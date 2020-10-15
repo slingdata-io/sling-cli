@@ -1,0 +1,95 @@
+name: Build & Release
+
+# on:
+#   pull_request:
+#     types: [closed]
+#     branches:
+#       - master
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    # if: github.event.pull_request.merged
+
+    strategy:
+      matrix:
+        os: [ macos-latest, ubuntu-latest, windows-2016 ]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Dump context
+      env:
+        JOB_CONTEXT: ${{ toJson(job) }}
+        MATRIX_CONTEXT: ${{ toJson(matrix) }}
+        RUNNER_CONTEXT: ${{ toJson(runner) }}
+      run: |
+        echo "JOB_CONTEXT -> $JOB_CONTEXT"
+        echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
+        echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
+      
+    - name: Set up GoLang
+      uses: actions/setup-go@v1
+      with:
+        go-version: '1.15.2'
+  
+    - name: Prepare Build (Unix)
+      if: runner.os != 'windows'
+      run: |
+        export GO_BIN_FOLDER=$HOME/go/bin
+        export TMPDIR=~/tmp/
+        export PATH=$GO_BIN_FOLDER:$PATH
+        mkdir -p $TMPDIR
+        go get github.com/markbates/pkger/cmd/pkger
+
+        pkger -include github.com/slingdata/sling/core/database:/core/database/templates -o cmd/sling
+
+    - name: Prepare Build (Windows)
+      if: runner.os == 'windows'
+      run: |
+        setx TMPDIR "C:\Users\runneradmin\tmp"
+        setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
+        setx GO111MODULE "auto"
+        mkdir C:\Users\runneradmin\tmp
+
+        go get github.com/markbates/pkger/cmd/pkger
+
+        C:\Users\runneradmin\go\bin\pkger.exe -include github.com/slingdata/sling/core/database:/core/database/templates -o cmd/sling
+
+        
+    - name: Build Sling (Linux)
+      if: runner.os == 'linux'
+      run: |
+        echo "Building sling"
+        GOOS=linux GOARCH=amd64 go build -o sling cmd/sling/*.go
+
+    - name: Build Sling (Mac)
+      if: runner.os == 'macOS'
+      run: |
+        echo "Building sling"
+        GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
+      
+    - name: Build Sling (Windows)
+      if: runner.os == 'windows'
+      run: |
+        echo "Building sling.exe"
+        setx GOOS "windows"
+        setx GOARCH "386"
+        setx GO111MODULE "auto"
+        go build -o sling.exe github.com/slingdata/sling/cmd/sling
+
+    - name: Release Binaries to Github
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest-${{ runner.os }}"
+        prerelease: true
+        title: "Latest: ${{ runner.os }}"
+        files: |
+          sling*
+
+    
+        

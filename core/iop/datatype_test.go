@@ -80,7 +80,7 @@ func bParseString(sp *StreamProcessor, val string, b *testing.B) {
 }
 
 // go test -run BenchmarkParseString -bench=.
-// go test -benchmem -run='^$ github.com/slingelt/sling/iop' -bench '^BenchmarkParseString'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkParseString'
 // assume worst case 1000ns * 100 columns * 100000 rows = 0.01sec
 func BenchmarkParseString1String(b *testing.B) {
 	sp := NewStreamProcessor()
@@ -153,7 +153,7 @@ func initProcessRow(name string) (columns []Column, row []interface{}) {
 	return
 }
 
-// go test -benchmem -run='^$ github.com/slingelt/sling/iop' -bench '^BenchmarkProcessRow'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkProcessRow'
 func BenchmarkProcessRow1(b *testing.B) {
 	sp := NewStreamProcessor()
 	_, row := initProcessRow("")
@@ -189,7 +189,7 @@ func BenchmarkProcessRow3(b *testing.B) {
 	}
 }
 
-// go test -benchmem -run='^$ github.com/slingelt/sling/iop' -bench '^BenchmarkProcessVal'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkProcessVal'
 func BenchmarkProcessValFloat(b *testing.B) {
 	sp := NewStreamProcessor()
 	columns, row := initProcessRow("float")
@@ -255,7 +255,7 @@ func BenchmarkProcessValBlank(b *testing.B) {
 	}
 }
 
-// go test -benchmem -run='^$ github.com/slingelt/sling/iop' -bench '^BenchmarkCastToString'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkCastToString'
 func BenchmarkCastToStringTime(b *testing.B) {
 	sp := NewStreamProcessor()
 	_, row := initProcessRow("timestamp")

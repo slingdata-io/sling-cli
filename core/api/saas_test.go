@@ -6,7 +6,7 @@ import (
 
 	h "github.com/flarco/gutil"
 	"github.com/jmespath/go-jmespath"
-	"github.com/json-iterator/go"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
@@ -104,7 +104,7 @@ func TestParse(t *testing.T) {
 	h.P(as)
 }
 
-// go test -benchmem -run='^$ github.com/slingelt/sling/api' -bench '^BenchmarkParseJSON'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/api' -bench '^BenchmarkParseJSON'
 func BenchmarkParseJSON1iBH(b *testing.B) {
 	var data interface{}
 	for n := 0; n < b.N; n++ {
@@ -203,8 +203,8 @@ func TestGithub(t *testing.T) {
 	// return
 
 	// params := map[string]interface{}{
-	// 	"owner": "flarco",
-	// 	"repo":  "slingelt",
+	// 	"owner": "slingdata",
+	// 	"repo":  "sling",
 	// }
 
 	// params := map[string]interface{}{
@@ -245,8 +245,8 @@ func TestSurveyMonkey(t *testing.T) {
 	// return
 
 	// params := map[string]interface{}{
-	// 	"owner": "flarco",
-	// 	"repo":  "slingelt",
+	// 	"owner": "slingdata",
+	// 	"repo":  "sling",
 	// }
 	// ds, err := api.Stream("commits", params, nil)
 	ds, err := api.Stream("surveys", nil, nil)

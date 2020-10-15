@@ -55,5 +55,4 @@ ENV PATH="${PATH}:/usr/local/anaconda3/bin:/usr/local/go/bin:/root/go/bin:/code-
 ADD sling /usr/local/bin/sling
 RUN chmod 755 /usr/local/bin/sling
 
-# docker run --rm -it -e env.file slingelt/sling
 ENTRYPOINT ["sling"]

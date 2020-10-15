@@ -77,9 +77,9 @@ func LogEvent(m map[string]interface{}) {
 		return
 	}
 
-	URL := "https://logapi.slingelt.com/log/event/prd"
+	URL := "https://logapi.slingdata.io/log/event/prd"
 	if os.Getenv("SLINGELT_ENV") == "STG" {
-		URL = "https://logapi.slingelt.com/log/event/stg"
+		URL = "https://logapi.slingdata.io/log/event/stg"
 	}
 
 	jsonBytes, err := json.Marshal(m)

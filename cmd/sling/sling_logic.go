@@ -186,11 +186,11 @@ func updateCLI(c *h.CliSC) (err error) {
 
 	url := ""
 	if runtime.GOOS == "linux" {
-		url = "https://f.slingelt.com/linux/sling"
+		url = "https://f.slingdata.io/linux/sling"
 	} else if runtime.GOOS == "darwin" {
-		url = "https://f.slingelt.com/mac/sling"
+		url = "https://f.slingdata.io/mac/sling"
 	} else if runtime.GOOS == "windows" {
-		url = "https://f.slingelt.com/windows/sling.exe"
+		url = "https://f.slingdata.io/windows/sling.exe"
 	} else {
 		return fmt.Errorf("OS Unsupported: %s", runtime.GOOS)
 	}

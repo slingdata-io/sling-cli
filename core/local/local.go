@@ -35,9 +35,6 @@ type Profile struct {
 var home *Home
 
 // GetHome initializes the home folder
-// ~/.slingelt/auth.json
-// ~/.slingelt/db.db
-// ~/.slingelt/logs
 func GetHome() (homeObj *Home, err error) {
 	if home != nil {
 		return home, nil
@@ -104,16 +101,16 @@ func (home *Home) initDB() (err error) {
 	sqlitePath := h.F("%s/db.db", home.Path)
 	home.Db, err = sqlx.Open("sqlite3", "file:"+sqlitePath)
 	if err != nil {
-		err = h.Error(err, "could not initialize slingelt home db: "+sqlitePath)
+		err = h.Error(err, "could not initialize sling home db: "+sqlitePath)
 	}
 	return
 }
 
-// Authenticate authenticates to a SlingELT instance
+// Authenticate authenticates to a sling instance
 func (home *Home) Authenticate(url string) (err error) {
 	key := ""
 	if url == "" {
-		url = "https://api.slingelt.com"
+		url = "https://api.slingdata.io"
 	}
 	// prompt for key
 	authURL := h.F("%s/account/api", url)
@@ -133,7 +130,7 @@ func (home *Home) Authenticate(url string) (err error) {
 
 	err = ioutil.WriteFile(home.authPath, fileBytes, 0600)
 	if err != nil {
-		err = h.Error(err, "could not create slingelt auth.json")
+		err = h.Error(err, "could not create sling auth.json")
 	}
 
 	home.InstanceURL = url
@@ -142,7 +139,7 @@ func (home *Home) Authenticate(url string) (err error) {
 
 // APIKey returns the API key
 func (home *Home) APIKey() (key string) {
-	key = os.Getenv("SLINGELT_API_KEY")
+	key = os.Getenv("sling_API_KEY")
 	if key == "" {
 		fileBytes, err := ioutil.ReadFile(home.authPath)
 		if err != nil {

@@ -1935,7 +1935,7 @@ func (sp *StreamProcessor) GetType(val interface{}) (typ string) {
 
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
-// go test -benchmem -run='^$ github.com/slingelt/sling/iop' -bench '^BenchmarkProcessVal'
+// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkProcessVal'
 func (sp *StreamProcessor) CastVal(i int, val interface{}, typ string) interface{} {
 	cs, ok := sp.colStats[i]
 	if !ok {
