@@ -1,0 +1,19 @@
+users_me:
+  method: GET
+  endpoint: /users/me
+  records_jp: '@'
+  resp_type: json
+
+groups:
+  method: GET
+  endpoint: /groups
+  records_jp: data
+  resp_type: json
+  next_jp: links.next
+
+surveys:
+  method: GET
+  endpoint: /surveys
+  records_jp: data
+  resp_type: json
+  next_jp: links.next

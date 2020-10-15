@@ -1,0 +1,32 @@
+core:
+  drop_table: drop table if exists {} purge
+  create_table: create table {table} stored as parquet as \n({col_types})
+
+metadata:
+  schemas: show databases
+  tables: show tables in {schema}
+  views: select 0 schema, 1 view where 1=0
+  columns: describe {schema}.{table}
+  primary_keys: select 0 as schema, 1 table, 2 pk_name, 3 column_name, 4 column_order where 1=0
+  indexes: select 0 schema, 1 table, 2 index_name, 3 column_name, 4 column_order, 5 unique where 1=0
+  ddl: show create table {schema}.{table}
+
+analysis:
+  field_chars: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      sum(if({field} rlike '\\n', 1, 0)) as cnt_nline,
+      sum(if({field} rlike '\\t', 1, 0)) as cnt_tab,
+      sum(if({field} rlike ',', 1, 0)) as cnt_comma,
+      sum(if({field} rlike '"', 1, 0)) as cnt_dquote,
+      min(length({field})) as f_min_len,
+      max(length({field})) as f_max_len
+    from {schema}.{table}
+
+functions:
+  replace: regexp_replace({string_exp}, {to_replace}, {replacement})
+  truncate_datef: date({field})
+  checksum_datetime: unix_timestamp({field})
+

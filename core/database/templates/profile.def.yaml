@@ -1,0 +1,39 @@
+# leave this alone, unless you want to change the JARs
+drivers:
+  oracle:
+    path: jars/ojdbc6-11.2.0.3.jar
+    class: oracle.jdbc.driver.OracleDriver
+  sqlserver:
+    path: jars/jtds-1.3.1.jar
+    class: net.sourceforge.jtds.jdbc.Driver
+  postgresql:
+    path: jars/postgresql-9.4.1207.jre7.jar
+    class: org.postgresql.Driver
+  mysql:
+    path: jars/mysql-connector-java-6.0.6.jar
+    class: com.mysql.jdbc.Driver
+  sqlite:
+    path: jars/sqlite-jdbc-3.23.1.jar
+    class: org.sqlite.JDBC
+
+# Here enter your database profiles, use proper JDBC URLs
+# databse type include: oracle, postgresql, sqlserver, hive, spark
+databases:
+
+  PG:
+    name: PG1
+    host: pg1
+    database: db1
+    port: 5432
+    user: user
+    password: password
+    sslmode: disable
+    type: postgresql
+    url: "jdbc:postgresql://host:port/database?&ssl=false"
+
+environment:
+  ETL_TEMP_DIR: /tmp
+
+variable:
+  tmp_folder: /tmp
+

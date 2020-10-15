@@ -1,0 +1,19 @@
+billing_history:
+  method: GET
+  endpoint: /v2/customers/my/billing_history
+  records_jp: billing_history
+  next_jp: links.pages.next
+  resp_type: json
+
+droplets:
+  method: GET
+  endpoint: /v2/droplets
+  records_jp: droplets
+  next_jp: links.pages.next
+  resp_type: json
+
+floating_ip_assign:
+  method: POST
+  endpoint: /v2/floating_ips/{floating_ip_address}/actions
+  records_jp: action
+  resp_type: json

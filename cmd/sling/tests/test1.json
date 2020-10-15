@@ -1,0 +1,14 @@
+{
+  "src_conn": "testing",
+  "src_table": "testing",
+  "src_file": "testing",
+  "src_sql": "testing",
+  "tgt_conn": "testing",
+  "tgt_table": "testing",
+  "tgt_file": "testing",
+  "mode": "testing",
+  "limit": 111,
+  "tgt_table_ddl": "testing",
+  "tgt_table_tmp": "testing",
+  "post_sql": "testing"
+}
