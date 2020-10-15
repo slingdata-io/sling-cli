@@ -40,7 +40,7 @@ jobs:
       if: runner.os != 'windows'
       run: |
         go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/gutil@v0.0.0' go.mod
+        go mod edit -droprequire='github.com/flarco/gutil' go.mod
         go mod tidy
 
         export GO_BIN_FOLDER=$HOME/go/bin
@@ -55,7 +55,7 @@ jobs:
       if: runner.os == 'windows'
       run: |
         go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/gutil@v0.0.0' go.mod
+        go mod edit -droprequire='github.com/flarco/gutil' go.mod
         go mod tidy
 
         setx TMPDIR "C:\Users\runneradmin\tmp"
