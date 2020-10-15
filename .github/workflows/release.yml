@@ -39,6 +39,8 @@ jobs:
     - name: Prepare Build (Unix)
       if: runner.os != 'windows'
       run: |
+        go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
+
         export GO_BIN_FOLDER=$HOME/go/bin
         export TMPDIR=~/tmp/
         export PATH=$GO_BIN_FOLDER:$PATH
@@ -50,6 +52,8 @@ jobs:
     - name: Prepare Build (Windows)
       if: runner.os == 'windows'
       run: |
+        go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
+        
         setx TMPDIR "C:\Users\runneradmin\tmp"
         setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
         setx GO111MODULE "auto"
