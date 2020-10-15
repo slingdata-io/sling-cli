@@ -69,8 +69,8 @@ jobs:
         
         docker login -u slingdata -p "${{ secrets.DOCKER_PASSWORD }}"
 
-        docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
-        docker push slingdata/sling:${GITHUB_RUN_NUMBER}
+        docker build -t slingdata-io/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
+        docker push slingdata-io/sling:${GITHUB_RUN_NUMBER}
 
         rm -rf webapp
 

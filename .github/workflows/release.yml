@@ -50,7 +50,7 @@ jobs:
 
         go get github.com/markbates/pkger/cmd/pkger
 
-        pkger -include github.com/slingdata/sling/core/database:/core/database/templates -o cmd/sling
+        pkger -include github.com/slingdata-io/sling/core/database:/core/database/templates -o cmd/sling
 
     - name: Prepare Build (Windows)
       if: runner.os == 'windows'
@@ -66,7 +66,7 @@ jobs:
 
         go get github.com/markbates/pkger/cmd/pkger
 
-        C:\Users\runneradmin\go\bin\pkger.exe -include github.com/slingdata/sling/core/database:/core/database/templates -o cmd/sling
+        C:\Users\runneradmin\go\bin\pkger.exe -include github.com/slingdata-io/sling/core/database:/core/database/templates -o cmd/sling
 
         
     - name: Build Sling (Linux)
@@ -88,7 +88,7 @@ jobs:
         setx GOOS "windows"
         setx GOARCH "386"
         setx GO111MODULE "auto"
-        go build -o sling.exe github.com/slingdata/sling/cmd/sling
+        go build -o sling.exe github.com/slingdata-io/sling/cmd/sling
 
     - name: Release Binaries to Github
       uses: "marvinpinto/action-automatic-releases@latest"

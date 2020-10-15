@@ -13,7 +13,7 @@ import (
 	"time"
 
 	h "github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
 )

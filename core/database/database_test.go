@@ -14,7 +14,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	h "github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"github.com/xo/dburl"
@@ -793,7 +793,7 @@ func TestLargeDataset(t *testing.T) {
 	ctx := h.NewContext(context.Background(), 20)
 	doTest := func(db *testDB) {
 		defer ctx.Wg.Write.Done()
-		os.Setenv("SLINGELT_FILE_ROW_LIMIT", "13000")
+		os.Setenv("SLING_FILE_ROW_LIMIT", "13000")
 		conn, err := connect(db)
 		ok := assert.NoError(t, err)
 		if !ok {
@@ -852,9 +852,9 @@ func TestLargeDataset(t *testing.T) {
 }
 
 func TestEnvURL(t *testing.T) {
-	os.Setenv("SLINGELT_DB_PG_HELLO", DBs["postgres"].URL)
+	os.Setenv("SLING_DB_PG_HELLO", DBs["postgres"].URL)
 	slingEnv := GetSlingEnv()
-	assert.Contains(t, slingEnv, "SLINGELT_DB_PG_HELLO")
+	assert.Contains(t, slingEnv, "SLING_DB_PG_HELLO")
 	conn, err := NewConn("PG_HELLO")
 	assert.NoError(t, err)
 	err = conn.Connect()

@@ -14,7 +14,7 @@ import (
 	"github.com/dustin/go-humanize"
 	h "github.com/flarco/gutil"
 	"github.com/jmoiron/sqlx"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
 )
@@ -154,7 +154,7 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 // BcpImportStreamParrallel uses goroutine to import partitioned files
 func (conn *MsSQLServerConn) BcpImportStreamParrallel(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 
-	fileRowLimit := cast.ToInt(conn.GetProp("SLINGELT_FILE_ROW_LIMIT"))
+	fileRowLimit := cast.ToInt(conn.GetProp("SLING_FILE_ROW_LIMIT"))
 	if fileRowLimit == 0 {
 		fileRowLimit = 200000
 	}

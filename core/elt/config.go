@@ -3,7 +3,7 @@ package elt
 import (
 	"encoding/json"
 	"github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
@@ -89,13 +89,13 @@ func (cfg *Config) Prepare() (err error) {
 					file.ID = v
 				} else {
 					if k == "FILE_MAX_ROWS" {
-						k = "SLINGELT_FILE_ROW_LIMIT"
+						k = "SLING_FILE_ROW_LIMIT"
 					}
 					if k == "DELIMITER" {
-						os.Setenv("SLINGELT_DELIMITER", v) // so that it can detected
+						os.Setenv("SLING_DELIMITER", v) // so that it can detected
 					}
 					if k == "COMPRESSION" {
-						k = "SLINGELT_COMPRESSION"
+						k = "SLING_COMPRESSION"
 						v = strings.ToUpper(v)
 					}
 

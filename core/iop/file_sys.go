@@ -20,7 +20,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go"
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core/env"
 
 	gcstorage "cloud.google.com/go/storage"
 	azstorage "github.com/Azure/azure-sdk-for-go/storage"
@@ -100,8 +100,8 @@ func NewFileSysClient(fst FileSysType, props ...string) (fsClient FileSysClient,
 // props are provided as `"Prop1=Value1", "Prop2=Value2", ...`
 func NewFileSysClientContext(ctx context.Context, fst FileSysType, props ...string) (fsClient FileSysClient, err error) {
 	concurencyLimit := defaultConcurencyLimit
-	if os.Getenv("SLINGELT_CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(os.Getenv("SLINGELT_CONCURENCY_LIMIT"))
+	if os.Getenv("SLING_CONCURENCY_LIMIT") != "" {
+		concurencyLimit = cast.ToInt(os.Getenv("SLING_CONCURENCY_LIMIT"))
 	}
 
 	switch fst {
@@ -139,8 +139,8 @@ func NewFileSysClientContext(ctx context.Context, fst FileSysType, props ...stri
 		fsClient.SetProp(k, v)
 	}
 
-	if fsClient.GetProp("SLINGELT_CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(fsClient.GetProp("SLINGELT_CONCURENCY_LIMIT"))
+	if fsClient.GetProp("SLING_CONCURENCY_LIMIT") != "" {
+		concurencyLimit = cast.ToInt(fsClient.GetProp("SLING_CONCURENCY_LIMIT"))
 	}
 
 	for k, v := range env.EnvVars() {
@@ -493,8 +493,8 @@ func (fs *BaseFileSysClient) GetReaders(paths ...string) (readers []io.Reader, e
 func (fs *BaseFileSysClient) WriteDataflowReady(df *Dataflow, url string, fileReadyChn chan string) (bw int64, err error) {
 	fsClient := fs.Self()
 	defer close(fileReadyChn)
-	gzip := strings.ToUpper(fs.GetProp("SLINGELT_COMPRESSION")) == "GZIP"
-	fileRowLimit := cast.ToInt(fs.GetProp("SLINGELT_FILE_ROW_LIMIT"))
+	gzip := strings.ToUpper(fs.GetProp("SLING_COMPRESSION")) == "GZIP"
+	fileRowLimit := cast.ToInt(fs.GetProp("SLING_FILE_ROW_LIMIT"))
 
 	if strings.HasSuffix(url, "/") {
 		url = url[:len(url)-1]

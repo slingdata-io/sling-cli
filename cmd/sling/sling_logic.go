@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/flarco/gutil/net"
-	core2 "github.com/slingdata/sling/core"
-	"github.com/slingdata/sling/core/elt"
-	"github.com/slingdata/sling/core/env"
+	core2 "github.com/slingdata-io/sling/core"
+	"github.com/slingdata-io/sling/core/elt"
+	"github.com/slingdata-io/sling/core/env"
 	"os"
 	"os/exec"
 	"runtime"
@@ -15,7 +15,7 @@ import (
 	h "github.com/flarco/gutil"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/kardianos/osext"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 

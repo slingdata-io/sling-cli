@@ -9,8 +9,8 @@ import (
 
 	g "github.com/flarco/gutil"
 	"github.com/flarco/gutil/process"
-	"github.com/slingdata/sling/core/iop"
-	"github.com/slingdata/sling/core/local"
+	"github.com/slingdata-io/sling/core/iop"
+	"github.com/slingdata-io/sling/core/local"
 	"gopkg.in/yaml.v2"
 )
 

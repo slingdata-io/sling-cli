@@ -6,8 +6,8 @@ import (
 	"os"
 
 	g "github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
-	"github.com/slingdata/sling/core/local"
+	"github.com/slingdata-io/sling/core/iop"
+	"github.com/slingdata-io/sling/core/local"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )

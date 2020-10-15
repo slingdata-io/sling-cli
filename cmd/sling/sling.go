@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"github.com/slingdata/sling/core"
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core"
+	"github.com/slingdata-io/sling/core/env"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -12,8 +12,8 @@ import (
 
 	h "github.com/flarco/gutil"
 	"github.com/integrii/flaggy"
-	"github.com/slingdata/sling/core/database"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/database"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 
@@ -240,7 +240,7 @@ var cliUpdate = &h.CliSC{
 
 func init() {
 	// we need a webserver to get the pprof webserver
-	if os.Getenv("SLINGELT_PPROF") == "TRUE" {
+	if os.Getenv("SLING_PPROF") == "TRUE" {
 		go func() {
 			h.Trace("Starting pprof webserver @ localhost:6060")
 			h.LogError(http.ListenAndServe("localhost:6060", nil))

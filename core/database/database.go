@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core/env"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	h "github.com/flarco/gutil"
@@ -21,8 +21,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/slingdata/sling/core/iop"
-	"github.com/slingdata/sling/core/local"
+	"github.com/slingdata-io/sling/core/iop"
+	"github.com/slingdata-io/sling/core/local"
 	_ "github.com/snowflakedb/gosnowflake"
 	_ "github.com/solcates/go-sql-bigquery"
 	"github.com/spf13/cast"
@@ -201,11 +201,11 @@ var (
 )
 
 func init() {
-	if os.Getenv("SLINGELT_SAMPLE_SIZE") != "" {
-		sampleSize = cast.ToInt(os.Getenv("SLINGELT_SAMPLE_SIZE"))
+	if os.Getenv("SLING_SAMPLE_SIZE") != "" {
+		sampleSize = cast.ToInt(os.Getenv("SLING_SAMPLE_SIZE"))
 	}
-	if os.Getenv("SLINGELT_FILEPATH_SLUG") != "" {
-		filePathStorageSlug = os.Getenv("SLINGELT_FILEPATH_SLUG")
+	if os.Getenv("SLING_FILEPATH_SLUG") != "" {
+		filePathStorageSlug = os.Getenv("SLING_FILEPATH_SLUG")
 	}
 }
 
@@ -308,7 +308,7 @@ func GetSlingEnv() map[string]string {
 		value := strings.ReplaceAll(env, key+"=", "")
 
 		keyUpper := strings.ToUpper(key)
-		if strings.HasPrefix(keyUpper, "SLINGELT_") {
+		if strings.HasPrefix(keyUpper, "SLING_") {
 			slingEnvs[keyUpper] = value
 		}
 	}
@@ -2338,13 +2338,13 @@ func (conn *BaseConn) CopyDirect(tableFName string, srcFile iop.DataConn) (cnt u
 // settingMppBulkImportFlow sets settings for MPP databases type
 // for BulkImportFlow
 func settingMppBulkImportFlow(conn Connection) {
-	if cast.ToInt(conn.GetProp("SLINGELT_FILE_ROW_LIMIT")) == 0 {
-		conn.SetProp("SLINGELT_FILE_ROW_LIMIT", "500000")
+	if cast.ToInt(conn.GetProp("SLING_FILE_ROW_LIMIT")) == 0 {
+		conn.SetProp("SLING_FILE_ROW_LIMIT", "500000")
 	}
 
-	conn.SetProp("SLINGELT_COMPRESSION", "GZIP")
+	conn.SetProp("SLING_COMPRESSION", "GZIP")
 
-	conn.SetProp("SLINGELT_PARALLEL", "true")
+	conn.SetProp("SLING_PARALLEL", "true")
 }
 
 // ToData converts schema objects to tabular format

@@ -9,7 +9,7 @@ import (
 
 	"github.com/cheggaaa/pb"
 	"github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 )
 
 // TaskProcess is a slingELT task / execution process

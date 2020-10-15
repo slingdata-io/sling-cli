@@ -161,11 +161,11 @@ type ColumnStats struct {
 }
 
 func init() {
-	if os.Getenv("SLINGELT_SAMPLE_SIZE") != "" {
-		sampleSize = cast.ToInt(os.Getenv("SLINGELT_SAMPLE_SIZE"))
+	if os.Getenv("SLING_SAMPLE_SIZE") != "" {
+		sampleSize = cast.ToInt(os.Getenv("SLING_SAMPLE_SIZE"))
 	}
-	if os.Getenv("SLINGELT_REMOVE_TRAILING_ZEROS") != "" {
-		RemoveTrailingDecZeros = cast.ToBool(os.Getenv("SLINGELT_REMOVE_TRAILING_ZEROS"))
+	if os.Getenv("SLING_REMOVE_TRAILING_ZEROS") != "" {
+		RemoveTrailingDecZeros = cast.ToBool(os.Getenv("SLING_REMOVE_TRAILING_ZEROS"))
 	}
 }
 
@@ -1935,7 +1935,7 @@ func (sp *StreamProcessor) GetType(val interface{}) (typ string) {
 
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
-// go test -benchmem -run='^$ github.com/slingdata/sling/core/iop' -bench '^BenchmarkProcessVal'
+// go test -benchmem -run='^$ github.com/slingdata-io/sling/core/iop' -bench '^BenchmarkProcessVal'
 func (sp *StreamProcessor) CastVal(i int, val interface{}, typ string) interface{} {
 	cs, ok := sp.colStats[i]
 	if !ok {

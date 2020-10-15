@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core/env"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -14,7 +14,7 @@ import (
 	h "github.com/flarco/gutil"
 	"github.com/jmespath/go-jmespath"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	yaml "gopkg.in/yaml.v2"
 )

@@ -1,4 +1,4 @@
-module github.com/slingdata/sling
+module github.com/slingdata-io/sling
 
 go 1.15
 
@@ -29,6 +29,7 @@ require (
 	github.com/json-iterator/go v1.1.10
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/lib/pq v1.3.0
+	github.com/markbates/pkger v0.17.1
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/mattn/go-sqlite3 v1.11.0
 	github.com/minio/minio-go v6.0.14+incompatible

@@ -3,18 +3,18 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core/env"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/slingdata/sling/core/elt"
+	"github.com/slingdata-io/sling/core/elt"
 
 	h "github.com/flarco/gutil"
-	d "github.com/slingdata/sling/core/database"
-	"github.com/slingdata/sling/core/iop"
+	d "github.com/slingdata-io/sling/core/database"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -99,7 +99,7 @@ func init() {
 	env.InitLogger()
 	iop.RemoveTrailingDecZeros = true
 	elt.PermitTableSchemaOptimization = false
-	os.Setenv("SLINGELT_FILE_ROW_LIMIT", "0")
+	os.Setenv("SLING_FILE_ROW_LIMIT", "0")
 	for _, db := range DBs {
 		if db.URL == "" {
 			log.Fatal("No Env Var URL for " + db.name)
@@ -107,7 +107,7 @@ func init() {
 			os.Remove(strings.ReplaceAll(db.URL, "file:", ""))
 		}
 		if db.name == "Redshift" {
-			os.Setenv("SLINGELT_PARALLEL", "FALSE")
+			os.Setenv("SLING_PARALLEL", "FALSE")
 		}
 	}
 }

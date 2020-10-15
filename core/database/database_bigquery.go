@@ -15,7 +15,7 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
 	h "github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -60,7 +60,7 @@ func (conn *BigQueryConn) Init() error {
 	// Google BigQuery has limits
 	// https://cloud.google.com/bigquery/quotas
 	conn.Context().SetConcurencyLimit(5)
-	conn.SetProp("SLINGELT_FILE_ROW_LIMIT", "1000000") // hard code?
+	conn.SetProp("SLING_FILE_ROW_LIMIT", "1000000") // hard code?
 
 	// set MAX_DECIMALS to fix bigquery import for numeric types
 	os.Setenv("MAX_DECIMALS", "9")
@@ -707,14 +707,14 @@ func (conn *BigQueryConn) CopyToGCS(tableFName string, gcsURI string) error {
 	}
 	defer client.Close()
 
-	if strings.ToUpper(conn.GetProp("SLINGELT_COMPRESSION")) == "GZIP" {
+	if strings.ToUpper(conn.GetProp("SLING_COMPRESSION")) == "GZIP" {
 		gcsURI = gcsURI + ".gz"
 	}
 	gcsRef := bigquery.NewGCSReference(gcsURI)
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
-	if strings.ToUpper(conn.GetProp("SLINGELT_COMPRESSION")) == "GZIP" {
+	if strings.ToUpper(conn.GetProp("SLING_COMPRESSION")) == "GZIP" {
 		gcsRef.Compression = bigquery.Gzip
 	}
 	gcsRef.MaxBadRecords = 0

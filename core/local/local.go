@@ -13,7 +13,7 @@ import (
 	"github.com/flarco/gutil/process"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	yaml "gopkg.in/yaml.v2"
 )

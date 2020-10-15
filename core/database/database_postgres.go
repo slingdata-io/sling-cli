@@ -10,7 +10,7 @@ import (
 
 	h "github.com/flarco/gutil"
 	"github.com/lib/pq"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 )
 
 // PostgresConn is a Postgres connection

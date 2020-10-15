@@ -104,7 +104,7 @@ func TestParse(t *testing.T) {
 	h.P(as)
 }
 
-// go test -benchmem -run='^$ github.com/slingdata/sling/core/api' -bench '^BenchmarkParseJSON'
+// go test -benchmem -run='^$ github.com/slingdata-io/sling/core/api' -bench '^BenchmarkParseJSON'
 func BenchmarkParseJSON1iBH(b *testing.B) {
 	var data interface{}
 	for n := 0; n < b.N; n++ {

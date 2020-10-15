@@ -16,16 +16,16 @@ import (
 var DisableSendAnonUsage = false
 
 var envVars = []string{
-	"SLINGELT_PARALLEL", "AWS_BUCKET", "AWS_ACCESS_KEY_ID",
+	"SLING_PARALLEL", "AWS_BUCKET", "AWS_ACCESS_KEY_ID",
 	"AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ENDPOINT", "AWS_REGION",
-	"SLINGELT_COMPRESSION", "SLINGELT_FILE_ROW_LIMIT", "SLINGELT_SAMPLE_SIZE",
+	"SLING_COMPRESSION", "SLING_FILE_ROW_LIMIT", "SLING_SAMPLE_SIZE",
 	"GC_BUCKET", "GC_CRED_FILE", "GSHEETS_CRED_FILE",
 	"GC_CRED_JSON_BODY", "GC_CRED_JSON_BODY_ENC", "GC_CRED_API_KEY",
 	"AZURE_ACCOUNT", "AZURE_KEY", "AZURE_CONTAINER", "AZURE_SAS_SVC_URL",
 	"AZURE_CONN_STR", "SSH_TUNNEL", "SSH_PRIVATE_KEY", "SSH_PUBLIC_KEY",
-	"SLINGELT_CONCURENCY_LIMIT",
+	"SLING_CONCURENCY_LIMIT",
 
-	"SLINGELT_SMTP_HOST", "SLINGELT_SMTP_PORT", "SLINGELT_SMTP_USERNAME", "SLINGELT_SMTP_PASSWORD", "SLINGELT_SMTP_FROM_EMAIL", "SLINGELT_SMTP_REPLY_EMAIL",
+	"SLING_SMTP_HOST", "SLING_SMTP_PORT", "SLING_SMTP_USERNAME", "SLING_SMTP_PASSWORD", "SLING_SMTP_FROM_EMAIL", "SLING_SMTP_REPLY_EMAIL",
 
 	"SFTP_USER", "SFTP_PASSWORD", "SFTP_HOST", "SFTP_PORT",
 	"SSH_PRIVATE_KEY", "SFTP_PRIVATE_KEY", "SFTP_URL",
@@ -36,7 +36,7 @@ var envVars = []string{
 	"DIGITALOCEAN_ACCESS_TOKEN", "GITHUB_ACCESS_TOKEN",
 	"SURVEYMONKEY_ACCESS_TOKEN",
 
-	"SLINGELT_SEND_ANON_USAGE", "SLING_HOME",
+	"SLING_SEND_ANON_USAGE", "SLING_HOME",
 }
 
 // EnvVars are the variables we are using
@@ -56,12 +56,12 @@ func EnvVars() (vars map[string]string) {
 		}
 	}
 
-	if vars["SLINGELT_CONCURENCY_LIMIT"] == "" {
-		vars["SLINGELT_CONCURENCY_LIMIT"] = "10"
+	if vars["SLING_CONCURENCY_LIMIT"] == "" {
+		vars["SLING_CONCURENCY_LIMIT"] = "10"
 	}
 
-	if vars["SLINGELT_SAMPLE_SIZE"] == "" {
-		vars["SLINGELT_SAMPLE_SIZE"] = "900"
+	if vars["SLING_SAMPLE_SIZE"] == "" {
+		vars["SLING_SAMPLE_SIZE"] = "900"
 	}
 
 	if bodyEnc := vars["GC_CRED_JSON_BODY_ENC"]; bodyEnc != "" {
@@ -78,7 +78,7 @@ func LogEvent(m map[string]interface{}) {
 	}
 
 	URL := "https://logapi.slingdata.io/log/event/prd"
-	if os.Getenv("SLINGELT_ENV") == "STG" {
+	if os.Getenv("SLING_ENV") == "STG" {
 		URL = "https://logapi.slingdata.io/log/event/stg"
 	}
 
@@ -107,22 +107,22 @@ func LogEvent(m map[string]interface{}) {
 // InitLogger initializes the Gutil Logger
 func InitLogger() {
 	h.SetZeroLogLevel(zerolog.InfoLevel)
-	h.DisableColor = !cast.ToBool(os.Getenv("SLINGELT_LOGGING_COLOR"))
+	h.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
 
-	if val := os.Getenv("SLINGELT_SEND_ANON_USAGE"); val != "" {
+	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
 		DisableSendAnonUsage = cast.ToBool(val)
 	}
 
-	if os.Getenv("SLINGELT_DEBUG_CALLER_LEVEL") != "" {
-		h.CallerLevel = cast.ToInt(os.Getenv("SLINGELT_DEBUG_CALLER_LEVEL"))
+	if os.Getenv("SLING_DEBUG_CALLER_LEVEL") != "" {
+		h.CallerLevel = cast.ToInt(os.Getenv("SLING_DEBUG_CALLER_LEVEL"))
 	}
-	if os.Getenv("SLINGELT_DEBUG") == "TRACE" {
+	if os.Getenv("SLING_DEBUG") == "TRACE" {
 		h.SetZeroLogLevel(zerolog.TraceLevel)
 		h.SetLogLevel(h.TraceLevel)
-	} else if os.Getenv("SLINGELT_DEBUG") != "" {
+	} else if os.Getenv("SLING_DEBUG") != "" {
 		h.SetZeroLogLevel(zerolog.DebugLevel)
 		h.SetLogLevel(h.DebugLevel)
-		if os.Getenv("SLINGELT_DEBUG") == "LOW" {
+		if os.Getenv("SLING_DEBUG") == "LOW" {
 			h.SetLogLevel(h.LowDebugLevel)
 		}
 	}
@@ -142,12 +142,12 @@ func InitLogger() {
 	// 	zlog.Logger = zerolog.New(outputErr).With().Timestamp().Logger()
 	// }
 
-	if os.Getenv("SLINGELT_LOGGING") == "TASK" {
+	if os.Getenv("SLING_LOGGING") == "TASK" {
 		outputOut.NoColor = true
 		outputErr.NoColor = true
 		h.LogOut = zerolog.New(outputOut).With().Timestamp().Logger()
 		h.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
-	} else if os.Getenv("SLINGELT_LOGGING") == "MASTER" || os.Getenv("SLINGELT_LOGGING") == "WORKER" {
+	} else if os.Getenv("SLING_LOGGING") == "MASTER" || os.Getenv("SLING_LOGGING") == "WORKER" {
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
 		h.LogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()

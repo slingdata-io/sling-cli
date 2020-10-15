@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/slingdata/sling/core/env"
+	"github.com/slingdata-io/sling/core/env"
 
 	h "github.com/flarco/gutil"
-	"github.com/slingdata/sling/core/database"
-	"github.com/slingdata/sling/core/dbt"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/database"
+	"github.com/slingdata-io/sling/core/dbt"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 

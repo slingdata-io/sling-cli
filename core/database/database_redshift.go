@@ -8,7 +8,7 @@ import (
 	"github.com/dustin/go-humanize"
 	h "github.com/flarco/gutil"
 	"github.com/jmoiron/sqlx"
-	"github.com/slingdata/sling/core/iop"
+	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 
@@ -76,7 +76,7 @@ func (conn *RedshiftConn) Unload(sqls ...string) (s3Path string, err error) {
 			"s3_path", s3PathPart,
 			"aws_access_key_id", AwsID,
 			"aws_secret_access_key", AwsAccessKey,
-			"parallel", conn.GetProp("SLINGELT_PARALLEL"),
+			"parallel", conn.GetProp("SLING_PARALLEL"),
 		)
 		_, err = conn.Exec(unloadSQL)
 		if err != nil {
