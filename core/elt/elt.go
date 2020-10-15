@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/slingdata/sling/core/env"
 	"io/ioutil"
 	"math"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/dustin/go-humanize"
+	"github.com/slingdata/sling/core/env"
 
 	h "github.com/flarco/gutil"
 	"github.com/slingdata/sling/core/database"

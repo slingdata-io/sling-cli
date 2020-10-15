@@ -6,13 +6,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/slingdata/sling/core/env"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/slingdata/sling/core/env"
 
 	_ "github.com/denisenkom/go-mssqldb"
 	h "github.com/flarco/gutil"

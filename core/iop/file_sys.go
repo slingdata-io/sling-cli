@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/slingdata/sling/core/env"
 	"io"
 	"io/ioutil"
 	"log"
@@ -18,6 +17,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dustin/go-humanize"
+	"github.com/minio/minio-go"
+	"github.com/slingdata/sling/core/env"
 
 	gcstorage "cloud.google.com/go/storage"
 	azstorage "github.com/Azure/azure-sdk-for-go/storage"

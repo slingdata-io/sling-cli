@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb"
+	"github.com/dustin/go-humanize"
 	h "github.com/flarco/gutil"
 	"github.com/godror/godror"
 	"github.com/jmoiron/sqlx"
