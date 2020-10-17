@@ -36,6 +36,7 @@ require (
 	github.com/pkg/sftp v1.12.0
 	github.com/rs/zerolog v1.20.0
 	github.com/shirou/gopsutil v2.20.8+incompatible
+	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/snowflakedb/gosnowflake v1.3.9
 	github.com/solcates/go-sql-bigquery v0.2.4
 	github.com/spf13/cast v1.3.1
@@ -50,6 +51,7 @@ require (
 	gopkg.in/VividCortex/ewma.v1 v1.1.1 // indirect
 	gopkg.in/cheggaaa/pb.v2 v2.0.7 // indirect
 	gopkg.in/fatih/color.v1 v1.7.0 // indirect
+	gopkg.in/ini.v1 v1.62.0 // indirect
 	gopkg.in/mattn/go-colorable.v0 v0.1.0 // indirect
 	gopkg.in/mattn/go-isatty.v0 v0.0.4 // indirect
 	gopkg.in/mattn/go-runewidth.v0 v0.0.4 // indirect
