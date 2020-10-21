@@ -75,6 +75,9 @@ type Connection interface {
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
 	BulkExportFlow(sqls ...string) (*iop.Dataflow, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
+	Begin() error
+	Commit() error
+	Rollback() error
 	Query(sql string, limit ...int) (iop.Dataset, error)
 	QueryContext(ctx context.Context, sql string, limit ...int) (iop.Dataset, error)
 	GenerateDDL(tableFName string, data iop.Dataset) (string, error)
@@ -132,6 +135,7 @@ type BaseConn struct {
 	URL         string
 	Type        DbType // the type of database for sqlx: postgres, mysql, sqlite
 	db          *sqlx.DB
+	tx          *sqlx.Tx
 	Data        iop.Dataset
 	defaultPort int
 	instance    *Connection
@@ -799,7 +803,13 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, sql string, limit .
 	}
 
 	queryContext := h.NewContext(ctx)
-	result, err := conn.db.QueryxContext(queryContext.Ctx, sql)
+
+	var result *sqlx.Rows
+	if conn.tx != nil {
+		result, err = conn.tx.QueryxContext(queryContext.Ctx, sql)
+	} else {
+		result, err = conn.db.QueryxContext(queryContext.Ctx, sql)
+	}
 	if err != nil {
 		queryContext.Cancel()
 		return ds, h.Error(err, "SQL Error for:\n"+sql)
@@ -856,6 +866,44 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, sql string, limit .
 	return
 }
 
+// Begin starts a connection wide transaction
+func (conn *BaseConn) Begin() (err error) {
+	if conn.db == nil {
+		return
+	}
+	conn.tx, err = conn.db.BeginTxx(conn.Context().Ctx, &sql.TxOptions{})
+	if err != nil {
+		err = h.Error(err, "could not begin Tx")
+	}
+	return
+}
+
+// Commit commits connection wide transaction
+func (conn *BaseConn) Commit() (err error) {
+	if conn.tx == nil {
+		return
+	}
+	err = conn.tx.Commit()
+	conn.tx = nil
+	if err != nil {
+		err = h.Error(err, "could not commit Tx")
+	}
+	return
+}
+
+// Rollback rolls back connection wide transaction
+func (conn *BaseConn) Rollback() (err error) {
+	if conn.tx == nil {
+		return
+	}
+	err = conn.tx.Rollback()
+	conn.tx = nil
+	if err != nil {
+		err = h.Error(err, "could not rollback Tx")
+	}
+	return
+}
+
 // Exec runs a sql query, returns `error`
 func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
 	if conn.GetProp("connected") != "true" {
@@ -883,7 +931,12 @@ func (conn *BaseConn) ExecContext(ctx context.Context, sql string, args ...inter
 	if !noTrace {
 		h.Debug(conn.CleanSQL(sql), args...)
 	}
-	result, err = conn.db.ExecContext(ctx, sql, args...)
+
+	if conn.tx != nil {
+		result, err = conn.tx.ExecContext(ctx, sql, args...)
+	} else {
+		result, err = conn.db.ExecContext(ctx, sql, args...)
+	}
 	if err != nil {
 		err = h.Error(err, "Error executing: "+conn.CleanSQL(sql))
 	}
