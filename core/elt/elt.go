@@ -573,10 +573,6 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		cfg.Mode = "append"
 	}
 
-	// Begin Transaction
-	tgtConn.Begin()
-	defer tgtConn.Rollback() // rollback by default for any errs
-
 	// pre SQL
 	if cfg.TgtPreSQL != "" {
 		j.SetProgress("executing pre-sql")
@@ -769,9 +765,6 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 			return cnt, err
 		}
 	}
-
-	// commit which will invalidate the deferred rollback
-	tgtConn.Commit()
 
 	err = df.Context.Err()
 	return
