@@ -1237,6 +1237,41 @@ func (ds *Datastream) Records() <-chan map[string]interface{} {
 	return chnl
 }
 
+// Chunk splits the datastream into chunk datastreams
+func (ds *Datastream) Chunk(limit uint64) (chDs chan *Datastream) {
+	chDs = make(chan *Datastream)
+	if limit == 0 {
+		limit = 200000
+	}
+
+	go func() {
+		defer close(chDs)
+		nDs := NewDatastreamContext(ds.Context.Ctx, ds.Columns)
+		chDs <- nDs
+
+		defer func() { nDs.Close() }()
+		for row := range ds.Rows {
+			nDs.Ready = true
+
+			select {
+			case <-nDs.Context.Ctx.Done():
+				break
+			default:
+				nDs.Rows <- row
+				nDs.Count++
+
+				if nDs.Count == limit {
+					nDs.Close()
+					nDs = NewDatastreamContext(ds.Context.Ctx, ds.Columns)
+					chDs <- nDs
+				}
+			}
+		}
+		ds.SetEmpty()
+	}()
+	return
+}
+
 // Shape changes the column types as needed, to the provided columns var
 // It will cast the already wrongly casted rows, and not recast the
 // correctly casted rows
@@ -1265,7 +1300,7 @@ func (ds *Datastream) Shape(columns []Column) (nDs *Datastream, err error) {
 	nDs = NewDatastreamContext(ds.Context.Ctx, columns)
 
 	go func() {
-		defer close(nDs.Rows)
+		defer nDs.Close()
 		nDs.Ready = true
 		for row := range ds.Rows {
 			if nDs.Count <= counterMarker {

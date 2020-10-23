@@ -159,27 +159,16 @@ func (conn *MsSQLServerConn) BcpImportStreamParrallel(tableFName string, ds *iop
 		fileRowLimit = 200000
 	}
 
-	doImport := func(tableFName string, data iop.Dataset) {
+	doImport := func(tableFName string, nDs *iop.Datastream) {
 		defer ds.Context.Wg.Write.Done()
 
-		_, err := conn.BcpImportStream(tableFName, data.Stream())
+		_, err := conn.BcpImportStream(tableFName, nDs)
 		ds.Context.CaptureErr(err)
 	}
 
-	for {
-		data, err := ds.Collect(fileRowLimit)
-		if err != nil {
-			return ds.Count, err
-		}
-
-		if len(data.Rows) > 0 {
-			ds.Context.Wg.Write.Add()
-			go doImport(tableFName, data)
-		}
-
-		if ds.IsEmpty() {
-			break
-		}
+	for nDs := range ds.Chunk(cast.ToUint64(fileRowLimit)) {
+		ds.Context.Wg.Write.Add()
+		go doImport(tableFName, nDs)
 	}
 
 	ds.Context.Wg.Write.Wait()

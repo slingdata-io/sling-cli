@@ -788,7 +788,7 @@ func TestLargeDataset(t *testing.T) {
 		schema: "public",
 	}
 
-	// dbs = []*testDB{DBs["snowflake_aws"], DBs["snowflake_azure"]}
+	dbs = []*testDB{DBs["sqlserver"]}
 
 	ctx := h.NewContext(context.Background(), 20)
 	doTest := func(db *testDB) {
