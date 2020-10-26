@@ -581,12 +581,12 @@ func (ggs *GoogleSheet) getRawRows(sheet *sheets.Sheet) [][]string {
 func (ggs *GoogleSheet) GetDataset(shtName string) (data Dataset, err error) {
 	sheet, ok := ggs.sheetObjects[shtName]
 	if !ok {
-		err = h.Error(fmt.Errorf("sheet %s not found", shtName), "")
+		err = h.Error("sheet %s not found", shtName)
 		return
 	}
 
 	if len(sheet.Data) == 0 {
-		err = h.Error(fmt.Errorf("no data found for sheet %s", shtName), "")
+		err = h.Error("no data found for sheet %s", shtName)
 		return
 	}
 

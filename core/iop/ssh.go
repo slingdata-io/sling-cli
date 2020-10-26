@@ -64,7 +64,7 @@ func (s *SSHClient) Connect() (err error) {
 	} else if s.Password != "" {
 		authMethods = append(authMethods, ssh.Password(s.Password))
 	} else if s.Password == "" {
-		return h.Error(fmt.Errorf("need to provide password, public key or private key"), "need to provide password, public key or private key")
+		return h.Error("need to provide password, public key or private key")
 	}
 
 	homeDir := h.UserHomeDir()
@@ -180,7 +180,7 @@ func (s *SSHClient) forward(localConn net.Conn) error {
 // https://git-scm.com/book/pt-pt/v2/Git-no-Servidor-Generating-Your-SSH-Public-Key
 func (s *SSHClient) RunAsProcess() (localPort int, err error) {
 	if s.cmd != nil {
-		return 0, h.Error(fmt.Errorf("already running"))
+		return 0, h.Error("already running")
 	}
 	localPort, err = h.GetPort("localhost:0")
 	if err != nil {

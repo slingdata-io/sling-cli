@@ -427,7 +427,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 				database.ColumnNames(j.Cfg.TgtColumns),
 			)
 			if len(commFields) == 0 {
-				err = h.Error(fmt.Errorf("src table and tgt table have no columns with same names. Column names must match"))
+				err = h.Error("src table and tgt table have no columns with same names. Column names must match")
 				return
 			}
 			fieldsStr = strings.Join(commFields, ", ")
@@ -454,7 +454,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 
 		if cfg.SrcSQL != "" {
 			if !strings.Contains(sql, "{upsert_where_cond}") {
-				err = h.Error(fmt.Errorf("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}"))
+				err = h.Error("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}")
 				return
 			}
 			sql = h.R(sql, "upsert_where_cond", upsertWhereCond)
@@ -549,7 +549,7 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 		}
 		cnt = stream.Count
 	} else {
-		err = h.Error(fmt.Errorf("target for output is not specified"))
+		err = h.Error("target for output is not specified")
 		return
 	}
 
@@ -628,7 +628,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		}
 		tCnt, _ := tgtConn.GetCount(cfg.TgtTableTmp)
 		if cnt != tCnt {
-			err = h.Error(fmt.Errorf("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt))
+			err = h.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
 			return
 		}
 		// aggregate stats from stream processors

@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bufio"
 	"compress/gzip"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,7 +52,7 @@ func Unzip(src string, dest string) ([]string, error) {
 
 		// Check for ZipSlip. More Info: http://bit.ly/2MsjAWE
 		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-			return filenames, h.Error(fmt.Errorf("%s: illegal file path", fpath))
+			return filenames, h.Error("%s: illegal file path", fpath)
 		}
 
 		filenames = append(filenames, fpath)

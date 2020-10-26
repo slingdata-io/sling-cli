@@ -1,8 +1,6 @@
 package api
 
 import (
-	"fmt"
-
 	"github.com/digitalocean/godo"
 	h "github.com/flarco/gutil"
 )
@@ -21,7 +19,7 @@ func (api *DigitalOceanAPI) Init() (err error) {
 	api.Key = api.properties["DIGITALOCEAN_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error(fmt.Errorf("did not provide DIGITALOCEAN_ACCESS_TOKEN"))
+		err = h.Error("did not provide DIGITALOCEAN_ACCESS_TOKEN")
 		return
 	}
 

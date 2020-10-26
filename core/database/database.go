@@ -1102,7 +1102,7 @@ func (conn *BaseConn) GetSQLColumns(sqls ...string) (columns []iop.Column, err e
 	if len(sqls) > 0 {
 		sql = sqls[0]
 	} else {
-		err = h.Error(fmt.Errorf("no query provided"))
+		err = h.Error("no query provided")
 		return
 	}
 
@@ -1161,10 +1161,10 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns [
 	for _, field := range fields {
 		_, ok := colMap[strings.ToLower(field)]
 		if !ok {
-			err = h.Error(fmt.Errorf(
+			err = h.Error(
 				"provided field '%s' not found in table %s",
 				strings.ToLower(field), tableFName,
-			))
+			)
 			return
 		}
 		fieldMap[strings.ToLower(field)] = colMap[strings.ToLower(field)]
@@ -1175,12 +1175,12 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns [
 		dType = strings.Split(strings.ToLower(dType), "(")[0]
 		generalType, ok := conn.Template().NativeTypeMap[dType]
 		if !ok {
-			err = h.Error(fmt.Errorf(
+			err = h.Error(
 				"No general type mapping defined for col '%s', with type '%s' for '%s'",
 				rec["column_name"],
 				dType,
 				conn.GetType(),
-			))
+			)
 			return
 		}
 
@@ -1202,7 +1202,7 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns [
 	}
 
 	if len(columns) == 0 {
-		err = h.Error(fmt.Errorf("unable to obtain columns for " + tableFName))
+		err = h.Error("unable to obtain columns for " + tableFName)
 	}
 
 	return
@@ -1523,7 +1523,7 @@ func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []strin
 	}
 
 	if len(mismatches) > 0 {
-		err = h.Error(fmt.Errorf(strings.Join(mismatches, "\n")), "column names mismatch")
+		err = h.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
 	}
 
 	h.Trace("insert target fields: " + strings.Join(newColNames, ", "))

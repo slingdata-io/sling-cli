@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"github.com/slingdata-io/sling/core/env"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/slingdata-io/sling/core/env"
 
 	h "github.com/flarco/gutil"
 	"github.com/jmespath/go-jmespath"
@@ -100,7 +101,7 @@ func NewAPIClientContext(ctx context.Context, ap APIProvider, props ...string) (
 	case SurveyMonkey:
 		api = &SurveyMonkeyAPI{}
 	default:
-		err = h.Error(fmt.Errorf("unhandled provider: %#v", ap))
+		err = h.Error("unhandled provider: %#v", ap)
 		return
 	}
 
@@ -137,7 +138,7 @@ func NewAPIClientFromDataConnContext(ctx context.Context, dc *iop.DataConn) (api
 	case iop.ConnTypeAPIGithub:
 		return NewAPIClientContext(ctx, Github, h.MapToKVArr(dc.VarsS())...)
 	default:
-		err = h.Error(fmt.Errorf("invalid API connection request"))
+		err = h.Error("invalid API connection request")
 	}
 	return
 }
@@ -183,7 +184,7 @@ func (api *BaseAPI) SetProp(key string, val string) {
 func (api *BaseAPI) Call(name string, params map[string]interface{}, body []byte) (respBytes []byte, err error) {
 	aos, ok := api.Endpoints[name]
 	if !ok {
-		err = h.Error(fmt.Errorf("api endpoint '%s' does not exists", name))
+		err = h.Error("api endpoint '%s' does not exists", name)
 		return
 	}
 
@@ -207,7 +208,7 @@ func (api *BaseAPI) Call(name string, params map[string]interface{}, body []byte
 func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []byte) (ds *iop.Datastream, err error) {
 	aos, ok := api.Endpoints[name]
 	if !ok {
-		err = h.Error(fmt.Errorf("api endpoint '%s' does not exists", name))
+		err = h.Error("api endpoint '%s' does not exists", name)
 		return
 	}
 
@@ -316,7 +317,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 		case []map[interface{}]interface{}:
 			recordsInterf = records.([]map[interface{}]interface{})
 		default:
-			err = h.Error(fmt.Errorf("unhandled interface type: %#v", t))
+			err = h.Error("unhandled interface type: %#v", t)
 			it.Context.CaptureErr(err)
 			return false
 		}
@@ -504,7 +505,7 @@ func (aos *APIEndpoint) Request(url string, body []byte) (resp *http.Response, r
 
 	h.Trace("API Endpoint %s -> %d: %s", aos.Name, resp.StatusCode, resp.Status)
 	if resp.StatusCode >= 300 || resp.StatusCode < 200 {
-		err = h.Error(fmt.Errorf("Bad API Response %d: %s", resp.StatusCode, resp.Status))
+		err = h.Error("Bad API Response %d: %s", resp.StatusCode, resp.Status)
 		return
 	}
 

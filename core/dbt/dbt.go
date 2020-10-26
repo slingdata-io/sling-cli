@@ -1,7 +1,6 @@
 package dbt
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -56,7 +55,7 @@ func (d *Dbt) Init(conns ...iop.DataConn) (err error) {
 			return
 		}
 	} else if !g.PathExists(d.ProjectPath) {
-		err = g.Error(fmt.Errorf("proj path '%s' doesn't exist", d.ProjectPath))
+		err = g.Error("proj path '%s' doesn't exist", d.ProjectPath)
 		return
 	}
 

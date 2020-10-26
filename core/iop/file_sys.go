@@ -1358,7 +1358,7 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	} else if val := fs.GetProp("GC_CRED_FILE"); val != "" {
 		authOpthion = option.WithCredentialsFile(val)
 	} else {
-		return h.Error(fmt.Errorf("Could not connect. Did not provide GC_CRED_JSON_BODY, GC_CRED_API_KEY or GC_CRED_FILE"), "")
+		return h.Error("Could not connect. Did not provide GC_CRED_JSON_BODY, GC_CRED_API_KEY or GC_CRED_FILE")
 	}
 
 	fs.bucket = fs.GetProp("GC_BUCKET")
@@ -1701,7 +1701,7 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 		}
 
 	} else {
-		err = h.Error(fmt.Errorf("Invalid Azure path: " + url))
+		err = h.Error("Invalid Azure path: " + url)
 		return
 	}
 
@@ -2543,7 +2543,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 	if err != nil {
 		return h.Error(err, "failed testing permissions: Create file/folder")
 	} else if bw == 0 {
-		return h.Error(fmt.Errorf("failed testing permissions: Create file/folder returned 0 bytes"))
+		return h.Error("failed testing permissions: Create file/folder returned 0 bytes")
 	}
 
 	// List File
@@ -2551,7 +2551,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 	if err != nil {
 		return h.Error(err, "failed testing permissions: List File")
 	} else if len(paths) == 0 {
-		return h.Error(fmt.Errorf("failed testing permissions: List File is zero"))
+		return h.Error("failed testing permissions: List File is zero")
 	}
 
 	// Read File
@@ -2566,7 +2566,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 	}
 
 	if string(content) != testString {
-		return h.Error(fmt.Errorf("failed testing permissions: Read File content mismatch"))
+		return h.Error("failed testing permissions: Read File content mismatch")
 	}
 
 	// Delete file/folder

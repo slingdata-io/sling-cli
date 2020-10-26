@@ -1277,7 +1277,7 @@ func (ds *Datastream) Chunk(limit uint64) (chDs chan *Datastream) {
 // correctly casted rows
 func (ds *Datastream) Shape(columns []Column) (nDs *Datastream, err error) {
 	if len(columns) != len(ds.Columns) {
-		err = h.Error(fmt.Errorf("number of columns do not match"))
+		err = h.Error("number of columns do not match")
 		return ds, err
 	}
 

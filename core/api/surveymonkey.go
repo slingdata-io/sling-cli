@@ -1,8 +1,6 @@
 package api
 
 import (
-	"fmt"
-
 	h "github.com/flarco/gutil"
 )
 
@@ -19,7 +17,7 @@ func (api *SurveyMonkeyAPI) Init() (err error) {
 	api.Key = api.properties["SURVEYMONKEY_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error(fmt.Errorf("did not provide SURVEYMONKEY_ACCESS_TOKEN"))
+		err = h.Error("did not provide SURVEYMONKEY_ACCESS_TOKEN")
 		return
 	}
 

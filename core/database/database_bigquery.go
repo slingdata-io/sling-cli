@@ -90,7 +90,7 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 		authOption = option.WithCredentialsFile(val)
 	}
 	if authOption == nil {
-		err = h.Error(fmt.Errorf("no Google crendentials provided"))
+		err = h.Error("no Google crendentials provided")
 		return
 	}
 	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, time.Duration(to)*time.Second)
@@ -629,7 +629,7 @@ func (conn *BigQueryConn) BulkExportFlow(sqls ...string) (df *iop.Dataflow, err 
 func (conn *BigQueryConn) Unload(sqls ...string) (gsPath string, err error) {
 	gcBucket := conn.GetProp("GC_BUCKET")
 	if gcBucket == "" {
-		err = h.Error(fmt.Errorf("Must provide prop 'GC_BUCKET'"), "")
+		err = h.Error("Must provide prop 'GC_BUCKET'")
 		return
 	}
 
@@ -654,7 +654,7 @@ func (conn *BigQueryConn) Unload(sqls ...string) (gsPath string, err error) {
 
 		bucket := conn.GetProp("GC_BUCKET")
 		if bucket == "" {
-			err = h.Error(fmt.Errorf("need to provide prop 'GC_BUCKET'"), "")
+			err = h.Error("need to provide prop 'GC_BUCKET'")
 			return
 		}
 

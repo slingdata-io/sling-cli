@@ -285,7 +285,7 @@ func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 	}
 
 	if err == nil && stage == "" {
-		err = h.Error(fmt.Errorf("Need to permit internal staging, or provide AWS/Azure creds"))
+		err = h.Error("Need to permit internal staging, or provide AWS/Azure creds")
 		return 0, err
 	}
 
@@ -461,13 +461,13 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 
 	if conn.GetProp("internalStage") == "" {
-		return 0, h.Error(fmt.Errorf("Prop internalStage is required"), "")
+		return 0, h.Error("Prop internalStage is required")
 	}
 
 	if conn.GetProp("schema") == "" {
 		schema, _ := SplitTableFullName(tableFName)
 		if schema == "" {
-			return 0, h.Error(fmt.Errorf("Prop schema is required"), "")
+			return 0, h.Error("Prop schema is required")
 		}
 		conn.SetProp("schema", schema)
 	}

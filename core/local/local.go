@@ -160,7 +160,7 @@ func (home *Home) APIKey() (key string) {
 func (home *Home) CloneRepo(URL string) (path string, err error) {
 
 	if URL == "" {
-		err = h.Error(fmt.Errorf("did not provide repository URL"))
+		err = h.Error("did not provide repository URL")
 		return
 	}
 

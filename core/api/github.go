@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,7 +20,7 @@ func (api *GithubAPI) Init() (err error) {
 	api.Key = api.properties["GITHUB_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error(fmt.Errorf("did not provide GITHUB_ACCESS_TOKEN"))
+		err = h.Error("did not provide GITHUB_ACCESS_TOKEN")
 		return
 	}
 
