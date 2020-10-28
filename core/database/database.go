@@ -828,6 +828,8 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, sql string, limit .
 	conn.Data.Columns = SQLColumns(colTypes, conn.template.NativeTypeMap)
 	conn.Data.NoTrace = noTrace
 
+	h.Debug("query responded in %d secs", conn.Data.Duration)
+
 	nextFunc := func(it *iop.Iterator) bool {
 		if Limit > 0 && it.Counter == Limit {
 			result.Close()
