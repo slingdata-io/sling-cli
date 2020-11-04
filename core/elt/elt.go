@@ -175,7 +175,8 @@ func (j *Task) runDbSQL() (err error) {
 }
 
 func (j *Task) runDbDbt() (err error) {
-	dbtObj, err := dbt.NewDbt(j.Cfg.TgtPostDbt)
+	dbtConfig := h.Marshal(j.Cfg.TgtPostDbt)
+	dbtObj, err := dbt.NewDbt(dbtConfig)
 	if err != nil {
 		return h.Error(err, "could not init dbt task")
 	}
@@ -191,7 +192,7 @@ func (j *Task) runDbDbt() (err error) {
 		dbtObj.Profile = j.Cfg.TgtConn.ID
 	}
 
-	err = dbtObj.Init()
+	err = dbtObj.Init(j.Cfg.TgtConn)
 	if err != nil {
 		return h.Error(err, "could not initialize dbt project")
 	}

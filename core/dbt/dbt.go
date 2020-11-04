@@ -181,7 +181,7 @@ func (d *Dbt) Install(venvPath string) (err error) {
 
 	pip := g.F("%s/bin/pip", venvPath)
 	g.Debug("ensuring pip package is '%s'", dbtPkg)
-	err = d.Session.Run(pip, "install", "-U", dbtPkg)
+	err = d.Session.Run(pip, "install", "-q", "-U", "--disable-pip-version-check", dbtPkg)
 	if err != nil {
 		err = g.Error(err, "could not install dbt via python pip")
 	}

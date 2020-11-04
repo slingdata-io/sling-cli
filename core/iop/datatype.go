@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
-	"net/url"
 	"os"
 	"reflect"
 	"regexp"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/flarco/gutil/net"
 
 	"github.com/cheggaaa/pb"
 	"github.com/dustin/go-humanize"
@@ -2514,10 +2515,18 @@ func (dc *DataConn) SetFromEnv() {
 }
 
 // VarsS returns vars as map[string]string
-func (dc *DataConn) VarsS() map[string]string {
+func (dc *DataConn) VarsS(lowerCase ...bool) map[string]string {
+	lc := false
+	if len(lowerCase) > 0 {
+		lc = lowerCase[0]
+	}
 	vars := map[string]string{}
 	for k, v := range dc.Vars {
-		vars[k] = cast.ToString(v)
+		if lc {
+			vars[strings.ToLower(k)] = cast.ToString(v)
+		} else {
+			vars[k] = cast.ToString(v)
+		}
 	}
 	return vars
 }
@@ -2596,27 +2605,25 @@ var ConnTypesDefPort = map[ConnType]int{
 
 // GetCredProps returns the credential properties
 func (dc *DataConn) GetCredProps() (m map[string]interface{}, err error) {
-	u, err := url.Parse(dc.URL)
+	u, err := net.NewURL(dc.URL)
 	if err != nil {
 		err = h.Error(err, "could not parse URL for "+dc.GetTypeKey())
 		return
 	}
 
-	password, _ := u.User.Password()
-
-	port := cast.ToInt(u.Port())
-	if port == 0 {
-		port = ConnTypesDefPort[dc.GetType()]
+	schema := u.PopParam("schema")
+	if schema == "" {
+		schema = dc.VarsS(true)["schema"]
 	}
 
 	m = h.M(
 		"type", dc.GetTypeKey(),
 		"host", u.Hostname(),
-		"user", u.User.Username(),
-		"password", password,
-		"port", port,
-		"database", strings.ReplaceAll(u.Path, "/", ""),
-		"url", u,
+		"user", u.Username(),
+		"password", u.Password(),
+		"port", u.Port(ConnTypesDefPort[dc.GetType()]),
+		"database", strings.ReplaceAll(u.Path(), "/", ""),
+		"url", u.URL(),
 	)
 	return
 }

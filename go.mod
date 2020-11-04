@@ -11,6 +11,7 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/Azure/go-autorest/autorest/to v0.4.0 // indirect
 	github.com/PuerkitoBio/goquery v1.6.0
+	github.com/alecthomas/assert v0.0.0-20170929043011-405dbfeb8e38
 	github.com/aws/aws-sdk-go v1.35.7
 	github.com/cheggaaa/pb v2.0.7+incompatible
 	github.com/denisenkom/go-mssqldb v0.0.0-20200910202707-1e08a3fab204

@@ -3,7 +3,6 @@ package elt
 // JobType is an enum type for jobs
 type JobType string
 
-
 const (
 
 	// APIToDb is from api to db
@@ -69,3 +68,20 @@ func (s ExecStatus) IsFinished() bool {
 	return false
 }
 
+// IsFailure returns true if an execution is failed
+func (s ExecStatus) IsFailure() bool {
+	switch s {
+	case ExecStatusError, ExecStatusTerminated, ExecStatusStalled, ExecStatusTimedOut:
+		return true
+	}
+	return false
+}
+
+// IsSuccess returns true if an execution is successful
+func (s ExecStatus) IsSuccess() bool {
+	switch s {
+	case ExecStatusSuccess:
+		return true
+	}
+	return false
+}

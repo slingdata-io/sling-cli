@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -108,6 +109,19 @@ func (conn *BigQueryConn) Connect(timeOut ...int) error {
 	return conn.BaseConn.Connect()
 }
 
+type bqResult struct {
+	it  *bigquery.RowIterator
+	res driver.Result
+}
+
+func (r bqResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r bqResult) RowsAffected() (int64, error) {
+	return cast.ToInt64(r.it.TotalRows), nil
+}
+
 // ExecContext runs a sql query with context, returns `error`
 func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 
@@ -152,16 +166,18 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 		Q:                sql,
 		DefaultDatasetID: conn.GetProp("schema"),
 	}
-	_, err = q.Read(ctx)
+	it, err := q.Read(ctx)
 	if err != nil {
 		err = h.Error(err, "SQL Error for:\n"+sql)
 		return
 	}
 
-	// h.Debug("ExecContext - Rows affected: %d", int64(it.TotalRows))
+	result = bqResult{it: it}
+
 	if err != nil {
 		err = h.Error(err, "Error executing "+sql)
 	}
+
 	return
 }
 

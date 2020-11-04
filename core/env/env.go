@@ -161,3 +161,10 @@ func InitLogger() {
 		h.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	}
 }
+
+// Env returns the environment variables to propogate
+func Env() map[string]interface{} {
+	return h.M(
+		"SLING_SEND_ANON_USAGE", cast.ToString(!DisableSendAnonUsage),
+	)
+}

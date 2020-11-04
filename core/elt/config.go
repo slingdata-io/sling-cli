@@ -2,13 +2,14 @@ package elt
 
 import (
 	"encoding/json"
+	"io/ioutil"
+	"os"
+	"strings"
+
 	"github.com/flarco/gutil"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
-	"io/ioutil"
-	"os"
-	"strings"
 )
 
 // NewConfig return a config object from a string
@@ -49,6 +50,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.Props == nil {
 		cfg.Props = map[string]interface{}{}
+	}
+
+	if cfg.Env == nil {
+		cfg.Env = map[string]interface{}{}
 	}
 	return nil
 }
@@ -309,7 +314,7 @@ type Config struct {
 	TgtTableTmp string       `json:"tgt_table_tmp" yaml:"tgt_table_tmp"`
 	TgtPreSQL   string       `json:"pre_sql" yaml:"pre_sql"`
 	TgtPostSQL  string       `json:"post_sql" yaml:"post_sql"`
-	TgtPostDbt  string       `json:"post_dbt" yaml:"post_dbt"`
+	TgtPostDbt  gutil.Map    `json:"post_dbt" yaml:"post_dbt"`
 	PrimaryKey  string       `json:"primary_key" yaml:"primary_key"`
 	UpdateKey   string       `json:"update_key" yaml:"update_key"`
 	Mode        string       `json:"mode" yaml:"mode"` // append, upsert, truncate, drop
@@ -322,6 +327,7 @@ type Config struct {
 
 	Options string                 `json:"options" yaml:"options"`
 	Props   map[string]interface{} `json:"props" yaml:"props"`
+	Env     map[string]interface{} `json:"env" yaml:"env"`
 
 	Remote bool   `json:"remote" yaml:"remote"`
 	Email  string `json:"email" yaml:"email"` // email those addresses after

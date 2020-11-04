@@ -8,7 +8,6 @@ import (
 	g "github.com/flarco/gutil"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/slingdata-io/sling/core/local"
-	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
@@ -82,7 +81,6 @@ func (d *Dbt) getProfileEntry(conn iop.DataConn) (pe map[string]interface{}, err
 	u, _ := pe["url"].(*url.URL)
 	q := u.Query()
 
-	pe["schema"] = q.Get("schema")
 	pe["pass"] = pe["password"]
 	pe["dbname"] = pe["database"]
 	pe["threads"] = 3
@@ -91,7 +89,7 @@ func (d *Dbt) getProfileEntry(conn iop.DataConn) (pe map[string]interface{}, err
 	delete(pe, "database")
 	delete(pe, "url")
 
-	if cast.ToString(pe["schema"]) == "" {
+	if d.Schema != "" {
 		pe["schema"] = d.Schema
 	}
 	switch conn.GetType() {

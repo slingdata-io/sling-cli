@@ -8,6 +8,7 @@ import (
 	h "github.com/flarco/gutil"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetRate(t *testing.T) {
@@ -36,4 +37,24 @@ func TestGetRate(t *testing.T) {
 	h.P(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
 	rate = cast.ToInt(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
 	h.P(rate)
+}
+
+func TestConfig(t *testing.T) {
+
+	cfgStr := `{
+		"post_dbt": {
+			"conn": "ORACLE_SLING",
+			"expr": "my_first_dbt_model",
+			"name": "DBT_PROJ_1",
+			"folder": "/",
+			"version": "0.18.0",
+			"repo_url": "https://github.com/fishtown-analytics/dbt-starter-project"
+		},
+		"tgt_conn": "ORACLE_SLING"
+	}`
+	cfg, err := NewConfig(cfgStr)
+	assert.NoError(t, err)
+
+	println(cfg.TgtPostDbt)
+
 }

@@ -14,17 +14,17 @@ import (
 
 // TaskProcess is a slingELT task / execution process
 type TaskProcess struct {
-	Task      Task      `json:"-"`
-	JobID     int       `json:"job_id" mapstructure:"job_id"`
-	ExecID    int       `json:"exec_id" mapstructure:"exec_id"`
-	Pid       int       `json:"pid" mapstructure:"pid"`
-	Stderr    string    `json:"stderr" mapstructure:"stderr"`
-	Stdout    string    `json:"stdout" mapstructure:"stdout"`
-	Err       error     `json:"-"`
-	StartTime time.Time `json:"start_time" mapstructure:"start_time"`
-	EndTime   time.Time `json:"end_time" mapstructure:"end_time"`
-	ExitCode  int       `json:"exit_code" mapstructure:"exit_code"`
-	RowRate   int       `json:"-"`
+	Task      Task         `json:"-"`
+	JobID     int          `json:"job_id" mapstructure:"job_id"`
+	ExecID    int          `json:"exec_id" mapstructure:"exec_id"`
+	Pid       int          `json:"pid" mapstructure:"pid"`
+	Stderr    string       `json:"stderr" mapstructure:"stderr"`
+	Stdout    string       `json:"stdout" mapstructure:"stdout"`
+	Err       error        `json:"-"`
+	StartTime time.Time    `json:"start_time" mapstructure:"start_time"`
+	EndTime   time.Time    `json:"end_time" mapstructure:"end_time"`
+	ExitCode  int          `json:"exit_code" mapstructure:"exit_code"`
+	RowRate   int          `json:"-"`
 	StderrBuf bytes.Buffer `json:"-"`
 	StdoutBuf bytes.Buffer `json:"-"`
 	Cmd       *exec.Cmd    `json:"-"`
@@ -91,7 +91,7 @@ func NewTask(execID int, cfg Config) (j Task) {
 		j.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		j.Type = FileToFile
-	} else if tgtDbProvided && cfg.TgtPostDbt != "" {
+	} else if tgtDbProvided && cfg.TgtPostDbt != nil {
 		j.Type = DbDbt
 	} else if tgtDbProvided && cfg.TgtPostSQL != "" {
 		j.Type = DbSQL
