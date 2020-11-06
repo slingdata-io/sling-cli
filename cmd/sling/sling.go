@@ -10,10 +10,10 @@ import (
 	"os/signal"
 	"time"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/iop"
+	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
-	"github.com/slingdata-io/sling/core/database"
-	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 
@@ -117,94 +117,94 @@ primary_key: id
 var ctx, cancel = context.WithCancel(context.Background())
 
 
-var cliELT = &h.CliSC{
+var cliELT = &g.CliSC{
 	Name:        "elt",
 	Description: "execute an ad-hoc ELT task",
-	Flags: []h.Flag{
-		h.Flag{
+	Flags: []g.Flag{
+		g.Flag{
 			Name:        "local-conns",
 			Type:        "bool",
 			Description: "show the locally defined connections",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "bool",
 			ShortName:   "R",
 			Name:        "remote",
 			Description: "execute the task remotely from your SlingELT account / instance",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "c",
 			Name:        "config",
 			Description: "The config string or file to use (JSON or YAML).\n",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-file",
 			Description: "The path/url of the source file (local, s3, gc, azure, http, sftp).",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-conn",
 			Description: "The source database / API connection (name, conn string or URL).",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-table",
 			Description: "The source table (schema.table) or API supported object name.",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-sql",
 			Description: "The path of sql file or in-line text to use as query\n",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-file",
 			Description: "The path/url of the target file (local, s3, gc, azure).",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-conn",
 			Description: "The target database connection (name, conn string or URL).",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-table",
 			Description: "The target table (schema.table).",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "pre-sql",
 			Description: "The path of sql file or in-line text to run on tgtConn prior to the data load",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "post-sql",
 			Description: "The path of sql file or in-line text to run on tgtConn after the data is loaded.",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "bool",
 			ShortName:   "",
 			Name:        "stdout",
 			Description: "Output the stream to standard output (STDOUT).\n",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "o",
 			Name:        "options",
 			Description: "in-line options to further configure ELT task.",
 		},
-		h.Flag{
+		g.Flag{
 			Type:        "string",
 			ShortName:   "m",
 			Name:        "mode",
@@ -222,7 +222,7 @@ var cliELT = &h.CliSC{
 		// 	Name:        "upsertPK",
 		// 	Description: "The column(s) to use to as the primark key for updating. Comma delimited values allowed for a composite key. Must be provided with `upsert` load mode.\n",
 		// },
-		h.Flag{
+		g.Flag{
 			Type:        "bool",
 			ShortName:   "e",
 			Name:        "examples",
@@ -232,7 +232,7 @@ var cliELT = &h.CliSC{
 	ExecProcess: processELT,
 }
 
-var cliUpdate = &h.CliSC{
+var cliUpdate = &g.CliSC{
 	Name:        "update",
 	Description: "update the cli application to the latest version",
 	ExecProcess: updateCLI,
@@ -242,8 +242,8 @@ func init() {
 	// we need a webserver to get the pprof webserver
 	if os.Getenv("SLING_PPROF") == "TRUE" {
 		go func() {
-			h.Trace("Starting pprof webserver @ localhost:6060")
-			h.LogError(http.ListenAndServe("localhost:6060", nil))
+			g.Trace("Starting pprof webserver @ localhost:6060")
+			g.LogError(http.ListenAndServe("localhost:6060", nil))
 		}()
 	}
 
@@ -297,15 +297,15 @@ func cliInit() int {
 	flaggy.DefaultParser.AdditionalHelpPrepend = "Slings data from a data source to a data target.\nVersion " + core.Version
 
 	flaggy.SetVersion(core.Version)
-	for _, cli := range h.CliArr {
+	for _, cli := range g.CliArr {
 		flaggy.AttachSubcommand(cli.Sc, 1)
 	}
 
 	flaggy.Parse()
 
-	ok, err := h.CliProcess()
+	ok, err := g.CliProcess()
 	if ok {
-		h.LogFatal(err)
+		g.LogFatal(err)
 	} else {
 		flaggy.ShowHelp("")
 	}

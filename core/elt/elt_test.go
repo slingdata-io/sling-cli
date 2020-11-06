@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	h "github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/iop"
+	"github.com/flarco/dbio/iop"
+	"github.com/flarco/g"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
@@ -25,18 +25,18 @@ func TestGetRate(t *testing.T) {
 	st := *task.StartTime
 	et := *task.EndTime
 
-	h.P(et.UnixNano())
-	h.P(st.UnixNano())
-	h.P(df.Count())
-	h.P(rate)
+	g.P(et.UnixNano())
+	g.P(st.UnixNano())
+	g.P(df.Count())
+	g.P(rate)
 
-	h.P(et.UnixNano() - st.UnixNano())
+	g.P(et.UnixNano() - st.UnixNano())
 
 	secElapsed := cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
-	h.P(secElapsed)
-	h.P(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
+	g.P(secElapsed)
+	g.P(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
 	rate = cast.ToInt(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
-	h.P(rate)
+	g.P(rate)
 }
 
 func TestConfig(t *testing.T) {

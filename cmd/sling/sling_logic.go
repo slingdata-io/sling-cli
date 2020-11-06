@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling/core"
 	"github.com/slingdata-io/sling/core/elt"
@@ -12,21 +13,20 @@ import (
 	"sort"
 	"strings"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/kardianos/osext"
-	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 
 func listLocalConns() {
 	rows := [][]interface{}{}
-	for key, val := range h.KVArrToMap(os.Environ()...) {
+	for key, val := range g.KVArrToMap(os.Environ()...) {
 		if !strings.Contains(val, ":/") {
 			continue
 		}
-		conn := iop.DataConn{ID: key, URL: val}
-		if conn.GetType() == iop.ConnTypeNone || conn.GetType() == iop.ConnTypeFileHTTP {
+		conn := dbio.DataConn{ID: key, URL: val}
+		if conn.GetType() == dbio.ConnTypeNone || conn.GetType() == dbio.ConnTypeFileHTTP {
 			continue
 		}
 		connType := ""
@@ -55,12 +55,12 @@ func listLocalConns() {
 }
 
 
-func processELT(c *h.CliSC) (err error) {
+func processELT(c *g.CliSC) (err error) {
 
 	doLog := func() {
-		logUsage(h.M(
+		logUsage(g.M(
 			"cmd", "elt",
-			"error", h.ErrorText(err),
+			"error", g.ErrorText(err),
 		))
 	}
 	defer doLog()
@@ -134,12 +134,12 @@ func processELT(c *h.CliSC) (err error) {
 		err = cfg.Prepare()
 	}
 	if err != nil {
-		return h.Error(err, "Unable to parse config string")
+		return g.Error(err, "Unable to parse config string")
 	}
 
 	task := elt.NewTask(0, cfg)
 	if task.Err != nil {
-		return h.Error(task.Err)
+		return g.Error(task.Err)
 	}
 
 	doLog = func() {
@@ -151,9 +151,9 @@ func processELT(c *h.CliSC) (err error) {
 		if tgtType == "" {
 			tgtType = task.Cfg.TgtFile.GetTypeNameLong()
 		}
-		logUsage(h.M(
+		logUsage(g.M(
 			"cmd", "elt",
-			"error", h.ErrorText(task.Err),
+			"error", g.ErrorText(task.Err),
 			"job_type", task.Type,
 			"job_mode", task.Cfg.Mode,
 			"job_remote", task.Cfg.Remote,
@@ -172,15 +172,15 @@ func processELT(c *h.CliSC) (err error) {
 	// run task
 	err = task.Execute()
 	if err != nil {
-		return h.Error(err)
+		return g.Error(err)
 	}
 
 	return nil
 }
 
-func updateCLI(c *h.CliSC) (err error) {
+func updateCLI(c *g.CliSC) (err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
-	go logUsage(h.M(
+	go logUsage(g.M(
 		"cmd", "update",
 	))
 
@@ -197,7 +197,7 @@ func updateCLI(c *h.CliSC) (err error) {
 
 	execFileName, err := osext.Executable()
 	if err != nil {
-		return h.Error(err, "Unable to determine executable path")
+		return g.Error(err, "Unable to determine executable path")
 	}
 
 	fileStat, _ := os.Stat(execFileName)
@@ -205,7 +205,7 @@ func updateCLI(c *h.CliSC) (err error) {
 
 	filePath := execFileName + ".new"
 
-	h.Info("Checking update...")
+	g.Info("Checking update...")
 	err = net.DownloadFile(url, filePath)
 	if err != nil {
 		println("Unable to download update!")
@@ -225,7 +225,7 @@ func updateCLI(c *h.CliSC) (err error) {
 
 	if strings.HasSuffix(strings.TrimSpace(string(versionOut)), core2.Version) {
 		os.Remove(filePath)
-		h.Info("Already using latest version: " + core2.Version)
+		g.Info("Already using latest version: " + core2.Version)
 		return nil
 	}
 
@@ -234,7 +234,7 @@ func updateCLI(c *h.CliSC) (err error) {
 
 	os.Remove(execFileName + ".old")
 
-	h.Info("Updated to " + strings.TrimSpace(string(versionOut)))
+	g.Info("Updated to " + strings.TrimSpace(string(versionOut)))
 
 	return nil
 }

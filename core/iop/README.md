@@ -1,2 +1,0 @@
-
-## Input-Process-Output (ipo)

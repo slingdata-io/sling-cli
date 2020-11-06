@@ -1,15 +1,15 @@
 package dbt
 
 import (
+	"github.com/flarco/dbio"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
 	"github.com/flarco/g/process"
-	"github.com/slingdata-io/sling/core/iop"
-	"github.com/slingdata-io/sling/core/local"
 	"gopkg.in/yaml.v2"
 )
 
@@ -45,7 +45,7 @@ func NewDbt(dbtConfig string) (d *Dbt, err error) {
 }
 
 // Init initializes the DBT Project and generates profiles
-func (d *Dbt) Init(conns ...iop.DataConn) (err error) {
+func (d *Dbt) Init(conns ...dbio.DataConn) (err error) {
 	// clone git repo
 	if d.ProjectPath == "" {
 		// will clone into ~/.sling/repos/<owner>/<repo>

@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"os"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
@@ -84,8 +84,8 @@ func LogEvent(m map[string]interface{}) {
 
 	jsonBytes, err := json.Marshal(m)
 	if err != nil {
-		if h.IsDebugLow() {
-			h.LogError(err)
+		if g.IsDebugLow() {
+			g.LogError(err)
 		}
 	}
 
@@ -98,36 +98,36 @@ func LogEvent(m map[string]interface{}) {
 	)
 
 	if err != nil {
-		if h.IsDebugLow() {
-			h.LogError(err)
+		if g.IsDebugLow() {
+			g.LogError(err)
 		}
 	}
 }
 
 // InitLogger initializes the g Logger
 func InitLogger() {
-	h.SetZeroLogLevel(zerolog.InfoLevel)
-	h.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
+	g.SetZeroLogLevel(zerolog.InfoLevel)
+	g.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
 
 	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
 		DisableSendAnonUsage = cast.ToBool(val)
 	}
 
 	if os.Getenv("SLING_DEBUG_CALLER_LEVEL") != "" {
-		h.CallerLevel = cast.ToInt(os.Getenv("SLING_DEBUG_CALLER_LEVEL"))
+		g.CallerLevel = cast.ToInt(os.Getenv("SLING_DEBUG_CALLER_LEVEL"))
 	}
 	if os.Getenv("SLING_DEBUG") == "TRACE" {
-		h.SetZeroLogLevel(zerolog.TraceLevel)
-		h.SetLogLevel(h.TraceLevel)
+		g.SetZeroLogLevel(zerolog.TraceLevel)
+		g.SetLogLevel(g.TraceLevel)
 	} else if os.Getenv("SLING_DEBUG") != "" {
-		h.SetZeroLogLevel(zerolog.DebugLevel)
-		h.SetLogLevel(h.DebugLevel)
+		g.SetZeroLogLevel(zerolog.DebugLevel)
+		g.SetLogLevel(g.DebugLevel)
 		if os.Getenv("SLING_DEBUG") == "LOW" {
-			h.SetLogLevel(h.LowDebugLevel)
+			g.SetLogLevel(g.LowDebugLevel)
 		}
 	}
 
-	// fmt.Printf("g.LogLevel = %d\n", h.GetLogLevel())
+	// fmt.Printf("g.LogLevel = %d\n", g.GetLogLevel())
 	// fmt.Printf("g.zerolog = %d\n", zerolog.GlobalLevel())
 
 	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
@@ -145,26 +145,26 @@ func InitLogger() {
 	if os.Getenv("SLING_LOGGING") == "TASK" {
 		outputOut.NoColor = true
 		outputErr.NoColor = true
-		h.LogOut = zerolog.New(outputOut).With().Timestamp().Logger()
-		h.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.LogOut = zerolog.New(outputOut).With().Timestamp().Logger()
+		g.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	} else if os.Getenv("SLING_LOGGING") == "MASTER" || os.Getenv("SLING_LOGGING") == "WORKER" {
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
-		h.LogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
-		h.LogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
+		g.LogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
+		g.LogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
 		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM"}
-		if h.IsDebugLow() {
+		if g.IsDebugLow() {
 			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
 		}
-		h.LogOut = zerolog.New(outputErr).With().Timestamp().Logger()
-		h.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.LogOut = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	}
 }
 
 // Env returns the environment variables to propogate
 func Env() map[string]interface{} {
-	return h.M(
+	return g.M(
 		"SLING_SEND_ANON_USAGE", cast.ToString(!DisableSendAnonUsage),
 	)
 }

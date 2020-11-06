@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"github.com/flarco/dbio"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -12,10 +13,10 @@ import (
 
 	"github.com/slingdata-io/sling/core/env"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/dbio/iop"
+	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	yaml "gopkg.in/yaml.v2"
 )
@@ -59,7 +60,7 @@ type BaseAPI struct {
 	BaseURL       string
 	User          string
 	Key           string
-	Context       h.Context
+	Context       g.Context
 	FlattenNested bool
 	DefHeaders    map[string]string
 	DefParams     map[string]string
@@ -101,7 +102,7 @@ func NewAPIClientContext(ctx context.Context, ap APIProvider, props ...string) (
 	case SurveyMonkey:
 		api = &SurveyMonkeyAPI{}
 	default:
-		err = h.Error("unhandled provider: %#v", ap)
+		err = g.Error("unhandled provider: %#v", ap)
 		return
 	}
 
@@ -109,13 +110,13 @@ func NewAPIClientContext(ctx context.Context, ap APIProvider, props ...string) (
 		api.SetProp(k, v)
 	}
 
-	for k, v := range h.KVArrToMap(props...) {
+	for k, v := range g.KVArrToMap(props...) {
 		api.SetProp(k, v) // overwrite if provided
 	}
 
 	err = api.Init()
 	if err != nil {
-		err = h.Error(err, "could not initialize api")
+		err = g.Error(err, "could not initialize api")
 	}
 
 	return
@@ -123,22 +124,22 @@ func NewAPIClientContext(ctx context.Context, ap APIProvider, props ...string) (
 }
 
 // NewAPIClientFromDataConn provides an API client with the given Dataconn URL
-func NewAPIClientFromDataConn(dc *iop.DataConn) (api API, err error) {
+func NewAPIClientFromDataConn(dc *dbio.DataConn) (api API, err error) {
 	return NewAPIClientFromDataConnContext(context.Background(), dc)
 }
 
 // NewAPIClientFromDataConnContext provides an API client with the given Dataconn URL
-func NewAPIClientFromDataConnContext(ctx context.Context, dc *iop.DataConn) (api API, err error) {
+func NewAPIClientFromDataConnContext(ctx context.Context, dc *dbio.DataConn) (api API, err error) {
 	if dc.URL != "" {
 		dc.Vars["URL"] = dc.URL
 	}
 	switch dc.GetType() {
-	case iop.ConnTypeAPIGit:
-		return NewAPIClientContext(ctx, Git, h.MapToKVArr(dc.VarsS())...)
-	case iop.ConnTypeAPIGithub:
-		return NewAPIClientContext(ctx, Github, h.MapToKVArr(dc.VarsS())...)
+	case dbio.ConnTypeAPIGit:
+		return NewAPIClientContext(ctx, Git, g.MapToKVArr(dc.VarsS())...)
+	case dbio.ConnTypeAPIGithub:
+		return NewAPIClientContext(ctx, Github, g.MapToKVArr(dc.VarsS())...)
 	default:
-		err = h.Error("invalid API connection request")
+		err = g.Error("invalid API connection request")
 	}
 	return
 }
@@ -149,11 +150,11 @@ func (api *BaseAPI) Init() (err error) {
 	api.Endpoints = map[string]*APIEndpoint{}
 	err = api.LoadEndpoints()
 	if err != nil {
-		err = h.Error(err, "could not load endpoints")
+		err = g.Error(err, "could not load endpoints")
 		return
 	}
 
-	api.Context = h.NewContext(context.Background())
+	api.Context = g.NewContext(context.Background())
 	return
 }
 
@@ -184,7 +185,7 @@ func (api *BaseAPI) SetProp(key string, val string) {
 func (api *BaseAPI) Call(name string, params map[string]interface{}, body []byte) (respBytes []byte, err error) {
 	aos, ok := api.Endpoints[name]
 	if !ok {
-		err = h.Error("api endpoint '%s' does not exists", name)
+		err = g.Error("api endpoint '%s' does not exists", name)
 		return
 	}
 
@@ -194,10 +195,10 @@ func (api *BaseAPI) Call(name string, params map[string]interface{}, body []byte
 		}
 	}
 
-	url := h.Rm(aos.URL, params)
+	url := g.Rm(aos.URL, params)
 	_, respBytes, err = aos.Request(url, body)
 	if err != nil {
-		err = h.Error(err, "could not perform request")
+		err = g.Error(err, "could not perform request")
 		return
 	}
 
@@ -208,7 +209,7 @@ func (api *BaseAPI) Call(name string, params map[string]interface{}, body []byte
 func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []byte) (ds *iop.Datastream, err error) {
 	aos, ok := api.Endpoints[name]
 	if !ok {
-		err = h.Error("api endpoint '%s' does not exists", name)
+		err = g.Error("api endpoint '%s' does not exists", name)
 		return
 	}
 
@@ -218,7 +219,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 		}
 	}
 
-	url := h.Rm(aos.URL, params)
+	url := g.Rm(aos.URL, params)
 	aos.buffer = make(chan []interface{}, 100000)
 
 	nextFunc := func(it *iop.Iterator) bool {
@@ -243,18 +244,18 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 			// proceed with request
 		}
 
-		url = h.Rm(url, params)
+		url = g.Rm(url, params)
 		resp, respBytes, err := aos.Request(url, body)
 		if err != nil {
 			// TODO: need to implement retry logic
-			it.Context.CaptureErr(h.Error(err, "could not perform request"))
+			it.Context.CaptureErr(g.Error(err, "could not perform request"))
 			return false
 		}
 
-		// h.P(string(respBytes))
+		// g.P(string(respBytes))
 		err = aos.Unmarshal(respBytes, &data)
 		if err != nil {
-			it.Context.CaptureErr(h.Error(err, "could not parse response"))
+			it.Context.CaptureErr(g.Error(err, "could not parse response"))
 			return false
 		}
 
@@ -262,7 +263,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 
 		records, err := jmespath.Search(aos.RecordsJP, data)
 		if err != nil {
-			it.Context.CaptureErr(h.Error(err, "could not find records"))
+			it.Context.CaptureErr(g.Error(err, "could not find records"))
 			return false
 		}
 
@@ -317,7 +318,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 		case []map[interface{}]interface{}:
 			recordsInterf = records.([]map[interface{}]interface{})
 		default:
-			err = h.Error("unhandled interface type: %#v", t)
+			err = g.Error("unhandled interface type: %#v", t)
 			it.Context.CaptureErr(err)
 			return false
 		}
@@ -330,7 +331,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 		api.Context.Wg.Read.Wait()
 
 		if err = api.Context.Err(); err != nil {
-			err = h.Error(err, "error parsing records")
+			err = g.Error(err, "error parsing records")
 			it.Context.CaptureErr(err)
 			return false
 		}
@@ -348,7 +349,7 @@ func (api *BaseAPI) Stream(name string, params map[string]interface{}, body []by
 
 	err = ds.Start()
 	if err != nil {
-		return ds, h.Error(err, "could start datastream")
+		return ds, g.Error(err, "could start datastream")
 	}
 
 	return
@@ -426,24 +427,24 @@ func (aos *APIEndpoint) parseRecords(records []map[interface{}]interface{}, rowR
 			rowReadied = true
 		}
 	}
-	h.Debug("API Endpoint %s -> Parsed %d records", aos.Name, len(records))
+	g.Debug("API Endpoint %s -> Parsed %d records", aos.Name, len(records))
 }
 
 // LoadEndpoints loads the endpoints from a yaml file
 func (api *BaseAPI) LoadEndpoints() (err error) {
-	fName := h.F("specs/%s.yaml", api.Provider.String())
-	SpecFile, err := h.PkgerFile(fName)
+	fName := g.F("specs/%s.yaml", api.Provider.String())
+	SpecFile, err := g.PkgerFile(fName)
 	if err != nil {
-		return h.Error(err, `cannot read `+fName)
+		return g.Error(err, `cannot read `+fName)
 	}
 
 	SpecBytes, err := ioutil.ReadAll(SpecFile)
 	if err != nil {
-		return h.Error(err, "ioutil.ReadAll(baseTemplateFile)")
+		return g.Error(err, "ioutil.ReadAll(baseTemplateFile)")
 	}
 
 	if err = yaml.Unmarshal(SpecBytes, &api.Endpoints); err != nil {
-		err = h.Error(err, "could not parse "+fName)
+		err = g.Error(err, "could not parse "+fName)
 		return
 	}
 
@@ -463,7 +464,7 @@ func (api *BaseAPI) LoadEndpoints() (err error) {
 		}
 	}
 
-	h.Trace("loaded %d endpoints", len(api.Endpoints))
+	g.Trace("loaded %d endpoints", len(api.Endpoints))
 	return
 }
 
@@ -476,18 +477,18 @@ func (aos *APIEndpoint) Unmarshal(body []byte, data *interface{}) (err error) {
 		return xml.Unmarshal(body, &data)
 	default:
 		err = fmt.Errorf("unhandled response type '%s'", aos.RespType)
-		return h.Error(err)
+		return g.Error(err)
 	}
 }
 
 // Request performs a request
 func (aos *APIEndpoint) Request(url string, body []byte) (resp *http.Response, respBytes []byte, err error) {
 	payload := bytes.NewReader(body)
-	h.Debug("API Endpoint %s -> %s %s", aos.Name, aos.Method, url)
+	g.Debug("API Endpoint %s -> %s %s", aos.Name, aos.Method, url)
 
 	req, err := http.NewRequest(aos.Method, url, payload)
 	if err != nil {
-		err = h.Error(err, "could not create request")
+		err = g.Error(err, "could not create request")
 		return
 	}
 
@@ -497,24 +498,24 @@ func (aos *APIEndpoint) Request(url string, body []byte) (resp *http.Response, r
 
 	resp, err = aos.client.Do(req)
 	if err != nil {
-		err = h.Error(err, "could not perform request")
+		err = g.Error(err, "could not perform request")
 		return
 	}
 
-	// h.P(resp.Header)
+	// g.P(resp.Header)
 
-	h.Trace("API Endpoint %s -> %d: %s", aos.Name, resp.StatusCode, resp.Status)
+	g.Trace("API Endpoint %s -> %d: %s", aos.Name, resp.StatusCode, resp.Status)
 	if resp.StatusCode >= 300 || resp.StatusCode < 200 {
-		err = h.Error("Bad API Response %d: %s", resp.StatusCode, resp.Status)
+		err = g.Error("Bad API Response %d: %s", resp.StatusCode, resp.Status)
 		return
 	}
 
 	respBytes, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
-		err = h.Error(err, "could not read from request body")
+		err = g.Error(err, "could not read from request body")
 	}
 
-	h.Trace("API Endpoint %s -> Got %d bytes", aos.Name, len(respBytes))
+	g.Trace("API Endpoint %s -> Got %d bytes", aos.Name, len(respBytes))
 	return
 }
 
@@ -527,7 +528,7 @@ func (aos *APIEndpoint) NextURL(data interface{}, resp *http.Response) string {
 		var err error
 		val, err = jmespath.Search(aos.NextJP, data)
 		if err != nil {
-			err = h.Error(err, "could not parse response")
+			err = g.Error(err, "could not parse response")
 			return ""
 		}
 	} else {
@@ -540,7 +541,7 @@ func (aos *APIEndpoint) NextURL(data interface{}, resp *http.Response) string {
 		if sVal == "" {
 			return ""
 		} else if strings.HasPrefix(sVal, "/") {
-			sVal = h.F("%s%s", aos.API.GetBaseURL(), sVal)
+			sVal = g.F("%s%s", aos.API.GetBaseURL(), sVal)
 		}
 		return sVal
 	}

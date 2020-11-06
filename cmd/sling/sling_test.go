@@ -3,18 +3,19 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/slingdata-io/sling/core/env"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/slingdata-io/sling/core/env"
+
 	"github.com/slingdata-io/sling/core/elt"
 
-	h "github.com/flarco/g"
-	d "github.com/slingdata-io/sling/core/database"
-	"github.com/slingdata-io/sling/core/iop"
+	d "github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/iop"
+	"github.com/flarco/g"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -128,7 +129,7 @@ func TestInToDb(t *testing.T) {
 
 	for _, tgtDB := range DBs {
 		println()
-		h.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
+		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
 
 		task := elt.NewTask(0, elt.Config{
 			SrcFileObj: csvFile,
@@ -169,7 +170,7 @@ func TestDbToDb(t *testing.T) {
 			}
 
 			println()
-			h.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
+			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
 			task := elt.NewTask(0, elt.Config{
 				SrcConnObj: srcDB.URL,
 				SrcTable:   srcDB.table,
@@ -206,13 +207,13 @@ func TestDbToOut(t *testing.T) {
 	for _, srcDB := range DBs {
 		filePath2 := fmt.Sprintf("tests/%s.out.csv", srcDB.name)
 		println()
-		h.Debug(">>>>>> Tranferring from %s to CSV (%s)", srcDB.name, filePath2)
+		g.Debug(">>>>>> Tranferring from %s to CSV (%s)", srcDB.name, filePath2)
 
 		srcTable := srcDB.table
 		srcTableCopy := srcDB.table + "_copy"
 		task := elt.NewTask(0, elt.Config{
 			SrcConnObj: srcDB.URL,
-			SrcSQL:     h.F("select * from %s order by id", srcTableCopy),
+			SrcSQL:     g.F("select * from %s order by id", srcTableCopy),
 			TgtFileObj: filePath2,
 		})
 		err := task.Execute()
@@ -260,7 +261,7 @@ func TestDbToOut(t *testing.T) {
 				err = os.RemoveAll(filePath2)
 				os.Remove(strings.ReplaceAll(srcDB.URL, "file:", ""))
 			} else {
-				h.Debug("Not equal for " + srcDB.name)
+				g.Debug("Not equal for " + srcDB.name)
 			}
 		}
 	}
@@ -279,11 +280,11 @@ func TestDbt(t *testing.T) {
 		switch db.name {
 		case "Postgres", "Snowflake", "BigQuery":
 			println()
-			h.Debug(">>>>>> DBT (%s)", db.name)
+			g.Debug(">>>>>> DBT (%s)", db.name)
 
 			task := elt.NewTask(0, elt.Config{
 				TgtConnObj: db.URL,
-				TgtPostDbt: h.Deindent(h.R(dbtConfig, "schema", schema)),
+				TgtPostDbt: g.Deindent(g.R(dbtConfig, "schema", schema)),
 			})
 			err := task.Execute()
 			if !assert.NoError(t, err) {

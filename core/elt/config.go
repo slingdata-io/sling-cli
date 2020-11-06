@@ -2,12 +2,13 @@ package elt
 
 import (
 	"encoding/json"
+	"github.com/flarco/dbio"
 	"io/ioutil"
 	"os"
 	"strings"
 
+	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -76,12 +77,12 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.prepared {
 		return
 	}
-	cfg.SrcConn = iop.DataConn{Vars: map[string]interface{}{}}
-	cfg.TgtConn = iop.DataConn{Vars: map[string]interface{}{}}
-	cfg.SrcFile = iop.DataConn{Vars: map[string]interface{}{}}
-	cfg.TgtFile = iop.DataConn{Vars: map[string]interface{}{}}
+	cfg.SrcConn = dbio.DataConn{Vars: map[string]interface{}{}}
+	cfg.TgtConn = dbio.DataConn{Vars: map[string]interface{}{}}
+	cfg.SrcFile = dbio.DataConn{Vars: map[string]interface{}{}}
+	cfg.TgtFile = dbio.DataConn{Vars: map[string]interface{}{}}
 
-	prepFile := func(file *iop.DataConn, fileObj interface{}, defName string) {
+	prepFile := func(file *dbio.DataConn, fileObj interface{}, defName string) {
 		switch fileObj.(type) {
 		case map[interface{}]interface{}:
 			m := fileObj.(map[interface{}]interface{})
@@ -123,7 +124,7 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
-	prepConn := func(conn *iop.DataConn, connObj interface{}, defName string) {
+	prepConn := func(conn *dbio.DataConn, connObj interface{}, defName string) {
 		switch connObj.(type) {
 		case map[interface{}]interface{}:
 			m := connObj.(map[interface{}]interface{})
@@ -243,7 +244,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 // Decrypt decrypts the sensitive connection strings
 func (cfg *Config) Decrypt(secret string) (err error) {
-	decrypt := func(dConn *iop.DataConn) error {
+	decrypt := func(dConn *dbio.DataConn) error {
 		dConn.URL, err = g.Decrypt(dConn.URL, secret)
 		if err != nil {
 			return g.Error(err, "could not decrypt")
@@ -260,7 +261,7 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 		return nil
 	}
 
-	dConns := []*iop.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
+	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
 	for i := range dConns {
 		err = decrypt(dConns[i])
 		if err != nil {
@@ -272,7 +273,7 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 
 // Encrypt encrypts the sensitive connection strings
 func (cfg *Config) Encrypt(secret string) (err error) {
-	encrypt := func(dConn *iop.DataConn) error {
+	encrypt := func(dConn *dbio.DataConn) error {
 		dConn.URL, err = g.Encrypt(dConn.URL, secret)
 		if err != nil {
 			return g.Error(err, "could not decrypt")
@@ -289,7 +290,7 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 		return nil
 	}
 
-	dConns := []*iop.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
+	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
 	for i := range dConns {
 		err = encrypt(dConns[i])
 		if err != nil {
@@ -301,29 +302,29 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 
 // Config is a config for the sling task
 type Config struct {
-	SrcConn    iop.DataConn `json:"-"`
-	SrcConnObj interface{}  `json:"src_conn" yaml:"src_conn"`
-	SrcTable   string       `json:"src_table" yaml:"src_table"`
-	SrcSQL     string       `json:"src_sql" yaml:"src_sql"`
-	Limit      uint64       `json:"limit" yaml:"limit"`
+	SrcConn    dbio.DataConn `json:"-"`
+	SrcConnObj interface{}   `json:"src_conn" yaml:"src_conn"`
+	SrcTable   string        `json:"src_table" yaml:"src_table"`
+	SrcSQL     string        `json:"src_sql" yaml:"src_sql"`
+	Limit      uint64        `json:"limit" yaml:"limit"`
 
-	TgtConn     iop.DataConn `json:"-"`
-	TgtConnObj  interface{}  `json:"tgt_conn" yaml:"tgt_conn"`
-	TgtTable    string       `json:"tgt_table" yaml:"tgt_table"`
-	TgtTableDDL string       `json:"tgt_table_ddl" yaml:"tgt_table_ddl"`
-	TgtTableTmp string       `json:"tgt_table_tmp" yaml:"tgt_table_tmp"`
-	TgtPreSQL   string       `json:"pre_sql" yaml:"pre_sql"`
-	TgtPostSQL  string       `json:"post_sql" yaml:"post_sql"`
-	TgtPostDbt  g.Map    `json:"post_dbt" yaml:"post_dbt"`
-	PrimaryKey  string       `json:"primary_key" yaml:"primary_key"`
-	UpdateKey   string       `json:"update_key" yaml:"update_key"`
-	Mode        string       `json:"mode" yaml:"mode"` // append, upsert, truncate, drop
+	TgtConn     dbio.DataConn `json:"-"`
+	TgtConnObj  interface{}   `json:"tgt_conn" yaml:"tgt_conn"`
+	TgtTable    string        `json:"tgt_table" yaml:"tgt_table"`
+	TgtTableDDL string        `json:"tgt_table_ddl" yaml:"tgt_table_ddl"`
+	TgtTableTmp string        `json:"tgt_table_tmp" yaml:"tgt_table_tmp"`
+	TgtPreSQL   string        `json:"pre_sql" yaml:"pre_sql"`
+	TgtPostSQL  string        `json:"post_sql" yaml:"post_sql"`
+	TgtPostDbt  g.Map         `json:"post_dbt" yaml:"post_dbt"`
+	PrimaryKey  string        `json:"primary_key" yaml:"primary_key"`
+	UpdateKey   string        `json:"update_key" yaml:"update_key"`
+	Mode        string        `json:"mode" yaml:"mode"` // append, upsert, truncate, drop
 
-	SrcFile    iop.DataConn `json:"-"`
-	SrcFileObj interface{}  `json:"src_file" yaml:"src_file"`
+	SrcFile    dbio.DataConn `json:"-"`
+	SrcFileObj interface{}   `json:"src_file" yaml:"src_file"`
 
-	TgtFile    iop.DataConn `json:"-"`
-	TgtFileObj interface{}  `json:"tgt_file" yaml:"tgt_file"`
+	TgtFile    dbio.DataConn `json:"-"`
+	TgtFileObj interface{}   `json:"tgt_file" yaml:"tgt_file"`
 
 	Options string                 `json:"options" yaml:"options"`
 	Props   map[string]interface{} `json:"props" yaml:"props"`

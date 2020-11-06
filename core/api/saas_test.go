@@ -4,7 +4,7 @@ import (
 	"log"
 	"testing"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/cast"
@@ -94,14 +94,14 @@ func TestParse(t *testing.T) {
 	var bs billingHistoryResp
 	var as accountResp
 	json2.Unmarshal(jsonBillingHistoryExample, &bi)
-	h.P(bi)
+	g.P(bi)
 	json2.Unmarshal(jsonBillingHistoryExample, &bs)
-	h.P(bs)
+	g.P(bs)
 
 	json2.Unmarshal(jsonAccountExample, &ai)
-	h.P(ai)
+	g.P(ai)
 	json2.Unmarshal(jsonAccountExample, &as)
-	h.P(as)
+	g.P(as)
 }
 
 // go test -benchmem -run='^$ github.com/slingdata-io/sling/core/api' -bench '^BenchmarkParseJSON'
@@ -168,7 +168,7 @@ func TestJSONPath(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	h.P(v)
+	g.P(v)
 }
 
 func TestDigitalOcean(t *testing.T) {
@@ -187,11 +187,11 @@ func TestDigitalOcean(t *testing.T) {
 
 	data, err := ds.Collect(0)
 	assert.NoError(t, err)
-	h.P(len(data.Rows))
-	h.P(len(data.Columns))
+	g.P(len(data.Rows))
+	g.P(len(data.Columns))
 	if len(data.Rows) > 0 {
-		h.P(data.GetFields())
-		h.P(data.Rows[0])
+		g.P(data.GetFields())
+		g.P(data.Rows[0])
 	}
 }
 func TestGithub(t *testing.T) {
@@ -224,14 +224,14 @@ func TestGithub(t *testing.T) {
 
 	data, err := ds.Collect(0)
 	assert.NoError(t, err)
-	h.P(len(data.Rows))
-	h.P(len(data.Columns))
+	g.P(len(data.Rows))
+	g.P(len(data.Columns))
 	if len(data.Rows) > 0 {
-		h.P(data.GetFields())
+		g.P(data.GetFields())
 		fields := data.GetFields()
-		// h.P(data.Records()[0])
+		// g.P(data.Records()[0])
 		for i, val := range data.Rows[0] {
-			println(h.F("%d - %s - %s", i+1, fields[i], cast.ToString(val)))
+			println(g.F("%d - %s - %s", i+1, fields[i], cast.ToString(val)))
 		}
 	}
 }
@@ -256,14 +256,14 @@ func TestSurveyMonkey(t *testing.T) {
 
 	data, err := ds.Collect(0)
 	assert.NoError(t, err)
-	h.P(len(data.Rows))
-	h.P(len(data.Columns))
+	g.P(len(data.Rows))
+	g.P(len(data.Columns))
 	if len(data.Rows) > 0 {
-		h.P(data.GetFields())
+		g.P(data.GetFields())
 		fields := data.GetFields()
-		// h.P(data.Records()[0])
+		// g.P(data.Records()[0])
 		for i, val := range data.Rows[0] {
-			println(h.F("%d - %s - %s", i+1, fields[i], cast.ToString(val)))
+			println(g.F("%d - %s - %s", i+1, fields[i], cast.ToString(val)))
 		}
 	}
 }

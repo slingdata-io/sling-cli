@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 )
 
 // GithubAPI is github's api
@@ -20,7 +20,7 @@ func (api *GithubAPI) Init() (err error) {
 	api.Key = api.properties["GITHUB_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error("did not provide GITHUB_ACCESS_TOKEN")
+		err = g.Error("did not provide GITHUB_ACCESS_TOKEN")
 		return
 	}
 

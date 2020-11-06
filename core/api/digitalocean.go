@@ -2,7 +2,7 @@ package api
 
 import (
 	"github.com/digitalocean/godo"
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 )
 
 // DigitalOceanAPI is DO's api
@@ -19,7 +19,7 @@ func (api *DigitalOceanAPI) Init() (err error) {
 	api.Key = api.properties["DIGITALOCEAN_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error("did not provide DIGITALOCEAN_ACCESS_TOKEN")
+		err = g.Error("did not provide DIGITALOCEAN_ACCESS_TOKEN")
 		return
 	}
 

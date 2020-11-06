@@ -1,13 +1,13 @@
 package dbt
 
 import (
+	"github.com/flarco/dbio"
 	"io/ioutil"
 	"net/url"
 	"os"
 
+	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/iop"
-	"github.com/slingdata-io/sling/core/local"
 	"gopkg.in/yaml.v2"
 )
 
@@ -24,7 +24,7 @@ type profileConfig struct {
 type profileOutput map[string]interface{}
 
 // generateProfile creates the connection profile YAML file
-func (d *Dbt) generateProfile(conns []iop.DataConn) (err error) {
+func (d *Dbt) generateProfile(conns []dbio.DataConn) (err error) {
 	filepath := g.F("%s/profiles.yml", d.HomePath)
 	defTarget := "main"
 	prof := g.M()
@@ -70,7 +70,7 @@ func (d *Dbt) generateProfile(conns []iop.DataConn) (err error) {
 	return
 }
 
-func (d *Dbt) getProfileEntry(conn iop.DataConn) (pe map[string]interface{}, err error) {
+func (d *Dbt) getProfileEntry(conn dbio.DataConn) (pe map[string]interface{}, err error) {
 
 	pe, err = conn.GetCredProps()
 	if err != nil {
@@ -93,17 +93,17 @@ func (d *Dbt) getProfileEntry(conn iop.DataConn) (pe map[string]interface{}, err
 		pe["schema"] = d.Schema
 	}
 	switch conn.GetType() {
-	case iop.ConnTypeDbPostgres:
+	case dbio.ConnTypeDbPostgres:
 		pe["sslmode"] = q.Get("sslmode")
-	case iop.ConnTypeDbRedshift:
+	case dbio.ConnTypeDbRedshift:
 		pe["sslmode"] = q.Get("sslmode")
-	case iop.ConnTypeDbOracle:
-	case iop.ConnTypeDbSQLServer:
+	case dbio.ConnTypeDbOracle:
+	case dbio.ConnTypeDbSQLServer:
 		pe["server"] = pe["host"]
 		pe["driver"] = "ODBC Driver 17 for SQL Server" // need to ensure the ODBC driver is installable on image
 		delete(pe, "host")
 
-	case iop.ConnTypeDbBigQuery:
+	case dbio.ConnTypeDbBigQuery:
 		pe["project"] = q.Get("GC_CRED_FILE")
 		pe["project"] = q.Get("PROJECT_ID")
 		pe["location"] = q.Get("location")
@@ -136,7 +136,7 @@ func (d *Dbt) getProfileEntry(conn iop.DataConn) (pe map[string]interface{}, err
 		delete(pe, "pass")
 		delete(pe, "user")
 
-	case iop.ConnTypeDbSnowflake:
+	case dbio.ConnTypeDbSnowflake:
 		pe["account"] = pe["host"]
 		pe["password"] = pe["pass"]
 		pe["database"] = pe["dbname"]

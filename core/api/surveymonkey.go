@@ -1,7 +1,7 @@
 package api
 
 import (
-	h "github.com/flarco/g"
+	"github.com/flarco/g"
 )
 
 // SurveyMonkeyAPI is for surveymonkey
@@ -17,7 +17,7 @@ func (api *SurveyMonkeyAPI) Init() (err error) {
 	api.Key = api.properties["SURVEYMONKEY_ACCESS_TOKEN"]
 
 	if api.Key == "" {
-		err = h.Error("did not provide SURVEYMONKEY_ACCESS_TOKEN")
+		err = g.Error("did not provide SURVEYMONKEY_ACCESS_TOKEN")
 		return
 	}
 

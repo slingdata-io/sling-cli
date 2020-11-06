@@ -4,19 +4,22 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/flarco/dbio/filesys"
 	"io/ioutil"
 	"math"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/flarco/dbio"
+
 	"github.com/dustin/go-humanize"
 	"github.com/slingdata-io/sling/core/env"
 
-	h "github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/database"
+	"github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/iop"
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/dbt"
-	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 )
 
@@ -144,16 +147,16 @@ func (j *Task) runDbSQL() (err error) {
 	start = time.Now()
 
 	j.SetProgress("connecting to target database")
-	tgtProps := h.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
-		err = h.Error(err, "Could not initialize target connection")
+		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = h.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
 		return
 	}
 
@@ -162,7 +165,7 @@ func (j *Task) runDbSQL() (err error) {
 	j.SetProgress("executing sql on target database")
 	result, err := tgtConn.ExecContext(j.Ctx, j.Cfg.TgtPostSQL)
 	if err != nil {
-		err = h.Error(err, "Could not complete sql execution on %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not complete sql execution on %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
 		return
 	}
 
@@ -175,10 +178,10 @@ func (j *Task) runDbSQL() (err error) {
 }
 
 func (j *Task) runDbDbt() (err error) {
-	dbtConfig := h.Marshal(j.Cfg.TgtPostDbt)
+	dbtConfig := g.Marshal(j.Cfg.TgtPostDbt)
 	dbtObj, err := dbt.NewDbt(dbtConfig)
 	if err != nil {
-		return h.Error(err, "could not init dbt task")
+		return g.Error(err, "could not init dbt task")
 	}
 
 	dbtObj.Session.SetScanner(func(stderr bool, text string) {
@@ -194,12 +197,12 @@ func (j *Task) runDbDbt() (err error) {
 
 	err = dbtObj.Init(j.Cfg.TgtConn)
 	if err != nil {
-		return h.Error(err, "could not initialize dbt project")
+		return g.Error(err, "could not initialize dbt project")
 	}
 
 	err = dbtObj.Run()
 	if err != nil {
-		err = h.Error(err, "could not run dbt task")
+		err = g.Error(err, "could not run dbt task")
 	}
 
 	return
@@ -208,17 +211,17 @@ func (j *Task) runDbDbt() (err error) {
 func (j *Task) runDbToFile() (err error) {
 
 	start = time.Now()
-	srcProps := h.MapToKVArr(j.Cfg.SrcConn.VarsS())
+	srcProps := g.MapToKVArr(j.Cfg.SrcConn.VarsS())
 	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
 	if err != nil {
-		err = h.Error(err, "Could not initialize source connection")
+		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
 	j.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = h.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
 		return
 	}
 
@@ -227,7 +230,7 @@ func (j *Task) runDbToFile() (err error) {
 	j.SetProgress("reading from source database")
 	j.df, err = j.ReadFromDB(&j.Cfg, srcConn)
 	if err != nil {
-		err = h.Error(err, "Could not ReadFromDB")
+		err = g.Error(err, "Could not ReadFromDB")
 		return
 	}
 	defer j.df.Close()
@@ -235,7 +238,7 @@ func (j *Task) runDbToFile() (err error) {
 	j.SetProgress("writing to target file system")
 	cnt, err := j.WriteToFile(&j.Cfg, j.df)
 	if err != nil {
-		err = h.Error(err, "Could not WriteToFile")
+		err = g.Error(err, "Could not WriteToFile")
 		return
 	}
 
@@ -251,16 +254,16 @@ func (j *Task) runFileToDB() (err error) {
 	start = time.Now()
 
 	j.SetProgress("connecting to target database")
-	tgtProps := h.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
-		err = h.Error(err, "Could not initialize target connection")
+		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = h.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
 		return
 	}
 
@@ -269,7 +272,7 @@ func (j *Task) runFileToDB() (err error) {
 	j.SetProgress("reading from source file system")
 	j.df, err = j.ReadFromFile(&j.Cfg)
 	if err != nil {
-		err = h.Error(err, "could not read from file")
+		err = g.Error(err, "could not read from file")
 		return
 	}
 	defer j.df.Close()
@@ -277,7 +280,7 @@ func (j *Task) runFileToDB() (err error) {
 	j.SetProgress("writing to target database")
 	cnt, err := j.WriteToDb(&j.Cfg, j.df, tgtConn)
 	if err != nil {
-		err = h.Error(err, "could not write to database")
+		err = g.Error(err, "could not write to database")
 		if j.Cfg.TmpTableCreated {
 			// need to drop residue
 			tgtConn.DropTable(j.Cfg.TgtTableTmp)
@@ -289,7 +292,7 @@ func (j *Task) runFileToDB() (err error) {
 	j.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
 
 	if err != nil {
-		err = h.Error(j.df.Err(), "error in transfer")
+		err = g.Error(j.df.Err(), "error in transfer")
 	}
 	return
 }
@@ -301,7 +304,7 @@ func (j *Task) runFileToFile() (err error) {
 	j.SetProgress("reading from source file system")
 	j.df, err = j.ReadFromFile(&j.Cfg)
 	if err != nil {
-		err = h.Error(err, "Could not ReadFromFile")
+		err = g.Error(err, "Could not ReadFromFile")
 		return
 	}
 	defer j.df.Close()
@@ -309,14 +312,14 @@ func (j *Task) runFileToFile() (err error) {
 	j.SetProgress("writing to target file system")
 	cnt, err := j.WriteToFile(&j.Cfg, j.df)
 	if err != nil {
-		err = h.Error(err, "Could not WriteToFile")
+		err = g.Error(err, "Could not WriteToFile")
 		return
 	}
 
 	j.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
 
 	if j.df.Err() != nil {
-		err = h.Error(j.df.Err(), "Error in runFileToFile")
+		err = g.Error(j.df.Err(), "Error in runFileToFile")
 	}
 	return
 }
@@ -328,31 +331,31 @@ func (j *Task) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
-	srcProps := h.MapToKVArr(j.Cfg.SrcConn.VarsS())
+	srcProps := g.MapToKVArr(j.Cfg.SrcConn.VarsS())
 	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
 	if err != nil {
-		err = h.Error(err, "Could not initialize source connection")
+		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
-	tgtProps := h.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
-		err = h.Error(err, "Could not initialize target connection")
+		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
 	j.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = h.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
 		return
 	}
 
 	j.SetProgress("connecting to target database")
 	err = tgtConn.Connect()
 	if err != nil {
-		err = h.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
 		return
 	}
 
@@ -366,7 +369,7 @@ func (j *Task) runDbToDb() (err error) {
 		j.SetProgress("getting checkpoint value")
 		j.Cfg.UpsertVal, err = getUpsertValue(&j.Cfg, tgtConn, srcConn.Template().Variable)
 		if err != nil {
-			err = h.Error(err, "Could not getUpsertValue")
+			err = g.Error(err, "Could not getUpsertValue")
 			return err
 		}
 	}
@@ -374,17 +377,17 @@ func (j *Task) runDbToDb() (err error) {
 	j.SetProgress("reading from source database")
 	j.df, err = j.ReadFromDB(&j.Cfg, srcConn)
 	if err != nil {
-		err = h.Error(err, "Could not ReadFromDB")
+		err = g.Error(err, "Could not ReadFromDB")
 		return
 	}
 	defer j.df.Close()
 
 	// to DirectLoad if possible
 	vars := map[string]interface{}{}
-	for k, v := range h.KVArrToMap(srcConn.PropArr()...) {
+	for k, v := range g.KVArrToMap(srcConn.PropArr()...) {
 		vars[k] = v
 	}
-	j.Cfg.SrcFile = iop.DataConn{
+	j.Cfg.SrcFile = dbio.DataConn{
 		URL:  j.df.FsURL,
 		Vars: vars,
 	}
@@ -392,7 +395,7 @@ func (j *Task) runDbToDb() (err error) {
 	j.SetProgress("writing to target database")
 	cnt, err := j.WriteToDb(&j.Cfg, j.df, tgtConn)
 	if err != nil {
-		err = h.Error(err, "Could not WriteToDb")
+		err = g.Error(err, "Could not WriteToDb")
 		return
 	}
 
@@ -400,7 +403,7 @@ func (j *Task) runDbToDb() (err error) {
 	j.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
 
 	if j.df.Context.Err() != nil {
-		err = h.Error(j.df.Context.Err(), "Error running runDbToDb")
+		err = g.Error(j.df.Context.Err(), "Error running runDbToDb")
 	}
 	return
 }
@@ -409,18 +412,18 @@ func (j *Task) runDbToDb() (err error) {
 func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
 
 	fieldsStr := "*"
-	sql := h.F(`select %s from %s`, fieldsStr, cfg.SrcTable)
+	sql := g.F(`select %s from %s`, fieldsStr, cfg.SrcTable)
 
 	if cfg.SrcSQL != "" {
 		// for upsert, need to put `{upsert_where_cond}` for proper selecting
 		sql, err = GetSQLText(cfg.SrcSQL)
 		if err != nil {
-			err = h.Error(err, "Could not get GetSQLText for: "+cfg.SrcSQL)
+			err = g.Error(err, "Could not get GetSQLText for: "+cfg.SrcSQL)
 			return
 		}
 	} else if cfg.Mode != "drop" && len(j.Cfg.TgtColumns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
-		srcData, _ := srcConn.Query(h.F("select * from %s where 1=0", cfg.SrcTable))
+		srcData, _ := srcConn.Query(g.F("select * from %s where 1=0", cfg.SrcTable))
 
 		if len(srcData.Columns) > 0 {
 			commFields := database.CommonColumns(
@@ -428,7 +431,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 				database.ColumnNames(j.Cfg.TgtColumns),
 			)
 			if len(commFields) == 0 {
-				err = h.Error("src table and tgt table have no columns with same names. Column names must match")
+				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
 				return
 			}
 			fieldsStr = strings.Join(commFields, ", ")
@@ -436,9 +439,9 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 	}
 
 	// Get source columns
-	cfg.SrcColumns, err = srcConn.GetSQLColumns(h.R(sql, "upsert_where_cond", "1=0"))
+	cfg.SrcColumns, err = srcConn.GetSQLColumns(g.R(sql, "upsert_where_cond", "1=0"))
 	if err != nil {
-		err = h.Error(err, "Could not obtain source columns")
+		err = g.Error(err, "Could not obtain source columns")
 		return
 	}
 
@@ -446,7 +449,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 		// select only records that have been modified after last max value
 		upsertWhereCond := "1=1"
 		if cfg.UpsertVal != "" {
-			upsertWhereCond = h.R(
+			upsertWhereCond = g.R(
 				"{update_key} >= {value}",
 				"update_key", srcConn.Quote(cfg.SrcColumns.Normalize(cfg.UpdateKey)),
 				"value", cfg.UpsertVal,
@@ -455,12 +458,12 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 
 		if cfg.SrcSQL != "" {
 			if !strings.Contains(sql, "{upsert_where_cond}") {
-				err = h.Error("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}")
+				err = g.Error("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}")
 				return
 			}
-			sql = h.R(sql, "upsert_where_cond", upsertWhereCond)
+			sql = g.R(sql, "upsert_where_cond", upsertWhereCond)
 		} else {
-			sql = h.R(
+			sql = g.R(
 				`select {fields} from {table} where {upsert_where_cond}`,
 				"fields", fieldsStr,
 				"table", cfg.SrcTable,
@@ -468,7 +471,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 			)
 		}
 	} else if cfg.Limit > 0 {
-		sql = h.R(
+		sql = g.R(
 			srcConn.Template().Core["limit"],
 			"fields", fieldsStr,
 			"table", cfg.SrcTable,
@@ -478,7 +481,7 @@ func (j *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 
 	df, err = srcConn.BulkExportFlow(sql)
 	if err != nil {
-		err = h.Error(err, "Could not BulkStream: "+sql)
+		err = g.Error(err, "Could not BulkStream: "+sql)
 		return
 	}
 
@@ -491,26 +494,26 @@ func (j *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 	var stream *iop.Datastream
 
 	if cfg.SrcFile.URL != "" {
-		fs, err := iop.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcFile.URL, h.MapToKVArr(cfg.SrcFile.VarsS())...)
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcFile.URL, g.MapToKVArr(cfg.SrcFile.VarsS())...)
 		if err != nil {
-			err = h.Error(err, "Could not obtain client for: "+cfg.SrcFile.URL)
+			err = g.Error(err, "Could not obtain client for: "+cfg.SrcFile.URL)
 			return df, err
 		}
 
 		df, err = fs.ReadDataflow(cfg.SrcFile.URL)
 		if err != nil {
-			err = h.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcFile.URL)
+			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcFile.URL)
 			return df, err
 		}
 	} else {
-		stream, err = iop.MakeDatastream(bufio.NewReader(os.Stdin))
+		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin))
 		if err != nil {
-			err = h.Error(err, "Could not MakeDatastream")
+			err = g.Error(err, "Could not MakeDatastream")
 			return
 		}
 		df, err = iop.MakeDataFlow(stream)
 		if err != nil {
-			err = h.Error(err, "Could not MakeDataFlow for Stdin")
+			err = g.Error(err, "Could not MakeDataFlow for Stdin")
 			return
 		}
 	}
@@ -525,16 +528,16 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 
 	if cfg.TgtFile.URL != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
-		cfg.TgtFile.URL = h.Rm(cfg.TgtFile.URL, dateMap)
-		fs, err := iop.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtFile.URL, h.MapToKVArr(cfg.TgtFile.VarsS())...)
+		cfg.TgtFile.URL = g.Rm(cfg.TgtFile.URL, dateMap)
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtFile.URL, g.MapToKVArr(cfg.TgtFile.VarsS())...)
 		if err != nil {
-			err = h.Error(err, "Could not obtain client for: "+cfg.TgtFile.URL)
+			err = g.Error(err, "Could not obtain client for: "+cfg.TgtFile.URL)
 			return cnt, err
 		}
 
 		bw, err = fs.WriteDataflow(df, cfg.TgtFile.URL)
 		if err != nil {
-			err = h.Error(err, "Could not FileSysWriteDataflow")
+			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err
 		}
 		cnt = df.Count()
@@ -543,18 +546,18 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 		reader := stream.NewCsvReader(0)
 		bufStdout := bufio.NewWriter(os.Stdout)
 		defer bufStdout.Flush()
-		bw, err = iop.Write(reader, bufStdout)
+		bw, err = filesys.Write(reader, bufStdout)
 		if err != nil {
-			err = h.Error(err, "Could not write to Stdout")
+			err = g.Error(err, "Could not write to Stdout")
 			return
 		}
 		cnt = stream.Count
 	} else {
-		err = h.Error("target for output is not specified")
+		err = g.Error("target for output is not specified")
 		return
 	}
 
-	h.Debug(
+	g.Debug(
 		"wrote %s: %d rows [%s r/s]",
 		humanize.Bytes(cast.ToUint64(bw)), cnt, getRate(cnt),
 	)
@@ -568,7 +571,7 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 // insert / upsert / replace into target table
 func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	if cfg.TgtTableTmp == "" {
-		cfg.TgtTableTmp = cfg.TgtTable + "_tmp" + h.RandString(h.NumericRunes, 1) + strings.ToLower(h.RandString(h.AplhanumericRunes, 1))
+		cfg.TgtTableTmp = cfg.TgtTable + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = "append"
@@ -579,12 +582,12 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		j.SetProgress("executing pre-sql")
 		sql, err := GetSQLText(cfg.TgtPreSQL)
 		if err != nil {
-			err = h.Error(err, "could not get pre-sql body")
+			err = g.Error(err, "could not get pre-sql body")
 			return cnt, err
 		}
 		_, err = tgtConn.Exec(sql)
 		if err != nil {
-			err = h.Error(err, "could not execute pre-sql on target")
+			err = g.Error(err, "could not execute pre-sql on target")
 			return cnt, err
 		}
 	}
@@ -592,7 +595,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// Drop & Create the temp table
 	err = tgtConn.DropTable(cfg.TgtTableTmp)
 	if err != nil {
-		err = h.Error(err, "could not drop table "+cfg.TgtTableTmp)
+		err = g.Error(err, "could not drop table "+cfg.TgtTableTmp)
 		return
 	}
 	sampleData := iop.NewDataset(df.Columns)
@@ -600,7 +603,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	sampleData.SafeInference = true
 	_, err = createTableIfNotExists(tgtConn, sampleData, cfg.TgtTableTmp, "")
 	if err != nil {
-		err = h.Error(err, "could not create temp table "+cfg.TgtTableTmp)
+		err = g.Error(err, "could not create temp table "+cfg.TgtTableTmp)
 		return
 	}
 	cfg.TmpTableCreated = true
@@ -614,22 +617,22 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	if ok {
 		df.SetEmpty() // this executes deferred functions (such as file residue removal
 		if err != nil {
-			err = h.Error(err, "could not directly load into database")
+			err = g.Error(err, "could not directly load into database")
 			return
 		}
-		h.Debug("copied directly from cloud storage")
+		g.Debug("copied directly from cloud storage")
 		cnt, _ = tgtConn.GetCount(cfg.TgtTableTmp)
 		// perhaps do full analysis to validate quality
 	} else {
 		j.SetProgress("streaming inserts")
 		cnt, err = tgtConn.BulkImportFlow(cfg.TgtTableTmp, df)
 		if err != nil {
-			err = h.Error(err, "could not insert into "+cfg.TgtTable)
+			err = g.Error(err, "could not insert into "+cfg.TgtTable)
 			return
 		}
 		tCnt, _ := tgtConn.GetCount(cfg.TgtTableTmp)
 		if cnt != tCnt {
-			err = h.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
+			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
 			return
 		}
 		// aggregate stats from stream processors
@@ -638,7 +641,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		// Checksum Comparison, data quality
 		err = tgtConn.CompareChecksums(cfg.TgtTableTmp, df.Columns)
 		if err != nil {
-			h.Debug(err.Error())
+			g.Debug(err.Error())
 		}
 	}
 
@@ -647,7 +650,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 			// drop, (create if not exists) and insert directly
 			err = tgtConn.DropTable(cfg.TgtTable)
 			if err != nil {
-				err = h.Error(err, "could not drop table "+cfg.TgtTable)
+				err = g.Error(err, "could not drop table "+cfg.TgtTable)
 				return
 			}
 			j.SetProgress("dropped table " + cfg.TgtTable)
@@ -664,7 +667,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 			cfg.TgtTableDDL,
 		)
 		if err != nil {
-			err = h.Error(err, "could not create table "+cfg.TgtTable)
+			err = g.Error(err, "could not create table "+cfg.TgtTable)
 			return cnt, err
 		} else if created {
 			j.SetProgress("created table %s", cfg.TgtTable)
@@ -685,7 +688,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		if !created && PermitTableSchemaOptimization {
 			err = tgtConn.OptimizeTable(cfg.TgtTable, df.Columns)
 			if err != nil {
-				err = h.Error(err, "could not optimize table schema")
+				err = g.Error(err, "could not optimize table schema")
 				return cnt, err
 			}
 		}
@@ -698,13 +701,13 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		// use swap
 		err = tgtConn.SwapTable(cfg.TgtTableTmp, cfg.TgtTable)
 		if err != nil {
-			err = h.Error(err, "could not swap tables %s to %s", cfg.TgtTableTmp, cfg.TgtTable)
+			err = g.Error(err, "could not swap tables %s to %s", cfg.TgtTableTmp, cfg.TgtTable)
 			return 0, err
 		}
 
 		err = tgtConn.DropTable(cfg.TgtTableTmp)
 		if err != nil {
-			err = h.Error(err, "could not drop table "+cfg.TgtTableTmp)
+			err = g.Error(err, "could not drop table "+cfg.TgtTableTmp)
 			return
 		}
 		j.SetProgress("dropped old table of " + cfg.TgtTable)
@@ -713,18 +716,18 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
-			err = h.Error(err, "Could not insert from temp")
+			err = g.Error(err, "Could not insert from temp")
 			return 0, err
 		}
 	} else if cfg.Mode == "truncate" {
 		// truncate (create if not exists) and insert directly
-		truncSQL := h.R(
+		truncSQL := g.R(
 			tgtConn.GetTemplateValue("core.truncate_table"),
 			"table", cfg.TgtTable,
 		)
 		_, err = tgtConn.Exec(truncSQL)
 		if err != nil {
-			err = h.Error(err, "Could not truncate table: "+cfg.TgtTable)
+			err = g.Error(err, "Could not truncate table: "+cfg.TgtTable)
 			return
 		}
 		j.SetProgress("truncated table " + cfg.TgtTable)
@@ -732,7 +735,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		// insert
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
-			err = h.Error(err, "Could not insert from temp")
+			err = g.Error(err, "Could not insert from temp")
 			// data is still in temp table at this point
 			// need to decide whether to drop or keep it for future use
 			return 0, err
@@ -744,7 +747,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		// or update (such as merge or ON CONFLICT)
 		rowAffCnt, err := tgtConn.Upsert(cfg.TgtTableTmp, cfg.TgtTable, strings.Split(cfg.PrimaryKey, ","))
 		if err != nil {
-			err = h.Error(err, "Could not upsert from temp")
+			err = g.Error(err, "Could not upsert from temp")
 			// data is still in temp table at this point
 			// need to decide whether to drop or keep it for future use
 			return 0, err
@@ -757,12 +760,12 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		j.SetProgress("executing post-sql")
 		sql, err := GetSQLText(cfg.TgtPostSQL)
 		if err != nil {
-			err = h.Error(err, "Error executing TgtPostSQL. Could not get GetSQLText for: "+cfg.TgtPostSQL)
+			err = g.Error(err, "Error executing TgtPostSQL. Could not get GetSQLText for: "+cfg.TgtPostSQL)
 			return cnt, err
 		}
 		_, err = tgtConn.Exec(sql)
 		if err != nil {
-			err = h.Error(err, "Error executing TgtPostSQL")
+			err = g.Error(err, "Error executing TgtPostSQL")
 			return cnt, err
 		}
 	}
@@ -776,7 +779,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	if tableDDL == "" {
 		tableDDL, err = conn.GenerateDDL(tableName, data)
 		if err != nil {
-			return false, h.Error(err, "Could not generate DDL for "+tableName)
+			return false, g.Error(err, "Could not generate DDL for "+tableName)
 		}
 	}
 
@@ -784,10 +787,10 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	if err != nil {
 		errorFilterTableExists := conn.GetTemplateValue("variable.error_filter_table_exists")
 		if errorFilterTableExists != "" && strings.Contains(err.Error(), errorFilterTableExists) {
-			h.Debug("did not create table %s as it already exists", tableName)
+			g.Debug("did not create table %s as it already exists", tableName)
 			return false, nil
 		} else {
-			return false, h.Error(err, "Error creating table "+tableName)
+			return false, g.Error(err, "Error creating table "+tableName)
 		}
 	}
 
@@ -798,12 +801,12 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	// insert
 	tmpColumns, err := tgtConn.GetColumns(cfg.TgtTableTmp)
 	if err != nil {
-		err = h.Error(err, "could not get column list for "+cfg.TgtTableTmp)
+		err = g.Error(err, "could not get column list for "+cfg.TgtTableTmp)
 		return
 	}
 	tgtColumns, err := tgtConn.GetColumns(cfg.TgtTable)
 	if err != nil {
-		err = h.Error(err, "could not get column list for "+cfg.TgtTable)
+		err = g.Error(err, "could not get column list for "+cfg.TgtTable)
 		return
 	}
 
@@ -822,13 +825,13 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		true,
 	)
 	if err != nil {
-		err = h.Error(err, "columns mismatched")
+		err = g.Error(err, "columns mismatched")
 		return
 	}
 
 	srcFields := tgtConn.CastColumnsForSelect(tmpColumns, tgtColumns)
 
-	sql := h.R(
+	sql := g.R(
 		tgtConn.Template().Core["insert_from_table"],
 		"tgt_table", cfg.TgtTable,
 		"src_table", cfg.TgtTableTmp,
@@ -837,10 +840,10 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	)
 	_, err = tgtConn.Exec(sql)
 	if err != nil {
-		err = h.Error(err, "Could not execute SQL: "+sql)
+		err = g.Error(err, "Could not execute SQL: "+sql)
 		return
 	}
-	h.Debug("inserted rows into `%s` from temp table `%s`", cfg.TgtTable, cfg.TgtTableTmp)
+	g.Debug("inserted rows into `%s` from temp table `%s`", cfg.TgtTable, cfg.TgtTableTmp)
 	return
 }
 
@@ -849,7 +852,7 @@ func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[
 	// in order to get max value
 	// does table exists?
 	// get max value from key_field
-	sql := h.F(
+	sql := g.F(
 		"select max(%s) as max_val from %s",
 		cfg.UpdateKey,
 		cfg.TgtTable,
@@ -862,7 +865,7 @@ func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[
 			// set val to blank for full load
 			return "", nil
 		}
-		err = h.Error(err, "could not get max value for "+cfg.UpdateKey)
+		err = g.Error(err, "could not get max value for "+cfg.UpdateKey)
 		return
 	}
 	if len(data.Rows) == 0 {
@@ -874,12 +877,12 @@ func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[
 	value := data.Rows[0][0]
 	colType := data.Columns[0].Type
 	if strings.Contains("datetime,date,timestamp", colType) {
-		val = h.R(
+		val = g.R(
 			srcConnVarMap["timestamp_layout_str"],
 			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
 		)
 	} else if strings.Contains("datetime,date", colType) {
-		val = h.R(
+		val = g.R(
 			srcConnVarMap["date_layout_str"],
 			"value", cast.ToTime(value).Format(srcConnVarMap["date_layout"]),
 		)
@@ -905,7 +908,7 @@ func GetSQLText(sqlStr string) (string, error) {
 	if err == nil {
 		bytes, err := ioutil.ReadFile(sqlStr)
 		if err != nil {
-			return "", h.Error(err, "Could not ReadFile: "+sqlStr)
+			return "", g.Error(err, "Could not ReadFile: "+sqlStr)
 		}
 		sql = string(bytes)
 	}

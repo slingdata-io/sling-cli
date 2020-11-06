@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/cheggaaa/pb"
+	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/iop"
+	pb "gopkg.in/cheggaaa/pb.v2"
 )
 
 // TaskProcess is a slingELT task / execution process
