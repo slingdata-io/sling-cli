@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"

@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/flarco/gutil/net"
+	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling/core"
 	"github.com/slingdata-io/sling/core/elt"
 	"github.com/slingdata-io/sling/core/env"
@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/kardianos/osext"
 	"github.com/slingdata-io/sling/core/iop"

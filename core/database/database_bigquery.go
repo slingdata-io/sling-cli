@@ -15,7 +15,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"google.golang.org/api/iterator"

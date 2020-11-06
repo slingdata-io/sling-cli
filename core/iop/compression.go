@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/pkg/sftp"
 )
 

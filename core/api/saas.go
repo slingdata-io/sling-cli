@@ -12,7 +12,7 @@ import (
 
 	"github.com/slingdata-io/sling/core/env"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/slingdata-io/sling/core/iop"

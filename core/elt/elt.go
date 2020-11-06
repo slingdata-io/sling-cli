@@ -13,7 +13,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/slingdata-io/sling/core/env"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/database"
 	"github.com/slingdata-io/sling/core/dbt"
 	"github.com/slingdata-io/sling/core/iop"

@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/360EntSecGroup-Skylar/excelize"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/spf13/cast"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"

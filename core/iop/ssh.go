@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"

@@ -1,7 +1,7 @@
 set -e  # exit on error
 
-rm -rf /gutil
-cp -r ../gutil /gutil
+rm -rf /g
+cp -r ../g /g
 
 rm -rf /sling
 cp -r . /sling

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/xitongsys/parquet-go-source/writerfile"
 	"github.com/xitongsys/parquet-go/source"
 	"github.com/xitongsys/parquet-go/writer"

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/stretchr/testify/assert"
 )
 

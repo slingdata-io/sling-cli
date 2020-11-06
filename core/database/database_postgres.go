@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/lib/pq"
 	"github.com/slingdata-io/sling/core/iop"
 )

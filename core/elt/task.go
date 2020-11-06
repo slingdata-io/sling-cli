@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb"
-	"github.com/flarco/gutil"
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 )
 
@@ -49,7 +49,7 @@ func (tp *TaskProcess) ToMap() map[string]interface{} {
 func NewTask(execID int, cfg Config) (j Task) {
 	err := cfg.Prepare()
 	if err != nil {
-		j.Err = gutil.Error(err, "could not prepare task")
+		j.Err = g.Error(err, "could not prepare task")
 		return
 	}
 
@@ -98,7 +98,7 @@ func NewTask(execID int, cfg Config) (j Task) {
 	}
 
 	if j.Type == "" {
-		gutil.P(cfg)
+		g.P(cfg)
 		j.Err = fmt.Errorf("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
 	}
 
@@ -127,8 +127,8 @@ type Task struct {
 
 // SetProgress sets the progress
 func (t *Task) SetProgress(progressText string, args ...interface{}) {
-	gutil.Info(progressText, args...)
-	progressText = gutil.F(progressText, args...)
+	g.Info(progressText, args...)
+	progressText = g.F(progressText, args...)
 	t.progressHist = append(t.progressHist, progressText)
 	t.Progress = progressText
 }

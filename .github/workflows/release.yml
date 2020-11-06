@@ -44,9 +44,9 @@ jobs:
         export PATH=$GO_BIN_FOLDER:$PATH
         mkdir -p $TMPDIR
 
-        go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/gutil' go.mod
-        go get -u github.com/flarco/gutil
+        go mod edit -dropreplace='github.com/flarco/g@v0.0.0' go.mod
+        go mod edit -droprequire='github.com/flarco/g' go.mod
+        go get -u github.com/flarco/g
 
         go get github.com/markbates/pkger/cmd/pkger
 
@@ -60,9 +60,9 @@ jobs:
         setx GO111MODULE "auto"
         mkdir C:\Users\runneradmin\tmp
 
-        go mod edit -dropreplace='github.com/flarco/gutil@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/gutil' go.mod
-        go get -u github.com/flarco/gutil
+        go mod edit -dropreplace='github.com/flarco/g@v0.0.0' go.mod
+        go mod edit -droprequire='github.com/flarco/g' go.mod
+        go get -u github.com/flarco/g
 
         go get github.com/markbates/pkger/cmd/pkger
 

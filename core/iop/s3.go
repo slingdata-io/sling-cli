@@ -5,7 +5,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/flarco/gutil/sizedwaitgroup"
+	"github.com/flarco/g/sizedwaitgroup"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // S3 is a AWS s3 object

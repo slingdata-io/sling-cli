@@ -1,7 +1,7 @@
 package api
 
 import (
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // SurveyMonkeyAPI is for surveymonkey

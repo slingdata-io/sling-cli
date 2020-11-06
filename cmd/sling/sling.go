@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"time"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/integrii/flaggy"
 	"github.com/slingdata-io/sling/core/database"
 	"github.com/slingdata-io/sling/core/iop"

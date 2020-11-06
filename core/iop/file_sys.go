@@ -32,7 +32,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/pkg/sftp"
 	"github.com/spf13/cast"
 	"google.golang.org/api/iterator"

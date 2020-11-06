@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flarco/gutil"
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -16,13 +16,13 @@ import (
 func NewConfig(cfgStr string) (cfg Config, err error) {
 	err = cfg.Unmarshal(cfgStr)
 	if err != nil {
-		err = gutil.Error(err, "Unable to parse config string")
+		err = g.Error(err, "Unable to parse config string")
 		return
 	}
 
 	err = cfg.Prepare()
 	if err != nil {
-		err = gutil.Error(err, "Unable to prepare config")
+		err = g.Error(err, "Unable to prepare config")
 		return
 	}
 	return
@@ -34,18 +34,18 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	if _, err := os.Stat(cfgStr); err == nil {
 		cfgFile, err := os.Open(cfgStr)
 		if err != nil {
-			return gutil.Error(err, "Unable to open cfgStr: "+cfgStr)
+			return g.Error(err, "Unable to open cfgStr: "+cfgStr)
 		}
 
 		cfgBytes, err = ioutil.ReadAll(cfgFile)
 		if err != nil {
-			return gutil.Error(err, "could not read from cfgFile")
+			return g.Error(err, "could not read from cfgFile")
 		}
 	}
 
 	err := yaml.Unmarshal(cfgBytes, &cfg)
 	if err != nil {
-		return gutil.Error(err, "Error parsing cfgBytes")
+		return g.Error(err, "Error parsing cfgBytes")
 	}
 
 	if cfg.Props == nil {
@@ -235,7 +235,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
-		err = gutil.Error(err, "Could not encode provided configuration into JSON")
+		err = g.Error(err, "Could not encode provided configuration into JSON")
 		return
 	}
 	return
@@ -244,17 +244,17 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 // Decrypt decrypts the sensitive connection strings
 func (cfg *Config) Decrypt(secret string) (err error) {
 	decrypt := func(dConn *iop.DataConn) error {
-		dConn.URL, err = gutil.Decrypt(dConn.URL, secret)
+		dConn.URL, err = g.Decrypt(dConn.URL, secret)
 		if err != nil {
-			return gutil.Error(err, "could not decrypt")
+			return g.Error(err, "could not decrypt")
 		}
 		for k := range dConn.Vars {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Vars[k], err = gutil.Decrypt(dConn.VarsS()[k], secret)
+			dConn.Vars[k], err = g.Decrypt(dConn.VarsS()[k], secret)
 			if err != nil {
-				return gutil.Error(err, "could not decrypt")
+				return g.Error(err, "could not decrypt")
 			}
 		}
 		return nil
@@ -264,7 +264,7 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 	for i := range dConns {
 		err = decrypt(dConns[i])
 		if err != nil {
-			return gutil.Error(err, "could not decrypt fields for "+dConns[i].ID)
+			return g.Error(err, "could not decrypt fields for "+dConns[i].ID)
 		}
 	}
 	return nil
@@ -273,17 +273,17 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 // Encrypt encrypts the sensitive connection strings
 func (cfg *Config) Encrypt(secret string) (err error) {
 	encrypt := func(dConn *iop.DataConn) error {
-		dConn.URL, err = gutil.Encrypt(dConn.URL, secret)
+		dConn.URL, err = g.Encrypt(dConn.URL, secret)
 		if err != nil {
-			return gutil.Error(err, "could not decrypt")
+			return g.Error(err, "could not decrypt")
 		}
 		for k := range dConn.Vars {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Vars[k], err = gutil.Encrypt(dConn.VarsS()[k], secret)
+			dConn.Vars[k], err = g.Encrypt(dConn.VarsS()[k], secret)
 			if err != nil {
-				return gutil.Error(err, "could not decrypt")
+				return g.Error(err, "could not decrypt")
 			}
 		}
 		return nil
@@ -293,7 +293,7 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 	for i := range dConns {
 		err = encrypt(dConns[i])
 		if err != nil {
-			return gutil.Error(err, "could not encrypt fields for "+dConns[i].ID)
+			return g.Error(err, "could not encrypt fields for "+dConns[i].ID)
 		}
 	}
 	return nil
@@ -314,7 +314,7 @@ type Config struct {
 	TgtTableTmp string       `json:"tgt_table_tmp" yaml:"tgt_table_tmp"`
 	TgtPreSQL   string       `json:"pre_sql" yaml:"pre_sql"`
 	TgtPostSQL  string       `json:"post_sql" yaml:"post_sql"`
-	TgtPostDbt  gutil.Map    `json:"post_dbt" yaml:"post_dbt"`
+	TgtPostDbt  g.Map    `json:"post_dbt" yaml:"post_dbt"`
 	PrimaryKey  string       `json:"primary_key" yaml:"primary_key"`
 	UpdateKey   string       `json:"update_key" yaml:"update_key"`
 	Mode        string       `json:"mode" yaml:"mode"` // append, upsert, truncate, drop

@@ -2,7 +2,7 @@ package api
 
 import (
 	"github.com/digitalocean/godo"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // DigitalOceanAPI is DO's api

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // CSV is a csv object

@@ -4,7 +4,7 @@ import (
 	"log"
 	"testing"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/cast"

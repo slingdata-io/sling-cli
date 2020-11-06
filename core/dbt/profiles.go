@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"os"
 
-	g "github.com/flarco/gutil"
+	g "github.com/flarco/g"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/slingdata-io/sling/core/local"
 	"gopkg.in/yaml.v2"

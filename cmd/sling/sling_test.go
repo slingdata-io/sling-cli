@@ -12,7 +12,7 @@ import (
 
 	"github.com/slingdata-io/sling/core/elt"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	d "github.com/slingdata-io/sling/core/database"
 	"github.com/slingdata-io/sling/core/iop"
 	"github.com/stretchr/testify/assert"

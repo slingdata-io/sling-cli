@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flarco/gutil"
-	h "github.com/flarco/gutil"
-	"github.com/flarco/gutil/process"
+	"github.com/flarco/g"
+	h "github.com/flarco/g"
+	"github.com/flarco/g/process"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/slingdata-io/sling/core/iop"
@@ -254,7 +254,7 @@ func (p *Profile) ListConnections(includeEnv bool) (dcs []iop.DataConn, err erro
 
 	// from Environment
 	if includeEnv {
-		for id, val := range gutil.KVArrToMap(os.Environ()...) {
+		for id, val := range g.KVArrToMap(os.Environ()...) {
 			conn := iop.DataConn{ID: strings.ToUpper(id), URL: val}
 			if conn.GetTypeKey() == "" || conn.GetType() == iop.ConnTypeFileLocal {
 				continue

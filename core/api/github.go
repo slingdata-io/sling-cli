@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // GithubAPI is github's api

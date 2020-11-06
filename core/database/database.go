@@ -16,7 +16,7 @@ import (
 	"github.com/slingdata-io/sling/core/env"
 
 	_ "github.com/denisenkom/go-mssqldb"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"

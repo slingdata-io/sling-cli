@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"os"
 
-	h "github.com/flarco/gutil"
-	"github.com/flarco/gutil/net"
+	h "github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
 )
@@ -104,7 +104,7 @@ func LogEvent(m map[string]interface{}) {
 	}
 }
 
-// InitLogger initializes the Gutil Logger
+// InitLogger initializes the g Logger
 func InitLogger() {
 	h.SetZeroLogLevel(zerolog.InfoLevel)
 	h.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
@@ -127,8 +127,8 @@ func InitLogger() {
 		}
 	}
 
-	// fmt.Printf("gutil.LogLevel = %d\n", h.GetLogLevel())
-	// fmt.Printf("gutil.zerolog = %d\n", zerolog.GlobalLevel())
+	// fmt.Printf("g.LogLevel = %d\n", h.GetLogLevel())
+	// fmt.Printf("g.zerolog = %d\n", zerolog.GlobalLevel())
 
 	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
 	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}

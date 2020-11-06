@@ -3,7 +3,7 @@ package database
 import (
 	"strings"
 
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 )
 
 // SQLiteConn is a Google Big Query connection

@@ -17,11 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flarco/gutil/net"
+	"github.com/flarco/g/net"
 
 	"github.com/cheggaaa/pb"
 	"github.com/dustin/go-humanize"
-	h "github.com/flarco/gutil"
+	h "github.com/flarco/g"
 	"github.com/godror/godror"
 	"github.com/jmoiron/sqlx"
 	"github.com/shirou/gopsutil/cpu"

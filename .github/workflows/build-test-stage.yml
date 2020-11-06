@@ -15,16 +15,16 @@ jobs:
       with:
         go-version: '1.15.2'
 
-    - name: Sync gutil
+    - name: Sync g
       run: |
-        rm -rf ../gutil
-        cp -r /__/devbox/gutil ../
+        rm -rf ../g
+        cp -r /__/devbox/g ../
   
     - name: Build Server, Worker, Sling
       run: |
         export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
         mkdir -p $WORK_FOLDER
-        cp -r ../gutil $WORK_FOLDER/gutil
+        cp -r ../g $WORK_FOLDER/g
         cp -r . $WORK_FOLDER/sling
         docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox bash scripts/build.sh
         rm -rf $WORK_FOLDER
@@ -47,8 +47,8 @@ jobs:
     #   with:
     #     go-version: '1.15.2'
 
-    - name: Sync gutil
-      run: cp -r /__/devbox/gutil ../
+    - name: Sync g
+      run: cp -r /__/devbox/g ../
   
     - name: Run Go Tests
       run: |

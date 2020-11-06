@@ -18,7 +18,7 @@ require (
 	github.com/digitalocean/godo v1.47.0
 	github.com/dnaeon/go-vcr v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/gutil v0.0.0
+	github.com/flarco/g v0.0.0
 	github.com/go-ini/ini v1.62.0 // indirect
 	github.com/go-openapi/strfmt v0.19.6 // indirect
 	github.com/go-sql-driver/mysql v1.5.0
@@ -62,4 +62,4 @@ require (
 	syreclabs.com/go/faker v1.2.2
 )
 
-replace github.com/flarco/gutil v0.0.0 => ../gutil
+replace github.com/flarco/g v0.0.0 => ../g
