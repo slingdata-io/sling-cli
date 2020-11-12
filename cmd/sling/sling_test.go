@@ -53,19 +53,19 @@ var DBs = []*testDB{
 		table: "system.test1",
 	},
 
-	&testDB{
-		// https://github.com/denisenkom/go-mssqldb
-		name:  "MySQL",
-		URL:   "MYSQL_URL",
-		table: "mysql.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/denisenkom/go-mssqldb
+	// 	name:  "MySQL",
+	// 	URL:   "MYSQL_URL",
+	// 	table: "mysql.test1",
+	// },
 
-	&testDB{
-		// https://github.com/denisenkom/go-mssqldb
-		name:  "SQLServer",
-		URL:   "MSSQL_URL",
-		table: "dbo.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/denisenkom/go-mssqldb
+	// 	name:  "SQLServer",
+	// 	URL:   "MSSQL_URL",
+	// 	table: "dbo.test1",
+	// },
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
@@ -74,19 +74,19 @@ var DBs = []*testDB{
 	// 	table: "dbo.test1",
 	// },
 
-	&testDB{
-		// https://github.com/snowflakedb/gosnowflake
-		name:  "Snowflake",
-		URL:   "SNOWFLAKE_URL",
-		table: "sling.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/snowflakedb/gosnowflake
+	// 	name:  "Snowflake",
+	// 	URL:   "SNOWFLAKE_URL",
+	// 	table: "sling.test1",
+	// },
 
-	&testDB{
-		// https://github.com/snowflakedb/gosnowflake
-		name:  "BigQuery",
-		URL:   "BIGQUERY_URL",
-		table: "public.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/snowflakedb/gosnowflake
+	// 	name:  "BigQuery",
+	// 	URL:   "BIGQUERY_URL",
+	// 	table: "public.test1",
+	// },
 
 	// &testDB{
 	// 	// https://github.com/lib/pq
@@ -282,9 +282,10 @@ func TestDbt(t *testing.T) {
 			println()
 			g.Debug(">>>>>> DBT (%s)", db.name)
 
+			dbtMap, _ := g.UnmarshalMap(g.Deindent(g.R(dbtConfig, "schema", schema)))
 			task := elt.NewTask(0, elt.Config{
 				TgtConnObj: db.URL,
-				TgtPostDbt: g.Deindent(g.R(dbtConfig, "schema", schema)),
+				TgtPostDbt: dbtMap,
 			})
 			err := task.Execute()
 			if !assert.NoError(t, err) {

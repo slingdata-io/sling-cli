@@ -113,16 +113,16 @@ func InitLogger() {
 		DisableSendAnonUsage = cast.ToBool(val)
 	}
 
-	if os.Getenv("SLING_DEBUG_CALLER_LEVEL") != "" {
-		g.CallerLevel = cast.ToInt(os.Getenv("SLING_DEBUG_CALLER_LEVEL"))
+	if os.Getenv("_DEBUG_CALLER_LEVEL") != "" {
+		g.CallerLevel = cast.ToInt(os.Getenv("_DEBUG_CALLER_LEVEL"))
 	}
-	if os.Getenv("SLING_DEBUG") == "TRACE" {
+	if os.Getenv("_DEBUG") == "TRACE" {
 		g.SetZeroLogLevel(zerolog.TraceLevel)
 		g.SetLogLevel(g.TraceLevel)
-	} else if os.Getenv("SLING_DEBUG") != "" {
+	} else if os.Getenv("_DEBUG") != "" {
 		g.SetZeroLogLevel(zerolog.DebugLevel)
 		g.SetLogLevel(g.DebugLevel)
-		if os.Getenv("SLING_DEBUG") == "LOW" {
+		if os.Getenv("_DEBUG") == "LOW" {
 			g.SetLogLevel(g.LowDebugLevel)
 		}
 	}
@@ -142,12 +142,12 @@ func InitLogger() {
 	// 	zlog.Logger = zerolog.New(outputErr).With().Timestamp().Logger()
 	// }
 
-	if os.Getenv("SLING_LOGGING") == "TASK" {
+	if os.Getenv("G_LOGGING") == "TASK" {
 		outputOut.NoColor = true
 		outputErr.NoColor = true
 		g.LogOut = zerolog.New(outputOut).With().Timestamp().Logger()
 		g.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
-	} else if os.Getenv("SLING_LOGGING") == "MASTER" || os.Getenv("SLING_LOGGING") == "WORKER" {
+	} else if os.Getenv("G_LOGGING") == "MASTER" || os.Getenv("G_LOGGING") == "WORKER" {
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
 		g.LogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
