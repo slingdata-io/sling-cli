@@ -53,19 +53,19 @@ var DBs = []*testDB{
 		table: "system.test1",
 	},
 
-	// &testDB{
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "MySQL",
-	// 	URL:   "MYSQL_URL",
-	// 	table: "mysql.test1",
-	// },
+	&testDB{
+		// https://github.com/denisenkom/go-mssqldb
+		name:  "MySQL",
+		URL:   "MYSQL_URL",
+		table: "mysql.test1",
+	},
 
-	// &testDB{
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "SQLServer",
-	// 	URL:   "MSSQL_URL",
-	// 	table: "dbo.test1",
-	// },
+	&testDB{
+		// https://github.com/denisenkom/go-mssqldb
+		name:  "SQLServer",
+		URL:   "MSSQL_URL",
+		table: "dbo.test1",
+	},
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
@@ -74,19 +74,19 @@ var DBs = []*testDB{
 	// 	table: "dbo.test1",
 	// },
 
-	// &testDB{
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "Snowflake",
-	// 	URL:   "SNOWFLAKE_URL",
-	// 	table: "sling.test1",
-	// },
+	&testDB{
+		// https://github.com/snowflakedb/gosnowflake
+		name:  "Snowflake",
+		URL:   "SNOWFLAKE_URL",
+		table: "sling.test1",
+	},
 
-	// &testDB{
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "BigQuery",
-	// 	URL:   "BIGQUERY_URL",
-	// 	table: "public.test1",
-	// },
+	&testDB{
+		// https://github.com/snowflakedb/gosnowflake
+		name:  "BigQuery",
+		URL:   "BIGQUERY_URL",
+		table: "public.test1",
+	},
 
 	// &testDB{
 	// 	// https://github.com/lib/pq
@@ -150,6 +150,7 @@ func TestInToDb(t *testing.T) {
 			Mode:       "truncate",
 		})
 		err = taskUpsert.Execute()
+		g.LogError(err)
 		if err != nil {
 			assert.NoError(t, err)
 			return
@@ -269,12 +270,6 @@ func TestDbToOut(t *testing.T) {
 
 func TestDbt(t *testing.T) {
 
-	dbtConfig := `
-	dbt_version: "0.18"
-	repo_url: "https://github.com/fishtown-analytics/dbt-starter-project"
-	schema: {schema}
-	expr: "+my_second_dbt_model"`
-
 	for _, db := range DBs {
 		schema, _ := d.SplitTableFullName(db.table)
 		switch db.name {
@@ -282,13 +277,20 @@ func TestDbt(t *testing.T) {
 			println()
 			g.Debug(">>>>>> DBT (%s)", db.name)
 
-			dbtMap, _ := g.UnmarshalMap(g.Deindent(g.R(dbtConfig, "schema", schema)))
+			dbtMap := g.M(
+				"dbt_version", "0.18",
+				"profile", db.URL,
+				"repo_url", "https://github.com/fishtown-analytics/dbt-starter-project",
+				"schema", schema,
+				"models", "+my_second_dbt_model",
+			)
 			task := elt.NewTask(0, elt.Config{
 				TgtConnObj: db.URL,
 				TgtPostDbt: dbtMap,
 			})
 			err := task.Execute()
 			if !assert.NoError(t, err) {
+				g.LogError(err)
 				return
 			}
 		default:
