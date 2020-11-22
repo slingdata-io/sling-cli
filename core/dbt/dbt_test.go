@@ -9,7 +9,7 @@ import (
 func TestDbtCompile(t *testing.T) {
 	// https://docs.getdbt.com/reference/node-selection/syntax/
 	dbtConfig := `{
-		"dbt_version": "0.18",
+		"version": "0.18",
 		"repo_url": "https://github.com/fishtown-analytics/dbt-starter-project",
 		"profile": "POSTGRES_URL",
 		"schema": "public",
@@ -40,7 +40,7 @@ func TestDbtCompile(t *testing.T) {
 
 func TestDbtRun(t *testing.T) {
 	dbtConfig := `{
-		"dbt_version": "0.18",
+		"version": "0.18",
 		"repo_url": "https://github.com/fishtown-analytics/dbt-starter-project",
 		"profile": "POSTGRES_URL",
 		"schema": "public",

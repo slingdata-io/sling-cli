@@ -62,38 +62,41 @@ func NewTask(execID int, cfg Config) (j Task) {
 		progressHist: []string{},
 	}
 
-	srcFileProvided := cfg.StdIn || cfg.SrcFile.URL != ""
-	tgtFileProvided := cfg.StdOut || cfg.TgtFile.URL != ""
-	srcDbProvided := cfg.SrcConn.URL != ""
-	tgtDbProvided := cfg.TgtConn.URL != ""
-	srcTableQueryProvided := cfg.SrcTable != "" || cfg.SrcSQL != ""
-	validMode := cfg.Mode == "" || cfg.Mode == "append" || cfg.Mode == "drop" || cfg.Mode == "upsert" || cfg.Mode == "truncate"
+	srcFileProvided := cfg.StdIn || cfg.SrcConn.IsFileType()
+	tgtFileProvided := cfg.StdOut || cfg.TgtConn.IsFileType()
+	srcDbProvided := cfg.SrcConn.IsDbType()
+	tgtDbProvided := cfg.TgtConn.IsDbType()
+	srcTableQueryProvided := cfg.Source.Table != "" || cfg.Source.SQL != ""
 
+	if cfg.Target.Mode == "" {
+		cfg.Target.Mode = AppendMode
+	}
+	validMode := cfg.Target.Mode != Mode("")
 	if !validMode {
 		j.Err = fmt.Errorf("must specify valid mode: append, drop, upsert or truncate")
 		return
 	}
 
-	if cfg.Mode == "upsert" && (cfg.PrimaryKey == "" || cfg.UpdateKey == "") {
+	if cfg.Target.Mode == "upsert" && (len(cfg.Target.PrimaryKey) == 0 || len(cfg.Target.UpdateKey) == 0) {
 		j.Err = fmt.Errorf("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
 		return
 	}
 
-	if srcDbProvided && tgtDbProvided {
-		if cfg.Mode == "upsert" && (cfg.UpdateKey == "" || cfg.PrimaryKey == "") {
+	if srcDbProvided && tgtDbProvided && cfg.Target.Dbt == nil {
+		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
 			j.Err = fmt.Errorf("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}
 		j.Type = DbToDb
-	} else if srcFileProvided && tgtDbProvided {
+	} else if srcFileProvided && tgtDbProvided && cfg.Target.Dbt == nil {
 		j.Type = FileToDB
-	} else if cfg.SrcFile.URL == "" && srcDbProvided && srcTableQueryProvided && !tgtDbProvided && tgtFileProvided {
+	} else if srcDbProvided && srcTableQueryProvided && !tgtDbProvided && tgtFileProvided {
 		j.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		j.Type = FileToFile
-	} else if tgtDbProvided && cfg.TgtPostDbt != nil {
+	} else if cfg.Target.Dbt != nil {
 		j.Type = DbDbt
-	} else if tgtDbProvided && cfg.TgtPostSQL != "" {
+	} else if tgtDbProvided && cfg.Target.PostSQL != "" {
 		j.Type = DbSQL
 	}
 

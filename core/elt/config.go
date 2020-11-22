@@ -2,15 +2,31 @@ package elt
 
 import (
 	"encoding/json"
-	"github.com/flarco/dbio"
 	"io/ioutil"
 	"os"
-	"strings"
+
+	"github.com/flarco/dbio"
+	"github.com/slingdata-io/sling/core/dbt"
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
-	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
+)
+
+// Mode is a load mode
+type Mode string
+
+const (
+	// TruncateMode is to truncate
+	TruncateMode Mode = "truncate"
+	// DropMode is to drop
+	DropMode Mode = "drop"
+	// AppendMode is to append
+	AppendMode Mode = "append"
+	// UpsertMode is to upsert
+	UpsertMode Mode = "upsert"
+	// SnapshotMode is to snapshot
+	SnapshotMode Mode = "snapshot"
 )
 
 // NewConfig return a config object from a string
@@ -50,11 +66,19 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	if cfg.Props == nil {
-		cfg.Props = map[string]interface{}{}
+		cfg.Props = g.Map{}
 	}
 
 	if cfg.Env == nil {
-		cfg.Env = map[string]interface{}{}
+		cfg.Env = g.Map{}
+	}
+
+	if cfg.Source.Vars == nil {
+		cfg.Source.Vars = g.Map{}
+	}
+
+	if cfg.Target.Vars == nil {
+		cfg.Target.Vars = g.Map{}
 	}
 	return nil
 }
@@ -77,92 +101,36 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.prepared {
 		return
 	}
-	cfg.SrcConn = dbio.DataConn{Vars: map[string]interface{}{}}
-	cfg.TgtConn = dbio.DataConn{Vars: map[string]interface{}{}}
-	cfg.SrcFile = dbio.DataConn{Vars: map[string]interface{}{}}
-	cfg.TgtFile = dbio.DataConn{Vars: map[string]interface{}{}}
 
-	prepFile := func(file *dbio.DataConn, fileObj interface{}, defName string) {
-		switch fileObj.(type) {
-		case map[interface{}]interface{}:
-			m := fileObj.(map[interface{}]interface{})
-			for ki, vi := range m {
-				k := strings.ToUpper(cast.ToString(ki))
-				v := cast.ToString(vi)
-				if k == "URL" || k == "PATH" {
-					file.URL = v
-				} else if k == "NAME" || k == "CONN" || k == "ID" {
-					file.ID = v
-				} else {
-					if k == "FILE_MAX_ROWS" {
-						k = "SLING_FILE_ROW_LIMIT"
-					}
-					if k == "DELIMITER" {
-						os.Setenv("SLING_DELIMITER", v) // so that it can detected
-					}
-					if k == "COMPRESSION" {
-						k = "SLING_COMPRESSION"
-						v = strings.ToUpper(v)
-					}
-
-					file.Vars[k] = v
-					if strings.HasPrefix(v, "$") {
-						if newV := os.Getenv(strings.TrimLeft(v, "$")); newV != "" {
-							file.Vars[k] = newV
-						}
-					}
-				}
-			}
-		default:
-			file.URL = cast.ToString(fileObj)
-		}
-
-		for k, v := range fileVarsDefault {
-			if _, ok := file.Vars[k]; !ok {
-				file.Vars[k] = v
-			}
-		}
+	// Set Source
+	if cfg.Source.Conn != "" && cfg.Source.URL == "" {
+		cfg.Source.URL = cfg.Source.Conn
+	}
+	if !cfg.StdIn && cfg.Source.URL == "" && cfg.Target.Dbt == nil && cfg.Target.URL == "" {
+		return g.Error("invalid source connection. URL is blank or not found")
 	}
 
-	prepConn := func(conn *dbio.DataConn, connObj interface{}, defName string) {
-		switch connObj.(type) {
-		case map[interface{}]interface{}:
-			m := connObj.(map[interface{}]interface{})
-			for ki, vi := range m {
-				k := strings.ToUpper(cast.ToString(ki))
-				v := cast.ToString(vi)
-				if k == "URL" {
-					conn.URL = v
-				} else if k == "NAME" || k == "ID" {
-					conn.ID = v
-				} else {
-					conn.Vars[k] = v
-					if strings.HasPrefix(v, "$") {
-						if newV := os.Getenv(strings.TrimLeft(v, "$")); newV != "" {
-							conn.Vars[k] = newV
-						}
-					}
-				}
-			}
-		default:
-			objStr := cast.ToString(connObj)
-			if strings.Contains(objStr, "://") || strings.Contains(objStr, ";") {
-				conn.URL = objStr
-			} else {
-				conn.ID = objStr
-				conn.URL = os.Getenv(conn.ID)
-			}
-		}
+	// Set Target
+	if cfg.Target.Conn != "" && cfg.Target.URL == "" {
+		cfg.Target.URL = cfg.Target.Conn
+	}
+	if !cfg.StdOut && cfg.Target.URL == "" {
+		return g.Error("invalid target connection. URL is blank or not found")
 	}
 
-	prepConn(&cfg.SrcConn, cfg.SrcConnObj, "sourceDB")
-	prepConn(&cfg.TgtConn, cfg.TgtConnObj, "targetDB")
-	prepFile(&cfg.SrcFile, cfg.SrcFileObj, "sourceFile")
-	prepFile(&cfg.TgtFile, cfg.TgtFileObj, "targetFile")
-	cfg.SrcConnObj = nil
-	cfg.TgtConnObj = nil
-	cfg.SrcFileObj = nil
-	cfg.TgtFileObj = nil
+	cfg.SrcConn = dbio.DataConn{ID: cfg.Source.Conn, URL: cfg.Source.URL, Vars: cfg.Source.Vars}
+	cfg.TgtConn = dbio.DataConn{ID: cfg.Target.Conn, URL: cfg.Target.URL, Vars: cfg.Target.Vars}
+
+	cfg.SrcConn.SetFromEnv()
+	cfg.TgtConn.SetFromEnv()
+
+	if cfg.Source.Vars == nil {
+		cfg.Source.Vars = g.M()
+	}
+
+	if cfg.Target.Vars == nil {
+		cfg.Target.Vars = g.M()
+	}
 
 	cfg.prepared = true
 	return
@@ -170,69 +138,14 @@ func (cfg *Config) Prepare() (err error) {
 
 // Marshal marshals into JSON
 func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
-	cfg.SrcFileObj = nil
-	cfg.TgtFileObj = nil
-	cfg.SrcConnObj = nil
-	cfg.TgtConnObj = nil
 
-	srcDbProvided := cfg.SrcConn.URL != ""
-	tgtDbProvided := cfg.TgtConn.URL != ""
+	cfg.Source.Conn = cfg.SrcConn.ID
+	cfg.Source.URL = cfg.SrcConn.URL
+	cfg.Source.Vars = cfg.SrcConn.Vars
 
-	if srcDbProvided {
-		srcM := map[string]string{
-			"id":  cfg.SrcConn.ID,
-			"url": cfg.SrcConn.URL,
-		}
-		if cfg.SrcConn.ID == "" {
-			delete(srcM, "id")
-		}
-		for k, v := range cfg.SrcConn.VarsS() {
-			srcM[k] = v
-		}
-		cfg.SrcConnObj = srcM
-	}
-
-	if tgtDbProvided {
-		tgtM := map[string]string{
-			"id":  cfg.TgtConn.ID,
-			"url": cfg.TgtConn.URL,
-		}
-		if cfg.TgtConn.ID == "" {
-			delete(tgtM, "id")
-		}
-		for k, v := range cfg.TgtConn.VarsS() {
-			tgtM[k] = v
-		}
-		cfg.TgtConnObj = tgtM
-	}
-
-	if cfg.SrcFile.URL != "" {
-		srcM := map[string]string{
-			"id":  cfg.SrcFile.ID,
-			"url": cfg.SrcFile.URL,
-		}
-		if cfg.SrcFile.ID == "" {
-			delete(srcM, "id")
-		}
-		for k, v := range cfg.SrcFile.VarsS() {
-			srcM[k] = v
-		}
-		cfg.SrcFileObj = srcM
-	}
-
-	if cfg.TgtFile.URL != "" {
-		tgtM := map[string]string{
-			"id":  cfg.TgtFile.ID,
-			"url": cfg.TgtFile.URL,
-		}
-		if cfg.TgtFile.ID == "" {
-			delete(tgtM, "id")
-		}
-		for k, v := range cfg.TgtFile.VarsS() {
-			tgtM[k] = v
-		}
-		cfg.TgtFileObj = tgtM
-	}
+	cfg.Target.Conn = cfg.TgtConn.ID
+	cfg.Target.URL = cfg.TgtConn.URL
+	cfg.Target.Vars = cfg.TgtConn.Vars
 
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
@@ -261,7 +174,7 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 		return nil
 	}
 
-	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
+	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.TgtConn}
 	for i := range dConns {
 		err = decrypt(dConns[i])
 		if err != nil {
@@ -290,7 +203,7 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 		return nil
 	}
 
-	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.SrcFile, &cfg.TgtConn, &cfg.TgtFile}
+	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.TgtConn}
 	for i := range dConns {
 		err = encrypt(dConns[i])
 		if err != nil {
@@ -300,8 +213,8 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 	return nil
 }
 
-// Config is a config for the sling task
-type Config struct {
+// ConfigOld is a config for the sling task
+type ConfigOld struct {
 	SrcConn    dbio.DataConn `json:"-"`
 	SrcConnObj interface{}   `json:"src_conn" yaml:"src_conn"`
 	SrcTable   string        `json:"src_table" yaml:"src_table"`
@@ -326,12 +239,8 @@ type Config struct {
 	TgtFile    dbio.DataConn `json:"-"`
 	TgtFileObj interface{}   `json:"tgt_file" yaml:"tgt_file"`
 
-	Options string                 `json:"options" yaml:"options"`
-	Props   map[string]interface{} `json:"props" yaml:"props"`
-	Env     map[string]interface{} `json:"env" yaml:"env"`
-
-	Remote bool   `json:"remote" yaml:"remote"`
-	Email  string `json:"email" yaml:"email"` // email those addresses after
+	Props map[string]interface{} `json:"props" yaml:"props"`
+	Env   map[string]interface{} `json:"env" yaml:"env"`
 
 	UpsertVal       string `json:"-"`
 	StdIn           bool   `json:"-"`                    // whether stdin is passed
@@ -340,4 +249,85 @@ type Config struct {
 	TgtColumns      iop.Columns
 	TmpTableCreated bool
 	prepared        bool
+}
+
+// Config is the new config struct
+type Config struct {
+	SrcConn dbio.DataConn `json:"-"`
+	Source  Source        `json:"source,omitempty" yaml:"source,omitempty"`
+
+	TgtConn dbio.DataConn          `json:"-"`
+	Target  Target                 `json:"target,omitempty" yaml:"target,omitempty"`
+	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+
+	StdIn  bool                   `json:"-"`                    // whether stdin is passed
+	StdOut bool                   `json:"stdout" yaml:"stdout"` // whether to output to stdout
+	Props  map[string]interface{} `json:"props" yaml:"props"`   // remove?
+	Env    map[string]interface{} `json:"env" yaml:"env"`       // remove ?
+
+	UpsertVal string `json:"-"`
+	prepared  bool   `json:"-"`
+}
+
+// FileConfig is for file source / targets
+type FileConfig struct {
+	NullIf           string `json:"null_if" yaml:"null_if"`
+	Compression      string `json:"compression" yaml:"compression"`
+	EmptyFieldAsNull bool   `json:"empty_field_as_null" yaml:"empty_field_as_null"`
+	TrimSpace        bool   `json:"trim_space" yaml:"trim_space"`
+	DateFormat       string `json:"date_format" yaml:"date_format"`
+	TimeFormat       string `json:"time_format" yaml:"time_format"`
+	SkipBlankLines   bool   `json:"skip_blank_lines" yaml:"skip_blank_lines"`
+	FileMaxRows      int    `json:"file_max_rows" yaml:"file_max_rows"`
+	Delimiter        rune   `json:"delimiter" yaml:"delimiter"`
+	Header           bool   `json:"header" yaml:"header"`
+}
+
+// NewFileConfig returns a default FileConfig
+func NewFileConfig() *FileConfig {
+	return &FileConfig{
+		NullIf:           "NULL",
+		Compression:      "AUTO",
+		EmptyFieldAsNull: true,
+		TrimSpace:        false,
+		DateFormat:       "AUTO",
+		TimeFormat:       "AUTO",
+		SkipBlankLines:   false,
+		FileMaxRows:      0,
+		Delimiter:        ',',
+		Header:           true,
+	}
+}
+
+// Source is a source of data
+type Source struct {
+	Conn       string                 `json:"con,omitempty" yaml:"conn,omitempty"`
+	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
+	SQL        string                 `json:"sql,omitempty" yaml:"sql,omitempty"`
+	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
+	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
+	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
+	Vars       map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+
+	Columns iop.Columns `json:"-"`
+}
+
+// Target is a target of data
+type Target struct {
+	Conn       string                 `json:"con,omitempty" yaml:"conn,omitempty"`
+	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
+	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
+	TableDDL   string                 `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	TableTmp   string                 `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	PreSQL     string                 `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL    string                 `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Dbt        *dbt.Dbt               `json:"dbt,omitempty" yaml:"dbt,omitempty"`
+	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
+	Vars       map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+
+	TmpTableCreated bool        `json:"-"`
+	Columns         iop.Columns `json:"-"`
 }

@@ -13,6 +13,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/json-iterator/go v1.1.10
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
+	github.com/markbates/pkger v0.17.1
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/rs/zerolog v1.20.0
 	github.com/spf13/cast v1.3.1

@@ -2,16 +2,17 @@ package main
 
 import (
 	"fmt"
-	"github.com/flarco/dbio"
-	"github.com/flarco/g/net"
-	core2 "github.com/slingdata-io/sling/core"
-	"github.com/slingdata-io/sling/core/elt"
-	"github.com/slingdata-io/sling/core/env"
 	"os"
 	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/flarco/dbio"
+	"github.com/flarco/g/net"
+	core2 "github.com/slingdata-io/sling/core"
+	"github.com/slingdata-io/sling/core/elt"
+	"github.com/slingdata-io/sling/core/env"
 
 	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"
@@ -54,7 +55,6 @@ func listLocalConns() {
 	os.Exit(0)
 }
 
-
 func processELT(c *g.CliSC) (err error) {
 
 	doLog := func() {
@@ -64,7 +64,6 @@ func processELT(c *g.CliSC) (err error) {
 		))
 	}
 	defer doLog()
-
 
 	local, ok := c.Vals["local-conns"]
 	if ok && cast.ToBool(local) {
@@ -85,38 +84,32 @@ func processELT(c *g.CliSC) (err error) {
 
 	for k, v := range c.Vals {
 		switch k {
-		case "remote":
-			cfg.Remote = cast.ToBool(v)
 		case "config":
 			cfgStr = cast.ToString(v)
 		case "src-file":
-			cfg.SrcFileObj = cast.ToString(v)
+			cfg.Source.URL = cast.ToString(v)
 		case "src-table":
-			cfg.SrcTable = cast.ToString(v)
+			cfg.Source.Table = cast.ToString(v)
 		case "src-sql", "query":
-			cfg.SrcSQL = cast.ToString(v)
+			cfg.Source.SQL = cast.ToString(v)
 		case "tgt-file":
-			cfg.TgtFileObj = cast.ToString(v)
+			cfg.Target.URL = cast.ToString(v)
 		case "src-conn", "conn":
-			cfg.SrcConnObj = cast.ToString(v)
+			cfg.Source.Conn = cast.ToString(v)
 		case "tgt-conn":
-			cfg.TgtConnObj = cast.ToString(v)
+			cfg.Target.Conn = cast.ToString(v)
 		case "tgt-table":
-			cfg.TgtTable = cast.ToString(v)
+			cfg.Target.Table = cast.ToString(v)
 		case "pre-sql":
-			cfg.TgtPreSQL = cast.ToString(v)
+			cfg.Target.PreSQL = cast.ToString(v)
 		case "post-sql":
-			cfg.TgtPostSQL = cast.ToString(v)
+			cfg.Target.PostSQL = cast.ToString(v)
 		case "stdout":
 			cfg.StdOut = cast.ToBool(v)
-		case "options":
-			cfg.Options = cast.ToString(v)
 		case "mode":
-			cfg.Mode = cast.ToString(v)
+			cfg.Target.Mode = elt.Mode(cast.ToString(v))
 		case "examples":
 			showExamples = cast.ToBool(v)
-		case "email":
-			cfg.Email = cast.ToString(v)
 			// case "save":
 			// 	saveAsJob = cast.ToBool(v)
 		}
@@ -126,7 +119,6 @@ func processELT(c *g.CliSC) (err error) {
 		println(examples)
 		return nil
 	}
-
 
 	if cfgStr != "" {
 		err = cfg.Unmarshal(cfgStr)
@@ -145,18 +137,17 @@ func processELT(c *g.CliSC) (err error) {
 	doLog = func() {
 		srcType := task.Cfg.SrcConn.GetTypeNameLong()
 		if srcType == "" {
-			srcType = task.Cfg.SrcFile.GetTypeNameLong()
+			srcType = task.Cfg.SrcConn.GetTypeNameLong()
 		}
 		tgtType := task.Cfg.TgtConn.GetTypeNameLong()
 		if tgtType == "" {
-			tgtType = task.Cfg.TgtFile.GetTypeNameLong()
+			tgtType = task.Cfg.TgtConn.GetTypeNameLong()
 		}
 		logUsage(g.M(
 			"cmd", "elt",
 			"error", g.ErrorText(task.Err),
 			"job_type", task.Type,
-			"job_mode", task.Cfg.Mode,
-			"job_remote", task.Cfg.Remote,
+			"job_mode", task.Cfg.Target.Mode,
 			"job_status", task.Status,
 			"job_src_type", srcType,
 			"job_tgt_type", tgtType,
@@ -239,10 +230,10 @@ func updateCLI(c *g.CliSC) (err error) {
 	return nil
 }
 
-
 func logUsage(m map[string]interface{}) {
 	m["application_name"] = "sling"
 	m["version"] = core2.Version
 	m["os"] = runtime.GOOS
+	return
 	env.LogEvent(m)
 }

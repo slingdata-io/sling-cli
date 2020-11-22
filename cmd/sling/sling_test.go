@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slingdata-io/sling/core/dbt"
 	"github.com/slingdata-io/sling/core/env"
 
 	"github.com/slingdata-io/sling/core/elt"
@@ -53,19 +54,19 @@ var DBs = []*testDB{
 		table: "system.test1",
 	},
 
-	&testDB{
-		// https://github.com/denisenkom/go-mssqldb
-		name:  "MySQL",
-		URL:   "MYSQL_URL",
-		table: "mysql.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/denisenkom/go-mssqldb
+	// 	name:  "MySQL",
+	// 	URL:   "MYSQL_URL",
+	// 	table: "mysql.test1",
+	// },
 
-	&testDB{
-		// https://github.com/denisenkom/go-mssqldb
-		name:  "SQLServer",
-		URL:   "MSSQL_URL",
-		table: "dbo.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/denisenkom/go-mssqldb
+	// 	name:  "SQLServer",
+	// 	URL:   "MSSQL_URL",
+	// 	table: "dbo.test1",
+	// },
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
@@ -74,19 +75,19 @@ var DBs = []*testDB{
 	// 	table: "dbo.test1",
 	// },
 
-	&testDB{
-		// https://github.com/snowflakedb/gosnowflake
-		name:  "Snowflake",
-		URL:   "SNOWFLAKE_URL",
-		table: "sling.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/snowflakedb/gosnowflake
+	// 	name:  "Snowflake",
+	// 	URL:   "SNOWFLAKE_URL",
+	// 	table: "sling.test1",
+	// },
 
-	&testDB{
-		// https://github.com/snowflakedb/gosnowflake
-		name:  "BigQuery",
-		URL:   "BIGQUERY_URL",
-		table: "public.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/snowflakedb/gosnowflake
+	// 	name:  "BigQuery",
+	// 	URL:   "BIGQUERY_URL",
+	// 	table: "public.test1",
+	// },
 
 	// &testDB{
 	// 	// https://github.com/lib/pq
@@ -131,24 +132,24 @@ func TestInToDb(t *testing.T) {
 		println()
 		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
 
-		task := elt.NewTask(0, elt.Config{
-			SrcFileObj: csvFile,
-			TgtConnObj: tgtDB.URL,
-			TgtTable:   tgtDB.table,
-			Mode:       "drop",
-		})
+		config := elt.Config{}
+		config.Source.URL = csvFile
+		config.Target.URL = tgtDB.URL
+		config.Target.Table = tgtDB.table
+		config.Target.Mode = elt.DropMode
+		task := elt.NewTask(0, config)
 		err = task.Execute()
 		if err != nil {
 			assert.NoError(t, err)
 			return
 		}
 
-		taskUpsert := elt.NewTask(0, elt.Config{
-			SrcFileObj: csvFileUpsert,
-			TgtConnObj: tgtDB.URL,
-			TgtTable:   tgtDB.table + "_upsert",
-			Mode:       "truncate",
-		})
+		config = elt.Config{}
+		config.Source.URL = csvFileUpsert
+		config.Target.URL = tgtDB.URL
+		config.Target.Table = tgtDB.table + "_upsert"
+		config.Target.Mode = elt.TruncateMode
+		taskUpsert := elt.NewTask(0, config)
 		err = taskUpsert.Execute()
 		g.LogError(err)
 		if err != nil {
@@ -172,28 +173,28 @@ func TestDbToDb(t *testing.T) {
 
 			println()
 			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
-			task := elt.NewTask(0, elt.Config{
-				SrcConnObj: srcDB.URL,
-				SrcTable:   srcDB.table,
-				TgtConnObj: tgtDB.URL,
-				TgtTable:   tgtDB.table + "_copy",
-				Mode:       "drop",
-			})
+			config := elt.Config{}
+			config.Source.URL = srcDB.URL
+			config.Source.Table = srcDB.table
+			config.Target.URL = tgtDB.URL
+			config.Target.Table = tgtDB.table + "_copy"
+			config.Target.Mode = elt.DropMode
+			task := elt.NewTask(0, config)
 			err = task.Execute()
 			if err != nil {
 				assert.NoError(t, err)
 				return
 			}
 
-			taskUpsert := elt.NewTask(0, elt.Config{
-				SrcConnObj: srcDB.URL,
-				SrcTable:   srcDB.table + "_upsert",
-				TgtConnObj: tgtDB.URL,
-				TgtTable:   tgtDB.table + "_copy",
-				Mode:       "upsert",
-				UpdateKey:  "create_dt",
-				PrimaryKey: "id",
-			})
+			config = elt.Config{}
+			config.Source.URL = srcDB.URL
+			config.Source.Table = srcDB.table + "_upsert"
+			config.Target.URL = tgtDB.URL
+			config.Target.Table = tgtDB.table + "_copy"
+			config.Target.Mode = elt.UpsertMode
+			config.Target.UpdateKey = "create_dt"
+			config.Target.PrimaryKey = []string{"id"}
+			taskUpsert := elt.NewTask(0, config)
 			err = taskUpsert.Execute()
 			if err != nil {
 				assert.NoError(t, err)
@@ -212,11 +213,13 @@ func TestDbToOut(t *testing.T) {
 
 		srcTable := srcDB.table
 		srcTableCopy := srcDB.table + "_copy"
-		task := elt.NewTask(0, elt.Config{
-			SrcConnObj: srcDB.URL,
-			SrcSQL:     g.F("select * from %s order by id", srcTableCopy),
-			TgtFileObj: filePath2,
-		})
+
+		config := elt.Config{}
+		config.Source.URL = srcDB.URL
+		config.Source.SQL = g.F("select * from %s order by id", srcTableCopy)
+		config.Target.URL = filePath2
+
+		task := elt.NewTask(0, config)
 		err := task.Execute()
 		if !assert.NoError(t, err) {
 			return
@@ -277,17 +280,18 @@ func TestDbt(t *testing.T) {
 			println()
 			g.Debug(">>>>>> DBT (%s)", db.name)
 
-			dbtMap := g.M(
-				"dbt_version", "0.18",
-				"profile", db.URL,
-				"repo_url", "https://github.com/fishtown-analytics/dbt-starter-project",
-				"schema", schema,
-				"models", "+my_second_dbt_model",
-			)
-			task := elt.NewTask(0, elt.Config{
-				TgtConnObj: db.URL,
-				TgtPostDbt: dbtMap,
-			})
+			dbtConfig := &dbt.Dbt{
+				Version: "0.18",
+				Profile: db.URL,
+				RepoURL: "https://github.com/fishtown-analytics/dbt-starter-project",
+				Schema:  schema,
+				Models:  "+my_second_dbt_model",
+			}
+
+			config := elt.Config{}
+			config.Target.URL = db.URL
+			config.Target.Dbt = dbtConfig
+			task := elt.NewTask(0, config)
 			err := task.Execute()
 			if !assert.NoError(t, err) {
 				g.LogError(err)
@@ -307,17 +311,17 @@ func TestCfgPath(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.EqualValues(t, "testing", cfg.SrcConn.ID)
-		assert.EqualValues(t, "testing", cfg.SrcTable)
-		assert.EqualValues(t, "testing", cfg.SrcFile.URL)
-		assert.EqualValues(t, "testing", cfg.SrcSQL)
+		assert.EqualValues(t, "testing", cfg.Source.Table)
+		assert.EqualValues(t, "testing", cfg.SrcConn.URL)
+		assert.EqualValues(t, "testing", cfg.Source.SQL)
 		assert.EqualValues(t, "testing", cfg.TgtConn.ID)
-		assert.EqualValues(t, "testing", cfg.TgtTable)
-		assert.EqualValues(t, "testing", cfg.TgtFile.URL)
-		assert.EqualValues(t, "testing", cfg.Mode)
-		assert.EqualValues(t, 111, cfg.Limit)
-		assert.EqualValues(t, "testing", cfg.TgtTableDDL)
-		assert.EqualValues(t, "testing", cfg.TgtTableTmp)
-		assert.EqualValues(t, "testing", cfg.TgtPostSQL)
+		assert.EqualValues(t, "testing", cfg.Target.Table)
+		assert.EqualValues(t, "testing", cfg.TgtConn.URL)
+		assert.EqualValues(t, "testing", cfg.Target.Mode)
+		assert.EqualValues(t, 111, cfg.Source.Limit)
+		assert.EqualValues(t, "testing", cfg.Target.TableDDL)
+		assert.EqualValues(t, "testing", cfg.Target.TableTmp)
+		assert.EqualValues(t, "testing", cfg.Target.PostSQL)
 
 		return err
 	}
@@ -330,13 +334,13 @@ func TestCfgPath(t *testing.T) {
 }
 
 func testTask(t *testing.T) {
-	task := elt.NewTask(0, elt.Config{
-		SrcConnObj: "SNOWFLAKE_URL",
-		SrcTable:   "public.test5",
-		TgtConnObj: "POSTGRES_URL",
-		TgtTable:   "public.test5",
-		Mode:       "drop",
-	})
+	config := elt.Config{}
+	config.Source.URL = "SNOWFLAKE_URL"
+	config.Source.Table = "public.test5"
+	config.Target.URL = "POSTGRES_URL"
+	config.Target.Table = "public.test5"
+	config.Target.Mode = elt.DropMode
+	task := elt.NewTask(0, config)
 	assert.NoError(t, task.Err)
 
 	// run task

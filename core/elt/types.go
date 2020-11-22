@@ -58,6 +58,15 @@ const (
 	ExecStatusStalled ExecStatus = "stalled"
 )
 
+// IsRunning returns true if an execution is running
+func (s ExecStatus) IsRunning() bool {
+	switch s {
+	case ExecStatusStarted, ExecStatusRunning:
+		return true
+	}
+	return false
+}
+
 // IsFinished returns true if an execution is finished
 func (s ExecStatus) IsFinished() bool {
 	switch s {

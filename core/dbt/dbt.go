@@ -1,11 +1,12 @@
 package dbt
 
 import (
-	"github.com/flarco/dbio"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/flarco/dbio"
 
 	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
@@ -15,7 +16,8 @@ import (
 
 // Dbt represents a dbt instance
 type Dbt struct {
-	Version     string           `json:"dbt_version" yaml:"dbt_version"`
+	Name        string           `json:"name,omitempty" yaml:"name,omitempty"` // the project name
+	Version     string           `json:"version" yaml:"version"`
 	RepoURL     string           `json:"repo_url" yaml:"repo_url"`
 	ProjectRoot string           `json:"project_root" yaml:"project_root"`
 	Profile     string           `json:"profile" yaml:"profile"`
