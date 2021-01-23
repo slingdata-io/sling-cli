@@ -111,7 +111,7 @@ func (d *Dbt) getProfileEntry(conn dbio.DataConn) (pe map[string]interface{}, er
 		pe["method"] = "service-account"
 
 		// write the service json key to dbt folder
-		jsonBody := conn.VarsS()["GC_CRED_JSON_BODY"]
+		jsonBody := conn.DataS()["GC_CRED_JSON_BODY"]
 		if jsonBody == "" {
 			jsonBody = os.Getenv("GC_CRED_JSON_BODY")
 		}

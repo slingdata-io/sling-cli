@@ -148,7 +148,7 @@ func (j *Task) runDbSQL() (err error) {
 	start = time.Now()
 
 	j.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
@@ -212,7 +212,7 @@ func (j *Task) runDbDbt() (err error) {
 func (j *Task) runDbToFile() (err error) {
 
 	start = time.Now()
-	srcProps := g.MapToKVArr(j.Cfg.SrcConn.VarsS())
+	srcProps := g.MapToKVArr(j.Cfg.SrcConn.DataS())
 	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
@@ -255,7 +255,7 @@ func (j *Task) runFileToDB() (err error) {
 	start = time.Now()
 
 	j.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
@@ -332,14 +332,14 @@ func (j *Task) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
-	srcProps := g.MapToKVArr(j.Cfg.SrcConn.VarsS())
+	srcProps := g.MapToKVArr(j.Cfg.SrcConn.DataS())
 	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
-	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.VarsS())
+	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
 	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
@@ -495,7 +495,7 @@ func (j *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.URL != "" {
-		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcConn.URL, g.MapToKVArr(cfg.SrcConn.VarsS())...)
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcConn.URL, g.MapToKVArr(cfg.SrcConn.DataS())...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL)
 			return df, err
@@ -530,7 +530,7 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 	if cfg.TgtConn.URL != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
 		cfg.TgtConn.URL = g.Rm(cfg.TgtConn.URL, dateMap)
-		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtConn.URL, g.MapToKVArr(cfg.TgtConn.VarsS())...)
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtConn.URL, g.MapToKVArr(cfg.TgtConn.DataS())...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL)
 			return cnt, err

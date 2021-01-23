@@ -166,7 +166,7 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Data[k], err = g.Decrypt(dConn.VarsS()[k], secret)
+			dConn.Data[k], err = g.Decrypt(dConn.DataS()[k], secret)
 			if err != nil {
 				return g.Error(err, "could not decrypt")
 			}
@@ -195,7 +195,7 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Data[k], err = g.Encrypt(dConn.VarsS()[k], secret)
+			dConn.Data[k], err = g.Encrypt(dConn.DataS()[k], secret)
 			if err != nil {
 				return g.Error(err, "could not decrypt")
 			}
