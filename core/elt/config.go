@@ -73,12 +73,12 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		cfg.Env = g.Map{}
 	}
 
-	if cfg.Source.Vars == nil {
-		cfg.Source.Vars = g.Map{}
+	if cfg.Source.Data == nil {
+		cfg.Source.Data = g.Map{}
 	}
 
-	if cfg.Target.Vars == nil {
-		cfg.Target.Vars = g.Map{}
+	if cfg.Target.Data == nil {
+		cfg.Target.Data = g.Map{}
 	}
 	return nil
 }
@@ -118,18 +118,18 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error("invalid target connection. URL is blank or not found")
 	}
 
-	cfg.SrcConn = dbio.DataConn{ID: cfg.Source.Conn, URL: cfg.Source.URL, Vars: cfg.Source.Vars}
-	cfg.TgtConn = dbio.DataConn{ID: cfg.Target.Conn, URL: cfg.Target.URL, Vars: cfg.Target.Vars}
+	srcConn := dbio.NewDataConnFromMap(g.M("id", cfg.Source.Conn, "url", cfg.Source.URL, "data", cfg.Source.Data))
+	cfg.SrcConn = *srcConn
 
-	cfg.SrcConn.SetFromEnv()
-	cfg.TgtConn.SetFromEnv()
+	tgtConn := dbio.NewDataConnFromMap(g.M("id", cfg.Target.Conn, "url", cfg.Target.URL, "data", cfg.Target.Data))
+	cfg.TgtConn = *tgtConn
 
-	if cfg.Source.Vars == nil {
-		cfg.Source.Vars = g.M()
+	if cfg.Source.Data == nil {
+		cfg.Source.Data = g.M()
 	}
 
-	if cfg.Target.Vars == nil {
-		cfg.Target.Vars = g.M()
+	if cfg.Target.Data == nil {
+		cfg.Target.Data = g.M()
 	}
 
 	cfg.prepared = true
@@ -141,11 +141,11 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 	cfg.Source.Conn = cfg.SrcConn.ID
 	cfg.Source.URL = cfg.SrcConn.URL
-	cfg.Source.Vars = cfg.SrcConn.Vars
+	cfg.Source.Data = cfg.SrcConn.Data
 
 	cfg.Target.Conn = cfg.TgtConn.ID
 	cfg.Target.URL = cfg.TgtConn.URL
-	cfg.Target.Vars = cfg.TgtConn.Vars
+	cfg.Target.Data = cfg.TgtConn.Data
 
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
@@ -162,11 +162,11 @@ func (cfg *Config) Decrypt(secret string) (err error) {
 		if err != nil {
 			return g.Error(err, "could not decrypt")
 		}
-		for k := range dConn.Vars {
+		for k := range dConn.Data {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Vars[k], err = g.Decrypt(dConn.VarsS()[k], secret)
+			dConn.Data[k], err = g.Decrypt(dConn.VarsS()[k], secret)
 			if err != nil {
 				return g.Error(err, "could not decrypt")
 			}
@@ -191,11 +191,11 @@ func (cfg *Config) Encrypt(secret string) (err error) {
 		if err != nil {
 			return g.Error(err, "could not decrypt")
 		}
-		for k := range dConn.Vars {
+		for k := range dConn.Data {
 			if _, ok := fileVarsDefault[k]; ok {
 				continue
 			}
-			dConn.Vars[k], err = g.Encrypt(dConn.VarsS()[k], secret)
+			dConn.Data[k], err = g.Encrypt(dConn.VarsS()[k], secret)
 			if err != nil {
 				return g.Error(err, "could not decrypt")
 			}
@@ -301,20 +301,20 @@ func NewFileConfig() *FileConfig {
 
 // Source is a source of data
 type Source struct {
-	Conn       string                 `json:"con,omitempty" yaml:"conn,omitempty"`
+	Conn       string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
 	SQL        string                 `json:"sql,omitempty" yaml:"sql,omitempty"`
 	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
 	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
 	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
-	Vars       map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	Columns iop.Columns `json:"-"`
 }
 
 // Target is a target of data
 type Target struct {
-	Conn       string                 `json:"con,omitempty" yaml:"conn,omitempty"`
+	Conn       string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
 	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
 	TableDDL   string                 `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -326,7 +326,7 @@ type Target struct {
 	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
-	Vars       map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-"`
 	Columns         iop.Columns `json:"-"`

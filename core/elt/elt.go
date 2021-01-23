@@ -388,7 +388,7 @@ func (j *Task) runDbToDb() (err error) {
 	for k, v := range g.KVArrToMap(srcConn.PropArr()...) {
 		vars[k] = v
 	}
-	j.Cfg.Source.Vars["SOURCE_FILE"] = g.Map{
+	j.Cfg.Source.Data["SOURCE_FILE"] = g.Map{
 		"url":  j.df.FsURL,
 		"vars": vars,
 	}
@@ -615,7 +615,7 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// do direct loading (without passing through our box)
 	// risk is potential data loss, since we cannot validate counts
 	srcFile := &dbio.DataConn{}
-	if sf, ok := j.Cfg.Source.Vars["SOURCE_FILE"]; ok {
+	if sf, ok := j.Cfg.Source.Data["SOURCE_FILE"]; ok {
 		srcFile = dbio.NewDataConnFromMap(sf.(g.Map))
 	}
 	cnt, ok, err := tgtConn.CopyDirect(cfg.Target.TableTmp, *srcFile)

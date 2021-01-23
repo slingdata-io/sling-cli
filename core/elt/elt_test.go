@@ -52,9 +52,7 @@ func TestConfig(t *testing.T) {
 		},
 		"tgt_conn": "ORACLE_SLING"
 	}`
-	cfg, err := NewConfig(cfgStr)
+	_, err := NewConfig(cfgStr)
 	assert.NoError(t, err)
-
-	println(cfg.TgtPostDbt)
 
 }

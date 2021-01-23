@@ -131,7 +131,7 @@ func NewAPIClientFromDataConn(dc *dbio.DataConn) (api API, err error) {
 // NewAPIClientFromDataConnContext provides an API client with the given Dataconn URL
 func NewAPIClientFromDataConnContext(ctx context.Context, dc *dbio.DataConn) (api API, err error) {
 	if dc.URL != "" {
-		dc.Vars["URL"] = dc.URL
+		dc.Data["url"] = dc.URL
 	}
 	switch dc.GetType() {
 	case dbio.ConnTypeAPIGit:
