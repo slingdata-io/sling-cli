@@ -181,7 +181,7 @@ func TestDbToDb(t *testing.T) {
 			config.Target.Mode = elt.DropMode
 			task := elt.NewTask(0, config)
 			err = task.Execute()
-			if err != nil {
+			if g.LogError(err) {
 				assert.NoError(t, err)
 				return
 			}

@@ -118,19 +118,31 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error("invalid target connection. URL is blank or not found")
 	}
 
-	srcConn := dbio.NewDataConnFromMap(g.M("id", cfg.Source.Conn, "url", cfg.Source.URL, "data", cfg.Source.Data))
-	cfg.SrcConn = *srcConn
-
-	tgtConn := dbio.NewDataConnFromMap(g.M("id", cfg.Target.Conn, "url", cfg.Target.URL, "data", cfg.Target.Data))
-	cfg.TgtConn = *tgtConn
-
-	if cfg.Source.Data == nil {
-		cfg.Source.Data = g.M()
-	}
-
+	// Target
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
 	}
+	cfg.Target.Data["url"] = cfg.Target.URL
+	tgtConn, err := dbio.NewDataConnFromMap(g.M("id", cfg.Target.Conn, "data", cfg.Target.Data))
+	if err != nil {
+		return g.Error(err, "could not create data conn for target")
+	}
+	cfg.TgtConn = *tgtConn
+
+	// Source
+	if cfg.Source.Data == nil {
+		cfg.Source.Data = g.M()
+	}
+	cfg.Source.Data["url"] = cfg.Source.URL
+	srcConn, err := dbio.NewDataConnFromMap(g.M("id", cfg.Source.Conn, "data", cfg.Source.Data))
+	if err != nil {
+		if cfg.Target.Dbt == nil {
+			return g.Error(err, "could not create data conn for source")
+		} else {
+			err = nil
+		}
+	}
+	cfg.SrcConn = *srcConn
 
 	cfg.prepared = true
 	return

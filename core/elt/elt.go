@@ -384,13 +384,12 @@ func (j *Task) runDbToDb() (err error) {
 	defer j.df.Close()
 
 	// to DirectLoad if possible
-	vars := map[string]interface{}{}
-	for k, v := range g.KVArrToMap(srcConn.PropArr()...) {
-		vars[k] = v
-	}
-	j.Cfg.Source.Data["SOURCE_FILE"] = g.Map{
-		"url":  j.df.FsURL,
-		"vars": vars,
+	if j.df.FsURL != "" {
+		data := g.M("url", j.df.FsURL)
+		for k, v := range g.KVArrToMap(srcConn.PropArr()...) {
+			data[k] = v
+		}
+		j.Cfg.Source.Data["SOURCE_FILE"] = g.Map{"data": data}
 	}
 
 	j.SetProgress("writing to target database")
@@ -614,10 +613,15 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// supports direct loading (RedShift, Snowflake or Azure)
 	// do direct loading (without passing through our box)
 	// risk is potential data loss, since we cannot validate counts
-	srcFile := &dbio.DataConn{}
+	srcFile, _ := dbio.NewDataConnFromMap(g.M())
 	if sf, ok := j.Cfg.Source.Data["SOURCE_FILE"]; ok {
-		srcFile = dbio.NewDataConnFromMap(sf.(g.Map))
+		srcFile, err = dbio.NewDataConnFromMap(sf.(g.Map))
+		if err != nil {
+			err = g.Error(err, "could not create data conn for SOURCE_FILE")
+			return
+		}
 	}
+
 	cnt, ok, err := tgtConn.CopyDirect(cfg.Target.TableTmp, *srcFile)
 	if ok {
 		df.SetEmpty() // this executes deferred functions (such as file residue removal

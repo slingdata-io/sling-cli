@@ -26,7 +26,11 @@ func listLocalConns() {
 		if !strings.Contains(val, ":/") {
 			continue
 		}
-		conn := dbio.DataConn{ID: key, URL: val}
+		conn, err := dbio.NewDataConnFromURL(key, val)
+		if g.LogError(err) {
+			continue
+		}
+
 		if conn.GetType() == dbio.ConnTypeNone || conn.GetType() == dbio.ConnTypeFileHTTP {
 			continue
 		}
