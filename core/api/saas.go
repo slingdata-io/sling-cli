@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -123,21 +124,18 @@ func NewAPIClientContext(ctx context.Context, ap APIProvider, props ...string) (
 
 }
 
-// NewAPIClientFromDataConn provides an API client with the given Dataconn URL
-func NewAPIClientFromDataConn(dc *dbio.DataConn) (api API, err error) {
-	return NewAPIClientFromDataConnContext(context.Background(), dc)
+// NewAPIClientFromConn provides an API client with the given Dataconn URL
+func NewAPIClientFromConn(c connection.Connection) (api API, err error) {
+	return NewAPIClientFromConnContext(context.Background(), c)
 }
 
-// NewAPIClientFromDataConnContext provides an API client with the given Dataconn URL
-func NewAPIClientFromDataConnContext(ctx context.Context, dc *dbio.DataConn) (api API, err error) {
-	if dc.URL != "" {
-		dc.Data["url"] = dc.URL
-	}
-	switch dc.GetType() {
-	case dbio.ConnTypeAPIGit:
-		return NewAPIClientContext(ctx, Git, g.MapToKVArr(dc.DataS())...)
-	case dbio.ConnTypeAPIGithub:
-		return NewAPIClientContext(ctx, Github, g.MapToKVArr(dc.DataS())...)
+// NewAPIClientFromConnContext provides an API client with the given Dataconn URL
+func NewAPIClientFromConnContext(ctx context.Context, c connection.Connection) (api API, err error) {
+	switch c.Info().Type {
+	case dbio.TypeAPIGit:
+		return NewAPIClientContext(ctx, Git, g.MapToKVArr(c.DataS())...)
+	case dbio.TypeAPIGithub:
+		return NewAPIClientContext(ctx, Github, g.MapToKVArr(c.DataS())...)
 	default:
 		err = g.Error("invalid API connection request")
 	}

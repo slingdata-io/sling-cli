@@ -1,12 +1,11 @@
 package dbt
 
 import (
+	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
-
-	"github.com/flarco/dbio"
 
 	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
@@ -47,7 +46,7 @@ func NewDbt(dbtConfig string) (d *Dbt, err error) {
 }
 
 // Init initializes the DBT Project and generates profiles
-func (d *Dbt) Init(conns ...dbio.DataConn) (err error) {
+func (d *Dbt) Init(conns ...connection.Connection) (err error) {
 	// clone git repo
 	if d.ProjectPath == "" {
 		// will clone into ~/.sling/repos/<owner>/<repo>

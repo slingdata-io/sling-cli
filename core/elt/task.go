@@ -62,10 +62,10 @@ func NewTask(execID int, cfg Config) (j Task) {
 		progressHist: []string{},
 	}
 
-	srcFileProvided := cfg.StdIn || cfg.SrcConn.IsFileType()
-	tgtFileProvided := cfg.StdOut || cfg.TgtConn.IsFileType()
-	srcDbProvided := cfg.SrcConn.IsDbType()
-	tgtDbProvided := cfg.TgtConn.IsDbType()
+	srcFileProvided := cfg.StdIn || cfg.SrcConn.Info().Type.IsFile()
+	tgtFileProvided := cfg.StdOut || cfg.TgtConn.Info().Type.IsFile()
+	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
+	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
 	srcTableQueryProvided := cfg.Source.Table != "" || cfg.Source.SQL != ""
 
 	if cfg.Target.Mode == "" {

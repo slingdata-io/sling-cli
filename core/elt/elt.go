@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/dbio/filesys"
+	"github.com/flarco/dbio/connection"
 
-	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/filesys"
 
 	"github.com/dustin/go-humanize"
 	"github.com/slingdata-io/sling/core/env"
@@ -149,7 +149,7 @@ func (j *Task) runDbSQL() (err error) {
 
 	j.SetProgress("connecting to target database")
 	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
+	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -157,7 +157,7 @@ func (j *Task) runDbSQL() (err error) {
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -166,7 +166,7 @@ func (j *Task) runDbSQL() (err error) {
 	j.SetProgress("executing sql on target database")
 	result, err := tgtConn.ExecContext(j.Ctx, j.Cfg.Target.PostSQL)
 	if err != nil {
-		err = g.Error(err, "Could not complete sql execution on %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not complete sql execution on %s (%s)", j.Cfg.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -193,7 +193,7 @@ func (j *Task) runDbDbt() (err error) {
 	})
 
 	if dbtObj.Profile == "" {
-		dbtObj.Profile = j.Cfg.TgtConn.ID
+		dbtObj.Profile = j.Cfg.TgtConn.Info().Name
 	}
 
 	err = dbtObj.Init(j.Cfg.TgtConn)
@@ -213,7 +213,7 @@ func (j *Task) runDbToFile() (err error) {
 
 	start = time.Now()
 	srcProps := g.MapToKVArr(j.Cfg.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
+	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -222,7 +222,7 @@ func (j *Task) runDbToFile() (err error) {
 	j.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.Info().Name, srcConn.GetType())
 		return
 	}
 
@@ -256,7 +256,7 @@ func (j *Task) runFileToDB() (err error) {
 
 	j.SetProgress("connecting to target database")
 	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
+	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -264,7 +264,7 @@ func (j *Task) runFileToDB() (err error) {
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -333,14 +333,14 @@ func (j *Task) runDbToDb() (err error) {
 
 	// Initiate connections
 	srcProps := g.MapToKVArr(j.Cfg.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL, srcProps...)
+	srcConn, err := database.NewConnContext(j.Ctx, j.Cfg.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
 	tgtProps := g.MapToKVArr(j.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL, tgtProps...)
+	tgtConn, err := database.NewConnContext(j.Ctx, j.Cfg.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -349,14 +349,14 @@ func (j *Task) runDbToDb() (err error) {
 	j.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.ID, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.SrcConn.Info().Name, srcConn.GetType())
 		return
 	}
 
 	j.SetProgress("connecting to target database")
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.ID, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", j.Cfg.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -386,7 +386,7 @@ func (j *Task) runDbToDb() (err error) {
 	// to DirectLoad if possible
 	if j.df.FsURL != "" {
 		data := g.M("url", j.df.FsURL)
-		for k, v := range g.KVArrToMap(srcConn.PropArr()...) {
+		for k, v := range srcConn.Props() {
 			data[k] = v
 		}
 		j.Cfg.Source.Data["SOURCE_FILE"] = g.Map{"data": data}
@@ -493,16 +493,16 @@ func (j *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
 	var stream *iop.Datastream
 
-	if cfg.SrcConn.URL != "" {
-		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcConn.URL, g.MapToKVArr(cfg.SrcConn.DataS())...)
+	if cfg.SrcConn.URL() != "" {
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.SrcConn.URL(), g.MapToKVArr(cfg.SrcConn.DataS())...)
 		if err != nil {
-			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL)
+			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL())
 			return df, err
 		}
 
-		df, err = fs.ReadDataflow(cfg.SrcConn.URL)
+		df, err = fs.ReadDataflow(cfg.SrcConn.URL())
 		if err != nil {
-			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcConn.URL)
+			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcConn.URL())
 			return df, err
 		}
 	} else {
@@ -526,16 +526,16 @@ func (j *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 	var stream *iop.Datastream
 	var bw int64
 
-	if cfg.TgtConn.URL != "" {
+	if cfg.TgtConn.URL() != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
-		cfg.TgtConn.URL = g.Rm(cfg.TgtConn.URL, dateMap)
-		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtConn.URL, g.MapToKVArr(cfg.TgtConn.DataS())...)
+		cfg.TgtConn.Set(g.M("url", g.Rm(cfg.TgtConn.URL(), dateMap)))
+		fs, err := filesys.NewFileSysClientFromURLContext(j.Ctx, cfg.TgtConn.URL(), g.MapToKVArr(cfg.TgtConn.DataS())...)
 		if err != nil {
-			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL)
+			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL())
 			return cnt, err
 		}
 
-		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL)
+		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL())
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err
@@ -613,16 +613,16 @@ func (j *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// supports direct loading (RedShift, Snowflake or Azure)
 	// do direct loading (without passing through our box)
 	// risk is potential data loss, since we cannot validate counts
-	srcFile, _ := dbio.NewDataConnFromMap(g.M())
+	srcFile, _ := connection.NewConnectionFromMap(g.M())
 	if sf, ok := j.Cfg.Source.Data["SOURCE_FILE"]; ok {
-		srcFile, err = dbio.NewDataConnFromMap(sf.(g.Map))
+		srcFile, err = connection.NewConnectionFromMap(sf.(g.Map))
 		if err != nil {
 			err = g.Error(err, "could not create data conn for SOURCE_FILE")
 			return
 		}
 	}
 
-	cnt, ok, err := tgtConn.CopyDirect(cfg.Target.TableTmp, *srcFile)
+	cnt, ok, err := connection.CopyDirect(tgtConn, cfg.Target.TableTmp, srcFile)
 	if ok {
 		df.SetEmpty() // this executes deferred functions (such as file residue removal
 		if err != nil {

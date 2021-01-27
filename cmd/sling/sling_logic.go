@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/flarco/dbio/connection"
 	"os"
 	"os/exec"
 	"runtime"
@@ -26,23 +27,15 @@ func listLocalConns() {
 		if !strings.Contains(val, ":/") {
 			continue
 		}
-		conn, err := dbio.NewDataConnFromURL(key, val)
+		conn, err := connection.NewConnectionFromURL(key, val)
 		if g.LogError(err) {
 			continue
 		}
 
-		if conn.GetType() == dbio.ConnTypeNone || conn.GetType() == dbio.ConnTypeFileHTTP {
+		if conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
 			continue
 		}
-		connType := ""
-		switch {
-		case conn.IsDbType():
-			connType = "database"
-		case conn.IsFileType():
-			connType = "file-system"
-		}
-		connType = conn.GetTypeNameLong()
-		rows = append(rows, []interface{}{conn.ID, connType})
+		rows = append(rows, []interface{}{conn.Info().Name, connection.GetTypeNameLong(conn)})
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
@@ -139,22 +132,14 @@ func processELT(c *g.CliSC) (err error) {
 	}
 
 	doLog = func() {
-		srcType := task.Cfg.SrcConn.GetTypeNameLong()
-		if srcType == "" {
-			srcType = task.Cfg.SrcConn.GetTypeNameLong()
-		}
-		tgtType := task.Cfg.TgtConn.GetTypeNameLong()
-		if tgtType == "" {
-			tgtType = task.Cfg.TgtConn.GetTypeNameLong()
-		}
 		logUsage(g.M(
 			"cmd", "elt",
 			"error", g.ErrorText(task.Err),
 			"job_type", task.Type,
 			"job_mode", task.Cfg.Target.Mode,
 			"job_status", task.Status,
-			"job_src_type", srcType,
-			"job_tgt_type", tgtType,
+			"job_src_type", connection.GetTypeNameLong(task.Cfg.SrcConn),
+			"job_tgt_type", connection.GetTypeNameLong(task.Cfg.TgtConn),
 			"job_start_time", task.StartTime,
 			"job_end_time", task.EndTime,
 			"job_rows_count", task.GetCount(),

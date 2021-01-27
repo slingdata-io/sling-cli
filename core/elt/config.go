@@ -2,10 +2,10 @@ package elt
 
 import (
 	"encoding/json"
+	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"os"
 
-	"github.com/flarco/dbio"
 	"github.com/slingdata-io/sling/core/dbt"
 
 	"github.com/flarco/dbio/iop"
@@ -123,18 +123,18 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = g.M()
 	}
 	cfg.Target.Data["url"] = cfg.Target.URL
-	tgtConn, err := dbio.NewDataConnFromMap(g.M("id", cfg.Target.Conn, "data", cfg.Target.Data))
+	tgtConn, err := connection.NewConnectionFromMap(g.M("id", cfg.Target.Conn, "data", cfg.Target.Data))
 	if err != nil {
 		return g.Error(err, "could not create data conn for target")
 	}
-	cfg.TgtConn = *tgtConn
+	cfg.TgtConn = tgtConn
 
 	// Source
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
 	cfg.Source.Data["url"] = cfg.Source.URL
-	srcConn, err := dbio.NewDataConnFromMap(g.M("id", cfg.Source.Conn, "data", cfg.Source.Data))
+	srcConn, err := connection.NewConnectionFromMap(g.M("id", cfg.Source.Conn, "data", cfg.Source.Data))
 	if err != nil {
 		if cfg.Target.Dbt == nil {
 			return g.Error(err, "could not create data conn for source")
@@ -142,7 +142,7 @@ func (cfg *Config) Prepare() (err error) {
 			err = nil
 		}
 	}
-	cfg.SrcConn = *srcConn
+	cfg.SrcConn = srcConn
 
 	cfg.prepared = true
 	return
@@ -151,13 +151,13 @@ func (cfg *Config) Prepare() (err error) {
 // Marshal marshals into JSON
 func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
-	cfg.Source.Conn = cfg.SrcConn.ID
-	cfg.Source.URL = cfg.SrcConn.URL
-	cfg.Source.Data = cfg.SrcConn.Data
+	cfg.Source.Conn = cfg.SrcConn.Info().Name
+	cfg.Source.URL = cfg.SrcConn.URL()
+	cfg.Source.Data = cfg.SrcConn.Info().Data
 
-	cfg.Target.Conn = cfg.TgtConn.ID
-	cfg.Target.URL = cfg.TgtConn.URL
-	cfg.Target.Data = cfg.TgtConn.Data
+	cfg.Target.Conn = cfg.TgtConn.Info().Name
+	cfg.Target.URL = cfg.TgtConn.URL()
+	cfg.Target.Data = cfg.TgtConn.Info().Data
 
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
@@ -168,107 +168,69 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 }
 
 // Decrypt decrypts the sensitive connection strings
-func (cfg *Config) Decrypt(secret string) (err error) {
-	decrypt := func(dConn *dbio.DataConn) error {
-		dConn.URL, err = g.Decrypt(dConn.URL, secret)
-		if err != nil {
-			return g.Error(err, "could not decrypt")
-		}
-		for k := range dConn.Data {
-			if _, ok := fileVarsDefault[k]; ok {
-				continue
-			}
-			dConn.Data[k], err = g.Decrypt(dConn.DataS()[k], secret)
-			if err != nil {
-				return g.Error(err, "could not decrypt")
-			}
-		}
-		return nil
-	}
-
-	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.TgtConn}
-	for i := range dConns {
-		err = decrypt(dConns[i])
-		if err != nil {
-			return g.Error(err, "could not decrypt fields for "+dConns[i].ID)
-		}
-	}
-	return nil
-}
+//func (cfg *Config) Decrypt(secret string) (err error) {
+//	decrypt := func(dConn *connection.DataConn) error {
+//		dConn.URL, err = g.Decrypt(dConn.URL, secret)
+//		if err != nil {
+//			return g.Error(err, "could not decrypt")
+//		}
+//		for k := range dConn.Data {
+//			if _, ok := fileVarsDefault[k]; ok {
+//				continue
+//			}
+//			dConn.Data[k], err = g.Decrypt(dConn.DataS()[k], secret)
+//			if err != nil {
+//				return g.Error(err, "could not decrypt")
+//			}
+//		}
+//		return nil
+//	}
+//
+//	dConns := []*connection.DataConn{&cfg.SrcConn, &cfg.TgtConn}
+//	for i := range dConns {
+//		err = decrypt(dConns[i])
+//		if err != nil {
+//			return g.Error(err, "could not decrypt fields for "+dConns[i].ID)
+//		}
+//	}
+//	return nil
+//}
 
 // Encrypt encrypts the sensitive connection strings
-func (cfg *Config) Encrypt(secret string) (err error) {
-	encrypt := func(dConn *dbio.DataConn) error {
-		dConn.URL, err = g.Encrypt(dConn.URL, secret)
-		if err != nil {
-			return g.Error(err, "could not decrypt")
-		}
-		for k := range dConn.Data {
-			if _, ok := fileVarsDefault[k]; ok {
-				continue
-			}
-			dConn.Data[k], err = g.Encrypt(dConn.DataS()[k], secret)
-			if err != nil {
-				return g.Error(err, "could not decrypt")
-			}
-		}
-		return nil
-	}
-
-	dConns := []*dbio.DataConn{&cfg.SrcConn, &cfg.TgtConn}
-	for i := range dConns {
-		err = encrypt(dConns[i])
-		if err != nil {
-			return g.Error(err, "could not encrypt fields for "+dConns[i].ID)
-		}
-	}
-	return nil
-}
-
-// ConfigOld is a config for the sling task
-type ConfigOld struct {
-	SrcConn    dbio.DataConn `json:"-"`
-	SrcConnObj interface{}   `json:"src_conn" yaml:"src_conn"`
-	SrcTable   string        `json:"src_table" yaml:"src_table"`
-	SrcSQL     string        `json:"src_sql" yaml:"src_sql"`
-	Limit      uint64        `json:"limit" yaml:"limit"`
-
-	TgtConn     dbio.DataConn `json:"-"`
-	TgtConnObj  interface{}   `json:"tgt_conn" yaml:"tgt_conn"`
-	TgtTable    string        `json:"tgt_table" yaml:"tgt_table"`
-	TgtTableDDL string        `json:"tgt_table_ddl" yaml:"tgt_table_ddl"`
-	TgtTableTmp string        `json:"tgt_table_tmp" yaml:"tgt_table_tmp"`
-	TgtPreSQL   string        `json:"pre_sql" yaml:"pre_sql"`
-	TgtPostSQL  string        `json:"post_sql" yaml:"post_sql"`
-	TgtPostDbt  g.Map         `json:"post_dbt" yaml:"post_dbt"`
-	PrimaryKey  string        `json:"primary_key" yaml:"primary_key"`
-	UpdateKey   string        `json:"update_key" yaml:"update_key"`
-	Mode        string        `json:"mode" yaml:"mode"` // append, upsert, truncate, drop
-
-	SrcFile    dbio.DataConn `json:"-"`
-	SrcFileObj interface{}   `json:"src_file" yaml:"src_file"`
-
-	TgtFile    dbio.DataConn `json:"-"`
-	TgtFileObj interface{}   `json:"tgt_file" yaml:"tgt_file"`
-
-	Props map[string]interface{} `json:"props" yaml:"props"`
-	Env   map[string]interface{} `json:"env" yaml:"env"`
-
-	UpsertVal       string `json:"-"`
-	StdIn           bool   `json:"-"`                    // whether stdin is passed
-	StdOut          bool   `json:"stdout" yaml:"stdout"` // whether to output to stdout
-	SrcColumns      iop.Columns
-	TgtColumns      iop.Columns
-	TmpTableCreated bool
-	prepared        bool
-}
+//func (cfg *Config) Encrypt(secret string) (err error) {
+//	encrypt := func(dConn *connection.DataConn) error {
+//		dConn.URL, err = g.Encrypt(dConn.URL, secret)
+//		if err != nil {
+//			return g.Error(err, "could not decrypt")
+//		}
+//		for k := range dConn.Data {
+//			if _, ok := fileVarsDefault[k]; ok {
+//				continue
+//			}
+//			dConn.Data[k], err = g.Encrypt(dConn.DataS()[k], secret)
+//			if err != nil {
+//				return g.Error(err, "could not decrypt")
+//			}
+//		}
+//		return nil
+//	}
+//
+//	dConns := []*connection.DataConn{&cfg.SrcConn, &cfg.TgtConn}
+//	for i := range dConns {
+//		err = encrypt(dConns[i])
+//		if err != nil {
+//			return g.Error(err, "could not encrypt fields for "+dConns[i].ID)
+//		}
+//	}
+//	return nil
+//}
 
 // Config is the new config struct
 type Config struct {
-	SrcConn dbio.DataConn `json:"-"`
-	Source  Source        `json:"source,omitempty" yaml:"source,omitempty"`
+	SrcConn connection.Connection `json:"-"`
+	Source  Source              `json:"source,omitempty" yaml:"source,omitempty"`
 
-	TgtConn dbio.DataConn          `json:"-"`
+	TgtConn connection.Connection    `json:"-"`
 	Target  Target                 `json:"target,omitempty" yaml:"target,omitempty"`
 	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
 

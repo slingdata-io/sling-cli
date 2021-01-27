@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/flarco/dbio/connection"
+
 	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
 	"gopkg.in/yaml.v2"
@@ -24,7 +26,7 @@ type profileConfig struct {
 type profileOutput map[string]interface{}
 
 // generateProfile creates the connection profile YAML file
-func (d *Dbt) generateProfile(conns []dbio.DataConn) (err error) {
+func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
 	filepath := g.F("%s/profiles.yml", d.HomePath)
 	defTarget := "main"
 	prof := g.M()
@@ -41,15 +43,15 @@ func (d *Dbt) generateProfile(conns []dbio.DataConn) (err error) {
 	conns = append(conns, connsLocal...)
 
 	for _, conn := range conns {
-		if !conn.IsDbType() {
+		if conn.Info().Type.Kind() != dbio.KindDatabase {
 			continue
 		}
 		pe, err := d.getProfileEntry(conn)
 		if err != nil {
-			err = g.Error(err, "could not obtain profile entry for "+conn.ID)
+			err = g.Error(err, "could not obtain profile entry for "+conn.Info().Name)
 			return err
 		}
-		prof[conn.ID] = profileConn{
+		prof[conn.Info().Name] = profileConn{
 			Target: defTarget,
 			Outputs: map[string]profileOutput{
 				defTarget: pe,
@@ -70,13 +72,9 @@ func (d *Dbt) generateProfile(conns []dbio.DataConn) (err error) {
 	return
 }
 
-func (d *Dbt) getProfileEntry(conn dbio.DataConn) (pe map[string]interface{}, err error) {
+func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interface{}, err error) {
 
-	pe, err = conn.GetCredProps()
-	if err != nil {
-		err = g.Error(err, "could not parse credentials")
-		return
-	}
+	pe = conn.Info().Data
 
 	u, _ := pe["url"].(*url.URL)
 	q := u.Query()
@@ -92,18 +90,18 @@ func (d *Dbt) getProfileEntry(conn dbio.DataConn) (pe map[string]interface{}, er
 	if d.Schema != "" {
 		pe["schema"] = d.Schema
 	}
-	switch conn.GetType() {
-	case dbio.ConnTypeDbPostgres:
+	switch conn.Info().Type {
+	case dbio.TypeDbPostgres:
 		pe["sslmode"] = q.Get("sslmode")
-	case dbio.ConnTypeDbRedshift:
+	case dbio.TypeDbRedshift:
 		pe["sslmode"] = q.Get("sslmode")
-	case dbio.ConnTypeDbOracle:
-	case dbio.ConnTypeDbSQLServer:
+	case dbio.TypeDbOracle:
+	case dbio.TypeDbSQLServer:
 		pe["server"] = pe["host"]
 		pe["driver"] = "ODBC Driver 17 for SQL Server" // need to ensure the ODBC driver is installable on image
 		delete(pe, "host")
 
-	case dbio.ConnTypeDbBigQuery:
+	case dbio.TypeDbBigQuery:
 		pe["project"] = q.Get("GC_CRED_FILE")
 		pe["project"] = q.Get("PROJECT_ID")
 		pe["location"] = q.Get("location")
@@ -136,7 +134,7 @@ func (d *Dbt) getProfileEntry(conn dbio.DataConn) (pe map[string]interface{}, er
 		delete(pe, "pass")
 		delete(pe, "user")
 
-	case dbio.ConnTypeDbSnowflake:
+	case dbio.TypeDbSnowflake:
 		pe["account"] = pe["host"]
 		pe["password"] = pe["pass"]
 		pe["database"] = pe["dbname"]
