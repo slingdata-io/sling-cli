@@ -1,10 +1,11 @@
 package dbt
 
 import (
-	"github.com/flarco/dbio"
 	"io/ioutil"
-	"net/url"
 	"os"
+
+	"github.com/flarco/dbio"
+	"github.com/flarco/g/net"
 
 	"github.com/flarco/dbio/connection"
 
@@ -43,7 +44,7 @@ func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
 	conns = append(conns, connsLocal...)
 
 	for _, conn := range conns {
-		if conn.Info().Type.Kind() != dbio.KindDatabase {
+		if !conn.Info().Type.IsDb() {
 			continue
 		}
 		pe, err := d.getProfileEntry(conn)
@@ -75,14 +76,19 @@ func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
 func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interface{}, err error) {
 
 	pe = conn.Info().Data
+	pe["type"] = conn.Info().Type.String()
 
-	u, _ := pe["url"].(*url.URL)
-	q := u.Query()
+	u, err := net.NewURL(conn.URL())
+	if err != nil {
+		return pe, g.Error("could not parse url")
+	}
 
+	pe["user"] = pe["username"]
 	pe["pass"] = pe["password"]
 	pe["dbname"] = pe["database"]
 	pe["threads"] = 3
 
+	delete(pe, "username")
 	delete(pe, "password")
 	delete(pe, "database")
 	delete(pe, "url")
@@ -92,9 +98,9 @@ func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interfa
 	}
 	switch conn.Info().Type {
 	case dbio.TypeDbPostgres:
-		pe["sslmode"] = q.Get("sslmode")
+		pe["sslmode"] = u.GetParam("sslmode")
 	case dbio.TypeDbRedshift:
-		pe["sslmode"] = q.Get("sslmode")
+		pe["sslmode"] = u.GetParam("sslmode")
 	case dbio.TypeDbOracle:
 	case dbio.TypeDbSQLServer:
 		pe["server"] = pe["host"]
@@ -102,9 +108,9 @@ func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interfa
 		delete(pe, "host")
 
 	case dbio.TypeDbBigQuery:
-		pe["project"] = q.Get("GC_CRED_FILE")
-		pe["project"] = q.Get("PROJECT_ID")
-		pe["location"] = q.Get("location")
+		pe["project"] = u.GetParam("GC_CRED_FILE")
+		pe["project"] = u.GetParam("PROJECT_ID")
+		pe["location"] = u.GetParam("location")
 		pe["dataset"] = pe["schema"]
 		pe["method"] = "service-account"
 
@@ -114,7 +120,7 @@ func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interfa
 			jsonBody = os.Getenv("GC_CRED_JSON_BODY")
 		}
 		if jsonBody == "" {
-			bytes, _ := ioutil.ReadFile(q.Get("GC_CRED_FILE"))
+			bytes, _ := ioutil.ReadFile(u.GetParam("GC_CRED_FILE"))
 			jsonBody = string(bytes)
 		}
 
@@ -138,7 +144,7 @@ func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interfa
 		pe["account"] = pe["host"]
 		pe["password"] = pe["pass"]
 		pe["database"] = pe["dbname"]
-		pe["warehouse"] = q.Get("warehouse")
+		pe["warehouse"] = u.GetParam("warehouse")
 		delete(pe, "port")
 		delete(pe, "pass")
 		delete(pe, "dbname")

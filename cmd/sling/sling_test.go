@@ -43,56 +43,56 @@ var DBs = []*testDB{
 	&testDB{
 		// https://github.com/lib/pq
 		name:  "Postgres",
-		URL:   "POSTGRES_URL",
+		URL:   "$POSTGRES_URL",
 		table: "public.test1",
 	},
 
 	&testDB{
 		// https://github.com/godror/godror
 		name:  "Oracle",
-		URL:   "ORACLE_URL",
+		URL:   "$ORACLE_URL",
 		table: "system.test1",
 	},
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "MySQL",
-	// 	URL:   "MYSQL_URL",
+	// 	URL:   "$MYSQL_URL",
 	// 	table: "mysql.test1",
 	// },
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "SQLServer",
-	// 	URL:   "MSSQL_URL",
+	// 	URL:   "$MSSQL_URL",
 	// 	table: "dbo.test1",
 	// },
 
 	// &testDB{
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "AzureSQL",
-	// 	URL:   "AZURESQL_URL",
+	// 	URL:   "$AZURESQL_URL",
 	// 	table: "dbo.test1",
 	// },
 
 	// &testDB{
 	// 	// https://github.com/snowflakedb/gosnowflake
 	// 	name:  "Snowflake",
-	// 	URL:   "SNOWFLAKE_URL",
+	// 	URL:   "$SNOWFLAKE_URL",
 	// 	table: "sling.test1",
 	// },
 
 	// &testDB{
 	// 	// https://github.com/snowflakedb/gosnowflake
 	// 	name:  "BigQuery",
-	// 	URL:   "BIGQUERY_URL",
+	// 	URL:   "$BIGQUERY_URL",
 	// 	table: "public.test1",
 	// },
 
 	// &testDB{
 	// 	// https://github.com/lib/pq
 	// 	name:  "Redshift",
-	// 	URL:   os.Getenv("REDSHIFT_URL"),
+	// 	URL:   "$REDSHIFT_URL",
 	// 	table: "public.test1",
 	// },
 }
@@ -308,15 +308,18 @@ func TestCfgPath(t *testing.T) {
 
 	testCfg := func(path string) (err error) {
 		cfg, err := elt.NewConfig(path)
-		assert.NoError(t, err)
+		if g.LogError(err) {
+			assert.NoError(t, err)
+			return
+		}
 
-		assert.EqualValues(t, "testing", cfg.SrcConn.ID)
+		assert.EqualValues(t, "testing", cfg.SrcConn.Info().Name)
 		assert.EqualValues(t, "testing", cfg.Source.Table)
-		assert.EqualValues(t, "testing", cfg.SrcConn.URL)
+		assert.EqualValues(t, "testing", cfg.SrcConn.URL())
 		assert.EqualValues(t, "testing", cfg.Source.SQL)
-		assert.EqualValues(t, "testing", cfg.TgtConn.ID)
+		assert.EqualValues(t, "testing", cfg.TgtConn.Info().Name)
 		assert.EqualValues(t, "testing", cfg.Target.Table)
-		assert.EqualValues(t, "testing", cfg.TgtConn.URL)
+		assert.EqualValues(t, "testing", cfg.TgtConn.URL())
 		assert.EqualValues(t, "testing", cfg.Target.Mode)
 		assert.EqualValues(t, 111, cfg.Source.Limit)
 		assert.EqualValues(t, "testing", cfg.Target.TableDDL)

@@ -1,11 +1,12 @@
 package dbt
 
 import (
-	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/flarco/dbio/connection"
 
 	"github.com/flarco/dbio/local"
 	g "github.com/flarco/g"
@@ -38,6 +39,9 @@ func NewDbt(dbtConfig string) (d *Dbt, err error) {
 		err = g.Error(err, "could not parse dbt config")
 		return
 	}
+
+	// in case this is referring to a env var.
+	d.Profile = strings.TrimPrefix(d.Profile, "$")
 
 	// create process seesion
 	d.Session = process.NewSession()

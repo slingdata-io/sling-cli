@@ -2,9 +2,10 @@ package elt
 
 import (
 	"encoding/json"
-	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"os"
+
+	"github.com/flarco/dbio/connection"
 
 	"github.com/slingdata-io/sling/core/dbt"
 
@@ -60,7 +61,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		}
 	}
 
-	err := yaml.Unmarshal(cfgBytes, &cfg)
+	err := yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
 		return g.Error(err, "Error parsing cfgBytes")
 	}
@@ -228,9 +229,9 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 // Config is the new config struct
 type Config struct {
 	SrcConn connection.Connection `json:"-"`
-	Source  Source              `json:"source,omitempty" yaml:"source,omitempty"`
+	Source  Source                `json:"source,omitempty" yaml:"source,omitempty"`
 
-	TgtConn connection.Connection    `json:"-"`
+	TgtConn connection.Connection  `json:"-"`
 	Target  Target                 `json:"target,omitempty" yaml:"target,omitempty"`
 	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
 
