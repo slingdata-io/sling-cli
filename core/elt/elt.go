@@ -3,7 +3,6 @@ package elt
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"os"
@@ -111,7 +110,7 @@ func (j *Task) Execute() error {
 			j.Err = j.runFileToFile()
 		} else {
 			j.SetProgress("task execution configuration is invalid")
-			j.Err = fmt.Errorf("Cannot Execute. Task Type is not specified")
+			j.Err = g.Error("Cannot Execute. Task Type is not specified")
 		}
 	}()
 
@@ -125,7 +124,7 @@ func (j *Task) Execute() error {
 		case <-time.After(3 * time.Second):
 		}
 		if j.Err == nil {
-			j.Err = fmt.Errorf("Execution interrupted")
+			j.Err = g.Error("Execution interrupted")
 		}
 	}
 

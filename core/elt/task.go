@@ -3,7 +3,6 @@ package elt
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os/exec"
 	"time"
 
@@ -73,18 +72,18 @@ func NewTask(execID int, cfg Config) (j Task) {
 	}
 	validMode := cfg.Target.Mode != Mode("")
 	if !validMode {
-		j.Err = fmt.Errorf("must specify valid mode: append, drop, upsert or truncate")
+		j.Err = g.Error("must specify valid mode: append, drop, upsert or truncate")
 		return
 	}
 
 	if cfg.Target.Mode == "upsert" && (len(cfg.Target.PrimaryKey) == 0 || len(cfg.Target.UpdateKey) == 0) {
-		j.Err = fmt.Errorf("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
+		j.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
 		return
 	}
 
 	if srcDbProvided && tgtDbProvided && cfg.Target.Dbt == nil {
 		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
-			j.Err = fmt.Errorf("Must specify update_key / primary_key for 'upsert' mode")
+			j.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}
 		j.Type = DbToDb
@@ -101,8 +100,7 @@ func NewTask(execID int, cfg Config) (j Task) {
 	}
 
 	if j.Type == "" {
-		g.P(cfg)
-		j.Err = fmt.Errorf("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
+		j.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
 	}
 
 	return

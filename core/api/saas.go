@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
-	"fmt"
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/connection"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/connection"
 
 	"github.com/slingdata-io/sling/core/env"
 
@@ -474,7 +474,7 @@ func (aos *APIEndpoint) Unmarshal(body []byte, data *interface{}) (err error) {
 	case "xml":
 		return xml.Unmarshal(body, &data)
 	default:
-		err = fmt.Errorf("unhandled response type '%s'", aos.RespType)
+		err = g.Error("unhandled response type '%s'", aos.RespType)
 		return g.Error(err)
 	}
 }

@@ -172,7 +172,7 @@ func updateCLI(c *g.CliSC) (err error) {
 	} else if runtime.GOOS == "windows" {
 		url = "https://f.slingdata.io/windows/sling.exe"
 	} else {
-		return fmt.Errorf("OS Unsupported: %s", runtime.GOOS)
+		return g.Error("OS Unsupported: %s", runtime.GOOS)
 	}
 
 	execFileName, err := osext.Executable()
@@ -189,7 +189,7 @@ func updateCLI(c *g.CliSC) (err error) {
 	err = net.DownloadFile(url, filePath)
 	if err != nil {
 		println("Unable to download update!")
-		return fmt.Errorf(strings.ReplaceAll(err.Error(), url, ""))
+		return g.Error(strings.ReplaceAll(err.Error(), url, ""))
 	}
 	err = os.Chmod(filePath, fileMode)
 	if err != nil {

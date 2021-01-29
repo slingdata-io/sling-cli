@@ -85,16 +85,16 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 }
 
 var fileVarsDefault = map[string]string{
-	"NULL_IF":             "NULL",
-	"COMPRESSION":         "AUTO", // TODO: ZIP | GZIP | SNAPPY | NONE
-	"EMPTY_FIELD_AS_NULL": "TRUE",
-	"TRIM_SPACE":          "FALSE",
+	"null_if":             "NULL",
+	"compression":         "AUTO", // TODO: ZIP | GZIP | SNAPPY | NONE
+	"empty_field_as_null": "TRUE",
+	"trim_space":          "FALSE",
 	"DATE_FORMAT":         "AUTO",
 	"TIME_FORMAT":         "AUTO",
-	"SKIP_BLANK_LINES":    "FALSE",
-	"FILE_MAX_ROWS":       "0",
-	"DELIMITER":           ",",
-	"HEADER":              "TRUE",
+	"skip_blank_lines":    "FALSE",
+	"file_max_rows":       "0",
+	"delimiter":           ",",
+	"header":              "TRUE",
 }
 
 // Prepare prepares the config
@@ -160,6 +160,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 	cfg.Target.URL = cfg.TgtConn.URL()
 	cfg.Target.Data = cfg.TgtConn.Info().Data
 
+	g.P(cfg)
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
 		err = g.Error(err, "Could not encode provided configuration into JSON")
