@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/flarco/dbio/connection"
 	"os"
 	"os/exec"

@@ -124,7 +124,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = g.M()
 	}
 	cfg.Target.Data["url"] = cfg.Target.URL
-	tgtConn, err := connection.NewConnectionFromMap(g.M("id", cfg.Target.Conn, "data", cfg.Target.Data))
+	tgtConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Target.Conn, "data", cfg.Target.Data))
 	if err != nil {
 		return g.Error(err, "could not create data conn for target")
 	}
@@ -135,7 +135,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = g.M()
 	}
 	cfg.Source.Data["url"] = cfg.Source.URL
-	srcConn, err := connection.NewConnectionFromMap(g.M("id", cfg.Source.Conn, "data", cfg.Source.Data))
+	srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
 	if err != nil {
 		if cfg.Target.Dbt == nil {
 			return g.Error(err, "could not create data conn for source")
@@ -192,7 +192,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 //	for i := range dConns {
 //		err = decrypt(dConns[i])
 //		if err != nil {
-//			return g.Error(err, "could not decrypt fields for "+dConns[i].ID)
+//			return g.Error(err, "could not decrypt fields for "+dConns[i].Name)
 //		}
 //	}
 //	return nil
@@ -221,7 +221,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 //	for i := range dConns {
 //		err = encrypt(dConns[i])
 //		if err != nil {
-//			return g.Error(err, "could not encrypt fields for "+dConns[i].ID)
+//			return g.Error(err, "could not encrypt fields for "+dConns[i].Name)
 //		}
 //	}
 //	return nil
