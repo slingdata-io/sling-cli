@@ -160,7 +160,6 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 	cfg.Target.URL = cfg.TgtConn.URL()
 	cfg.Target.Data = cfg.TgtConn.Info().Data
 
-	g.P(cfg)
 	cfgBytes, err = json.Marshal(cfg)
 	if err != nil {
 		err = g.Error(err, "Could not encode provided configuration into JSON")
