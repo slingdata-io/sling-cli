@@ -67,10 +67,6 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		return g.Error(err, "Error parsing cfgBytes")
 	}
 
-	if cfg.Props == nil {
-		cfg.Props = g.Map{}
-	}
-
 	if cfg.Env == nil {
 		cfg.Env = g.Map{}
 	}
@@ -91,53 +87,55 @@ func (cfg *Config) Prepare() (err error) {
 		return
 	}
 
-	// Set Source
-	if cfg.Source.Conn != "" && cfg.Source.URL == "" {
-		cfg.Source.URL = cfg.Source.Conn
+	// Check Inputs
+	if !cfg.Options.StdIn && cfg.Source.Conn == "" && cfg.Target.Conn == "" {
+		return g.Error("invalid source connection. Input is blank or not found")
 	}
-	if !cfg.StdIn && cfg.Source.URL == "" && cfg.Target.Dbt == nil && cfg.Target.URL == "" {
-		return g.Error("invalid source connection. URL is blank or not found")
+	if !cfg.Options.StdOut && cfg.Target.Conn == "" {
+		return g.Error("invalid target connection. Input is blank or not found")
 	}
 
 	// Set Target
-	if cfg.Target.Conn != "" && cfg.Target.URL == "" {
-		cfg.Target.URL = cfg.Target.Conn
-	}
-	if !cfg.StdOut && cfg.Target.URL == "" {
-		return g.Error("invalid target connection. URL is blank or not found")
-	}
-
-	// Target
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
 	}
-	cfg.Target.Data["url"] = cfg.Target.URL
+	if strings.Contains(cfg.Target.Object, "://") {
+		cfg.Target.Data["url"] = cfg.Target.Object
+	} else {
+		cfg.Target.Data["url"] = cfg.Target.Conn
+	}
 	tgtConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Target.Conn, "data", cfg.Target.Data))
 	if err != nil {
 		return g.Error(err, "could not create data conn for target")
 	}
 	cfg.TgtConn = tgtConn
+	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 
-	// Source
+	// fill target table schema if needed
+	if schema, ok := cfg.Target.Data["schema"]; ok && cfg.Target.Object != "" && !strings.Contains(cfg.Target.Object, ".") {
+		cfg.Target.Object = g.F("%s.%s", schema, cfg.Target.Object)
+	}
+
+	// Set Source
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
-	cfg.Source.Data["url"] = cfg.Source.URL
+	if strings.Contains(cfg.Source.Stream, "://") {
+		cfg.Source.Data["url"] = cfg.Source.Stream
+	} else {
+		cfg.Source.Data["url"] = cfg.Source.Conn
+	}
 	srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
 	if err != nil {
 		if cfg.Target.Dbt == nil {
 			return g.Error(err, "could not create data conn for source")
-		} else {
-			err = nil
 		}
+		err = nil
 	}
 	cfg.SrcConn = srcConn
+	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 
-	// fill target table schema if needed
-	if schema, ok := cfg.Target.Data["schema"]; ok && cfg.Target.Table != "" && !strings.Contains(cfg.Target.Table, ".") {
-		cfg.Target.Table = g.F("%s.%s", schema, cfg.Target.Table)
-	}
-
+	// done
 	cfg.prepared = true
 	return
 }
@@ -146,11 +144,9 @@ func (cfg *Config) Prepare() (err error) {
 func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 	cfg.Source.Conn = cfg.SrcConn.Info().Name
-	cfg.Source.URL = cfg.SrcConn.URL()
 	cfg.Source.Data = cfg.SrcConn.Info().Data
 
 	cfg.Target.Conn = cfg.TgtConn.Info().Name
-	cfg.Target.URL = cfg.TgtConn.URL()
 	cfg.Target.Data = cfg.TgtConn.Info().Data
 
 	cfgBytes, err = json.Marshal(cfg)
@@ -221,54 +217,45 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 // Config is the new config struct
 type Config struct {
-	SrcConn connection.Connection `json:"-"`
-	Source  Source                `json:"source,omitempty" yaml:"source,omitempty"`
-
-	TgtConn connection.Connection  `json:"-"`
+	Source  Source                 `json:"source,omitempty" yaml:"source,omitempty"`
 	Target  Target                 `json:"target" yaml:"target"`
-	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"` // remove?
+	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Env     map[string]interface{} `json:"env" yaml:"env"`
 
-	StdIn  bool                   `json:"-"`                    // whether stdin is passed
-	StdOut bool                   `json:"stdout" yaml:"stdout"` // whether to output to stdout
-	Props  map[string]interface{} `json:"props" yaml:"props"`   // remove?
-	Env    map[string]interface{} `json:"env" yaml:"env"`       // remove ?
+	SrcConn   connection.Connection `json:"-" yaml:"-"`
+	TgtConn   connection.Connection `json:"-" yaml:"-"`
+	UpsertVal string                `json:"-" yaml:"-"`
+	prepared  bool                  `json:"-" yaml:"-"`
+}
 
-	UpsertVal string `json:"-"`
-	prepared  bool   `json:"-"`
+// ConfigOptions are configuration options
+type ConfigOptions struct {
+	StdIn     bool    `json:"-"`                    // whether stdin is passed
+	StdOut    bool    `json:"stdout" yaml:"stdout"` // whether to output to stdout
+	ProxyPIDs *string `json:"proxy_pids,omitempty" yaml:"proxy_pids,omitempty"`
 }
 
 // Source is a source of data
 type Source struct {
-	Conn    string  `json:"conn" yaml:"conn"`
-	Object  string  `json:"object" yaml:"object"`
-	Limit   int     `json:"limit,omitempty" yaml:"limit,omitempty"`
-	Options Options `json:"options,omitempty" yaml:"options,omitempty"`
-
-	URL   string                 `json:"url,omitempty" yaml:"url,omitempty"`     // use conn
-	SQL   string                 `json:"sql,omitempty" yaml:"sql,omitempty"`     // use object
-	Table string                 `json:"table,omitempty" yaml:"table,omitempty"` // use object
-	Data  map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`   // remove
+	Conn    string                 `json:"conn" yaml:"conn"`
+	Stream  string                 `json:"stream" yaml:"stream"`
+	Limit   int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Options SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	Columns iop.Columns `json:"-"`
 }
 
 // Target is a target of data
 type Target struct {
-	Conn       string   `json:"conn" yaml:"conn"`
-	Object     string   `json:"object,omitempty" yaml:"object,omitempty"`
-	Options    Options  `json:"options,omitempty" yaml:"options,omitempty"`
-	Mode       Mode     `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Dbt        *dbt.Dbt `json:"dbt,omitempty" yaml:"dbt,omitempty"`
-	PrimaryKey []string `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey  string   `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-
-	TableDDL string                 `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"` // use options.TableDDL
-	TableTmp string                 `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"` // use options.TableTmp
-	PreSQL   string                 `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`     // use options.PreSQL
-	PostSQL  string                 `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`   // use options.PostSQL
-	URL      string                 `json:"url,omitempty" yaml:"url,omitempty"`             // use object
-	Table    string                 `json:"table,omitempty" yaml:"table,omitempty"`         // use object
-	Data     map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`           //remove ?
+	Conn       string                 `json:"conn" yaml:"conn"`
+	Object     string                 `json:"object,omitempty" yaml:"object,omitempty"`
+	Options    TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Dbt        *dbt.Dbt               `json:"dbt,omitempty" yaml:"dbt,omitempty"`
+	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-"`
 	Columns         iop.Columns `json:"-"`
@@ -290,8 +277,8 @@ const (
 	CompressionNone Compression = ""
 )
 
-// Options are connection and stream processing options
-type Options struct {
+// SourceOptions are connection and stream processing options
+type SourceOptions struct {
 	TrimSpace      bool        `json:"trim_space" yaml:"trim_space"`
 	EmptyAsNull    bool        `json:"empty_as_null" yaml:"empty_as_null"`
 	Header         bool        `json:"header" yaml:"header"`
@@ -300,13 +287,25 @@ type Options struct {
 	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
 	SkipBlankLines bool        `json:"skip_blank_lines" yaml:"skip_blank_lines"`
 	Delimiter      rune        `json:"delimiter" yaml:"delimiter"`
-	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
 	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
-	TableDDL       string      `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	TableTmp       string      `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 }
 
-var fileOptionsDefault = Options{
+// TargetOptions are target connection and stream processing options
+type TargetOptions struct {
+	Header         bool        `json:"header" yaml:"header"`
+	Compression    Compression `json:"compression" yaml:"compression"`
+	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
+	Delimiter      rune        `json:"delimiter" yaml:"delimiter"`
+	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
+	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
+
+	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	PreSQL   string `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL  string `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+}
+
+var sourceFileOptionsDefault = SourceOptions{
 	TrimSpace:      false,
 	EmptyAsNull:    true,
 	Header:         true,
@@ -315,6 +314,13 @@ var fileOptionsDefault = Options{
 	DatetimeFormat: "auto",
 	SkipBlankLines: false,
 	Delimiter:      ',',
-	FileMaxRows:    0,
+	MaxDecimals:    -1,
+}
+
+var targetFileOptionsDefault = TargetOptions{
+	Header:         true,
+	Compression:    CompressionAuto,
+	DatetimeFormat: "auto",
+	Delimiter:      ',',
 	MaxDecimals:    -1,
 }

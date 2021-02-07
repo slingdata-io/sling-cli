@@ -74,11 +74,11 @@ func NewTask(execID int, cfg Config) (j Task) {
 		progressHist: []string{},
 	}
 
-	srcFileProvided := cfg.StdIn || cfg.SrcConn.Info().Type.IsFile()
-	tgtFileProvided := cfg.StdOut || cfg.TgtConn.Info().Type.IsFile()
+	srcFileProvided := cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	srcTableQueryProvided := cfg.Source.Table != "" || cfg.Source.SQL != ""
+	srcTableQueryProvided := cfg.Source.Stream != ""
 
 	if cfg.Target.Mode == "" {
 		cfg.Target.Mode = AppendMode
@@ -106,9 +106,9 @@ func NewTask(execID int, cfg Config) (j Task) {
 		j.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		j.Type = FileToFile
-	} else if cfg.Target.Dbt != nil {
+	} else if tgtDbProvided && cfg.Target.Dbt != nil {
 		j.Type = DbDbt
-	} else if tgtDbProvided && cfg.Target.PostSQL != "" {
+	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
 		j.Type = DbSQL
 	}
 

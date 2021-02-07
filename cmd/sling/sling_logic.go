@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/flarco/dbio/connection"
 	"os"
 	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/flarco/dbio/connection"
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
@@ -75,7 +76,7 @@ func processELT(c *g.CliSC) (err error) {
 	// https://stackoverflow.com/a/26567513
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		cfg.StdIn = true
+		cfg.Options.StdIn = true
 	}
 
 	for k, v := range c.Vals {
@@ -83,25 +84,33 @@ func processELT(c *g.CliSC) (err error) {
 		case "config":
 			cfgStr = cast.ToString(v)
 		case "src-file":
-			cfg.Source.URL = cast.ToString(v)
-		case "src-table":
-			cfg.Source.Table = cast.ToString(v)
-		case "src-sql", "query":
-			cfg.Source.SQL = cast.ToString(v)
+			url := cast.ToString(v)
+			if !strings.Contains(url, "://") {
+				url = g.F("file://%s", url) // is local path
+			}
+			cfg.Source.Conn = url
+			cfg.Source.Stream = url
+		case "src-table", "src-sql", "query":
+			cfg.Source.Stream = cast.ToString(v)
 		case "tgt-file":
-			cfg.Target.URL = cast.ToString(v)
+			url := cast.ToString(v)
+			if !strings.Contains(url, "://") {
+				url = g.F("file://%s", url) // is local path
+			}
+			cfg.Target.Conn = url
+			cfg.Target.Object = url
 		case "src-conn", "conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "tgt-conn":
 			cfg.Target.Conn = cast.ToString(v)
 		case "tgt-table":
-			cfg.Target.Table = cast.ToString(v)
+			cfg.Target.Object = cast.ToString(v)
 		case "pre-sql":
-			cfg.Target.PreSQL = cast.ToString(v)
+			cfg.Target.Options.PreSQL = cast.ToString(v)
 		case "post-sql":
-			cfg.Target.PostSQL = cast.ToString(v)
+			cfg.Target.Options.PostSQL = cast.ToString(v)
 		case "stdout":
-			cfg.StdOut = cast.ToBool(v)
+			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Target.Mode = elt.Mode(cast.ToString(v))
 		case "examples":

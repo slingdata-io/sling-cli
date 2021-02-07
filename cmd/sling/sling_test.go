@@ -133,9 +133,9 @@ func TestInToDb(t *testing.T) {
 		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
 
 		config := elt.Config{}
-		config.Source.URL = csvFile
-		config.Target.URL = tgtDB.URL
-		config.Target.Table = tgtDB.table
+		config.Source.Stream = csvFile
+		config.Target.Conn = tgtDB.URL
+		config.Target.Object = tgtDB.table
 		config.Target.Mode = elt.DropMode
 		task := elt.NewTask(0, config)
 		err = task.Execute()
@@ -145,9 +145,9 @@ func TestInToDb(t *testing.T) {
 		}
 
 		config = elt.Config{}
-		config.Source.URL = csvFileUpsert
-		config.Target.URL = tgtDB.URL
-		config.Target.Table = tgtDB.table + "_upsert"
+		config.Source.Stream = csvFileUpsert
+		config.Target.Conn = tgtDB.URL
+		config.Target.Object = tgtDB.table + "_upsert"
 		config.Target.Mode = elt.TruncateMode
 		taskUpsert := elt.NewTask(0, config)
 		err = taskUpsert.Execute()
@@ -174,10 +174,10 @@ func TestDbToDb(t *testing.T) {
 			println()
 			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
 			config := elt.Config{}
-			config.Source.URL = srcDB.URL
-			config.Source.Table = srcDB.table
-			config.Target.URL = tgtDB.URL
-			config.Target.Table = tgtDB.table + "_copy"
+			config.Source.Conn = srcDB.URL
+			config.Source.Stream = srcDB.table
+			config.Target.Conn = tgtDB.URL
+			config.Target.Object = tgtDB.table + "_copy"
 			config.Target.Mode = elt.DropMode
 			task := elt.NewTask(0, config)
 			err = task.Execute()
@@ -187,10 +187,10 @@ func TestDbToDb(t *testing.T) {
 			}
 
 			config = elt.Config{}
-			config.Source.URL = srcDB.URL
-			config.Source.Table = srcDB.table + "_upsert"
-			config.Target.URL = tgtDB.URL
-			config.Target.Table = tgtDB.table + "_copy"
+			config.Source.Conn = srcDB.URL
+			config.Source.Stream = srcDB.table + "_upsert"
+			config.Target.Conn = tgtDB.URL
+			config.Target.Object = tgtDB.table + "_copy"
 			config.Target.Mode = elt.UpsertMode
 			config.Target.UpdateKey = "create_dt"
 			config.Target.PrimaryKey = []string{"id"}
@@ -215,9 +215,9 @@ func TestDbToOut(t *testing.T) {
 		srcTableCopy := srcDB.table + "_copy"
 
 		config := elt.Config{}
-		config.Source.URL = srcDB.URL
-		config.Source.SQL = g.F("select * from %s order by id", srcTableCopy)
-		config.Target.URL = filePath2
+		config.Source.Conn = srcDB.URL
+		config.Source.Stream = g.F("select * from %s order by id", srcTableCopy)
+		config.Target.Object = filePath2
 
 		task := elt.NewTask(0, config)
 		err := task.Execute()
@@ -289,7 +289,7 @@ func TestDbt(t *testing.T) {
 			}
 
 			config := elt.Config{}
-			config.Target.URL = db.URL
+			config.Target.Conn = db.URL
 			config.Target.Dbt = dbtConfig
 			task := elt.NewTask(0, config)
 			err := task.Execute()
@@ -314,17 +314,16 @@ func TestCfgPath(t *testing.T) {
 		}
 
 		assert.EqualValues(t, "testing", cfg.SrcConn.Info().Name)
-		assert.EqualValues(t, "testing", cfg.Source.Table)
+		assert.EqualValues(t, "testing", cfg.Source.Stream)
 		assert.EqualValues(t, "testing", cfg.SrcConn.URL())
-		assert.EqualValues(t, "testing", cfg.Source.SQL)
 		assert.EqualValues(t, "testing", cfg.TgtConn.Info().Name)
-		assert.EqualValues(t, "testing", cfg.Target.Table)
+		assert.EqualValues(t, "testing", cfg.Target.Object)
 		assert.EqualValues(t, "testing", cfg.TgtConn.URL())
 		assert.EqualValues(t, "testing", cfg.Target.Mode)
 		assert.EqualValues(t, 111, cfg.Source.Limit)
-		assert.EqualValues(t, "testing", cfg.Target.TableDDL)
-		assert.EqualValues(t, "testing", cfg.Target.TableTmp)
-		assert.EqualValues(t, "testing", cfg.Target.PostSQL)
+		assert.EqualValues(t, "testing", cfg.Target.Options.TableDDL)
+		assert.EqualValues(t, "testing", cfg.Target.Options.TableTmp)
+		assert.EqualValues(t, "testing", cfg.Target.Options.PostSQL)
 
 		return err
 	}
@@ -338,10 +337,10 @@ func TestCfgPath(t *testing.T) {
 
 func testTask(t *testing.T) {
 	config := elt.Config{}
-	config.Source.URL = "SNOWFLAKE_URL"
-	config.Source.Table = "public.test5"
-	config.Target.URL = "POSTGRES_URL"
-	config.Target.Table = "public.test5"
+	config.Source.Conn = "SNOWFLAKE_URL"
+	config.Source.Stream = "public.test5"
+	config.Target.Conn = "POSTGRES_URL"
+	config.Target.Object = "public.test5"
 	config.Target.Mode = elt.DropMode
 	task := elt.NewTask(0, config)
 	assert.NoError(t, task.Err)
