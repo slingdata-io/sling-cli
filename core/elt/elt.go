@@ -179,9 +179,12 @@ func (j *Task) runDbSQL() (err error) {
 
 func (j *Task) runDbDbt() (err error) {
 	dbtConfig := g.Marshal(j.Cfg.Target.Dbt)
-	dbtObj, err := dbt.NewDbt(dbtConfig)
+	dbtObj, err := dbt.NewDbt(dbtConfig, j.Cfg.TgtConn.Info().Name)
 	if err != nil {
 		return g.Error(err, "could not init dbt task")
+	}
+	if dbtObj.Schema == "" {
+		dbtObj.Schema = j.Cfg.TgtConn.DataS()["schema"]
 	}
 
 	dbtObj.Session.SetScanner(func(stderr bool, text string) {
@@ -190,10 +193,6 @@ func (j *Task) runDbDbt() (err error) {
 			j.SetProgress(text)
 		}
 	})
-
-	if dbtObj.Profile == "" {
-		dbtObj.Profile = j.Cfg.TgtConn.Info().Name
-	}
 
 	err = dbtObj.Init(j.Cfg.TgtConn)
 	if err != nil {

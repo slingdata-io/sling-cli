@@ -29,6 +29,19 @@ type TaskProcess struct {
 	Cmd       *exec.Cmd    `json:"-"`
 }
 
+// ExecutionStatus is an execution status object
+type ExecutionStatus struct {
+	JobID       int        `json:"job_id,omitempty"`
+	ExecID      int        `json:"exec_id,omitempty"`
+	Status      ExecStatus `json:"status,omitempty"`
+	Text        string     `json:"text,omitempty"`
+	Rows        int        `json:"rows,omitempty"`
+	Percent     int        `json:"percent,omitempty"`
+	Stalled     bool       `json:"stalled,omitempty"`
+	Duration    *int       `json:"duration,omitempty"`
+	AvgDuration int        `json:"avg_duration,omitempty"`
+}
+
 // ToMap converts to map of interface
 func (tp *TaskProcess) ToMap() map[string]interface{} {
 	m := map[string]interface{}{

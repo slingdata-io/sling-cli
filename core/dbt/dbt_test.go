@@ -11,13 +11,12 @@ func TestDbtCompile(t *testing.T) {
 	dbtConfig := `{
 		"version": "0.18",
 		"repo_url": "https://github.com/fishtown-analytics/dbt-starter-project",
-		"profile": "POSTGRES_URL",
 		"schema": "public",
 		"models": "+my_second_dbt_model",
 		"debug": false
 	}`
 
-	dbtObj, err := NewDbt(dbtConfig)
+	dbtObj, err := NewDbt(dbtConfig, "POSTGRES_URL")
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -42,13 +41,12 @@ func TestDbtRun(t *testing.T) {
 	dbtConfig := `{
 		"version": "0.18",
 		"repo_url": "https://github.com/fishtown-analytics/dbt-starter-project",
-		"profile": "POSTGRES_URL",
 		"schema": "public",
 		"models": "+my_second_dbt_model",
 		"debug": false
 	}`
 
-	dbtObj, err := NewDbt(dbtConfig)
+	dbtObj, err := NewDbt(dbtConfig, "POSTGRES_URL")
 	if !assert.NoError(t, err) {
 		return
 	}

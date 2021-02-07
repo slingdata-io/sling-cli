@@ -16,23 +16,25 @@ import (
 
 // Dbt represents a dbt instance
 type Dbt struct {
-	Name        string           `json:"name,omitempty" yaml:"name,omitempty"` // the project name
-	Version     string           `json:"version" yaml:"version"`
-	RepoURL     string           `json:"repo_url" yaml:"repo_url"`
-	ProjectRoot string           `json:"project_root" yaml:"project_root"`
-	Profile     string           `json:"profile" yaml:"profile"`
-	Models      string           `json:"models" yaml:"models"`
-	Debug       bool             `json:"debug" yaml:"debug"`
-	Schema      string           `json:"schema" yaml:"schema"`
-	ProjectPath string           `json:"project_path" yaml:"project_path"`
-	HomePath    string           `json:"-" yaml:"-"`
-	Session     *process.Session `json:"-" yaml:"-"`
-	Manifest    Manifest         `json:"-" yaml:"-"`
-	RunResult   RunResult        `json:"-" yaml:"-"`
+	Version string `json:"version" yaml:"version"`
+	RepoURL string `json:"repo_url" yaml:"repo_url"`
+	Models  string `json:"models" yaml:"models"`
+
+	Name        string `json:"name,omitempty" yaml:"name,omitempty"` // the project name
+	ProjectRoot string `json:"project_root,omitempty" yaml:"project_root,omitempty"`
+	Debug       bool   `json:"debug,omitempty" yaml:"debug,omitempty"`
+	Schema      string `json:"schema,omitempty" yaml:"schema,omitempty"`
+	ProjectPath string `json:"project_path,omitempty" yaml:"project_path,omitempty"`
+
+	Profile   string           `json:"-" yaml:"-"` // the name of the connection
+	HomePath  string           `json:"-" yaml:"-"`
+	Session   *process.Session `json:"-" yaml:"-"`
+	Manifest  Manifest         `json:"-" yaml:"-"`
+	RunResult RunResult        `json:"-" yaml:"-"`
 }
 
 // NewDbt creates a new DBT instance
-func NewDbt(dbtConfig string) (d *Dbt, err error) {
+func NewDbt(dbtConfig, profile string) (d *Dbt, err error) {
 	d = new(Dbt)
 	err = yaml.Unmarshal([]byte(dbtConfig), &d)
 	if err != nil {
@@ -41,7 +43,7 @@ func NewDbt(dbtConfig string) (d *Dbt, err error) {
 	}
 
 	// in case this is referring to a env var.
-	d.Profile = strings.TrimPrefix(d.Profile, "$")
+	d.Profile = strings.TrimPrefix(profile, "$")
 
 	// create process seesion
 	d.Session = process.NewSession()

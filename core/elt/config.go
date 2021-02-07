@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/flarco/dbio/connection"
 
@@ -84,19 +85,6 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	return nil
 }
 
-var fileVarsDefault = map[string]string{
-	"null_if":             "NULL",
-	"compression":         "AUTO", // TODO: ZIP | GZIP | SNAPPY | NONE
-	"empty_field_as_null": "TRUE",
-	"trim_space":          "FALSE",
-	"DATE_FORMAT":         "AUTO",
-	"TIME_FORMAT":         "AUTO",
-	"skip_blank_lines":    "FALSE",
-	"file_max_rows":       "0",
-	"delimiter":           ",",
-	"header":              "TRUE",
-}
-
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.prepared {
@@ -145,6 +133,11 @@ func (cfg *Config) Prepare() (err error) {
 	}
 	cfg.SrcConn = srcConn
 
+	// fill target table schema if needed
+	if schema, ok := cfg.Target.Data["schema"]; ok && cfg.Target.Table != "" && !strings.Contains(cfg.Target.Table, ".") {
+		cfg.Target.Table = g.F("%s.%s", schema, cfg.Target.Table)
+	}
+
 	cfg.prepared = true
 	return
 }
@@ -176,7 +169,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 //			return g.Error(err, "could not decrypt")
 //		}
 //		for k := range dConn.Data {
-//			if _, ok := fileVarsDefault[k]; ok {
+//			if _, ok := fileOptionsDefault[k]; ok {
 //				continue
 //			}
 //			dConn.Data[k], err = g.Decrypt(dConn.DataS()[k], secret)
@@ -205,7 +198,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 //			return g.Error(err, "could not decrypt")
 //		}
 //		for k := range dConn.Data {
-//			if _, ok := fileVarsDefault[k]; ok {
+//			if _, ok := fileOptionsDefault[k]; ok {
 //				continue
 //			}
 //			dConn.Data[k], err = g.Encrypt(dConn.DataS()[k], secret)
@@ -232,8 +225,8 @@ type Config struct {
 	Source  Source                `json:"source,omitempty" yaml:"source,omitempty"`
 
 	TgtConn connection.Connection  `json:"-"`
-	Target  Target                 `json:"target,omitempty" yaml:"target,omitempty"`
-	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"`
+	Target  Target                 `json:"target" yaml:"target"`
+	Vars    map[string]interface{} `json:"vars,omitempty" yaml:"vars,omitempty"` // remove?
 
 	StdIn  bool                   `json:"-"`                    // whether stdin is passed
 	StdOut bool                   `json:"stdout" yaml:"stdout"` // whether to output to stdout
@@ -244,65 +237,84 @@ type Config struct {
 	prepared  bool   `json:"-"`
 }
 
-// FileConfig is for file source / targets
-type FileConfig struct {
-	NullIf           string `json:"null_if" yaml:"null_if"`
-	Compression      string `json:"compression" yaml:"compression"`
-	EmptyFieldAsNull bool   `json:"empty_field_as_null" yaml:"empty_field_as_null"`
-	TrimSpace        bool   `json:"trim_space" yaml:"trim_space"`
-	DateFormat       string `json:"date_format" yaml:"date_format"`
-	TimeFormat       string `json:"time_format" yaml:"time_format"`
-	SkipBlankLines   bool   `json:"skip_blank_lines" yaml:"skip_blank_lines"`
-	FileMaxRows      int    `json:"file_max_rows" yaml:"file_max_rows"`
-	Delimiter        rune   `json:"delimiter" yaml:"delimiter"`
-	Header           bool   `json:"header" yaml:"header"`
-}
-
-// NewFileConfig returns a default FileConfig
-func NewFileConfig() *FileConfig {
-	return &FileConfig{
-		NullIf:           "NULL",
-		Compression:      "AUTO",
-		EmptyFieldAsNull: true,
-		TrimSpace:        false,
-		DateFormat:       "AUTO",
-		TimeFormat:       "AUTO",
-		SkipBlankLines:   false,
-		FileMaxRows:      0,
-		Delimiter:        ',',
-		Header:           true,
-	}
-}
-
 // Source is a source of data
 type Source struct {
-	Conn       string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
-	SQL        string                 `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
-	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
-	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn    string  `json:"conn" yaml:"conn"`
+	Object  string  `json:"object" yaml:"object"`
+	Limit   int     `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Options Options `json:"options,omitempty" yaml:"options,omitempty"`
+
+	URL   string                 `json:"url,omitempty" yaml:"url,omitempty"`     // use conn
+	SQL   string                 `json:"sql,omitempty" yaml:"sql,omitempty"`     // use object
+	Table string                 `json:"table,omitempty" yaml:"table,omitempty"` // use object
+	Data  map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`   // remove
 
 	Columns iop.Columns `json:"-"`
 }
 
 // Target is a target of data
 type Target struct {
-	Conn       string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	URL        string                 `json:"url,omitempty" yaml:"url,omitempty"`
-	Table      string                 `json:"table,omitempty" yaml:"table,omitempty"`
-	TableDDL   string                 `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	TableTmp   string                 `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	PreSQL     string                 `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL    string                 `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
-	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Dbt        *dbt.Dbt               `json:"dbt,omitempty" yaml:"dbt,omitempty"`
-	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	FileConfig *FileConfig            `json:"file_config,omitempty" yaml:"file_config,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn       string   `json:"conn" yaml:"conn"`
+	Object     string   `json:"object,omitempty" yaml:"object,omitempty"`
+	Options    Options  `json:"options,omitempty" yaml:"options,omitempty"`
+	Mode       Mode     `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Dbt        *dbt.Dbt `json:"dbt,omitempty" yaml:"dbt,omitempty"`
+	PrimaryKey []string `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey  string   `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+
+	TableDDL string                 `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"` // use options.TableDDL
+	TableTmp string                 `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"` // use options.TableTmp
+	PreSQL   string                 `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`     // use options.PreSQL
+	PostSQL  string                 `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`   // use options.PostSQL
+	URL      string                 `json:"url,omitempty" yaml:"url,omitempty"`             // use object
+	Table    string                 `json:"table,omitempty" yaml:"table,omitempty"`         // use object
+	Data     map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`           //remove ?
 
 	TmpTableCreated bool        `json:"-"`
 	Columns         iop.Columns `json:"-"`
+}
+
+// Compression is the compression to use
+type Compression string
+
+const (
+	// CompressionAuto is Auto
+	CompressionAuto Compression = "auto"
+	// CompressionZip is Zip
+	CompressionZip Compression = "zip"
+	// CompressionGzip is Gzip
+	CompressionGzip Compression = "gzip"
+	// CompressionSnappy is Snappy
+	CompressionSnappy Compression = "snappy"
+	// CompressionNone is None
+	CompressionNone Compression = ""
+)
+
+// Options are connection and stream processing options
+type Options struct {
+	TrimSpace      bool        `json:"trim_space" yaml:"trim_space"`
+	EmptyAsNull    bool        `json:"empty_as_null" yaml:"empty_as_null"`
+	Header         bool        `json:"header" yaml:"header"`
+	Compression    Compression `json:"compression" yaml:"compression"`
+	NullIf         string      `json:"null_if" yaml:"null_if"`
+	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
+	SkipBlankLines bool        `json:"skip_blank_lines" yaml:"skip_blank_lines"`
+	Delimiter      rune        `json:"delimiter" yaml:"delimiter"`
+	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
+	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
+	TableDDL       string      `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	TableTmp       string      `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+}
+
+var fileOptionsDefault = Options{
+	TrimSpace:      false,
+	EmptyAsNull:    true,
+	Header:         true,
+	Compression:    CompressionAuto,
+	NullIf:         "null",
+	DatetimeFormat: "auto",
+	SkipBlankLines: false,
+	Delimiter:      ',',
+	FileMaxRows:    0,
+	MaxDecimals:    -1,
 }
