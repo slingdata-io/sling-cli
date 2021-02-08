@@ -110,6 +110,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// Set Target
+	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
 	}
@@ -123,7 +124,7 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error(err, "could not create data conn for target")
 	}
 	cfg.TgtConn = tgtConn
-	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
+	g.P(tgtConn)
 
 	// fill target table schema if needed
 	if schema, ok := cfg.Target.Data["schema"]; ok && cfg.Target.Object != "" && !strings.Contains(cfg.Target.Object, ".") {
@@ -131,6 +132,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// Set Source
+	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
@@ -147,7 +149,6 @@ func (cfg *Config) Prepare() (err error) {
 		err = nil
 	}
 	cfg.SrcConn = srcConn
-	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 
 	// done
 	cfg.Prepared = true

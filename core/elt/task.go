@@ -58,14 +58,14 @@ func (tp *TaskProcess) ToMap() map[string]interface{} {
 }
 
 // NewTask creates a Sling task with given configuration
-func NewTask(execID int, cfg Config) (j Task) {
+func NewTask(execID int, cfg Config) (t Task) {
 	err := cfg.Prepare()
 	if err != nil {
-		j.Err = g.Error(err, "could not prepare task")
+		t.Err = g.Error(err, "could not prepare task")
 		return
 	}
 
-	j = Task{
+	t = Task{
 		ExecID:       execID,
 		Cfg:          cfg,
 		Status:       ExecStatusCreated,
@@ -85,35 +85,35 @@ func NewTask(execID int, cfg Config) (j Task) {
 	}
 	validMode := cfg.Target.Mode != Mode("")
 	if !validMode {
-		j.Err = g.Error("must specify valid mode: append, drop, upsert or truncate")
+		t.Err = g.Error("must specify valid mode: append, drop, upsert or truncate")
 		return
 	}
 
 	if cfg.Target.Mode == "upsert" && (len(cfg.Target.PrimaryKey) == 0 || len(cfg.Target.UpdateKey) == 0) {
-		j.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
+		t.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
 		return
 	}
 
 	if srcDbProvided && tgtDbProvided && cfg.Target.Dbt == nil {
 		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
-			j.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
+			t.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}
-		j.Type = DbToDb
+		t.Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided && cfg.Target.Dbt == nil {
-		j.Type = FileToDB
+		t.Type = FileToDB
 	} else if srcDbProvided && srcTableQueryProvided && !tgtDbProvided && tgtFileProvided {
-		j.Type = DbToFile
+		t.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		j.Type = FileToFile
+		t.Type = FileToFile
 	} else if tgtDbProvided && cfg.Target.Dbt != nil {
-		j.Type = DbDbt
+		t.Type = DbDbt
 	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
-		j.Type = DbSQL
+		t.Type = DbSQL
 	}
 
-	if j.Type == "" {
-		j.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
+	if t.Type == "" {
+		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
 	}
 
 	return
