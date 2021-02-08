@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
+	"github.com/flarco/g/net"
 
 	"github.com/slingdata-io/sling/core/dbt"
 
@@ -83,7 +85,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
-	if cfg.prepared {
+	if cfg.Prepared {
 		return
 	}
 
@@ -91,15 +93,27 @@ func (cfg *Config) Prepare() (err error) {
 	if !cfg.Options.StdIn && cfg.Source.Conn == "" && cfg.Target.Conn == "" {
 		return g.Error("invalid source connection. Input is blank or not found")
 	}
-	if !cfg.Options.StdOut && cfg.Target.Conn == "" {
+	if !cfg.Options.StdOut && cfg.Target.Conn == "" && cfg.Target.Object == "" {
 		return g.Error("invalid target connection. Input is blank or not found")
+	}
+
+	isFileURL := func(url string) bool {
+		if !strings.Contains(url, "://") {
+			return false
+		}
+		U, err := net.NewURL(url)
+		if err != nil {
+			return false
+		}
+		t, _ := dbio.ValidateType(U.U.Scheme)
+		return t.IsFile()
 	}
 
 	// Set Target
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
 	}
-	if strings.Contains(cfg.Target.Object, "://") {
+	if isFileURL(cfg.Target.Object) {
 		cfg.Target.Data["url"] = cfg.Target.Object
 	} else {
 		cfg.Target.Data["url"] = cfg.Target.Conn
@@ -120,7 +134,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
-	if strings.Contains(cfg.Source.Stream, "://") {
+	if isFileURL(cfg.Source.Stream) {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 	} else {
 		cfg.Source.Data["url"] = cfg.Source.Conn
@@ -136,7 +150,7 @@ func (cfg *Config) Prepare() (err error) {
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 
 	// done
-	cfg.prepared = true
+	cfg.Prepared = true
 	return
 }
 
@@ -222,10 +236,10 @@ type Config struct {
 	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]interface{} `json:"env" yaml:"env"`
 
-	SrcConn   connection.Connection `json:"-" yaml:"-"`
-	TgtConn   connection.Connection `json:"-" yaml:"-"`
+	SrcConn   connection.Connection `json:"sc,omitempty" yaml:"sc,omitempty"`
+	TgtConn   connection.Connection `json:"tc,omitempty" yaml:"tc,omitempty"`
+	Prepared  bool                  `json:"prepared,omitempty" yaml:"prepared,omitempty"`
 	UpsertVal string                `json:"-" yaml:"-"`
-	prepared  bool                  `json:"-" yaml:"-"`
 }
 
 // ConfigOptions are configuration options

@@ -30,26 +30,28 @@ An example. Put this in https://jsonschema.net/home
 
 ```json
 {
-    "source": {
-        "conn": "MY_PG",
-        "stream": "select * from my_table",
-        "limit": 0,
-        "options": {}
-    },
-    "target": {
-        "conn": "s3://my_bucket/my_folder",
-        "object": "new_file.csv",
-        "mode": "drop",
-        "primary_key": ["col1", "col2"],
-        "update_key": "col3",
-        "dbt": {
-            "version": "0.18",
-            "repo_url": "...",
-            "models": "my_model"
-        },
-        "options": {}
-    },
+  "source": {
+      "conn": "MY_PG",
+      "stream": "select * from my_table",
+      "limit": 0,
+      "options": {}
+  },
+  "target": {
+      "conn": "s3://my_bucket",
+      "object": "s3://my_bucket/my_folder/new_file.csv",
+      "mode": "drop",
+      "primary_key": ["col1", "col2"],
+      "update_key": "col3",
+      "dbt": {
+          "version": "0.18",
+          "repo_url": "...",
+          "models": "my_model"
+      },
+      "options": {}
+  },
+  "options": {
     "stdout": false,
     "stdin": false
+  }
 }
 ```

@@ -1,15 +1,14 @@
 source:
   conn: testing
-  sql: testing
-  table: testing
+  stream: testing
   limit: 111
 
 target:
   conn: testing
-  url: testing
-  table: testing
-  pre_sql: testing
-  post_sql: testing
-  table_ddl: testing
-  table_tmp: testing
+  object: testing
+  options:
+    pre_sql: testing
+    post_sql: testing
+    table_ddl: testing
+    table_tmp: testing
   mode: testing

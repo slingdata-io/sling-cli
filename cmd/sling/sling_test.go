@@ -119,6 +119,7 @@ func TestInToDb(t *testing.T) {
 	csvFileUpsert := "tests/test1.upsert.csv"
 	testFile1, err := os.Open(csvFile)
 	if err != nil {
+		g.LogError(err)
 		assert.NoError(t, err)
 		return
 	}
@@ -133,19 +134,20 @@ func TestInToDb(t *testing.T) {
 		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
 
 		config := elt.Config{}
-		config.Source.Stream = csvFile
+		config.Source.Stream = "file://" + csvFile
 		config.Target.Conn = tgtDB.URL
 		config.Target.Object = tgtDB.table
 		config.Target.Mode = elt.DropMode
 		task := elt.NewTask(0, config)
 		err = task.Execute()
 		if err != nil {
+			g.LogError(err)
 			assert.NoError(t, err)
 			return
 		}
 
 		config = elt.Config{}
-		config.Source.Stream = csvFileUpsert
+		config.Source.Stream = "file://" + csvFileUpsert
 		config.Target.Conn = tgtDB.URL
 		config.Target.Object = tgtDB.table + "_upsert"
 		config.Target.Mode = elt.TruncateMode
@@ -217,11 +219,12 @@ func TestDbToOut(t *testing.T) {
 		config := elt.Config{}
 		config.Source.Conn = srcDB.URL
 		config.Source.Stream = g.F("select * from %s order by id", srcTableCopy)
-		config.Target.Object = filePath2
+		config.Target.Object = "file://" + filePath2
 
 		task := elt.NewTask(0, config)
 		err := task.Execute()
 		if !assert.NoError(t, err) {
+			g.LogError(err)
 			return
 		}
 

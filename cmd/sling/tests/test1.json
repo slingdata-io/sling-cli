@@ -1,18 +1,18 @@
 {
   "source": {
-    "table": "testing", 
+    "stream": "testing", 
     "limit": 111, 
-    "conn": "testing", 
-    "sql": "testing"
+    "conn": "testing"
   }, 
   "target": {
-    "table_ddl": "testing", 
-    "url": "testing", 
-    "post_sql": "testing", 
-    "pre_sql": "testing", 
-    "table_tmp": "testing", 
+    "options": {
+      "table_ddl": "testing", 
+      "post_sql": "testing", 
+      "pre_sql": "testing", 
+      "table_tmp": "testing"
+    },
     "mode": "testing", 
-    "table": "testing", 
+    "object": "testing", 
     "conn": "testing"
   }
 }
