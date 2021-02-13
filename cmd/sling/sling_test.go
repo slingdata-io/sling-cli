@@ -75,12 +75,12 @@ var DBs = []*testDB{
 	// 	table: "dbo.test1",
 	// },
 
-	// &testDB{
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "Snowflake",
-	// 	URL:   "$SNOWFLAKE_URL",
-	// 	table: "sling.test1",
-	// },
+	&testDB{
+		// https://github.com/snowflakedb/gosnowflake
+		name:  "Snowflake",
+		URL:   "$SNOWFLAKE_URL",
+		table: "sling.test1",
+	},
 
 	// &testDB{
 	// 	// https://github.com/snowflakedb/gosnowflake

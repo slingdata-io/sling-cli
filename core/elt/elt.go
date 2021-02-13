@@ -249,6 +249,18 @@ func (t *Task) runDbToFile() (err error) {
 
 }
 
+func (t *Task) runFolderToDB() (err error) {
+	/*
+		This will take a URL as a folder path
+		1. list the files/folders in it (not recursive)
+		2a. run runFileToDB for each of the files, naming the target table respectively
+		2b. OR run runFileToDB for each of the files, to the same target able, assume each file has same structure
+		3. keep list of file inserted in Job.Settings (view handleExecutionHeartbeat in server_ws.go).
+
+	*/
+	return
+}
+
 func (t *Task) runFileToDB() (err error) {
 
 	start = time.Now()
@@ -560,7 +572,7 @@ func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
 		stream = iop.MergeDataflow(df)
-		reader := stream.NewCsvReader(0)
+		reader := stream.NewCsvReader(0, 0)
 		bufStdout := bufio.NewWriter(os.Stdout)
 		defer bufStdout.Flush()
 		bw, err = filesys.Write(reader, bufStdout)
