@@ -301,7 +301,7 @@ type SourceOptions struct {
 	NullIf         string      `json:"null_if" yaml:"null_if"`
 	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
 	SkipBlankLines bool        `json:"skip_blank_lines" yaml:"skip_blank_lines"`
-	Delimiter      rune        `json:"delimiter" yaml:"delimiter"`
+	Delimiter      string      `json:"delimiter" yaml:"delimiter"`
 	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
 }
 
@@ -310,7 +310,7 @@ type TargetOptions struct {
 	Header         bool        `json:"header" yaml:"header"`
 	Compression    Compression `json:"compression" yaml:"compression"`
 	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
-	Delimiter      rune        `json:"delimiter" yaml:"delimiter"`
+	Delimiter      string      `json:"delimiter" yaml:"delimiter"`
 	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
 	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
 
@@ -328,7 +328,7 @@ var sourceFileOptionsDefault = SourceOptions{
 	NullIf:         "null",
 	DatetimeFormat: "auto",
 	SkipBlankLines: false,
-	Delimiter:      ',',
+	Delimiter:      ",",
 	MaxDecimals:    -1,
 }
 
@@ -336,6 +336,6 @@ var targetFileOptionsDefault = TargetOptions{
 	Header:         true,
 	Compression:    CompressionAuto,
 	DatetimeFormat: "auto",
-	Delimiter:      ',',
+	Delimiter:      ",",
 	MaxDecimals:    -1,
 }
