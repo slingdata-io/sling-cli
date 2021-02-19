@@ -75,12 +75,12 @@ var DBs = []*testDB{
 	// 	table: "dbo.test1",
 	// },
 
-	&testDB{
-		// https://github.com/snowflakedb/gosnowflake
-		name:  "Snowflake",
-		URL:   "$SNOWFLAKE_URL",
-		table: "sling.test1",
-	},
+	// &testDB{
+	// 	// https://github.com/snowflakedb/gosnowflake
+	// 	name:  "Snowflake",
+	// 	URL:   "$SNOWFLAKE_URL",
+	// 	table: "sling.test1",
+	// },
 
 	// &testDB{
 	// 	// https://github.com/snowflakedb/gosnowflake
@@ -293,7 +293,8 @@ func TestDbt(t *testing.T) {
 
 			config := elt.Config{}
 			config.Target.Conn = db.URL
-			config.Target.Dbt = dbtConfig
+			config.Target.Dbt = dbtConfig.Models
+			config.Target.DbtConfig = dbtConfig
 			task := elt.NewTask(0, config)
 			err := task.Execute()
 			if !assert.NoError(t, err) {

@@ -20,11 +20,12 @@ type Dbt struct {
 	RepoURL string `json:"repo_url" yaml:"repo_url"`
 	Models  string `json:"models" yaml:"models"`
 
-	Name        string `json:"name,omitempty" yaml:"name,omitempty"` // the project name
-	ProjectRoot string `json:"project_root,omitempty" yaml:"project_root,omitempty"`
-	Debug       bool   `json:"debug,omitempty" yaml:"debug,omitempty"`
-	Schema      string `json:"schema,omitempty" yaml:"schema,omitempty"`
-	ProjectPath string `json:"project_path,omitempty" yaml:"project_path,omitempty"`
+	ProjectRoot  string `json:"project_root,omitempty" yaml:"project_root,omitempty"`
+	Debug        bool   `json:"debug,omitempty" yaml:"debug,omitempty"`
+	Schema       string `json:"schema,omitempty" yaml:"schema,omitempty"`
+	ProjectPath  string `json:"project_path,omitempty" yaml:"project_path,omitempty"`
+	RepoUser     string `json:"repo_user,omitempty" yaml:"repo_user,omitempty"`
+	RepoPassword string `json:"repo_password,omitempty" yaml:"repo_password,omitempty"`
 
 	Profile   string           `json:"-" yaml:"-"` // the name of the connection
 	HomePath  string           `json:"-" yaml:"-"`
@@ -56,7 +57,15 @@ func (d *Dbt) Init(conns ...connection.Connection) (err error) {
 	// clone git repo
 	if d.ProjectPath == "" {
 		// will clone into ~/.sling/repos/<owner>/<repo>
-		err = d.CloneRepo(d.RepoURL)
+		repoURL := d.RepoURL
+		if d.RepoUser != "" {
+			arrURL := strings.Split(repoURL, "://")
+			if len(arrURL) != 2 {
+				return g.Error("Invalid DBT Repo URL")
+			}
+			repoURL = g.F("%s://%s:%s@%s", arrURL[0], d.RepoUser, d.RepoPassword, arrURL[1])
+		}
+		err = d.CloneRepo(repoURL)
 		if err != nil {
 			err = g.Error(err, "could not sync from git repo")
 			return

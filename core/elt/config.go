@@ -83,6 +83,17 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	return nil
 }
 
+// setSchema sets the default schema
+func setSchema(schema string, obj string) string {
+
+	// fill table schema if needed
+	if schema != "" && obj != "" && !strings.Contains(obj, ".") {
+		obj = g.F("%s.%s", schema, obj)
+	}
+
+	return obj
+}
+
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {
@@ -124,12 +135,6 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error(err, "could not create data conn for target")
 	}
 	cfg.TgtConn = tgtConn
-	g.P(tgtConn)
-
-	// fill target table schema if needed
-	if schema, ok := cfg.Target.Data["schema"]; ok && cfg.Target.Object != "" && !strings.Contains(cfg.Target.Object, ".") {
-		cfg.Target.Object = g.F("%s.%s", schema, cfg.Target.Object)
-	}
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
@@ -143,7 +148,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 	srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
 	if err != nil {
-		if cfg.Target.Dbt == nil {
+		if cfg.Target.DbtConfig == nil {
 			return g.Error(err, "could not create data conn for source")
 		}
 		err = nil
@@ -267,11 +272,12 @@ type Target struct {
 	Object     string                 `json:"object,omitempty" yaml:"object,omitempty"`
 	Options    TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Dbt        *dbt.Dbt               `json:"dbt,omitempty" yaml:"dbt,omitempty"`
+	Dbt        string                 `json:"dbt,omitempty" yaml:"dbt,omitempty"` // the model string to run
 	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
+	DbtConfig       *dbt.Dbt    `json:"dbt_config,omitempty" yaml:"dbt_config,omitempty"`
 	TmpTableCreated bool        `json:"-"`
 	Columns         iop.Columns `json:"-"`
 }

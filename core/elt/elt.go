@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flarco/dbio"
+
 	"github.com/flarco/dbio/connection"
 
 	"github.com/flarco/dbio/filesys"
@@ -179,7 +181,7 @@ func (t *Task) runDbSQL() (err error) {
 }
 
 func (t *Task) runDbDbt() (err error) {
-	dbtConfig := g.Marshal(t.Cfg.Target.Dbt)
+	dbtConfig := g.Marshal(t.Cfg.Target.DbtConfig)
 	dbtObj, err := dbt.NewDbt(dbtConfig, t.Cfg.TgtConn.Info().Name)
 	if err != nil {
 		return g.Error(err, "could not init dbt task")
@@ -289,6 +291,9 @@ func (t *Task) runFileToDB() (err error) {
 	}
 	defer t.df.Close()
 
+	// set schema if needed
+	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
+
 	t.SetProgress("writing to target database")
 	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
 	if err != nil {
@@ -374,6 +379,9 @@ func (t *Task) runDbToDb() (err error) {
 	defer srcConn.Close()
 	defer tgtConn.Close()
 
+	// set schema if needed
+	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
+
 	// check if table exists by getting target columns
 	t.Cfg.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Cfg.Target.Object)
 
@@ -428,6 +436,7 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 	streamNameArr := regexp.MustCompile(`\s`).Split(cfg.Source.Stream, -1)
 	if len(streamNameArr) == 1 { // has no whitespace, is a table/view
 		srcTable = streamNameArr[0]
+		srcTable = setSchema(cast.ToString(cfg.Source.Data["schema"]), srcTable)
 		sql = g.F(`select %s from %s`, fieldsStr, srcTable)
 	} else {
 		sql = cfg.Source.Stream
@@ -602,7 +611,11 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	targetTable := cfg.Target.Object
 
 	if cfg.Target.Options.TableTmp == "" {
-		cfg.Target.Options.TableTmp = targetTable + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
+		cfg.Target.Options.TableTmp = targetTable
+		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) && len(cfg.Target.Options.TableTmp) > 24 {
+			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp[:24] // max is 30 chars
+		}
+		cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
 	}
 	if cfg.Target.Mode == "" {
 		cfg.Target.Mode = "append"

@@ -94,19 +94,19 @@ func NewTask(execID int, cfg Config) (t Task) {
 		return
 	}
 
-	if srcDbProvided && tgtDbProvided && cfg.Target.Dbt == nil {
+	if srcDbProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
 		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
 			t.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}
 		t.Type = DbToDb
-	} else if srcFileProvided && tgtDbProvided && cfg.Target.Dbt == nil {
+	} else if srcFileProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
 		t.Type = FileToDB
 	} else if srcDbProvided && srcTableQueryProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = FileToFile
-	} else if tgtDbProvided && cfg.Target.Dbt != nil {
+	} else if tgtDbProvided && cfg.Target.DbtConfig != nil {
 		t.Type = DbDbt
 	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
 		t.Type = DbSQL
