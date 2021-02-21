@@ -4,6 +4,8 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/spf13/cast"
+
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
 
@@ -32,6 +34,12 @@ func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
 	defTarget := "main"
 	prof := g.M()
 	prof["config"] = profileConfig{false, false}
+	if cast.ToFloat64(d.Version) >= 17.0 {
+		prof["config-version"] = 1
+		if cast.ToFloat64(d.Version) >= 19.0 {
+			prof["config-version"] = 2
+		}
+	}
 
 	home, err := local.GetHome()
 	if err != nil {
