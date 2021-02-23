@@ -10,6 +10,7 @@ import (
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
 
+	"github.com/jmespath/go-jmespath"
 	"github.com/slingdata-io/sling/core/dbt"
 
 	"github.com/flarco/dbio/iop"
@@ -70,16 +71,43 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	if cfg.Env == nil {
-		cfg.Env = g.Map{}
+		cfg.Env = g.M()
 	}
 
 	if cfg.Source.Data == nil {
-		cfg.Source.Data = g.Map{}
+		cfg.Source.Data = g.M()
 	}
 
 	if cfg.Target.Data == nil {
-		cfg.Target.Data = g.Map{}
+		cfg.Target.Data = g.M()
 	}
+
+	// set default options
+	m := g.M()
+	g.Unmarshal(string(cfgBytes), &m)
+
+	if cfg.Source.Stream != "" {
+		val, err := jmespath.Search("source.options.header", m)
+		if val == nil || err != nil {
+			cfg.Source.Options.Header = true
+		}
+		val, err = jmespath.Search("source.options.delimiter", m)
+		if val == nil || err != nil {
+			cfg.Source.Options.Delimiter = ","
+		}
+	}
+
+	if cfg.Target.Object != "" {
+		val, err := jmespath.Search("target.options.header", m)
+		if val == nil || err != nil {
+			cfg.Target.Options.Header = true
+		}
+		val, err = jmespath.Search("target.options.delimiter", m)
+		if val == nil || err != nil {
+			cfg.Target.Options.Delimiter = ","
+		}
+	}
+
 	return nil
 }
 

@@ -133,11 +133,19 @@ func TestInToDb(t *testing.T) {
 		println()
 		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
 
-		config := elt.Config{}
-		config.Source.Stream = "file://" + csvFile
-		config.Target.Conn = tgtDB.URL
-		config.Target.Object = tgtDB.table
-		config.Target.Mode = elt.DropMode
+		cfgMap := g.M(
+			"source", g.M(
+				"stream", "file://"+csvFile,
+			),
+			"target", g.M(
+				"conn", tgtDB.URL,
+				"object", tgtDB.table,
+				"mode", elt.DropMode,
+			),
+		)
+		config, err := elt.NewConfig(g.Marshal(cfgMap))
+		assert.NoError(t, err)
+
 		task := elt.NewTask(0, config)
 		err = task.Execute()
 		if err != nil {
@@ -146,11 +154,19 @@ func TestInToDb(t *testing.T) {
 			return
 		}
 
-		config = elt.Config{}
-		config.Source.Stream = "file://" + csvFileUpsert
-		config.Target.Conn = tgtDB.URL
-		config.Target.Object = tgtDB.table + "_upsert"
-		config.Target.Mode = elt.TruncateMode
+		cfgMap = g.M(
+			"source", g.M(
+				"stream", "file://"+csvFileUpsert,
+			),
+			"target", g.M(
+				"conn", tgtDB.URL,
+				"object", tgtDB.table+"_upsert",
+				"mode", elt.TruncateMode,
+			),
+		)
+		config, err = elt.NewConfig(g.Marshal(cfgMap))
+		assert.NoError(t, err)
+
 		taskUpsert := elt.NewTask(0, config)
 		err = taskUpsert.Execute()
 		g.LogError(err)
@@ -162,7 +178,6 @@ func TestInToDb(t *testing.T) {
 }
 
 func TestDbToDb(t *testing.T) {
-	var err error
 	for _, srcDB := range DBs {
 		for _, tgtDB := range DBs {
 			if srcDB.name == "SQLite" && tgtDB.name == "SQLite" {
@@ -175,12 +190,21 @@ func TestDbToDb(t *testing.T) {
 
 			println()
 			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
-			config := elt.Config{}
-			config.Source.Conn = srcDB.URL
-			config.Source.Stream = srcDB.table
-			config.Target.Conn = tgtDB.URL
-			config.Target.Object = tgtDB.table + "_copy"
-			config.Target.Mode = elt.DropMode
+
+			cfgMap := g.M(
+				"source", g.M(
+					"conn", srcDB.URL,
+					"stream", srcDB.table,
+				),
+				"target", g.M(
+					"conn", tgtDB.URL,
+					"object", tgtDB.table+"_copy",
+					"mode", elt.DropMode,
+				),
+			)
+			config, err := elt.NewConfig(g.Marshal(cfgMap))
+			assert.NoError(t, err)
+
 			task := elt.NewTask(0, config)
 			err = task.Execute()
 			if g.LogError(err) {
@@ -188,14 +212,22 @@ func TestDbToDb(t *testing.T) {
 				return
 			}
 
-			config = elt.Config{}
-			config.Source.Conn = srcDB.URL
-			config.Source.Stream = srcDB.table + "_upsert"
-			config.Target.Conn = tgtDB.URL
-			config.Target.Object = tgtDB.table + "_copy"
-			config.Target.Mode = elt.UpsertMode
-			config.Target.UpdateKey = "create_dt"
-			config.Target.PrimaryKey = []string{"id"}
+			cfgMap = g.M(
+				"source", g.M(
+					"conn", srcDB.URL,
+					"stream", srcDB.table+"_upsert",
+				),
+				"target", g.M(
+					"conn", tgtDB.URL,
+					"object", tgtDB.table+"_copy",
+					"primary_key", []string{"id"},
+					"update_key", "create_dt",
+					"mode", elt.UpsertMode,
+				),
+			)
+			config, err = elt.NewConfig(g.Marshal(cfgMap))
+			assert.NoError(t, err)
+
 			taskUpsert := elt.NewTask(0, config)
 			err = taskUpsert.Execute()
 			if err != nil {
@@ -216,13 +248,20 @@ func TestDbToOut(t *testing.T) {
 		srcTable := srcDB.table
 		srcTableCopy := srcDB.table + "_copy"
 
-		config := elt.Config{}
-		config.Source.Conn = srcDB.URL
-		config.Source.Stream = g.F("select * from %s order by id", srcTableCopy)
-		config.Target.Object = "file://" + filePath2
+		cfgMap := g.M(
+			"source", g.M(
+				"conn", srcDB.URL,
+				"stream", g.F("select * from %s order by id", srcTableCopy),
+			),
+			"target", g.M(
+				"object", "file://"+filePath2,
+			),
+		)
+		config, err := elt.NewConfig(g.Marshal(cfgMap))
+		assert.NoError(t, err)
 
 		task := elt.NewTask(0, config)
-		err := task.Execute()
+		err = task.Execute()
 		if !assert.NoError(t, err) {
 			g.LogError(err)
 			return
@@ -291,12 +330,18 @@ func TestDbt(t *testing.T) {
 				Models:  "+my_second_dbt_model",
 			}
 
-			config := elt.Config{}
-			config.Target.Conn = db.URL
-			config.Target.Dbt = dbtConfig.Models
-			config.Target.DbtConfig = dbtConfig
+			cfgMap := g.M(
+				"target", g.M(
+					"conn", db.URL,
+					"dbt", dbtConfig.Models,
+				),
+			)
+			config, err := elt.NewConfig(g.Marshal(cfgMap))
+			assert.NoError(t, err)
+			config.Target.DbtConfig = dbtConfig // normally would be pulled from DB
+
 			task := elt.NewTask(0, config)
-			err := task.Execute()
+			err = task.Execute()
 			if !assert.NoError(t, err) {
 				g.LogError(err)
 				return

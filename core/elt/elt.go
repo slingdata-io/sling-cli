@@ -166,7 +166,7 @@ func (t *Task) runDbSQL() (err error) {
 	defer tgtConn.Close()
 
 	t.SetProgress("executing sql on target database")
-	result, err := tgtConn.ExecContext(t.Ctx, t.Cfg.Target.Options.PostSQL)
+	result, err := tgtConn.ExecContext(t.Ctx, t.Cfg.Target.Object)
 	if err != nil {
 		err = g.Error(err, "Could not complete sql execution on %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
 		return
@@ -293,6 +293,7 @@ func (t *Task) runFileToDB() (err error) {
 
 	// set schema if needed
 	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
+	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
 	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
@@ -381,6 +382,7 @@ func (t *Task) runDbToDb() (err error) {
 
 	// set schema if needed
 	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
+	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
 	t.Cfg.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Cfg.Target.Object)
@@ -408,7 +410,7 @@ func (t *Task) runDbToDb() (err error) {
 		for k, v := range srcConn.Props() {
 			data[k] = v
 		}
-		t.Cfg.Source.Data["SOURCE_FILE"] = g.Map{"data": data}
+		t.Cfg.Source.Data["SOURCE_FILE"] = g.M("data", data)
 	}
 
 	t.SetProgress("writing to target database")
@@ -532,7 +534,15 @@ func (t *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.URL() != "" {
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.SrcConn.URL(), g.MapToKVArr(cfg.SrcConn.DataS())...)
+		// construct props by merging with options
+		options := g.M()
+		g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
+		props := append(
+			g.MapToKVArr(cfg.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+		)
+		g.P(props)
+
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.SrcConn.URL(), props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL())
 			return df, err
@@ -567,7 +577,15 @@ func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 	if cfg.TgtConn.URL() != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
 		cfg.TgtConn.Set(g.M("url", g.Rm(cfg.TgtConn.URL(), dateMap)))
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.TgtConn.URL(), g.MapToKVArr(cfg.TgtConn.DataS())...)
+
+		// construct props by merging with options
+		options := g.M()
+		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
+		props := append(
+			g.MapToKVArr(cfg.TgtConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+		)
+
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.TgtConn.URL(), props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL())
 			return cnt, err

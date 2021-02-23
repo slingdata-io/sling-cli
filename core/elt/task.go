@@ -106,9 +106,9 @@ func NewTask(execID int, cfg Config) (t Task) {
 		t.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = FileToFile
-	} else if tgtDbProvided && cfg.Target.DbtConfig != nil {
+	} else if tgtDbProvided && cfg.Target.Dbt != "" {
 		t.Type = DbDbt
-	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
+	} else if tgtDbProvided && cfg.Target.Object != "" {
 		t.Type = DbSQL
 	}
 
