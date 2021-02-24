@@ -106,6 +106,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		if val == nil || err != nil {
 			cfg.Target.Options.Delimiter = ","
 		}
+		val, err = jmespath.Search("target.options.use_bulk", m)
+		if val == nil || err != nil {
+			cfg.Target.Options.UseBulk = true
+		}
 	}
 
 	return nil
@@ -352,6 +356,7 @@ type TargetOptions struct {
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	PreSQL   string `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
 	PostSQL  string `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	UseBulk  bool   `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 }
 
 var sourceFileOptionsDefault = SourceOptions{

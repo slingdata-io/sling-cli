@@ -540,7 +540,6 @@ func (t *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
 		)
-		g.P(props)
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.SrcConn.URL(), props...)
 		if err != nil {
@@ -627,6 +626,12 @@ func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 // insert / upsert / replace into target table
 func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	targetTable := cfg.Target.Object
+
+	// set bulk
+	if !cfg.Target.Options.UseBulk {
+		tgtConn.SetProp("use_bulk", "false")
+		tgtConn.SetProp("allow_bulk_import", "false")
+	}
 
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable
