@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/flarco/dbio"
@@ -109,6 +110,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		val, err = jmespath.Search("target.options.use_bulk", m)
 		if val == nil || err != nil {
 			cfg.Target.Options.UseBulk = true
+		}
+		val, err = jmespath.Search("target.options.concurrency", m)
+		if val == nil || err != nil {
+			cfg.Target.Options.Concurrency = runtime.NumCPU()
 		}
 	}
 
@@ -347,6 +352,7 @@ type SourceOptions struct {
 type TargetOptions struct {
 	Header         bool        `json:"header" yaml:"header"`
 	Compression    Compression `json:"compression" yaml:"compression"`
+	Concurrency    int         `json:"concurrency" yaml:"concurrency"`
 	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
 	Delimiter      string      `json:"delimiter" yaml:"delimiter"`
 	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
@@ -374,6 +380,7 @@ var sourceFileOptionsDefault = SourceOptions{
 var targetFileOptionsDefault = TargetOptions{
 	Header:         true,
 	Compression:    CompressionAuto,
+	Concurrency:    runtime.NumCPU(),
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    -1,
