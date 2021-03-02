@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/xml"
 	"io/ioutil"
 	"net/http"
@@ -23,6 +24,9 @@ import (
 )
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
+
+//go:embed specs/*
+var specsFolder embed.FS
 
 type APIProvider string
 
@@ -431,7 +435,7 @@ func (aos *APIEndpoint) parseRecords(records []map[interface{}]interface{}, rowR
 // LoadEndpoints loads the endpoints from a yaml file
 func (api *BaseAPI) LoadEndpoints() (err error) {
 	fName := g.F("specs/%s.yaml", api.Provider.String())
-	SpecFile, err := g.PkgerFile(fName)
+	SpecFile, err := specsFolder.Open(fName)
 	if err != nil {
 		return g.Error(err, `cannot read `+fName)
 	}

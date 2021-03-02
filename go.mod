@@ -1,6 +1,6 @@
 module github.com/slingdata-io/sling
 
-go 1.15
+go 1.16
 
 require (
 	github.com/digitalocean/godo v1.47.0
