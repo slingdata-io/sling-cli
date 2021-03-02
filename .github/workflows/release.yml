@@ -48,10 +48,6 @@ jobs:
         go mod edit -droprequire='github.com/flarco/g' go.mod
         go get -u github.com/flarco/g
 
-        go get github.com/markbates/pkger/cmd/pkger
-
-        pkger -include github.com/flarco/dbio/database:/database/templates -o cmd/sling
-
     - name: Prepare Build (Windows)
       if: runner.os == 'windows'
       run: |
@@ -63,10 +59,6 @@ jobs:
         go mod edit -dropreplace='github.com/flarco/g@v0.0.0' go.mod
         go mod edit -droprequire='github.com/flarco/g' go.mod
         go get -u github.com/flarco/g
-
-        go get github.com/markbates/pkger/cmd/pkger
-
-        C:\Users\runneradmin\go\bin\pkger.exe -include github.com/flarco/dbio/database:/database/templates -o cmd/sling
 
         
     - name: Build Sling (Linux)
