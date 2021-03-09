@@ -34,6 +34,7 @@ jobs:
       run: |
         source /root/.bashrc
         source /__/devbox/.env.sh
+        export _DEBUG=''
         echo $PATH
         bash scripts/test.sh
 
@@ -47,6 +48,7 @@ jobs:
         /bin/cp /__/bin/sling .
         
         source /__/devbox/.env.sh
+        export _DEBUG=''
         echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
         docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
