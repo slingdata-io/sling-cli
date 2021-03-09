@@ -50,9 +50,9 @@ jobs:
         source /__/devbox/.env.sh
         echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
-        docker build -t slingdata-io/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
-        docker push slingdata-io/sling:${GITHUB_RUN_NUMBER}
-        docker image rm -f slingdata-io/sling:${GITHUB_RUN_NUMBER}
+        docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
+        docker push slingdata/sling:${GITHUB_RUN_NUMBER}
+        docker image rm -f slingdata/sling:${GITHUB_RUN_NUMBER}
 
         rm -rf webapp
 
