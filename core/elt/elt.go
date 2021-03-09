@@ -598,6 +598,7 @@ func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
 		stream = iop.MergeDataflow(df)
+		stream.SetConfig(map[string]string{"delimiter": ","})
 		reader := stream.NewCsvReader(0, 0)
 		bufStdout := bufio.NewWriter(os.Stdout)
 		defer bufStdout.Flush()
