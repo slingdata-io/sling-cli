@@ -33,7 +33,6 @@ jobs:
     - name: Run Go Tests
       run: |
         source /root/.bashrc
-        env
         source /__/devbox/.env.sh
         echo $PATH
         bash scripts/test.sh
