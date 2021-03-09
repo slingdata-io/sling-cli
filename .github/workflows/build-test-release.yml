@@ -1,16 +1,61 @@
-name: Build & Release
-
-# on:
-#   pull_request:
-#     types: [closed]
-#     branches:
-#       - master
+name: Build & Test
 
 on: [push]
 
 jobs:
-  build:
+  build-sling:
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: self-hosted
 
+    steps:
+    - uses: actions/checkout@v2
+  
+    - name: Build
+      run: |
+        export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
+        mkdir -p $WORK_FOLDER
+        cp -r . $WORK_FOLDER/sling
+        docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox bash scripts/build.sh
+        rm -rf $WORK_FOLDER
+
+  
+  test:
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    
+    needs: [build-sling]
+
+    runs-on: self-hosted
+    
+    steps:
+        
+    - uses: actions/checkout@v2
+  
+    - name: Run Go Tests
+      run: |
+        source /root/.bashrc
+        env
+        source /__/devbox/.env.sh
+        echo $PATH
+        bash scripts/test.sh
+
+  push:
+    needs: [build-sling, test]
+    runs-on: self-hosted
+
+    steps:
+    - name: Push Docker
+      run: |
+        cp /__/bin/sling .
+        
+        docker login -u slingdata -p "${{ secrets.DOCKER_PASSWORD }}"
+
+        docker build -t slingdata-io/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
+        docker push slingdata-io/sling:${GITHUB_RUN_NUMBER}
+
+        rm -rf webapp
+
+  release:
+    needs: [build-sling, test]
     runs-on: ${{ matrix.os }}
     # if: github.event.pull_request.merged
 
@@ -34,7 +79,7 @@ jobs:
     - name: Set up GoLang
       uses: actions/setup-go@v1
       with:
-        go-version: '1.15.2'
+        go-version: '1.16.0'
   
     - name: Prepare Build (Unix)
       if: runner.os != 'windows'
@@ -44,10 +89,6 @@ jobs:
         export PATH=$GO_BIN_FOLDER:$PATH
         mkdir -p $TMPDIR
 
-        go mod edit -dropreplace='github.com/flarco/g@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/g' go.mod
-        go get -u github.com/flarco/g
-
     - name: Prepare Build (Windows)
       if: runner.os == 'windows'
       run: |
@@ -55,10 +96,6 @@ jobs:
         setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
         setx GO111MODULE "auto"
         mkdir C:\Users\runneradmin\tmp
-
-        go mod edit -dropreplace='github.com/flarco/g@v0.0.0' go.mod
-        go mod edit -droprequire='github.com/flarco/g' go.mod
-        go get -u github.com/flarco/g
 
         
     - name: Build Sling (Linux)
@@ -91,6 +128,4 @@ jobs:
         title: "Latest: ${{ runner.os }}"
         files: |
           sling*
-
     
-        
