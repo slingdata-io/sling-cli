@@ -45,12 +45,14 @@ jobs:
     steps:
     - name: Push Docker
       run: |
-        cp /__/bin/sling .
+        /bin/cp /__/bin/sling .
         
-        docker login -u slingdata -p "${{ secrets.DOCKER_PASSWORD }}"
+        source /__/devbox/.env.sh
+        echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
         docker build -t slingdata-io/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
         docker push slingdata-io/sling:${GITHUB_RUN_NUMBER}
+        docker image rm -f slingdata-io/sling:${GITHUB_RUN_NUMBER}
 
         rm -rf webapp
 
