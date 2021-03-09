@@ -148,8 +148,8 @@ github.com/facebookgo/subset v0.0.0-20150612182917-8dac2c3c4870 h1:E2s37DuLxFhQD
 github.com/facebookgo/subset v0.0.0-20150612182917-8dac2c3c4870/go.mod h1:5tD+neXqOorC30/tWg0LCSkrqj/AR6gu8yY8/fpw1q0=
 github.com/fatih/color v1.9.0 h1:8xPHl4/q1VyqGIPif1F+1V3Y3lSmrq01EabUW3CoW5s=
 github.com/fatih/color v1.9.0/go.mod h1:eQcE1qtQxscV5RaZvpXrrb8Drkc3/DdQ+uUYCNjL+zU=
-github.com/flarco/dbio v0.0.2 h1:b3pJb0E/BNvB76fLADD2OgM3ASoMgQK4K9J07wRLrx4=
-github.com/flarco/dbio v0.0.2/go.mod h1:PaT4vfxb5hqzCXCE27jGuPB4MY1pzVedZ6lMC1wxBVM=
+github.com/flarco/dbio v0.0.3 h1:1rIT4LEw26K9Fnnd4Ln8Amt7SKUFKtHsKX3/EGiOqRw=
+github.com/flarco/dbio v0.0.3/go.mod h1:PaT4vfxb5hqzCXCE27jGuPB4MY1pzVedZ6lMC1wxBVM=
 github.com/flarco/g v0.0.2 h1:Bk9RC/HUhyVZrdWf+uhDHMBjGQErWHZ2YxLweJk9pWI=
 github.com/flarco/g v0.0.2/go.mod h1:tbVYhW1Rmie3V8lb7O9+MRWFZmDl8H71EvoHUHMxEOI=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=

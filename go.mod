@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/digitalocean/godo v1.47.0
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.0.2
+	github.com/flarco/dbio v0.0.3
 	github.com/flarco/g v0.0.2
 	github.com/go-openapi/strfmt v0.19.6 // indirect
 	github.com/integrii/flaggy v1.4.4
@@ -21,6 +21,6 @@ require (
 	gopkg.in/yaml.v2 v2.2.8
 )
 
-// replace github.com/flarco/dbio v0.0.1 => ../dbio
+// replace github.com/flarco/dbio v0.0.2 => ../dbio
 
 // replace github.com/flarco/g v0.0.2 => ../g
