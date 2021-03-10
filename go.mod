@@ -21,6 +21,6 @@ require (
 	gopkg.in/yaml.v2 v2.2.8
 )
 
-// replace github.com/flarco/dbio v0.0.2 => ../dbio
+replace github.com/flarco/dbio => ../dbio
 
-// replace github.com/flarco/g v0.0.2 => ../g
+replace github.com/flarco/g => ../g
