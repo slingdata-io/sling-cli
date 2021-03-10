@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"github.com/slingdata-io/sling/core"
-	"github.com/slingdata-io/sling/core/env"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/slingdata-io/sling/core"
+	"github.com/slingdata-io/sling/core/env"
 
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
@@ -115,7 +116,6 @@ primary_key: id
 '
 `
 var ctx, cancel = context.WithCancel(context.Background())
-
 
 var cliELT = &g.CliSC{
 	Name:        "elt",
