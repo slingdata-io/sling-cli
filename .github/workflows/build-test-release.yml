@@ -12,11 +12,7 @@ jobs:
   
     - name: Build
       run: |
-        go mod edit -dropreplace='github.com/flarco/g' go.mod
-        go mod edit -dropreplace='github.com/flarco/dbio' go.mod
-        go get github.com/flarco/g@HEAD
-        go get github.com/flarco/dbio@HEAD
-
+        bash scripts/prep.gomod.sh
         export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
         mkdir -p $WORK_FOLDER
         cp -r . $WORK_FOLDER/sling
@@ -37,11 +33,7 @@ jobs:
   
     - name: Run Go Tests
       run: |
-        go mod edit -dropreplace='github.com/flarco/g' go.mod
-        go mod edit -dropreplace='github.com/flarco/dbio' go.mod
-        go get github.com/flarco/g@HEAD
-        go get github.com/flarco/dbio@HEAD
-
+        bash scripts/prep.gomod.sh
         source /root/.bashrc
         source /__/devbox/.env.sh
         export _DEBUG=''
@@ -115,12 +107,14 @@ jobs:
       if: runner.os == 'linux'
       run: |
         echo "Building sling"
+        bash scripts/prep.gomod.sh
         GOOS=linux GOARCH=amd64 go build -o sling cmd/sling/*.go
 
     - name: Build Sling (Mac)
       if: runner.os == 'macOS'
       run: |
         echo "Building sling"
+        bash scripts/prep.gomod.sh
         GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
       
     - name: Build Sling (Windows)
@@ -130,6 +124,12 @@ jobs:
         setx GOOS "windows"
         setx GOARCH "386"
         setx GO111MODULE "auto"
+
+        go mod edit -dropreplace='github.com/flarco/g' go.mod
+        go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+        go get github.com/flarco/g@HEAD
+        go get github.com/flarco/dbio@HEAD
+
         go build -o sling.exe github.com/slingdata-io/sling/cmd/sling
 
     - name: Release Binaries to Github
