@@ -54,7 +54,8 @@ jobs:
         echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
         docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
-        docker push slingdata/sling:${GITHUB_RUN_NUMBER}
+        docker tag slingdata/sling:${GITHUB_RUN_NUMBER} slingdata/sling:latest
+        docker push slingdata/sling:latest
         docker image rm -f slingdata/sling:${GITHUB_RUN_NUMBER}
 
         rm -rf webapp
