@@ -85,7 +85,7 @@ jobs:
     - name: Set up GoLang
       uses: actions/setup-go@v1
       with:
-        go-version: '1.16.0'
+        go-version: '1.16'
   
     - name: Prepare Build (Unix)
       if: runner.os != 'windows'
