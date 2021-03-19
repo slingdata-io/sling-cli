@@ -691,21 +691,6 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		}
 	}
 
-	// need to contain the final write in a transcation
-	txOptions := sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
-	switch tgtConn.GetType() {
-	case dbio.TypeDbSnowflake:
-		txOptions = sql.TxOptions{}
-	}
-
-	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)
-	if err != nil {
-		err = g.Error(err, "could not open transcation to write to final table")
-		return
-	}
-
-	defer tgtConn.Rollback() // rollback in case of error
-
 	cnt, ok, err := connection.CopyDirect(tgtConn, cfg.Target.Options.TableTmp, srcFile)
 	if ok {
 		df.SetEmpty() // this executes deferred functions (such as file residue removal
@@ -737,6 +722,21 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 			g.Debug(err.Error())
 		}
 	}
+
+	// need to contain the final write in a transcation after data is loaded
+	txOptions := sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
+	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)
+	if err != nil {
+		err = g.Error(err, "could not open transcation to write to final table")
+		return
+	}
+
+	switch tgtConn.GetType() {
+	case dbio.TypeDbSnowflake:
+		txOptions = sql.TxOptions{}
+	}
+
+	defer tgtConn.Rollback() // rollback in case of error
 
 	if cnt > 0 {
 		if cfg.Target.Mode == "drop" {
