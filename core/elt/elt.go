@@ -138,6 +138,7 @@ func (t *Task) Execute() error {
 	} else {
 		t.SetProgress("execution failed")
 		t.Status = ExecStatusError
+		t.Err = g.Error(t.Err, "execution failed")
 	}
 
 	now2 := time.Now()
@@ -468,8 +469,8 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 
 		if len(srcData.Columns) > 0 {
 			commFields := database.CommonColumns(
-				database.ColumnNames(srcData.Columns),
-				database.ColumnNames(t.Cfg.Target.Columns),
+				srcData.Columns.Names(),
+				t.Cfg.Target.Columns.Names(),
 			)
 			if len(commFields) == 0 {
 				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
@@ -725,15 +726,14 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 
 	// need to contain the final write in a transcation after data is loaded
 	txOptions := sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
+	switch tgtConn.GetType() {
+	case dbio.TypeDbSnowflake:
+		txOptions = sql.TxOptions{}
+	}
 	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)
 	if err != nil {
 		err = g.Error(err, "could not open transcation to write to final table")
 		return
-	}
-
-	switch tgtConn.GetType() {
-	case dbio.TypeDbSnowflake:
-		txOptions = sql.TxOptions{}
 	}
 
 	defer tgtConn.Rollback() // rollback in case of error
@@ -927,8 +927,8 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	// TODO: need to validate the source table types are casted
 	// into the target column type
 	tgtFields, err := tgtConn.ValidateColumnNames(
-		database.ColumnNames(tgtColumns),
-		database.ColumnNames(tmpColumns),
+		tgtColumns.Names(),
+		tmpColumns.Names(),
 		true,
 	)
 	if err != nil {

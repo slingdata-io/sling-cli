@@ -120,12 +120,12 @@ func TestInToDb(t *testing.T) {
 	testFile1, err := os.Open(csvFile)
 	if err != nil {
 		g.LogError(err)
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 		return
 	}
 
 	tReader, err := iop.Decompress(bufio.NewReader(testFile1))
-	assert.NoError(t, err)
+	g.AssertNoError(t, err)
 	testFile1Bytes, err = ioutil.ReadAll(tReader)
 	testFile1.Close()
 
@@ -144,13 +144,13 @@ func TestInToDb(t *testing.T) {
 			),
 		)
 		config, err := elt.NewConfig(g.Marshal(cfgMap))
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 
 		task := elt.NewTask(0, config)
 		err = task.Execute()
 		if err != nil {
 			g.LogError(err)
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 			return
 		}
 
@@ -165,13 +165,13 @@ func TestInToDb(t *testing.T) {
 			),
 		)
 		config, err = elt.NewConfig(g.Marshal(cfgMap))
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 
 		taskUpsert := elt.NewTask(0, config)
 		err = taskUpsert.Execute()
 		g.LogError(err)
 		if err != nil {
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 			return
 		}
 	}
@@ -203,12 +203,12 @@ func TestDbToDb(t *testing.T) {
 				),
 			)
 			config, err := elt.NewConfig(g.Marshal(cfgMap))
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 
 			task := elt.NewTask(0, config)
 			err = task.Execute()
 			if g.LogError(err) {
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 				return
 			}
 
@@ -226,12 +226,12 @@ func TestDbToDb(t *testing.T) {
 				),
 			)
 			config, err = elt.NewConfig(g.Marshal(cfgMap))
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 
 			taskUpsert := elt.NewTask(0, config)
 			err = taskUpsert.Execute()
 			if err != nil {
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 				return
 			}
 		}
@@ -258,21 +258,21 @@ func TestDbToOut(t *testing.T) {
 			),
 		)
 		config, err := elt.NewConfig(g.Marshal(cfgMap))
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 
 		task := elt.NewTask(0, config)
 		err = task.Execute()
-		if !assert.NoError(t, err) {
+		if !g.AssertNoError(t, err) {
 			g.LogError(err)
 			return
 		}
 
 		testFile1, err := os.Open("tests/test1.result.csv")
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 		testFile1Bytes, err = ioutil.ReadAll(testFile1)
 
 		testFile2, err := os.Open(filePath2)
-		assert.NoError(t, err)
+		g.AssertNoError(t, err)
 		testFile2Bytes, err := ioutil.ReadAll(testFile2)
 
 		if srcDB.name != "SQLite" {
@@ -281,22 +281,22 @@ func TestDbToOut(t *testing.T) {
 
 			if equal {
 				err = os.RemoveAll(filePath2)
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 
 				conn, err := d.NewConn(srcDB.URL)
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 
 				err = conn.Connect()
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 
 				err = conn.DropTable(srcTable)
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 
 				err = conn.DropTable(srcTableCopy)
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 
 				err = conn.Close()
-				assert.NoError(t, err)
+				g.AssertNoError(t, err)
 			}
 		} else {
 			testFile1Lines := len(strings.Split(string(testFile1Bytes), "\n"))
@@ -337,12 +337,12 @@ func TestDbt(t *testing.T) {
 				),
 			)
 			config, err := elt.NewConfig(g.Marshal(cfgMap))
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 			config.Target.DbtConfig = dbtConfig // normally would be pulled from DB
 
 			task := elt.NewTask(0, config)
 			err = task.Execute()
-			if !assert.NoError(t, err) {
+			if !g.AssertNoError(t, err) {
 				g.LogError(err)
 				return
 			}
@@ -358,7 +358,7 @@ func TestCfgPath(t *testing.T) {
 	testCfg := func(path string) (err error) {
 		cfg, err := elt.NewConfig(path)
 		if g.LogError(err) {
-			assert.NoError(t, err)
+			g.AssertNoError(t, err)
 			return
 		}
 
@@ -378,10 +378,10 @@ func TestCfgPath(t *testing.T) {
 	}
 
 	err := testCfg("tests/test1.yaml")
-	assert.NoError(t, err)
+	g.AssertNoError(t, err)
 
 	err = testCfg("tests/test1.json")
-	assert.NoError(t, err)
+	g.AssertNoError(t, err)
 }
 
 func testTask(t *testing.T) {
@@ -392,9 +392,9 @@ func testTask(t *testing.T) {
 	config.Target.Object = "public.test5"
 	config.Target.Mode = elt.DropMode
 	task := elt.NewTask(0, config)
-	assert.NoError(t, task.Err)
+	g.AssertNoError(t, task.Err)
 
 	// run task
 	err := task.Execute()
-	assert.NoError(t, err)
+	g.AssertNoError(t, err)
 }
