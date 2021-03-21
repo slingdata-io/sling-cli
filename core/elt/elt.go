@@ -465,11 +465,11 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 
 	if srcTable != "" && cfg.Target.Mode != "drop" && len(t.Cfg.Target.Columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
-		srcData, _ := srcConn.Query(g.F("select * from %s where 1=0", srcTable))
+		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
-		if len(srcData.Columns) > 0 {
+		if len(columns) > 0 {
 			commFields := database.CommonColumns(
-				srcData.Columns.Names(),
+				columns.Names(),
 				t.Cfg.Target.Columns.Names(),
 			)
 			if len(commFields) == 0 {
@@ -886,7 +886,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	}
 
 	if tableDDL == "" {
-		tableDDL, err = conn.GenerateDDL(tableName, data)
+		tableDDL, err = conn.GenerateDDL(tableName, data, false)
 		if err != nil {
 			return false, g.Error(err, "Could not generate DDL for "+tableName)
 		}
