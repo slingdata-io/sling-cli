@@ -94,6 +94,8 @@ func (t *Task) Execute() error {
 		t.Ctx = context.Background()
 	}
 
+	// print for debugging
+	g.Trace("using Config:\n%s", g.Pretty(t.Cfg))
 	go func() {
 		defer close(done)
 		t.Status = ExecStatusRunning

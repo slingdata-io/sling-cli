@@ -68,6 +68,7 @@ func processELT(c *g.CliSC) (err error) {
 	}
 
 	cfg := elt.Config{}
+	cfg.SetDefault()
 	cfgStr := ""
 	showExamples := false
 	// saveAsJob := false

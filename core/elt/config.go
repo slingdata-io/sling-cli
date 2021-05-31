@@ -37,6 +37,9 @@ const (
 
 // NewConfig return a config object from a string
 func NewConfig(cfgStr string) (cfg Config, err error) {
+	// set default, unmarshalling will overwrite
+	cfg.SetDefault()
+
 	err = cfg.Unmarshal(cfgStr)
 	if err != nil {
 		err = g.Error(err, "Unable to parse config string")
@@ -49,6 +52,12 @@ func NewConfig(cfgStr string) (cfg Config, err error) {
 		return
 	}
 	return
+}
+
+// SetDefault sets default options
+func (cfg *Config) SetDefault() {
+	cfg.Source.Options = sourceFileOptionsDefault
+	cfg.Target.Options = targetFileOptionsDefault
 }
 
 // Unmarshal parse a configuration file path or config text
@@ -279,9 +288,9 @@ type Config struct {
 	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]interface{} `json:"env" yaml:"env"`
 
-	SrcConn   connection.Connection `json:"sc,omitempty" yaml:"sc,omitempty"`
-	TgtConn   connection.Connection `json:"tc,omitempty" yaml:"tc,omitempty"`
-	Prepared  bool                  `json:"prepared,omitempty" yaml:"prepared,omitempty"`
+	SrcConn   connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
+	TgtConn   connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
+	Prepared  bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
 	UpsertVal string                `json:"-" yaml:"-"`
 }
 
@@ -381,6 +390,7 @@ var targetFileOptionsDefault = TargetOptions{
 	Header:         true,
 	Compression:    CompressionAuto,
 	Concurrency:    runtime.NumCPU(),
+	UseBulk:        true,
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    -1,
