@@ -71,7 +71,7 @@ func NewTask(execID int, cfg Config) (t Task) {
 		Status:       ExecStatusCreated,
 		df:           iop.NewDataflow(),
 		pbar:         iop.NewPBar(time.Second),
-		progressHist: []string{},
+		ProgressHist: []string{},
 	}
 
 	srcFileProvided := cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
@@ -131,18 +131,18 @@ type Task struct {
 	Bytes         uint64           `json:"bytes"`
 	Ctx           context.Context  `json:"-"`
 	SubTasks      map[string]*Task `json:"-"`
-	Progress      string
-	df            *iop.Dataflow
+	Progress      string           `json:"progress"`
+	df            *iop.Dataflow    `json:"-"`
 	prevCount     uint64
-	lastIncrement time.Time // the time of last row increment (to determine stalling)
-	progressHist  []string
-	pbar          *pb.ProgressBar
+	lastIncrement time.Time       // the time of last row increment (to determine stalling)
+	ProgressHist  []string        `json:"progress_hist"`
+	pbar          *pb.ProgressBar `json:"-"`
 }
 
 // SetProgress sets the progress
 func (t *Task) SetProgress(progressText string, args ...interface{}) {
 	g.Info(progressText, args...)
 	progressText = g.F(progressText, args...)
-	t.progressHist = append(t.progressHist, progressText)
+	t.ProgressHist = append(t.ProgressHist, progressText)
 	t.Progress = progressText
 }

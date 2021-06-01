@@ -16,17 +16,15 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type profileConn struct {
-	Target  string                   `yaml:"target"`
-	Outputs map[string]profileOutput `yaml:"outputs"`
+type ProfileConn struct {
+	Target  string           `yaml:"target"`
+	Outputs map[string]g.Map `yaml:"outputs"`
 }
 
 type profileConfig struct {
 	SendAnonymousUsageStats bool `yaml:"send_anonymous_usage_stats"`
 	UseColors               bool `yaml:"use_colors"`
 }
-
-type profileOutput map[string]interface{}
 
 // generateProfile creates the connection profile YAML file
 func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
@@ -60,9 +58,9 @@ func (d *Dbt) generateProfile(conns []connection.Connection) (err error) {
 			err = g.Error(err, "could not obtain profile entry for "+conn.Info().Name)
 			return err
 		}
-		prof[conn.Info().Name] = profileConn{
+		prof[conn.Info().Name] = ProfileConn{
 			Target: defTarget,
-			Outputs: map[string]profileOutput{
+			Outputs: map[string]g.Map{
 				defTarget: pe,
 			},
 		}
