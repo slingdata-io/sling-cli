@@ -118,93 +118,93 @@ primary_key: id
 var ctx, cancel = context.WithCancel(context.Background())
 
 var cliELT = &g.CliSC{
-	Name:        "elt",
-	Description: "execute an ad-hoc ELT task",
+	Name:        "exec",
+	Description: "execute an ad-hoc Extract-Load task",
 	Flags: []g.Flag{
-		g.Flag{
+		{
 			Name:        "local-conns",
 			Type:        "bool",
 			Description: "show the locally defined connections",
 		},
-		g.Flag{
+		{
 			Type:        "bool",
 			ShortName:   "R",
 			Name:        "remote",
 			Description: "execute the task remotely from your SlingELT account / instance",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "c",
 			Name:        "config",
 			Description: "The config string or file to use (JSON or YAML).\n",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-file",
 			Description: "The path/url of the source file (local, s3, gc, azure, http, sftp).",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-conn",
 			Description: "The source database / API connection (name, conn string or URL).",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-table",
 			Description: "The source table (schema.table) or API supported object name.",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "src-sql",
 			Description: "The path of sql file or in-line text to use as query\n",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-file",
 			Description: "The path/url of the target file (local, s3, gc, azure).",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-conn",
 			Description: "The target database connection (name, conn string or URL).",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "tgt-table",
 			Description: "The target table (schema.table).",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "pre-sql",
 			Description: "The path of sql file or in-line text to run on tgtConn prior to the data load",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "",
 			Name:        "post-sql",
 			Description: "The path of sql file or in-line text to run on tgtConn after the data is loaded.",
 		},
-		g.Flag{
+		{
 			Type:        "bool",
 			ShortName:   "",
 			Name:        "stdout",
 			Description: "Output the stream to standard output (STDOUT).\n",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "o",
 			Name:        "options",
 			Description: "in-line options to further configure ELT task.",
 		},
-		g.Flag{
+		{
 			Type:        "string",
 			ShortName:   "m",
 			Name:        "mode",
@@ -222,7 +222,7 @@ var cliELT = &g.CliSC{
 		// 	Name:        "upsertPK",
 		// 	Description: "The column(s) to use to as the primark key for updating. Comma delimited values allowed for a composite key. Must be provided with `upsert` load mode.\n",
 		// },
-		g.Flag{
+		{
 			Type:        "bool",
 			ShortName:   "e",
 			Name:        "examples",
@@ -292,7 +292,7 @@ func cliInit() int {
 
 	// Set your program's name and description.  These appear in help output.
 	flaggy.SetName("sling")
-	flaggy.SetDescription("An ELT tool.")
+	flaggy.SetDescription("An Extract-Load tool.")
 	flaggy.DefaultParser.ShowHelpOnUnexpected = true
 	flaggy.DefaultParser.AdditionalHelpPrepend = "Slings data from a data source to a data target.\nVersion " + core.Version
 
