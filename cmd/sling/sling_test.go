@@ -33,63 +33,63 @@ var (
 )
 
 var DBs = []*testDB{
-	// &testDB{
+	// {
 	// 	// https://github.com/mattn/go-sqlite3
 	// 	name:  "SQLite",
 	// 	URL:   "file:./test.db",
 	// 	table: "main.test1",
 	// },
 
-	&testDB{
+	{
 		// https://github.com/lib/pq
 		name:  "Postgres",
 		URL:   "$POSTGRES_URL",
 		table: "public.test1",
 	},
 
-	&testDB{
+	{
 		// https://github.com/godror/godror
 		name:  "Oracle",
 		URL:   "$ORACLE_URL",
 		table: "system.test1",
 	},
 
-	// &testDB{
+	// {
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "MySQL",
 	// 	URL:   "$MYSQL_URL",
 	// 	table: "mysql.test1",
 	// },
 
-	// &testDB{
+	// {
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "SQLServer",
 	// 	URL:   "$MSSQL_URL",
 	// 	table: "dbo.test1",
 	// },
 
-	// &testDB{
+	// {
 	// 	// https://github.com/denisenkom/go-mssqldb
 	// 	name:  "AzureSQL",
 	// 	URL:   "$AZURESQL_URL",
 	// 	table: "dbo.test1",
 	// },
 
-	// &testDB{
+	// {
 	// 	// https://github.com/snowflakedb/gosnowflake
 	// 	name:  "Snowflake",
 	// 	URL:   "$SNOWFLAKE_URL",
 	// 	table: "sling.test1",
 	// },
 
-	// &testDB{
+	// {
 	// 	// https://github.com/snowflakedb/gosnowflake
 	// 	name:  "BigQuery",
 	// 	URL:   "$BIGQUERY_URL",
 	// 	table: "public.test1",
 	// },
 
-	// &testDB{
+	// {
 	// 	// https://github.com/lib/pq
 	// 	name:  "Redshift",
 	// 	URL:   "$REDSHIFT_URL",
