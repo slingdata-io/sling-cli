@@ -122,11 +122,6 @@ var cliELT = &g.CliSC{
 	Description: "execute an ad-hoc Extract-Load task",
 	Flags: []g.Flag{
 		{
-			Name:        "local-conns",
-			Type:        "bool",
-			Description: "show the locally defined connections",
-		},
-		{
 			Type:        "bool",
 			ShortName:   "R",
 			Name:        "remote",
@@ -238,6 +233,12 @@ var cliUpdate = &g.CliSC{
 	ExecProcess: updateCLI,
 }
 
+var cliList = &g.CliSC{
+	Name:        "list",
+	Description: "list local connections configured",
+	ExecProcess: listLocalConns,
+}
+
 func init() {
 	// we need a webserver to get the pprof webserver
 	if os.Getenv("SLING_PPROF") == "TRUE" {
@@ -247,6 +248,7 @@ func init() {
 		}()
 	}
 
+	cliList.Make().Add()
 	cliELT.Make().Add()
 	cliUpdate.Make().Add()
 }

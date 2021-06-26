@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/cast"
 )
 
-func listLocalConns() {
+func listLocalConns(c *g.CliSC) (err error) {
 	rows := [][]interface{}{}
 	for key, val := range g.KVArrToMap(os.Environ()...) {
 		if !strings.Contains(val, ":/") {
@@ -32,10 +32,17 @@ func listLocalConns() {
 			continue
 		}
 
-		if conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
+		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
 			continue
 		}
 		rows = append(rows, []interface{}{conn.Info().Name, connection.GetTypeNameLong(conn)})
+	}
+
+	conns, err := connection.ReadDbtConnections()
+	if !g.LogError(err) {
+		for _, conn := range conns {
+			rows = append(rows, []interface{}{conn.Info().Name, connection.GetTypeNameLong(conn) + " [dbt]"})
+		}
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
@@ -49,7 +56,7 @@ func listLocalConns() {
 	}
 
 	println(T.Render())
-	os.Exit(0)
+	return
 }
 
 func processELT(c *g.CliSC) (err error) {
@@ -61,11 +68,6 @@ func processELT(c *g.CliSC) (err error) {
 		))
 	}
 	defer doLog()
-
-	local, ok := c.Vals["local-conns"]
-	if ok && cast.ToBool(local) {
-		listLocalConns()
-	}
 
 	cfg := elt.Config{}
 	cfg.SetDefault()

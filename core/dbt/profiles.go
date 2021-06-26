@@ -3,6 +3,7 @@ package dbt
 import (
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/spf13/cast"
 
@@ -155,6 +156,64 @@ func (d *Dbt) getProfileEntry(conn connection.Connection) (pe map[string]interfa
 		delete(pe, "pass")
 		delete(pe, "dbname")
 		delete(pe, "host")
+	}
+
+	return
+}
+
+func ReadDbtConnections() (conns map[string]connection.Connection, err error) {
+	conns = map[string]connection.Connection{}
+
+	profileDir := strings.TrimSuffix(os.Getenv("DBT_PROFILES_DIR"), "/")
+	if profileDir == "" {
+		profileDir = g.UserHomeDir() + "/.dbt"
+	}
+	path := profileDir + "/profiles.yml"
+	if !g.PathExists(path) {
+		return
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		err = g.Error(err, "error reading from yaml: %s", path)
+		return
+	}
+
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		err = g.Error(err, "error reading bytes from yaml: %s", path)
+		return
+	}
+
+	type ProfileConn struct {
+		Target  string           `json:"target" yaml:"target"`
+		Outputs map[string]g.Map `json:"outputs" yaml:"outputs"`
+	}
+
+	dbtProfile := map[string]ProfileConn{}
+	err = yaml.Unmarshal(bytes, &dbtProfile)
+	if err != nil {
+		err = g.Error(err, "error parsing yaml string")
+		return
+	}
+
+	for pName, pc := range dbtProfile {
+		for target, data := range pc.Outputs {
+			connName := strings.ToUpper(pName + "/" + target)
+			data["dbt"] = true
+
+			conn, err := connection.NewConnectionFromMap(
+				g.M("name", connName, "data", data, "type", data["type"]),
+			)
+			if err != nil {
+				g.Warn("could not load dbt connection %s", connName)
+				g.LogError(err)
+				continue
+			}
+
+			conns[connName] = conn
+			g.Trace("found connection from dbt profiles YAMML: " + connName)
+		}
 	}
 
 	return

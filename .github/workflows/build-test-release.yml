@@ -8,57 +8,55 @@ jobs:
     runs-on: self-hosted
 
     steps:
-    - uses: actions/checkout@v2
-  
-    - name: Build
-      run: |
-        bash scripts/prep.gomod.sh
-        export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
-        mkdir -p $WORK_FOLDER
-        cp -r . $WORK_FOLDER/sling
-        docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox bash scripts/build.sh
-        rm -rf $WORK_FOLDER
+      - uses: actions/checkout@v2
 
-  
+      - name: Build
+        run: |
+          bash scripts/prep.gomod.sh
+          export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
+          mkdir -p $WORK_FOLDER
+          cp -r . $WORK_FOLDER/sling
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.sh
+          rm -rf $WORK_FOLDER
+
   test:
     if: "! contains(github.event.head_commit.message, '[skip ci]')"
-    
+
     needs: [build-sling]
 
     runs-on: self-hosted
-    
+
     steps:
-        
-    - uses: actions/checkout@v2
-  
-    - name: Run Go Tests
-      run: |
-        bash scripts/prep.gomod.sh
-        source /root/.bashrc
-        source /__/devbox/.env.sh
-        export _DEBUG=''
-        echo $PATH
-        bash scripts/test.sh
+      - uses: actions/checkout@v2
+
+      - name: Run Go Tests
+        run: |
+          bash scripts/prep.gomod.sh
+          source /root/.bashrc
+          source /__/devbox/.env.sh
+          export _DEBUG=''
+          echo $PATH
+          bash scripts/test.sh
 
   push:
     needs: [build-sling, test]
     runs-on: self-hosted
 
     steps:
-    - name: Push Docker
-      run: |
-        /bin/cp /__/bin/sling .
-        
-        source /__/devbox/.env.sh
-        export _DEBUG=''
-        echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
+      - name: Push Docker
+        run: |
+          /bin/cp /__/bin/sling .
 
-        docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
-        docker tag slingdata/sling:${GITHUB_RUN_NUMBER} slingdata/sling:latest
-        docker push slingdata/sling:latest
-        docker image rm -f slingdata/sling:${GITHUB_RUN_NUMBER}
+          source /__/devbox/.env.sh
+          export _DEBUG=''
+          echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
-        rm -rf webapp
+          docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
+          docker tag slingdata/sling:${GITHUB_RUN_NUMBER} slingdata/sling:latest
+          docker push slingdata/sling:latest
+          docker image rm -f slingdata/sling:${GITHUB_RUN_NUMBER}
+
+          rm -rf webapp
 
   release:
     needs: [build-sling, test]
@@ -67,79 +65,77 @@ jobs:
 
     strategy:
       matrix:
-        os: [ macos-latest, ubuntu-latest, windows-2016 ]
+        os: [macos-latest, ubuntu-latest, windows-2016]
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - name: Dump context
-      env:
-        JOB_CONTEXT: ${{ toJson(job) }}
-        MATRIX_CONTEXT: ${{ toJson(matrix) }}
-        RUNNER_CONTEXT: ${{ toJson(runner) }}
-      run: |
-        echo "JOB_CONTEXT -> $JOB_CONTEXT"
-        echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
-        echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
-      
-    - name: Set up GoLang
-      uses: actions/setup-go@v1
-      with:
-        go-version: '1.16'
-  
-    - name: Prepare Build (Unix)
-      if: runner.os != 'windows'
-      run: |
-        export GO_BIN_FOLDER=$HOME/go/bin
-        export TMPDIR=~/tmp/
-        export PATH=$GO_BIN_FOLDER:$PATH
-        mkdir -p $TMPDIR
+      - name: Dump context
+        env:
+          JOB_CONTEXT: ${{ toJson(job) }}
+          MATRIX_CONTEXT: ${{ toJson(matrix) }}
+          RUNNER_CONTEXT: ${{ toJson(runner) }}
+        run: |
+          echo "JOB_CONTEXT -> $JOB_CONTEXT"
+          echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
+          echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
 
-    - name: Prepare Build (Windows)
-      if: runner.os == 'windows'
-      run: |
-        setx TMPDIR "C:\Users\runneradmin\tmp"
-        setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
-        setx GO111MODULE "auto"
-        mkdir C:\Users\runneradmin\tmp
+      - name: Set up GoLang
+        uses: actions/setup-go@v1
+        with:
+          go-version: "1.16"
 
-        
-    - name: Build Sling (Linux)
-      if: runner.os == 'linux'
-      run: |
-        echo "Building sling"
-        bash scripts/prep.gomod.sh
-        GOOS=linux GOARCH=amd64 go build -o sling cmd/sling/*.go
+      - name: Prepare Build (Unix)
+        if: runner.os != 'windows'
+        run: |
+          export GO_BIN_FOLDER=$HOME/go/bin
+          export TMPDIR=~/tmp/
+          export PATH=$GO_BIN_FOLDER:$PATH
+          mkdir -p $TMPDIR
 
-    - name: Build Sling (Mac)
-      if: runner.os == 'macOS'
-      run: |
-        echo "Building sling"
-        bash scripts/prep.gomod.sh
-        GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
-      
-    - name: Build Sling (Windows)
-      if: runner.os == 'windows'
-      run: |
-        echo "Building sling.exe"
-        setx GOOS "windows"
-        setx GOARCH "386"
-        setx GO111MODULE "auto"
+      - name: Prepare Build (Windows)
+        if: runner.os == 'windows'
+        run: |
+          setx TMPDIR "C:\Users\runneradmin\tmp"
+          setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
+          setx GO111MODULE "auto"
+          mkdir C:\Users\runneradmin\tmp
 
-        go mod edit -dropreplace='github.com/flarco/g' go.mod
-        go mod edit -dropreplace='github.com/flarco/dbio' go.mod
-        go get github.com/flarco/g@HEAD
-        go get github.com/flarco/dbio@HEAD
+      - name: Build Sling (Linux)
+        if: runner.os == 'linux'
+        run: |
+          echo "Building sling"
+          bash scripts/prep.gomod.sh
+          GOOS=linux GOARCH=amd64 go build -o sling cmd/sling/*.go
 
-        go build -o sling.exe github.com/slingdata-io/sling/cmd/sling
+      - name: Build Sling (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          echo "Building sling"
+          bash scripts/prep.gomod.sh
+          GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
 
-    - name: Release Binaries to Github
-      uses: "marvinpinto/action-automatic-releases@latest"
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "latest-${{ runner.os }}"
-        prerelease: true
-        title: "Latest: ${{ runner.os }}"
-        files: |
-          sling*
-    
+      - name: Build Sling (Windows)
+        if: runner.os == 'windows'
+        run: |
+          echo "Building sling.exe"
+          setx GOOS "windows"
+          setx GOARCH "386"
+          setx GO111MODULE "auto"
+
+          go mod edit -dropreplace='github.com/flarco/g' go.mod
+          go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+          go get github.com/flarco/g@HEAD
+          go get github.com/flarco/dbio@HEAD
+
+          go build -o sling.exe github.com/slingdata-io/sling/cmd/sling
+
+      - name: Release Binaries to Github
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest-${{ runner.os }}"
+          prerelease: true
+          title: "Latest: ${{ runner.os }}"
+          files: |
+            sling*
