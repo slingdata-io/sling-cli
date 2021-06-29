@@ -6,8 +6,11 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	"github.com/rudderlabs/analytics-go"
 	"github.com/slingdata-io/sling/core"
 	"github.com/slingdata-io/sling/core/env"
 
@@ -251,9 +254,53 @@ func init() {
 	cliList.Make().Add()
 	cliELT.Make().Add()
 	cliUpdate.Make().Add()
+
+	sentry.Init(sentry.ClientOptions{
+		// Either set your DSN here or set the SENTRY_DSN environment variable.
+		Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
+		// Either set environment and release here or set the SENTRY_ENVIRONMENT
+		// and SENTRY_RELEASE environment variables.
+		// Environment: "",
+		Release: "sling@" + core.Version,
+		// Enable printing of SDK debug messages.
+		// Useful when getting started or trying to figure something out.
+		Debug: false,
+	})
+}
+
+func getRsClient() analytics.Client {
+	return analytics.New("1uXKxEPgIB9HXkTduvfwXmFak2l", "https://liveflarccszw.dataplane.rudderstack.com")
+}
+
+func Track(event string, props ...g.Map) {
+	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
+		if !cast.ToBool(val) {
+			return
+		}
+	}
+
+	rsClient := getRsClient()
+	properties := analytics.NewProperties().
+		Set("application", "sling-cli").
+		Set("version", core.Version).
+		Set("os", runtime.GOOS)
+
+	if len(props) > 0 {
+		for k, v := range props[0] {
+			properties.Set(k, v)
+		}
+	}
+
+	rsClient.Enqueue(analytics.Track{
+		UserId:     "sling",
+		Event:      event,
+		Properties: properties,
+	})
+	rsClient.Close()
 }
 
 func main() {
+
 	exitCode := 11
 	done := make(chan struct{})
 	interrupt := make(chan os.Signal, 1)
@@ -307,9 +354,13 @@ func cliInit() int {
 
 	ok, err := g.CliProcess()
 	if ok {
+		if err != nil {
+			sentry.CaptureException(err)
+		}
 		g.LogFatal(err)
 	} else {
 		flaggy.ShowHelp("")
+		Track("ShowHelp")
 	}
 	return 0
 }

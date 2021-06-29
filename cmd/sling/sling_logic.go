@@ -13,7 +13,6 @@ import (
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling/core"
 	"github.com/slingdata-io/sling/core/elt"
-	"github.com/slingdata-io/sling/core/env"
 
 	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"
@@ -60,14 +59,6 @@ func listLocalConns(c *g.CliSC) (err error) {
 }
 
 func processELT(c *g.CliSC) (err error) {
-
-	doLog := func() {
-		logUsage(g.M(
-			"cmd", "elt",
-			"error", g.ErrorText(err),
-		))
-	}
-	defer doLog()
 
 	cfg := elt.Config{}
 	cfg.SetDefault()
@@ -142,23 +133,25 @@ func processELT(c *g.CliSC) (err error) {
 		return g.Error(task.Err)
 	}
 
-	doLog = func() {
-		logUsage(g.M(
-			"cmd", "elt",
-			"error", g.ErrorText(task.Err),
+	// set context
+	task.Ctx = ctx
+
+	// track usage
+	defer func() {
+		props := g.M(
+			"cmd", "exec",
+			"error", g.ErrMsgSimple(task.Err),
 			"job_type", task.Type,
 			"job_mode", task.Cfg.Target.Mode,
 			"job_status", task.Status,
-			"job_src_type", connection.GetTypeNameLong(task.Cfg.SrcConn),
-			"job_tgt_type", connection.GetTypeNameLong(task.Cfg.TgtConn),
+			"job_src_type", task.Cfg.SrcConn.Type,
+			"job_tgt_type", task.Cfg.TgtConn.Type,
 			"job_start_time", task.StartTime,
 			"job_end_time", task.EndTime,
 			"job_rows_count", task.GetCount(),
-		))
-	}
-
-	// set context
-	task.Ctx = ctx
+		)
+		Track("task.Execute", props)
+	}()
 
 	// run task
 	err = task.Execute()
@@ -171,9 +164,7 @@ func processELT(c *g.CliSC) (err error) {
 
 func updateCLI(c *g.CliSC) (err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
-	go logUsage(g.M(
-		"cmd", "update",
-	))
+	Track("updateCLI")
 
 	url := ""
 	if runtime.GOOS == "linux" {
@@ -228,12 +219,4 @@ func updateCLI(c *g.CliSC) (err error) {
 	g.Info("Updated to " + strings.TrimSpace(string(versionOut)))
 
 	return nil
-}
-
-func logUsage(m map[string]interface{}) {
-	m["application_name"] = "sling"
-	m["version"] = core2.Version
-	m["os"] = runtime.GOOS
-	return
-	env.LogEvent(m)
 }

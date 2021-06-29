@@ -386,15 +386,20 @@ func TestCfgPath(t *testing.T) {
 
 func testTask(t *testing.T) {
 	config := elt.Config{}
-	config.Source.Conn = "SNOWFLAKE_URL"
-	config.Source.Stream = "public.test5"
-	config.Target.Conn = "POSTGRES_URL"
-	config.Target.Object = "public.test5"
+	config.SetDefault()
+	config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021"
+	config.Target.Conn = "PG_BIONIC_URL"
+	config.Target.Object = "public.sling_cli_events"
 	config.Target.Mode = elt.DropMode
-	task := elt.NewTask(0, config)
-	g.AssertNoError(t, task.Err)
+	config.Target.Options.UseBulk = false
+	err := config.Prepare()
+	if g.AssertNoError(t, err) {
 
-	// run task
-	err := task.Execute()
-	g.AssertNoError(t, err)
+		task := elt.NewTask(0, config)
+		g.AssertNoError(t, task.Err)
+
+		// run task
+		err = task.Execute()
+		g.AssertNoError(t, err)
+	}
 }

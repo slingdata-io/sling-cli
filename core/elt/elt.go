@@ -384,6 +384,13 @@ func (t *Task) runDbToDb() (err error) {
 	defer srcConn.Close()
 	defer tgtConn.Close()
 
+	defer func() {
+		if err != nil {
+			g.Trace(strings.Join(srcConn.Base().Log, ";\n"))
+			g.Trace(strings.Join(tgtConn.Base().Log, ";\n"))
+		}
+	}()
+
 	// set schema if needed
 	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
 	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
@@ -705,12 +712,21 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		cnt, _ = tgtConn.GetCount(cfg.Target.Options.TableTmp)
 		// perhaps do full analysis to validate quality
 	} else {
+		err = tgtConn.BeginContext(df.Context.Ctx)
+		if err != nil {
+			err = g.Error(err, "could not open transcation to write to temp table")
+			return
+		}
+
 		t.SetProgress("streaming inserts")
 		cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 		if err != nil {
+			tgtConn.Rollback()
 			err = g.Error(err, "could not insert into "+targetTable)
 			return
 		}
+		tgtConn.Commit()
+
 		tCnt, _ := tgtConn.GetCount(cfg.Target.Options.TableTmp)
 		if cnt != tCnt {
 			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
