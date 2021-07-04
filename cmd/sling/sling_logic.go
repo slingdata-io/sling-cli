@@ -39,6 +39,7 @@ func init() {
 type Conn struct {
 	Name        string
 	Description string
+	Source      string
 	Connection  connection.Connection
 }
 
@@ -58,13 +59,13 @@ func getLocalConns() []Conn {
 		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
 			continue
 		}
-		conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
+		conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "env variable", conn})
 	}
 
 	dbtConns, err := connection.ReadDbtConnections()
 	if !g.LogError(err) {
 		for _, conn := range dbtConns {
-			conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn) + " [dbt]", conn})
+			conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "dbt profiles", conn})
 		}
 	}
 
@@ -73,7 +74,7 @@ func getLocalConns() []Conn {
 		profileConns, err := connection.ReadConnections(path)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
-				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
+				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "sling profiles", conn})
 			}
 		}
 	}
@@ -83,7 +84,7 @@ func getLocalConns() []Conn {
 		profileConns, err := connection.ReadConnections(path)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
-				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
+				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "dbnet yaml", conn})
 			}
 		}
 	}
@@ -208,9 +209,9 @@ func processConns(c *g.CliSC) error {
 	case "list", "show":
 		conns := getLocalConns()
 		T := table.NewWriter()
-		T.AppendHeader(table.Row{"Conn Name", "Conn Type"})
+		T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
 		for _, conn := range conns {
-			T.AppendRow(table.Row{conn.Name, conn.Description})
+			T.AppendRow(table.Row{conn.Name, conn.Description, conn.Source})
 		}
 		println(T.Render())
 	case "test":
