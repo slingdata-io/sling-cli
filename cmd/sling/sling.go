@@ -247,10 +247,10 @@ var cliConns = &g.CliSC{
 	Singular:    "local connection",
 	Description: "manage local connections",
 	SubComs: []*g.CliSC{
-		{
-			Name:        "add",
-			Description: "add new connection",
-		},
+		// {
+		// 	Name:        "add",
+		// 	Description: "add new connection",
+		// },
 		{
 			Name:        "show",
 			Description: "list local connections detected",
