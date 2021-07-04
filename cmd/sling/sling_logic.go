@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"runtime"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/flarco/dbio/connection"
+	"github.com/integrii/flaggy"
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
@@ -20,42 +22,42 @@ import (
 	"github.com/spf13/cast"
 )
 
-func listLocalConns(c *g.CliSC) (err error) {
-	rows := [][]interface{}{}
+type Conn struct {
+	Name        string
+	Description string
+	Connection  connection.Connection
+}
+
+func getLocalConns() []Conn {
+	conns := []Conn{}
 	for key, val := range g.KVArrToMap(os.Environ()...) {
-		if !strings.Contains(val, ":/") {
+		if !strings.Contains(val, ":/") || strings.Contains(val, "{") {
 			continue
 		}
 		conn, err := connection.NewConnectionFromURL(key, val)
-		if g.LogError(err) {
+		if err != nil {
+			e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
+			g.Warn(e)
 			continue
 		}
 
 		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
 			continue
 		}
-		rows = append(rows, []interface{}{conn.Info().Name, connection.GetTypeNameLong(conn)})
+		conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
 	}
 
-	conns, err := connection.ReadDbtConnections()
+	dbtConns, err := connection.ReadDbtConnections()
 	if !g.LogError(err) {
-		for _, conn := range conns {
-			rows = append(rows, []interface{}{conn.Info().Name, connection.GetTypeNameLong(conn) + " [dbt]"})
+		for _, conn := range dbtConns {
+			conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn) + " [dbt]", conn})
 		}
 	}
 
-	sort.Slice(rows, func(i, j int) bool {
-		return cast.ToString(rows[i][0]) < cast.ToString(rows[j][0])
+	sort.Slice(conns, func(i, j int) bool {
+		return cast.ToString(conns[i].Name) < cast.ToString(conns[j].Name)
 	})
-
-	T := table.NewWriter()
-	T.AppendHeader(table.Row{"Conn Name", "Conn Type"})
-	for _, row := range rows {
-		T.AppendRow(row)
-	}
-
-	println(T.Render())
-	return
+	return conns
 }
 
 func processELT(c *g.CliSC) (err error) {
@@ -159,6 +161,69 @@ func processELT(c *g.CliSC) (err error) {
 		return g.Error(err)
 	}
 
+	return nil
+}
+
+func processConns(c *g.CliSC) error {
+	switch c.UsedSC() {
+	case "add", "new":
+		if len(c.Vals) == 0 {
+			flaggy.ShowHelp("")
+			return nil
+		}
+	case "list", "show":
+		conns := getLocalConns()
+		T := table.NewWriter()
+		T.AppendHeader(table.Row{"Conn Name", "Conn Type"})
+		for _, conn := range conns {
+			T.AppendRow(table.Row{conn.Name, conn.Description})
+		}
+		println(T.Render())
+	case "test":
+		if len(c.Vals) == 0 {
+			flaggy.ShowHelp("")
+			return nil
+		}
+		name := cast.ToString(c.Vals["name"])
+		conns := map[string]Conn{}
+		for _, conn := range getLocalConns() {
+			conns[strings.ToLower(conn.Name)] = conn
+		}
+
+		conn, ok := conns[strings.ToLower(name)]
+		if !ok || name == "" {
+			g.Info("Invalid Connection name: %s", name)
+			return nil
+		}
+
+		switch {
+		case conn.Connection.Type.IsDb():
+			dbConn, err := conn.Connection.AsDatabase()
+			if err != nil {
+				return g.Error(err, "could not initiate %s", name)
+			}
+			err = dbConn.Connect()
+			if err != nil {
+				return g.Error(err, "could not connect to %s", name)
+			}
+			g.Info("success!")
+		case conn.Connection.Type.IsFile():
+			fileClient, err := conn.Connection.AsFile()
+			if err != nil {
+				return g.Error(err, "could not initiate %s", name)
+			}
+			err = fileClient.Init(context.Background())
+			if err != nil {
+				return g.Error(err, "could not connect to %s", name)
+			}
+			g.Info("success!")
+		default:
+			g.Warn("Unhandled connection type: %s", conn.Connection.Type)
+		}
+
+	case "":
+		flaggy.ShowHelp("")
+	}
 	return nil
 }
 

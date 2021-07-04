@@ -120,16 +120,16 @@ primary_key: id
 `
 var ctx, cancel = context.WithCancel(context.Background())
 
-var cliELT = &g.CliSC{
-	Name:        "exec",
-	Description: "execute an ad-hoc Extract-Load task",
+var cliRun = &g.CliSC{
+	Name:        "run",
+	Description: "execute an ad-hoc task",
 	Flags: []g.Flag{
-		{
-			Type:        "bool",
-			ShortName:   "R",
-			Name:        "remote",
-			Description: "execute the task remotely from your SlingELT account / instance",
-		},
+		// {
+		// 	Type:        "bool",
+		// 	ShortName:   "R",
+		// 	Name:        "remote",
+		// 	Description: "execute the task remotely from your SlingELT account / instance",
+		// },
 		{
 			Type:        "string",
 			ShortName:   "c",
@@ -230,16 +230,45 @@ var cliELT = &g.CliSC{
 	ExecProcess: processELT,
 }
 
+var cliInteractive = &g.CliSC{
+	Name:        "it",
+	Description: "launch interactive mode",
+	ExecProcess: slingPrompt,
+}
+
 var cliUpdate = &g.CliSC{
 	Name:        "update",
-	Description: "update the cli application to the latest version",
+	Description: "update to the latest version",
 	ExecProcess: updateCLI,
 }
 
-var cliList = &g.CliSC{
-	Name:        "list",
-	Description: "list local connections configured",
-	ExecProcess: listLocalConns,
+var cliConns = &g.CliSC{
+	Name:        "conns",
+	Singular:    "local connection",
+	Description: "manage local connections",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "add",
+			Description: "add new connection",
+		},
+		{
+			Name:        "show",
+			Description: "list local connections detected",
+		},
+		{
+			Name:        "test",
+			Description: "test a local connection",
+			Flags: []g.Flag{
+				{
+					Type:        "string",
+					ShortName:   "",
+					Name:        "name",
+					Description: "The name of the connection to test",
+				},
+			},
+		},
+	},
+	ExecProcess: processConns,
 }
 
 func init() {
@@ -251,8 +280,9 @@ func init() {
 		}()
 	}
 
-	cliList.Make().Add()
-	cliELT.Make().Add()
+	cliInteractive.Make().Add()
+	cliConns.Make().Add()
+	cliRun.Make().Add()
 	cliUpdate.Make().Add()
 
 	sentry.Init(sentry.ClientOptions{
@@ -323,7 +353,7 @@ func main() {
 		println("\nkilling process...")
 		os.Exit(111)
 	case <-interrupt:
-		if cliELT.Sc.Used {
+		if cliRun.Sc.Used {
 			println("\ninterrupting...")
 			cancel()
 			select {

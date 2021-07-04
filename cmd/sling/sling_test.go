@@ -388,10 +388,13 @@ func testTask(t *testing.T) {
 	config := elt.Config{}
 	config.SetDefault()
 	config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021"
+	// config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021/1624811693.1uXKxCrhN2WGAt2fojy6k2fqDSb.9939afc4-a80f-4f3e-921e-fc24e8e7ff43.json.gz"
+	// config.Source.Conn = "file:///tmp/csvTest/"
+	// config.Source.Conn = "file:///tmp/csvTest/part2.csv.gz"
 	config.Target.Conn = "PG_BIONIC_URL"
 	config.Target.Object = "public.sling_cli_events"
 	config.Target.Mode = elt.DropMode
-	config.Target.Options.UseBulk = false
+	config.Target.Options.UseBulk = true
 	err := config.Prepare()
 	if g.AssertNoError(t, err) {
 
