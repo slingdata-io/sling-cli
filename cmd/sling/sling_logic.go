@@ -22,6 +22,20 @@ import (
 	"github.com/spf13/cast"
 )
 
+var HomeDir = os.Getenv("SLING_DIR")
+var DbNetDir = os.Getenv("DBNET_DIR")
+
+func init() {
+	if HomeDir == "" {
+		HomeDir = g.UserHomeDir() + "/sling"
+		os.Setenv("SLING_DIR", HomeDir)
+	}
+	if DbNetDir == "" {
+		DbNetDir = g.UserHomeDir() + "/dbnet"
+	}
+	os.MkdirAll(HomeDir, 0755)
+}
+
 type Conn struct {
 	Name        string
 	Description string
@@ -51,6 +65,26 @@ func getLocalConns() []Conn {
 	if !g.LogError(err) {
 		for _, conn := range dbtConns {
 			conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn) + " [dbt]", conn})
+		}
+	}
+
+	path := HomeDir + "/profiles.yaml"
+	if g.PathExists(path) {
+		profileConns, err := connection.ReadConnections(path)
+		if !g.LogError(err) {
+			for _, conn := range profileConns {
+				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
+			}
+		}
+	}
+
+	path = DbNetDir + "/.dbnet.yaml"
+	if g.PathExists(path) {
+		profileConns, err := connection.ReadConnections(path)
+		if !g.LogError(err) {
+			for _, conn := range profileConns {
+				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), conn})
+			}
 		}
 	}
 
