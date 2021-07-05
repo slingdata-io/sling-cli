@@ -252,6 +252,16 @@ func processConns(c *g.CliSC) error {
 				return g.Error(err, "could not connect to %s", name)
 			}
 			g.Info("success!")
+		case conn.Connection.Type.IsAirbyte():
+			client, err := conn.Connection.AsAirbyte()
+			if err != nil {
+				return g.Error(err, "could not initiate %s", name)
+			}
+			err = client.Init()
+			if err != nil {
+				return g.Error(err, "could not connect to %s", name)
+			}
+			g.Info("success!")
 		default:
 			g.Warn("Unhandled connection type: %s", conn.Connection.Type)
 		}
