@@ -22,8 +22,12 @@ import (
 	"github.com/spf13/cast"
 )
 
-var HomeDir = os.Getenv("SLING_DIR")
-var DbNetDir = os.Getenv("DBNET_DIR")
+var (
+	HomeDir         = os.Getenv("SLING_DIR")
+	DbNetDir        = os.Getenv("DBNET_DIR")
+	HomeDirProfile  = ""
+	DbNetDirProfile = ""
+)
 
 func init() {
 	if HomeDir == "" {
@@ -34,6 +38,11 @@ func init() {
 		DbNetDir = g.UserHomeDir() + "/dbnet"
 	}
 	os.MkdirAll(HomeDir, 0755)
+
+	HomeDirProfile = HomeDir + "/profiles.yaml"
+	DbNetDirProfile = DbNetDir + "/.dbnet.yaml"
+
+	os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirProfile, DbNetDirProfile))
 }
 
 type Conn struct {
@@ -69,9 +78,8 @@ func getLocalConns() []Conn {
 		}
 	}
 
-	path := HomeDir + "/profiles.yaml"
-	if g.PathExists(path) {
-		profileConns, err := connection.ReadConnections(path)
+	if g.PathExists(HomeDirProfile) {
+		profileConns, err := connection.ReadConnections(HomeDirProfile)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
 				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "sling profiles", conn})
@@ -79,9 +87,8 @@ func getLocalConns() []Conn {
 		}
 	}
 
-	path = DbNetDir + "/.dbnet.yaml"
-	if g.PathExists(path) {
-		profileConns, err := connection.ReadConnections(path)
+	if g.PathExists(DbNetDirProfile) {
+		profileConns, err := connection.ReadConnections(DbNetDirProfile)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
 				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "dbnet yaml", conn})

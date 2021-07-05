@@ -78,7 +78,8 @@ func NewTask(execID int, cfg Config) (t Task) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	srcTableQueryProvided := cfg.Source.Stream != ""
+	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	srcStreamProvided := cfg.Source.Stream != ""
 
 	if cfg.Target.Mode == "" {
 		cfg.Target.Mode = AppendMode
@@ -102,10 +103,14 @@ func NewTask(execID int, cfg Config) (t Task) {
 		t.Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
 		t.Type = FileToDB
-	} else if srcDbProvided && srcTableQueryProvided && !tgtDbProvided && tgtFileProvided {
+	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = FileToFile
+	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
+		t.Type = APIToDb
+	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
+		t.Type = APIToFile
 	} else if tgtDbProvided && cfg.Target.Dbt != "" {
 		t.Type = DbDbt
 	} else if tgtDbProvided && cfg.Target.Object != "" {
@@ -113,7 +118,8 @@ func NewTask(execID int, cfg Config) (t Task) {
 	}
 
 	if t.Type == "" {
-		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcTableQueryProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcTableQueryProvided)
+		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+		// g.PP(t)
 	}
 
 	return

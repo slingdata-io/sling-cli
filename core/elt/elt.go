@@ -102,19 +102,26 @@ func (t *Task) Execute() error {
 
 		if t.Err != nil {
 			return
-		} else if t.Type == DbSQL {
+		}
+
+		switch t.Type {
+		case DbSQL:
 			t.Err = t.runDbSQL()
-		} else if t.Type == DbDbt {
+		case DbDbt:
 			t.Err = t.runDbDbt()
-		} else if t.Type == FileToDB {
+		case FileToDB:
 			t.Err = t.runFileToDB()
-		} else if t.Type == DbToDb {
+		case DbToDb:
 			t.Err = t.runDbToDb()
-		} else if t.Type == DbToFile {
+		case DbToFile:
 			t.Err = t.runDbToFile()
-		} else if t.Type == FileToFile {
+		case FileToFile:
 			t.Err = t.runFileToFile()
-		} else {
+		case APIToDb:
+			t.Err = t.runAPIToDB()
+		case APIToFile:
+			t.Err = t.runAPIToFile()
+		default:
 			t.SetProgress("task execution configuration is invalid")
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
 		}
@@ -255,6 +262,32 @@ func (t *Task) runDbToFile() (err error) {
 
 }
 
+func (t *Task) runAPIToFile() (err error) {
+
+	start = time.Now()
+
+	t.SetProgress("reading from source api system")
+	t.df, err = t.ReadFromAPI(&t.Cfg)
+	if err != nil {
+		err = g.Error(err, "could not read from file")
+		return
+	}
+	defer t.df.Close()
+
+	t.SetProgress("writing to target file system")
+	cnt, err := t.WriteToFile(&t.Cfg, t.df)
+	if err != nil {
+		err = g.Error(err, "Could not WriteToFile")
+		return
+	}
+
+	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
+
+	err = t.df.Context.Err()
+	return
+
+}
+
 func (t *Task) runFolderToDB() (err error) {
 	/*
 		This will take a URL as a folder path
@@ -264,6 +297,58 @@ func (t *Task) runFolderToDB() (err error) {
 		3. keep list of file inserted in Job.Settings (view handleExecutionHeartbeat in server_ws.go).
 
 	*/
+	return
+}
+
+func (t *Task) runAPIToDB() (err error) {
+
+	start = time.Now()
+
+	t.SetProgress("connecting to target database")
+	tgtProps := g.MapToKVArr(t.Cfg.TgtConn.DataS())
+	tgtConn, err := database.NewConnContext(t.Ctx, t.Cfg.TgtConn.URL(), tgtProps...)
+	if err != nil {
+		err = g.Error(err, "Could not initialize target connection")
+		return
+	}
+
+	err = tgtConn.Connect()
+	if err != nil {
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		return
+	}
+
+	defer tgtConn.Close()
+
+	t.SetProgress("reading from source api system")
+	t.df, err = t.ReadFromAPI(&t.Cfg)
+	if err != nil {
+		err = g.Error(err, "could not read from file")
+		return
+	}
+	defer t.df.Close()
+
+	// set schema if needed
+	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
+	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
+
+	t.SetProgress("writing to target database")
+	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
+	if err != nil {
+		err = g.Error(err, "could not write to database")
+		if t.Cfg.Target.TmpTableCreated {
+			// need to drop residue
+			tgtConn.DropTable(t.Cfg.Target.Options.TableTmp)
+		}
+		return
+	}
+
+	elapsed := int(time.Since(start).Seconds())
+	t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+
+	if err != nil {
+		err = g.Error(t.df.Err(), "error in transfer")
+	}
 	return
 }
 
@@ -534,6 +619,41 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 	if err != nil {
 		err = g.Error(err, "Could not BulkStream: "+sql)
 		return
+	}
+
+	return
+}
+
+// ReadFromAPI reads from a source API
+func (t *Task) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
+
+	var stream *iop.Datastream
+
+	if cfg.SrcConn.Type.IsAirbyte() {
+		client, err := cfg.SrcConn.AsAirbyte()
+		if err != nil {
+			err = g.Error(err, "Could not obtain client for: %s", cfg.SrcConn.Type)
+			return df, err
+		}
+		err = client.Init()
+		if err != nil {
+			err = g.Error(err, "Could not init connection for: %s", cfg.SrcConn.Type)
+			return df, err
+		}
+
+		stream, err = client.Stream(cfg.Source.Stream, time.Time{})
+		if err != nil {
+			err = g.Error(err, "Could not read stream '%s' for connection: %s", cfg.Source.Stream, cfg.SrcConn.Type)
+			return df, err
+		}
+
+		df, err = iop.MakeDataFlow(stream)
+		if err != nil {
+			err = g.Error(err, "Could not MakeDataFlow")
+			return df, err
+		}
+	} else {
+		err = g.Error("API type not implemented: %s", cfg.SrcConn.Type)
 	}
 
 	return
