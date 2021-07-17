@@ -14,7 +14,7 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling/core"
-	"github.com/slingdata-io/sling/core/elt"
+	"github.com/slingdata-io/sling/core/sling"
 
 	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"
@@ -104,7 +104,7 @@ func getLocalConns() []Conn {
 
 func processRun(c *g.CliSC) (err error) {
 
-	cfg := elt.Config{}
+	cfg := sling.Config{}
 	cfg.SetDefault()
 	cfgStr := ""
 	showExamples := false
@@ -150,7 +150,7 @@ func processRun(c *g.CliSC) (err error) {
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
-			cfg.Target.Mode = elt.Mode(cast.ToString(v))
+			cfg.Target.Mode = sling.Mode(cast.ToString(v))
 		case "examples":
 			showExamples = cast.ToBool(v)
 			// case "save":
@@ -172,7 +172,7 @@ func processRun(c *g.CliSC) (err error) {
 		return g.Error(err, "Unable to parse config string")
 	}
 
-	task := elt.NewTask(0, cfg)
+	task := sling.NewTask(0, cfg)
 	if task.Err != nil {
 		return g.Error(task.Err)
 	}

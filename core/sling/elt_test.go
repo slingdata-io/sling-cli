@@ -1,6 +1,7 @@
-package elt
+package sling_test
 
 import (
+	"github.com/slingdata-io/sling/core/sling"
 	"math"
 	"testing"
 	"time"
@@ -15,10 +16,10 @@ func TestGetRate(t *testing.T) {
 	now := time.Now()
 	now2 := time.Now()
 	df := iop.Dataflow{}
-	task := Task{
+	task := sling.Task{
 		StartTime: &now,
 		EndTime:   &now2,
-		df:        &df,
+		//df:        &df,
 	}
 	rate := task.GetRate(10)
 
@@ -52,7 +53,7 @@ func TestConfig(t *testing.T) {
 		},
 		"tgt_conn": "ORACLE_SLING"
 	}`
-	_, err := NewConfig(cfgStr)
+	_, err := sling.NewConfig(cfgStr)
 	assert.NoError(t, err)
 
 }

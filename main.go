@@ -1,4 +1,4 @@
-package sling
+package sling_main
 
 func main() {
 	println("")

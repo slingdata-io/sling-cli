@@ -12,7 +12,7 @@ import (
 	"github.com/slingdata-io/sling/core/dbt"
 	"github.com/slingdata-io/sling/core/env"
 
-	"github.com/slingdata-io/sling/core/elt"
+	"github.com/slingdata-io/sling/core/sling"
 
 	d "github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
@@ -100,7 +100,7 @@ var DBs = []*testDB{
 func init() {
 	env.InitLogger()
 	iop.RemoveTrailingDecZeros = true
-	elt.PermitTableSchemaOptimization = false
+	sling.PermitTableSchemaOptimization = false
 	os.Setenv("SLING_FILE_ROW_LIMIT", "0")
 	for _, db := range DBs {
 		if db.URL == "" {
@@ -140,13 +140,13 @@ func TestInToDb(t *testing.T) {
 			"target", g.M(
 				"conn", tgtDB.URL,
 				"object", tgtDB.table,
-				"mode", elt.DropMode,
+				"mode", sling.DropMode,
 			),
 		)
-		config, err := elt.NewConfig(g.Marshal(cfgMap))
+		config, err := sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
 
-		task := elt.NewTask(0, config)
+		task := sling.NewTask(0, config)
 		err = task.Execute()
 		if err != nil {
 			g.LogError(err)
@@ -161,13 +161,13 @@ func TestInToDb(t *testing.T) {
 			"target", g.M(
 				"conn", tgtDB.URL,
 				"object", tgtDB.table+"_upsert",
-				"mode", elt.TruncateMode,
+				"mode", sling.TruncateMode,
 			),
 		)
-		config, err = elt.NewConfig(g.Marshal(cfgMap))
+		config, err = sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
 
-		taskUpsert := elt.NewTask(0, config)
+		taskUpsert := sling.NewTask(0, config)
 		err = taskUpsert.Execute()
 		g.LogError(err)
 		if err != nil {
@@ -199,13 +199,13 @@ func TestDbToDb(t *testing.T) {
 				"target", g.M(
 					"conn", tgtDB.URL,
 					"object", tgtDB.table+"_copy",
-					"mode", elt.DropMode,
+					"mode", sling.DropMode,
 				),
 			)
-			config, err := elt.NewConfig(g.Marshal(cfgMap))
+			config, err := sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
 
-			task := elt.NewTask(0, config)
+			task := sling.NewTask(0, config)
 			err = task.Execute()
 			if g.LogError(err) {
 				g.AssertNoError(t, err)
@@ -222,13 +222,13 @@ func TestDbToDb(t *testing.T) {
 					"object", tgtDB.table+"_copy",
 					"primary_key", []string{"id"},
 					"update_key", "create_dt",
-					"mode", elt.UpsertMode,
+					"mode", sling.UpsertMode,
 				),
 			)
-			config, err = elt.NewConfig(g.Marshal(cfgMap))
+			config, err = sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
 
-			taskUpsert := elt.NewTask(0, config)
+			taskUpsert := sling.NewTask(0, config)
 			err = taskUpsert.Execute()
 			if err != nil {
 				g.AssertNoError(t, err)
@@ -257,10 +257,10 @@ func TestDbToOut(t *testing.T) {
 				"object", "file://"+filePath2,
 			),
 		)
-		config, err := elt.NewConfig(g.Marshal(cfgMap))
+		config, err := sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
 
-		task := elt.NewTask(0, config)
+		task := sling.NewTask(0, config)
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			g.LogError(err)
@@ -336,11 +336,11 @@ func TestDbt(t *testing.T) {
 					"dbt", dbtConfig.Models,
 				),
 			)
-			config, err := elt.NewConfig(g.Marshal(cfgMap))
+			config, err := sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
 			config.Target.DbtConfig = dbtConfig // normally would be pulled from DB
 
-			task := elt.NewTask(0, config)
+			task := sling.NewTask(0, config)
 			err = task.Execute()
 			if !g.AssertNoError(t, err) {
 				g.LogError(err)
@@ -356,7 +356,7 @@ func TestDbt(t *testing.T) {
 func TestCfgPath(t *testing.T) {
 
 	testCfg := func(path string) (err error) {
-		cfg, err := elt.NewConfig(path)
+		cfg, err := sling.NewConfig(path)
 		if g.LogError(err) {
 			g.AssertNoError(t, err)
 			return
@@ -385,7 +385,7 @@ func TestCfgPath(t *testing.T) {
 }
 
 func testTask(t *testing.T) {
-	config := elt.Config{}
+	config := sling.Config{}
 	config.SetDefault()
 	config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021"
 	// config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021/1624811693.1uXKxCrhN2WGAt2fojy6k2fqDSb.9939afc4-a80f-4f3e-921e-fc24e8e7ff43.json.gz"
@@ -393,12 +393,12 @@ func testTask(t *testing.T) {
 	// config.Source.Conn = "file:///tmp/csvTest/part2.csv.gz"
 	config.Target.Conn = "PG_BIONIC_URL"
 	config.Target.Object = "public.sling_cli_events"
-	config.Target.Mode = elt.DropMode
+	config.Target.Mode = sling.DropMode
 	config.Target.Options.UseBulk = true
 	err := config.Prepare()
 	if g.AssertNoError(t, err) {
 
-		task := elt.NewTask(0, config)
+		task := sling.NewTask(0, config)
 		g.AssertNoError(t, task.Err)
 
 		// run task

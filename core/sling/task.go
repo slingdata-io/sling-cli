@@ -1,4 +1,4 @@
-package elt
+package sling
 
 import (
 	"bytes"

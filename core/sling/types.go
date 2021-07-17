@@ -1,4 +1,4 @@
-package elt
+package sling
 
 // JobType is an enum type for jobs
 type JobType string

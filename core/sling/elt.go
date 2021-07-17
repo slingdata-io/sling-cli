@@ -1,4 +1,4 @@
-package elt
+package sling
 
 import (
 	"bufio"
@@ -543,9 +543,9 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 	// check if referring to a SQL file
 	if strings.HasSuffix(strings.ToLower(cfg.Source.Stream), ".sql") {
 		// for upsert, need to put `{upsert_where_cond}` for proper selecting
-		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
+		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
-			err = g.Error(err, "Could not get GetSQLText for: "+cfg.Source.Stream)
+			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
 			if srcTable == "" {
 				return df, err
 			} else {
@@ -779,7 +779,7 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// pre SQL
 	if cfg.Target.Options.PreSQL != "" {
 		t.SetProgress("executing pre-sql")
-		sql, err := GetSQLText(cfg.Target.Options.PreSQL)
+		sql, err := getSQLText(cfg.Target.Options.PreSQL)
 		if err != nil {
 			err = g.Error(err, "could not get pre-sql body")
 			return cnt, err
@@ -990,9 +990,9 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	if postSQL := cfg.Target.Options.PostSQL; postSQL != "" {
 		t.SetProgress("executing post-sql")
 		if strings.HasSuffix(strings.ToLower(postSQL), ".sql") {
-			postSQL, err = GetSQLText(cfg.Target.Options.PostSQL)
+			postSQL, err = getSQLText(cfg.Target.Options.PostSQL)
 			if err != nil {
-				err = g.Error(err, "Error executing Target.PostSQL. Could not get GetSQLText for: "+cfg.Target.Options.PostSQL)
+				err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
 				return cnt, err
 			}
 		}
@@ -1145,8 +1145,8 @@ func getRate(cnt uint64) string {
 	return humanize.Commaf(math.Round(cast.ToFloat64(cnt) / time.Since(start).Seconds()))
 }
 
-// GetSQLText process source sql file / text
-func GetSQLText(sqlStr string) (string, error) {
+// getSQLText process source sql file / text
+func getSQLText(sqlStr string) (string, error) {
 	sql := sqlStr
 
 	_, err := os.Stat(sqlStr)
@@ -1160,3 +1160,4 @@ func GetSQLText(sqlStr string) (string, error) {
 
 	return sql, nil
 }
+

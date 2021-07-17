@@ -1,4 +1,4 @@
-package elt
+package sling
 
 import (
 	"encoding/json"
@@ -35,7 +35,7 @@ const (
 	SnapshotMode Mode = "snapshot"
 )
 
-// NewConfig return a config object from a string
+// NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg Config, err error) {
 	// set default, unmarshalling will overwrite
 	cfg.SetDefault()
