@@ -154,11 +154,14 @@ class Sling:
 
   def run(self, return_output=False, env:dict=None):
     """
-    Runs the task. Use `return_output` as `True` to return the output as a stream. `env` accepts a dictionary which defines the environment.
+    Runs the task. Use `return_output` as `True` to return the stdout+stderr output at end. `env` accepts a dictionary which defines the environment.
     """
     cmd = self._prep_cmd()
     lines = []
     try:
+      for k,v in os.environ.items():
+        env[k] = env.get(k, v)
+
       for line in _exec_cmd(cmd, env=env):
         if return_output:
           lines.append(line)
@@ -178,17 +181,20 @@ class Sling:
   
   def stream(self, env:dict=None, stdin=None) -> Iterable[list]:
     """
-    Runs the task and streams the output as iterable. `env` accepts a dictionary which defines the environment. `stdin` can be any stream-like object, which will be used as input stream.
+    Runs the task and streams the stdout output as iterable. `env` accepts a dictionary which defines the environment. `stdin` can be any stream-like object, which will be used as input stream.
     """
     cmd = self._prep_cmd()
 
     lines = []
     try:
-      for line in _exec_cmd(cmd, env=env, stdin=stdin):
-        lines.append(line)
+      for k,v in os.environ.items():
+        env[k] = env.get(k, v)
+        
+      for stdout_line in _exec_cmd(cmd, env=env, stdin=stdin, stderr=PIPE):
+        lines.append(stdout_line)
         if len(lines) > 20:
           lines.pop(0) # max size of 100 lines
-        yield line
+        yield stdout_line
     
     except Exception as E:
       lines.append(str(E))
@@ -204,7 +210,9 @@ def cli(*args, return_output=False):
   cmd = f'''{SLING_BIN} {" ".join([f'"{escape(a)}"' for a in args])}'''
   lines = []
   try:
-    for line in _exec_cmd(cmd, stdin=sys.stdin):
+    stdout = PIPE if return_output else sys.stdout
+    stderr = STDOUT if return_output else sys.stderr
+    for line in _exec_cmd(cmd, stdin=sys.stdin, stdout=stdout, stderr=stderr):
       if return_output:
         lines.append(line)
       else:
@@ -216,13 +224,17 @@ def cli(*args, return_output=False):
 
   
 
-def _exec_cmd(cmd, stdin=None, env:dict=None):
-  with Popen(cmd, shell=True, env=env, stdin=stdin, stdout=PIPE, stderr=STDOUT) as proc:
+def _exec_cmd(cmd, stdin=None, stdout=PIPE, stderr=STDOUT, env:dict=None):
+  with Popen(cmd, shell=True, env=env, stdin=stdin, stdout=stdout, stderr=stderr) as proc:
     for line in proc.stdout:
       line = str(line.strip(), 'utf-8')
       yield line
 
     proc.wait()
 
+    lines = line
+    if stderr and stderr != STDOUT:
+      lines = '\n'.join(list(proc.stderr))
+
     if proc.returncode != 0:
-      raise Exception(f'Sling command failed:\n{line}')
+      raise Exception(f'Sling command failed:\n{lines}')
