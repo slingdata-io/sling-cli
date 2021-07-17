@@ -102,7 +102,7 @@ func getLocalConns() []Conn {
 	return conns
 }
 
-func processELT(c *g.CliSC) (err error) {
+func processRun(c *g.CliSC) (err error) {
 
 	cfg := elt.Config{}
 	cfg.SetDefault()

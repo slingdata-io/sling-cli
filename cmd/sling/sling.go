@@ -208,18 +208,6 @@ var cliRun = &g.CliSC{
 			Name:        "mode",
 			Description: "The target load mode to use: append, upsert, truncate, drop.\n                     Default is append. For upsert, must provide `update_key` and `primary_key` in a configuration file.\n                     All modes load into a new temp table on tgtConn prior to final load.",
 		},
-		// cmd.Flag{
-		// 	Type:        "string",
-		// 	ShortName:   "",
-		// 	Name:        "upsertCol",
-		// 	Description: "The column to use to as an anchor for new values. Must be provided with `upsert` load mode.",
-		// },
-		// cmd.Flag{
-		// 	Type:        "string",
-		// 	ShortName:   "",
-		// 	Name:        "upsertPK",
-		// 	Description: "The column(s) to use to as the primark key for updating. Comma delimited values allowed for a composite key. Must be provided with `upsert` load mode.\n",
-		// },
 		{
 			Type:        "bool",
 			ShortName:   "e",
@@ -227,7 +215,7 @@ var cliRun = &g.CliSC{
 			Description: "Shows some examples.",
 		},
 	},
-	ExecProcess: processELT,
+	ExecProcess: processRun,
 }
 
 var cliInteractive = &g.CliSC{

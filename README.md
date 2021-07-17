@@ -55,3 +55,25 @@ An example. Put this in https://jsonschema.net/home
   }
 }
 ```
+
+# Python 
+
+```python
+from slingdata.io import sling
+sling(
+  ....
+)
+
+sling(
+  src_conn='',
+  src_sql='',
+  src_table='',
+
+  tgt_conn='',
+  tgt_table='',
+
+  mode='',
+  options={},
+)
+
+```
