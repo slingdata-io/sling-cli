@@ -1,79 +1,105 @@
 # sling
 
+## Running a Extract-Load Task
+
+### CLI
+
+```shell
+sling run -c --src-conn POSTGRES_URL --src-stream myschema.mytable \
+  --tgt-conn SNOWFLAKE_URL --tgt-object yourschema.yourtable \
+  --mode drop
+```
+
+Or passing a yaml/json string or file
+
+```shell
+sling run -c '
+source:
+  conn: $POSTGRES_URL
+  stream: myschema.mytable
+
+target:
+  conn: $SNOWFLAKE_URL
+  object: yourschema.yourtable
+  mode: drop
+'
+# OR
+sling run -c /path/to/config.json
+```
+
+### From Lib
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/slingdata-io/sling/core/sling"
+)
+
+func main() {
+  // cfgStr can be JSON or YAML
+	cfgStr := `
+    source:
+        conn: $POSTGRES_URL
+        stream: myschema.mytable
+    
+    target:
+        conn: $SNOWFLAKE_URL
+        object: yourschema.yourtable
+        mode: drop
+  `
+	cfg, err := sling.NewConfig(cfgStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = sling.Sling(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+```
 
 ## Config Schema
 
 An example. Put this in https://jsonschema.net/home
 
-`source.conn` / `target.conn` can be a name or URL of a folder:
+`--src-conn`/`source.conn` and `--tgt-conn`/`target.conn`  can be a name or URL of a folder:
 - `MY_PG` (connection ref in db, profile or env)
 - `$MY_PG` (connection ref in env)
 - `postgresql://user:password!@host.loc:5432/database`
-- `s3://my_bucket`
-- `file:///tmp/my_folder` (local storage)
+- `s3://my_bucket/my_folder/file.csv`
+- `gs://my_google_bucket/my_folder/file.json`
+- `file:///tmp/my_folder/file.csv` (local storage)
 
-`source.stream` can be:
+`--src-stream`/`source.stream` can be an object name to stream from:
 - `TABLE1`
 - `SCHEMA1.TABLE2`
 - `OBJECT_NAME`
 - `select * from SCHEMA1.TABLE3`
-- `/path/to/file.sql` (if `source.conn` is DB)
-- `/path/to/file1.csv`
-- `s3://my_bucket/my_folder/file.csv`
+- `/path/to/file.sql` (if source conn is DB)
 
-`target.object` can be:
+`--tgt-object`/`target.object` can be an object name to write to:
 - `TABLE1`
 - `SCHEMA1.TABLE2`
-- `file1.csv`
 
-
+### Example as JSON
 
 ```json
 {
   "source": {
-      "conn": "MY_PG",
-      "stream": "select * from my_table",
-      "limit": 0,
-      "options": {}
+    "conn": "MY_PG_URL",
+    "stream": "select * from my_table",
+    "options": {}
   },
   "target": {
-      "conn": "s3://my_bucket",
-      "object": "s3://my_bucket/my_folder/new_file.csv",
-      "mode": "drop",
-      "primary_key": ["col1", "col2"],
-      "update_key": "col3",
-      "dbt": {
-          "version": "0.18",
-          "repo_url": "...",
-          "models": "my_model"
-      },
-      "options": {}
-  },
-  "options": {
-    "stdout": false,
-    "stdin": false
+    "conn": "s3://my_bucket/my_folder/new_file.csv",
+    "options": {
+      "header": false
+    }
   }
 }
-```
-
-# Python 
-
-```python
-from slingdata.io import sling
-sling(
-  ....
-)
-
-sling(
-  src_conn='',
-  src_sql='',
-  src_table='',
-
-  tgt_conn='',
-  tgt_table='',
-
-  mode='',
-  options={},
-)
-
 ```
