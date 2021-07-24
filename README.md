@@ -1,5 +1,5 @@
 
-<div style="text-align:center"><img src="logo-with-text.png" alt="drawing" width="250"/></div>
+<p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
 
 Slings data from a data source to a data target.
 

@@ -1,3 +1,4 @@
+<p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
 # sling
 
 ## Running a Extract-Load Task
