@@ -8,7 +8,7 @@ Slings data from a data source to a data target.
 ### CLI
 
 ```shell
-sling run -c --src-conn POSTGRES_URL --src-stream myschema.mytable \
+sling run --src-conn POSTGRES_URL --src-stream myschema.mytable \
   --tgt-conn SNOWFLAKE_URL --tgt-object yourschema.yourtable \
   --mode drop
 ```
