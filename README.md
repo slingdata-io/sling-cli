@@ -1,4 +1,7 @@
-# sling
+
+<div style="text-align:center"><img src="logo-with-text.png" alt="drawing" width="250"/></div>
+
+Slings data from a data source to a data target.
 
 ## Running a Extract-Load Task
 
