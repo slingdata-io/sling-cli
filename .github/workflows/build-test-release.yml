@@ -128,7 +128,7 @@ jobs:
           go get github.com/flarco/g@HEAD
           go get github.com/flarco/dbio@HEAD
 
-          go build -o sling.exe github.com/slingdata-io/sling/cmd/sling
+          go build -o sling.exe github.com/flarco/sling/cmd/sling
 
       - name: Release Binaries to Github
         uses: "marvinpinto/action-automatic-releases@latest"

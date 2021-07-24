@@ -13,8 +13,8 @@ import (
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
-	core2 "github.com/slingdata-io/sling/core"
-	"github.com/slingdata-io/sling/core/sling"
+	core2 "github.com/flarco/sling/core"
+	"github.com/flarco/sling/core/sling"
 
 	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"

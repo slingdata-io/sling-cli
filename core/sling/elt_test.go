@@ -1,7 +1,7 @@
 package sling_test
 
 import (
-	"github.com/slingdata-io/sling/core/sling"
+	"github.com/flarco/sling/core/sling"
 	"math"
 	"testing"
 	"time"

@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/flarco/sling/core"
+	"github.com/flarco/sling/core/env"
 	"github.com/getsentry/sentry-go"
 	"github.com/rudderlabs/analytics-go"
-	"github.com/slingdata-io/sling/core"
-	"github.com/slingdata-io/sling/core/env"
 
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"

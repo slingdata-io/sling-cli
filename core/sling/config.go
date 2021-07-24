@@ -11,8 +11,8 @@ import (
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
 
+	"github.com/flarco/sling/core/dbt"
 	"github.com/jmespath/go-jmespath"
-	"github.com/slingdata-io/sling/core/dbt"
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"

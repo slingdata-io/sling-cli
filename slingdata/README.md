@@ -91,7 +91,7 @@ An example. Put this in https://jsonschema.net/home
 - Update version in [setup.py](./setup.py).
 
 ```
-git clone https://github.com/slingdata-io/sling
+git clone https://github.com/flarco/sling
 cd sling/slingdata
 pip install -e .
 m2r --overwrite README.md

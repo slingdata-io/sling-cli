@@ -7,7 +7,7 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling/core"
+	"github.com/flarco/sling/core"
 	"github.com/spf13/cast"
 )
 

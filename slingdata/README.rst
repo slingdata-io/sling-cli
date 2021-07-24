@@ -108,7 +108,7 @@ Release
 
 .. code-block::
 
-   git clone https://github.com/slingdata-io/sling
+   git clone https://github.com/flarco/sling
    cd sling/slingdata
    m2r --overwrite README.md
    python setup.py sdist && twine upload --skip-existing dist/*

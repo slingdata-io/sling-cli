@@ -18,12 +18,12 @@ import (
 	"github.com/flarco/dbio/filesys"
 
 	"github.com/dustin/go-humanize"
-	"github.com/slingdata-io/sling/core/env"
+	"github.com/flarco/sling/core/env"
 
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling/core/dbt"
+	"github.com/flarco/sling/core/dbt"
 	"github.com/spf13/cast"
 )
 
@@ -1160,4 +1160,3 @@ func getSQLText(sqlStr string) (string, error) {
 
 	return sql, nil
 }
-
