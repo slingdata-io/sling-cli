@@ -104,6 +104,7 @@ func (t *Task) Execute() error {
 			return
 		}
 
+		g.Debug("type is %s", t.Type)
 		switch t.Type {
 		case DbSQL:
 			t.Err = t.runDbSQL()

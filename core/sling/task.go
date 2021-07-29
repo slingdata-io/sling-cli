@@ -113,13 +113,14 @@ func NewTask(execID int, cfg Config) (t Task) {
 		t.Type = APIToFile
 	} else if tgtDbProvided && cfg.Target.Dbt != "" {
 		t.Type = DbDbt
-	} else if tgtDbProvided && cfg.Target.Object != "" {
+	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
+		cfg.Target.Object = cfg.Target.Options.PostSQL
 		t.Type = DbSQL
 	}
+	// g.PP(t)
 
 	if t.Type == "" {
 		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
-		// g.PP(t)
 	}
 
 	return

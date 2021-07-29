@@ -3,6 +3,25 @@
 
 <p align="center">Slings data from a data source to a data target.</p>
 
+
+## Installation
+
+### Compiling From Source
+
+```bash
+git clone https://github.com/flarco/sling.git
+cd sling
+go build -o sling cmd/sling/*.go
+
+./sling --help
+```
+
+### Installing Python Wrapper
+
+`pip install slingdata`
+
+Then you should be able to run `sling --help` from command line.
+
 ## Running a Extract-Load Task
 
 ### CLI
