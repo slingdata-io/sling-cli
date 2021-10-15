@@ -18,7 +18,7 @@ go build -o sling cmd/sling/*.go
 
 ### Installing Python Wrapper
 
-`pip install slingdata`
+`pip install sling`
 
 Then you should be able to run `sling --help` from command line.
 
