@@ -102,5 +102,5 @@ An example. Put this in https://jsonschema.net/home
 git clone https://github.com/flarco/sling
 cd sling/python
 pip install -e .
-python setup.py sdist && twine upload --skip-existing dist/*
+python setup.py sdist && twine upload --verbose --skip-existing dist/*
 ```
