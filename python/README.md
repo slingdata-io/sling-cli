@@ -1,6 +1,12 @@
 <p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
 
-<p align="center">Slings data from a data source to a data target.</p>
+<p align="center">Slings from a data source to a data target.</p>
+
+## Installation
+
+`pip install sling`
+
+Then you should be able to run `sling --help` from command line.
 
 ## Running a Extract-Load Task
 

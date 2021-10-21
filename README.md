@@ -1,7 +1,7 @@
 
 <p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
 
-<p align="center">Slings data from a data source to a data target.</p>
+<p align="center">Slings from a data source to a data target.</p>
 
 
 ## Installation
@@ -16,7 +16,7 @@ go build -o sling cmd/sling/*.go
 ./sling --help
 ```
 
-### Installing Python Wrapper
+### Installing via Python Wrapper
 
 `pip install sling`
 
