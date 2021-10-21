@@ -5,7 +5,7 @@ from typing import Iterable, List, Union
 from json import JSONEncoder
 
 # set binary
-BIN_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bin')
+BIN_FOLDER = os.path.join(os.path.dirname(__file__), 'bin')
 if platform.system() == 'Linux':
   SLING_BIN = os.path.join(BIN_FOLDER,'sling-linux')
 elif platform.system() == 'Windows':
