@@ -6,7 +6,8 @@ cp -r . /tmp/sling
 cd /tmp/sling
 rm -rf .git
 
-GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
-mv -f sling python/sling/bin/sling-mac
+mkdir python/sling/bin
+GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
+mv -f sling-mac python/sling/bin/
 
 rm -rf /tmp/sling
