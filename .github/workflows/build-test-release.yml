@@ -17,6 +17,8 @@ jobs:
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
+          /bin/cp -f $WORK_FOLDER/sling/python/sling/bin/sling-linux /__/bin/sling
+          chmod 755 /__/bin/sling
           rm -rf $WORK_FOLDER
 
   test:
@@ -45,16 +47,17 @@ jobs:
     steps:
       - name: Push Docker
         run: |
+          VERSION=$(/__/bin/sling --version | sed 's/Version: //')
           /bin/cp /__/bin/sling .
 
           source /__/devbox/.env.sh
           export _DEBUG=''
           echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
 
-          docker build -t slingdata/sling:${GITHUB_RUN_NUMBER} -f cmd/sling/Dockerfile .
-          docker tag slingdata/sling:${GITHUB_RUN_NUMBER} slingdata/sling:latest
+          docker build -t slingdata/sling:$VERSION -f cmd/sling/Dockerfile .
+          docker tag slingdata/sling:$VERSION slingdata/sling:latest
           docker push slingdata/sling:latest
-          docker image rm -f slingdata/sling:${GITHUB_RUN_NUMBER}
+          docker image rm -f slingdata/sling:$VERSION
 
           rm -rf webapp
 
@@ -167,6 +170,7 @@ jobs:
           mv -f sling-mac python/sling/bin/
           mv -f sling-linux python/sling/bin/
           mv -f sling-win.exe python/sling/bin/
+          chmod -R 755 python/sling/bin/
 
           cd python
           pip install -e .
