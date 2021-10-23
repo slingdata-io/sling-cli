@@ -51,14 +51,12 @@ jobs:
 
           source /__/devbox/.env.sh
           export _DEBUG=''
-          echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
+          echo "$DOCKER_PASSWORD" | docker login -u flarco --password-stdin
 
-          docker build -t slingdata/sling:$VERSION -f cmd/sling/Dockerfile .
-          docker tag slingdata/sling:$VERSION slingdata/sling:latest
-          docker push slingdata/sling:latest
-          docker image rm -f slingdata/sling:$VERSION
-
-          rm -rf webapp
+          docker build -t flarco/sling:$VERSION -f cmd/sling/Dockerfile .
+          docker tag flarco/sling:$VERSION flarco/sling:latest
+          docker push flarco/sling:latest
+          docker image rm -f flarco/sling:$VERSION
 
   release:
     needs: [build-sling, test]
