@@ -124,7 +124,7 @@ func TestInToDb(t *testing.T) {
 		return
 	}
 
-	tReader, err := iop.Decompress(bufio.NewReader(testFile1))
+	tReader, err := iop.AutoDecompress(bufio.NewReader(testFile1))
 	g.AssertNoError(t, err)
 	testFile1Bytes, err = ioutil.ReadAll(tReader)
 	testFile1.Close()
