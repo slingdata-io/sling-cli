@@ -10,4 +10,4 @@ mkdir -p python/sling/bin
 GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
 mv -f sling-mac python/sling/bin/
 
-/bin/cp -f python/sling/bin/sling-mac /tmp/sling
+/bin/cp -f python/sling/bin/sling-mac /tmp/

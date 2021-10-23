@@ -45,8 +45,9 @@ jobs:
     steps:
       - name: Push Docker
         run: |
-          VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
           /bin/cp /tmp/sling-linux ./sling
+
+          VERSION=$(./sling --version | sed 's/Version: //')
 
           source /__/devbox/.env.sh
           export _DEBUG=''
