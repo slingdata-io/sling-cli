@@ -16,7 +16,7 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.sh
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
 
   test:
@@ -104,21 +104,21 @@ jobs:
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
         run: |
-          echo "Building sling"
+          echo "Building sling-linux"
           bash scripts/prep.gomod.sh
-          GOOS=linux GOARCH=amd64 go build -o sling cmd/sling/*.go
+          GOOS=linux GOARCH=amd64 go build -o sling-linux cmd/sling/*.go
 
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
         run: |
-          echo "Building sling"
+          echo "Building sling-mac"
           bash scripts/prep.gomod.sh
-          GOOS=darwin GOARCH=amd64 go build -o sling cmd/sling/*.go
+          GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
 
       - name: Build Sling (Windows)
         if: runner.os == 'windows'
         run: |
-          echo "Building sling.exe"
+          echo "Building sling-win.exe"
           setx GOOS "windows"
           setx GOARCH "386"
           setx GO111MODULE "auto"
@@ -128,7 +128,7 @@ jobs:
           go get github.com/flarco/g@HEAD
           go get github.com/flarco/dbio@HEAD
 
-          go build -o sling.exe github.com/flarco/sling/cmd/sling
+          go build -o sling-win.exe github.com/flarco/sling/cmd/sling
 
       - name: Release Binaries to Github
         uses: "marvinpinto/action-automatic-releases@latest"
@@ -139,3 +139,36 @@ jobs:
           title: "Latest: ${{ runner.os }}"
           files: |
             sling*
+      
+      - uses: actions/upload-artifact@v2
+        with:
+          name: sling-dist
+          path: sling*
+
+  release-python:
+    needs: [release]
+    runs-on: self-hosted
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+        
+      - uses: actions/download-artifact@v2
+        with:
+          name: sling-dist
+      
+      - name: Upload to PyPi
+        run: |
+          source /__/devbox/.env.sh
+          mkdir python/sling/bin/
+
+          mv -f sling-mac python/sling/bin/
+          mv -f sling-linux python/sling/bin/
+          mv -f sling-win.exe python/sling/bin/
+
+          cd python
+          pip install -e .
+          pip install twine
+          python setup.py sdist && twine upload --verbose --skip-existing dist/*
