@@ -16,7 +16,6 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          mkdir $WORK_FOLDER/sling/python/sling/bin
           chmod -R 777 $WORK_FOLDER/sling
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           /bin/cp -f $WORK_FOLDER/sling/python/sling/bin/sling-linux /__/bin/sling
