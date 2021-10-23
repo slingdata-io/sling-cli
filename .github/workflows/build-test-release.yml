@@ -16,10 +16,7 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          chmod -R 777 $WORK_FOLDER/sling
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
-          /bin/cp -f $WORK_FOLDER/sling/python/sling/bin/sling-linux /__/bin/sling
-          chmod 777 /__/bin/sling
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
 
   test:
@@ -48,8 +45,8 @@ jobs:
     steps:
       - name: Push Docker
         run: |
-          VERSION=$(/__/bin/sling --version | sed 's/Version: //')
-          /bin/cp /__/bin/sling .
+          VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
+          /bin/cp /tmp/sling-linux ./sling
 
           source /__/devbox/.env.sh
           export _DEBUG=''
