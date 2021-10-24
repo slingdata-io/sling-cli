@@ -55,6 +55,7 @@ jobs:
 
           docker build -t flarco/sling:$VERSION -f cmd/sling/Dockerfile .
           docker tag flarco/sling:$VERSION flarco/sling:latest
+          docker push flarco/sling:$VERSION
           docker push flarco/sling:latest
           docker image rm -f flarco/sling:$VERSION
 
