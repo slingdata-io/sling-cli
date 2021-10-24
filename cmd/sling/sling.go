@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -21,103 +22,9 @@ import (
 	"github.com/spf13/cast"
 )
 
-var examples = `
-
-###### Database to Database ######
-# drop target table
-export PG_DB_URL=postgres://xxxxxxxxxxxxxxxx
-export MYSQL_DB_URL=mysql://xxxxxxxxxxxxxxxx
-sling elt -c '
-src_conn: PG_DB_URL
-src_table: bank.transactions
-tgt_conn: MYSQL_DB_URL
-tgt_table: mysql.bank_transactions
-mode: drop
-'
-# OR
-sling elt --src-conn PG_DB_URL --src-table bank.transactions --tgt-conn MYSQL_DB_URL  --tgt-table mysql.bank_transactions --mode drop
-
-# custom sql in-line
-sling elt -c '
-src_conn: PG_DB_URL
-src_sql: select id, created_at, account_id, amount from bank.transactions where type = 'A'
-tgt_conn: MYSQL_DB_URL
-tgt_table: mysql.bank_transactions
-mode: append
-'
-
-# custom sql file
-sling elt -c '
-src_conn: PG_DB_URL
-src_sql: /path/to/query.sql
-tgt_conn: MYSQL_DB_URL
-tgt_table: mysql.bank_transactions
-mode: append
-'
-
-# upsert
-sling elt -c '
-src_conn: PG_DB_URL
-src_table: bank.transactions
-tgt_conn: MYSQL_DB_URL
-tgt_table: mysql.bank_transactions
-mode: upsert
-update_key: modified_at
-primary_key: id
-'
-
-
-###### Database to File ######
-# CSV export full table
-sling elt -c '
-src_conn: PG_DB_URL
-src_table: bank.transactions
-tgt_file: /tmp/bank.transactions.csv
-'
-# OR
-sling elt --src-conn PG_DB_URL --src-table bank.transactions --tgt-file /tmp/bank.transactions.csv
-
-# CSV dump, custom SQL
-sling elt -c '
-src_conn: PG_DB_URL
-src_sql: select id, created_at, account_id, amount from bank.transactions where type = 'A'
-tgt_file: /tmp/bank.transactions.csv
-'
-
-# CSV export full table to S3, gzip
-export AWS_ACCESS_KEY_ID=xxxxxxxxxxxxx
-export AWS_SECRET_ACCESS_KEY=xxxxxxxxx
-sling elt -c '
-src_conn: PG_DB_URL
-src_table: bank.transactions
-tgt_file: s3://my-bucket/bank.transactions.csv.gz
-options: gzip
-'
-
-###### File to Database ######
-# CSV import into table
-sling elt -c '
-src_file: /tmp/bank.transactions.csv.gz
-tgt_conn: PG_DB_URL
-tgt_table: bank.transactions
-mode: append
-'
-# OR
-cat /tmp/bank.transactions.csv.gz | sling elt --tgt-conn PG_DB_URL --tgt-table bank.transactions
-
-
-# CSV folder import into table, upsert
-export AWS_ACCESS_KEY_ID=xxxxxxxxxxxxx
-export AWS_SECRET_ACCESS_KEY=xxxxxxxxx
-sling elt -c '
-src_file: s3://my-bucket/bank.transactions/
-tgt_conn: PG_DB_URL
-tgt_table: bank.transactions
-mode: upsert
-update_key: modified_at
-primary_key: id
-'
-`
+//go:embed *
+var slingFolder embed.FS
+var examples = ``
 var ctx, cancel = context.WithCancel(context.Background())
 
 var cliRun = &g.CliSC{
@@ -137,16 +44,15 @@ var cliRun = &g.CliSC{
 			Description: "The source database / API connection (name, conn string or URL).",
 		},
 		{
-			Name:        "src-table",
+			Name:        "src-stream",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The source table (schema.table) or API supported object name.",
+			Description: "The source table (schema.table), local / cloud file path or API supported object name. Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
 		},
 		{
-			Name:        "src-sql",
-			ShortName:   "",
+			Name:        "src-options",
 			Type:        "string",
-			Description: "The path of sql file or in-line text to use as query\n",
+			Description: "in-line options to further configure source (JSON or YAML).\n",
 		},
 		{
 			Name:        "tgt-conn",
@@ -155,34 +61,21 @@ var cliRun = &g.CliSC{
 			Description: "The target database connection (name, conn string or URL).",
 		},
 		{
-			Name:        "tgt-table",
+			Name:        "tgt-object",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The target table (schema.table).",
+			Description: "The target table (schema.table) or local / cloud file path. Use `file://` for local paths.",
 		},
 		{
-			Name:        "pre-sql",
-			ShortName:   "",
+			Name:        "tgt-options",
 			Type:        "string",
-			Description: "The path of sql file or in-line text to run on tgtConn prior to the data load",
-		},
-		{
-			Name:        "post-sql",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The path of sql file or in-line text to run on tgtConn after the data is loaded.",
+			Description: "in-line options to further configure target (JSON or YAML).\n",
 		},
 		{
 			Name:        "stdout",
 			ShortName:   "",
 			Type:        "bool",
-			Description: "Output the stream to standard output (STDOUT).\n",
-		},
-		{
-			Name:        "options",
-			ShortName:   "o",
-			Type:        "string",
-			Description: "in-line options to further configure ELT task.",
+			Description: "Output the stream to standard output (STDOUT).",
 		},
 		{
 			Name:        "mode",
@@ -250,6 +143,9 @@ func init() {
 		}()
 	}
 
+	// collect examples
+	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
+	examples = string(examplesBytes)
 	cliInteractive.Make().Add()
 	cliConns.Make().Add()
 	cliRun.Make().Add()

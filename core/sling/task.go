@@ -81,6 +81,9 @@ func NewTask(execID int, cfg Config) (t Task) {
 	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
 	srcStreamProvided := cfg.Source.Stream != ""
 
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+	g.Trace(summary)
+
 	if cfg.Target.Mode == "" {
 		cfg.Target.Mode = AppendMode
 	}

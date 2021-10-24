@@ -533,7 +533,7 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 	sql := ""
 	fieldsStr := "*"
 	streamNameArr := regexp.MustCompile(`\s`).Split(cfg.Source.Stream, -1)
-	if len(streamNameArr) == 1 { // has no whitespace, is a table/view
+	if len(streamNameArr) == 1 && !strings.Contains(cfg.Source.Stream, "/") { // has no whitespace or "/", is a table/view
 		srcTable = streamNameArr[0]
 		srcTable = setSchema(cast.ToString(cfg.Source.Data["schema"]), srcTable)
 		sql = g.F(`select %s from %s`, fieldsStr, srcTable)
@@ -1147,17 +1147,16 @@ func getRate(cnt uint64) string {
 }
 
 // getSQLText process source sql file / text
-func getSQLText(sqlStr string) (string, error) {
-	sql := sqlStr
-
-	_, err := os.Stat(sqlStr)
-	if err == nil {
-		bytes, err := ioutil.ReadFile(sqlStr)
-		if err != nil {
-			return "", g.Error(err, "Could not ReadFile: "+sqlStr)
-		}
-		sql = string(bytes)
+func getSQLText(filePath string) (string, error) {
+	filePath = strings.TrimPrefix(filePath, "file://")
+	_, err := os.Stat(filePath)
+	if err != nil {
+		return "", g.Error(err, "Could not find file -> "+filePath)
+	}
+	bytes, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return "", g.Error(err, "Could not ReadFile: "+filePath)
 	}
 
-	return sql, nil
+	return string(bytes), nil
 }

@@ -187,7 +187,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
-	if isFileURL(cfg.Source.Stream) {
+	if isFileURL(cfg.Source.Stream) && isFileURL(cfg.Source.Conn) {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 	} else {
 		cfg.Source.Data["url"] = cfg.Source.Conn

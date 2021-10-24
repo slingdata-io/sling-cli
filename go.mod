@@ -6,7 +6,7 @@ require (
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869 // indirect
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.2.3
+	github.com/flarco/dbio v0.2.4
 	github.com/flarco/g v0.0.7
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/go-openapi/strfmt v0.19.6 // indirect

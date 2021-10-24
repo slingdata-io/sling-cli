@@ -313,7 +313,7 @@ func TestDbToOut(t *testing.T) {
 	}
 }
 
-func TestDbt(t *testing.T) {
+func testDbt(t *testing.T) {
 
 	for _, db := range DBs {
 		schema, _ := d.SplitTableFullName(db.table)

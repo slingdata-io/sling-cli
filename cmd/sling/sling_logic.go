@@ -10,6 +10,7 @@ import (
 
 	"github.com/flarco/dbio/connection"
 	"github.com/integrii/flaggy"
+	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
@@ -121,40 +122,45 @@ func processRun(c *g.CliSC) (err error) {
 		switch k {
 		case "config":
 			cfgStr = cast.ToString(v)
-		case "src-file":
-			url := cast.ToString(v)
-			if !strings.Contains(url, "://") {
-				url = g.F("file://%s", url) // is local path
-			}
-			cfg.Source.Conn = url
-			cfg.Source.Stream = url
-		case "src-table", "src-sql", "query":
-			cfg.Source.Stream = cast.ToString(v)
-		case "tgt-file":
-			url := cast.ToString(v)
-			if !strings.Contains(url, "://") {
-				url = g.F("file://%s", url) // is local path
-			}
-			cfg.Target.Conn = url
-			cfg.Target.Object = url
-		case "src-conn", "conn":
+		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
+		case "src-stream", "src-table", "src-sql", "src-file":
+			cfg.Source.Stream = cast.ToString(v)
+			if strings.Contains(cfg.Source.Stream, "://") {
+				if _, ok := c.Vals["src-conn"]; !ok { // src-conn not specified
+					cfg.Source.Conn = cfg.Source.Stream
+				}
+			}
+		case "src-options":
+			err = yaml.Unmarshal([]byte(cast.ToString(v)), &cfg.Source.Options)
+			if err != nil {
+				return g.Error(err, "invalid source options -> %s", cast.ToString(v))
+			}
+
 		case "tgt-conn":
 			cfg.Target.Conn = cast.ToString(v)
-		case "tgt-table":
+		case "tgt-object", "tgt-table":
 			cfg.Target.Object = cast.ToString(v)
-		case "pre-sql":
-			cfg.Target.Options.PreSQL = cast.ToString(v)
-		case "post-sql":
-			cfg.Target.Options.PostSQL = cast.ToString(v)
+			if strings.Contains(cfg.Target.Object, "://") {
+				if _, ok := c.Vals["tgt-conn"]; !ok { // tgt-conn not specified
+					cfg.Target.Conn = cfg.Target.Object
+				}
+			}
+		case "tgt-options":
+			stdout := cfg.Options.StdOut
+			err = yaml.Unmarshal([]byte(cast.ToString(v)), &cfg.Target.Options)
+			if err != nil {
+				return g.Error(err, "invalid target options -> %s", cast.ToString(v))
+			}
+			if stdout {
+				cfg.Options.StdOut = stdout
+			}
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Target.Mode = sling.Mode(cast.ToString(v))
 		case "examples":
 			showExamples = cast.ToBool(v)
-			// case "save":
-			// 	saveAsJob = cast.ToBool(v)
 		}
 	}
 
