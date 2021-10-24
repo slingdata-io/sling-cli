@@ -135,6 +135,7 @@ func TestInToDb(t *testing.T) {
 
 		cfgMap := g.M(
 			"source", g.M(
+				"conn", "file://"+csvFile,
 				"stream", "file://"+csvFile,
 			),
 			"target", g.M(
@@ -156,6 +157,7 @@ func TestInToDb(t *testing.T) {
 
 		cfgMap = g.M(
 			"source", g.M(
+				"conn", "file://"+csvFileUpsert,
 				"stream", "file://"+csvFileUpsert,
 			),
 			"target", g.M(
