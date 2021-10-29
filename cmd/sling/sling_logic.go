@@ -139,6 +139,13 @@ func processRun(c *g.CliSC) (err error) {
 
 		case "tgt-conn":
 			cfg.Target.Conn = cast.ToString(v)
+
+		case "primary-key":
+			cfg.Target.PrimaryKey = strings.Split(cast.ToString(v), ",")
+
+		case "update-key":
+			cfg.Target.UpdateKey = cast.ToString(v)
+
 		case "tgt-object", "tgt-table":
 			cfg.Target.Object = cast.ToString(v)
 			if strings.Contains(cfg.Target.Object, "://") {
