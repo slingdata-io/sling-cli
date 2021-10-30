@@ -201,6 +201,11 @@ func (cfg *Config) Prepare() (err error) {
 	}
 	cfg.SrcConn = srcConn
 
+	// set mode if primary key is providedand mode isnn't
+	if len(cfg.Target.PrimaryKey) > 0 && cfg.Target.Mode == "" {
+		cfg.Target.Mode = UpsertMode
+	}
+	
 	// done
 	cfg.Prepared = true
 	return
