@@ -47,7 +47,7 @@ var cliRun = &g.CliSC{
 			Name:        "src-stream",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The source table (schema.table), local / cloud file path or API supported object name. Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
+			Description: "The source table (schema.table), local / cloud file path or API supported object name.\n                       Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
 		},
 		{
 			Name:        "src-options",
@@ -81,13 +81,13 @@ var cliRun = &g.CliSC{
 			Name:        "mode",
 			ShortName:   "m",
 			Type:        "string",
-			Description: "The target load mode to use: append, upsert, truncate, drop.\n                     Default is append. For upsert, must provide `update-key` and `primary-key` values.\n                     All modes load into a new temp table on tgtConn prior to final load.",
+			Description: "The target load mode to use: append, upsert, truncate, drop.\n                       Default is append. For upsert, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
 		},
 		{
 			Name:        "primary-key",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The primary key to use for upsert. If compsite key, put comma delimited value.",
+			Description: "The primary key to use for upsert. For composite key, put comma delimited values.",
 		},
 		{
 			Name:        "update-key",
