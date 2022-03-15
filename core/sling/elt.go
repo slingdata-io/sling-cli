@@ -44,6 +44,15 @@ func (t *Task) IsStalled(window float64) bool {
 	return time.Since(t.lastIncrement).Seconds() > window
 }
 
+// GetBytes return the current total of bytes processed
+func (t *Task) GetBytes() (bytes uint64) {
+	if t.StartTime == nil {
+		return
+	}
+
+	return t.df.Bytes()
+}
+
 // GetCount return the current count of rows processed
 func (t *Task) GetCount() (count uint64) {
 	if t.StartTime == nil {

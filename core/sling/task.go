@@ -35,7 +35,8 @@ type ExecutionStatus struct {
 	ExecID      int        `json:"exec_id,omitempty"`
 	Status      ExecStatus `json:"status,omitempty"`
 	Text        string     `json:"text,omitempty"`
-	Rows        int        `json:"rows,omitempty"`
+	Rows        uint64     `json:"rows,omitempty"`
+	Bytes       uint64     `json:"bytes,omitempty"`
 	Percent     int        `json:"percent,omitempty"`
 	Stalled     bool       `json:"stalled,omitempty"`
 	Duration    *int       `json:"duration,omitempty"`
