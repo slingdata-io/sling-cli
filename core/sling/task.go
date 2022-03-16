@@ -68,7 +68,7 @@ func NewTask(execID int, cfg Config) (t Task) {
 
 	t = Task{
 		ExecID:       execID,
-		Cfg:          cfg,
+		Config:       cfg,
 		Status:       ExecStatusCreated,
 		df:           iop.NewDataflow(),
 		pbar:         iop.NewPBar(time.Second),
@@ -121,9 +121,9 @@ func NewTask(execID int, cfg Config) (t Task) {
 		cfg.Target.Object = cfg.Target.Options.PostSQL
 		t.Type = DbSQL
 	}
-	// g.PP(t)
 
 	if t.Type == "" {
+		// g.PP(t)
 		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
 	}
 
@@ -132,8 +132,8 @@ func NewTask(execID int, cfg Config) (t Task) {
 
 // Task is a sling ELT task run, synonymous to an execution
 type Task struct {
-	ExecID        int `json:"exec_id"`
-	Cfg           Config
+	ExecID        int              `json:"exec_id"`
+	Config        Config           `json:"config"`
 	Type          JobType          `json:"type"`
 	Status        ExecStatus       `json:"status"`
 	Err           error            `json:"error"`

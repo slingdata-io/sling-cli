@@ -104,7 +104,7 @@ func (t *Task) Execute() error {
 	}
 
 	// print for debugging
-	g.Trace("using Config:\n%s", g.Pretty(t.Cfg))
+	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	go func() {
 		defer close(done)
 		t.Status = ExecStatusRunning
@@ -171,8 +171,8 @@ func (t *Task) runDbSQL() (err error) {
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Cfg.TgtConn.URL(), tgtProps...)
+	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
+	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -180,16 +180,16 @@ func (t *Task) runDbSQL() (err error) {
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
 	defer tgtConn.Close()
 
 	t.SetProgress("executing sql on target database")
-	result, err := tgtConn.ExecContext(t.Ctx, t.Cfg.Target.Object)
+	result, err := tgtConn.ExecContext(t.Ctx, t.Config.Target.Object)
 	if err != nil {
-		err = g.Error(err, "Could not complete sql execution on %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		err = g.Error(err, "Could not complete sql execution on %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -202,13 +202,13 @@ func (t *Task) runDbSQL() (err error) {
 }
 
 func (t *Task) runDbDbt() (err error) {
-	dbtConfig := g.Marshal(t.Cfg.Target.DbtConfig)
-	dbtObj, err := dbt.NewDbt(dbtConfig, t.Cfg.TgtConn.Info().Name)
+	dbtConfig := g.Marshal(t.Config.Target.DbtConfig)
+	dbtObj, err := dbt.NewDbt(dbtConfig, t.Config.TgtConn.Info().Name)
 	if err != nil {
 		return g.Error(err, "could not init dbt task")
 	}
 	if dbtObj.Schema == "" {
-		dbtObj.Schema = t.Cfg.TgtConn.DataS()["schema"]
+		dbtObj.Schema = t.Config.TgtConn.DataS()["schema"]
 	}
 
 	dbtObj.Session.SetScanner(func(stderr bool, text string) {
@@ -218,7 +218,7 @@ func (t *Task) runDbDbt() (err error) {
 		}
 	})
 
-	err = dbtObj.Init(t.Cfg.TgtConn)
+	err = dbtObj.Init(t.Config.TgtConn)
 	if err != nil {
 		return g.Error(err, "could not initialize dbt project")
 	}
@@ -234,8 +234,8 @@ func (t *Task) runDbDbt() (err error) {
 func (t *Task) runDbToFile() (err error) {
 
 	start = time.Now()
-	srcProps := g.MapToKVArr(t.Cfg.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(t.Ctx, t.Cfg.SrcConn.URL(), srcProps...)
+	srcProps := g.MapToKVArr(t.Config.SrcConn.DataS())
+	srcConn, err := database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -244,14 +244,14 @@ func (t *Task) runDbToFile() (err error) {
 	t.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.SrcConn.Info().Name, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
 		return
 	}
 
 	defer srcConn.Close()
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(&t.Cfg, srcConn)
+	t.df, err = t.ReadFromDB(&t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
@@ -259,7 +259,7 @@ func (t *Task) runDbToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Cfg, t.df)
+	cnt, err := t.WriteToFile(&t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -277,7 +277,7 @@ func (t *Task) runAPIToFile() (err error) {
 	start = time.Now()
 
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(&t.Cfg)
+	t.df, err = t.ReadFromAPI(&t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -285,7 +285,7 @@ func (t *Task) runAPIToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Cfg, t.df)
+	cnt, err := t.WriteToFile(&t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -315,8 +315,8 @@ func (t *Task) runAPIToDB() (err error) {
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Cfg.TgtConn.URL(), tgtProps...)
+	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
+	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -324,14 +324,14 @@ func (t *Task) runAPIToDB() (err error) {
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
 	defer tgtConn.Close()
 
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(&t.Cfg)
+	t.df, err = t.ReadFromAPI(&t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -339,16 +339,16 @@ func (t *Task) runAPIToDB() (err error) {
 	defer t.df.Close()
 
 	// set schema if needed
-	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
-	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
+	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
+	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
+	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
-		if t.Cfg.Target.TmpTableCreated {
+		if t.Config.Target.TmpTableCreated {
 			// need to drop residue
-			tgtConn.DropTable(t.Cfg.Target.Options.TableTmp)
+			tgtConn.DropTable(t.Config.Target.Options.TableTmp)
 		}
 		return
 	}
@@ -367,8 +367,8 @@ func (t *Task) runFileToDB() (err error) {
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Cfg.TgtConn.URL(), tgtProps...)
+	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
+	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -376,14 +376,14 @@ func (t *Task) runFileToDB() (err error) {
 
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
 	defer tgtConn.Close()
 
 	t.SetProgress("reading from source file system")
-	t.df, err = t.ReadFromFile(&t.Cfg)
+	t.df, err = t.ReadFromFile(&t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -391,16 +391,16 @@ func (t *Task) runFileToDB() (err error) {
 	defer t.df.Close()
 
 	// set schema if needed
-	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
-	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
+	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
+	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
+	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
-		if t.Cfg.Target.TmpTableCreated {
+		if t.Config.Target.TmpTableCreated {
 			// need to drop residue
-			tgtConn.DropTable(t.Cfg.Target.Options.TableTmp)
+			tgtConn.DropTable(t.Config.Target.Options.TableTmp)
 		}
 		return
 	}
@@ -419,7 +419,7 @@ func (t *Task) runFileToFile() (err error) {
 	start = time.Now()
 
 	t.SetProgress("reading from source file system")
-	t.df, err = t.ReadFromFile(&t.Cfg)
+	t.df, err = t.ReadFromFile(&t.Config)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromFile")
 		return
@@ -427,7 +427,7 @@ func (t *Task) runFileToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Cfg, t.df)
+	cnt, err := t.WriteToFile(&t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -443,20 +443,20 @@ func (t *Task) runFileToFile() (err error) {
 
 func (t *Task) runDbToDb() (err error) {
 	start = time.Now()
-	if t.Cfg.Target.Mode == Mode("") {
-		t.Cfg.Target.Mode = AppendMode
+	if t.Config.Target.Mode == Mode("") {
+		t.Config.Target.Mode = AppendMode
 	}
 
 	// Initiate connections
-	srcProps := g.MapToKVArr(t.Cfg.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(t.Ctx, t.Cfg.SrcConn.URL(), srcProps...)
+	srcProps := g.MapToKVArr(t.Config.SrcConn.DataS())
+	srcConn, err := database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
-	tgtProps := g.MapToKVArr(t.Cfg.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Cfg.TgtConn.URL(), tgtProps...)
+	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
+	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -465,14 +465,14 @@ func (t *Task) runDbToDb() (err error) {
 	t.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.SrcConn.Info().Name, srcConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
 		return
 	}
 
 	t.SetProgress("connecting to target database")
 	err = tgtConn.Connect()
 	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Cfg.TgtConn.Info().Name, tgtConn.GetType())
+		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -487,15 +487,15 @@ func (t *Task) runDbToDb() (err error) {
 	}()
 
 	// set schema if needed
-	t.Cfg.Target.Object = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Object)
-	t.Cfg.Target.Options.TableTmp = setSchema(cast.ToString(t.Cfg.Target.Data["schema"]), t.Cfg.Target.Options.TableTmp)
+	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
+	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	t.Cfg.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Cfg.Target.Object)
+	t.Config.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
-	if t.Cfg.Target.Mode == "upsert" {
+	if t.Config.Target.Mode == "upsert" {
 		t.SetProgress("getting checkpoint value")
-		t.Cfg.UpsertVal, err = getUpsertValue(&t.Cfg, tgtConn, srcConn.Template().Variable)
+		t.Config.UpsertVal, err = getUpsertValue(&t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
 			err = g.Error(err, "Could not getUpsertValue")
 			return err
@@ -503,7 +503,7 @@ func (t *Task) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(&t.Cfg, srcConn)
+	t.df, err = t.ReadFromDB(&t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
@@ -516,11 +516,11 @@ func (t *Task) runDbToDb() (err error) {
 		for k, v := range srcConn.Props() {
 			data[k] = v
 		}
-		t.Cfg.Source.Data["SOURCE_FILE"] = g.M("data", data)
+		t.Config.Source.Data["SOURCE_FILE"] = g.M("data", data)
 	}
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Cfg, t.df, tgtConn)
+	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToDb")
 		return
@@ -567,14 +567,14 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 		}
 	}
 
-	if srcTable != "" && cfg.Target.Mode != "drop" && len(t.Cfg.Target.Columns) > 0 {
+	if srcTable != "" && cfg.Target.Mode != "drop" && len(t.Config.Target.Columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
 		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
 		if len(columns) > 0 {
 			commFields := database.CommonColumns(
 				columns.Names(),
-				t.Cfg.Target.Columns.Names(),
+				t.Config.Target.Columns.Names(),
 			)
 			if len(commFields) == 0 {
 				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
@@ -823,7 +823,7 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	// do direct loading (without passing through our box)
 	// risk is potential data loss, since we cannot validate counts
 	srcFile, _ := connection.NewConnectionFromMap(g.M())
-	if sf, ok := t.Cfg.Source.Data["SOURCE_FILE"]; ok {
+	if sf, ok := t.Config.Source.Data["SOURCE_FILE"]; ok {
 		srcFile, err = connection.NewConnectionFromMap(sf.(g.Map))
 		if err != nil {
 			err = g.Error(err, "could not create data conn for SOURCE_FILE")

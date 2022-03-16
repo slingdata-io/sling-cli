@@ -187,7 +187,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
 	}
-	if isFileURL(cfg.Source.Stream) && isFileURL(cfg.Source.Conn) {
+	if isFileURL(cfg.Source.Stream) {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 	} else {
 		cfg.Source.Data["url"] = cfg.Source.Conn
@@ -205,7 +205,7 @@ func (cfg *Config) Prepare() (err error) {
 	if len(cfg.Target.PrimaryKey) > 0 && cfg.Target.Mode == "" {
 		cfg.Target.Mode = UpsertMode
 	}
-	
+
 	// done
 	cfg.Prepared = true
 	return
