@@ -5,16 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
 	"strings"
 
-	"github.com/flarco/dbio/connection"
 	"github.com/integrii/flaggy"
 	"gopkg.in/yaml.v2"
 
-	"github.com/flarco/dbio"
 	"github.com/flarco/g/net"
 	core2 "github.com/flarco/sling/core"
+	"github.com/flarco/sling/core/env"
 	"github.com/flarco/sling/core/sling"
 
 	"github.com/flarco/g"
@@ -22,86 +20,6 @@ import (
 	"github.com/kardianos/osext"
 	"github.com/spf13/cast"
 )
-
-var (
-	HomeDir         = os.Getenv("SLING_DIR")
-	DbNetDir        = os.Getenv("DBNET_DIR")
-	HomeDirProfile  = ""
-	DbNetDirProfile = ""
-)
-
-func init() {
-	if HomeDir == "" {
-		HomeDir = g.UserHomeDir() + "/sling"
-		os.Setenv("SLING_DIR", HomeDir)
-	}
-	if DbNetDir == "" {
-		DbNetDir = g.UserHomeDir() + "/dbnet"
-	}
-	os.MkdirAll(HomeDir, 0755)
-
-	HomeDirProfile = HomeDir + "/profiles.yaml"
-	DbNetDirProfile = DbNetDir + "/.dbnet.yaml"
-
-	os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirProfile, DbNetDirProfile))
-}
-
-type Conn struct {
-	Name        string
-	Description string
-	Source      string
-	Connection  connection.Connection
-}
-
-func getLocalConns() []Conn {
-	conns := []Conn{}
-	for key, val := range g.KVArrToMap(os.Environ()...) {
-		if !strings.Contains(val, ":/") || strings.Contains(val, "{") {
-			continue
-		}
-		conn, err := connection.NewConnectionFromURL(key, val)
-		if err != nil {
-			e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
-			g.Warn(e)
-			continue
-		}
-
-		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
-			continue
-		}
-		conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "env variable", conn})
-	}
-
-	dbtConns, err := connection.ReadDbtConnections()
-	if !g.LogError(err) {
-		for _, conn := range dbtConns {
-			conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "dbt profiles", conn})
-		}
-	}
-
-	if g.PathExists(HomeDirProfile) {
-		profileConns, err := connection.ReadConnections(HomeDirProfile)
-		if !g.LogError(err) {
-			for _, conn := range profileConns {
-				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "sling profiles", conn})
-			}
-		}
-	}
-
-	if g.PathExists(DbNetDirProfile) {
-		profileConns, err := connection.ReadConnections(DbNetDirProfile)
-		if !g.LogError(err) {
-			for _, conn := range profileConns {
-				conns = append(conns, Conn{conn.Info().Name, connection.GetTypeNameLong(conn), "dbnet yaml", conn})
-			}
-		}
-	}
-
-	sort.Slice(conns, func(i, j int) bool {
-		return cast.ToString(conns[i].Name) < cast.ToString(conns[j].Name)
-	})
-	return conns
-}
 
 func processRun(c *g.CliSC) (err error) {
 
@@ -199,13 +117,14 @@ func processRun(c *g.CliSC) (err error) {
 			"cmd", "exec",
 			"error", g.ErrMsgSimple(task.Err),
 			"job_type", task.Type,
-			"job_mode", task.Cfg.Target.Mode,
+			"job_mode", task.Config.Target.Mode,
 			"job_status", task.Status,
-			"job_src_type", task.Cfg.SrcConn.Type,
-			"job_tgt_type", task.Cfg.TgtConn.Type,
+			"job_src_type", task.Config.SrcConn.Type,
+			"job_tgt_type", task.Config.TgtConn.Type,
 			"job_start_time", task.StartTime,
 			"job_end_time", task.EndTime,
 			"job_rows_count", task.GetCount(),
+			"job_rows_bytes", task.GetBytes(),
 		)
 		Track("task.Execute", props)
 	}()
@@ -219,6 +138,18 @@ func processRun(c *g.CliSC) (err error) {
 	return nil
 }
 
+func processAuth(c *g.CliSC) error {
+	return nil
+}
+
+func processProject(c *g.CliSC) error {
+	return nil
+}
+
+func processProjectJobs(c *g.CliSC) error {
+	return nil
+}
+
 func processConns(c *g.CliSC) error {
 	switch c.UsedSC() {
 	case "add", "new":
@@ -227,7 +158,7 @@ func processConns(c *g.CliSC) error {
 			return nil
 		}
 	case "list", "show":
-		conns := getLocalConns()
+		conns := env.GetLocalConns()
 		T := table.NewWriter()
 		T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
 		for _, conn := range conns {
@@ -240,8 +171,8 @@ func processConns(c *g.CliSC) error {
 			return nil
 		}
 		name := cast.ToString(c.Vals["name"])
-		conns := map[string]Conn{}
-		for _, conn := range getLocalConns() {
+		conns := map[string]env.Conn{}
+		for _, conn := range env.GetLocalConns() {
 			conns[strings.ToLower(conn.Name)] = conn
 		}
 

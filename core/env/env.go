@@ -4,13 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
+	"sort"
+	"strings"
 
+	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/spf13/cast"
+	"gopkg.in/yaml.v2"
 )
 
 var DisableSendAnonUsage = false
@@ -37,6 +44,91 @@ var envVars = []string{
 	"SURVEYMONKEY_ACCESS_TOKEN",
 
 	"SLING_SEND_ANON_USAGE", "SLING_HOME",
+}
+
+var (
+	HomeDir         = os.Getenv("SLING_HOME_DIR")
+	DbNetDir        = os.Getenv("DBNET_HOME_DIR")
+	HomeDirEnvFile  = ""
+	DbNetDirEnvFile = ""
+)
+
+func init() {
+	if HomeDir == "" {
+		HomeDir = g.UserHomeDir() + "/sling"
+		os.Setenv("SLING_HOME_DIR", HomeDir)
+	}
+	if DbNetDir == "" {
+		DbNetDir = g.UserHomeDir() + "/dbnet"
+	}
+	os.MkdirAll(HomeDir, 0755)
+
+	HomeDirEnvFile = HomeDir + "/env.yaml"
+	DbNetDirEnvFile = DbNetDir + "/env.yaml"
+
+	os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
+}
+
+// flatten and rename all children properly
+func flatten(key string, val interface{}) (m map[string]string) {
+	m = map[string]string{}
+	switch v := val.(type) {
+	case map[string]interface{}:
+		for k2, v2 := range v {
+			k2 = g.F("%s_%s", key, k2)
+			for k3, v3 := range flatten(k2, v2) {
+				m[k3] = v3
+			}
+		}
+	case map[interface{}]interface{}:
+		for k2, v2 := range v {
+			k2 = g.F("%s_%s", key, k2)
+			for k3, v3 := range flatten(cast.ToString(k2), v2) {
+				m[k3] = v3
+			}
+		}
+	case g.Map:
+		for k2, v2 := range v {
+			k2 = g.F("%s_%s", key, k2)
+			for k3, v3 := range flatten(cast.ToString(k2), v2) {
+				m[k3] = v3
+			}
+		}
+	default:
+		m[key] = cast.ToString(v)
+	}
+	return m
+}
+
+func RenderEnvFile(filePath string) (env map[string]string, err error) {
+	if !g.PathExists(filePath) {
+		err = g.Error("%s does not exists", filePath)
+		return
+	}
+
+	bytes, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		err = g.Error(err, "could not read from env file")
+		return
+	}
+
+	envMap := g.M()
+	err = yaml.Unmarshal(bytes, &envMap)
+	if err != nil {
+		err = g.Error(err, "Error parsing env file bytes")
+		return
+	}
+
+	// flatten and rename all children properly
+	env = map[string]string{}
+	for key, val := range envMap {
+		for k, v := range flatten(key, val) {
+			k = strings.ToUpper(k)
+			env[k] = v
+		}
+	}
+
+	return
 }
 
 // EnvVars are the variables we are using
@@ -167,4 +259,103 @@ func Env() map[string]interface{} {
 	return g.M(
 		"SLING_SEND_ANON_USAGE", cast.ToString(!DisableSendAnonUsage),
 	)
+}
+
+type Conn struct {
+	Name        string
+	Description string
+	Source      string
+	Connection  connection.Connection
+}
+
+func GetLocalConns() []Conn {
+	connsMap := map[string]Conn{}
+
+	// get dbt connections
+	dbtConns, err := connection.ReadDbtConnections()
+	if !g.LogError(err) {
+		for _, conn := range dbtConns {
+			c := Conn{
+				Name:        strings.ToUpper(conn.Info().Name),
+				Description: connection.GetTypeNameLong(conn),
+				Source:      "dbt profiles yaml",
+				Connection:  conn,
+			}
+			connsMap[c.Name] = c
+		}
+	}
+
+	if g.PathExists(DbNetDirEnvFile) {
+		profileConns, err := connection.ReadConnections(DbNetDirEnvFile)
+		if !g.LogError(err) {
+			for _, conn := range profileConns {
+				c := Conn{
+					Name:        strings.ToUpper(conn.Info().Name),
+					Description: connection.GetTypeNameLong(conn),
+					Source:      "dbnet env yaml",
+					Connection:  conn,
+				}
+				connsMap[c.Name] = c
+			}
+		}
+	}
+
+	if g.PathExists(HomeDirEnvFile) {
+		env, err := RenderEnvFile(HomeDirEnvFile)
+		if err != nil {
+			g.LogError(err, "could not parse env file -> %s", HomeDirEnvFile)
+		} else {
+			profileConns, err := connection.ReadConnectionsEnv(env)
+			if !g.LogError(err) {
+				for _, conn := range profileConns {
+					c := Conn{
+						Name:        strings.ToUpper(conn.Info().Name),
+						Description: connection.GetTypeNameLong(conn),
+						Source:      "sling env yaml",
+						Connection:  conn,
+					}
+					connsMap[c.Name] = c
+				}
+			}
+		}
+	}
+
+	// Environment variables
+	for key, val := range g.KVArrToMap(os.Environ()...) {
+		if !strings.Contains(val, ":/") || strings.Contains(val, "{") {
+			continue
+		}
+
+		key = strings.TrimSuffix(strings.ToUpper(key), "_URL")
+		conn, err := connection.NewConnectionFromURL(key, val)
+		if err != nil {
+			e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
+			g.Warn(e)
+			continue
+		}
+
+		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
+			continue
+		}
+
+		c := Conn{
+			Name:        conn.Info().Name,
+			Description: connection.GetTypeNameLong(conn),
+			Source:      "env variable",
+			Connection:  conn,
+		}
+		if exC, ok := connsMap[c.Name]; ok {
+			g.Warn(
+				"conn credentials of %s from %s overwritten by env var %s",
+				exC.Name, exC.Source, c.Name,
+			)
+		}
+		connsMap[c.Name] = c
+	}
+
+	connArr := lo.Values(connsMap)
+	sort.Slice(connArr, func(i, j int) bool {
+		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
+	})
+	return connArr
 }

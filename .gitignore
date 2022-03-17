@@ -14,3 +14,7 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 python/sling/bin/
+
+sling-mac
+sling-linux
+sling-win.exe
