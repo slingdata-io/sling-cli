@@ -10,6 +10,8 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
+	"github.com/samber/lo"
+	"github.com/spf13/cast"
 
 	"github.com/flarco/sling/core/dbt"
 	"github.com/jmespath/go-jmespath"
@@ -392,9 +394,22 @@ var sourceFileOptionsDefault = SourceOptions{
 }
 
 var targetFileOptionsDefault = TargetOptions{
-	Header:         true,
-	Compression:    CompressionAuto,
-	Concurrency:    runtime.NumCPU(),
+	Header: true,
+	Compression: lo.Ternary(
+		os.Getenv("COMPRESSION") != "",
+		Compression(os.Getenv("COMPRESSION")),
+		CompressionAuto,
+	),
+	Concurrency: lo.Ternary(
+		os.Getenv("CONCURRENCY") != "",
+		cast.ToInt(os.Getenv("CONCURRENCY")),
+		runtime.NumCPU(),
+	),
+	FileMaxRows: lo.Ternary(
+		os.Getenv("FILE_MAX_ROWS") != "",
+		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
+		0,
+	),
 	UseBulk:        true,
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
