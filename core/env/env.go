@@ -66,7 +66,7 @@ func init() {
 	HomeDirEnvFile = HomeDir + "/env.yaml"
 	DbNetDirEnvFile = DbNetDir + "/env.yaml"
 
-	os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
+	// os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
 }
 
 // flatten and rename all children properly
@@ -100,7 +100,56 @@ func flatten(key string, val interface{}) (m map[string]string) {
 	return m
 }
 
-func RenderEnvFile(filePath string) (env map[string]string, err error) {
+func NormalizeEnvFile(filePath string) (env map[string]interface{}, err error) {
+	if !g.PathExists(filePath) {
+		err = g.Error("%s does not exists", filePath)
+		return
+	}
+
+	bytes, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		err = g.Error(err, "could not read from env file")
+		return
+	}
+
+	envMap := g.M()
+	err = yaml.Unmarshal(bytes, &envMap)
+	if err != nil {
+		err = g.Error(err, "Error parsing env file bytes")
+		return
+	}
+
+	// flatten and rename all children properly
+	env = map[string]interface{}{}
+	for key, val := range envMap {
+		switch v := val.(type) {
+		case map[string]interface{}:
+			m := map[string]interface{}{}
+			for k2, v2 := range v {
+				m[strings.ToLower(k2)] = v2
+			}
+			env[strings.ToUpper(key)] = m
+
+		case map[interface{}]interface{}:
+			m := map[string]interface{}{}
+			for k2, v2 := range v {
+				m[strings.ToLower(cast.ToString(k2))] = v2
+			}
+			env[strings.ToUpper(key)] = m
+
+		case g.Map:
+			m := map[string]interface{}{}
+			for k2, v2 := range v {
+				m[strings.ToLower(k2)] = v2
+			}
+			env[strings.ToUpper(key)] = m
+		default:
+			env[strings.ToUpper(key)] = v
+		}
+	}
+	return
+}
+func FlattenEnvFile(filePath string) (env map[string]string, err error) {
 	if !g.PathExists(filePath) {
 		err = g.Error("%s does not exists", filePath)
 		return
@@ -301,7 +350,7 @@ func GetLocalConns() []Conn {
 	}
 
 	if g.PathExists(HomeDirEnvFile) {
-		env, err := RenderEnvFile(HomeDirEnvFile)
+		env, err := NormalizeEnvFile(HomeDirEnvFile)
 		if err != nil {
 			g.LogError(err, "could not parse env file -> %s", HomeDirEnvFile)
 		} else {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/flarco/sling/core"
@@ -127,7 +128,7 @@ var cliConns = &g.CliSC{
 		// 	Description: "add new connection",
 		// },
 		{
-			Name:        "show",
+			Name:        "list",
 			Description: "list local connections detected",
 		},
 		{
@@ -146,6 +147,81 @@ var cliConns = &g.CliSC{
 	ExecProcess: processConns,
 }
 
+var cliAuth = &g.CliSC{
+	Name:        "auth",
+	Description: "sling cloud authentication",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "login",
+			Description: "Log in in from existing sling cloud account",
+		},
+		{
+			Name:        "logout",
+			Description: "Logs out the currently logged in user",
+		},
+		{
+			Name:        "signup",
+			Description: "Create a new sling cloud account",
+		},
+		{
+			Name:        "token",
+			Description: "Show the current auth token",
+		},
+	},
+	ExecProcess: processAuth,
+}
+
+var cliProjectJobs = &g.CliSC{
+	Name:        "jobs",
+	Description: "Manage the project jobs",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "list",
+			Description: "List jobs",
+		},
+	},
+	ExecProcess: processProjectJobs,
+}
+
+var cliProject = &g.CliSC{
+	Name:        "project",
+	Description: "Manage a sling cloud project",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "init",
+			Description: "Initiate a new project",
+		},
+		{
+			Name:        "jobs",
+			Description: "Manage the project jobs",
+			SubComs: []*g.CliSC{
+				cliProjectJobs,
+			},
+		},
+		{
+			Name:        "deploy",
+			Description: "Deploy a sling project",
+		},
+		{
+			Name:        "secrets",
+			Description: "Manage environment variables",
+		},
+		{
+			Name:        "workers",
+			Description: "Manage self-hosted workers",
+		},
+		{
+			Name:        "history",
+			Description: "See project activity history",
+		},
+		{
+			Name:        "logs",
+			Description: "See logs",
+		},
+	},
+	ExecProcess: processProject,
+}
+
 func init() {
 	// we need a webserver to get the pprof webserver
 	if os.Getenv("SLING_PPROF") == "TRUE" {
@@ -158,8 +234,10 @@ func init() {
 	// collect examples
 	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
 	examples = string(examplesBytes)
-	cliInteractive.Make().Add()
+	// cliInteractive.Make().Add()
+	cliAuth.Make().Add()
 	cliConns.Make().Add()
+	cliProject.Make().Add()
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
 
@@ -214,7 +292,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	kill := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
-	signal.Notify(kill, os.Kill)
+	signal.Notify(kill, syscall.SIGTERM)
 
 	iop.ShowProgress = os.Getenv("SLING_SHOW_PROGRESS") != "false"
 	database.UseBulkExportFlowCSV = cast.ToBool(os.Getenv("SLING_BULK_EXPORT_FLOW_CSV"))
