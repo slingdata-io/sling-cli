@@ -699,7 +699,7 @@ func (t *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 			err = g.Error(err, "Could not MakeDatastream")
 			return
 		}
-		df, err = iop.MakeDataFlow(stream)
+		df, err = iop.MakeDataFlow(stream.Split()...)
 		if err != nil {
 			err = g.Error(err, "Could not MakeDataFlow for Stdin")
 			return
