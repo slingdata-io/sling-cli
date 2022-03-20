@@ -493,7 +493,7 @@ func (t *Task) runDbToDb() (err error) {
 	// check if table exists by getting target columns
 	t.Config.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
-	if t.Config.Target.Mode == "upsert" {
+	if t.Config.Target.Mode == UpsertMode {
 		t.SetProgress("getting checkpoint value")
 		t.Config.UpsertVal, err = getUpsertValue(&t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
@@ -567,7 +567,7 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 		}
 	}
 
-	if srcTable != "" && cfg.Target.Mode != "drop" && len(t.Config.Target.Columns) > 0 {
+	if srcTable != "" && cfg.Target.Mode != DropMode && len(t.Config.Target.Columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
 		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
@@ -591,7 +591,7 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 		return
 	}
 
-	if cfg.Target.Mode == "upsert" {
+	if cfg.Target.Mode == UpsertMode {
 		// select only records that have been modified after last max value
 		upsertWhereCond := "1=1"
 		if cfg.UpsertVal != "" {
@@ -784,7 +784,7 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
 	}
 	if cfg.Target.Mode == "" {
-		cfg.Target.Mode = "append"
+		cfg.Target.Mode = AppendMode
 	}
 
 	// pre SQL
@@ -888,7 +888,7 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 	defer tgtConn.Rollback() // rollback in case of error
 
 	if cnt > 0 {
-		if cfg.Target.Mode == "drop" {
+		if cfg.Target.Mode == DropMode {
 			// drop, (create if not exists) and insert directly
 			err = tgtConn.DropTable(targetTable)
 			if err != nil {
@@ -954,14 +954,14 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 		}
 		t.SetProgress("dropped old table of " + targetTable)
 
-	} else if cfg.Target.Mode == "append" || cfg.Target.Mode == "drop" {
+	} else if cfg.Target.Mode == AppendMode || cfg.Target.Mode == DropMode {
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
 			err = g.Error(err, "Could not insert from temp")
 			return 0, err
 		}
-	} else if cfg.Target.Mode == "truncate" {
+	} else if cfg.Target.Mode == TruncateMode {
 		// truncate (create if not exists) and insert directly
 		truncSQL := g.R(
 			tgtConn.GetTemplateValue("core.truncate_table"),
@@ -982,7 +982,7 @@ func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connect
 			// need to decide whether to drop or keep it for future use
 			return 0, err
 		}
-	} else if cfg.Target.Mode == "upsert" {
+	} else if cfg.Target.Mode == UpsertMode {
 		// insert in temp
 		// create final if not exists
 		// delete from final and insert
