@@ -87,7 +87,8 @@ func executor(in string) {
 		os.Exit(0)
 	case cliRun.Name:
 		cliRun.Vals = g.M(cast.ToSlice(blocks[1:])...)
-		g.LogError(cliRun.ExecProcess(cliRun))
+		_, err := cliRun.ExecProcess(cliRun)
+		g.LogError(err)
 	case cliConns.Name:
 		if len(blocks) == 1 {
 			return
@@ -95,14 +96,15 @@ func executor(in string) {
 		for _, subCom := range cliConns.SubComs {
 			if subCom.Name == blocks[1] {
 				subCom.Vals = g.M(cast.ToSlice(blocks[2:])...)
-				g.LogError(subCom.ExecProcess(subCom))
+				_, err := subCom.ExecProcess(subCom)
+				g.LogError(err)
 			}
 		}
 	}
 	println(in)
 }
 
-func slingPrompt(c *g.CliSC) (err error) {
+func slingPrompt(c *g.CliSC) (ok bool, err error) {
 	fmt.Println("sling - An Extract-Load tool")
 	fmt.Println("Slings data from a data source to a data target.\nVersion " + core.Version)
 

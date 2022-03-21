@@ -30,7 +30,7 @@ var ctx, cancel = context.WithCancel(context.Background())
 
 var cliRun = &g.CliSC{
 	Name:        "run",
-	Description: "execute an ad-hoc task",
+	Description: "Execute an ad-hoc task",
 	Flags: []g.Flag{
 		{
 			Name:        "config",
@@ -114,14 +114,14 @@ var cliInteractive = &g.CliSC{
 
 var cliUpdate = &g.CliSC{
 	Name:        "update",
-	Description: "update to the latest version",
+	Description: "Update sling to the latest version",
 	ExecProcess: updateCLI,
 }
 
 var cliConns = &g.CliSC{
 	Name:        "conns",
 	Singular:    "local connection",
-	Description: "manage local connections",
+	Description: "Manage local connections",
 	SubComs: []*g.CliSC{
 		// {
 		// 	Name:        "add",
@@ -134,7 +134,7 @@ var cliConns = &g.CliSC{
 		{
 			Name:        "test",
 			Description: "test a local connection",
-			Flags: []g.Flag{
+			PosFlags: []g.Flag{
 				{
 					Name:        "name",
 					ShortName:   "",
@@ -149,38 +149,190 @@ var cliConns = &g.CliSC{
 
 var cliAuth = &g.CliSC{
 	Name:        "auth",
-	Description: "sling cloud authentication",
+	Description: "Sling cloud authentication",
 	SubComs: []*g.CliSC{
 		{
 			Name:        "login",
-			Description: "Log in in from existing sling cloud account",
+			Description: "Log in from existing sling cloud account",
+			ExecProcess: processAuthLogin,
 		},
 		{
 			Name:        "logout",
-			Description: "Logs out the currently logged in user",
+			Description: "Log out the currently logged in user",
+			ExecProcess: processAuthLogout,
 		},
 		{
 			Name:        "signup",
 			Description: "Create a new sling cloud account",
+			ExecProcess: processAuthSignUp,
 		},
 		{
 			Name:        "token",
 			Description: "Show the current auth token",
+			ExecProcess: processAuthToken,
 		},
 	},
-	ExecProcess: processAuth,
 }
 
-var cliProjectJobs = &g.CliSC{
-	Name:        "jobs",
-	Description: "Manage the project jobs",
-	SubComs: []*g.CliSC{
-		{
-			Name:        "list",
-			Description: "List jobs",
+var cliProjectTasksSubComs = []*g.CliSC{
+	{
+		Name:        "list",
+		Description: "List project tasks",
+		ExecProcess: processProjectTasksList,
+	},
+	{
+		Name:        "show",
+		Description: "Show a singular task's details",
+		PosFlags: []g.Flag{
+			{
+				Name:        "task-id",
+				Type:        "string",
+				Description: "The task id to lookup",
+			},
+		},
+		ExecProcess: processProjectTasksShow,
+	},
+	{
+		Name:        "toggle-active",
+		Description: "Enable / disable task schedule",
+		ExecProcess: processProjectTasksToggle,
+		PosFlags: []g.Flag{
+			{
+				Name:        "selector",
+				ShortName:   "s",
+				Type:        "string",
+				Description: "The selector string to filter affected records",
+			},
 		},
 	},
-	ExecProcess: processProjectJobs,
+	{
+		Name:        "trigger",
+		Description: "Send one or more tasks to cloud queue for execution, immediately",
+		ExecProcess: processProjectTasksTrigger,
+		PosFlags: []g.Flag{
+			{
+				Name:        "selector",
+				ShortName:   "s",
+				Type:        "string",
+				Description: "The selector string to filter affected records",
+			},
+		},
+		Flags: []g.Flag{
+			{
+				Name:        "dry-run",
+				Type:        "bool",
+				Description: "Returns a list of tasks to be executed. Good for validation.",
+			},
+		},
+	},
+	{
+		Name:        "terminate",
+		Description: "Terminate one or more tasks currently executing",
+		ExecProcess: processProjectTasksTerminate,
+		PosFlags: []g.Flag{
+			{
+				Name:        "selector",
+				ShortName:   "s",
+				Type:        "string",
+				Description: "The selector string to filter affected records",
+			},
+		},
+		Flags: []g.Flag{
+			{
+				Name:        "dry-run",
+				Type:        "bool",
+				Description: "Returns a list of tasks to be executed. Good for validation.",
+			},
+		},
+	},
+	{
+		Name:        "generate",
+		Description: "Auto-generate task files from a database schemata",
+		ExecProcess: processProjectTasksGenerate,
+	},
+}
+
+var cliProjectWorkersSubComs = []*g.CliSC{
+	{
+		Name:        "list",
+		Description: "List registered project self-hosted workers",
+		ExecProcess: processProjectWorkersList,
+	},
+	{
+		Name:        "attach",
+		Description: "Register & attach a self-hosted worker to project",
+		ExecProcess: processProjectWorkersAttach,
+	},
+	{
+		Name:        "detach",
+		Description: "Detach a self-hosted worker from project",
+		ExecProcess: processProjectWorkersDetach,
+	},
+}
+
+var cliProjectConnsSubComs = []*g.CliSC{
+	{
+		Name:        "set",
+		Description: "Set (create or update) a project connection",
+		ExecProcess: processProjectConns,
+	},
+	{
+		Name:        "unset",
+		Description: "Unset (delete) a project connection",
+		PosFlags: []g.Flag{
+			{
+				Name:        "name",
+				ShortName:   "",
+				Type:        "string",
+				Description: "The name of the connection to test",
+			},
+		},
+		ExecProcess: processProjectConns,
+	},
+	{
+		Name:        "list",
+		Description: "List the project connections. Only the name & type will be shown.",
+		ExecProcess: processProjectConns,
+	},
+	{
+		Name:        "test",
+		Description: "Test connectivity to a project connection",
+		PosFlags: []g.Flag{
+			{
+				Name:        "name",
+				ShortName:   "",
+				Type:        "string",
+				Description: "The name of the connection to test",
+			},
+		},
+		ExecProcess: processProjectConns,
+	},
+}
+
+var cliProjectVarsSubComs = []*g.CliSC{
+	{
+		Name:        "set",
+		Description: "Set (create or update) a project environment variable",
+		ExecProcess: processProjectVars,
+	},
+	{
+		Name:        "unset",
+		Description: "Unset (delete) a project environment variable",
+		PosFlags: []g.Flag{
+			{
+				Name:        "name",
+				ShortName:   "",
+				Type:        "string",
+				Description: "The name of the connection to test",
+			},
+		},
+		ExecProcess: processProjectVars,
+	},
+	{
+		Name:        "list",
+		Description: "List the project's environment variables. Only the name will be shown.",
+		ExecProcess: processProjectVars,
+	},
 }
 
 var cliProject = &g.CliSC{
@@ -192,34 +344,54 @@ var cliProject = &g.CliSC{
 			Description: "Initiate a new project",
 		},
 		{
-			Name:        "jobs",
-			Description: "Manage the project jobs",
-			SubComs: []*g.CliSC{
-				cliProjectJobs,
-			},
+			Name:        "tasks",
+			Description: "Manage the project tasks",
+			SubComs:     cliProjectTasksSubComs,
+		},
+		{
+			Name:        "validate",
+			Description: "Validates project tasks and environment. Is ran prior to deployment",
+			ExecProcess: processProjectValidate,
 		},
 		{
 			Name:        "deploy",
 			Description: "Deploy a sling project",
+			ExecProcess: processProjectDeploy,
 		},
 		{
-			Name:        "secrets",
-			Description: "Manage environment variables",
+			Name:        "conns",
+			Description: "Manage project connections",
+			SubComs:     cliProjectConnsSubComs,
+		},
+		{
+			Name:        "vars",
+			Description: "Manage project environment variables",
+			SubComs:     cliProjectVarsSubComs,
 		},
 		{
 			Name:        "workers",
 			Description: "Manage self-hosted workers",
+			SubComs:     cliProjectWorkersSubComs,
 		},
 		{
 			Name:        "history",
 			Description: "See project activity history",
+			ExecProcess: processProjectHistory,
 		},
 		{
 			Name:        "logs",
-			Description: "See logs",
+			Description: "See project task execution logs",
+			PosFlags: []g.Flag{
+				{
+					Name:        "exec-id",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The ID of the task execution",
+				},
+			},
+			ExecProcess: processProjectLogs,
 		},
 	},
-	ExecProcess: processProject,
 }
 
 func init() {
@@ -234,6 +406,7 @@ func init() {
 	// collect examples
 	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
 	examples = string(examplesBytes)
+
 	// cliInteractive.Make().Add()
 	cliAuth.Make().Add()
 	cliConns.Make().Add()
@@ -246,8 +419,8 @@ func init() {
 		Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
 		// Either set environment and release here or set the SENTRY_ENVIRONMENT
 		// and SENTRY_RELEASE environment variables.
-		// Environment: "",
-		Release: "sling@" + core.Version,
+		Environment: "Production",
+		Release:     "sling@" + core.Version,
 		// Enable printing of SDK debug messages.
 		// Useful when getting started or trying to figure something out.
 		Debug: false,
@@ -346,7 +519,7 @@ func cliInit() int {
 		g.LogFatal(err)
 	} else {
 		flaggy.ShowHelp("")
-		Track("ShowHelp")
+		// Track("ShowHelp")
 	}
 	return 0
 }
