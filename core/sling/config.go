@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"io/ioutil"
 	"os"
@@ -301,6 +302,16 @@ type Config struct {
 	UpsertVal string                `json:"-" yaml:"-"`
 }
 
+// Scan scan value into Jsonb, implements sql.Scanner interface
+func (cfg *Config) Scan(value interface{}) error {
+	return g.JSONScanner(cfg, value)
+}
+
+// Value return json value, implement driver.Valuer interface
+func (cfg Config) Value() (driver.Value, error) {
+	return g.JSONValuer(cfg, "{}")
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	StdIn     bool    `json:"-"`                    // whether stdin is passed
@@ -311,12 +322,12 @@ type ConfigOptions struct {
 // Source is a source of data
 type Source struct {
 	Conn    string                 `json:"conn" yaml:"conn"`
-	Stream  string                 `json:"stream" yaml:"stream"`
+	Stream  string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Limit   int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Options SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
-	Columns iop.Columns `json:"-"`
+	Columns iop.Columns `json:"-" yaml:"-"`
 }
 
 // Target is a target of data
@@ -331,8 +342,8 @@ type Target struct {
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	DbtConfig       *dbt.Dbt    `json:"dbt_config,omitempty" yaml:"dbt_config,omitempty"`
-	TmpTableCreated bool        `json:"-"`
-	Columns         iop.Columns `json:"-"`
+	TmpTableCreated bool        `json:"-" yaml:"-"`
+	Columns         iop.Columns `json:"-" yaml:"-"`
 }
 
 // Compression is the compression to use

@@ -37,7 +37,7 @@ var start time.Time
 var PermitTableSchemaOptimization = false
 
 // IsStalled determines if the task has stalled (no row increment)
-func (t *Task) IsStalled(window float64) bool {
+func (t *TaskExecution) IsStalled(window float64) bool {
 	if strings.Contains(t.Progress, "pre-sql") || strings.Contains(t.Progress, "post-sql") {
 		return false
 	}
@@ -45,7 +45,7 @@ func (t *Task) IsStalled(window float64) bool {
 }
 
 // GetBytes return the current total of bytes processed
-func (t *Task) GetBytes() (bytes uint64) {
+func (t *TaskExecution) GetBytes() (bytes uint64) {
 	if t.StartTime == nil {
 		return
 	}
@@ -54,7 +54,7 @@ func (t *Task) GetBytes() (bytes uint64) {
 }
 
 // GetCount return the current count of rows processed
-func (t *Task) GetCount() (count uint64) {
+func (t *TaskExecution) GetCount() (count uint64) {
 	if t.StartTime == nil {
 		return
 	}
@@ -64,7 +64,7 @@ func (t *Task) GetCount() (count uint64) {
 
 // GetRate return the speed of flow (rows / sec)
 // secWindow is how many seconds back to measure (0 is since beginning)
-func (t *Task) GetRate(secWindow int) (rate int) {
+func (t *TaskExecution) GetRate(secWindow int) (rate int) {
 	var secElapsed float64
 	if t.StartTime == nil || t.StartTime.IsZero() {
 		return
@@ -91,7 +91,7 @@ func (t *Task) GetRate(secWindow int) (rate int) {
 
 // Execute runs a Sling task.
 // This may be a file/db to file/db transfer
-func (t *Task) Execute() error {
+func (t *TaskExecution) Execute() error {
 	env.InitLogger()
 
 	done := make(chan struct{})
@@ -166,7 +166,7 @@ func (t *Task) Execute() error {
 	return t.Err
 }
 
-func (t *Task) runDbSQL() (err error) {
+func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
@@ -201,7 +201,7 @@ func (t *Task) runDbSQL() (err error) {
 	return
 }
 
-func (t *Task) runDbDbt() (err error) {
+func (t *TaskExecution) runDbDbt() (err error) {
 	dbtConfig := g.Marshal(t.Config.Target.DbtConfig)
 	dbtObj, err := dbt.NewDbt(dbtConfig, t.Config.TgtConn.Info().Name)
 	if err != nil {
@@ -231,7 +231,7 @@ func (t *Task) runDbDbt() (err error) {
 	return
 }
 
-func (t *Task) runDbToFile() (err error) {
+func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
 	srcProps := g.MapToKVArr(t.Config.SrcConn.DataS())
@@ -272,7 +272,7 @@ func (t *Task) runDbToFile() (err error) {
 
 }
 
-func (t *Task) runAPIToFile() (err error) {
+func (t *TaskExecution) runAPIToFile() (err error) {
 
 	start = time.Now()
 
@@ -298,7 +298,7 @@ func (t *Task) runAPIToFile() (err error) {
 
 }
 
-func (t *Task) runFolderToDB() (err error) {
+func (t *TaskExecution) runFolderToDB() (err error) {
 	/*
 		This will take a URL as a folder path
 		1. list the files/folders in it (not recursive)
@@ -310,7 +310,7 @@ func (t *Task) runFolderToDB() (err error) {
 	return
 }
 
-func (t *Task) runAPIToDB() (err error) {
+func (t *TaskExecution) runAPIToDB() (err error) {
 
 	start = time.Now()
 
@@ -362,7 +362,7 @@ func (t *Task) runAPIToDB() (err error) {
 	return
 }
 
-func (t *Task) runFileToDB() (err error) {
+func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
 
@@ -414,7 +414,7 @@ func (t *Task) runFileToDB() (err error) {
 	return
 }
 
-func (t *Task) runFileToFile() (err error) {
+func (t *TaskExecution) runFileToFile() (err error) {
 
 	start = time.Now()
 
@@ -441,7 +441,7 @@ func (t *Task) runFileToFile() (err error) {
 	return
 }
 
-func (t *Task) runDbToDb() (err error) {
+func (t *TaskExecution) runDbToDb() (err error) {
 	start = time.Now()
 	if t.Config.Target.Mode == Mode("") {
 		t.Config.Target.Mode = AppendMode
@@ -536,7 +536,7 @@ func (t *Task) runDbToDb() (err error) {
 }
 
 // ReadFromDB reads from a source database
-func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
+func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
 
 	srcTable := ""
 	sql := ""
@@ -635,7 +635,7 @@ func (t *Task) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dat
 }
 
 // ReadFromAPI reads from a source API
-func (t *Task) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
+func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 
 	var stream *iop.Datastream
 
@@ -670,7 +670,7 @@ func (t *Task) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 }
 
 // ReadFromFile reads from a source file
-func (t *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
 	var stream *iop.Datastream
 
@@ -710,7 +710,7 @@ func (t *Task) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 }
 
 // WriteToFile writes to a target file
-func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error) {
+func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error) {
 	var stream *iop.Datastream
 	var bw int64
 
@@ -767,7 +767,7 @@ func (t *Task) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error
 // create temp table
 // load into temp table
 // insert / upsert / replace into target table
-func (t *Task) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
+func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	targetTable := cfg.Target.Object
 
 	// set bulk

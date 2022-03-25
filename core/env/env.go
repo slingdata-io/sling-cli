@@ -326,7 +326,7 @@ func GetLocalConns() []Conn {
 		for _, conn := range dbtConns {
 			c := Conn{
 				Name:        strings.ToUpper(conn.Info().Name),
-				Description: connection.GetTypeNameLong(conn),
+				Description: conn.Type.NameLong(),
 				Source:      "dbt profiles yaml",
 				Connection:  conn,
 			}
@@ -340,7 +340,7 @@ func GetLocalConns() []Conn {
 			for _, conn := range profileConns {
 				c := Conn{
 					Name:        strings.ToUpper(conn.Info().Name),
-					Description: connection.GetTypeNameLong(conn),
+					Description: conn.Type.NameLong(),
 					Source:      "dbnet env yaml",
 					Connection:  conn,
 				}
@@ -359,7 +359,7 @@ func GetLocalConns() []Conn {
 				for _, conn := range profileConns {
 					c := Conn{
 						Name:        strings.ToUpper(conn.Info().Name),
-						Description: connection.GetTypeNameLong(conn),
+						Description: conn.Type.NameLong(),
 						Source:      "sling env yaml",
 						Connection:  conn,
 					}
@@ -383,13 +383,13 @@ func GetLocalConns() []Conn {
 			continue
 		}
 
-		if connection.GetTypeNameLong(conn) == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
+		if conn.Type.NameLong() == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
 			continue
 		}
 
 		c := Conn{
 			Name:        conn.Info().Name,
-			Description: connection.GetTypeNameLong(conn),
+			Description: conn.Type.NameLong(),
 			Source:      "env variable",
 			Connection:  conn,
 		}

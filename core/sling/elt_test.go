@@ -1,10 +1,11 @@
 package sling_test
 
 import (
-	"github.com/flarco/sling/core/sling"
 	"math"
 	"testing"
 	"time"
+
+	"github.com/flarco/sling/core/sling"
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
@@ -16,7 +17,7 @@ func TestGetRate(t *testing.T) {
 	now := time.Now()
 	now2 := time.Now()
 	df := iop.Dataflow{}
-	task := sling.Task{
+	task := sling.TaskExecution{
 		StartTime: &now,
 		EndTime:   &now2,
 		//df:        &df,

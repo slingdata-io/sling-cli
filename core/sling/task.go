@@ -13,26 +13,26 @@ import (
 
 // TaskProcess is a slingELT task / execution process
 type TaskProcess struct {
-	Task      Task         `json:"-"`
-	JobID     int          `json:"job_id" mapstructure:"job_id"`
-	ExecID    int          `json:"exec_id" mapstructure:"exec_id"`
-	Pid       int          `json:"pid" mapstructure:"pid"`
-	Stderr    string       `json:"stderr" mapstructure:"stderr"`
-	Stdout    string       `json:"stdout" mapstructure:"stdout"`
-	Err       error        `json:"-"`
-	StartTime time.Time    `json:"start_time" mapstructure:"start_time"`
-	EndTime   time.Time    `json:"end_time" mapstructure:"end_time"`
-	ExitCode  int          `json:"exit_code" mapstructure:"exit_code"`
-	RowRate   int          `json:"-"`
-	StderrBuf bytes.Buffer `json:"-"`
-	StdoutBuf bytes.Buffer `json:"-"`
-	Cmd       *exec.Cmd    `json:"-"`
+	Task      TaskExecution `json:"-"`
+	JobID     int           `json:"job_id" mapstructure:"job_id"`
+	ExecID    int64         `json:"exec_id" mapstructure:"exec_id"`
+	Pid       int           `json:"pid" mapstructure:"pid"`
+	Stderr    string        `json:"stderr" mapstructure:"stderr"`
+	Stdout    string        `json:"stdout" mapstructure:"stdout"`
+	Err       error         `json:"-"`
+	StartTime time.Time     `json:"start_time" mapstructure:"start_time"`
+	EndTime   time.Time     `json:"end_time" mapstructure:"end_time"`
+	ExitCode  int           `json:"exit_code" mapstructure:"exit_code"`
+	RowRate   int           `json:"-"`
+	StderrBuf bytes.Buffer  `json:"-"`
+	StdoutBuf bytes.Buffer  `json:"-"`
+	Cmd       *exec.Cmd     `json:"-"`
 }
 
 // ExecutionStatus is an execution status object
 type ExecutionStatus struct {
 	JobID       int        `json:"job_id,omitempty"`
-	ExecID      int        `json:"exec_id,omitempty"`
+	ExecID      int64      `json:"exec_id,omitempty"`
 	Status      ExecStatus `json:"status,omitempty"`
 	Text        string     `json:"text,omitempty"`
 	Rows        uint64     `json:"rows,omitempty"`
@@ -59,14 +59,14 @@ func (tp *TaskProcess) ToMap() map[string]interface{} {
 }
 
 // NewTask creates a Sling task with given configuration
-func NewTask(execID int, cfg Config) (t Task) {
+func NewTask(execID int64, cfg Config) (t TaskExecution) {
 	err := cfg.Prepare()
 	if err != nil {
 		t.Err = g.Error(err, "could not prepare task")
 		return
 	}
 
-	t = Task{
+	t = TaskExecution{
 		ExecID:       execID,
 		Config:       cfg,
 		Status:       ExecStatusCreated,
@@ -130,20 +130,19 @@ func NewTask(execID int, cfg Config) (t Task) {
 	return
 }
 
-// Task is a sling ELT task run, synonymous to an execution
-type Task struct {
-	ExecID        int              `json:"exec_id"`
-	Config        Config           `json:"config"`
-	Type          JobType          `json:"type"`
-	Status        ExecStatus       `json:"status"`
-	Err           error            `json:"error"`
-	StartTime     *time.Time       `json:"start_time"`
-	EndTime       *time.Time       `json:"end_time"`
-	Bytes         uint64           `json:"bytes"`
-	Ctx           context.Context  `json:"-"`
-	SubTasks      map[string]*Task `json:"-"`
-	Progress      string           `json:"progress"`
-	df            *iop.Dataflow    `json:"-"`
+// TaskExecution is a sling ELT task run, synonymous to an execution
+type TaskExecution struct {
+	ExecID        int64           `json:"exec_id"`
+	Config        Config          `json:"config"`
+	Type          JobType         `json:"type"`
+	Status        ExecStatus      `json:"status"`
+	Err           error           `json:"error"`
+	StartTime     *time.Time      `json:"start_time"`
+	EndTime       *time.Time      `json:"end_time"`
+	Bytes         uint64          `json:"bytes"`
+	Ctx           context.Context `json:"-"`
+	Progress      string          `json:"progress"`
+	df            *iop.Dataflow   `json:"-"`
 	prevCount     uint64
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
 	ProgressHist  []string        `json:"progress_hist"`
@@ -151,7 +150,7 @@ type Task struct {
 }
 
 // SetProgress sets the progress
-func (t *Task) SetProgress(progressText string, args ...interface{}) {
+func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	g.Info(progressText, args...)
 	progressText = g.F(progressText, args...)
 	t.ProgressHist = append(t.ProgressHist, progressText)

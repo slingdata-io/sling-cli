@@ -154,22 +154,22 @@ var cliAuth = &g.CliSC{
 		{
 			Name:        "login",
 			Description: "Log in from existing sling cloud account",
-			ExecProcess: processAuthLogin,
+			ExecProcess: processAuth,
 		},
 		{
 			Name:        "logout",
 			Description: "Log out the currently logged in user",
-			ExecProcess: processAuthLogout,
+			ExecProcess: processAuth,
 		},
 		{
 			Name:        "signup",
 			Description: "Create a new sling cloud account",
-			ExecProcess: processAuthSignUp,
+			ExecProcess: processAuth,
 		},
 		{
 			Name:        "token",
 			Description: "Show the current auth token",
-			ExecProcess: processAuthToken,
+			ExecProcess: processAuth,
 		},
 	},
 }
@@ -178,7 +178,7 @@ var cliProjectTasksSubComs = []*g.CliSC{
 	{
 		Name:        "list",
 		Description: "List project tasks",
-		ExecProcess: processProjectTasksList,
+		ExecProcess: processProjectTasks,
 	},
 	{
 		Name:        "show",
@@ -190,12 +190,12 @@ var cliProjectTasksSubComs = []*g.CliSC{
 				Description: "The task id to lookup",
 			},
 		},
-		ExecProcess: processProjectTasksShow,
+		ExecProcess: processProjectTasks,
 	},
 	{
 		Name:        "toggle-active",
 		Description: "Enable / disable task schedule",
-		ExecProcess: processProjectTasksToggle,
+		ExecProcess: processProjectTasks,
 		PosFlags: []g.Flag{
 			{
 				Name:        "selector",
@@ -208,7 +208,7 @@ var cliProjectTasksSubComs = []*g.CliSC{
 	{
 		Name:        "trigger",
 		Description: "Send one or more tasks to cloud queue for execution, immediately",
-		ExecProcess: processProjectTasksTrigger,
+		ExecProcess: processProjectTasks,
 		PosFlags: []g.Flag{
 			{
 				Name:        "selector",
@@ -228,7 +228,7 @@ var cliProjectTasksSubComs = []*g.CliSC{
 	{
 		Name:        "terminate",
 		Description: "Terminate one or more tasks currently executing",
-		ExecProcess: processProjectTasksTerminate,
+		ExecProcess: processProjectTasks,
 		PosFlags: []g.Flag{
 			{
 				Name:        "selector",
