@@ -13,11 +13,11 @@ import (
 
 	"github.com/flarco/sling/core"
 	"github.com/flarco/sling/core/env"
+	"github.com/flarco/sling/core/sling"
 	"github.com/getsentry/sentry-go"
 	"github.com/rudderlabs/analytics-go"
 
 	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
 	"github.com/spf13/cast"
@@ -467,7 +467,7 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 	signal.Notify(kill, syscall.SIGTERM)
 
-	iop.ShowProgress = os.Getenv("SLING_SHOW_PROGRESS") != "false"
+	sling.ShowProgress = os.Getenv("SLING_SHOW_PROGRESS") != "false"
 	database.UseBulkExportFlowCSV = cast.ToBool(os.Getenv("SLING_BULK_EXPORT_FLOW_CSV"))
 
 	go func() {

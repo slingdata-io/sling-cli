@@ -103,6 +103,9 @@ func (t *TaskExecution) Execute() error {
 		t.Ctx = context.Background()
 	}
 
+	// get stats of process at beginning
+	t.procStatsStart = g.GetProcStats(os.Getpid())
+
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	go func() {
@@ -857,6 +860,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return
 		}
 		tgtConn.Commit()
+		t.PBar.Finish()
 
 		tCnt, _ := tgtConn.GetCount(cfg.Target.Options.TableTmp)
 		if cnt != tCnt {
