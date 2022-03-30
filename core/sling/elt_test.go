@@ -22,7 +22,7 @@ func TestGetRate(t *testing.T) {
 		EndTime:   &now2,
 		//df:        &df,
 	}
-	rate := task.GetRate(10)
+	rate, _ := task.GetRate(10)
 
 	st := *task.StartTime
 	et := *task.EndTime
@@ -37,7 +37,7 @@ func TestGetRate(t *testing.T) {
 	secElapsed := cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
 	g.P(secElapsed)
 	g.P(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
-	rate = cast.ToInt(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
+	rate = cast.ToInt64(math.Round(cast.ToFloat64(df.Count()) / secElapsed))
 	g.P(rate)
 }
 

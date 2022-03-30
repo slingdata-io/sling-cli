@@ -45,12 +45,24 @@ func (t *TaskExecution) IsStalled(window float64) bool {
 }
 
 // GetBytes return the current total of bytes processed
-func (t *TaskExecution) GetBytes() (bytes uint64) {
-	if t.StartTime == nil {
-		return
+func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
+	inBytes, outBytes = t.df.Bytes()
+	if inBytes == 0 && outBytes == 0 {
+		// use tx/rc bytes
+		stats := g.GetProcStats(os.Getpid())
+		inBytes = stats.RcBytes - t.ProcStatsStart.RcBytes
+		outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
 	}
+	return
+}
 
-	return t.df.Bytes()
+func (t *TaskExecution) GetBytesString() (s string) {
+	inBytes, _ := t.GetBytes()
+	return g.F("%s", humanize.Bytes(inBytes))
+	// if inBytes > 0 && inBytes == outBytes {
+	// 	return g.F("%s", humanize.Bytes(inBytes))
+	// }
+	// return g.F("%s -> %s", humanize.Bytes(inBytes), humanize.Bytes(outBytes))
 }
 
 // GetCount return the current count of rows processed
@@ -62,29 +74,35 @@ func (t *TaskExecution) GetCount() (count uint64) {
 	return t.df.Count()
 }
 
-// GetRate return the speed of flow (rows / sec)
+// GetRate return the speed of flow (rows / sec and bytes / sec)
 // secWindow is how many seconds back to measure (0 is since beginning)
-func (t *TaskExecution) GetRate(secWindow int) (rate int) {
+func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 	var secElapsed float64
+	count := t.GetCount()
+	bytes, _ := t.GetBytes()
 	if t.StartTime == nil || t.StartTime.IsZero() {
 		return
 	} else if t.EndTime == nil || t.EndTime.IsZero() {
 		st := *t.StartTime
 		if secWindow <= 0 {
 			secElapsed = time.Since(st).Seconds()
-			rate = cast.ToInt(math.Round(cast.ToFloat64(t.df.Count()) / secElapsed))
+			rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
+			byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 		} else {
-			rate = cast.ToInt(math.Round(cast.ToFloat64((t.df.Count() - t.prevCount) / cast.ToUint64(secWindow))))
-			if t.prevCount < t.df.Count() {
+			rowRate = cast.ToInt64(math.Round(cast.ToFloat64((count - t.prevRowCount) / cast.ToUint64(secWindow))))
+			byteRate = cast.ToInt64(math.Round(cast.ToFloat64((bytes - t.prevByteCount) / cast.ToUint64(secWindow))))
+			if t.prevRowCount < count {
 				t.lastIncrement = time.Now()
 			}
-			t.prevCount = t.df.Count()
+			t.prevRowCount = count
+			t.prevByteCount = bytes
 		}
 	} else {
 		st := *t.StartTime
 		et := *t.EndTime
 		secElapsed = cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
-		rate = cast.ToInt(math.Round(cast.ToFloat64(t.df.Count()) / secElapsed))
+		rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
+		byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
 	}
 	return
 }
@@ -104,7 +122,7 @@ func (t *TaskExecution) Execute() error {
 	}
 
 	// get stats of process at beginning
-	t.procStatsStart = g.GetProcStats(os.Getpid())
+	t.ProcStatsStart = g.GetProcStats(os.Getpid())
 
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
@@ -530,7 +548,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+	t.SetProgress("inserted %d rows in %d secs [%s r/s] [%s]", cnt, elapsed, getRate(cnt), t.GetBytesString())
 
 	if t.df.Context.Err() != nil {
 		err = g.Error(t.df.Context.Err(), "Error running runDbToDb")

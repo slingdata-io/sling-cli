@@ -168,6 +168,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	// track usage
 	defer func() {
+		inBytes, outBytes := task.GetBytes()
 		props := g.M(
 			"cmd", "exec",
 			"error", g.ErrMsgSimple(task.Err),
@@ -179,7 +180,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			"job_start_time", task.StartTime,
 			"job_end_time", task.EndTime,
 			"job_rows_count", task.GetCount(),
-			"job_rows_bytes", task.GetBytes(),
+			"job_rows_in_bytes", inBytes,
+			"job_rows_ou_tbytes", outBytes,
 		)
 		Track("task.Execute", props)
 	}()
@@ -189,6 +191,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	if err != nil {
 		return ok, g.Error(err)
 	}
+
+	// g.PP(task.ProcStatsStart)
+	// g.PP(g.GetProcStats(os.Getpid()))
 
 	return ok, nil
 }

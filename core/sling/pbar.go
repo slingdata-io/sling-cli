@@ -27,11 +27,13 @@ func NewPBar(d time.Duration) *ProgressBar {
 	pb.RegisterElement("status", elementStatus, true)
 	pb.RegisterElement("counters", elementCounters, true)
 	pb.RegisterElement("bytes", elementBytes, true)
-	tmpl := `{{etime . "%s" | yellow }} {{counters . }} {{speed . "%s r/s" | green }} {{ status . }}`
+	pb.RegisterElement("rowRate", elementRowRate, true)
+	pb.RegisterElement("byteRate", elementByteRate, true)
+	tmpl := `{{etime . "%s" | yellow }} {{counters . }} {{speed . "%s r/s" | green }} {{ bytes . | blue }} {{ status . }}`
 	if g.IsDebugLow() {
 		pb.RegisterElement("mem", elementMem, true)
 		pb.RegisterElement("cpu", elementCPU, true)
-		tmpl = `{{etime . "%s" | yellow }} {{counters . }} {{speed . "%s r/s" | green }} {{ bytes . }} {{ mem . }} {{ cpu . }} {{ status . }}`
+		tmpl = `{{etime . "%s" | yellow }} {{counters . }} {{speed . "%s r/s" | green }} {{ bytes . | blue }} {{ byteRate . }} {{ mem . }} {{ cpu . }} {{ status . }}`
 	}
 	barTmpl := pb.ProgressBarTemplate(tmpl)
 	pbar = barTmpl.New(0)
@@ -117,9 +119,16 @@ var elementCounters pb.ElementFunc = func(state *pb.State, args ...string) strin
 }
 
 var elementBytes pb.ElementFunc = func(state *pb.State, args ...string) string {
-	bytes := cast.ToUint64(state.Get("bytes"))
-	if bytes == 0 {
-		return ""
-	}
-	return g.F("| %s", humanize.Bytes(bytes))
+	bytes := cast.ToString(state.Get("bytes"))
+	return g.F("%s", bytes)
+}
+
+var elementByteRate pb.ElementFunc = func(state *pb.State, args ...string) string {
+	bytes := cast.ToString(state.Get("byteRate"))
+	return g.F("| %s", bytes)
+}
+
+var elementRowRate pb.ElementFunc = func(state *pb.State, args ...string) string {
+	bytes := cast.ToString(state.Get("rowRate"))
+	return g.F("| %s", bytes)
 }
