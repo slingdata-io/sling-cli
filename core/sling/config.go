@@ -183,6 +183,10 @@ func (cfg *Config) Prepare() (err error) {
 	if err != nil {
 		return g.Error(err, "could not create data conn for target")
 	}
+	if cfg.Options.StdOut {
+		cfg.Target.Options.Concurrency = 1
+		os.Setenv("CONCURRENCY", "1")
+	}
 	cfg.TgtConn = tgtConn
 
 	// Set Source
