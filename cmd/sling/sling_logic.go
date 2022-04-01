@@ -684,6 +684,12 @@ func processConns(c *g.CliSC) (bool, error) {
 	return ok, nil
 }
 
+func slingUiServer(c *g.CliSC) (ok bool, err error) {
+	Track("slingUiServer")
+	ok = true
+	return
+}
+
 func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
 	Track("updateCLI")

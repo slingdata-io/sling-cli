@@ -114,8 +114,14 @@ var cliInteractive = &g.CliSC{
 
 var cliUpdate = &g.CliSC{
 	Name:        "update",
-	Description: "Update sling to the latest version",
+	Description: "Update Sling to the latest version",
 	ExecProcess: updateCLI,
+}
+
+var cliUi = &g.CliSC{
+	Name:        "ui",
+	Description: "Open the Sling app in a browser",
+	ExecProcess: slingUiServer,
 }
 
 var cliConns = &g.CliSC{
@@ -410,9 +416,10 @@ func init() {
 	// cliInteractive.Make().Add()
 	cliAuth.Make().Add()
 	cliConns.Make().Add()
-	cliProject.Make().Add()
+	// cliProject.Make().Add()
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
+	cliUi.Make().Add()
 
 	sentry.Init(sentry.ClientOptions{
 		// Either set your DSN here or set the SENTRY_DSN environment variable.
