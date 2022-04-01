@@ -187,13 +187,40 @@ func (t *TaskExecution) Execute() error {
 	return t.Err
 }
 
+func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
+	options := g.M()
+	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
+	srcProps := append(
+		g.MapToKVArr(t.Config.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+	)
+	conn, err = database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+	return
+}
+
+func (t *TaskExecution) getTgtDBConn() (conn database.Connection, err error) {
+	options := g.M()
+	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
+	tgtProps := append(
+		g.MapToKVArr(t.Config.TgtConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+	)
+	conn, err = database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	if err != nil {
+		err = g.Error(err, "Could not initialize target connection")
+		return
+	}
+	return
+}
+
 func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -255,14 +282,14 @@ func (t *TaskExecution) runDbDbt() (err error) {
 func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
-	srcProps := g.MapToKVArr(t.Config.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
+
+	t.SetProgress("connecting to source database")
+	srcConn, err := t.getSrcDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
-	t.SetProgress("connecting to source database")
 	err = srcConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
@@ -336,8 +363,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -388,8 +414,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	start = time.Now()
 
 	t.SetProgress("connecting to target database")
-	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -469,8 +494,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
-	srcProps := g.MapToKVArr(t.Config.SrcConn.DataS())
-	srcConn, err := database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
+	srcConn, err := t.getSrcDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -558,7 +582,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
-
+	df = iop.NewDataflow()
 	srcTable := ""
 	sql := ""
 	fieldsStr := "*"
@@ -588,7 +612,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if srcTable != "" && cfg.Target.Mode != DropMode && len(t.Config.Target.Columns) > 0 {
+	if srcTable != "" && cfg.Target.Mode != DropMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.Columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
 		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
@@ -652,12 +676,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return
 	}
 
+	g.PP(df.Columns)
+
 	return
 }
 
 // ReadFromAPI reads from a source API
 func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 
+	df = iop.NewDataflow()
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.Type.IsAirbyte() {
@@ -693,6 +720,7 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 // ReadFromFile reads from a source file
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
+	df = iop.NewDataflow()
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.URL() != "" {
@@ -870,7 +898,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return
 		}
 
-		t.SetProgress("streaming inserts")
+		t.SetProgress("streaming data")
 		cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 		if err != nil {
 			tgtConn.Rollback()

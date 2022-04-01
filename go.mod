@@ -17,6 +17,7 @@ require (
 	github.com/rs/zerolog v1.20.0
 	github.com/rudderlabs/analytics-go v3.3.1+incompatible
 	github.com/samber/lo v1.10.1
+	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/spf13/cast v1.4.1
 	github.com/stretchr/testify v1.7.0
 	gopkg.in/cheggaaa/pb.v2 v2.0.7
@@ -125,7 +126,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/segmentio/backo-go v0.0.0-20200129164019-23eae7c10bd3 // indirect
-	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/snowflakedb/gosnowflake v1.6.8 // indirect
 	github.com/tidwall/gjson v1.8.0 // indirect
