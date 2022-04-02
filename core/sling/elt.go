@@ -602,7 +602,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if err != nil {
 			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
 			if srcTable == "" {
-				return df, err
+				return t.df, err
 			} else {
 				err = nil // don't return error in case the table full name ends with .sql
 				g.LogError(err)
@@ -623,7 +623,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			)
 			if len(commFields) == 0 {
 				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
-				return
+				return t.df, err
 			}
 			fieldsStr = strings.Join(commFields, ", ")
 		}
@@ -633,7 +633,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	cfg.Source.Columns, err = srcConn.GetSQLColumns(g.R(sql, "upsert_where_cond", "1=0"))
 	if err != nil {
 		err = g.Error(err, "Could not obtain source columns")
-		return
+		return t.df, err
 	}
 
 	if cfg.Target.Mode == UpsertMode {
@@ -657,7 +657,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		} else {
 			if !strings.Contains(sql, "{upsert_where_cond}") {
 				err = g.Error("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}")
-				return
+				return t.df, err
 			}
 			sql = g.R(sql, "upsert_where_cond", upsertWhereCond)
 		}
@@ -673,10 +673,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	df, err = srcConn.BulkExportFlow(sql)
 	if err != nil {
 		err = g.Error(err, "Could not BulkStream: "+sql)
-		return
+		return t.df, err
 	}
-
-	g.PP(df.Columns)
 
 	return
 }
@@ -691,24 +689,24 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 		client, err := cfg.SrcConn.AsAirbyte()
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: %s", cfg.SrcConn.Type)
-			return df, err
+			return t.df, err
 		}
 		err = client.Init()
 		if err != nil {
 			err = g.Error(err, "Could not init connection for: %s", cfg.SrcConn.Type)
-			return df, err
+			return t.df, err
 		}
 
 		stream, err = client.Stream(cfg.Source.Stream, time.Time{})
 		if err != nil {
 			err = g.Error(err, "Could not read stream '%s' for connection: %s", cfg.Source.Stream, cfg.SrcConn.Type)
-			return df, err
+			return t.df, err
 		}
 
 		df, err = iop.MakeDataFlow(stream)
 		if err != nil {
 			err = g.Error(err, "Could not MakeDataFlow")
-			return df, err
+			return t.df, err
 		}
 	} else {
 		err = g.Error("API type not implemented: %s", cfg.SrcConn.Type)
@@ -734,25 +732,30 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.SrcConn.URL(), props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL())
-			return df, err
+			return t.df, err
 		}
 
 		df, err = fs.ReadDataflow(cfg.SrcConn.URL())
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcConn.URL())
-			return df, err
+			return t.df, err
 		}
 	} else {
 		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin))
 		if err != nil {
 			err = g.Error(err, "Could not MakeDatastream")
-			return
+			return t.df, err
 		}
 		df, err = iop.MakeDataFlow(stream.Split()...)
 		if err != nil {
 			err = g.Error(err, "Could not MakeDataFlow for Stdin")
-			return
+			return t.df, err
 		}
+	}
+
+	if len(df.Columns) == 0 {
+		err = g.Error("Could not read columns")
+		return df, err
 	}
 
 	return
