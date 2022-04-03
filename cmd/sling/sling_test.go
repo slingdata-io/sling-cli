@@ -114,6 +114,18 @@ func init() {
 	}
 }
 
+func TestOne(t *testing.T) {
+	return
+	cfg := sling.Config{}
+	cfg.SetDefault()
+	err := cfg.Unmarshal("/tmp/test.json")
+	task := sling.NewTask(0, cfg)
+	if g.AssertNoError(t, task.Err) {
+		err = task.Execute()
+		g.AssertNoError(t, err)
+	}
+}
+
 func TestInToDb(t *testing.T) {
 	csvFile := "tests/test1.csv"
 	csvFileUpsert := "tests/test1.upsert.csv"
