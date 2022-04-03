@@ -14,7 +14,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 
-	"github.com/flarco/sling/core/dbt"
 	"github.com/jmespath/go-jmespath"
 
 	"github.com/flarco/dbio/iop"
@@ -201,10 +200,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 	srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
 	if err != nil {
-		if cfg.Target.DbtConfig == nil {
-			return g.Error(err, "could not create data conn for source")
-		}
-		err = nil
+		return g.Error(err, "could not create data conn for source")
 	}
 	cfg.SrcConn = srcConn
 
@@ -345,7 +341,6 @@ type Target struct {
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
-	DbtConfig       *dbt.Dbt    `json:"dbt_config,omitempty" yaml:"dbt_config,omitempty"`
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	Columns         iop.Columns `json:"-" yaml:"-"`
 }

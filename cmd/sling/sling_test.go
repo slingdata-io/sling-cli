@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flarco/sling/core/dbt"
 	"github.com/flarco/sling/core/env"
 
 	"github.com/flarco/sling/core/sling"
@@ -325,46 +324,6 @@ func TestDbToOut(t *testing.T) {
 			}
 		}
 	}
-}
-
-func testDbt(t *testing.T) {
-
-	for _, db := range DBs {
-		schema, _ := d.SplitTableFullName(db.table)
-		switch db.name {
-		case "Postgres", "Snowflake", "BigQuery":
-			println()
-			g.Debug(">>>>>> DBT (%s)", db.name)
-
-			dbtConfig := &dbt.Dbt{
-				Version: "0.18",
-				Profile: db.URL,
-				RepoURL: "https://github.com/fishtown-analytics/dbt-starter-project",
-				Schema:  schema,
-				Models:  "+my_second_dbt_model",
-			}
-
-			cfgMap := g.M(
-				"target", g.M(
-					"conn", db.URL,
-					"dbt", dbtConfig.Models,
-				),
-			)
-			config, err := sling.NewConfig(g.Marshal(cfgMap))
-			g.AssertNoError(t, err)
-			config.Target.DbtConfig = dbtConfig // normally would be pulled from DB
-
-			task := sling.NewTask(0, config)
-			err = task.Execute()
-			if !g.AssertNoError(t, err) {
-				g.LogError(err)
-				return
-			}
-		default:
-			continue
-		}
-	}
-
 }
 
 func TestCfgPath(t *testing.T) {

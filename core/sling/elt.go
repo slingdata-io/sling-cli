@@ -23,7 +23,6 @@ import (
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
-	"github.com/flarco/sling/core/dbt"
 	"github.com/spf13/cast"
 )
 
@@ -138,8 +137,6 @@ func (t *TaskExecution) Execute() error {
 		switch t.Type {
 		case DbSQL:
 			t.Err = t.runDbSQL()
-		case DbDbt:
-			t.Err = t.runDbDbt()
 		case FileToDB:
 			t.Err = t.runFileToDB()
 		case DbToDb:
@@ -244,36 +241,6 @@ func (t *TaskExecution) runDbSQL() (err error) {
 	rowAffCnt, err := result.RowsAffected()
 	if err == nil {
 		t.SetProgress("%d rows affected", rowAffCnt)
-	}
-
-	return
-}
-
-func (t *TaskExecution) runDbDbt() (err error) {
-	dbtConfig := g.Marshal(t.Config.Target.DbtConfig)
-	dbtObj, err := dbt.NewDbt(dbtConfig, t.Config.TgtConn.Info().Name)
-	if err != nil {
-		return g.Error(err, "could not init dbt task")
-	}
-	if dbtObj.Schema == "" {
-		dbtObj.Schema = t.Config.TgtConn.DataS()["schema"]
-	}
-
-	dbtObj.Session.SetScanner(func(stderr bool, text string) {
-		switch stderr {
-		case true, false:
-			t.SetProgress(text)
-		}
-	})
-
-	err = dbtObj.Init(t.Config.TgtConn)
-	if err != nil {
-		return g.Error(err, "could not initialize dbt project")
-	}
-
-	err = dbtObj.Run()
-	if err != nil {
-		err = g.Error(err, "could not run dbt task")
 	}
 
 	return

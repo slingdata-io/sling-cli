@@ -29,9 +29,6 @@ const FileToFile JobType = "file-file"
 // DbSQL is for a db sql query
 const DbSQL JobType = "db-sql"
 
-// DbDbt is for a db dbt model execution
-const DbDbt JobType = "db-dbt"
-
 // ExecStatus is the status of an execution
 type ExecStatus string
 

@@ -131,24 +131,22 @@ func NewTask(execID int64, cfg Config) (t *TaskExecution) {
 		return
 	}
 
-	if srcDbProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
+	if srcDbProvided && tgtDbProvided {
 		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
 			t.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}
 		t.Type = DbToDb
-	} else if srcFileProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
+	} else if srcFileProvided && tgtDbProvided {
 		t.Type = FileToDB
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = FileToFile
-	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided && cfg.Target.DbtConfig == nil {
+	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided {
 		t.Type = APIToDb
 	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		t.Type = APIToFile
-	} else if tgtDbProvided && cfg.Target.Dbt != "" {
-		t.Type = DbDbt
 	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
 		cfg.Target.Object = cfg.Target.Options.PostSQL
 		t.Type = DbSQL
