@@ -414,12 +414,12 @@ func init() {
 	examples = string(examplesBytes)
 
 	// cliInteractive.Make().Add()
-	cliAuth.Make().Add()
+	// cliAuth.Make().Add()
 	cliConns.Make().Add()
 	// cliProject.Make().Add()
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
-	cliUi.Make().Add()
+	// cliUi.Make().Add()
 
 	sentry.Init(sentry.ClientOptions{
 		// Either set your DSN here or set the SENTRY_DSN environment variable.
