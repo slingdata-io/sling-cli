@@ -375,7 +375,7 @@ func GetLocalConns() []Conn {
 			continue
 		}
 
-		key = strings.TrimSuffix(strings.ToUpper(key), "_URL")
+		key = strings.ToUpper(key)
 		conn, err := connection.NewConnectionFromURL(key, val)
 		if err != nil {
 			e := g.F("could not parse %s: %s", key, g.ErrMsgSimple(err))
