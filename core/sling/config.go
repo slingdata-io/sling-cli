@@ -11,6 +11,7 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
+	"github.com/flarco/sling/core/env"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 
@@ -88,10 +89,12 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
+		cfg.SrcConn.Data = g.M()
 	}
 
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
+		cfg.TgtConn.Data = g.M()
 	}
 
 	// set default options
@@ -148,6 +151,11 @@ func (cfg *Config) Prepare() (err error) {
 		return
 	}
 
+	// get local connections
+	connsMap := lo.KeyBy(env.GetLocalConns(), func(c env.Conn) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+
 	// Check Inputs
 	if !cfg.Options.StdIn && cfg.Source.Conn == "" && cfg.Target.Conn == "" {
 		return g.Error("invalid source connection. Input is blank or not found")
@@ -174,39 +182,60 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
-	if cfg.Target.Data == nil {
-		cfg.Target.Data = g.M()
+	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
+		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
+			cfg.TgtConn = c.Connection
+		} else {
+			cfg.Target.Data = g.M()
+		}
 	}
+
 	if isFileURL(cfg.Target.Object) {
 		cfg.Target.Data["url"] = cfg.Target.Object
-	} else {
+		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	} else if cast.ToString(cfg.Target.Data["url"]) == "" {
 		cfg.Target.Data["url"] = cfg.Target.Conn
 	}
-	tgtConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Target.Conn, "data", cfg.Target.Data))
-	if err != nil {
-		return g.Error(err, "could not create data conn for target")
+
+	if cfg.TgtConn.Type.IsUnknown() {
+		tgtConn, err := connection.NewConnectionFromMap(g.M(
+			"name", cfg.Target.Conn, "data", cfg.Target.Data,
+		))
+		if err != nil {
+			return g.Error(err, "could not create data conn for target")
+		}
+		cfg.TgtConn = tgtConn
 	}
+
 	if cfg.Options.StdOut {
 		cfg.Target.Options.Concurrency = 1
 		os.Setenv("CONCURRENCY", "1")
 	}
-	cfg.TgtConn = tgtConn
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
-	if cfg.Source.Data == nil {
-		cfg.Source.Data = g.M()
+	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
+		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
+			cfg.SrcConn = c.Connection
+		} else {
+			cfg.Source.Data = g.M()
+		}
 	}
+
 	if isFileURL(cfg.Source.Stream) {
 		cfg.Source.Data["url"] = cfg.Source.Stream
-	} else {
+		cfg.SrcConn.Data["url"] = cfg.Source.Stream
+	} else if cast.ToString(cfg.Source.Data["url"]) == "" {
 		cfg.Source.Data["url"] = cfg.Source.Conn
 	}
-	srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
-	if err != nil {
-		return g.Error(err, "could not create data conn for source")
+
+	if cfg.SrcConn.Type.IsUnknown() {
+		srcConn, err := connection.NewConnectionFromMap(g.M("name", cfg.Source.Conn, "data", cfg.Source.Data))
+		if err != nil {
+			return g.Error(err, "could not create data conn for source")
+		}
+		cfg.SrcConn = srcConn
 	}
-	cfg.SrcConn = srcConn
 
 	// set mode if primary key is providedand mode isnn't
 	if len(cfg.Target.PrimaryKey) > 0 && cfg.Target.Mode == "" {
@@ -283,7 +312,6 @@ type Target struct {
 	Object     string                 `json:"object,omitempty" yaml:"object,omitempty"`
 	Options    TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Dbt        string                 `json:"dbt,omitempty" yaml:"dbt,omitempty"` // the model string to run
 	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
