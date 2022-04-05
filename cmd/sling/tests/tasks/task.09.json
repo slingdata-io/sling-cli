@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"","options":{},"stream":"file:///tmp/test_1000.csv"},"target":{"conn":"POSTGRES_SSH","mode":"append","object":"public.test1k","options":{},"primary_key":[],"update_key":""}}

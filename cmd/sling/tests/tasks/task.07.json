@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"POSTGRES","options":{},"stream":"public.test1k"},"target":{"conn":"MYSQL","mode":"drop","object":"mysql.test1k","options":{},"primary_key":[],"update_key":""}}

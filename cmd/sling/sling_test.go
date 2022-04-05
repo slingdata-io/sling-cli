@@ -6,10 +6,12 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/flarco/sling/core/env"
+	"github.com/spf13/cast"
 
 	"github.com/flarco/sling/core/sling"
 
@@ -114,27 +116,125 @@ func init() {
 }
 
 func TestOne(t *testing.T) {
-	return
+	// return
+	path := "tests/tasks/task.19.json"
+	file := g.FileItem{FullPath: path, RelPath: path}
+	runOneTask(t, file)
+}
+
+func TestTasks(t *testing.T) {
+	defFilePath := "tests/tasks.tsv"
+	folderPath := "tests/tasks"
+
+	// generate files
+	os.RemoveAll(folderPath) // clean up
+	os.MkdirAll(folderPath, 0755)
+
+	data, err := iop.ReadCsv(defFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	for i, rec := range data.Records() {
+		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
+		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
+		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
+		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
+		primaryKey := []string{}
+		if val := cast.ToString(rec["target_primary_key"]); val != "" {
+			primaryKey = strings.Split(val, ",")
+		}
+
+		task := g.M(
+			"source", g.M(
+				"conn", cast.ToString(rec["source_conn"]),
+				"stream", cast.ToString(rec["source_stream"]),
+				"options", sourceOptions,
+			),
+			"target", g.M(
+				"conn", cast.ToString(rec["target_conn"]),
+				"object", cast.ToString(rec["target_object"]),
+				"mode", cast.ToString(rec["target_mode"]),
+				"primary_key", primaryKey,
+				"update_key", cast.ToString(rec["target_update_key"]),
+				"options", targetOptions,
+			),
+			"options", options,
+			"env", env,
+		)
+		taskPath := filepath.Join(folderPath, g.F("task.%02d.json", i+1))
+		taskBytes := []byte(g.Marshal(task))
+		err = ioutil.WriteFile(taskPath, taskBytes, 0755)
+		g.AssertNoError(t, err)
+	}
+
+	files, _ := g.ListDir(folderPath)
+	for _, file := range files {
+		runOneTask(t, file)
+
+		if t.Failed() {
+			break
+		}
+	}
+}
+
+func runOneTask(t *testing.T, file g.FileItem) {
+	println()
+	bars := "---------------------------"
+	g.Info("%s Testing %s %s", bars, file.RelPath, bars)
 	cfg := sling.Config{}
 	cfg.SetDefault()
-	err := cfg.Unmarshal("/tmp/test.json")
+	err := cfg.Unmarshal(file.FullPath)
 	task := sling.NewTask(0, cfg)
+	// g.PP(task)
 	if g.AssertNoError(t, task.Err) {
 		err = task.Execute()
 		g.AssertNoError(t, err)
 	}
-}
 
-func TestTasks(t *testing.T) {
-	files, _ := g.ListDir("tests/tasks")
-	for _, file := range files {
-		cfg := sling.Config{}
-		cfg.SetDefault()
-		err := cfg.Unmarshal(file.FullPath)
-		task := sling.NewTask(0, cfg)
-		if g.AssertNoError(t, task.Err) {
-			err = task.Execute()
+	// validate count
+	if task.Config.Target.Mode == sling.DropMode {
+		g.Debug("getting count")
+		conn, err := task.Config.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			count, err := conn.GetCount(task.Config.Target.Object)
 			g.AssertNoError(t, err)
+			assert.EqualValues(t, task.GetCount(), count)
+			conn.Close()
+		}
+	}
+
+	// validate file
+	if val, ok := task.Config.Env["validation_file"]; ok {
+		valFile := strings.TrimPrefix(cast.ToString(val), "file://")
+		data, err := iop.ReadCsv(valFile)
+		if !g.AssertNoError(t, err) {
+			return
+		}
+		valCol := cast.ToInt(task.Config.Env["validation_col"])
+
+		valuesFile := data.ColValues(valCol)
+		conn, err := task.Config.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			orderByStr := ""
+			if len(task.Config.Target.PrimaryKey) > 0 {
+				orderByStr = strings.Join(task.Config.Target.PrimaryKey, ", ")
+			}
+			sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
+			data, err := conn.Query(sql)
+			g.AssertNoError(t, err)
+			conn.Close()
+
+			valuesDb := data.ColValues(valCol)
+			if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+				for i := range valuesDb {
+					valDb := data.Sp.ParseString(cast.ToString(valuesDb[i]))
+					valFile := data.Sp.ParseString(cast.ToString(valuesFile[i]))
+					if !assert.EqualValues(t, valFile, valDb) {
+						return
+					}
+				}
+			}
 		}
 	}
 }

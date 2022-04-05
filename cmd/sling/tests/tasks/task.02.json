@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"DO_SPACES","options":{},"stream":"s3://ocral/test_1000.csv"},"target":{"conn":"AWS_S3","mode":"","object":"s3://ocral-data-1/test_1000.csv","options":{},"primary_key":[],"update_key":""}}

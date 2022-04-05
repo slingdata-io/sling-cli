@@ -1,0 +1,22 @@
+source.conn	source.stream	source.options	target.conn	target.object	target.mode	target.primary_key	target.update_key	target.options	options	env
+DO_SPACES	s3://ocral/test_1000.csv	{}		file:///tmp/test_1000.csv				{}	{}	
+DO_SPACES	s3://ocral/test_1000.csv	{}	AWS_S3	s3://ocral-data-1/test_1000.csv				{}	{}	
+DO_SPACES	s3://ocral/test_1000.csv	{}	POSTGRES	public.test1k	drop			{}	{}	
+	file:///tmp/test_1000.csv	{}	SNOWFLAKE	public.test1k	drop			{}	{}	
+	file:///tmp/test_1000.csv	{}	BIGQUERY	public.test1k	drop			{}	{}	
+POSTGRES	public.test1k	{}	DO_SPACES	s3://ocral/test_1000.copy.csv				{}	{}	
+POSTGRES	public.test1k	{}	MYSQL	mysql.test1k	drop			{}	{}	
+POSTGRES	public.test1k	{}	MSSQL	dbo.test1k	drop			{}	{}	
+	file:///tmp/test_1000.csv	{}	POSTGRES_SSH	public.test1k	append			{}	{}	
+BIGQUERY	public.test1k	{}	POSTGRES	public.test1k	drop			{}	{}	
+SNOWFLAKE	public.test1k	{}	POSTGRES	public.test1k	drop			{}	{}	
+	file://tests/files/test1.csv	{}	POSTGRES	public.test1	drop			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	POSTGRES	public.test1	upsert	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.csv	{}	SNOWFLAKE	public.test1	drop			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	SNOWFLAKE	public.test1	upsert	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.csv	{}	BIGQUERY	public.test1	drop			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	BIGQUERY	public.test1	upsert	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.csv	{}	MYSQL	mysql.test1	drop			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	MYSQL	mysql.test1	upsert	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.csv	{}	MSSQL	dbo.test1	drop			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	MSSQL	dbo.test1	upsert	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}

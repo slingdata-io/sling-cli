@@ -1,0 +1,1 @@
+{"env":{"validation_col":6,"validation_file":"file://tests/files/test1.result.csv"},"options":{},"source":{"conn":"","options":{},"stream":"file://tests/files/test1.upsert.csv"},"target":{"conn":"MYSQL","mode":"upsert","object":"mysql.test1","options":{},"primary_key":["id"],"update_key":"created_dt"}}

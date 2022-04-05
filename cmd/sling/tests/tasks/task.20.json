@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"","options":{},"stream":"file://tests/files/test1.csv"},"target":{"conn":"MSSQL","mode":"drop","object":"dbo.test1","options":{},"primary_key":[],"update_key":""}}

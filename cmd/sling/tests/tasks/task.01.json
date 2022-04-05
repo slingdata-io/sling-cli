@@ -1,16 +1,1 @@
-{
-  "source": {
-    "conn": "DO_SPACES",
-    "stream": "s3://ocral/test_1000.csv",
-    "options": {}
-  },
-  "target": {
-    "conn": "POSTGRES",
-    "object": "public.test1k",
-    "mode": "drop",
-    "options": {}
-  },
-  "env": {
-    "SLING_SEND_ANON_USAGE": "true"
-  }
-}
+{"env":{},"options":{},"source":{"conn":"DO_SPACES","options":{},"stream":"s3://ocral/test_1000.csv"},"target":{"conn":"","mode":"","object":"file:///tmp/test_1000.csv","options":{},"primary_key":[],"update_key":""}}

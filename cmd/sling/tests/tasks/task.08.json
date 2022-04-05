@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"POSTGRES","options":{},"stream":"public.test1k"},"target":{"conn":"MSSQL","mode":"drop","object":"dbo.test1k","options":{},"primary_key":[],"update_key":""}}

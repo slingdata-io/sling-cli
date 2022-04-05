@@ -1,0 +1,1 @@
+{"env":{},"options":{},"source":{"conn":"DO_SPACES","options":{},"stream":"s3://ocral/test_1000.csv"},"target":{"conn":"POSTGRES","mode":"drop","object":"public.test1k","options":{},"primary_key":[],"update_key":""}}
