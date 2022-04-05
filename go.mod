@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.2.9
+	github.com/flarco/dbio v0.3.1
 	github.com/flarco/g v0.1.0
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/integrii/flaggy v1.4.4
@@ -87,6 +87,7 @@ require (
 	github.com/google/go-cmp v0.5.7 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.2.0 // indirect
+	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
 	github.com/jackc/pgconn v1.11.0 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
@@ -118,6 +119,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
+	github.com/nqd/flat v0.1.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.11 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
