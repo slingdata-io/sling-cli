@@ -97,6 +97,12 @@ var cliRun = &g.CliSC{
 			Description: "The update key to use for upsert.\n",
 		},
 		{
+			Name:        "debug",
+			ShortName:   "d",
+			Type:        "bool",
+			Description: "Set logging level to DEBUG.",
+		},
+		{
 			Name:        "examples",
 			ShortName:   "e",
 			Type:        "bool",

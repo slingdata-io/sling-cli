@@ -156,6 +156,10 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error("invalid target connection. Input is blank or not found")
 	}
 
+	if cfg.Options.Debug && os.Getenv("_DEBUG") == "" {
+		os.Setenv("_DEBUG", "DEBUG")
+	}
+
 	isFileURL := func(url string) bool {
 		if !strings.Contains(url, "://") {
 			return false
@@ -231,64 +235,6 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 	return
 }
 
-// Decrypt decrypts the sensitive connection strings
-//func (cfg *Config) Decrypt(secret string) (err error) {
-//	decrypt := func(dConn *connection.DataConn) error {
-//		dConn.URL, err = g.Decrypt(dConn.URL, secret)
-//		if err != nil {
-//			return g.Error(err, "could not decrypt")
-//		}
-//		for k := range dConn.Data {
-//			if _, ok := fileOptionsDefault[k]; ok {
-//				continue
-//			}
-//			dConn.Data[k], err = g.Decrypt(dConn.DataS()[k], secret)
-//			if err != nil {
-//				return g.Error(err, "could not decrypt")
-//			}
-//		}
-//		return nil
-//	}
-//
-//	dConns := []*connection.DataConn{&cfg.SrcConn, &cfg.TgtConn}
-//	for i := range dConns {
-//		err = decrypt(dConns[i])
-//		if err != nil {
-//			return g.Error(err, "could not decrypt fields for "+dConns[i].Name)
-//		}
-//	}
-//	return nil
-//}
-
-// Encrypt encrypts the sensitive connection strings
-//func (cfg *Config) Encrypt(secret string) (err error) {
-//	encrypt := func(dConn *connection.DataConn) error {
-//		dConn.URL, err = g.Encrypt(dConn.URL, secret)
-//		if err != nil {
-//			return g.Error(err, "could not decrypt")
-//		}
-//		for k := range dConn.Data {
-//			if _, ok := fileOptionsDefault[k]; ok {
-//				continue
-//			}
-//			dConn.Data[k], err = g.Encrypt(dConn.DataS()[k], secret)
-//			if err != nil {
-//				return g.Error(err, "could not decrypt")
-//			}
-//		}
-//		return nil
-//	}
-//
-//	dConns := []*connection.DataConn{&cfg.SrcConn, &cfg.TgtConn}
-//	for i := range dConns {
-//		err = encrypt(dConns[i])
-//		if err != nil {
-//			return g.Error(err, "could not encrypt fields for "+dConns[i].Name)
-//		}
-//	}
-//	return nil
-//}
-
 // Config is the new config struct
 type Config struct {
 	Source  Source                 `json:"source,omitempty" yaml:"source,omitempty"`
@@ -314,6 +260,7 @@ func (cfg Config) Value() (driver.Value, error) {
 
 // ConfigOptions are configuration options
 type ConfigOptions struct {
+	Debug     bool    `json:"debug" yaml:"debug"`
 	StdIn     bool    `json:"-"`                    // whether stdin is passed
 	StdOut    bool    `json:"stdout" yaml:"stdout"` // whether to output to stdout
 	ProxyPIDs *string `json:"proxy_pids,omitempty" yaml:"proxy_pids,omitempty"`

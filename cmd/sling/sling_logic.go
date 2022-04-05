@@ -133,6 +133,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Target.Mode = sling.Mode(cast.ToString(v))
+		case "debug":
+			cfg.Options.Debug = cast.ToBool(v)
 		case "examples":
 			showExamples = cast.ToBool(v)
 		}

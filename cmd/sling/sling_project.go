@@ -1,4 +1,4 @@
-package sling
+package main
 
 import (
 	"errors"

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -154,7 +155,43 @@ func NewTask(execID int64, cfg Config) (t *TaskExecution) {
 
 	if t.Type == "" {
 		// g.PP(t)
-		t.Err = g.Error("invalid Task Configuration. Must specify source conn / file or target connection / output. srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+		sourceErrMsg := ""
+		targetErrMsg := ""
+
+		if !cfg.Options.StdIn {
+			if cfg.SrcConn.Name == "" {
+				targetErrMsg = g.F("source connection is missing, need to provide")
+			} else if cfg.SrcConn.Name != "" && cfg.SrcConn.Info().Type.IsUnknown() {
+				sourceErrMsg = g.F("source connection '%s' not valid / found in environment", cfg.SrcConn.Name)
+			}
+		}
+
+		if !cfg.Options.StdOut {
+			if cfg.TgtConn.Name == "" {
+				targetErrMsg = g.F("target connection is missing, need to provide")
+			} else if cfg.TgtConn.Name != "" && cfg.TgtConn.Info().Type.IsUnknown() {
+				targetErrMsg = g.F("target connection '%s' not valid / found in environment", cfg.TgtConn.Name)
+			}
+		}
+
+		output := []string{}
+		if sourceErrMsg != "" {
+			output = append(output, g.F("error -> %s", sourceErrMsg))
+		}
+		if targetErrMsg != "" {
+			output = append(output, g.F("error -> %s", targetErrMsg))
+		}
+
+		// []string{
+		// 	g.F("Source File Provided: %t", srcFileProvided),
+		// 	g.F("Target File Provided: %t", tgtFileProvided),
+		// 	g.F("Source DB Provided: %t", srcDbProvided),
+		// 	g.F("Target DB Provided: %t", tgtDbProvided),
+		// 	g.F("Source Stream Provided: %t", srcStreamProvided),
+		// 	g.F("Source API Provided: %t", srcAPIProvided),
+		// }
+
+		t.Err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
 	}
 
 	return
