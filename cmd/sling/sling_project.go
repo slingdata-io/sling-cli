@@ -379,7 +379,7 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 	folderDefaults := yaml.MapSlice{
 		{Key: "source", Value: sling.Source{Conn: sourceConn.Name}},
 		{Key: "target", Value: target},
-		{Key: "config", Value: g.Map{"schedule": scheduleExpr}},
+		{Key: "config", Value: g.M("schedule", scheduleExpr)},
 	}
 
 	folderDefaultsBytes, err := yaml.Marshal(folderDefaults)
@@ -404,8 +404,8 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 			return quoteFunc(c.Name)
 		})
 		colsSQL := "  " + strings.Join(cols, ",\n  ")
-		task := g.Map{
-			"source": g.Map{
+		task := map[string]interface{}{
+			"source": map[string]interface{}{
 				"stream": g.F("select\n%s\nfrom %s", colsSQL, fullName),
 			},
 		}

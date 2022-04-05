@@ -844,7 +844,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// risk is potential data loss, since we cannot validate counts
 	srcFile, _ := connection.NewConnectionFromMap(g.M())
 	if sf, ok := t.Config.Source.Data["SOURCE_FILE"]; ok {
-		srcFile, err = connection.NewConnectionFromMap(sf.(g.Map))
+		srcFile, err = connection.NewConnectionFromMap(cast.ToStringMap(sf))
 		if err != nil {
 			err = g.Error(err, "could not create data conn for SOURCE_FILE")
 			return

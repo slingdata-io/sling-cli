@@ -1,7 +1,5 @@
 package sling
 
-import "github.com/flarco/g"
-
 type Project struct {
 	Config      ProjectConfig
 	TaskConfigs map[string]Config
@@ -12,7 +10,7 @@ func LoadProject(path string) {}
 type ProjectConfig struct {
 	Project          string                        `json:"project" yaml:"project"`
 	TaskPaths        []string                      `json:"task-paths" yaml:"task-paths"`
-	Defaults         g.Map                         `json:"defaults" yaml:"defaults"`
+	Defaults         map[string]interface{}        `json:"defaults" yaml:"defaults"`
 	NotificationTags map[string]NotificationConfig `json:"notification_tags" yaml:"notification_tags"`
 }
 

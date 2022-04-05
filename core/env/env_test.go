@@ -3,15 +3,14 @@ package env
 import (
 	"testing"
 
-	"github.com/flarco/g"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestFlatten(t *testing.T) {
-	m := g.Map{
-		"parent": g.Map{
+	m := map[string]interface{}{
+		"parent": map[string]interface{}{
 			"child_1": "val_1",
-			"child_2": g.Map{
+			"child_2": map[string]interface{}{
 				"grandchild_1": "val_2",
 			},
 		},

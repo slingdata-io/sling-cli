@@ -55,11 +55,11 @@ var (
 
 func init() {
 	if HomeDir == "" {
-		HomeDir = g.UserHomeDir() + "/sling"
+		HomeDir = g.UserHomeDir() + "/.sling"
 		os.Setenv("SLING_HOME_DIR", HomeDir)
 	}
 	if DbNetDir == "" {
-		DbNetDir = g.UserHomeDir() + "/dbnet"
+		DbNetDir = g.UserHomeDir() + "/.dbnet"
 	}
 	os.MkdirAll(HomeDir, 0755)
 
@@ -81,13 +81,6 @@ func flatten(key string, val interface{}) (m map[string]string) {
 			}
 		}
 	case map[interface{}]interface{}:
-		for k2, v2 := range v {
-			k2 = g.F("%s_%s", key, k2)
-			for k3, v3 := range flatten(cast.ToString(k2), v2) {
-				m[k3] = v3
-			}
-		}
-	case g.Map:
 		for k2, v2 := range v {
 			k2 = g.F("%s_%s", key, k2)
 			for k3, v3 := range flatten(cast.ToString(k2), v2) {
@@ -134,13 +127,6 @@ func NormalizeEnvFile(filePath string) (env map[string]interface{}, err error) {
 			m := map[string]interface{}{}
 			for k2, v2 := range v {
 				m[strings.ToLower(cast.ToString(k2))] = v2
-			}
-			env[strings.ToUpper(key)] = m
-
-		case g.Map:
-			m := map[string]interface{}{}
-			for k2, v2 := range v {
-				m[strings.ToLower(k2)] = v2
 			}
 			env[strings.ToUpper(key)] = m
 		default:
@@ -350,21 +336,16 @@ func GetLocalConns() []Conn {
 	}
 
 	if g.PathExists(HomeDirEnvFile) {
-		env, err := NormalizeEnvFile(HomeDirEnvFile)
-		if err != nil {
-			g.LogError(err, "could not parse env file -> %s", HomeDirEnvFile)
-		} else {
-			profileConns, err := connection.ReadConnectionsEnv(env)
-			if !g.LogError(err) {
-				for _, conn := range profileConns {
-					c := Conn{
-						Name:        strings.ToUpper(conn.Info().Name),
-						Description: conn.Type.NameLong(),
-						Source:      "sling env yaml",
-						Connection:  conn,
-					}
-					connsMap[c.Name] = c
+		profileConns, err := connection.ReadConnections(HomeDirEnvFile)
+		if !g.LogError(err) {
+			for _, conn := range profileConns {
+				c := Conn{
+					Name:        strings.ToUpper(conn.Info().Name),
+					Description: conn.Type.NameLong(),
+					Source:      "sling env yaml",
+					Connection:  conn,
 				}
+				connsMap[c.Name] = c
 			}
 		}
 	}

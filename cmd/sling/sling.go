@@ -444,7 +444,7 @@ func getRsClient() analytics.Client {
 	return analytics.New("1uXKxEPgIB9HXkTduvfwXmFak2l", "https://liveflarccszw.dataplane.rudderstack.com")
 }
 
-func Track(event string, props ...g.Map) {
+func Track(event string, props ...map[string]interface{}) {
 	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
 		if !cast.ToBool(val) {
 			return
