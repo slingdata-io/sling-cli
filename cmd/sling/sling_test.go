@@ -125,9 +125,23 @@ func TestOne(t *testing.T) {
 	}
 }
 
+func TestTasks(t *testing.T) {
+	files, _ := g.ListDir("tests/tasks")
+	for _, file := range files {
+		cfg := sling.Config{}
+		cfg.SetDefault()
+		err := cfg.Unmarshal(file.FullPath)
+		task := sling.NewTask(0, cfg)
+		if g.AssertNoError(t, task.Err) {
+			err = task.Execute()
+			g.AssertNoError(t, err)
+		}
+	}
+}
+
 func TestInToDb(t *testing.T) {
-	csvFile := "tests/test1.csv"
-	csvFileUpsert := "tests/test1.upsert.csv"
+	csvFile := "tests/files/test1.csv"
+	csvFileUpsert := "tests/files/test1.upsert.csv"
 	testFile1, err := os.Open(csvFile)
 	if err != nil {
 		g.LogError(err)
@@ -254,7 +268,7 @@ func TestDbToDb(t *testing.T) {
 func TestDbToOut(t *testing.T) {
 
 	for _, srcDB := range DBs {
-		filePath2 := fmt.Sprintf("tests/%s.out.csv", srcDB.name)
+		filePath2 := fmt.Sprintf("tests/files/%s.out.csv", srcDB.name)
 		println()
 		g.Debug(">>>>>> Tranferring from %s to CSV (%s)", srcDB.name, filePath2)
 
@@ -280,7 +294,7 @@ func TestDbToOut(t *testing.T) {
 			return
 		}
 
-		testFile1, err := os.Open("tests/test1.result.csv")
+		testFile1, err := os.Open("tests/files/test1.result.csv")
 		g.AssertNoError(t, err)
 		testFile1Bytes, err = ioutil.ReadAll(testFile1)
 

@@ -1,0 +1,16 @@
+{
+  "source": {
+    "conn": "DO_SPACES",
+    "stream": "s3://ocral/test_1000.csv",
+    "options": {}
+  },
+  "target": {
+    "conn": "POSTGRES",
+    "object": "public.test1k",
+    "mode": "drop",
+    "options": {}
+  },
+  "env": {
+    "SLING_SEND_ANON_USAGE": "true"
+  }
+}
