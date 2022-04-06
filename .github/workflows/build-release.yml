@@ -90,7 +90,7 @@ jobs:
           setx TMPDIR "C:\Users\runneradmin\tmp"
           setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
           setx GO111MODULE "auto"
-          mkdir -p C:\Users\runneradmin\tmp
+          mkdir -Force -p C:\Users\runneradmin\tmp
 
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
@@ -135,7 +135,7 @@ jobs:
 
           $env:VERSION = (sling-win.exe --version).replace('Version: ', '')
           echo "$env:VERSION"
-          mkdir -p "dist\$env:VERSION"
+          mkdir -Force -p "dist\$env:VERSION"
           copy sling-win.exe dist
           copy sling-win.exe "dist\$env:VERSION"
 
