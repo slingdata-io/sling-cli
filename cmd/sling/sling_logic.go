@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
 	"runtime"
 	"strings"
@@ -274,18 +273,36 @@ func slingUiServer(c *g.CliSC) (ok bool, err error) {
 	return
 }
 
+func checkLatestVersion() (string, error) {
+	_, respBytes, err := net.ClientDo("GET", "https://files.ocral.org/slingdata.io/dist/version", nil, map[string]string{}, 5)
+	newVersion := strings.TrimSpace(string(respBytes))
+	if err != nil {
+		return "", g.Error(err, "Unable to check for latest version")
+	}
+	return newVersion, nil
+}
+
 func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
 	Track("updateCLI")
 	ok = true
 
+	// get latest version number
+	newVersion, err := checkLatestVersion()
+	if err != nil {
+		return ok, g.Error(err)
+	} else if newVersion == core2.Version {
+		g.Info("Already up-to-date!")
+		return
+	}
+
 	url := ""
 	if runtime.GOOS == "linux" {
-		url = "https://f.slingdata.io/linux/sling"
+		url = "https://files.ocral.org/slingdata.io/dist/sling-linux"
 	} else if runtime.GOOS == "darwin" {
-		url = "https://f.slingdata.io/mac/sling"
+		url = "https://files.ocral.org/slingdata.io/dist/sling-mac"
 	} else if runtime.GOOS == "windows" {
-		url = "https://f.slingdata.io/windows/sling.exe"
+		url = "https://files.ocral.org/slingdata.io/dist/sling-win.exe"
 	} else {
 		return ok, g.Error("OS Unsupported: %s", runtime.GOOS)
 	}
@@ -300,7 +317,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 
 	filePath := execFileName + ".new"
 
-	g.Info("Checking update...")
+	g.Info("Downloading latest version (%s)", newVersion)
 	err = net.DownloadFile(url, filePath)
 	if err != nil {
 		println("Unable to download update!")
@@ -312,24 +329,21 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 		return ok, err
 	}
 
-	versionOut, err := exec.Command(filePath, "--version").Output()
+	err = os.Rename(execFileName, execFileName+".old")
 	if err != nil {
-		println("Unable to get version of current binary executable.")
+		println("Unable to rename current binary executable. Try with sudo or admin?")
 		return ok, err
 	}
 
-	if strings.HasSuffix(strings.TrimSpace(string(versionOut)), core2.Version) {
-		os.Remove(filePath)
-		g.Info("Already using latest version: " + core2.Version)
-		return ok, nil
+	err = os.Rename(filePath, execFileName)
+	if err != nil {
+		println("Unable to rename current binary executable. Try with sudo or admin?")
+		return ok, err
 	}
-
-	os.Rename(execFileName, execFileName+".old")
-	os.Rename(filePath, execFileName)
 
 	os.Remove(execFileName + ".old")
 
-	g.Info("Updated to " + strings.TrimSpace(string(versionOut)))
+	g.Info("Updated to " + strings.TrimSpace(string(newVersion)))
 
 	return ok, nil
 }

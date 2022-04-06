@@ -51,7 +51,7 @@ jobs:
 
     strategy:
       matrix:
-        runner: [macos-latest,self-hosted-linux, self-hosted-windows]
+        runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
 
     # doesn't work, put double quote at the end
     # env:
@@ -104,6 +104,9 @@ jobs:
           mkdir -p dist/$VERSION
           cp sling-linux dist
           cp sling-linux dist/$VERSION
+
+          echo $VERSION > version
+          cp version dist
 
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
