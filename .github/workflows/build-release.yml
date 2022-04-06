@@ -102,8 +102,8 @@ jobs:
           VERSION=$(./sling-linux --version | sed 's/Version: //')
           echo $VERSION
           mkdir -p dist/$VERSION
-          cp sling-linux dist\
-          cp sling-linux dist\$VERSION
+          cp sling-linux dist
+          cp sling-linux dist/$VERSION
 
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
@@ -115,8 +115,8 @@ jobs:
           VERSION=$(./sling-mac --version | sed 's/Version: //')
           echo $VERSION
           mkdir -p dist/$VERSION
-          cp sling-mac dist\
-          cp sling-mac dist\$VERSION
+          cp sling-mac dist
+          cp sling-mac dist/$VERSION
 
       - name: Build Sling (Windows)
         if: runner.os == 'windows'
