@@ -1,0 +1,39 @@
+name: Build & Test
+
+on: [push]
+
+jobs:
+  build:
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build
+        run: |
+          bash scripts/prep.gomod.sh
+          export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
+          mkdir -p $WORK_FOLDER
+          cp -r . $WORK_FOLDER/sling
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
+          rm -rf $WORK_FOLDER
+
+  test:
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+
+    needs: [build]
+
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run Go Tests
+        run: |
+          bash scripts/prep.gomod.sh
+          source /root/.bashrc
+          source /__/devbox/.env.sh
+          export _DEBUG=''
+          echo $PATH
+          bash scripts/test.sh
