@@ -128,7 +128,7 @@ jobs:
         run: |
           echo "Building sling-win.exe"
           setx GOOS "windows"
-          setx GOARCH "386"
+          setx GOARCH "amd64"
           setx GO111MODULE "auto"
           $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
