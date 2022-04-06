@@ -23,7 +23,7 @@ jobs:
           rm -rf $WORK_FOLDER
 
           VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
-          echo "::set-output name=version::$VERSION"
+          echo ::set-output name=version::$VERSION
 
   push:
     needs: [build]
@@ -92,7 +92,7 @@ jobs:
           setx TMPDIR "C:\Users\runneradmin\tmp"
           setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
           setx GO111MODULE "auto"
-          mkdir C:\Users\runneradmin\tmp
+          if not exists C:\Users\runneradmin\tmp mkdir C:\Users\runneradmin\tmp
           mkdir dist
           mkdir "dist\$env:VERSION"
 
