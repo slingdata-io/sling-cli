@@ -106,8 +106,7 @@ jobs:
           cp sling-linux dist
           cp sling-linux dist/$VERSION
 
-          echo $VERSION > version
-          cp version dist
+          echo $VERSION > dist/version-linux
 
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
@@ -122,6 +121,8 @@ jobs:
           cp sling-mac dist
           cp sling-mac dist/$VERSION
 
+          echo $VERSION > dist/version-mac
+
       - name: Build Sling (Windows)
         if: runner.os == 'windows'
         run: |
@@ -129,6 +130,7 @@ jobs:
           setx GOOS "windows"
           setx GOARCH "386"
           setx GO111MODULE "auto"
+          $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
           go mod edit -dropreplace='github.com/flarco/g' go.mod
           go mod edit -dropreplace='github.com/flarco/dbio' go.mod
@@ -142,6 +144,8 @@ jobs:
           mkdir -Force -p "dist\$env:VERSION"
           copy .\sling-win.exe dist
           copy .\sling-win.exe "dist\$env:VERSION"
+
+          echo "$env:VERSION" > "dist\version-win"
 
 
       - name: Release Binaries to Github

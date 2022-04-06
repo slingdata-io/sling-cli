@@ -274,7 +274,18 @@ func slingUiServer(c *g.CliSC) (ok bool, err error) {
 }
 
 func checkLatestVersion() (string, error) {
-	_, respBytes, err := net.ClientDo("GET", "https://files.ocral.org/slingdata.io/dist/version", nil, map[string]string{}, 5)
+	url := ""
+	if runtime.GOOS == "linux" {
+		url = "https://files.ocral.org/slingdata.io/dist/version-linux"
+	} else if runtime.GOOS == "darwin" {
+		url = "https://files.ocral.org/slingdata.io/dist/version-mac"
+	} else if runtime.GOOS == "windows" {
+		url = "https://files.ocral.org/slingdata.io/dist/version-win"
+	} else {
+		return "", g.Error("OS Unsupported: %s", runtime.GOOS)
+	}
+
+	_, respBytes, err := net.ClientDo("GET", url, nil, map[string]string{}, 5)
 	newVersion := strings.TrimSpace(string(respBytes))
 	if err != nil {
 		return "", g.Error(err, "Unable to check for latest version")
