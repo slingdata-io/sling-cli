@@ -29,13 +29,11 @@ jobs:
     needs: [build]
     runs-on: [self-hosted, Linux]
     
-    env:
-      VERSION: ${{ needs.build.outputs.version }}"
-
     steps:
       - name: Push Docker
         run: |
           /bin/cp /tmp/sling-linux ./sling
+          VERSION=$(./sling --version | sed 's/Version: //')
 
           source /__/devbox/.env.sh
           export _DEBUG=''
@@ -55,8 +53,9 @@ jobs:
       matrix:
         runner: [macos-latest,self-hosted-linux, self-hosted-windows]
 
-    env:
-      VERSION: ${{ needs.build.outputs.version }}"
+    # doesn't work, put double quote at the end
+    # env:
+    #   VERSION: ${{ needs.build.outputs.version }}"
 
     steps:
       - uses: actions/checkout@v2
@@ -84,7 +83,6 @@ jobs:
           export TMPDIR=~/tmp/
           export PATH=$GO_BIN_FOLDER:$PATH
           mkdir -p $TMPDIR
-          mkdir -p dist/$VERSION
 
       - name: Prepare Build (Windows)
         if: runner.os == 'windows'
@@ -92,9 +90,7 @@ jobs:
           setx TMPDIR "C:\Users\runneradmin\tmp"
           setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
           setx GO111MODULE "auto"
-          if not exists C:\Users\runneradmin\tmp mkdir C:\Users\runneradmin\tmp
-          mkdir dist
-          mkdir "dist\$env:VERSION"
+          mkdir -p C:\Users\runneradmin\tmp
 
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
@@ -103,6 +99,9 @@ jobs:
           bash scripts/prep.gomod.sh
           GOOS=linux GOARCH=amd64 go build -o sling-linux cmd/sling/*.go
 
+          VERSION=$(./sling-linux --version | sed 's/Version: //')
+          echo $VERSION
+          mkdir -p dist/$VERSION
           cp sling-linux dist\
           cp sling-linux dist\$VERSION
 
@@ -113,6 +112,9 @@ jobs:
           bash scripts/prep.gomod.sh
           GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
 
+          VERSION=$(./sling-mac --version | sed 's/Version: //')
+          echo $VERSION
+          mkdir -p dist/$VERSION
           cp sling-mac dist\
           cp sling-mac dist\$VERSION
 
@@ -131,6 +133,9 @@ jobs:
 
           go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
+          $env:VERSION = (sling-win.exe --version).replace('Version: ', '')
+          echo "$env:VERSION"
+          mkdir -p "dist\$env:VERSION"
           copy sling-win.exe dist
           copy sling-win.exe "dist\$env:VERSION"
 
