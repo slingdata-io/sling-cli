@@ -7,8 +7,8 @@ import (
 
 	"github.com/c-bata/go-prompt"
 	"github.com/flarco/g"
-	"github.com/flarco/sling/core"
-	"github.com/flarco/sling/core/env"
+	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 

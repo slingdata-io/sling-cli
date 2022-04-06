@@ -18,7 +18,7 @@ import (
 	"github.com/flarco/dbio/filesys"
 
 	"github.com/dustin/go-humanize"
-	"github.com/flarco/sling/core/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"

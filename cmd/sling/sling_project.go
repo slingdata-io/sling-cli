@@ -11,11 +11,11 @@ import (
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
-	"github.com/flarco/sling/core/env"
-	"github.com/flarco/sling/core/sling"
 	"github.com/manifoldco/promptui"
 	"github.com/robfig/cron/v3"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )

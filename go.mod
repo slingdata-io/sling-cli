@@ -1,4 +1,4 @@
-module github.com/flarco/sling
+module github.com/slingdata-io/sling-cli
 
 go 1.18
 

@@ -99,7 +99,7 @@ An example. Put this in https://jsonschema.net/home
 - Update version in [setup.py](./setup.py).
 
 ```
-git clone https://github.com/flarco/sling
+git clone https://github.com/slingdata-io/sling-cli
 cd sling/python
 pip install -e .
 rm -rf dist && python setup.py sdist && twine upload --verbose --skip-existing dist/*

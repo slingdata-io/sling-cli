@@ -9,7 +9,7 @@
 ### Compiling From Source
 
 ```bash
-git clone https://github.com/flarco/sling.git
+git clone https://github.com/slingdata-io/sling-cli.git
 cd sling
 go build -o sling cmd/sling/*.go
 
@@ -57,7 +57,7 @@ package main
 import (
 	"log"
 
-	"github.com/flarco/sling/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling"
 )
 
 func main() {

@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flarco/sling/core"
-	"github.com/flarco/sling/core/env"
-	"github.com/flarco/sling/core/sling"
 	"github.com/getsentry/sentry-go"
 	"github.com/rudderlabs/analytics-go"
+	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"

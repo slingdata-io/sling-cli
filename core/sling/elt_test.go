@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flarco/sling/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"

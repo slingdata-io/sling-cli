@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/flarco/sling/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling"
 )
 
 func main() {

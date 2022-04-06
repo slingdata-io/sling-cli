@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/g/net"
-	core2 "github.com/flarco/sling/core"
-	"github.com/flarco/sling/core/env"
-	"github.com/flarco/sling/core/sling"
+	core2 "github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
 	"github.com/jedib0t/go-pretty/table"

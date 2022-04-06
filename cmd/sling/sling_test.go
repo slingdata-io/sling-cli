@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flarco/sling/core/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
-	"github.com/flarco/sling/core/sling"
+	"github.com/slingdata-io/sling-cli/core/sling"
 
 	d "github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
