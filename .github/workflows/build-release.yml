@@ -133,11 +133,11 @@ jobs:
 
           go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
-          $env:VERSION = (sling-win.exe --version).replace('Version: ', '')
+          $env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
           echo "$env:VERSION"
           mkdir -Force -p "dist\$env:VERSION"
-          copy sling-win.exe dist
-          copy sling-win.exe "dist\$env:VERSION"
+          copy .\sling-win.exe dist
+          copy .\sling-win.exe "dist\$env:VERSION"
 
 
       - name: Release Binaries to Github
