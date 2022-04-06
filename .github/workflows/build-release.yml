@@ -6,10 +6,14 @@ jobs:
   build:
     runs-on: [self-hosted, linux]
 
+    outputs:
+      version: ${{ steps.step1.outputs.version }}
+
     steps:
       - uses: actions/checkout@v2
 
-      - name: Build
+      - id: step1
+        name: Build
         run: |
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
@@ -18,21 +22,20 @@ jobs:
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
 
+          VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
+          echo "::set-output name=version::$VERSION"
+
   push:
     needs: [build]
     runs-on: [self-hosted, Linux]
-
-    outputs:
-      version: ${{ steps.step1.outputs.version }}
+    
+    env:
+      VERSION: ${{ needs.build.outputs.version }}"
 
     steps:
-      - id: step1
-        name: Push Docker
+      - name: Push Docker
         run: |
           /bin/cp /tmp/sling-linux ./sling
-
-          VERSION=$(./sling --version | sed 's/Version: //')
-          echo "::set-output name=version::$VERSION"
 
           source /__/devbox/.env.sh
           export _DEBUG=''
@@ -50,10 +53,10 @@ jobs:
 
     strategy:
       matrix:
-        runner: [macos-latest, ubuntu-latest, self-hosted-windows]
+        runner: [macos-latest,self-hosted-linux, self-hosted-windows]
 
     env:
-      VERSION: ${{ needs.push.outputs.version }}"
+      VERSION: ${{ needs.build.outputs.version }}"
 
     steps:
       - uses: actions/checkout@v2
@@ -91,7 +94,7 @@ jobs:
           setx GO111MODULE "auto"
           mkdir C:\Users\runneradmin\tmp
           mkdir dist
-          mkdir dist\$env:VERSION
+          mkdir "dist\$env:VERSION"
 
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
@@ -128,8 +131,8 @@ jobs:
 
           go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
-          copy sling-win.exe dist\
-          copy sling-win.exe dist\$env:VERSION
+          copy sling-win.exe dist
+          copy sling-win.exe "dist\$env:VERSION"
 
 
       - name: Release Binaries to Github
