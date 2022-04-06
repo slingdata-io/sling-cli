@@ -4,7 +4,7 @@ on: [workflow_dispatch]
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux]
 
     steps:
       - uses: actions/checkout@v2
@@ -20,14 +20,19 @@ jobs:
 
   push:
     needs: [build]
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
+
+    outputs:
+      version: ${{ steps.step1.outputs.version }}
 
     steps:
-      - name: Push Docker
+      - id: step1
+        name: Push Docker
         run: |
           /bin/cp /tmp/sling-linux ./sling
 
           VERSION=$(./sling --version | sed 's/Version: //')
+          echo "::set-output name=version::$VERSION"
 
           source /__/devbox/.env.sh
           export _DEBUG=''
@@ -41,11 +46,14 @@ jobs:
 
   release:
     needs: [build]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        runner: [macos-latest, ubuntu-latest, self-hosted-windows]
+
+    env:
+      VERSION: ${{ needs.push.outputs.version }}"
 
     steps:
       - uses: actions/checkout@v2
@@ -59,6 +67,7 @@ jobs:
           echo "JOB_CONTEXT -> $JOB_CONTEXT"
           echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
           echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
+          echo "VERSION -> $VERSION"
 
       - name: Set up GoLang
         uses: actions/setup-go@v1
@@ -72,6 +81,7 @@ jobs:
           export TMPDIR=~/tmp/
           export PATH=$GO_BIN_FOLDER:$PATH
           mkdir -p $TMPDIR
+          mkdir -p dist/$VERSION
 
       - name: Prepare Build (Windows)
         if: runner.os == 'windows'
@@ -80,6 +90,8 @@ jobs:
           setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
           setx GO111MODULE "auto"
           mkdir C:\Users\runneradmin\tmp
+          mkdir dist
+          mkdir dist\$env:VERSION
 
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
@@ -88,12 +100,18 @@ jobs:
           bash scripts/prep.gomod.sh
           GOOS=linux GOARCH=amd64 go build -o sling-linux cmd/sling/*.go
 
+          cp sling-linux dist\
+          cp sling-linux dist\$VERSION
+
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
         run: |
           echo "Building sling-mac"
           bash scripts/prep.gomod.sh
           GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
+
+          cp sling-mac dist\
+          cp sling-mac dist\$VERSION
 
       - name: Build Sling (Windows)
         if: runner.os == 'windows'
@@ -110,6 +128,10 @@ jobs:
 
           go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
+          copy sling-win.exe dist\
+          copy sling-win.exe dist\$env:VERSION
+
+
       - name: Release Binaries to Github
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
@@ -120,36 +142,24 @@ jobs:
           files: |
             sling*
       
-      - uses: actions/upload-artifact@v2
+      - uses: BetaHuhn/do-spaces-action@v2
         with:
-          name: sling-dist
-          path: sling*
+          access_key: ${{ secrets.DO_SPACE_ACCESS_KEY}}
+          secret_key: ${{ secrets.DO_SPACE_SECRET_KEY }}
+          space_name: ${{ secrets.DO_SPACE_NAME }}
+          space_region: ${{ secrets.DO_SPACE_REGION }}
+          source: dist
+          out_dir: slingdata.io/dist
 
   release-python:
     needs: [release]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Set up Python
-        uses: actions/setup-python@v2
+      - name: Trigger Upload to PyPi
+        uses: peter-evans/repository-dispatch@v2
         with:
-          python-version: '3.8'
-        
-      - uses: actions/download-artifact@v2
-        with:
-          name: sling-dist
-      
-      - name: Upload to PyPi
-        run: |
-          source /__/devbox/.env.sh
-          mkdir python/sling/bin/
-
-          mv -f sling-mac python/sling/bin/
-          mv -f sling-linux python/sling/bin/
-          mv -f sling-win.exe python/sling/bin/
-          chmod -R 755 python/sling/bin/
-
-          cd python
-          pip install -e .
-          pip install twine
-          python setup.py sdist && twine upload --verbose --skip-existing dist/*
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          repository: slingdata-io/sling-python
+          event-type: release-python
+          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
