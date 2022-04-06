@@ -72,7 +72,7 @@ func setJWT() {
 
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
-	cfg := sling.Config{}
+	cfg := &sling.Config{}
 	cfg.SetDefault()
 	cfgStr := ""
 	showExamples := false

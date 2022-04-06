@@ -266,7 +266,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	defer srcConn.Close()
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(&t.Config, srcConn)
+	t.df, err = t.ReadFromDB(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
@@ -274,7 +274,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Config, t.df)
+	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -292,7 +292,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 	start = time.Now()
 
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(&t.Config)
+	t.df, err = t.ReadFromAPI(t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -300,7 +300,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Config, t.df)
+	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -345,7 +345,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	defer tgtConn.Close()
 
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(&t.Config)
+	t.df, err = t.ReadFromAPI(t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -357,7 +357,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
+	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
 		if t.Config.Target.TmpTableCreated {
@@ -396,7 +396,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	defer tgtConn.Close()
 
 	t.SetProgress("reading from source file system")
-	t.df, err = t.ReadFromFile(&t.Config)
+	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
 		return
@@ -408,7 +408,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
+	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
 		if t.Config.Target.TmpTableCreated {
@@ -432,7 +432,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	start = time.Now()
 
 	t.SetProgress("reading from source file system")
-	t.df, err = t.ReadFromFile(&t.Config)
+	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromFile")
 		return
@@ -440,7 +440,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
-	cnt, err := t.WriteToFile(&t.Config, t.df)
+	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
@@ -507,7 +507,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	if t.Config.Target.Mode == UpsertMode {
 		t.SetProgress("getting checkpoint value")
-		t.Config.UpsertVal, err = getUpsertValue(&t.Config, tgtConn, srcConn.Template().Variable)
+		t.Config.UpsertVal, err = getUpsertValue(t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
 			err = g.Error(err, "Could not getUpsertValue")
 			return err
@@ -515,7 +515,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("reading from source database")
-	t.df, err = t.ReadFromDB(&t.Config, srcConn)
+	t.df, err = t.ReadFromDB(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
 		return
@@ -532,7 +532,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("writing to target database")
-	cnt, err := t.WriteToDb(&t.Config, t.df, tgtConn)
+	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToDb")
 		return

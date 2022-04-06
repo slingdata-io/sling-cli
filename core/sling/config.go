@@ -39,8 +39,9 @@ const (
 )
 
 // NewConfig return a config object from a YAML / JSON string
-func NewConfig(cfgStr string) (cfg Config, err error) {
+func NewConfig(cfgStr string) (cfg *Config, err error) {
 	// set default, unmarshalling will overwrite
+	cfg = &Config{}
 	cfg.SetDefault()
 
 	err = cfg.Unmarshal(cfgStr)
@@ -183,10 +184,9 @@ func (cfg *Config) Prepare() (err error) {
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
+		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = c.Connection
-		} else {
-			cfg.Target.Data = g.M()
 		}
 	}
 
@@ -215,10 +215,9 @@ func (cfg *Config) Prepare() (err error) {
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
+		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = c.Connection
-		} else {
-			cfg.Source.Data = g.M()
 		}
 	}
 
@@ -320,44 +319,28 @@ type Target struct {
 	Columns         iop.Columns `json:"-" yaml:"-"`
 }
 
-// Compression is the compression to use
-type Compression string
-
-const (
-	// CompressionAuto is Auto
-	CompressionAuto Compression = "auto"
-	// CompressionZip is Zip
-	CompressionZip Compression = "zip"
-	// CompressionGzip is Gzip
-	CompressionGzip Compression = "gzip"
-	// CompressionSnappy is Snappy
-	CompressionSnappy Compression = "snappy"
-	// CompressionNone is None
-	CompressionNone Compression = ""
-)
-
 // SourceOptions are connection and stream processing options
 type SourceOptions struct {
-	TrimSpace      bool        `json:"trim_space" yaml:"trim_space"`
-	EmptyAsNull    bool        `json:"empty_as_null" yaml:"empty_as_null"`
-	Header         bool        `json:"header" yaml:"header"`
-	Compression    Compression `json:"compression" yaml:"compression"`
-	NullIf         string      `json:"null_if" yaml:"null_if"`
-	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
-	SkipBlankLines bool        `json:"skip_blank_lines" yaml:"skip_blank_lines"`
-	Delimiter      string      `json:"delimiter" yaml:"delimiter"`
-	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
+	TrimSpace      bool               `json:"trim_space" yaml:"trim_space"`
+	EmptyAsNull    bool               `json:"empty_as_null" yaml:"empty_as_null"`
+	Header         bool               `json:"header" yaml:"header"`
+	Compression    iop.CompressorType `json:"compression" yaml:"compression"`
+	NullIf         string             `json:"null_if" yaml:"null_if"`
+	DatetimeFormat string             `json:"datetime_format" yaml:"datetime_format"`
+	SkipBlankLines bool               `json:"skip_blank_lines" yaml:"skip_blank_lines"`
+	Delimiter      string             `json:"delimiter" yaml:"delimiter"`
+	MaxDecimals    int                `json:"max_decimals" yaml:"max_decimals"`
 }
 
 // TargetOptions are target connection and stream processing options
 type TargetOptions struct {
-	Header         bool        `json:"header" yaml:"header"`
-	Compression    Compression `json:"compression" yaml:"compression"`
-	Concurrency    int         `json:"concurrency" yaml:"concurrency"`
-	DatetimeFormat string      `json:"datetime_format" yaml:"datetime_format"`
-	Delimiter      string      `json:"delimiter" yaml:"delimiter"`
-	FileMaxRows    int64       `json:"file_max_rows" yaml:"file_max_rows"`
-	MaxDecimals    int         `json:"max_decimals" yaml:"max_decimals"`
+	Header         bool               `json:"header" yaml:"header"`
+	Compression    iop.CompressorType `json:"compression" yaml:"compression"`
+	Concurrency    int                `json:"concurrency" yaml:"concurrency"`
+	DatetimeFormat string             `json:"datetime_format" yaml:"datetime_format"`
+	Delimiter      string             `json:"delimiter" yaml:"delimiter"`
+	FileMaxRows    int64              `json:"file_max_rows" yaml:"file_max_rows"`
+	MaxDecimals    int                `json:"max_decimals" yaml:"max_decimals"`
 
 	UseBulk  bool   `json:"use_bulk" yaml:"use_bulk"`
 	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -370,7 +353,7 @@ var sourceFileOptionsDefault = SourceOptions{
 	TrimSpace:      false,
 	EmptyAsNull:    true,
 	Header:         true,
-	Compression:    CompressionAuto,
+	Compression:    iop.AutoCompressorType,
 	NullIf:         "null",
 	DatetimeFormat: "auto",
 	SkipBlankLines: false,
@@ -382,8 +365,8 @@ var targetFileOptionsDefault = TargetOptions{
 	Header: true,
 	Compression: lo.Ternary(
 		os.Getenv("COMPRESSION") != "",
-		Compression(os.Getenv("COMPRESSION")),
-		CompressionAuto,
+		iop.CompressorType(os.Getenv("COMPRESSION")),
+		iop.AutoCompressorType,
 	),
 	Concurrency: lo.Ternary(
 		os.Getenv("CONCURRENCY") != "",

@@ -63,13 +63,7 @@ func (tp *TaskProcess) ToMap() map[string]interface{} {
 }
 
 // NewTask creates a Sling task with given configuration
-func NewTask(execID int64, cfg Config) (t *TaskExecution) {
-	err := cfg.Prepare()
-	if err != nil {
-		t.Err = g.Error(err, "could not prepare task")
-		return
-	}
-
+func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 	t = &TaskExecution{
 		ExecID:       execID,
 		Config:       cfg,
@@ -77,6 +71,12 @@ func NewTask(execID int64, cfg Config) (t *TaskExecution) {
 		df:           iop.NewDataflow(),
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
+	}
+
+	err := cfg.Prepare()
+	if err != nil {
+		t.Err = g.Error(err, "could not prepare task")
+		return
 	}
 
 	if ShowProgress {
@@ -200,7 +200,7 @@ func NewTask(execID int64, cfg Config) (t *TaskExecution) {
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
 	ExecID        int64           `json:"exec_id"`
-	Config        Config          `json:"config"`
+	Config        *Config         `json:"config"`
 	Type          JobType         `json:"type"`
 	Status        ExecStatus      `json:"status"`
 	Err           error           `json:"error"`

@@ -7,7 +7,7 @@ import (
 )
 
 // Sling accepts a configuration and runs an Extract-Load task
-func Sling(cfg Config) (err error) {
+func Sling(cfg *Config) (err error) {
 
 	task := NewTask(time.Now().Unix(), cfg)
 	if task.Err != nil {
