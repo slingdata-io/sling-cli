@@ -48,8 +48,10 @@ jobs:
   release:
     needs: [build]
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
+      fail-fast: false
       matrix:
         runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
 
