@@ -48,7 +48,6 @@ jobs:
   release:
     needs: [build]
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       fail-fast: false
