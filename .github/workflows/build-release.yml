@@ -53,7 +53,7 @@ jobs:
       fail-fast: true
       matrix:
         # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
-        runner: [macos-latest, ubuntu-latest, windows-latest]
+        runner: [macos-latest, ubuntu-18.04, windows-latest]
 
     # doesn't work, put double quote at the end
     # env:
