@@ -8,6 +8,7 @@ mkdir -p $TMPDIR
 echo "Building sling-linux"
 go mod edit -dropreplace='github.com/flarco/g' go.mod
 go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+go mod tidy
 GOOS=linux GOARCH=amd64 go build -o sling-linux cmd/sling/*.go
 
 VERSION=$(./sling-linux --version | sed 's/Version: //')
