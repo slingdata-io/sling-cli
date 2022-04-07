@@ -50,9 +50,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
+        # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
+        runner: [macos-latest, ubuntu-latest, windows-latest]
 
     # doesn't work, put double quote at the end
     # env:

@@ -1,8 +1,8 @@
 
-# setx TMPDIR "C:\Users\runneradmin\tmp"
-# setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
-# setx GO111MODULE "auto"
-# mkdir -Force -p C:\Users\runneradmin\tmp
+setx TMPDIR "C:\Users\runneradmin\tmp"
+setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
+setx GO111MODULE "auto"
+mkdir -Force -p C:\Users\runneradmin\tmp
 
 echo "Building sling-win.exe"
 setx GOOS "windows"
