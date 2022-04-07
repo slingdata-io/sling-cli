@@ -77,76 +77,17 @@ jobs:
         with:
           go-version: "1.18"
 
-      - name: Prepare Build (Unix)
-        if: runner.os != 'windows'
-        run: |
-          export GO_BIN_FOLDER=$HOME/go/bin
-          export TMPDIR=~/tmp/
-          export PATH=$GO_BIN_FOLDER:$PATH
-          mkdir -p $TMPDIR
-
-      - name: Prepare Build (Windows)
-        if: runner.os == 'windows'
-        run: |
-          setx TMPDIR "C:\Users\runneradmin\tmp"
-          setx PATH "%PATH%;C:\Users\runneradmin\go\bin"
-          setx GO111MODULE "auto"
-          mkdir -Force -p C:\Users\runneradmin\tmp
-
       - name: Build Sling (Linux)
         if: runner.os == 'linux'
-        run: |
-          echo "Building sling-linux"
-          bash scripts/prep.gomod.sh
-          GOOS=linux GOARCH=amd64 go build -o sling-linux cmd/sling/*.go
-
-          VERSION=$(./sling-linux --version | sed 's/Version: //')
-          echo $VERSION
-          mkdir -p dist/$VERSION
-          cp sling-linux dist
-          cp sling-linux dist/$VERSION
-
-          echo $VERSION > dist/version-linux
+        run: bash scripts/ci/build.linux.sh
 
       - name: Build Sling (Mac)
         if: runner.os == 'macOS'
-        run: |
-          echo "Building sling-mac"
-          bash scripts/prep.gomod.sh
-          GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
-
-          VERSION=$(./sling-mac --version | sed 's/Version: //')
-          echo $VERSION
-          mkdir -p dist/$VERSION
-          cp sling-mac dist
-          cp sling-mac dist/$VERSION
-
-          echo $VERSION > dist/version-mac
+        run: bash scripts/ci/build.mac.sh
 
       - name: Build Sling (Windows)
         if: runner.os == 'windows'
-        run: |
-          echo "Building sling-win.exe"
-          setx GOOS "windows"
-          setx GOARCH "amd64"
-          setx GO111MODULE "auto"
-          $PSDefaultParameterValues['*:Encoding'] = 'utf8'
-
-          go mod edit -dropreplace='github.com/flarco/g' go.mod
-          go mod edit -dropreplace='github.com/flarco/dbio' go.mod
-          go get github.com/flarco/g@HEAD
-          go get github.com/flarco/dbio@HEAD
-
-          go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
-
-          $env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
-          echo "$env:VERSION"
-          mkdir -Force -p "dist\$env:VERSION"
-          copy .\sling-win.exe dist
-          copy .\sling-win.exe "dist\$env:VERSION"
-
-          echo "$env:VERSION" > "dist\version-win"
-
+        run: .\scripts\ci\build.win.ps1
 
       - name: Release Binaries to Github
         uses: "marvinpinto/action-automatic-releases@latest"
