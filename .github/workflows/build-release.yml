@@ -90,15 +90,15 @@ jobs:
         if: runner.os == 'windows'
         run: .\scripts\ci\build.win.ps1
 
-      - name: Release Binaries to Github
-        uses: "marvinpinto/action-automatic-releases@latest"
-        with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest-${{ runner.os }}"
-          prerelease: true
-          title: "Latest: ${{ runner.os }}"
-          files: |
-            sling*
+      # - name: Release Binaries to Github
+      #   uses: "marvinpinto/action-automatic-releases@latest"
+      #   with:
+      #     repo_token: "${{ secrets.GITHUB_TOKEN }}"
+      #     automatic_release_tag: "latest-${{ runner.os }}"
+      #     prerelease: true
+      #     title: "Latest: ${{ runner.os }}"
+      #     files: |
+      #       sling*
       
       - uses: BetaHuhn/do-spaces-action@v2
         with:

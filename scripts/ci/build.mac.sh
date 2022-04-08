@@ -18,3 +18,6 @@ cp sling-mac dist
 cp sling-mac dist/$VERSION
 
 echo $VERSION > dist/version-mac
+
+cd dist/$VERSION
+tar -czvf sling.darwin-arm64.tar.gz sling-mac

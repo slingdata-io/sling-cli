@@ -18,3 +18,6 @@ cp sling-linux dist
 cp sling-linux dist/$VERSION
 
 echo $VERSION > dist/version-linux
+
+cd dist/$VERSION
+tar -czvf sling.linux-arm64.tar.gz sling-linux
