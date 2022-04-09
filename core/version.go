@@ -1,4 +1,4 @@
 package core
 
 // Version is the version number
-const Version = "0.82.5"
+const Version = "0.82.7"

@@ -1,11 +1,12 @@
 name: Bump version
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      tag:
+        description: 'Tag: vx.x.x'     
+        required: true
 jobs:
-  build:
+  bump:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -14,3 +15,4 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ github.event.inputs.tag }}
