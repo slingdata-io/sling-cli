@@ -220,9 +220,9 @@ func processConns(c *g.CliSC) (bool, error) {
 			conns[strings.ToLower(conn.Name)] = conn
 		}
 
-		conn, ok := conns[strings.ToLower(name)]
-		if !ok || name == "" {
-			g.Info("Invalid Connection name: %s", name)
+		conn, ok1 := conns[strings.ToLower(name)]
+		if !ok1 || name == "" {
+			g.Warn("Invalid Connection name: %s", name)
 			return ok, nil
 		}
 
