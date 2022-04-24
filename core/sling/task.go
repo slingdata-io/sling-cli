@@ -1,10 +1,8 @@
 package sling
 
 import (
-	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -14,24 +12,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 )
-
-// TaskProcess is a slingELT task / execution process
-type TaskProcess struct {
-	Task      *TaskExecution `json:"-"`
-	JobID     int            `json:"job_id" mapstructure:"job_id"`
-	ExecID    int64          `json:"exec_id" mapstructure:"exec_id"`
-	Pid       int            `json:"pid" mapstructure:"pid"`
-	Stderr    string         `json:"stderr" mapstructure:"stderr"`
-	Stdout    string         `json:"stdout" mapstructure:"stdout"`
-	Err       error          `json:"-"`
-	StartTime time.Time      `json:"start_time" mapstructure:"start_time"`
-	EndTime   time.Time      `json:"end_time" mapstructure:"end_time"`
-	ExitCode  int            `json:"exit_code" mapstructure:"exit_code"`
-	RowRate   int            `json:"-"`
-	StderrBuf bytes.Buffer   `json:"-"`
-	StdoutBuf bytes.Buffer   `json:"-"`
-	Cmd       *exec.Cmd      `json:"-"`
-}
 
 // ExecutionStatus is an execution status object
 type ExecutionStatus struct {
@@ -45,21 +25,6 @@ type ExecutionStatus struct {
 	Stalled     bool       `json:"stalled,omitempty"`
 	Duration    *int       `json:"duration,omitempty"`
 	AvgDuration int        `json:"avg_duration,omitempty"`
-}
-
-// ToMap converts to map of interface
-func (tp *TaskProcess) ToMap() map[string]interface{} {
-	m := map[string]interface{}{
-		"job_id":     tp.JobID,
-		"exec_id":    tp.ExecID,
-		"pid":        tp.Pid,
-		"stderr":     tp.Stderr,
-		"stdout":     tp.Stdout,
-		"start_time": tp.StartTime,
-		"end_time":   tp.EndTime,
-		"exit_code":  tp.ExitCode,
-	}
-	return m
 }
 
 // NewTask creates a Sling task with given configuration

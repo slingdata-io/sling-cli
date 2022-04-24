@@ -288,10 +288,9 @@ func (cfg Config) Value() (driver.Value, error) {
 
 // ConfigOptions are configuration options
 type ConfigOptions struct {
-	Debug     bool    `json:"debug" yaml:"debug"`
-	StdIn     bool    `json:"-"`                    // whether stdin is passed
-	StdOut    bool    `json:"stdout" yaml:"stdout"` // whether to output to stdout
-	ProxyPIDs *string `json:"proxy_pids,omitempty" yaml:"proxy_pids,omitempty"`
+	Debug  bool `json:"debug" yaml:"debug"`
+	StdIn  bool `json:"-"`                    // whether stdin is passed
+	StdOut bool `json:"stdout" yaml:"stdout"` // whether to output to stdout
 }
 
 // Source is a source of data
