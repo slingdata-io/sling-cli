@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -21,30 +20,6 @@ import (
 )
 
 var DisableSendAnonUsage = false
-
-var envVars = []string{
-	"SLING_PARALLEL", "AWS_BUCKET", "AWS_ACCESS_KEY_ID",
-	"AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_ENDPOINT", "AWS_REGION",
-	"SLING_COMPRESSION", "SLING_FILE_ROW_LIMIT", "SLING_SAMPLE_SIZE",
-	"GC_BUCKET", "GC_CRED_FILE", "GSHEETS_CRED_FILE",
-	"GC_CRED_JSON_BODY", "GC_CRED_JSON_BODY_ENC", "GC_CRED_API_KEY",
-	"AZURE_ACCOUNT", "AZURE_KEY", "AZURE_CONTAINER", "AZURE_SAS_SVC_URL",
-	"AZURE_CONN_STR", "SSH_TUNNEL", "SSH_PRIVATE_KEY", "SSH_PUBLIC_KEY",
-	"SLING_CONCURENCY_LIMIT",
-
-	"SLING_SMTP_HOST", "SLING_SMTP_PORT", "SLING_SMTP_USERNAME", "SLING_SMTP_PASSWORD", "SLING_SMTP_FROM_EMAIL", "SLING_SMTP_REPLY_EMAIL",
-
-	"SFTP_USER", "SFTP_PASSWORD", "SFTP_HOST", "SFTP_PORT",
-	"SSH_PRIVATE_KEY", "SFTP_PRIVATE_KEY", "SFTP_URL",
-
-	"HTTP_USER", "HTTP_PASSWORD", "GSHEET_CLIENT_JSON_BODY",
-	"GSHEET_SHEET_NAME", "GSHEET_MODE",
-
-	"DIGITALOCEAN_ACCESS_TOKEN", "GITHUB_ACCESS_TOKEN",
-	"SURVEYMONKEY_ACCESS_TOKEN",
-
-	"SLING_SEND_ANON_USAGE", "SLING_HOME",
-}
 
 var (
 	HomeDir         = os.Getenv("SLING_HOME_DIR")
@@ -163,38 +138,6 @@ func FlattenEnvFile(filePath string) (env map[string]string, err error) {
 		}
 	}
 
-	return
-}
-
-// EnvVars are the variables we are using
-func EnvVars() (vars map[string]string) {
-	vars = map[string]string{}
-	// get default from environment
-	for _, k := range envVars {
-		if vars[k] == "" {
-			vars[k] = os.Getenv(k)
-		}
-	}
-
-	// default as true
-	for _, k := range []string{} {
-		if vars[k] == "" {
-			vars[k] = "true"
-		}
-	}
-
-	if vars["SLING_CONCURENCY_LIMIT"] == "" {
-		vars["SLING_CONCURENCY_LIMIT"] = "10"
-	}
-
-	if vars["SLING_SAMPLE_SIZE"] == "" {
-		vars["SLING_SAMPLE_SIZE"] = "900"
-	}
-
-	if bodyEnc := vars["GC_CRED_JSON_BODY_ENC"]; bodyEnc != "" {
-		body, _ := url.QueryUnescape(bodyEnc)
-		vars["GC_CRED_JSON_BODY"] = body
-	}
 	return
 }
 
