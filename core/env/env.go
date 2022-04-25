@@ -41,7 +41,7 @@ func init() {
 	HomeDirEnvFile = HomeDir + "/env.yaml"
 	DbNetDirEnvFile = DbNetDir + "/env.yaml"
 
-	// os.Setenv("DBIO_PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
+	// os.Setenv("PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
 }
 
 // flatten and rename all children properly
