@@ -90,11 +90,17 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.Source.Data == nil {
 		cfg.Source.Data = g.M()
+	}
+
+	if cfg.SrcConn.Data == nil {
 		cfg.SrcConn.Data = g.M()
 	}
 
 	if cfg.Target.Data == nil {
 		cfg.Target.Data = g.M()
+	}
+
+	if cfg.TgtConn.Data == nil {
 		cfg.TgtConn.Data = g.M()
 	}
 
