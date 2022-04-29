@@ -57,7 +57,7 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 						t.PBar.Start()
 						t.PBar.bar.SetCurrent(cast.ToInt64(cnt))
 						t.PBar.bar.Set("bytes", t.GetBytesString())
-						rowRate, byteRate := t.GetRate(4)
+						rowRate, byteRate := t.GetRate(1)
 						t.PBar.bar.Set("rowRate", g.F("%s r/s", humanize.Comma(rowRate)))
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}

@@ -5,8 +5,8 @@ go 1.18
 require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.3.16
-	github.com/flarco/g v0.1.8
+	github.com/flarco/dbio v0.3.17
+	github.com/flarco/g v0.1.9
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/integrii/flaggy v1.4.4
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
