@@ -50,12 +50,12 @@ sling run -c '
 source:
   conn: PG_DB
   stream: public.transactions
+  update_key: modified_at
+  primary_key: id
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
   mode: upsert
-  update_key: modified_at
-  primary_key: id
 '
 
 
@@ -118,10 +118,10 @@ export AWS_SECRET_ACCESS_KEY=xxxxxxxxx
 sling run -c '
 source:
   stream: s3://my-bucket/public.transactions/
+  update_key: modified_at
+  primary_key: id
 target:
   conn: PG_DB
   object: public.transactions
   mode: upsert
-  update_key: modified_at
-  primary_key: id
 '

@@ -92,13 +92,13 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		return
 	}
 
-	if cfg.Target.Mode == "upsert" && (len(cfg.Target.PrimaryKey) == 0 || len(cfg.Target.UpdateKey) == 0) {
+	if cfg.Target.Mode == "upsert" && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
 		t.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
 		return
 	}
 
 	if srcDbProvided && tgtDbProvided {
-		if cfg.Target.Mode == "upsert" && (len(cfg.Target.UpdateKey) == 0 || len(cfg.Target.PrimaryKey) == 0) {
+		if cfg.Target.Mode == "upsert" && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
 			t.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}

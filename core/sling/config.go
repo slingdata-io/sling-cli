@@ -243,7 +243,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set mode if primary key is providedand mode isnn't
-	if len(cfg.Target.PrimaryKey) > 0 && cfg.Target.Mode == "" {
+	if len(cfg.Source.PrimaryKey) > 0 && cfg.Target.Mode == "" {
 		cfg.Target.Mode = UpsertMode
 	}
 
@@ -301,24 +301,24 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn    string                 `json:"conn" yaml:"conn"`
-	Stream  string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Limit   int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
-	Options SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn       string                 `json:"conn" yaml:"conn"`
+	Stream     string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
+	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Options    SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	Columns iop.Columns `json:"-" yaml:"-"`
 }
 
 // Target is a target of data
 type Target struct {
-	Conn       string                 `json:"conn" yaml:"conn"`
-	Object     string                 `json:"object,omitempty" yaml:"object,omitempty"`
-	Options    TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
-	Mode       Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
-	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn    string                 `json:"conn" yaml:"conn"`
+	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
+	Options TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Mode    Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	Columns         iop.Columns `json:"-" yaml:"-"`

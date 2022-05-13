@@ -141,7 +141,7 @@ func TestTasks(t *testing.T) {
 		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
 		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
 		primaryKey := []string{}
-		if val := cast.ToString(rec["target_primary_key"]); val != "" {
+		if val := cast.ToString(rec["source_primary_key"]); val != "" {
 			primaryKey = strings.Split(val, ",")
 		}
 
@@ -149,14 +149,14 @@ func TestTasks(t *testing.T) {
 			"source", g.M(
 				"conn", cast.ToString(rec["source_conn"]),
 				"stream", cast.ToString(rec["source_stream"]),
+				"primary_key", primaryKey,
+				"update_key", cast.ToString(rec["source_update_key"]),
 				"options", sourceOptions,
 			),
 			"target", g.M(
 				"conn", cast.ToString(rec["target_conn"]),
 				"object", cast.ToString(rec["target_object"]),
 				"mode", cast.ToString(rec["target_mode"]),
-				"primary_key", primaryKey,
-				"update_key", cast.ToString(rec["target_update_key"]),
 				"options", targetOptions,
 			),
 			"options", options,
@@ -221,8 +221,8 @@ func runOneTask(t *testing.T, file g.FileItem) {
 		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
 			orderByStr := ""
-			if len(task.Config.Target.PrimaryKey) > 0 {
-				orderByStr = strings.Join(task.Config.Target.PrimaryKey, ", ")
+			if len(task.Config.Source.PrimaryKey) > 0 {
+				orderByStr = strings.Join(task.Config.Source.PrimaryKey, ", ")
 			}
 			sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
 			data, err := conn.Query(sql)

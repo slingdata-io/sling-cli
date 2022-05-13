@@ -609,7 +609,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if cfg.UpsertVal != "" {
 			upsertWhereCond = g.R(
 				"{update_key} >= {value}",
-				"update_key", srcConn.Quote(cfg.Source.Columns.Normalize(cfg.Target.UpdateKey)),
+				"update_key", srcConn.Quote(cfg.Source.Columns.Normalize(cfg.Source.UpdateKey)),
 				"value", cfg.UpsertVal,
 			)
 		}
@@ -1007,7 +1007,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// create final if not exists
 		// delete from final and insert
 		// or update (such as merge or ON CONFLICT)
-		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Target.PrimaryKey)
+		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Source.PrimaryKey)
 		if err != nil {
 			err = g.Error(err, "Could not upsert from temp")
 			// data is still in temp table at this point
@@ -1130,7 +1130,7 @@ func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[
 	// get max value from key_field
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		cfg.Target.UpdateKey,
+		cfg.Source.UpdateKey,
 		cfg.Target.Object,
 	)
 
@@ -1141,7 +1141,7 @@ func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[
 			// set val to blank for full load
 			return "", nil
 		}
-		err = g.Error(err, "could not get max value for "+cfg.Target.UpdateKey)
+		err = g.Error(err, "could not get max value for "+cfg.Source.UpdateKey)
 		return
 	}
 	if len(data.Rows) == 0 {

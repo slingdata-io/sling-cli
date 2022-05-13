@@ -1,1 +1,1 @@
-{"env":{},"options":{},"source":{"conn":"","options":{},"stream":"file://tests/files/test1.csv"},"target":{"conn":"SNOWFLAKE","mode":"drop","object":"public.test1","options":{},"primary_key":[],"update_key":""}}
+{"env":{},"options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file://tests/files/test1.csv","update_key":""},"target":{"conn":"SNOWFLAKE","mode":"drop","object":"public.test1","options":{}}}

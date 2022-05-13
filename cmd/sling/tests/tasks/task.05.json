@@ -1,1 +1,1 @@
-{"env":{},"options":{},"source":{"conn":"","options":{},"stream":"file:///tmp/test_1000.csv"},"target":{"conn":"BIGQUERY","mode":"drop","object":"public.test1k","options":{},"primary_key":[],"update_key":""}}
+{"env":{},"options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file:///tmp/test_1000.csv","update_key":""},"target":{"conn":"BIGQUERY","mode":"drop","object":"public.test1k","options":{}}}

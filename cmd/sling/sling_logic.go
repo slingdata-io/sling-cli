@@ -107,10 +107,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Target.Conn = cast.ToString(v)
 
 		case "primary-key":
-			cfg.Target.PrimaryKey = strings.Split(cast.ToString(v), ",")
+			cfg.Source.PrimaryKey = strings.Split(cast.ToString(v), ",")
 
 		case "update-key":
-			cfg.Target.UpdateKey = cast.ToString(v)
+			cfg.Source.UpdateKey = cast.ToString(v)
 
 		case "tgt-object", "tgt-table":
 			cfg.Target.Object = cast.ToString(v)
