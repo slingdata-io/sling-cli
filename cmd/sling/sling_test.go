@@ -197,7 +197,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	}
 
 	// validate count
-	if task.Config.Mode == sling.DropMode {
+	if task.Config.Mode == sling.FullRefreshMode {
 		g.Debug("getting count")
 		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
@@ -271,7 +271,7 @@ func TestInToDb(t *testing.T) {
 				"conn", tgtDB.URL,
 				"object", tgtDB.table,
 			),
-			"mode", sling.DropMode,
+			"mode", sling.FullRefreshMode,
 		)
 		config, err := sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
@@ -291,7 +291,7 @@ func TestInToDb(t *testing.T) {
 			),
 			"target", g.M(
 				"conn", tgtDB.URL,
-				"object", tgtDB.table+"_upsert",
+				"object", tgtDB.table+"_incremental",
 			),
 			"mode", sling.TruncateMode,
 		)
@@ -331,7 +331,7 @@ func TestDbToDb(t *testing.T) {
 					"conn", tgtDB.URL,
 					"object", tgtDB.table+"_copy",
 				),
-				"mode", sling.DropMode,
+				"mode", sling.FullRefreshMode,
 			)
 			config, err := sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
@@ -346,7 +346,7 @@ func TestDbToDb(t *testing.T) {
 			cfgMap = g.M(
 				"source", g.M(
 					"conn", srcDB.URL,
-					"stream", srcDB.table+"_upsert",
+					"stream", srcDB.table+"_incremental",
 				),
 				"target", g.M(
 					"conn", tgtDB.URL,
@@ -354,7 +354,7 @@ func TestDbToDb(t *testing.T) {
 					"primary_key", []string{"id"},
 					"update_key", "create_dt",
 				),
-				"mode", sling.UpsertMode,
+				"mode", sling.IncrementalMode,
 			)
 			config, err = sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
@@ -484,7 +484,7 @@ func testTask(t *testing.T) {
 	// config.Source.Conn = "file:///tmp/csvTest/part2.csv.gz"
 	config.Target.Conn = "PG_BIONIC_URL"
 	config.Target.Object = "public.sling_cli_events"
-	config.Mode = sling.DropMode
+	config.Mode = sling.FullRefreshMode
 	config.Target.Options.UseBulk = true
 	err := config.Prepare()
 	if g.AssertNoError(t, err) {

@@ -82,19 +82,19 @@ var cliRun = &g.CliSC{
 			Name:        "mode",
 			ShortName:   "m",
 			Type:        "string",
-			Description: "The target load mode to use: append, upsert, truncate, drop.\n                       Default is append. For upsert, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
+			Description: "The target load mode to use: append, incremental, truncate, full-refresh.\n                       Default is append. For incremental, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
 		},
 		{
 			Name:        "primary-key",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The primary key to use for upsert. For composite key, put comma delimited values.",
+			Description: "The primary key to use for incremental. For composite key, put comma delimited values.",
 		},
 		{
 			Name:        "update-key",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The update key to use for upsert.\n",
+			Description: "The update key to use for incremental.\n",
 		},
 		{
 			Name:        "debug",

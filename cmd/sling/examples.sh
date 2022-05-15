@@ -4,7 +4,7 @@
 export PG_DB=postgres://xxxxxxxxxxxxxxxx
 export MYSQL_DB=mysql://xxxxxxxxxxxxxxxx
 
-sling run --src-conn PG_DB --src-stream public.transactions --tgt-conn MYSQL_DB  --tgt-object mysql.bank_transactions --mode drop
+sling run --src-conn PG_DB --src-stream public.transactions --tgt-conn MYSQL_DB  --tgt-object mysql.bank_transactions --mode full-refresh
 # OR
 sling run -c '
 source:
@@ -13,14 +13,14 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-  mode: drop
+  mode: full-refresh
 '
 
 # custom sql in-line
 export PG_DB=$POSTGRES_URL
 export MYSQL_DB=$MYSQL_URL
 
-sling run --src-conn PG_DB --src-stream "select date, description, amount from public.transactions where transaction_type = 'debit'" --tgt-conn MYSQL_DB  --tgt-object mysql.bank_transactions --mode drop
+sling run --src-conn PG_DB --src-stream "select date, description, amount from public.transactions where transaction_type = 'debit'" --tgt-conn MYSQL_DB  --tgt-object mysql.bank_transactions --mode full-refresh
 # OR
 sling run -c "
 source:
@@ -29,7 +29,7 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-mode: drop
+mode: full-refresh
 "
 
 # custom sql file
@@ -45,7 +45,7 @@ target:
 mode: append
 '
 
-# upsert
+# incremental
 sling run -c '
 source:
   conn: PG_DB
@@ -55,7 +55,7 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-mode: upsert
+mode: incremental
 '
 
 
@@ -112,7 +112,7 @@ mode: append
 '
 
 
-# CSV folder import into table, upsert
+# CSV folder import into table, incremental
 export AWS_ACCESS_KEY_ID=xxxxxxxxxxxxx
 export AWS_SECRET_ACCESS_KEY=xxxxxxxxx
 sling run -c '
@@ -123,5 +123,5 @@ source:
 target:
   conn: PG_DB
   object: public.transactions
-mode: upsert
+mode: incremental
 '

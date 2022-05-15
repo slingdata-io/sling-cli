@@ -28,12 +28,12 @@ type Mode string
 const (
 	// TruncateMode is to truncate
 	TruncateMode Mode = "truncate"
-	// DropMode is to drop
-	DropMode Mode = "drop"
+	// FullRefreshMode is to drop
+	FullRefreshMode Mode = "full-refresh"
 	// AppendMode is to append
 	AppendMode Mode = "append"
-	// UpsertMode is to upsert
-	UpsertMode Mode = "upsert"
+	// IncrementalMode is to incremental
+	IncrementalMode Mode = "incremental"
 	// SnapshotMode is to snapshot
 	SnapshotMode Mode = "snapshot"
 )
@@ -244,7 +244,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// set mode if primary key is providedand mode isnn't
 	if len(cfg.Source.PrimaryKey) > 0 && cfg.Mode == "" {
-		cfg.Mode = UpsertMode
+		cfg.Mode = IncrementalMode
 	}
 
 	// done
@@ -277,10 +277,10 @@ type Config struct {
 	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]interface{} `json:"env" yaml:"env"`
 
-	SrcConn   connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn   connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared  bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
-	UpsertVal string                `json:"-" yaml:"-"`
+	SrcConn        connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
+	TgtConn        connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
+	Prepared       bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
+	IncrementalVal string                `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface

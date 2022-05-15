@@ -377,7 +377,7 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 	folderDefaults := yaml.MapSlice{
 		{Key: "source", Value: sling.Source{Conn: sourceConn.Name}},
 		{Key: "target", Value: target},
-		{Key: "mode", Value: sling.DropMode},
+		{Key: "mode", Value: sling.FullRefreshMode},
 		{Key: "config", Value: g.M("schedule", scheduleExpr)},
 	}
 

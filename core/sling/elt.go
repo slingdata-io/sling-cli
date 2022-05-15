@@ -505,11 +505,11 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// check if table exists by getting target columns
 	t.Config.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
-	if t.Config.Mode == UpsertMode {
+	if t.Config.Mode == IncrementalMode {
 		t.SetProgress("getting checkpoint value")
-		t.Config.UpsertVal, err = getUpsertValue(t.Config, tgtConn, srcConn.Template().Variable)
+		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
-			err = g.Error(err, "Could not getUpsertValue")
+			err = g.Error(err, "Could not getIncrementalValue")
 			return err
 		}
 	}
@@ -564,7 +564,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	// check if referring to a SQL file
 	if strings.HasSuffix(strings.ToLower(cfg.Source.Stream), ".sql") {
-		// for upsert, need to put `{upsert_where_cond}` for proper selecting
+		// for incremental, need to put `{incremental_where_cond}` for proper selecting
 		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
 			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
@@ -579,7 +579,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if srcTable != "" && cfg.Mode != DropMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.Columns) > 0 {
+	if srcTable != "" && cfg.Mode != FullRefreshMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.Columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
 		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
@@ -597,36 +597,36 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// Get source columns
-	cfg.Source.Columns, err = srcConn.GetSQLColumns(g.R(sql, "upsert_where_cond", "1=0"))
+	cfg.Source.Columns, err = srcConn.GetSQLColumns(g.R(sql, "incremental_where_cond", "1=0"))
 	if err != nil {
 		err = g.Error(err, "Could not obtain source columns")
 		return t.df, err
 	}
 
-	if cfg.Mode == UpsertMode {
+	if cfg.Mode == IncrementalMode {
 		// select only records that have been modified after last max value
-		upsertWhereCond := "1=1"
-		if cfg.UpsertVal != "" {
-			upsertWhereCond = g.R(
+		incrementalWhereCond := "1=1"
+		if cfg.IncrementalVal != "" {
+			incrementalWhereCond = g.R(
 				"{update_key} >= {value}",
 				"update_key", srcConn.Quote(cfg.Source.Columns.Normalize(cfg.Source.UpdateKey)),
-				"value", cfg.UpsertVal,
+				"value", cfg.IncrementalVal,
 			)
 		}
 
 		if srcTable != "" {
 			sql = g.R(
-				`select {fields} from {table} where {upsert_where_cond}`,
+				`select {fields} from {table} where {incremental_where_cond}`,
 				"fields", fieldsStr,
 				"table", srcTable,
-				"upsert_where_cond", upsertWhereCond,
+				"incremental_where_cond", incrementalWhereCond,
 			)
 		} else {
-			if !strings.Contains(sql, "{upsert_where_cond}") {
-				err = g.Error("For upsert loading with custom SQL, need to include where clause placeholder {upsert_where_cond}. e.g: select * from my_table where col2='A' AND {upsert_where_cond}")
+			if !strings.Contains(sql, "{incremental_where_cond}") {
+				err = g.Error("For incremental loading with custom SQL, need to include where clause placeholder {incremental_where_cond}. e.g: select * from my_table where col2='A' AND {incremental_where_cond}")
 				return t.df, err
 			}
-			sql = g.R(sql, "upsert_where_cond", upsertWhereCond)
+			sql = g.R(sql, "incremental_where_cond", incrementalWhereCond)
 		}
 	} else if cfg.Source.Limit > 0 && srcTable != "" {
 		sql = g.R(
@@ -785,7 +785,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 // WriteToDb writes to a target DB
 // create temp table
 // load into temp table
-// insert / upsert / replace into target table
+// insert / incremental / replace into target table
 func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	targetTable := cfg.Target.Object
 
@@ -908,7 +908,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	defer tgtConn.Rollback() // rollback in case of error
 
 	if cnt > 0 {
-		if cfg.Mode == DropMode {
+		if cfg.Mode == FullRefreshMode {
 			// drop, (create if not exists) and insert directly
 			err = tgtConn.DropTable(targetTable)
 			if err != nil {
@@ -974,7 +974,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 		t.SetProgress("dropped old table of " + targetTable)
 
-	} else if cfg.Mode == AppendMode || cfg.Mode == DropMode {
+	} else if cfg.Mode == AppendMode || cfg.Mode == FullRefreshMode {
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
@@ -1002,14 +1002,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// need to decide whether to drop or keep it for future use
 			return 0, err
 		}
-	} else if cfg.Mode == UpsertMode {
+	} else if cfg.Mode == IncrementalMode {
 		// insert in temp
 		// create final if not exists
 		// delete from final and insert
 		// or update (such as merge or ON CONFLICT)
 		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Source.PrimaryKey)
 		if err != nil {
-			err = g.Error(err, "Could not upsert from temp")
+			err = g.Error(err, "Could not incremental from temp")
 			// data is still in temp table at this point
 			// need to decide whether to drop or keep it for future use
 			return 0, err
@@ -1123,7 +1123,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getUpsertValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (val string, err error) {
+func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (val string, err error) {
 	// get table columns type for table creation if not exists
 	// in order to get max value
 	// does table exists?

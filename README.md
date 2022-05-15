@@ -29,7 +29,7 @@ Then you should be able to run `sling --help` from command line.
 ```shell
 sling run --src-conn POSTGRES_URL --src-stream myschema.mytable \
   --tgt-conn SNOWFLAKE_URL --tgt-object yourschema.yourtable \
-  --mode drop
+  --mode full-refresh
 ```
 
 Or passing a yaml/json string or file
@@ -44,7 +44,7 @@ target:
   conn: $SNOWFLAKE_URL
   object: yourschema.yourtable
 
-mode: drop
+mode: full-refresh
 '
 # OR
 sling run -c /path/to/config.json
@@ -72,7 +72,7 @@ func main() {
         conn: $SNOWFLAKE_URL
         object: yourschema.yourtable
     
-    mode: drop
+    mode: full-refresh
   `
 	cfg, err := sling.NewConfig(cfgStr)
 	if err != nil {
