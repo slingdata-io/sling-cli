@@ -11,8 +11,8 @@
       "pre_sql": "testing", 
       "table_tmp": "testing"
     },
-    "mode": "testing", 
     "object": "testing", 
     "conn": "testing"
-  }
+  },
+  "mode": "testing"
 }

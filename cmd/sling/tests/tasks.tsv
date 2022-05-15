@@ -1,4 +1,4 @@
-source.conn	source.stream	source.options	target.conn	target.object	target.mode	source.primary_key	source.update_key	target.options	options	env
+source.conn	source.stream	source.options	target.conn	target.object	mode	source.primary_key	source.update_key	target.options	options	env
 DO_SPACES	s3://ocral/test_1000.csv	{}		file:///tmp/test_1000.csv				{}	{}	
 DO_SPACES	s3://ocral/test_1000.csv	{}	AWS_S3	s3://ocral-data-1/test_1000.csv				{}	{}	
 DO_SPACES	s3://ocral/test_1000.csv	{}	POSTGRES	public.test1k	drop			{}	{}	

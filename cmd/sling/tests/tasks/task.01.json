@@ -1,1 +1,1 @@
-{"env":{},"options":{},"source":{"conn":"DO_SPACES","options":{},"primary_key":[],"stream":"s3://ocral/test_1000.csv","update_key":""},"target":{"conn":"","mode":"","object":"file:///tmp/test_1000.csv","options":{}}}
+{"env":{},"mode":"","options":{},"source":{"conn":"DO_SPACES","options":{},"primary_key":[],"stream":"s3://ocral/test_1000.csv","update_key":""},"target":{"conn":"","object":"file:///tmp/test_1000.csv","options":{}}}

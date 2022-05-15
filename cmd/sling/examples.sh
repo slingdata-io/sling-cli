@@ -29,7 +29,7 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-  mode: drop
+mode: drop
 "
 
 # custom sql file
@@ -42,7 +42,7 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-  mode: append
+mode: append
 '
 
 # upsert
@@ -55,7 +55,7 @@ source:
 target:
   conn: MYSQL_DB
   object: mysql.bank_transactions
-  mode: upsert
+mode: upsert
 '
 
 
@@ -108,7 +108,7 @@ source:
 target:
   conn: PG_DB
   object: public.transactions
-  mode: append
+mode: append
 '
 
 
@@ -123,5 +123,5 @@ source:
 target:
   conn: PG_DB
   object: public.transactions
-  mode: upsert
+mode: upsert
 '

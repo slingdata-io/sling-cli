@@ -83,22 +83,22 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
 	g.Trace(summary)
 
-	if cfg.Target.Mode == "" {
-		cfg.Target.Mode = AppendMode
+	if cfg.Mode == "" {
+		cfg.Mode = AppendMode
 	}
-	validMode := cfg.Target.Mode != Mode("")
+	validMode := cfg.Mode != Mode("")
 	if !validMode {
 		t.Err = g.Error("must specify valid mode: append, drop, upsert or truncate")
 		return
 	}
 
-	if cfg.Target.Mode == "upsert" && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
+	if cfg.Mode == "upsert" && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
 		t.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode upsert in configration text (with: append, drop, upsert or truncate")
 		return
 	}
 
 	if srcDbProvided && tgtDbProvided {
-		if cfg.Target.Mode == "upsert" && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
+		if cfg.Mode == "upsert" && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
 			t.Err = g.Error("Must specify update_key / primary_key for 'upsert' mode")
 			return
 		}

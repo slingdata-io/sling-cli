@@ -131,7 +131,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
-			cfg.Target.Mode = sling.Mode(cast.ToString(v))
+			cfg.Mode = sling.Mode(cast.ToString(v))
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
 		case "examples":
@@ -168,7 +168,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			"cmd", "exec",
 			"error", g.ErrMsgSimple(task.Err),
 			"job_type", task.Type,
-			"job_mode", task.Config.Target.Mode,
+			"job_mode", task.Config.Mode,
 			"job_status", task.Status,
 			"job_src_type", task.Config.SrcConn.Type,
 			"job_tgt_type", task.Config.TgtConn.Type,

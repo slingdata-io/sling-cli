@@ -156,9 +156,9 @@ func TestTasks(t *testing.T) {
 			"target", g.M(
 				"conn", cast.ToString(rec["target_conn"]),
 				"object", cast.ToString(rec["target_object"]),
-				"mode", cast.ToString(rec["target_mode"]),
 				"options", targetOptions,
 			),
+			"mode", cast.ToString(rec["mode"]),
 			"options", options,
 			"env", env,
 		)
@@ -197,7 +197,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	}
 
 	// validate count
-	if task.Config.Target.Mode == sling.DropMode {
+	if task.Config.Mode == sling.DropMode {
 		g.Debug("getting count")
 		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
@@ -270,8 +270,8 @@ func TestInToDb(t *testing.T) {
 			"target", g.M(
 				"conn", tgtDB.URL,
 				"object", tgtDB.table,
-				"mode", sling.DropMode,
 			),
+			"mode", sling.DropMode,
 		)
 		config, err := sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
@@ -292,8 +292,8 @@ func TestInToDb(t *testing.T) {
 			"target", g.M(
 				"conn", tgtDB.URL,
 				"object", tgtDB.table+"_upsert",
-				"mode", sling.TruncateMode,
 			),
+			"mode", sling.TruncateMode,
 		)
 		config, err = sling.NewConfig(g.Marshal(cfgMap))
 		g.AssertNoError(t, err)
@@ -330,8 +330,8 @@ func TestDbToDb(t *testing.T) {
 				"target", g.M(
 					"conn", tgtDB.URL,
 					"object", tgtDB.table+"_copy",
-					"mode", sling.DropMode,
 				),
+				"mode", sling.DropMode,
 			)
 			config, err := sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
@@ -353,8 +353,8 @@ func TestDbToDb(t *testing.T) {
 					"object", tgtDB.table+"_copy",
 					"primary_key", []string{"id"},
 					"update_key", "create_dt",
-					"mode", sling.UpsertMode,
 				),
+				"mode", sling.UpsertMode,
 			)
 			config, err = sling.NewConfig(g.Marshal(cfgMap))
 			g.AssertNoError(t, err)
@@ -459,7 +459,7 @@ func TestCfgPath(t *testing.T) {
 		assert.EqualValues(t, "testing", cfg.TgtConn.Info().Name)
 		assert.EqualValues(t, "testing", cfg.Target.Object)
 		assert.EqualValues(t, "testing", cfg.TgtConn.URL())
-		assert.EqualValues(t, "testing", cfg.Target.Mode)
+		assert.EqualValues(t, "testing", cfg.Mode)
 		assert.EqualValues(t, 111, cfg.Source.Limit)
 		assert.EqualValues(t, "testing", cfg.Target.Options.TableDDL)
 		assert.EqualValues(t, "testing", cfg.Target.Options.TableTmp)
@@ -484,7 +484,7 @@ func testTask(t *testing.T) {
 	// config.Source.Conn = "file:///tmp/csvTest/part2.csv.gz"
 	config.Target.Conn = "PG_BIONIC_URL"
 	config.Target.Object = "public.sling_cli_events"
-	config.Target.Mode = sling.DropMode
+	config.Mode = sling.DropMode
 	config.Target.Options.UseBulk = true
 	err := config.Prepare()
 	if g.AssertNoError(t, err) {

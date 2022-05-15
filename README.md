@@ -43,7 +43,8 @@ source:
 target:
   conn: $SNOWFLAKE_URL
   object: yourschema.yourtable
-  mode: drop
+
+mode: drop
 '
 # OR
 sling run -c /path/to/config.json
@@ -70,7 +71,8 @@ func main() {
     target:
         conn: $SNOWFLAKE_URL
         object: yourschema.yourtable
-        mode: drop
+    
+    mode: drop
   `
 	cfg, err := sling.NewConfig(cfgStr)
 	if err != nil {

@@ -366,19 +366,18 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 	target := sling.Target{
 		Conn:   targetConn.Name,
 		Object: g.F("%s.{source_schema}_{source_table}", targetSchema),
-		Mode:   sling.DropMode,
 	}
 	if targetConn.Connection.Type.IsFile() {
 		target = sling.Target{
 			Conn:   targetConn.Name,
 			Object: g.F("%s/{source_schema}/{source_table}.csv", targetFolder),
-			Mode:   sling.DropMode,
 		}
 	}
 
 	folderDefaults := yaml.MapSlice{
 		{Key: "source", Value: sling.Source{Conn: sourceConn.Name}},
 		{Key: "target", Value: target},
+		{Key: "mode", Value: sling.DropMode},
 		{Key: "config", Value: g.M("schedule", scheduleExpr)},
 	}
 

@@ -243,8 +243,8 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set mode if primary key is providedand mode isnn't
-	if len(cfg.Source.PrimaryKey) > 0 && cfg.Target.Mode == "" {
-		cfg.Target.Mode = UpsertMode
+	if len(cfg.Source.PrimaryKey) > 0 && cfg.Mode == "" {
+		cfg.Mode = UpsertMode
 	}
 
 	// done
@@ -273,6 +273,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 type Config struct {
 	Source  Source                 `json:"source,omitempty" yaml:"source,omitempty"`
 	Target  Target                 `json:"target" yaml:"target"`
+	Mode    Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]interface{} `json:"env" yaml:"env"`
 
@@ -317,7 +318,6 @@ type Target struct {
 	Conn    string                 `json:"conn" yaml:"conn"`
 	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
 	Options TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
-	Mode    Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`

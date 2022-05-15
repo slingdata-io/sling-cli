@@ -16,7 +16,8 @@ func main() {
     target:
         conn: $SNOWFLAKE_URL
         object: yourschema.yourtable
-        mode: drop
+		
+		mode: drop
   `
 	cfg, err := sling.NewConfig(cfgStr)
 	if err != nil {

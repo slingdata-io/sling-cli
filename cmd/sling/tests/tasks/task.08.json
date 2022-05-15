@@ -1,1 +1,1 @@
-{"env":{},"options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"MSSQL","mode":"drop","object":"dbo.test1k","options":{}}}
+{"env":{},"mode":"drop","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"MSSQL","object":"dbo.test1k","options":{}}}

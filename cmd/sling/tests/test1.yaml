@@ -11,4 +11,4 @@ target:
     post_sql: testing
     table_ddl: testing
     table_tmp: testing
-  mode: testing
+mode: testing
