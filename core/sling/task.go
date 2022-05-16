@@ -1,7 +1,6 @@
 package sling
 
 import (
-	"context"
 	"os"
 	"strings"
 	"time"
@@ -36,6 +35,7 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		df:           iop.NewDataflow(),
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
+		cleanupFuncs: []func(){},
 	}
 
 	err := cfg.Prepare()
@@ -164,17 +164,17 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
-	ExecID        int64           `json:"exec_id"`
-	Config        *Config         `json:"config"`
-	Type          JobType         `json:"type"`
-	Status        ExecStatus      `json:"status"`
-	Err           error           `json:"error"`
-	StartTime     *time.Time      `json:"start_time"`
-	EndTime       *time.Time      `json:"end_time"`
-	Bytes         uint64          `json:"bytes"`
-	Ctx           context.Context `json:"-"`
-	Progress      string          `json:"progress"`
-	df            *iop.Dataflow   `json:"-"`
+	ExecID        int64         `json:"exec_id"`
+	Config        *Config       `json:"config"`
+	Type          JobType       `json:"type"`
+	Status        ExecStatus    `json:"status"`
+	Err           error         `json:"error"`
+	StartTime     *time.Time    `json:"start_time"`
+	EndTime       *time.Time    `json:"end_time"`
+	Bytes         uint64        `json:"bytes"`
+	Context       *g.Context    `json:"-"`
+	Progress      string        `json:"progress"`
+	df            *iop.Dataflow `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
@@ -182,6 +182,7 @@ type TaskExecution struct {
 	ProgressHist   []string     `json:"progress_hist"`
 	PBar           *ProgressBar `json:"-"`
 	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning
+	cleanupFuncs   []func()
 }
 
 // SetProgress sets the progress

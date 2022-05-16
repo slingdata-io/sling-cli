@@ -26,7 +26,7 @@ import (
 //go:embed *
 var slingFolder embed.FS
 var examples = ``
-var ctx, cancel = context.WithCancel(context.Background())
+var ctx = g.NewContext(context.Background())
 
 var cliRun = &g.CliSC{
 	Name:        "run",
@@ -497,7 +497,7 @@ func main() {
 	case <-interrupt:
 		if cliRun.Sc.Used {
 			println("\ninterrupting...")
-			cancel()
+			ctx.Cancel()
 			select {
 			case <-done:
 			case <-time.After(5 * time.Second):

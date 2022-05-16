@@ -116,8 +116,9 @@ func (t *TaskExecution) Execute() error {
 	t.StartTime = &now
 	t.lastIncrement = now
 
-	if t.Ctx == nil {
-		t.Ctx = context.Background()
+	if t.Context == nil {
+		ctx := g.NewContext(context.Background())
+		t.Context = &ctx
 	}
 
 	// get stats of process at beginning
@@ -157,12 +158,15 @@ func (t *TaskExecution) Execute() error {
 
 	select {
 	case <-done:
-	case <-t.Ctx.Done():
+		t.Cleanup()
+	case <-t.Context.Ctx.Done():
 		// need to add cancelling mechanism here
 		// if context is cancelled, need to cleanly cancel task
+		go t.Cleanup()
+
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 		}
 		if t.Err == nil {
 			t.Err = g.Error("Execution interrupted")
@@ -190,7 +194,7 @@ func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
 	srcProps := append(
 		g.MapToKVArr(t.Config.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
 	)
-	conn, err = database.NewConnContext(t.Ctx, t.Config.SrcConn.URL(), srcProps...)
+	conn, err = database.NewConnContext(t.Context.Ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -204,7 +208,7 @@ func (t *TaskExecution) getTgtDBConn() (conn database.Connection, err error) {
 	tgtProps := append(
 		g.MapToKVArr(t.Config.TgtConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
 	)
-	conn, err = database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	conn, err = database.NewConnContext(t.Context.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -232,7 +236,7 @@ func (t *TaskExecution) runDbSQL() (err error) {
 	defer tgtConn.Close()
 
 	t.SetProgress("executing sql on target database")
-	result, err := tgtConn.ExecContext(t.Ctx, t.Config.Target.Object)
+	result, err := tgtConn.ExecContext(t.Context.Ctx, t.Config.Target.Object)
 	if err != nil {
 		err = g.Error(err, "Could not complete sql execution on %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
@@ -468,7 +472,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	tgtConn, err := database.NewConnContext(t.Context.Ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -696,7 +700,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			g.MapToKVArr(cfg.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
 		)
 
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.SrcConn.URL(), props...)
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.SrcConn.URL(), props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL())
 			return t.df, err
@@ -745,7 +749,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			g.MapToKVArr(g.ToMapString(options))...,
 		)
 
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Ctx, cfg.TgtConn.URL(), props...)
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.TgtConn.URL(), props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL())
 			return cnt, err
@@ -836,7 +840,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 	cfg.Target.TmpTableCreated = true
-	defer tgtConn.DropTable(cfg.Target.Options.TableTmp)
+	t.AddCleanupTask(func() {
+		tgtConn.DropTable(cfg.Target.Options.TableTmp)
+	})
 
 	// TODO: if srcFile is from a cloud storage, and targetDB
 	// supports direct loading (RedShift, Snowflake or Azure)
@@ -1042,6 +1048,25 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	err = df.Context.Err()
 	return
+}
+
+func (t *TaskExecution) AddCleanupTask(f func()) {
+	t.Context.Mux.Lock()
+	defer t.Context.Mux.Unlock()
+	t.cleanupFuncs = append(t.cleanupFuncs, f)
+}
+
+func (t *TaskExecution) Cleanup() {
+	t.Context.Mux.Lock()
+	defer t.Context.Mux.Unlock()
+
+	for i, f := range t.cleanupFuncs {
+		f()
+		t.cleanupFuncs[i] = func() {} // in case it gets called again
+	}
+	if t.df != nil {
+		t.df.CleanUp()
+	}
 }
 
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {

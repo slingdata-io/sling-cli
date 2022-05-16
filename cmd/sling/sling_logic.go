@@ -159,7 +159,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	// set context
-	task.Ctx = ctx
+	task.Context = &ctx
 
 	// track usage
 	defer func() {
