@@ -160,8 +160,6 @@ func (t *TaskExecution) Execute() error {
 	case <-done:
 		t.Cleanup()
 	case <-t.Context.Ctx.Done():
-		// need to add cancelling mechanism here
-		// if context is cancelled, need to cleanly cancel task
 		go t.Cleanup()
 
 		select {
