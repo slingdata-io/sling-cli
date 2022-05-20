@@ -194,6 +194,9 @@ func (cfg *Config) Prepare() (err error) {
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = c.Connection
 		}
+		if cfg.TgtConn.Data == nil {
+			cfg.TgtConn.Data = g.M()
+		}
 	}
 
 	if isFileURL(cfg.Target.Object) {
@@ -224,6 +227,9 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = c.Connection
+		}
+		if cfg.SrcConn.Data == nil {
+			cfg.SrcConn.Data = g.M()
 		}
 	}
 
