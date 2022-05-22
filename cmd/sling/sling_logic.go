@@ -176,7 +176,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			"job_end_time", task.EndTime,
 			"job_rows_count", task.GetCount(),
 			"job_rows_in_bytes", inBytes,
-			"job_rows_ou_tbytes", outBytes,
+			"job_rows_out_bytes", outBytes,
 		)
 		Track("task.Execute", props)
 	}()
