@@ -246,6 +246,10 @@ func processConns(c *g.CliSC) (bool, error) {
 			if err != nil {
 				return ok, g.Error(err, "could not connect to %s", name)
 			}
+			_, err = fileClient.List(conn.Connection.URL())
+			if err != nil {
+				return ok, g.Error(err, "could not connect to %s", name)
+			}
 			g.Info("success!")
 		case conn.Connection.Type.IsAirbyte():
 			client, err := conn.Connection.AsAirbyte()
