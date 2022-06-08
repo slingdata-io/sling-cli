@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag: vx.x.x'     
+        description: 'Tag: x.x.x'     
         required: true
 jobs:
   bump:
