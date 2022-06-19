@@ -152,6 +152,96 @@ func setSchema(schema string, obj string) string {
 	return obj
 }
 
+func (cfg *Config) DetermineType() (Type JobType, err error) {
+
+	srcFileProvided := cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
+	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
+	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
+	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	srcStreamProvided := cfg.Source.Stream != ""
+
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+	g.Trace(summary)
+
+	if cfg.Mode == "" {
+		cfg.Mode = AppendMode
+	}
+	validMode := cfg.Mode != Mode("")
+	if !validMode {
+		err = g.Error("must specify valid mode: append, full-refresh, incremental or truncate")
+		return
+	}
+
+	if cfg.Mode == IncrementalMode && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
+		err = g.Error("must specify value for 'primary_key' and 'update_key' for mode incremental in configration text (with: append, full-refresh, incremental or truncate")
+		return
+	}
+
+	if srcDbProvided && tgtDbProvided {
+		if cfg.Mode == IncrementalMode && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
+			err = g.Error("Must specify update_key / primary_key for 'incremental' mode")
+			return
+		}
+		Type = DbToDb
+	} else if srcFileProvided && tgtDbProvided {
+		Type = FileToDB
+	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
+		Type = DbToFile
+	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
+		Type = FileToFile
+	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided {
+		Type = APIToDb
+	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
+		Type = APIToFile
+	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
+		cfg.Target.Object = cfg.Target.Options.PostSQL
+		Type = DbSQL
+	}
+
+	if Type == "" {
+		// g.PP(t)
+		sourceErrMsg := ""
+		targetErrMsg := ""
+
+		if !cfg.Options.StdIn {
+			if cfg.SrcConn.Name == "" {
+				targetErrMsg = g.F("source connection is missing, need to provide")
+			} else if cfg.SrcConn.Name != "" && cfg.SrcConn.Info().Type.IsUnknown() {
+				sourceErrMsg = g.F("source connection '%s' not valid / found in environment", cfg.SrcConn.Name)
+			}
+		}
+
+		if !cfg.Options.StdOut {
+			if cfg.TgtConn.Name == "" {
+				targetErrMsg = g.F("target connection is missing, need to provide")
+			} else if cfg.TgtConn.Name != "" && cfg.TgtConn.Info().Type.IsUnknown() {
+				targetErrMsg = g.F("target connection '%s' not valid / found in environment", cfg.TgtConn.Name)
+			}
+		}
+
+		output := []string{}
+		if sourceErrMsg != "" {
+			output = append(output, g.F("error -> %s", sourceErrMsg))
+		}
+		if targetErrMsg != "" {
+			output = append(output, g.F("error -> %s", targetErrMsg))
+		}
+
+		// []string{
+		// 	g.F("Source File Provided: %t", srcFileProvided),
+		// 	g.F("Target File Provided: %t", tgtFileProvided),
+		// 	g.F("Source DB Provided: %t", srcDbProvided),
+		// 	g.F("Target DB Provided: %t", tgtDbProvided),
+		// 	g.F("Source Stream Provided: %t", srcStreamProvided),
+		// 	g.F("Source API Provided: %t", srcAPIProvided),
+		// }
+
+		err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
+	}
+	return Type, err
+}
+
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {

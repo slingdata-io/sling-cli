@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
@@ -246,7 +247,16 @@ type Conn struct {
 	Connection  connection.Connection
 }
 
+var (
+	localConns   []Conn
+	localConnsTs time.Time
+)
+
 func GetLocalConns() []Conn {
+	if time.Since(localConnsTs).Seconds() < 10 {
+		return localConns // cachine to not re-read from disk. once every 10s
+	}
+
 	connsMap := map[string]Conn{}
 
 	// get dbt connections
@@ -330,5 +340,9 @@ func GetLocalConns() []Conn {
 	sort.Slice(connArr, func(i, j int) bool {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
 	})
+
+	localConnsTs = time.Now()
+	localConns = connArr
+
 	return connArr
 }

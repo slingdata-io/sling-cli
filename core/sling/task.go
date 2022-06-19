@@ -2,7 +2,6 @@ package sling
 
 import (
 	"os"
-	"strings"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -44,6 +43,12 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		return
 	}
 
+	t.Type, err = cfg.DetermineType()
+	if err != nil {
+		t.Err = g.Error(err, "could not determine type")
+		return
+	}
+
 	if ShowProgress {
 		// progress bar ticker
 		t.PBar = NewPBar(time.Second)
@@ -71,92 +76,6 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 				}
 			}
 		}()
-	}
-
-	srcFileProvided := cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
-	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
-	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
-	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
-	srcStreamProvided := cfg.Source.Stream != ""
-
-	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
-	g.Trace(summary)
-
-	if cfg.Mode == "" {
-		cfg.Mode = AppendMode
-	}
-	validMode := cfg.Mode != Mode("")
-	if !validMode {
-		t.Err = g.Error("must specify valid mode: append, full-refresh, incremental or truncate")
-		return
-	}
-
-	if cfg.Mode == IncrementalMode && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
-		t.Err = g.Error("must specify value for 'primary_key' and 'update_key' for mode incremental in configration text (with: append, full-refresh, incremental or truncate")
-		return
-	}
-
-	if srcDbProvided && tgtDbProvided {
-		if cfg.Mode == IncrementalMode && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
-			t.Err = g.Error("Must specify update_key / primary_key for 'incremental' mode")
-			return
-		}
-		t.Type = DbToDb
-	} else if srcFileProvided && tgtDbProvided {
-		t.Type = FileToDB
-	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
-		t.Type = DbToFile
-	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		t.Type = FileToFile
-	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided {
-		t.Type = APIToDb
-	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		t.Type = APIToFile
-	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
-		cfg.Target.Object = cfg.Target.Options.PostSQL
-		t.Type = DbSQL
-	}
-
-	if t.Type == "" {
-		// g.PP(t)
-		sourceErrMsg := ""
-		targetErrMsg := ""
-
-		if !cfg.Options.StdIn {
-			if cfg.SrcConn.Name == "" {
-				targetErrMsg = g.F("source connection is missing, need to provide")
-			} else if cfg.SrcConn.Name != "" && cfg.SrcConn.Info().Type.IsUnknown() {
-				sourceErrMsg = g.F("source connection '%s' not valid / found in environment", cfg.SrcConn.Name)
-			}
-		}
-
-		if !cfg.Options.StdOut {
-			if cfg.TgtConn.Name == "" {
-				targetErrMsg = g.F("target connection is missing, need to provide")
-			} else if cfg.TgtConn.Name != "" && cfg.TgtConn.Info().Type.IsUnknown() {
-				targetErrMsg = g.F("target connection '%s' not valid / found in environment", cfg.TgtConn.Name)
-			}
-		}
-
-		output := []string{}
-		if sourceErrMsg != "" {
-			output = append(output, g.F("error -> %s", sourceErrMsg))
-		}
-		if targetErrMsg != "" {
-			output = append(output, g.F("error -> %s", targetErrMsg))
-		}
-
-		// []string{
-		// 	g.F("Source File Provided: %t", srcFileProvided),
-		// 	g.F("Target File Provided: %t", tgtFileProvided),
-		// 	g.F("Source DB Provided: %t", srcDbProvided),
-		// 	g.F("Target DB Provided: %t", tgtDbProvided),
-		// 	g.F("Source Stream Provided: %t", srcStreamProvided),
-		// 	g.F("Source API Provided: %t", srcAPIProvided),
-		// }
-
-		t.Err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
 	}
 
 	return
