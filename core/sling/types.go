@@ -60,7 +60,7 @@ const (
 // IsRunning returns true if an execution is running
 func (s ExecStatus) IsRunning() bool {
 	switch s {
-	case ExecStatusStarted, ExecStatusRunning:
+	case ExecStatusCreated, ExecStatusStarted, ExecStatusRunning:
 		return true
 	}
 	return false
