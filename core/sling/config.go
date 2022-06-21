@@ -60,8 +60,8 @@ func NewConfig(cfgStr string) (cfg *Config, err error) {
 
 // SetDefault sets default options
 func (cfg *Config) SetDefault() {
-	cfg.Source.Options = sourceFileOptionsDefault
-	cfg.Target.Options = targetFileOptionsDefault
+	cfg.Source.Options = SourceFileOptionsDefault
+	cfg.Target.Options = TargetFileOptionsDefault
 }
 
 // Unmarshal parse a configuration file path or config text
@@ -450,7 +450,7 @@ type TargetOptions struct {
 	PostSQL  string `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
-var sourceFileOptionsDefault = SourceOptions{
+var SourceFileOptionsDefault = SourceOptions{
 	TrimSpace:      false,
 	EmptyAsNull:    true,
 	Header:         true,
@@ -462,7 +462,7 @@ var sourceFileOptionsDefault = SourceOptions{
 	MaxDecimals:    -1,
 }
 
-var targetFileOptionsDefault = TargetOptions{
+var TargetFileOptionsDefault = TargetOptions{
 	Header: true,
 	Compression: lo.Ternary(
 		os.Getenv("COMPRESSION") != "",
