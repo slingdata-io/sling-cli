@@ -48,9 +48,9 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 	inBytes, outBytes = t.df.Bytes()
 	if inBytes == 0 && outBytes == 0 {
 		// use tx/rc bytes
-		stats := g.GetProcStats(os.Getpid())
-		inBytes = stats.RcBytes - t.ProcStatsStart.RcBytes
-		outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
+		// stats := g.GetProcStats(os.Getpid())
+		// inBytes = stats.RcBytes - t.ProcStatsStart.RcBytes
+		// outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
 	}
 	return
 }
