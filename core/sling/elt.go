@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flarco/dbio"
+	"github.com/samber/lo"
 
 	"github.com/flarco/dbio/connection"
 
@@ -600,6 +601,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
 				return t.df, err
 			}
+
+			// add quotes
+			commFields = lo.Map(commFields, func(f string, i int) string {
+				return srcConn.Quote(f)
+			})
 			fieldsStr = strings.Join(commFields, ", ")
 		}
 	}
