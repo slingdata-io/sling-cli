@@ -268,6 +268,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	defer srcConn.Close()
 
 	t.SetProgress("reading from source database")
+	defer t.Cleanup()
 	t.df, err = t.ReadFromDB(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromDB")
@@ -302,6 +303,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
+	defer t.Cleanup()
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
@@ -359,6 +361,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
+	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
@@ -410,6 +413,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
+	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
@@ -442,6 +446,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	defer t.df.Close()
 
 	t.SetProgress("writing to target file system")
+	defer t.Cleanup()
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
@@ -534,6 +539,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	t.SetProgress("writing to target database")
+	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToDb")
@@ -839,7 +845,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 	cfg.Target.TmpTableCreated = true
 	t.AddCleanupTask(func() {
-		tgtConn.DropTable(cfg.Target.Options.TableTmp)
+		err := tgtConn.DropTable(cfg.Target.Options.TableTmp)
+		g.LogError(err)
 	})
 
 	// TODO: if srcFile is from a cloud storage, and targetDB
