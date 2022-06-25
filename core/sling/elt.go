@@ -622,7 +622,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		incrementalWhereCond := "1=1"
 		if cfg.IncrementalVal != "" {
 			incrementalWhereCond = g.R(
-				"{update_key} >= {value}",
+				"{update_key} > {value}",
 				"update_key", srcConn.Quote(cfg.Source.Columns.Normalize(cfg.Source.UpdateKey)),
 				"value", cfg.IncrementalVal,
 			)
