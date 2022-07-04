@@ -371,7 +371,7 @@ type Config struct {
 	Target  Target                 `json:"target" yaml:"target"`
 	Mode    Mode                   `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Options ConfigOptions          `json:"options,omitempty" yaml:"options,omitempty"`
-	Env     map[string]interface{} `json:"env" yaml:"env"`
+	Env     map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
 
 	SrcConn        connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
 	TgtConn        connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
@@ -391,9 +391,9 @@ func (cfg Config) Value() (driver.Value, error) {
 
 // ConfigOptions are configuration options
 type ConfigOptions struct {
-	Debug  bool `json:"debug" yaml:"debug"`
-	StdIn  bool `json:"-"`                    // whether stdin is passed
-	StdOut bool `json:"stdout" yaml:"stdout"` // whether to output to stdout
+	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
+	StdIn  bool `json:"-"`                                        // whether stdin is passed
+	StdOut bool `json:"stdout,omitempty" yaml:"stdout,omitempty"` // whether to output to stdout
 }
 
 // Source is a source of data
@@ -440,7 +440,7 @@ type TargetOptions struct {
 	Concurrency    int                `json:"concurrency" yaml:"concurrency"`
 	DatetimeFormat string             `json:"datetime_format" yaml:"datetime_format"`
 	Delimiter      string             `json:"delimiter" yaml:"delimiter"`
-	FileMaxRows    int64              `json:"file_max_rows" yaml:"file_max_rows"`
+	FileMaxRows    int64              `json:"file_max_rows" yaml:"file_max_rows,omitempty"`
 	MaxDecimals    int                `json:"max_decimals" yaml:"max_decimals"`
 
 	UseBulk  bool   `json:"use_bulk" yaml:"use_bulk"`
