@@ -112,7 +112,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "update-key":
 			cfg.Source.UpdateKey = cast.ToString(v)
 
-		case "tgt-object", "tgt-table":
+		case "tgt-object", "tgt-table", "tgt-file":
 			cfg.Target.Object = cast.ToString(v)
 			if strings.Contains(cfg.Target.Object, "://") {
 				if _, ok := c.Vals["tgt-conn"]; !ok { // tgt-conn not specified

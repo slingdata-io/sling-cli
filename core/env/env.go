@@ -1,8 +1,6 @@
 package env
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,14 +11,11 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
-	"github.com/flarco/g/net"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
-
-var DisableSendAnonUsage = false
 
 var (
 	HomeDir         = os.Getenv("SLING_HOME_DIR")
@@ -142,47 +137,10 @@ func FlattenEnvFile(filePath string) (env map[string]string, err error) {
 	return
 }
 
-// LogEvent logs to Graylog
-func LogEvent(m map[string]interface{}) {
-	if DisableSendAnonUsage {
-		return
-	}
-
-	URL := "https://logapi.slingdata.io/log/event/prd"
-	if os.Getenv("SLING_ENV") == "STG" {
-		URL = "https://logapi.slingdata.io/log/event/stg"
-	}
-
-	jsonBytes, err := json.Marshal(m)
-	if err != nil {
-		if g.IsDebugLow() {
-			g.LogError(err)
-		}
-	}
-
-	_, _, err = net.ClientDo(
-		"POST",
-		URL,
-		bytes.NewBuffer(jsonBytes),
-		map[string]string{"Content-Type": "application/json"},
-		1,
-	)
-
-	if err != nil {
-		if g.IsDebugLow() {
-			g.LogError(err)
-		}
-	}
-}
-
 // InitLogger initializes the g Logger
 func InitLogger() {
 	g.SetZeroLogLevel(zerolog.InfoLevel)
 	g.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
-
-	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
-		DisableSendAnonUsage = cast.ToBool(val)
-	}
 
 	if os.Getenv("_DEBUG_CALLER_LEVEL") != "" {
 		g.CallerLevel = cast.ToInt(os.Getenv("_DEBUG_CALLER_LEVEL"))
@@ -235,9 +193,7 @@ func InitLogger() {
 
 // Env returns the environment variables to propogate
 func Env() map[string]interface{} {
-	return g.M(
-		"SLING_SEND_ANON_USAGE", cast.ToString(!DisableSendAnonUsage),
-	)
+	return g.M()
 }
 
 type Conn struct {

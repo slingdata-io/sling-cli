@@ -445,7 +445,7 @@ func getRsClient() analytics.Client {
 }
 
 func Track(event string, props ...map[string]interface{}) {
-	if val := os.Getenv("SLING_SEND_ANON_USAGE"); val != "" {
+	if val := os.Getenv("SLING_SEND_TELEMETRY"); val != "" {
 		if !cast.ToBool(val) {
 			return
 		}
