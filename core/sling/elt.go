@@ -298,7 +298,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 	t.SetProgress("reading from source api system")
 	t.df, err = t.ReadFromAPI(t.Config)
 	if err != nil {
-		err = g.Error(err, "could not read from file")
+		err = g.Error(err, "could not read from api")
 		return
 	}
 	defer t.df.Close()
@@ -352,7 +352,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	t.SetProgress("reading from source api system")
 	t.df, err = t.ReadFromAPI(t.Config)
 	if err != nil {
-		err = g.Error(err, "could not read from file")
+		err = g.Error(err, "could not read from api")
 		return
 	}
 	defer t.df.Close()
