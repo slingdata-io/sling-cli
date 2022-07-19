@@ -296,8 +296,22 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to source api system")
+	srcConn, err := t.Config.SrcConn.AsAirbyte()
+	if err != nil {
+		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
+		return err
+	}
+	defer srcConn.Close()
+
+	err = srcConn.Init(false)
+	if err != nil {
+		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
+		return err
+	}
+
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(t.Config)
+	t.df, err = t.ReadFromAPI(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "could not read from api")
 		return
@@ -335,6 +349,19 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to source api system")
+	srcConn, err := t.Config.SrcConn.AsAirbyte()
+	if err != nil {
+		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
+		return err
+	}
+
+	err = srcConn.Init(false)
+	if err != nil {
+		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
+		return err
+	}
+
 	t.SetProgress("connecting to target database")
 	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
@@ -349,18 +376,36 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	}
 
 	defer tgtConn.Close()
+	defer srcConn.Close()
+
+	// set schema if needed
+	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
+	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
+
+	// get watermark
+	if t.Config.Mode == IncrementalMode {
+		t.SetProgress("getting checkpoint value")
+		dateLayout := iop.Iso8601ToGoLayout(srcConn.GetProp("date_layout"))
+		varMap := map[string]string{
+			"timestamp_layout":     dateLayout,
+			"timestamp_layout_str": "{value}",
+			"date_layout":          dateLayout,
+			"date_layout_str":      "{value}",
+		}
+		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
+		if err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+	}
 
 	t.SetProgress("reading from source api system")
-	t.df, err = t.ReadFromAPI(t.Config)
+	t.df, err = t.ReadFromAPI(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "could not read from api")
 		return
 	}
 	defer t.df.Close()
-
-	// set schema if needed
-	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
-	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	t.SetProgress("writing to target database")
 	defer t.Cleanup()
@@ -514,11 +559,12 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// check if table exists by getting target columns
 	t.Config.Target.columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
+	// get watermark
 	if t.Config.Mode == IncrementalMode {
 		t.SetProgress("getting checkpoint value")
 		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
-			err = g.Error(err, "Could not getIncrementalValue")
+			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
 	}
@@ -672,24 +718,16 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 }
 
 // ReadFromAPI reads from a source API
-func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
+func (t *TaskExecution) ReadFromAPI(cfg *Config, client *airbyte.Airbyte) (df *iop.Dataflow, err error) {
 
 	df = iop.NewDataflow()
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.Type.IsAirbyte() {
-		client, err := cfg.SrcConn.AsAirbyte()
-		if err != nil {
-			err = g.Error(err, "Could not obtain client for: %s", cfg.SrcConn.Type)
-			return t.df, err
+		config := airbyte.StreamConfig{
+			Columns:   cfg.Source.Columns,
+			StartDate: cfg.IncrementalVal,
 		}
-		err = client.Init(false)
-		if err != nil {
-			err = g.Error(err, "Could not init connection for: %s", cfg.SrcConn.Type)
-			return t.df, err
-		}
-
-		config := airbyte.StreamConfig{Columns: cfg.Source.Columns}
 		stream, err = client.Stream(cfg.Source.Stream, config)
 		if err != nil {
 			err = g.Error(err, "Could not read stream '%s' for connection: %s", cfg.Source.Stream, cfg.SrcConn.Type)
@@ -1043,7 +1081,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// need to decide whether to drop or keep it for future use
 			return 0, err
 		}
-		t.SetProgress("%d INSERTS / UPDATES", rowAffCnt)
+		g.Debug("%d TOTAL INSERTS / UPDATES", rowAffCnt)
 	}
 
 	// post SQL
@@ -1178,7 +1216,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	// get max value from key_field
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		cfg.Source.UpdateKey,
+		tgtConn.Quote(cfg.Source.UpdateKey),
 		cfg.Target.Object,
 	)
 
