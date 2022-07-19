@@ -15,6 +15,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/flarco/dbio/connection"
+	"github.com/flarco/dbio/saas/airbyte"
 
 	"github.com/flarco/dbio/filesys"
 
@@ -511,7 +512,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	t.Config.Target.Columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
+	t.Config.Target.columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
 	if t.Config.Mode == IncrementalMode {
 		t.SetProgress("getting checkpoint value")
@@ -558,7 +559,6 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
-	df = iop.NewDataflow()
 	srcTable := ""
 	sql := ""
 	fieldsStr := "*"
@@ -566,6 +566,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	if len(streamNameArr) == 1 && !strings.Contains(cfg.Source.Stream, "/") { // has no whitespace or "/", is a table/view
 		srcTable = streamNameArr[0]
 		srcTable = setSchema(cast.ToString(cfg.Source.Data["schema"]), srcTable)
+		if len(cfg.Source.Columns) > 0 {
+			fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
+				return srcConn.Quote(f)
+			})
+			fieldsStr = strings.Join(fields, ", ")
+		}
 		sql = g.F(`select %s from %s`, fieldsStr, srcTable)
 	} else {
 		sql = cfg.Source.Stream
@@ -588,14 +594,19 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if srcTable != "" && cfg.Mode != FullRefreshMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.Columns) > 0 {
+	if srcTable != "" && cfg.Mode != FullRefreshMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.columns) > 0 {
 		// since we are not dropping and table exists, we need to only select the matched columns
 		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
 
 		if len(columns) > 0 {
+			colNames := columns.Names()
+			if len(cfg.Source.Columns) > 0 {
+				colNames = database.CommonColumns(colNames, cfg.Source.Columns)
+			}
+
 			commFields := database.CommonColumns(
-				columns.Names(),
-				t.Config.Target.Columns.Names(),
+				colNames,
+				t.Config.Target.columns.Names(),
 			)
 			if len(commFields) == 0 {
 				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
@@ -611,7 +622,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// Get source columns
-	cfg.Source.Columns, err = srcConn.GetSQLColumns(g.R(sql, "incremental_where_cond", "1=0"))
+	cfg.Source.columns, err = srcConn.GetSQLColumns(g.R(sql, "incremental_where_cond", "1=0"))
 	if err != nil {
 		err = g.Error(err, "Could not obtain source columns")
 		return t.df, err
@@ -623,7 +634,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if cfg.IncrementalVal != "" {
 			incrementalWhereCond = g.R(
 				"{update_key} > {value}",
-				"update_key", srcConn.Quote(cfg.Source.Columns.Normalize(cfg.Source.UpdateKey)),
+				"update_key", srcConn.Quote(cfg.Source.columns.Normalize(cfg.Source.UpdateKey)),
 				"value", cfg.IncrementalVal,
 			)
 		}
@@ -672,13 +683,14 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 			err = g.Error(err, "Could not obtain client for: %s", cfg.SrcConn.Type)
 			return t.df, err
 		}
-		err = client.Init()
+		err = client.Init(false)
 		if err != nil {
 			err = g.Error(err, "Could not init connection for: %s", cfg.SrcConn.Type)
 			return t.df, err
 		}
 
-		stream, err = client.Stream(cfg.Source.Stream, time.Time{})
+		config := airbyte.StreamConfig{Columns: cfg.Source.Columns}
+		stream, err = client.Stream(cfg.Source.Stream, config)
 		if err != nil {
 			err = g.Error(err, "Could not read stream '%s' for connection: %s", cfg.Source.Stream, cfg.SrcConn.Type)
 			return t.df, err
@@ -699,7 +711,6 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config) (df *iop.Dataflow, err error) {
 // ReadFromFile reads from a source file
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
-	df = iop.NewDataflow()
 	var stream *iop.Datastream
 
 	if cfg.SrcConn.URL() != "" {
@@ -716,7 +727,8 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		df, err = fs.ReadDataflow(cfg.SrcConn.URL())
+		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns}
+		df, err = fs.ReadDataflow(cfg.SrcConn.URL(), fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcConn.URL())
 			return t.df, err

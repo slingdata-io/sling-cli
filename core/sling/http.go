@@ -2,9 +2,7 @@ package sling
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/url"
-	"strings"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -181,36 +179,6 @@ func ClientGet(serverURL string, route RouteName, m map[string]interface{}, head
 	}
 
 	return respStr, nil
-}
-
-// ClientGetJStream sends a GET request for a JSON streaming response
-func ClientGetJStream(serverURL string, route RouteName, m map[string]interface{}, headers map[string]string) (decoder *json.Decoder, err error) {
-	URL := serverURL + string(route) + "?"
-	for k, v := range m {
-		val := url.QueryEscape(cast.ToString(v))
-		if val == "" {
-			continue
-		}
-		if !strings.HasSuffix(URL, "?") {
-			URL = URL + "&"
-		}
-		URL = g.F("%s%s=%s", URL, k, val)
-	}
-
-	_, reader, err := net.ClientDoStream(
-		"GET",
-		URL,
-		nil,
-		headers,
-	)
-	if err != nil {
-		err = g.Error(err, "error sending GET to url")
-		return
-	}
-
-	decoder = json.NewDecoder(reader)
-
-	return
 }
 
 // ClientDelete sends a DELETE request

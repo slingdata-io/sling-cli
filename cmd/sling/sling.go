@@ -140,6 +140,36 @@ var cliConns = &g.CliSC{
 		// 	Description: "add new connection",
 		// },
 		{
+			Name:        "discover",
+			Description: "list available streams in connection",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to test",
+				},
+			},
+			Flags: []g.Flag{
+				{
+					Name:        "filter",
+					ShortName:   "f",
+					Type:        "string",
+					Description: "filter stream name by pattern (e.g. account_*)",
+				},
+				{
+					Name:        "folder",
+					Type:        "string",
+					Description: "discover streams in a specific folder (for file connections)",
+				},
+				{
+					Name:        "schema",
+					Type:        "string",
+					Description: "discover streams in a specific schema (for database connections)",
+				},
+			},
+		},
+		{
 			Name:        "list",
 			Description: "list local connections detected",
 		},
@@ -157,253 +187,6 @@ var cliConns = &g.CliSC{
 		},
 	},
 	ExecProcess: processConns,
-}
-
-var cliAuth = &g.CliSC{
-	Name:        "auth",
-	Description: "Sling cloud authentication",
-	SubComs: []*g.CliSC{
-		{
-			Name:        "login",
-			Description: "Log in from existing sling cloud account",
-			ExecProcess: processAuth,
-		},
-		{
-			Name:        "logout",
-			Description: "Log out the currently logged in user",
-			ExecProcess: processAuth,
-		},
-		{
-			Name:        "signup",
-			Description: "Create a new sling cloud account",
-			ExecProcess: processAuth,
-		},
-		{
-			Name:        "token",
-			Description: "Show the current auth token",
-			ExecProcess: processAuth,
-		},
-	},
-}
-
-var cliProjectTasksSubComs = []*g.CliSC{
-	{
-		Name:        "list",
-		Description: "List project tasks",
-		ExecProcess: processProjectTasks,
-	},
-	{
-		Name:        "show",
-		Description: "Show a singular task's details",
-		PosFlags: []g.Flag{
-			{
-				Name:        "task-id",
-				Type:        "string",
-				Description: "The task id to lookup",
-			},
-		},
-		ExecProcess: processProjectTasks,
-	},
-	{
-		Name:        "toggle-active",
-		Description: "Enable / disable task schedule",
-		ExecProcess: processProjectTasks,
-		PosFlags: []g.Flag{
-			{
-				Name:        "selector",
-				ShortName:   "s",
-				Type:        "string",
-				Description: "The selector string to filter affected records",
-			},
-		},
-	},
-	{
-		Name:        "trigger",
-		Description: "Send one or more tasks to cloud queue for execution, immediately",
-		ExecProcess: processProjectTasks,
-		PosFlags: []g.Flag{
-			{
-				Name:        "selector",
-				ShortName:   "s",
-				Type:        "string",
-				Description: "The selector string to filter affected records",
-			},
-		},
-		Flags: []g.Flag{
-			{
-				Name:        "dry-run",
-				Type:        "bool",
-				Description: "Returns a list of tasks to be executed. Good for validation.",
-			},
-		},
-	},
-	{
-		Name:        "terminate",
-		Description: "Terminate one or more tasks currently executing",
-		ExecProcess: processProjectTasks,
-		PosFlags: []g.Flag{
-			{
-				Name:        "selector",
-				ShortName:   "s",
-				Type:        "string",
-				Description: "The selector string to filter affected records",
-			},
-		},
-		Flags: []g.Flag{
-			{
-				Name:        "dry-run",
-				Type:        "bool",
-				Description: "Returns a list of tasks to be executed. Good for validation.",
-			},
-		},
-	},
-	{
-		Name:        "generate",
-		Description: "Auto-generate task files from a database schemata",
-		ExecProcess: processProjectTasksGenerate,
-	},
-}
-
-var cliProjectWorkersSubComs = []*g.CliSC{
-	{
-		Name:        "list",
-		Description: "List registered project self-hosted workers",
-		ExecProcess: processProjectWorkersList,
-	},
-	{
-		Name:        "attach",
-		Description: "Register & attach a self-hosted worker to project",
-		ExecProcess: processProjectWorkersAttach,
-	},
-	{
-		Name:        "detach",
-		Description: "Detach a self-hosted worker from project",
-		ExecProcess: processProjectWorkersDetach,
-	},
-}
-
-var cliProjectConnsSubComs = []*g.CliSC{
-	{
-		Name:        "set",
-		Description: "Set (create or update) a project connection",
-		ExecProcess: processProjectConns,
-	},
-	{
-		Name:        "unset",
-		Description: "Unset (delete) a project connection",
-		PosFlags: []g.Flag{
-			{
-				Name:        "name",
-				ShortName:   "",
-				Type:        "string",
-				Description: "The name of the connection to test",
-			},
-		},
-		ExecProcess: processProjectConns,
-	},
-	{
-		Name:        "list",
-		Description: "List the project connections. Only the name & type will be shown.",
-		ExecProcess: processProjectConns,
-	},
-	{
-		Name:        "test",
-		Description: "Test connectivity to a project connection",
-		PosFlags: []g.Flag{
-			{
-				Name:        "name",
-				ShortName:   "",
-				Type:        "string",
-				Description: "The name of the connection to test",
-			},
-		},
-		ExecProcess: processProjectConns,
-	},
-}
-
-var cliProjectVarsSubComs = []*g.CliSC{
-	{
-		Name:        "set",
-		Description: "Set (create or update) a project environment variable",
-		ExecProcess: processProjectVars,
-	},
-	{
-		Name:        "unset",
-		Description: "Unset (delete) a project environment variable",
-		PosFlags: []g.Flag{
-			{
-				Name:        "name",
-				ShortName:   "",
-				Type:        "string",
-				Description: "The name of the connection to test",
-			},
-		},
-		ExecProcess: processProjectVars,
-	},
-	{
-		Name:        "list",
-		Description: "List the project's environment variables. Only the name will be shown.",
-		ExecProcess: processProjectVars,
-	},
-}
-
-var cliProject = &g.CliSC{
-	Name:        "project",
-	Description: "Manage a sling cloud project",
-	SubComs: []*g.CliSC{
-		{
-			Name:        "init",
-			Description: "Initiate a new project",
-		},
-		{
-			Name:        "tasks",
-			Description: "Manage the project tasks",
-			SubComs:     cliProjectTasksSubComs,
-		},
-		{
-			Name:        "validate",
-			Description: "Validates project tasks and environment. Is ran prior to deployment",
-			ExecProcess: processProjectValidate,
-		},
-		{
-			Name:        "deploy",
-			Description: "Deploy a sling project",
-			ExecProcess: processProjectDeploy,
-		},
-		{
-			Name:        "conns",
-			Description: "Manage project connections",
-			SubComs:     cliProjectConnsSubComs,
-		},
-		{
-			Name:        "vars",
-			Description: "Manage project environment variables",
-			SubComs:     cliProjectVarsSubComs,
-		},
-		{
-			Name:        "workers",
-			Description: "Manage self-hosted workers",
-			SubComs:     cliProjectWorkersSubComs,
-		},
-		{
-			Name:        "history",
-			Description: "See project activity history",
-			ExecProcess: processProjectHistory,
-		},
-		{
-			Name:        "logs",
-			Description: "See project task execution logs",
-			PosFlags: []g.Flag{
-				{
-					Name:        "exec-id",
-					ShortName:   "",
-					Type:        "string",
-					Description: "The ID of the task execution",
-				},
-			},
-			ExecProcess: processProjectLogs,
-		},
-	},
 }
 
 func init() {

@@ -2,7 +2,6 @@ package sling
 
 import (
 	"database/sql/driver"
-	"encoding/json"
 	"io/ioutil"
 	"os"
 	"runtime"
@@ -19,7 +18,12 @@ import (
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
+	jsoniter "github.com/json-iterator/go"
 	"gopkg.in/yaml.v2"
+)
+
+var (
+	json = jsoniter.ConfigCompatibleWithStandardLibrary
 )
 
 // Mode is a load mode
@@ -400,13 +404,14 @@ type ConfigOptions struct {
 type Source struct {
 	Conn       string                 `json:"conn" yaml:"conn"`
 	Stream     string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Columns    []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
 	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Options    SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
-	Columns iop.Columns `json:"-" yaml:"-"`
+	columns iop.Columns `json:"-" yaml:"-"`
 }
 
 // Target is a target of data
@@ -417,7 +422,7 @@ type Target struct {
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
-	Columns         iop.Columns `json:"-" yaml:"-"`
+	columns         iop.Columns `json:"-" yaml:"-"`
 }
 
 // SourceOptions are connection and stream processing options

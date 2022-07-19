@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/integrii/flaggy"
@@ -209,12 +210,18 @@ func processConns(c *g.CliSC) (bool, error) {
 			T.AppendRow(table.Row{conn.Name, conn.Description, conn.Source})
 		}
 		println(T.Render())
-	case "test":
-		if len(c.Vals) == 0 {
+	case "discover", "test":
+		name := cast.ToString(c.Vals["name"])
+		filter := cast.ToString(c.Vals["filter"])
+		if len(c.Vals) == 0 || name == "" {
 			flaggy.ShowHelp("")
 			return ok, nil
 		}
-		name := cast.ToString(c.Vals["name"])
+
+		discover := c.UsedSC() == "discover"
+		schema := cast.ToString(c.Vals["schema"])
+		folder := cast.ToString(c.Vals["folder"])
+
 		conns := map[string]env.Conn{}
 		for _, conn := range env.GetLocalConns() {
 			conns[strings.ToLower(conn.Name)] = conn
@@ -226,7 +233,9 @@ func processConns(c *g.CliSC) (bool, error) {
 			return ok, nil
 		}
 
+		streamNames := []string{}
 		switch {
+
 		case conn.Connection.Type.IsDb():
 			dbConn, err := conn.Connection.AsDatabase()
 			if err != nil {
@@ -236,7 +245,16 @@ func processConns(c *g.CliSC) (bool, error) {
 			if err != nil {
 				return ok, g.Error(err, "could not connect to %s", name)
 			}
-			g.Info("success!")
+			if discover {
+				schemata, err := dbConn.GetSchemata(schema, "")
+				if err != nil {
+					return ok, g.Error(err, "could not discover %s", name)
+				}
+				for _, table := range schemata.Tables() {
+					streamNames = append(streamNames, table.FullName())
+				}
+			}
+
 		case conn.Connection.Type.IsFile():
 			fileClient, err := conn.Connection.AsFile()
 			if err != nil {
@@ -246,23 +264,61 @@ func processConns(c *g.CliSC) (bool, error) {
 			if err != nil {
 				return ok, g.Error(err, "could not connect to %s", name)
 			}
-			_, err = fileClient.List(conn.Connection.URL())
+
+			url := conn.Connection.URL()
+			if folder != "" {
+				if !strings.HasPrefix(folder, string(fileClient.FsType())+"://") {
+					return ok, g.Error("need to use proper URL for folder path. Example -> %s/my-folder", url)
+				}
+				url = folder
+			}
+
+			streamNames, err = fileClient.List(url)
 			if err != nil {
 				return ok, g.Error(err, "could not connect to %s", name)
 			}
-			g.Info("success!")
+
 		case conn.Connection.Type.IsAirbyte():
 			client, err := conn.Connection.AsAirbyte()
 			if err != nil {
 				return ok, g.Error(err, "could not initiate %s", name)
 			}
-			err = client.Init()
+			err = client.Init(!discover)
 			if err != nil {
 				return ok, g.Error(err, "could not connect to %s", name)
 			}
-			g.Info("success!")
+			if discover {
+				streams, err := client.Discover()
+				if err != nil {
+					return ok, g.Error(err, "could not discover %s", name)
+				}
+				streamNames = streams.Names()
+			}
+
 		default:
-			g.Warn("Unhandled connection type: %s", conn.Connection.Type)
+			return ok, g.Error("Unhandled connection type: %s", conn.Connection.Type)
+		}
+
+		if discover {
+			// sort alphabetically
+			sort.Slice(streamNames, func(i, j int) bool {
+				return streamNames[i] < streamNames[j]
+			})
+
+			g.Info("Found %d streams:", len(streamNames))
+			filters := strings.Split(filter, ",")
+			for _, sn := range streamNames {
+				if filter == "" || g.IsMatched(filters, sn) {
+					println(g.F(" - %s", sn))
+				}
+			}
+			if len(streamNames) > 0 && conn.Connection.Type.IsFile() &&
+				folder == "" {
+				println()
+				g.Warn("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders")
+			}
+		} else {
+			g.Info("success!") // successfully connected
 		}
 
 	case "":
