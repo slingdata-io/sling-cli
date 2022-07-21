@@ -20,3 +20,6 @@ SNOWFLAKE	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}
 	file://tests/files/test1.upsert.csv	{}	MYSQL	mysql.test1	incremental	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	MSSQL	dbo.test1	full-refresh			{}	{}	
 	file://tests/files/test1.upsert.csv	{}	MSSQL	dbo.test1	incremental	id	created_dt	{}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+GITHUB_DBIO	commits	{}	POSTGRES	public.test1	full-refresh					
+GITHUB_DBIO	commits	{}	POSTGRES	public.test1	incremental	sha	created_at	{}	{}	
+NOTION	users	{}	POSTGRES	public.test1	full-refresh					
