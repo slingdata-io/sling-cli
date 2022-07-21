@@ -225,8 +225,8 @@ func GetLocalConns() []Conn {
 				Source:      "dbt profiles yaml",
 				Connection:  conn,
 			}
-			name := strings.ReplaceAll(c.Name, "/", "_")
-			connsMap[name] = c
+			c.Name = strings.ReplaceAll(c.Name, "/", "_")
+			connsMap[c.Name] = c
 		}
 	}
 
