@@ -956,7 +956,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// Checksum Comparison, data quality
 		err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
 		if err != nil {
-			g.Debug(err.Error())
+			g.Debug(g.ErrMsgSimple(err))
 		}
 	}
 
