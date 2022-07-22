@@ -9,6 +9,7 @@ rm -rf .git
 
 export VERSION=$1
 echo "VERSION -> $VERSION"
-GOOS=linux GOARCH=amd64 go build -ldflags="-X 'core.Version=$VERSION'" -o sling-linux cmd/sling/*.go
+sed 's/Version: //'
+GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION'" -o sling-linux cmd/sling/*.go
 
 ./sling-linux version

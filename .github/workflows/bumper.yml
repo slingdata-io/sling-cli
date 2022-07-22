@@ -5,6 +5,9 @@ on:
       new_tag:
         description: "The new tag"
         value: ${{ jobs.bump.outputs.new_tag }}
+      new_version:
+        description: "The new version"
+        value: ${{ jobs.bump.outputs.new_version }}
   
   workflow_dispatch:
     inputs:
@@ -16,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      new_version: ${{ steps.tag_version.outputs.new_version }}
     steps:
       - uses: actions/checkout@v2
       - name: Bump version and push tag
