@@ -32,14 +32,16 @@ jobs:
         run: |
           echo "VERSION -> $VERSION"
           echo "REF_NAME -> $REF_NAME"
-          echo "GIT_TAG=`echo $(git describe --tags --abbrev=0)`" >> $VERSION
+
+          export VERSION=$(git describe --tags `git rev-list --tags --max-count=1`)
           echo "VERSION -> $VERSION"
 
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          docker run --rm -e VERSION=$VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base VERSION=$VERSION bash scripts/build.linux.sh
+
+          docker run --rm -e VERSION=$VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
           rm -rf $WORK_FOLDER
           /tmp/sling-linux
 
