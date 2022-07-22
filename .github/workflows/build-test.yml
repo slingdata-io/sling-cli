@@ -1,14 +1,17 @@
-name: Build & Test
+name: Bump, Build & Test
 
 on: 
   workflow_dispatch:
   repository_dispatch:
     types: [build-test]
   push:
-    tags:
-      - 'v*.*.*'
 
 jobs:
+  bump:
+    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    uses: ./.github/workflows/bumper.yml
+    secrets: inherit
+  
   build:
     if: "! contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: [self-hosted, linux]
@@ -17,15 +20,12 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.client_payload.ref }}
-        
-      - name: Get the version
-        id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
 
       - name: Build
         env:
           # VERSION: ${{ steps.get_version.outputs.VERSION }}
-          VERSION: ${{ github.event.client_payload.version }}
+          # VERSION: ${{ github.event.client_payload.version }}
+          VERSION: ${{ ${{ needs.bump.outputs.new_tag }} }}
           REF_NAME: ${{ github.ref_name }}
         
         run: |
@@ -36,7 +36,7 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          docker run --rm -e VERSION=$REF_NAME -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
+          docker run --rm -e VERSION=$VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
           /tmp/sling-linux
 
