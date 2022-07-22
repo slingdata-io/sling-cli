@@ -10,10 +10,15 @@ jobs:
       - uses: actions/checkout@v2
         
       - name: Get the version
+        id: get_version
+        run: |
+          TAG=$(git tag -l --sort=-creatordate | head -n 1)
+          VERSION=$(echo $TAG | sed 's/v//')
+          echo ::set-output name=version::$VERSION
+          
+      - name: Get the version
         env:
-          TAG: ${{ steps.get-latest-tag.outputs.tag }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           echo "VERSION -> $VERSION"
-          echo "REF_NAME -> $REF_NAME"
-          echo "TAG1 -> $(git describe --tags --abbrev=0)"
           echo "TAG2 -> $(git tag -l --sort=-creatordate | head -n 1)"
