@@ -34,6 +34,7 @@ jobs:
           rm -rf $WORK_FOLDER
           echo "REF_NAME -> $REF_NAME"
           echo "VERSION -> $VERSION"
+          /tmp/sling-linux
 
   test:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]'))"
