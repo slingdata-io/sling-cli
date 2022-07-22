@@ -22,15 +22,15 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ github.event.inputs.tag }}
   
-  build-test:
-    needs: [bump]
-    runs-on: ubuntu-latest
+  # build-test:
+  #   needs: [bump]
+  #   runs-on: ubuntu-latest
 
-    steps:          
-      - name: Trigger Build & Test
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          token: ${{ secrets.REPO_ACCESS_TOKEN }}
-          repository: slingdata-io/sling-cli
-          event-type: build-test
-          client-payload: "{\"version\": \"${{ needs.bump.outputs.new_tag }}\"}"
+  #   steps:          
+  #     - name: Trigger Build & Test
+  #       uses: peter-evans/repository-dispatch@v2
+  #       with:
+  #         token: ${{ secrets.REPO_ACCESS_TOKEN }}
+  #         repository: slingdata-io/sling-cli
+  #         event-type: build-test
+  #         client-payload: "{\"version\": \"${{ needs.bump.outputs.new_tag }}\"}"
