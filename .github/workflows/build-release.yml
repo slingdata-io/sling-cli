@@ -11,17 +11,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
 
       - id: step1
         name: Build
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
+          docker run --rm -e VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
 
+          echo $VERSION
           VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
           echo ::set-output name=version::$VERSION
 
@@ -86,14 +93,20 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Build Sling (Linux)
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'linux'
         run: bash scripts/ci/build.linux.sh
 
       - name: Build Sling (Mac)
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'macOS'
         run: bash scripts/ci/build.mac.sh
 
       - name: Build Sling (Windows)
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'windows'
         run: .\scripts\ci\build.win.ps1
 
