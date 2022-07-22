@@ -11,6 +11,8 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
     steps:
       - uses: actions/checkout@v2
       - name: Bump version and push tag
@@ -27,11 +29,12 @@ jobs:
     steps:
       - name: Set Payload
         env:
-          VERSION: ${{ steps.tag_version.outputs.new_tag }}
+          VERSION: ${{ needs.bump.outputs.new_tag }}
         run: |
           echo "VERSION -> $VERSION"
           export PAYLOAD="{\"version\": \"$VERSION\"}"
           echo "PAYLOAD -> $PAYLOAD"
+          echo "::set-output payload=$PAYLOAD"
           
       - name: Trigger Build & Test
         uses: peter-evans/repository-dispatch@v2
@@ -39,4 +42,4 @@ jobs:
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
           repository: slingdata-io/sling-cli
           event-type: build-test
-          client-payload: "{\"version\": \"${{ steps.tag_version.outputs.new_tag }}\"}"
+          client-payload: "{\"version\": \"${{ needs.bump.outputs.new_tag }}\"}"
