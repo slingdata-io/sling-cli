@@ -26,14 +26,15 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         
         run: |
+          echo "REF_NAME -> $REF_NAME"
+          echo "VERSION -> $VERSION"
+          
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
           docker run --rm -e VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
-          echo "REF_NAME -> $REF_NAME"
-          echo "VERSION -> $VERSION"
           /tmp/sling-linux
 
   test:

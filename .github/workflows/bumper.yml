@@ -26,16 +26,7 @@ jobs:
     needs: [bump]
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Set Payload
-        env:
-          VERSION: ${{ needs.bump.outputs.new_tag }}
-        run: |
-          echo "VERSION -> $VERSION"
-          export PAYLOAD="{\"version\": \"$VERSION\"}"
-          echo "PAYLOAD -> $PAYLOAD"
-          echo "::set-output payload=$PAYLOAD"
-          
+    steps:          
       - name: Trigger Build & Test
         uses: peter-evans/repository-dispatch@v2
         with:
