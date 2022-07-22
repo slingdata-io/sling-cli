@@ -9,15 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         
-      - uses: actions-ecosystem/action-get-latest-tag@v1
-        id: get-latest-tag
-        
       - name: Get the version
         env:
           TAG: ${{ steps.get-latest-tag.outputs.tag }}
         run: |
           echo "VERSION -> $VERSION"
           echo "REF_NAME -> $REF_NAME"
-          echo "TAG -> $(git describe --tags --abbrev=0)"
-          echo "TAG -> $TAG"
-          git tag -l
+          echo "TAG1 -> $(git describe --tags --abbrev=0)"
+          echo "TAG2 -> $(git tag -l --sort=-creatordate | head -n 1)"
