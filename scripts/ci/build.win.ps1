@@ -10,12 +10,15 @@ setx GOARCH "amd64"
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
 $version = $args[0]
+echo "version -> $version"
+echo "VERSION -> $env:VERSION"
 
 go mod edit -dropreplace='github.com/flarco/g' go.mod
 go mod edit -dropreplace='github.com/flarco/dbio' go.mod
 go mod tidy
-go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$version'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
+go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
+.\sling-win.exe --version
 $env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
 echo "VERSION -> $env:VERSION"
 mkdir -Force -p "dist\$env:VERSION"

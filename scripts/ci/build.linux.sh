@@ -14,6 +14,7 @@ export VERSION=$1
 echo "VERSION -> $VERSION"
 GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION'" -o sling-linux cmd/sling/*.go
 
+./sling-linux --version
 VERSION=$(./sling-linux --version | sed 's/Version: //')
 echo "VERSION -> $VERSION"
 mkdir -p dist/$VERSION

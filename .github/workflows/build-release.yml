@@ -111,7 +111,7 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'windows'
-        run: .\scripts\ci\build.win.ps1 $VERSION
+        run: .\scripts\ci\build.win.ps1 $env:VERSION
 
       # - name: Release Binaries to Github
       #   uses: "marvinpinto/action-automatic-releases@latest"
