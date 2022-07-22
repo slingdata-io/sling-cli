@@ -1,6 +1,11 @@
 name: Bump version
 on:
   workflow_call:
+    outputs:
+      new_tag:
+        description: "The new tag"
+        value: ${{ jobs.bump.outputs.new_tag }}
+  
   workflow_dispatch:
     inputs:
       tag:
