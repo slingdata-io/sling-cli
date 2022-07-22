@@ -1,6 +1,9 @@
 name: Build & Test
 
-on: [push]
+on: 
+  workflow_dispatch:
+  repository_dispatch:
+    types: [build-test]
 
 jobs:
   build:
@@ -8,15 +11,9 @@ jobs:
     runs-on: [self-hosted, linux]
 
     steps:
-      - name: Wait for bumper
-        uses: lewagon/wait-on-check-action@v1.0.0
-        with:
-          ref: ${{ github.ref }}
-          check-name: bump
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-
       - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.client_payload.ref }}
         
       - name: Get the version
         id: get_version
@@ -24,7 +21,10 @@ jobs:
 
       - name: Build
         env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          # VERSION: ${{ steps.get_version.outputs.VERSION }}
+          VERSION: ${{ github.event.client_payload.version }}
+          REF_NAME: ${{ github.ref_name }}
+        
         run: |
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
@@ -32,7 +32,8 @@ jobs:
           cp -r . $WORK_FOLDER/sling
           docker run --rm -e VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
           rm -rf $WORK_FOLDER
-          echo $VERSION
+          echo "REF_NAME -> $REF_NAME"
+          echo "VERSION -> $VERSION"
 
   test:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]'))"
