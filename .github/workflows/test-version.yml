@@ -1,0 +1,23 @@
+name: Test Version
+
+on: [workflow_dispatch]
+
+jobs:
+  test1:
+    runs-on: [self-hosted, linux]
+
+    steps:
+      - uses: actions/checkout@v2
+        
+      - uses: actions-ecosystem/action-get-latest-tag@v1
+        id: get-latest-tag
+        
+      - name: Get the version
+        env:
+          TAG: ${{ steps.get-latest-tag.outputs.tag }}
+        run: |
+          echo "VERSION -> $VERSION"
+          echo "REF_NAME -> $REF_NAME"
+          echo "TAG -> $(git describe --tags --abbrev=0)"
+          echo "TAG -> $TAG"
+          git tag -l
