@@ -31,4 +31,4 @@ jobs:
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
           repository: slingdata-io/sling-cli
           event-type: build-test
-          client-payload: '{"version": "${{ steps.bump.outputs.new_tag }}"}'
+          client-payload: '{"version": "${{ steps.tag_version.outputs.new_tag }}"}'
