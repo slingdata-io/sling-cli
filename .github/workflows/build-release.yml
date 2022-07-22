@@ -17,12 +17,12 @@ jobs:
         run: |
           TAG=$(git tag -l --sort=-creatordate | head -n 1)
           VERSION=$(echo $TAG | sed 's/v//')
-          echo ::set-output name=version::$VERSION
+          echo ::set-output name=VERSION::$VERSION
 
       - id: step1
         name: Build
         env:
-          VERSION: ${{ steps.get_version.outputs.version }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}

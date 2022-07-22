@@ -17,7 +17,7 @@ go mod tidy
 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$version'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
 $env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
-echo "$env:VERSION"
+echo "VERSION -> $env:VERSION"
 mkdir -Force -p "dist\$env:VERSION"
 copy .\sling-win.exe dist
 copy .\sling-win.exe "dist\$env:VERSION"
