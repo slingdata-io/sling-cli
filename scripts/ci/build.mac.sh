@@ -9,7 +9,10 @@ echo "Building sling-mac"
 go mod edit -dropreplace='github.com/flarco/g' go.mod
 go mod edit -dropreplace='github.com/flarco/dbio' go.mod
 go mod tidy
-GOOS=darwin GOARCH=amd64 go build -o sling-mac cmd/sling/*.go
+
+export VERSION=$1
+echo "VERSION -> $VERSION"
+GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION'" -o sling-mac cmd/sling/*.go
 
 VERSION=$(./sling-mac --version | sed 's/Version: //')
 echo $VERSION

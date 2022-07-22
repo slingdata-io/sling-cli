@@ -14,18 +14,21 @@ jobs:
         
       - name: Get the version
         id: get_version
-        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+        run: |
+          TAG=$(git tag -l --sort=-creatordate | head -n 1)
+          VERSION=$(echo $TAG | sed 's/v//')
+          echo ::set-output name=version::$VERSION
 
       - id: step1
         name: Build
         env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          docker run --rm -e VERSION -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
           rm -rf $WORK_FOLDER
 
           echo $VERSION
@@ -96,19 +99,19 @@ jobs:
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'linux'
-        run: bash scripts/ci/build.linux.sh
+        run: bash scripts/ci/build.linux.sh $VERSION
 
       - name: Build Sling (Mac)
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'macOS'
-        run: bash scripts/ci/build.mac.sh
+        run: bash scripts/ci/build.mac.sh $VERSION
 
       - name: Build Sling (Windows)
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         if: runner.os == 'windows'
-        run: .\scripts\ci\build.win.ps1
+        run: .\scripts\ci\build.win.ps1 $VERSION
 
       # - name: Release Binaries to Github
       #   uses: "marvinpinto/action-automatic-releases@latest"
