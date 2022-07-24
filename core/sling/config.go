@@ -14,8 +14,6 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
-	"github.com/jmespath/go-jmespath"
-
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	jsoniter "github.com/json-iterator/go"
@@ -46,7 +44,6 @@ const (
 func NewConfig(cfgStr string) (cfg *Config, err error) {
 	// set default, unmarshalling will overwrite
 	cfg = &Config{}
-	cfg.SetDefault()
 
 	err = cfg.Unmarshal(cfgStr)
 	if err != nil {
@@ -64,8 +61,88 @@ func NewConfig(cfgStr string) (cfg *Config, err error) {
 
 // SetDefault sets default options
 func (cfg *Config) SetDefault() {
-	cfg.Source.Options = SourceFileOptionsDefault
-	cfg.Target.Options = TargetFileOptionsDefault
+
+	// set source options
+	var sourceOptions SourceOptions
+	switch cfg.SrcConn.Type.Kind() {
+	case dbio.KindFile:
+		sourceOptions = SourceFileOptionsDefault
+	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+		sourceOptions = SourceDBOptionsDefault
+	default:
+		sourceOptions = SourceDBOptionsDefault
+	}
+
+	if cfg.Source.Options == nil {
+		cfg.Source.Options = &sourceOptions
+	}
+	if cfg.Source.Options.TrimSpace == nil {
+		cfg.Source.Options.TrimSpace = sourceOptions.TrimSpace
+	}
+	if cfg.Source.Options.EmptyAsNull == nil {
+		cfg.Source.Options.EmptyAsNull = sourceOptions.EmptyAsNull
+	}
+	if cfg.Source.Options.Header == nil {
+		cfg.Source.Options.Header = sourceOptions.Header
+	}
+	if cfg.Source.Options.Compression == nil {
+		cfg.Source.Options.Compression = sourceOptions.Compression
+	}
+	if cfg.Source.Options.NullIf == nil {
+		cfg.Source.Options.NullIf = sourceOptions.NullIf
+	}
+	if cfg.Source.Options.DatetimeFormat == "" {
+		cfg.Source.Options.DatetimeFormat = sourceOptions.DatetimeFormat
+	}
+	if cfg.Source.Options.SkipBlankLines == nil {
+		cfg.Source.Options.SkipBlankLines = sourceOptions.SkipBlankLines
+	}
+	if cfg.Source.Options.Delimiter == "" {
+		cfg.Source.Options.Delimiter = sourceOptions.Delimiter
+	}
+	if cfg.Source.Options.MaxDecimals == nil {
+		cfg.Source.Options.MaxDecimals = sourceOptions.MaxDecimals
+	}
+
+	// set target options
+	var targetptions TargetOptions
+	switch cfg.TgtConn.Type.Kind() {
+	case dbio.KindFile:
+		targetptions = TargetFileOptionsDefault
+	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+		targetptions = TargetDBOptionsDefault
+	default:
+		targetptions = TargetDBOptionsDefault
+	}
+
+	if cfg.Target.Options == nil {
+		cfg.Target.Options = &targetptions
+	}
+	if cfg.Target.Options.Header == nil {
+		cfg.Target.Options.Header = targetptions.Header
+	}
+	if cfg.Target.Options.Compression == nil {
+		cfg.Target.Options.Compression = targetptions.Compression
+	}
+	if cfg.Target.Options.Concurrency == 0 {
+		cfg.Target.Options.Concurrency = targetptions.Concurrency
+	}
+	if cfg.Target.Options.FileMaxRows == 0 {
+		cfg.Target.Options.FileMaxRows = targetptions.FileMaxRows
+	}
+	if cfg.Target.Options.UseBulk == nil {
+		cfg.Target.Options.UseBulk = targetptions.UseBulk
+	}
+	if cfg.Target.Options.DatetimeFormat == "" {
+		cfg.Target.Options.DatetimeFormat = targetptions.DatetimeFormat
+	}
+	if cfg.Target.Options.Delimiter == "" {
+		cfg.Target.Options.Delimiter = targetptions.Delimiter
+	}
+	if cfg.Target.Options.MaxDecimals == nil {
+		cfg.Target.Options.MaxDecimals = targetptions.MaxDecimals
+	}
+
 }
 
 // Unmarshal parse a configuration file path or config text
@@ -106,40 +183,6 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.TgtConn.Data == nil {
 		cfg.TgtConn.Data = g.M()
-	}
-
-	// set default options
-	m := g.M()
-	g.Unmarshal(string(cfgBytes), &m)
-
-	if cfg.Source.Stream != "" {
-		val, err := jmespath.Search("source.options.header", m)
-		if val == nil || err != nil {
-			cfg.Source.Options.Header = true
-		}
-		val, err = jmespath.Search("source.options.delimiter", m)
-		if val == nil || err != nil {
-			cfg.Source.Options.Delimiter = ","
-		}
-	}
-
-	if cfg.Target.Object != "" {
-		val, err := jmespath.Search("target.options.header", m)
-		if val == nil || err != nil {
-			cfg.Target.Options.Header = true
-		}
-		val, err = jmespath.Search("target.options.delimiter", m)
-		if val == nil || err != nil {
-			cfg.Target.Options.Delimiter = ","
-		}
-		val, err = jmespath.Search("target.options.use_bulk", m)
-		if val == nil || err != nil {
-			cfg.Target.Options.UseBulk = true
-		}
-		val, err = jmespath.Search("target.options.concurrency", m)
-		if val == nil || err != nil {
-			cfg.Target.Options.Concurrency = runtime.NumCPU()
-		}
 	}
 
 	return nil
@@ -198,7 +241,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = APIToDb
 	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		Type = APIToFile
-	} else if tgtDbProvided && cfg.Target.Options.PostSQL != "" {
+	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != "" {
 		cfg.Target.Object = cfg.Target.Options.PostSQL
 		Type = DbSQL
 	}
@@ -408,7 +451,7 @@ type Source struct {
 	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
-	Options    SourceOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Options    *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	columns iop.Columns `json:"-" yaml:"-"`
@@ -418,7 +461,7 @@ type Source struct {
 type Target struct {
 	Conn    string                 `json:"conn" yaml:"conn"`
 	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
-	Options TargetOptions          `json:"options,omitempty" yaml:"options,omitempty"`
+	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
@@ -427,52 +470,66 @@ type Target struct {
 
 // SourceOptions are connection and stream processing options
 type SourceOptions struct {
-	TrimSpace      bool               `json:"trim_space" yaml:"trim_space"`
-	EmptyAsNull    bool               `json:"empty_as_null" yaml:"empty_as_null"`
-	Header         bool               `json:"header" yaml:"header"`
-	Compression    iop.CompressorType `json:"compression" yaml:"compression"`
-	NullIf         string             `json:"null_if" yaml:"null_if"`
-	DatetimeFormat string             `json:"datetime_format" yaml:"datetime_format"`
-	SkipBlankLines bool               `json:"skip_blank_lines" yaml:"skip_blank_lines"`
-	Delimiter      string             `json:"delimiter" yaml:"delimiter"`
-	MaxDecimals    int                `json:"max_decimals" yaml:"max_decimals"`
+	TrimSpace      *bool               `json:"trim_space,omitempty" yaml:"trim_space,omitempty"`
+	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
+	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
+	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
+	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
+	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
+	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
+	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
+	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 }
 
 // TargetOptions are target connection and stream processing options
 type TargetOptions struct {
-	Header         bool               `json:"header" yaml:"header"`
-	Compression    iop.CompressorType `json:"compression" yaml:"compression"`
-	Concurrency    int                `json:"concurrency" yaml:"concurrency"`
-	DatetimeFormat string             `json:"datetime_format" yaml:"datetime_format"`
-	Delimiter      string             `json:"delimiter" yaml:"delimiter"`
-	FileMaxRows    int64              `json:"file_max_rows" yaml:"file_max_rows,omitempty"`
-	MaxDecimals    int                `json:"max_decimals" yaml:"max_decimals"`
+	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
+	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
+	Concurrency    int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
+	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
+	FileMaxRows    int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
+	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
+	UseBulk        *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 
-	UseBulk  bool   `json:"use_bulk" yaml:"use_bulk"`
-	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
 	PreSQL   string `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
 	PostSQL  string `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
-	TrimSpace:      false,
-	EmptyAsNull:    true,
-	Header:         true,
-	Compression:    iop.AutoCompressorType,
-	NullIf:         "null",
-	DatetimeFormat: "auto",
-	SkipBlankLines: false,
+	TrimSpace:      g.Bool(false),
+	EmptyAsNull:    g.Bool(true),
+	Header:         g.Bool(true),
+	Compression:    iop.CompressorTypePtr(iop.AutoCompressorType),
+	NullIf:         g.String("NULL"),
+	DatetimeFormat: "AUTO",
+	SkipBlankLines: g.Bool(false),
 	Delimiter:      ",",
-	MaxDecimals:    -1,
+	MaxDecimals:    g.Int(9),
+}
+
+var SourceDBOptionsDefault = SourceOptions{
+	EmptyAsNull:    g.Bool(true),
+	NullIf:         g.String("NULL"),
+	DatetimeFormat: "AUTO",
+	MaxDecimals:    g.Int(9),
+}
+
+var SourceAPIOptionsDefault = SourceOptions{
+	EmptyAsNull:    g.Bool(true),
+	NullIf:         g.String("NULL"),
+	DatetimeFormat: "AUTO",
+	MaxDecimals:    g.Int(9),
 }
 
 var TargetFileOptionsDefault = TargetOptions{
-	Header: true,
+	Header: g.Bool(true),
 	Compression: lo.Ternary(
 		os.Getenv("COMPRESSION") != "",
-		iop.CompressorType(os.Getenv("COMPRESSION")),
-		iop.AutoCompressorType,
+		iop.CompressorTypePtr(iop.CompressorType(os.Getenv("COMPRESSION"))),
+		iop.CompressorTypePtr(iop.AutoCompressorType),
 	),
 	Concurrency: lo.Ternary(
 		os.Getenv("CONCURRENCY") != "",
@@ -484,8 +541,30 @@ var TargetFileOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
-	UseBulk:        true,
+	UseBulk:        g.Bool(true),
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
-	MaxDecimals:    -1,
+	MaxDecimals:    g.Int(-1),
+}
+
+var TargetDBOptionsDefault = TargetOptions{
+	FileMaxRows: lo.Ternary(
+		os.Getenv("FILE_MAX_ROWS") != "",
+		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
+		0,
+	),
+	UseBulk:        g.Bool(true),
+	DatetimeFormat: "auto",
+	MaxDecimals:    g.Int(-1),
+}
+
+var TargetAPIOptionsDefault = TargetOptions{
+	FileMaxRows: lo.Ternary(
+		os.Getenv("FILE_MAX_ROWS") != "",
+		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
+		0,
+	),
+	UseBulk:        g.Bool(true),
+	DatetimeFormat: "auto",
+	MaxDecimals:    g.Int(-1),
 }

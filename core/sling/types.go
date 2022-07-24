@@ -3,16 +3,14 @@ package sling
 // JobType is an enum type for jobs
 type JobType string
 
-const (
+// APIToDb is from api to db
+const APIToDb JobType = "api-db"
 
-	// APIToDb is from api to db
-	APIToDb JobType = "api-db"
-	// APIToFile is from api to file
-	APIToFile JobType = "api-file"
+// APIToFile is from api to file
+const APIToFile JobType = "api-file"
 
-	// ConnTest is for a connection test
-	ConnTest JobType = "conn-test"
-)
+// ConnTest is for a connection test
+const ConnTest JobType = "conn-test"
 
 // DbToDb is from db to db
 const DbToDb JobType = "db-db"

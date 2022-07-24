@@ -126,6 +126,9 @@ func (t *TaskExecution) Execute() error {
 	// get stats of process at beginning
 	t.ProcStatsStart = g.GetProcStats(os.Getpid())
 
+	// set deaults
+	t.Config.SetDefault()
+
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	go func() {
@@ -212,6 +215,12 @@ func (t *TaskExecution) getTgtDBConn() (conn database.Connection, err error) {
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
+	}
+
+	// set bulk
+	if t.Config.Target.Options.UseBulk == g.Bool(false) {
+		conn.SetProp("use_bulk", "false")
+		conn.SetProp("allow_bulk_import", "false")
 	}
 	return
 }
@@ -852,12 +861,6 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 // insert / incremental / replace into target table
 func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	targetTable := cfg.Target.Object
-
-	// set bulk
-	if !cfg.Target.Options.UseBulk {
-		tgtConn.SetProp("use_bulk", "false")
-		tgtConn.SetProp("allow_bulk_import", "false")
-	}
 
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable
