@@ -65,6 +65,7 @@ jobs:
           docker image rm -f flarco/sling:$VERSION
 
   release:
+    if: "! (contains(github.event.inputs.build_only, 'true'))"
     needs: [build]
     runs-on: ${{ matrix.runner }}
 
