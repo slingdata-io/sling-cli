@@ -1,6 +1,11 @@
 name: Build & Release
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+    inputs:
+      build_only:
+        description: 'true/false'     
+        required: false
 
 jobs:
   build:
@@ -15,8 +20,11 @@ jobs:
       - name: Get the version
         id: get_version
         run: |
+          git pull
+          git tag -l --sort=-creatordate | head -n 9
           TAG=$(git tag -l --sort=-creatordate | head -n 1)
           VERSION=$(echo $TAG | sed 's/v//')
+          echo "VERSION -> $VERSION"
           echo ::set-output name=VERSION::$VERSION
 
       - id: step1
@@ -36,6 +44,7 @@ jobs:
           echo ::set-output name=version::$VERSION
 
   push:
+    if: "! (contains(github.event.inputs.tag, 'true'))"
     needs: [build]
     runs-on: [self-hosted, Linux]
     
