@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_only:
-        description: 'true/false'     
+        description: 'build_only: "true" or empty'     
         required: false
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
       - name: Get the version
         id: get_version
         run: |
-          git pull
+          git pull --ff-only
           git tag -l --sort=-creatordate | head -n 9
           TAG=$(git tag -l --sort=-creatordate | head -n 1)
           VERSION=$(echo $TAG | sed 's/v//')
@@ -44,7 +44,7 @@ jobs:
           echo ::set-output name=version::$VERSION
 
   push:
-    if: "! (contains(github.event.inputs.tag, 'true'))"
+    if: "! (contains(github.event.inputs.build_only, 'true'))"
     needs: [build]
     runs-on: [self-hosted, Linux]
     
