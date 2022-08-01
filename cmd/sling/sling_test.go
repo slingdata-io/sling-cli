@@ -196,7 +196,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	}
 
 	// validate count
-	if task.Config.Mode == sling.FullRefreshMode {
+	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
 		g.Debug("getting count")
 		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
