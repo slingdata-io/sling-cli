@@ -354,7 +354,6 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	if cfg.Options.StdOut {
-		cfg.Target.Options.Concurrency = 1
 		os.Setenv("CONCURRENCY", "1")
 	}
 

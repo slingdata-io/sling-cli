@@ -13,3 +13,5 @@ sed 's/Version: //'
 GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION'" -o sling-linux cmd/sling/*.go
 
 ./sling-linux version
+
+/bin/cp -f ./sling-linux /__/bin/sling
