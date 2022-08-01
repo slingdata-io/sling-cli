@@ -1,0 +1,19 @@
+{
+  "env": {},
+  "mode": "full-refresh",
+  "options": {
+    "stdout": true
+  },
+  "source": {
+    "conn": "NOTION",
+    "options": {},
+    "primary_key": [],
+    "stream": "users",
+    "update_key": ""
+  },
+  "target": {
+    "conn": "",
+    "object": "",
+    "options": {}
+  }
+}

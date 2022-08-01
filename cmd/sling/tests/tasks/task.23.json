@@ -1,0 +1,1 @@
+{"env":{},"mode":"incremental","options":{},"source":{"conn":"GITHUB_DBIO","options":{},"primary_key":["sha"],"stream":"commits","update_key":"created_at"},"target":{"conn":"POSTGRES","object":"public.test1","options":{}}}

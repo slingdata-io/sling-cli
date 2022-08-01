@@ -23,4 +23,4 @@ SNOWFLAKE	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}
 GITHUB_DBIO	commits	{}	POSTGRES	public.test1	full-refresh					
 GITHUB_DBIO	commits	{}	POSTGRES	public.test1	incremental	sha	created_at	{}	{}	
 NOTION	users	{}	POSTGRES	public.test1	full-refresh					
-NOTION	users	{}			full-refresh			{}	{"options":{"stdout": true}}	
+NOTION	users	{}			full-refresh			{}	{"stdout": true}	
