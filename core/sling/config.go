@@ -490,6 +490,7 @@ type TargetOptions struct {
 	FileMaxRows    int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk        *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
+	AddNewColumns  bool                `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`

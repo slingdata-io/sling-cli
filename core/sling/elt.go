@@ -649,33 +649,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if srcTable != "" && cfg.Mode != FullRefreshMode && t.Config.TgtConn.Type.IsDb() && len(t.Config.Target.columns) > 0 {
-		// since we are not dropping and table exists, we need to only select the matched columns
-		columns, _ := srcConn.GetSQLColumns("select * from " + srcTable)
-
-		if len(columns) > 0 {
-			colNames := columns.Names()
-			if len(cfg.Source.Columns) > 0 {
-				colNames = database.CommonColumns(colNames, cfg.Source.Columns)
-			}
-
-			commFields := database.CommonColumns(
-				colNames,
-				t.Config.Target.columns.Names(),
-			)
-			if len(commFields) == 0 {
-				err = g.Error("src table and tgt table have no columns with same names. Column names must match")
-				return t.df, err
-			}
-
-			// add quotes
-			commFields = lo.Map(commFields, func(f string, i int) string {
-				return srcConn.Quote(f)
-			})
-			fieldsStr = strings.Join(commFields, ", ")
-		}
-	}
-
 	// Get source columns
 	cfg.Source.columns, err = srcConn.GetSQLColumns(g.R(sql, "incremental_where_cond", "1=0"))
 	if err != nil {
@@ -1023,6 +996,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				err = g.Error(err, "could not optimize table schema")
 				return cnt, err
 			}
+			// if target table exists, add new columns (if we're not dropping)
+		}
+		if !created && cfg.Mode != FullRefreshMode && cfg.Target.Options.AddNewColumns {
+			err = database.AddMissingColumns(tgtConn, targetTable, df.Columns)
+			if err != nil {
+				err = g.Error(err, "could not add missing columns")
+				return cnt, err
+			}
 		}
 	}
 
@@ -1160,6 +1141,10 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	}
 
 	return true, nil
+}
+
+func addMissingColumns(conn database.Connection, tableName string, newColumns, existingColumns iop.Columns) (created bool, err error) {
+
 }
 
 func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
