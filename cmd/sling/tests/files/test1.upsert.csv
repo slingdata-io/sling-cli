@@ -1,15 +1,15 @@
-id,first_name,last_name,email,target,create_dt,rating
-706,Prue,Hendonson,phendonsonjl@vistaprint.com,false,2020-10-17 19:01:59.000,1234567
-707,Mattie,Berger,mbergerjm@pinterest.com,true,2020-10-21 07:16:33.000,1234567
-708,Mada,Iannello,miannellojn@craigslist.org,false,2020-01-17 01:49:58.000,1234567
-758,Rafa,Lagne,rlagnel1@dailymotion.com,false,2020-11-11 02:01:42.000,1234567
-759,Garth,Casetta,gcasettal2@wikimedia.org,true,2020-03-25 18:05:43.000,1234567
-760,Kirby,Storr,kstorrl3@ifeng.com,false,2020-03-22 15:32:24.000,1234567
-761,Florencia,Gusney,fgusneyl4@soup.io,true,2020-11-10 03:11:04.000,1234567
-846,Janette,Boobier,jboobiernh@live.com,false,2020-03-11 01:25:12.000,1234567
-968,Bev,Fligg,bfliggqv@imdb.com,false,2020-08-14 17:55:43.000,1234567
-969,Aviva,Varsey,avarseyqw@i2i.jp,true,2020-04-19 00:53:38.000,1234567
-997,Phillis,Shier,pshierro@free.fr,true,2020-07-06 22:36:51.000,1234567
-998,Corny,Greenless,cgreenlessrp@zdnet.com,true,2020-04-09 16:34:37.000,1234567
-1001,Audric,Larco,aularco@nytimes.com,true,2021-04-23 19:31:25.000,1234567
-1002,Adalie,Larco,adlarco@nytimes.com,true,2021-04-23 19:31:25.000,1234567
+id,first_name,last_name,email,target,create_dt,rating,json_data
+706,Prue,Hendonson,phendonsonjl@vistaprint.com,false,2020-10-17 19:01:59.000,1234567,
+707,Mattie,Berger,mbergerjm@pinterest.com,true,2020-10-21 07:16:33.000,1234567,
+708,Mada,Iannello,miannellojn@craigslist.org,false,2020-01-17 01:49:58.000,1234567,
+758,Rafa,Lagne,rlagnel1@dailymotion.com,false,2020-11-11 02:01:42.000,1234567,
+759,Garth,Casetta,gcasettal2@wikimedia.org,true,2020-03-25 18:05:43.000,1234567,
+760,Kirby,Storr,kstorrl3@ifeng.com,false,2020-03-22 15:32:24.000,1234567,
+761,Florencia,Gusney,fgusneyl4@soup.io,true,2020-11-10 03:11:04.000,1234567,
+846,Janette,Boobier,jboobiernh@live.com,false,2020-03-11 01:25:12.000,1234567,
+968,Bev,Fligg,bfliggqv@imdb.com,false,2020-08-14 17:55:43.000,1234567,"{""number"":1, ""tags"": [1,2,3]}"
+969,Aviva,Varsey,avarseyqw@i2i.jp,true,2020-04-19 00:53:38.000,1234567,
+997,Phillis,Shier,pshierro@free.fr,true,2020-07-06 22:36:51.000,1234567,
+998,Corny,Greenless,cgreenlessrp@zdnet.com,true,2020-04-09 16:34:37.000,1234567,
+1001,Audric,Larco,aularco@nytimes.com,true,2021-04-23 19:31:25.000,1234567,
+1002,Adalie,Larco,adlarco@nytimes.com,true,2021-04-23 19:31:25.000,1234567,

@@ -36,6 +36,13 @@ var AllowedProps = map[string]string{
 
 var start time.Time
 var PermitTableSchemaOptimization = false
+var AddLoadedAtColumn = true
+
+func init() {
+	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
+		AddLoadedAtColumn = cast.ToBool(val)
+	}
+}
 
 // IsStalled determines if the task has stalled (no row increment)
 func (t *TaskExecution) IsStalled(window float64) bool {
@@ -229,13 +236,13 @@ func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("connecting to target database")
 	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
+	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
 	err = tgtConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
@@ -263,13 +270,13 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("connecting to source database")
 	srcConn, err := t.getSrcDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
+	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
 	err = srcConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
@@ -305,7 +312,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("connecting to source api system")
+	t.SetProgress("connecting to source api system (%s)", t.Config.SrcConn.Info().Type)
 	srcConn, err := t.Config.SrcConn.AsAirbyte()
 	if err != nil {
 		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
@@ -319,7 +326,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 		return err
 	}
 
-	t.SetProgress("reading from source api system")
+	t.SetProgress("reading from source api system (%s)", t.Config.SrcConn.Type)
 	t.df, err = t.ReadFromAPI(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "could not read from api")
@@ -358,7 +365,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("connecting to source api system")
+	t.SetProgress("connecting to source api system (%s)", t.Config.SrcConn.Info().Type)
 	srcConn, err := t.Config.SrcConn.AsAirbyte()
 	if err != nil {
 		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
@@ -371,13 +378,13 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 		return err
 	}
 
-	t.SetProgress("connecting to target database")
 	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
+	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
 	err = tgtConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
@@ -408,7 +415,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 		}
 	}
 
-	t.SetProgress("reading from source api system")
+	t.SetProgress("reading from source api system (%s)", t.Config.SrcConn.Type)
 	t.df, err = t.ReadFromAPI(t.Config, srcConn)
 	if err != nil {
 		err = g.Error(err, "could not read from api")
@@ -441,13 +448,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("connecting to target database")
 	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
+	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
 	err = tgtConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
@@ -456,7 +463,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	defer tgtConn.Close()
 
-	t.SetProgress("reading from source file system")
+	t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
@@ -493,7 +500,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("reading from source file system")
+	t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromFile")
@@ -501,7 +508,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	}
 	defer t.df.Close()
 
-	t.SetProgress("writing to target file system")
+	t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
 	defer t.Cleanup()
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
@@ -537,14 +544,14 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		return
 	}
 
-	t.SetProgress("connecting to source database")
+	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
 	err = srcConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
 		return
 	}
 
-	t.SetProgress("connecting to target database")
+	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
 	err = tgtConn.Connect()
 	if err != nil {
 		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
@@ -556,8 +563,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	defer func() {
 		if err != nil {
-			g.Trace(strings.Join(srcConn.Base().Log, ";\n"))
-			g.Trace(strings.Join(tgtConn.Base().Log, ";\n"))
+			// g.Trace(strings.Join(srcConn.Base().Log, ";\n"))
+			// g.Trace(strings.Join(tgtConn.Base().Log, ";\n"))
 		}
 	}()
 
@@ -932,6 +939,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// Checksum Comparison, data quality
 		err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
 		if err != nil {
+			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
+				return
+			}
 			g.Debug(g.ErrMsgSimple(err))
 		}
 	}
@@ -1143,10 +1153,6 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	return true, nil
 }
 
-func addMissingColumns(conn database.Connection, tableName string, newColumns, existingColumns iop.Columns) (created bool, err error) {
-
-}
-
 func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	// insert
 	tmpColumns, err := tgtConn.GetColumns(cfg.Target.Options.TableTmp)
@@ -1226,17 +1232,17 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	value := data.Rows[0][0]
 	colType := data.Columns[0].Type
-	if strings.Contains("datetime,date,timestamp", colType) {
+	if colType.IsDatetime() {
 		val = g.R(
 			srcConnVarMap["timestamp_layout_str"],
 			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
 		)
-	} else if strings.Contains("datetime,date", colType) {
+	} else if colType == iop.DateType {
 		val = g.R(
 			srcConnVarMap["date_layout_str"],
 			"value", cast.ToTime(value).Format(srcConnVarMap["date_layout"]),
 		)
-	} else if strings.Contains("integer,bigint,decimal", colType) {
+	} else if colType.IsNumber() {
 		val = cast.ToString(value)
 	} else {
 		val = strings.ReplaceAll(cast.ToString(value), `'`, `''`)

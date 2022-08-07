@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"GITHUB_DBIO","options":{},"primary_key":[],"stream":"commits","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1","options":{}}}
+{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file://tests/files/test1.csv","update_key":""},"target":{"conn":"ORACLE","object":"system.test1","options":{}}}

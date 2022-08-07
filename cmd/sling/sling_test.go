@@ -120,6 +120,13 @@ func TestOne(t *testing.T) {
 	path := "/tmp/temp.json"
 	file := g.FileItem{FullPath: path, RelPath: path}
 	runOneTask(t, file)
+	if t.Failed() {
+		return
+	}
+
+	// path = "/tmp/temp.json"
+	// file = g.FileItem{FullPath: path, RelPath: path}
+	// runOneTask(t, file)
 }
 
 func TestTasks(t *testing.T) {
@@ -179,7 +186,9 @@ func TestTasks(t *testing.T) {
 }
 
 func runOneTask(t *testing.T, file g.FileItem) {
+	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
 	println()
+
 	bars := "---------------------------"
 	g.Info("%s Testing %s %s", bars, file.RelPath, bars)
 	cfg := &sling.Config{}

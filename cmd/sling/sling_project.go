@@ -9,6 +9,7 @@ import (
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/manifoldco/promptui"
@@ -399,7 +400,7 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 			"%s.%s.%s", quoteFunc(table.Database),
 			quoteFunc(table.Schema), quoteFunc(table.Name),
 		)
-		cols := lo.Map(table.Columns, func(c database.Column, i int) string {
+		cols := lo.Map(table.Columns, func(c iop.Column, i int) string {
 			return quoteFunc(c.Name)
 		})
 		colsSQL := "  " + strings.Join(cols, ",\n  ")
