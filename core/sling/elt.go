@@ -36,7 +36,8 @@ var AllowedProps = map[string]string{
 
 var start time.Time
 var PermitTableSchemaOptimization = false
-var AddLoadedAtColumn = true
+var AddLoadedAtColumn = false
+var slingLoadedAtColumn = "_sling_loaded_at"
 
 func init() {
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
@@ -423,7 +424,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	}
 	defer t.df.Close()
 
-	t.SetProgress("writing to target database")
+	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
 	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
@@ -475,7 +476,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
-	t.SetProgress("writing to target database")
+	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
 	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
@@ -602,7 +603,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		t.Config.Source.Data["SOURCE_FILE"] = g.M("data", data)
 	}
 
-	t.SetProgress("writing to target database")
+	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
 	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
@@ -925,6 +926,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			err = g.Error(err, "could not insert into "+targetTable)
 			return
 		}
+
 		tgtConn.Commit()
 		t.PBar.Finish()
 
@@ -943,6 +945,22 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return
 			}
 			g.Debug(g.ErrMsgSimple(err))
+		}
+
+		// add loaded_at column and set to now
+		if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
+			addLoadedAtColumn(&sampleData)
+			err = database.AddMissingColumns(tgtConn, cfg.Target.Options.TableTmp, sampleData.Columns)
+			if err != nil {
+				err = g.Error(err, "could not add loaded_at: "+targetTable)
+				return
+			}
+
+			_, err = tgtConn.Exec(g.F(`update %s set %s = %d`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
+			if err != nil {
+				err = g.Error(err, "could not set loaded_at: "+targetTable)
+				return
+			}
 		}
 	}
 
@@ -975,6 +993,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample := iop.NewDataset(df.Columns)
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
+		if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
+			addLoadedAtColumn(&sample)
+		}
 		created, err := createTableIfNotExists(
 			tgtConn,
 			sample,
@@ -1001,7 +1022,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// only on new data being inserted... would need a complete
 		// stats of the target table to properly optimize.
 		if !created && PermitTableSchemaOptimization {
-			err = tgtConn.OptimizeTable(targetTable, df.Columns)
+			err = tgtConn.OptimizeTable(targetTable, sample.Columns)
 			if err != nil {
 				err = g.Error(err, "could not optimize table schema")
 				return cnt, err
@@ -1009,7 +1030,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// if target table exists, add new columns (if we're not dropping)
 		}
 		if !created && cfg.Mode != FullRefreshMode && cfg.Target.Options.AddNewColumns {
-			err = database.AddMissingColumns(tgtConn, targetTable, df.Columns)
+			err = database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
 			if err != nil {
 				err = g.Error(err, "could not add missing columns")
 				return cnt, err
@@ -1035,7 +1056,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 		t.SetProgress("dropped old table of " + targetTable)
 
-	} else if cfg.Mode == AppendMode || cfg.Mode == FullRefreshMode {
+	} else if cfg.Mode == AppendMode || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
@@ -1269,4 +1290,19 @@ func getSQLText(filePath string) (string, error) {
 	}
 
 	return string(bytes), nil
+}
+
+func addLoadedAtColumn(data *iop.Dataset) {
+	if len(data.Columns) == 0 {
+		return
+	}
+	loadedAtCol := iop.Column{
+		Name: slingLoadedAtColumn,
+		Type: iop.IntegerType,
+		Stats: iop.ColumnStats{
+			TotalCnt: data.Columns[0].Stats.TotalCnt,
+			IntCnt:   data.Columns[0].Stats.TotalCnt,
+		},
+	}
+	data.Columns = append(data.Columns, loadedAtCol)
 }
