@@ -956,7 +956,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return
 			}
 
-			_, err = tgtConn.Exec(g.F(`update %s set %s = %d`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
+			_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
 			if err != nil {
 				err = g.Error(err, "could not set loaded_at: "+targetTable)
 				return
@@ -1293,7 +1293,7 @@ func getSQLText(filePath string) (string, error) {
 }
 
 func addLoadedAtColumn(data *iop.Dataset) {
-	if len(data.Columns) == 0 {
+	if len(data.Columns) == 0 || data.Columns.GetColumn(slingLoadedAtColumn).Name != "" {
 		return
 	}
 	loadedAtCol := iop.Column{
