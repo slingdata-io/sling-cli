@@ -984,7 +984,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			err = tgtConn.DropTable(targetTable)
 			if err != nil {
 				err = g.Error(err, "could not drop table "+targetTable)
-				return
+				return cnt, err
 			}
 			t.SetProgress("dropped table " + targetTable)
 		}
@@ -1033,6 +1033,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			err = database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
 			if err != nil {
 				err = g.Error(err, "could not add missing columns")
+				return cnt, err
+			}
+		} else if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
+			// add only loaded_at column
+			newCols := iop.Columns{sample.Columns.GetColumn(slingLoadedAtColumn)}
+			err = database.AddMissingColumns(tgtConn, targetTable, newCols)
+			if err != nil {
+				err = g.Error(err, "could not add loaded_at: "+targetTable)
 				return cnt, err
 			}
 		}
