@@ -938,13 +938,15 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// aggregate stats from stream processors
 		df.SyncStats()
 
-		// Checksum Comparison, data quality
-		err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
-		if err != nil {
-			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
-				return
+		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
+		if df.Count() <= 10000 {
+			err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
+			if err != nil {
+				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
+					return
+				}
+				g.Debug(g.ErrMsgSimple(err))
 			}
-			g.Debug(g.ErrMsgSimple(err))
 		}
 
 		// add loaded_at column and set to now

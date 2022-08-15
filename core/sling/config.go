@@ -4,11 +4,14 @@ import (
 	"database/sql/driver"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
+	"github.com/flarco/dbio/database"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -389,6 +392,12 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Mode = IncrementalMode
 	}
 
+	// format target name
+	err = cfg.FormatTargetObjectName()
+	if err != nil {
+		return g.Error(err, "could not format target name")
+	}
+
 	// done
 	cfg.Prepared = true
 	return
@@ -409,6 +418,73 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 		return
 	}
 	return
+}
+
+func (cfg *Config) FormatTargetObjectName() (err error) {
+	m := g.M(
+		"run_timestamp", g.NowFileStr(),
+		"stream_name", strings.ToLower(cfg.Source.Stream),
+		"source_name", strings.ToLower(cfg.Source.Conn),
+		"target_name", strings.ToLower(cfg.Target.Conn),
+		"target_schema", strings.ToLower(cast.ToString(cfg.Target.Data["schema"])),
+	)
+
+	if cfg.SrcConn.Type.IsDb() {
+		schema, table := database.SplitTableFullName(cfg.Source.Stream)
+		m["stream_schema"] = schema
+		m["stream_table"] = table
+	}
+
+	if cfg.SrcConn.Type.IsFile() {
+		re, _ := regexp.Compile(`\W+`)
+		url, err := net.NewURL(cfg.Source.Stream)
+		if err != nil {
+			return g.Error(err, "could not parse source stream url")
+		}
+
+		hostname := url.Hostname()
+		switch cfg.SrcConn.Type {
+		case dbio.TypeFileS3:
+			m["stream_bucket"] = hostname
+			m["stream_file_path"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
+		case dbio.TypeFileGoogle:
+			m["stream_bucket"] = hostname
+		case dbio.TypeFileAzure:
+			path := strings.TrimPrefix(url.Path(), "/")
+			m["stream_account"] = strings.TrimSuffix(hostname, ".blob.core.windows.net")
+			m["stream_container"] = strings.Split(path, "/")[0]
+		}
+	}
+
+	if cfg.TgtConn.Type.IsFile() {
+		url, err := net.NewURL(cfg.Target.Object)
+		if err != nil {
+			return g.Error(err, "could not parse target object url")
+		}
+
+		hostname := url.Hostname()
+		switch cfg.SrcConn.Type {
+		case dbio.TypeFileS3:
+			m["target_bucket"] = hostname
+		case dbio.TypeFileGoogle:
+			m["target_bucket"] = hostname
+		case dbio.TypeFileAzure:
+			path := strings.TrimPrefix(url.Path(), "/")
+			m["target_account"] = strings.TrimSuffix(hostname, ".blob.core.windows.net")
+			m["target_container"] = strings.Split(path, "/")[0]
+		case dbio.TypeFileLocal:
+			m["root_folder"] = cast.ToString(cfg.Target.Data["root_folder"])
+		}
+	}
+
+	// replace placeholders
+	cfg.Target.Object = g.Rm(cfg.Target.Object, m)
+
+	// apply date map
+	dateMap := iop.GetISO8601DateMap(time.Now())
+	cfg.Target.Object = g.Rm(cfg.Target.Object, dateMap)
+
+	return nil
 }
 
 // Config is the new config struct

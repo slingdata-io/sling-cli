@@ -43,7 +43,7 @@ const (
 	ExecStatusSuccess ExecStatus = "success"
 	// ExecStatusTerminated = terminated
 	ExecStatusTerminated ExecStatus = "terminated"
-	// ExecStatusInterrupted = terminated
+	// ExecStatusInterrupted = interrupted
 	ExecStatusInterrupted ExecStatus = "interrupted"
 	// ExecStatusTimedOut = timed-out (when no heartbeat sent for 30 sec)
 	ExecStatusTimedOut ExecStatus = "timed-out"
@@ -78,7 +78,7 @@ func (s ExecStatus) IsFinished() bool {
 // IsFailure returns true if an execution is failed
 func (s ExecStatus) IsFailure() bool {
 	switch s {
-	case ExecStatusError, ExecStatusTerminated, ExecStatusStalled, ExecStatusTimedOut:
+	case ExecStatusError, ExecStatusTerminated, ExecStatusInterrupted, ExecStatusStalled, ExecStatusTimedOut:
 		return true
 	}
 	return false
