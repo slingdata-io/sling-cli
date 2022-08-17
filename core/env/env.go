@@ -236,6 +236,7 @@ func GetLocalConns() []Conn {
 				Connection:  conn,
 			}
 			c.Name = strings.ReplaceAll(c.Name, "/", "_")
+			c.Connection.Name = strings.ReplaceAll(c.Connection.Name, "/", "_")
 			connsMap[c.Name] = c
 		}
 	}
