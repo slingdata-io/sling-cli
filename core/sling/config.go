@@ -442,36 +442,29 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			return g.Error(err, "could not parse source stream url")
 		}
 
-		hostname := url.Hostname()
+		filePath := string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3:
-			m["stream_bucket"] = hostname
-			m["stream_file_path"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
+			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
 		case dbio.TypeFileGoogle:
-			m["stream_bucket"] = hostname
+			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
 		case dbio.TypeFileAzure:
-			path := strings.TrimPrefix(url.Path(), "/")
-			m["stream_account"] = strings.TrimSuffix(hostname, ".blob.core.windows.net")
-			m["stream_container"] = strings.Split(path, "/")[0]
+			m["source_account"] = cfg.SrcConn.Data["account"]
+			m["source_container"] = cfg.SrcConn.Data["container"]
+			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
 		}
+		m["stream_file_path"] = filePath
 	}
 
 	if cfg.TgtConn.Type.IsFile() {
-		url, err := net.NewURL(cfg.Target.Object)
-		if err != nil {
-			return g.Error(err, "could not parse target object url")
-		}
-
-		hostname := url.Hostname()
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3:
-			m["target_bucket"] = hostname
+			m["target_bucket"] = cfg.TgtConn.Data["bucket"]
 		case dbio.TypeFileGoogle:
-			m["target_bucket"] = hostname
+			m["target_bucket"] = cfg.TgtConn.Data["bucket"]
 		case dbio.TypeFileAzure:
-			path := strings.TrimPrefix(url.Path(), "/")
-			m["target_account"] = strings.TrimSuffix(hostname, ".blob.core.windows.net")
-			m["target_container"] = strings.Split(path, "/")[0]
+			m["target_account"] = cfg.TgtConn.Data["account"]
+			m["target_container"] = cfg.TgtConn.Data["container"]
 		case dbio.TypeFileLocal:
 			m["root_folder"] = cast.ToString(cfg.Target.Data["root_folder"])
 		}
