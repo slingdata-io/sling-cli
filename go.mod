@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.3.82
+	github.com/flarco/dbio v0.3.83
 	github.com/flarco/g v0.1.37
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/integrii/flaggy v1.4.4
@@ -40,7 +40,7 @@ require (
 	github.com/Azure/go-autorest/autorest/date v0.3.0 // indirect
 	github.com/Azure/go-autorest/logger v0.2.1 // indirect
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
-	github.com/ClickHouse/clickhouse-go v1.4.5 // indirect
+	github.com/ClickHouse/clickhouse-go/v2 v2.2.0 // indirect
 	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/PuerkitoBio/goquery v1.6.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
@@ -62,7 +62,6 @@ require (
 	github.com/aws/smithy-go v1.9.0 // indirect
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
-	github.com/cloudflare/golz4 v0.0.0-20150217214814-ef862a3cdc58 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/denisenkom/go-mssqldb v0.9.0 // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
@@ -128,7 +127,8 @@ require (
 	github.com/nqd/flat v0.1.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2 // indirect
-	github.com/pierrec/lz4/v4 v4.1.11 // indirect
+	github.com/paulmach/orb v0.7.1 // indirect
+	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/sftp v1.12.0 // indirect
@@ -138,6 +138,7 @@ require (
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/segmentio/backo-go v0.0.0-20200129164019-23eae7c10bd3 // indirect
 	github.com/shirou/gopsutil/v3 v3.22.7 // indirect
+	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/snowflakedb/gosnowflake v1.6.10 // indirect
 	github.com/tidwall/gjson v1.9.3 // indirect
@@ -155,6 +156,8 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.mongodb.org/mongo-driver v1.5.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
+	go.opentelemetry.io/otel v1.7.0 // indirect
+	go.opentelemetry.io/otel/trace v1.7.0 // indirect
 	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871 // indirect
 	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17 // indirect
 	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e // indirect
