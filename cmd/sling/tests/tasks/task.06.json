@@ -1,1 +1,1 @@
-{"env":{},"mode":"","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"DO_SPACES","object":"s3://ocral/test_1000.copy.csv","options":{}}}
+{"env":{},"mode":"","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"DO_SPACES","object":"s3://{target_bucket}/test_1000.copy.csv","options":{}}}

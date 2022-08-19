@@ -480,7 +480,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	dateMap := iop.GetISO8601DateMap(time.Now())
 	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, dateMap))
 
-	if cfg.TgtConn.Type.IsFile() {
+	if schemeType(cfg.Target.Object).IsFile() {
 		cfg.Target.Data["url"] = cfg.Target.Object
 		cfg.TgtConn.Data["url"] = cfg.Target.Object
 	}
