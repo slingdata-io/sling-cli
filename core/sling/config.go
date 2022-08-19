@@ -292,6 +292,16 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	return Type, err
 }
 
+func schemeType(url string) dbio.Type {
+	if !strings.Contains(url, "://") {
+		return dbio.TypeUnknown
+	}
+
+	scheme := strings.Split(url, "://")[0]
+	t, _ := dbio.ValidateType(scheme)
+	return t
+}
+
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {
@@ -315,18 +325,6 @@ func (cfg *Config) Prepare() (err error) {
 		os.Setenv("_DEBUG", "DEBUG")
 	}
 
-	isFileURL := func(url string) bool {
-		if !strings.Contains(url, "://") {
-			return false
-		}
-		U, err := net.NewURL(url)
-		if err != nil {
-			return false
-		}
-		t, _ := dbio.ValidateType(U.U.Scheme)
-		return t.IsFile()
-	}
-
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
@@ -337,11 +335,15 @@ func (cfg *Config) Prepare() (err error) {
 		if cfg.TgtConn.Data == nil {
 			cfg.TgtConn.Data = g.M()
 		}
+		cfg.Target.Data = cfg.TgtConn.Data
 	}
 
-	if isFileURL(cfg.Target.Object) {
-		cfg.Target.Data["url"] = cfg.Target.Object
-		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	if schemeType(cfg.Target.Object).IsFile() {
+		// format target name, especially veriable hostname
+		err = cfg.FormatTargetObjectName()
+		if err != nil {
+			return g.Error(err, "could not format target object name")
+		}
 	} else if cast.ToString(cfg.Target.Data["url"]) == "" {
 		cfg.Target.Data["url"] = cfg.Target.Conn
 	}
@@ -370,9 +372,10 @@ func (cfg *Config) Prepare() (err error) {
 		if cfg.SrcConn.Data == nil {
 			cfg.SrcConn.Data = g.M()
 		}
+		cfg.Source.Data = cfg.SrcConn.Data
 	}
 
-	if isFileURL(cfg.Source.Stream) {
+	if schemeType(cfg.Source.Stream).IsFile() {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
 	} else if cast.ToString(cfg.Source.Data["url"]) == "" {
@@ -392,10 +395,10 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Mode = IncrementalMode
 	}
 
-	// format target name
+	// format target name, now we have source info
 	err = cfg.FormatTargetObjectName()
 	if err != nil {
-		return g.Error(err, "could not format target name")
+		return g.Error(err, "could not format target object name")
 	}
 
 	// done
@@ -456,15 +459,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		m["stream_file_path"] = filePath
 	}
 
-	if cfg.TgtConn.Type.IsFile() {
-		switch cfg.SrcConn.Type {
+	if t := schemeType(cfg.Target.Object); t.IsFile() {
+		switch t {
 		case dbio.TypeFileS3:
-			m["target_bucket"] = cfg.TgtConn.Data["bucket"]
+			m["target_bucket"] = cfg.Target.Data["bucket"]
 		case dbio.TypeFileGoogle:
-			m["target_bucket"] = cfg.TgtConn.Data["bucket"]
+			m["target_bucket"] = cfg.Target.Data["bucket"]
 		case dbio.TypeFileAzure:
-			m["target_account"] = cfg.TgtConn.Data["account"]
-			m["target_container"] = cfg.TgtConn.Data["container"]
+			m["target_account"] = cfg.Target.Data["account"]
+			m["target_container"] = cfg.Target.Data["container"]
 		case dbio.TypeFileLocal:
 			m["root_folder"] = cast.ToString(cfg.Target.Data["root_folder"])
 		}
@@ -475,7 +478,12 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 	// apply date map
 	dateMap := iop.GetISO8601DateMap(time.Now())
-	cfg.Target.Object = g.Rm(cfg.Target.Object, dateMap)
+	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, dateMap))
+
+	if cfg.TgtConn.Type.IsFile() {
+		cfg.Target.Data["url"] = cfg.Target.Object
+		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	}
 
 	return nil
 }
