@@ -399,6 +399,14 @@ func (cfg *Config) Prepare() (err error) {
 	err = cfg.FormatTargetObjectName()
 	if err != nil {
 		return g.Error(err, "could not format target object name")
+	} else if strings.Contains(cfg.Target.Object, "{") {
+		words := []string{}
+		for _, m := range g.Matches(cfg.Target.Object, `\{([^}]+)\}`) {
+			if len(m.Group) > 0 {
+				words = append(words, m.Group[0])
+			}
+		}
+		return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
 	}
 
 	// done

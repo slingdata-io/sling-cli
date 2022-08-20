@@ -118,7 +118,8 @@ func init() {
 func TestOne(t *testing.T) {
 	// return
 	path := "/tmp/temp.json"
-	file := g.FileItem{FullPath: path, RelPath: path}
+	pathArr := strings.Split(path, "/")
+	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
 	runOneTask(t, file)
 	if t.Failed() {
 		return
@@ -193,7 +194,23 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	g.Info("%s Testing %s %s", bars, file.RelPath, bars)
 	cfg := &sling.Config{}
 	err := cfg.Unmarshal(file.FullPath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
 	task := sling.NewTask(0, cfg)
+	if !g.AssertNoError(t, task.Err) {
+		return
+	}
+
+	// validate object name
+	if val, ok := task.Config.Env["validation_object"]; ok {
+		name := cast.ToString(val)
+		if !assert.Equal(t, name, task.Config.Target.Object) {
+			return
+		}
+	}
+
 	// g.PP(task)
 	if g.AssertNoError(t, task.Err) {
 		err = task.Execute()

@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"DO_SPACES","options":{},"primary_key":[],"stream":"s3://ocral/test_1000.csv","update_key":""},"target":{"conn":"","object":"file:///tmp/test_1000.csv","options":{}}}
+{"env":{"validation_object":"file:///tmp/ocral_test_1000.csv"},"mode":"full-refresh","options":{},"source":{"conn":"DO_SPACES","options":{},"primary_key":[],"stream":"s3://ocral/test_1000.csv","update_key":""},"target":{"conn":"","object":"file:///tmp/{source_bucket}_test_1000.csv","options":{}}}

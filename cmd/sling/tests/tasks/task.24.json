@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"GITHUB_DBIO","options":{},"primary_key":[],"stream":"commits","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1","options":{}}}
+{"env":{"validation_object":"public.github_dbio_commits"},"mode":"full-refresh","options":{},"source":{"conn":"GITHUB_DBIO","options":{},"primary_key":[],"stream":"commits","update_key":""},"target":{"conn":"POSTGRES","object":"public.{source_name}_{stream_name}","options":{}}}
