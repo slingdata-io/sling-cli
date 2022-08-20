@@ -845,10 +845,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable
-		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) && len(cfg.Target.Options.TableTmp) > 24 {
-			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp[:24] // max is 30 chars
+		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
+			cfg.Target.Options.TableTmp = lo.Ternary(len(cfg.Target.Options.TableTmp) > 24, cfg.Target.Options.TableTmp[:24], cfg.Target.Options.TableTmp)               // max is 30 chars
+			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1)) // some weird column error
+		} else {
+			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp"
 		}
-		cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp"
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = AppendMode
