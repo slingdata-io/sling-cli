@@ -14,7 +14,6 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/samber/lo"
 
-	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/saas/airbyte"
 
 	"github.com/flarco/dbio/filesys"
@@ -846,8 +845,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
-			cfg.Target.Options.TableTmp = lo.Ternary(len(cfg.Target.Options.TableTmp) > 24, cfg.Target.Options.TableTmp[:24], cfg.Target.Options.TableTmp)               // max is 30 chars
-			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1)) // some weird column error
+			if len(cfg.Target.Options.TableTmp) > 24 {
+				cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp[:24] // max is 30 chars
+			}
+			// some weird column / commit error, not picking up latest columns
+			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
 		} else {
 			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp"
 		}
@@ -891,80 +893,55 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		g.LogError(err)
 	})
 
-	// TODO: if srcFile is from a cloud storage, and targetDB
-	// supports direct loading (RedShift, Snowflake or Azure)
-	// do direct loading (without passing through our box)
-	// risk is potential data loss, since we cannot validate counts
-	srcFile, _ := connection.NewConnectionFromMap(g.M())
-	if sf, ok := t.Config.Source.Data["SOURCE_FILE"]; ok {
-		srcFile, err = connection.NewConnectionFromMap(cast.ToStringMap(sf))
+	err = tgtConn.BeginContext(df.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "could not open transcation to write to temp table")
+		return
+	}
+
+	t.SetProgress("streaming data")
+	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
+	if err != nil {
+		tgtConn.Rollback()
+		err = g.Error(err, "could not insert into "+targetTable)
+		return
+	}
+
+	tgtConn.Commit()
+	t.PBar.Finish()
+
+	tCnt, _ := tgtConn.GetCount(cfg.Target.Options.TableTmp)
+	if cnt != tCnt {
+		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
+		return
+	}
+	// aggregate stats from stream processors
+	df.SyncStats()
+
+	// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
+	if df.Count() <= 10000 {
+		err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
 		if err != nil {
-			err = g.Error(err, "could not create data conn for SOURCE_FILE")
-			return
+			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
+				return
+			}
+			g.Debug(g.ErrMsgSimple(err))
 		}
 	}
 
-	cnt, ok, err := connection.CopyDirect(tgtConn, cfg.Target.Options.TableTmp, srcFile)
-	if ok {
-		df.SetEmpty() // this executes deferred functions (such as file residue removal
+	// add loaded_at column and set to now
+	if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
+		addLoadedAtColumn(&sampleData)
+		err = database.AddMissingColumns(tgtConn, cfg.Target.Options.TableTmp, sampleData.Columns)
 		if err != nil {
-			err = g.Error(err, "could not directly load into database")
+			err = g.Error(err, "could not add loaded_at: "+targetTable)
 			return
 		}
-		g.Debug("copied directly from cloud storage")
-		cnt, _ = tgtConn.GetCount(cfg.Target.Options.TableTmp)
-		// perhaps do full analysis to validate quality
-	} else {
-		err = tgtConn.BeginContext(df.Context.Ctx)
+
+		_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
 		if err != nil {
-			err = g.Error(err, "could not open transcation to write to temp table")
+			err = g.Error(err, "could not set loaded_at: "+targetTable)
 			return
-		}
-
-		t.SetProgress("streaming data")
-		cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
-		if err != nil {
-			tgtConn.Rollback()
-			err = g.Error(err, "could not insert into "+targetTable)
-			return
-		}
-
-		tgtConn.Commit()
-		t.PBar.Finish()
-
-		tCnt, _ := tgtConn.GetCount(cfg.Target.Options.TableTmp)
-		if cnt != tCnt {
-			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
-			return
-		}
-		// aggregate stats from stream processors
-		df.SyncStats()
-
-		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
-		if df.Count() <= 10000 {
-			err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
-			if err != nil {
-				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
-					return
-				}
-				g.Debug(g.ErrMsgSimple(err))
-			}
-		}
-
-		// add loaded_at column and set to now
-		if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
-			addLoadedAtColumn(&sampleData)
-			err = database.AddMissingColumns(tgtConn, cfg.Target.Options.TableTmp, sampleData.Columns)
-			if err != nil {
-				err = g.Error(err, "could not add loaded_at: "+targetTable)
-				return
-			}
-
-			_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
-			if err != nil {
-				err = g.Error(err, "could not set loaded_at: "+targetTable)
-				return
-			}
 		}
 	}
 
