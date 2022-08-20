@@ -437,13 +437,16 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		"stream_name", strings.ToLower(cfg.Source.Stream),
 		"source_name", strings.ToLower(cfg.Source.Conn),
 		"target_name", strings.ToLower(cfg.Target.Conn),
-		"target_schema", strings.ToLower(cast.ToString(cfg.Target.Data["schema"])),
 	)
 
 	if cfg.SrcConn.Type.IsDb() {
 		schema, table := database.SplitTableFullName(cfg.Source.Stream)
 		m["stream_schema"] = schema
 		m["stream_table"] = table
+	}
+
+	if cfg.TgtConn.Type.IsDb() {
+		m["target_schema"] = strings.ToLower(cast.ToString(cfg.Target.Data["schema"]))
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
@@ -479,6 +482,17 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		case dbio.TypeFileLocal:
 			m["root_folder"] = cast.ToString(cfg.Target.Data["root_folder"])
 		}
+	}
+	// check that no value is blank
+	blankKeys := []string{}
+	for k, v := range m {
+		if cast.ToString(v) == "" {
+			blankKeys = append(blankKeys, k)
+		}
+	}
+
+	if len(blankKeys) > 0 {
+		return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
 	// replace placeholders
