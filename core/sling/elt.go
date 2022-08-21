@@ -252,7 +252,7 @@ func (t *TaskExecution) runDbSQL() (err error) {
 	defer tgtConn.Close()
 
 	t.SetProgress("executing sql on target database")
-	result, err := tgtConn.ExecContext(t.Context.Ctx, t.Config.Target.Object)
+	result, err := tgtConn.Exec(t.Config.Target.Object)
 	if err != nil {
 		err = g.Error(err, "Could not complete sql execution on %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return

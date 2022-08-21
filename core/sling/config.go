@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -435,9 +436,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	m := g.M(
 		"run_timestamp", g.NowFileStr(),
 		"stream_name", strings.ToLower(cfg.Source.Stream),
-		"source_name", strings.ToLower(cfg.Source.Conn),
-		"target_name", strings.ToLower(cfg.Target.Conn),
 	)
+
+	if cfg.Source.Conn != "" {
+		m["source_name"] = strings.ToLower(cfg.Source.Conn)
+	}
+
+	if cfg.Target.Conn != "" {
+		m["target_name"] = strings.ToLower(cfg.Target.Conn)
+	}
 
 	if cfg.SrcConn.Type.IsDb() {
 		schema, table := database.SplitTableFullName(cfg.Source.Stream)
@@ -466,6 +473,12 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
 			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
+		case dbio.TypeFileLocal:
+			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
+			fileFolder, fileName := filepath.Split(path)
+			m["stream_file_folder"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(fileFolder, "/")), []byte("_")))
+			m["stream_file_name"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(fileName, "/")), []byte("_")))
+			filePath = string(re.ReplaceAll([]byte(strings.TrimPrefix(path, "/")), []byte("_")))
 		}
 		m["stream_file_path"] = filePath
 	}
@@ -479,10 +492,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		case dbio.TypeFileAzure:
 			m["target_account"] = cfg.Target.Data["account"]
 			m["target_container"] = cfg.Target.Data["container"]
-		case dbio.TypeFileLocal:
-			m["root_folder"] = cast.ToString(cfg.Target.Data["root_folder"])
 		}
 	}
+
 	// check that no value is blank
 	blankKeys := []string{}
 	for k, v := range m {
