@@ -34,6 +34,8 @@ type Mode string
 const (
 	// TruncateMode is to truncate
 	TruncateMode Mode = "truncate"
+	// FullRefreshIncrementalMode is to drop or incremental
+	FullRefreshIncrementalMode Mode = "full-refresh+incremental"
 	// FullRefreshMode is to drop
 	FullRefreshMode Mode = "full-refresh"
 	// AppendMode is to append

@@ -856,6 +856,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = AppendMode
+	} else if cfg.Mode == FullRefreshIncrementalMode {
+		if len(cfg.Source.PrimaryKey) != 0 {
+			cfg.Mode = IncrementalMode
+		} else {
+			cfg.Mode = FullRefreshMode
+		}
 	}
 
 	// pre SQL
