@@ -394,8 +394,10 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set mode if primary key is providedand mode isnn't
-	if len(cfg.Source.PrimaryKey) > 0 && cfg.Mode == "" {
+	if len(cfg.Source.PrimaryKey) > 0 && (cfg.Mode == "" || cfg.Mode == FullRefreshIncrementalMode) {
 		cfg.Mode = IncrementalMode
+	} else if cfg.Mode == FullRefreshIncrementalMode {
+		cfg.Mode = FullRefreshMode
 	}
 
 	// format target name, now we have source info
