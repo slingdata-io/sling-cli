@@ -204,8 +204,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	}
 
 	// validate object name
-	if val, ok := task.Config.Env["validation_object"]; ok {
-		name := cast.ToString(val)
+	if name, ok := task.Config.Env["validation_object"]; ok {
 		if !assert.Equal(t, name, task.Config.Target.Object) {
 			return
 		}
@@ -235,7 +234,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 
 	// validate file
 	if val, ok := task.Config.Env["validation_file"]; ok {
-		valFile := strings.TrimPrefix(cast.ToString(val), "file://")
+		valFile := strings.TrimPrefix(val, "file://")
 		data, err := iop.ReadCsv(valFile)
 		if !g.AssertNoError(t, err) {
 			return

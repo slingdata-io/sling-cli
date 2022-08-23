@@ -192,8 +192,8 @@ func InitLogger() {
 }
 
 // Env returns the environment variables to propogate
-func Env() map[string]interface{} {
-	return g.M()
+func Env() map[string]string {
+	return map[string]string{}
 }
 
 type Conn struct {
