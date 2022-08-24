@@ -327,7 +327,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Options.Debug && os.Getenv("_DEBUG") == "" {
 		os.Setenv("_DEBUG", "DEBUG")
 	}
-	if cfg.Options.StdIn {
+	if cfg.Options.StdIn && cfg.Source.Stream == "" {
 		cfg.Source.Stream = "stdin"
 	}
 
