@@ -53,7 +53,7 @@ func NewConfig(cfgStr string) (cfg *Config, err error) {
 
 	err = cfg.Unmarshal(cfgStr)
 	if err != nil {
-		err = g.Error(err, "Unable to parse config string")
+		err = g.Error(err, "Unable to parse config payload")
 		return
 	}
 
@@ -318,10 +318,13 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Check Inputs
 	if !cfg.Options.StdIn && cfg.Source.Conn == "" && cfg.Target.Conn == "" {
-		return g.Error("invalid source connection. Input is blank or not found")
+		return g.Error("invalid source connection (blank or not found)")
 	}
 	if !cfg.Options.StdOut && cfg.Target.Conn == "" && cfg.Target.Object == "" {
-		return g.Error("invalid target connection. Input is blank or not found")
+		if os.Getenv("SLING_CLI") == "TRUE" {
+			return g.Error("invalid target connection (blank or not found). Did you mean to use the `--stdout` flag?")
+		}
+		return g.Error("invalid target connection (blank or not found)")
 	}
 
 	if cfg.Options.Debug && os.Getenv("_DEBUG") == "" {

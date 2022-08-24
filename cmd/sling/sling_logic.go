@@ -144,13 +144,17 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
+	os.Setenv("SLING_CLI", "TRUE")
 	if cfgStr != "" {
 		err = cfg.Unmarshal(cfgStr)
-	} else {
-		err = cfg.Prepare()
+		if err != nil {
+			return ok, g.Error(err, "could not parse task configuration")
+		}
 	}
+
+	err = cfg.Prepare()
 	if err != nil {
-		return ok, g.Error(err, "Unable to parse config string")
+		return ok, g.Error(err, "could not set task configuration")
 	}
 
 	task := sling.NewTask(0, cfg)
@@ -160,7 +164,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	// set context
 	task.Context = &ctx
-	task.IsCLI = true
 
 	// track usage
 	defer func() {

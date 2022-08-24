@@ -93,7 +93,6 @@ type TaskExecution struct {
 	Bytes     uint64     `json:"bytes"`
 	Context   *g.Context `json:"-"`
 	Progress  string     `json:"progress"`
-	IsCLI     bool
 
 	df            *iop.Dataflow `json:"-"`
 	prevRowCount  uint64

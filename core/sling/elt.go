@@ -463,7 +463,11 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	defer tgtConn.Close()
 
-	t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
+	if t.Config.Options.StdIn {
+		t.SetProgress("reading from stream (stdin)")
+	} else {
+		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
+	}
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "could not read from file")
@@ -500,7 +504,11 @@ func (t *TaskExecution) runFileToFile() (err error) {
 
 	start = time.Now()
 
-	t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
+	if t.Config.Options.StdIn {
+		t.SetProgress("reading from stream (stdin)")
+	} else {
+		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
+	}
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		err = g.Error(err, "Could not ReadFromFile")
@@ -904,7 +912,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
 		tgtConn.Rollback()
-		if t.IsCLI && (cfg.SrcConn.Type.IsFile() || cfg.Options.StdIn) {
+		if os.Getenv("SLING_CLI") == "TRUE" && (cfg.SrcConn.Type.IsFile() || cfg.Options.StdIn) {
 			err = g.Error(err, "could not insert into %s. Maybe try a higher sample size (SAMPLE_SIZE=2000)?", targetTable)
 		} else {
 			err = g.Error(err, "could not insert into "+targetTable)
