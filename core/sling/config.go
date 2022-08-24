@@ -327,6 +327,9 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Options.Debug && os.Getenv("_DEBUG") == "" {
 		os.Setenv("_DEBUG", "DEBUG")
 	}
+	if cfg.Options.StdIn {
+		cfg.Source.Stream = "stdin"
+	}
 
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
@@ -452,12 +455,16 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 	if cfg.SrcConn.Type.IsDb() {
 		schema, table := database.SplitTableFullName(cfg.Source.Stream)
-		m["stream_schema"] = schema
-		m["stream_table"] = table
+		if schema != "" && table != "" {
+			m["stream_schema"] = schema
+			m["stream_table"] = table
+		}
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
-		m["target_schema"] = strings.ToLower(cast.ToString(cfg.Target.Data["schema"]))
+		if targetSchema := cast.ToString(cfg.Target.Data["schema"]); targetSchema != "" {
+			m["target_schema"] = strings.ToLower(targetSchema)
+		}
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
@@ -484,7 +491,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			m["stream_file_name"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(fileName, "/")), []byte("_")))
 			filePath = string(re.ReplaceAll([]byte(strings.TrimPrefix(path, "/")), []byte("_")))
 		}
-		m["stream_file_path"] = filePath
+		if filePath != "" {
+			m["stream_file_path"] = filePath
+		}
 	}
 
 	if t := schemeType(cfg.Target.Object); t.IsFile() {

@@ -160,6 +160,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	// set context
 	task.Context = &ctx
+	task.IsCLI = true
 
 	// track usage
 	defer func() {

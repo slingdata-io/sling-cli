@@ -196,7 +196,7 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 	var sourceSchema, targetSchema, targetFolder string
 	var includeExpr, excludeExpr string
 	var sourceTables []database.Table
-	quoteFunc := func(field string, normalize ...bool) string { return field }
+	quoteFunc := func(field string) string { return field }
 
 	if targetConn.Connection.Type.IsFile() {
 		// if target is file, get the target folder url

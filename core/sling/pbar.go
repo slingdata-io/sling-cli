@@ -120,11 +120,17 @@ var elementCounters pb.ElementFunc = func(state *pb.State, args ...string) strin
 
 var elementBytes pb.ElementFunc = func(state *pb.State, args ...string) string {
 	bytes := cast.ToString(state.Get("bytes"))
+	if bytes == "0 B" {
+		return ""
+	}
 	return g.F("%s", bytes)
 }
 
 var elementByteRate pb.ElementFunc = func(state *pb.State, args ...string) string {
 	bytes := cast.ToString(state.Get("byteRate"))
+	if bytes == "0 B" {
+		return ""
+	}
 	return g.F("| %s", bytes)
 }
 

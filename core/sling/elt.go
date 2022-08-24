@@ -785,6 +785,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error) {
 	var stream *iop.Datastream
 	var bw int64
+	defer t.PBar.Finish()
 
 	if cfg.TgtConn.URL() != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
@@ -903,7 +904,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
 		tgtConn.Rollback()
-		err = g.Error(err, "could not insert into "+targetTable)
+		if t.IsCLI && (cfg.SrcConn.Type.IsFile() || cfg.Options.StdIn) {
+			err = g.Error(err, "could not insert into %s. Maybe try a higher sample size (SAMPLE_SIZE=2000)?", targetTable)
+		} else {
+			err = g.Error(err, "could not insert into "+targetTable)
+		}
 		return
 	}
 
@@ -938,7 +943,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return
 		}
 
-		_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn, true), time.Now().Unix()))
+		_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn), time.Now().Unix()))
 		if err != nil {
 			err = g.Error(err, "could not set loaded_at: "+targetTable)
 			return

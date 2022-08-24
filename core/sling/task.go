@@ -83,16 +83,18 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
-	ExecID        int64         `json:"exec_id"`
-	Config        *Config       `json:"config"`
-	Type          JobType       `json:"type"`
-	Status        ExecStatus    `json:"status"`
-	Err           error         `json:"error"`
-	StartTime     *time.Time    `json:"start_time"`
-	EndTime       *time.Time    `json:"end_time"`
-	Bytes         uint64        `json:"bytes"`
-	Context       *g.Context    `json:"-"`
-	Progress      string        `json:"progress"`
+	ExecID    int64      `json:"exec_id"`
+	Config    *Config    `json:"config"`
+	Type      JobType    `json:"type"`
+	Status    ExecStatus `json:"status"`
+	Err       error      `json:"error"`
+	StartTime *time.Time `json:"start_time"`
+	EndTime   *time.Time `json:"end_time"`
+	Bytes     uint64     `json:"bytes"`
+	Context   *g.Context `json:"-"`
+	Progress  string     `json:"progress"`
+	IsCLI     bool
+
 	df            *iop.Dataflow `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
