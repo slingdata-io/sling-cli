@@ -78,9 +78,4 @@ jobs:
 
       - name: Run Go Tests
         run: |
-          bash scripts/prep.gomod.sh
-          source /root/.bashrc
-          source /__/devbox/.env.sh
-          export _DEBUG=''
-          echo $PATH
-          bash scripts/test.sh
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $PWD:/work --workdir /work/sling flarco/devbox:base bash -c "bash scripts/prep.gomod.sh && source /__/devbox/.env.sh && _DEBUG='' bash scripts/test.sh"
