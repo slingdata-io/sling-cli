@@ -370,6 +370,9 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Options.StdOut {
 		os.Setenv("CONCURRENCY", "1")
 	}
+	if val := os.Getenv("SLING_LIMIT"); val != "" {
+		cfg.Source.Limit = cast.ToInt(val)
+	}
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
@@ -599,6 +602,7 @@ type SourceOptions struct {
 	TrimSpace      *bool               `json:"trim_space,omitempty" yaml:"trim_space,omitempty"`
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
+	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
 	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
@@ -629,6 +633,7 @@ var SourceFileOptionsDefault = SourceOptions{
 	TrimSpace:      g.Bool(false),
 	EmptyAsNull:    g.Bool(true),
 	Header:         g.Bool(true),
+	Flatten:        g.Bool(false),
 	Compression:    iop.CompressorTypePtr(iop.AutoCompressorType),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",

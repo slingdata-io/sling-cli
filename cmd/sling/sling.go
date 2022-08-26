@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/denisbrodbeck/machineid"
 	"github.com/getsentry/sentry-go"
 	"github.com/rudderlabs/analytics-go"
 	"github.com/slingdata-io/sling-cli/core"
@@ -29,8 +30,9 @@ var examples = ``
 var ctx = g.NewContext(context.Background())
 
 var cliRun = &g.CliSC{
-	Name:        "run",
-	Description: "Execute an ad-hoc task",
+	Name:                  "run",
+	Description:           "Execute an ad-hoc task",
+	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
 	Flags: []g.Flag{
 		{
 			Name:        "config",
@@ -131,9 +133,10 @@ var cliUi = &g.CliSC{
 }
 
 var cliConns = &g.CliSC{
-	Name:        "conns",
-	Singular:    "local connection",
-	Description: "Manage local connections",
+	Name:                  "conns",
+	Singular:              "local connection",
+	Description:           "Manage local connections",
+	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
 	SubComs: []*g.CliSC{
 		// {
 		// 	Name:        "add",
@@ -246,8 +249,9 @@ func Track(event string, props ...map[string]interface{}) {
 		}
 	}
 
+	id, _ := machineid.ProtectedID("sling")
 	rsClient.Enqueue(analytics.Track{
-		UserId:     "sling",
+		UserId:     id,
 		Event:      event,
 		Properties: properties,
 	})
@@ -296,7 +300,7 @@ func cliInit() int {
 
 	// Set your program's name and description.  These appear in help output.
 	flaggy.SetName("sling")
-	flaggy.SetDescription("An Extract-Load tool.")
+	flaggy.SetDescription("An Extract-Load tool | https://slingdata.io")
 	flaggy.DefaultParser.ShowHelpOnUnexpected = true
 	flaggy.DefaultParser.AdditionalHelpPrepend = "Slings data from a data source to a data target.\nVersion " + core.Version
 

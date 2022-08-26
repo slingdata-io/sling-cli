@@ -294,7 +294,11 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	}
 	defer t.df.Close()
 
-	t.SetProgress("writing to target file system")
+	if t.Config.Options.StdOut {
+		t.SetProgress("writing to target stream (stdout)")
+	} else {
+		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	}
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
@@ -334,7 +338,11 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 	}
 	defer t.df.Close()
 
-	t.SetProgress("writing to target file system")
+	if t.Config.Options.StdOut {
+		t.SetProgress("writing to target stream (stdout)")
+	} else {
+		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	}
 	defer t.Cleanup()
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
@@ -516,7 +524,11 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	}
 	defer t.df.Close()
 
-	t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	if t.Config.Options.StdOut {
+		t.SetProgress("writing to target stream (stdout)")
+	} else {
+		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	}
 	defer t.Cleanup()
 	cnt, err := t.WriteToFile(t.Config, t.df)
 	if err != nil {
@@ -758,14 +770,14 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.SrcConn.URL(), props...)
 		if err != nil {
-			err = g.Error(err, "Could not obtain client for: "+cfg.SrcConn.URL())
+			err = g.Error(err, "Could not obtain client for %s ", cfg.SrcConn.Type)
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns}
+		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns, Limit: cfg.Source.Limit}
 		df, err = fs.ReadDataflow(cfg.SrcConn.URL(), fsCfg)
 		if err != nil {
-			err = g.Error(err, "Could not FileSysReadDataflow for: "+cfg.SrcConn.URL())
+			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
 			return t.df, err
 		}
 	} else {
@@ -809,7 +821,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.TgtConn.URL(), props...)
 		if err != nil {
-			err = g.Error(err, "Could not obtain client for: "+cfg.TgtConn.URL())
+			err = g.Error(err, "Could not obtain client for: %s", cfg.TgtConn.Type)
 			return cnt, err
 		}
 
@@ -828,6 +840,9 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		bw, err = filesys.Write(reader, bufStdout)
 		if err != nil {
 			err = g.Error(err, "Could not write to Stdout")
+			return
+		} else if err = stream.Context.Err(); err != nil {
+			err = g.Error(err, "encountered stream error")
 			return
 		}
 		cnt = stream.Count
