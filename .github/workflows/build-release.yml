@@ -16,6 +16,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.18"
+          
+      - uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
         
       - name: Get the version
         id: get_version
@@ -36,6 +48,8 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
+          chmod -R 777 $WORK_FOLDER
+
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
           rm -rf $WORK_FOLDER
 
