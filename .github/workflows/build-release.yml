@@ -48,10 +48,10 @@ jobs:
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
-          chmod -R 777 $WORK_FOLDER
+          sudo chmod -R 777 $WORK_FOLDER
 
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
-          rm -rf $WORK_FOLDER
+          sudo rm -rf $WORK_FOLDER
 
           echo $VERSION
           VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
