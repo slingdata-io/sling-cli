@@ -52,7 +52,7 @@ jobs:
           cp -r . $WORK_FOLDER/sling
 
           docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
-          rm -rf $WORK_FOLDER
+          rm -rf $WORK_FOLDER/sling
 
   test:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]'))"
