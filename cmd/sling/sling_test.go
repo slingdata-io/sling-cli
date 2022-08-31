@@ -499,23 +499,28 @@ func TestCfgPath(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testTask(t *testing.T) {
+func testOneTask(t *testing.T) {
+	os.Setenv("SLING_CLI", "TRUE")
 	config := &sling.Config{}
-	config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021"
-	// config.Source.Conn = "s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/06-27-2021/1624811693.1uXKxCrhN2WGAt2fojy6k2fqDSb.9939afc4-a80f-4f3e-921e-fc24e8e7ff43.json.gz"
-	// config.Source.Conn = "file:///tmp/csvTest/"
-	// config.Source.Conn = "file:///tmp/csvTest/part2.csv.gz"
-	config.Target.Conn = "PG_BIONIC_URL"
-	config.Target.Object = "public.sling_cli_events"
-	config.Mode = sling.FullRefreshMode
-	err := config.Prepare()
+	cfgStr := `
+source:
+  conn: do_spaces
+  stream: 's3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/02-17-2022'
+  options:
+    flatten: true
+options:
+  stdout: true`
+	err := config.Unmarshal(cfgStr)
 	if g.AssertNoError(t, err) {
+		err = config.Prepare()
+		if g.AssertNoError(t, err) {
 
-		task := sling.NewTask(0, config)
-		g.AssertNoError(t, task.Err)
+			task := sling.NewTask(0, config)
+			g.AssertNoError(t, task.Err)
 
-		// run task
-		err = task.Execute()
-		g.AssertNoError(t, err)
+			// run task
+			err = task.Execute()
+			g.AssertNoError(t, err)
+		}
 	}
 }
