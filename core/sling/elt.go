@@ -953,7 +953,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
 				return
 			}
-			g.Debug(g.ErrMsgSimple(err))
+			if g.IsDebugLow() {
+				g.Debug(g.ErrMsgSimple(err))
+			}
 		}
 	}
 
