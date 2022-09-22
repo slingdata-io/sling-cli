@@ -73,6 +73,7 @@ func setJWT() {
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
 	cfg := &sling.Config{}
+	replicationCfgPath := ""
 	cfgStr := ""
 	showExamples := false
 	// saveAsJob := false
@@ -86,6 +87,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	for k, v := range c.Vals {
 		switch k {
+		case "replication":
+			replicationCfgPath = cast.ToString(v)
 		case "config":
 			cfgStr = cast.ToString(v)
 		case "src-conn":
@@ -145,6 +148,16 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	os.Setenv("SLING_CLI", "TRUE")
+
+	if replicationCfgPath != "" {
+		err = runReplication(replicationCfgPath)
+		if err != nil {
+			return ok, g.Error(err)
+		}
+		return ok, nil
+
+	}
+
 	if cfgStr != "" {
 		err = cfg.Unmarshal(cfgStr)
 		if err != nil {
@@ -152,14 +165,24 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		}
 	}
 
+	// run task
+	err = runTask(cfg)
+	if err != nil {
+		return ok, g.Error(err)
+	}
+
+	return ok, nil
+}
+
+func runTask(cfg *sling.Config) (err error) {
 	err = cfg.Prepare()
 	if err != nil {
-		return ok, g.Error(err, "could not set task configuration")
+		return g.Error(err, "could not set task configuration")
 	}
 
 	task := sling.NewTask(0, cfg)
 	if task.Err != nil {
-		return ok, g.Error(task.Err)
+		return g.Error(task.Err)
 	}
 
 	// set context
@@ -188,13 +211,74 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	// run task
 	err = task.Execute()
 	if err != nil {
-		return ok, g.Error(err)
+		return g.Error(err)
 	}
 
 	// g.PP(task.ProcStatsStart)
 	// g.PP(g.GetProcStats(os.Getpid()))
 
-	return ok, nil
+	return nil
+}
+
+func runReplication(cfgPath string) (err error) {
+	cfgFile, err := os.Open(cfgPath)
+	if err != nil {
+		return g.Error(err, "Unable to open replication path: "+cfgPath)
+	}
+
+	cfgBytes, err := ioutil.ReadAll(cfgFile)
+	if err != nil {
+		return g.Error(err, "could not read from replication path: "+cfgPath)
+	}
+
+	replication := sling.ReplicationConfig{}
+	err = yaml.Unmarshal(cfgBytes, &replication)
+	if err != nil {
+		return g.Error(err, "Error parsing replication config")
+	}
+
+	g.Info("starting replication | %s -> %s", replication.Source, replication.Target)
+
+	eG := g.ErrorGroup{}
+	for name, stream := range replication.Streams {
+		if stream == nil {
+			stream = &sling.ReplicationStreamConfig{}
+		}
+		sling.SetStreamDefaults(stream, replication)
+
+		if stream.ObjectName == "" {
+			return g.Error("need to specify `object_name`. Please see https://docs.slingdata.io/sling-cli for help.")
+		}
+
+		cfg := sling.Config{
+			Source: sling.Source{
+				Conn:       replication.Source,
+				Stream:     name,
+				Columns:    stream.Columns,
+				PrimaryKey: stream.PrimaryKey,
+				UpdateKey:  stream.UpdateKey,
+				Options:    stream.SourceOptions,
+			},
+			Target: sling.Target{
+				Conn:    replication.Target,
+				Object:  stream.ObjectName,
+				Options: stream.TargetOptions,
+			},
+			Mode: stream.Mode,
+		}
+
+		if stream.SQL != "" {
+			cfg.Source.Stream = stream.SQL
+		}
+
+		println()
+		g.Info("running stream `%s`", name)
+
+		err = runTask(&cfg)
+		eG.Capture(err)
+	}
+
+	return eG.Err()
 }
 
 func processConns(c *g.CliSC) (bool, error) {

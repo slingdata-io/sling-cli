@@ -38,7 +38,13 @@ var cliRun = &g.CliSC{
 			Name:        "config",
 			ShortName:   "c",
 			Type:        "string",
-			Description: "The config string or file to use (JSON or YAML).\n",
+			Description: "The config string or file to use (JSON or YAML).",
+		},
+		{
+			Name:        "replication",
+			ShortName:   "r",
+			Type:        "string",
+			Description: "The replication config file to use to run multiple tasks (YAML).\n",
 		},
 		{
 			Name:        "src-conn",
