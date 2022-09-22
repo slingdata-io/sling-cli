@@ -687,10 +687,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		// select only records that have been modified after last max value
 		incrementalWhereCond := "1=1"
 		if cfg.IncrementalVal != "" {
+			greaterThan := ">="
+			if val := os.Getenv("SLING_GREATER_THAN_EQUAL"); val != "" {
+				greaterThan = lo.Ternary(cast.ToBool(val), ">=", ">")
+			}
 			incrementalWhereCond = g.R(
-				"{update_key} > {value}",
+				"{update_key} {gt} {value}",
 				"update_key", srcConn.Quote(cfg.Source.columns.Normalize(cfg.Source.UpdateKey)),
 				"value", cfg.IncrementalVal,
+				"gt", greaterThan,
 			)
 		}
 
