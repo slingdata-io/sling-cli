@@ -66,6 +66,9 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 
 func (t *TaskExecution) GetBytesString() (s string) {
 	inBytes, _ := t.GetBytes()
+	if inBytes == 0 {
+		return ""
+	}
 	return g.F("%s", humanize.Bytes(inBytes))
 	// if inBytes > 0 && inBytes == outBytes {
 	// 	return g.F("%s", humanize.Bytes(inBytes))
@@ -630,8 +633,12 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		return
 	}
 
+	bytesStr := ""
+	if val := t.GetBytesString(); val != "" {
+		bytesStr = "[" + val + "]"
+	}
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows in %d secs [%s r/s] [%s]", cnt, elapsed, getRate(cnt), t.GetBytesString())
+	t.SetProgress("inserted %d rows in %d secs [%s r/s] %s", cnt, elapsed, getRate(cnt), bytesStr)
 
 	if t.df.Context.Err() != nil {
 		err = g.Error(t.df.Context.Err(), "Error running runDbToDb")
