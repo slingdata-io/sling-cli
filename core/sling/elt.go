@@ -877,6 +877,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 // insert / incremental / replace into target table
 func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	targetTable := cfg.Target.Object
+	defer t.PBar.Finish()
 
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable

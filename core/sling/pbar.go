@@ -58,8 +58,10 @@ func (pb *ProgressBar) Start() {
 }
 
 func (pb *ProgressBar) Finish() {
-	pb.bar.Finish()
-	pb.finished = true
+	if !pb.finished {
+		pb.bar.Finish()
+		pb.finished = true
+	}
 }
 
 // https://github.com/cheggaaa/pb/blob/master/v3/element.go
