@@ -275,7 +275,9 @@ func runReplication(cfgPath string) (err error) {
 		g.Info("running stream `%s`", name)
 
 		err = runTask(&cfg)
-		eG.Capture(err)
+		if err != nil {
+			eG.Capture(g.Error(err, "error for stream `%s`", name))
+		}
 	}
 
 	return eG.Err()

@@ -143,6 +143,8 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	go func() {
 		defer close(done)
+		defer t.PBar.Finish()
+
 		t.Status = ExecStatusRunning
 
 		if t.Err != nil {
