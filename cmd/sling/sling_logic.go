@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/integrii/flaggy"
+	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/g/net"
@@ -231,23 +232,23 @@ func runReplication(cfgPath string) (err error) {
 		return g.Error(err, "could not read from replication path: "+cfgPath)
 	}
 
-	replication := sling.ReplicationConfig{}
-	err = yaml.Unmarshal(cfgBytes, &replication)
+	replication, err := sling.UnmarshalReplication(string(cfgBytes))
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
 	}
 
-	g.Info("starting replication | %s -> %s", replication.Source, replication.Target)
+	g.Info("Sling Replication [%d streams] | %s -> %s", len(replication.Streams), replication.Source, replication.Target)
 
 	eG := g.ErrorGroup{}
-	for name, stream := range replication.Streams {
+	for i, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
+		stream := replication.Streams[name]
 		if stream == nil {
 			stream = &sling.ReplicationStreamConfig{}
 		}
 		sling.SetStreamDefaults(stream, replication)
 
-		if stream.ObjectName == "" {
-			return g.Error("need to specify `object_name`. Please see https://docs.slingdata.io/sling-cli for help.")
+		if stream.Object == "" {
+			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
 		}
 
 		cfg := sling.Config{
@@ -261,7 +262,7 @@ func runReplication(cfgPath string) (err error) {
 			},
 			Target: sling.Target{
 				Conn:    replication.Target,
-				Object:  stream.ObjectName,
+				Object:  stream.Object,
 				Options: stream.TargetOptions,
 			},
 			Mode: stream.Mode,
@@ -272,11 +273,13 @@ func runReplication(cfgPath string) (err error) {
 		}
 
 		println()
-		g.Info("running stream `%s`", name)
+		g.Info("[%d / %d] running stream `%s`", i+1, len(replication.Streams), name)
 
 		err = runTask(&cfg)
 		if err != nil {
-			eG.Capture(g.Error(err, "error for stream `%s`", name))
+			err = g.Error(err, "error for stream `%s`", name)
+			g.LogError(err)
+			eG.Capture(err)
 		}
 	}
 

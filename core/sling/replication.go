@@ -4,6 +4,8 @@ import (
 	"database/sql/driver"
 
 	"github.com/flarco/g"
+	"github.com/spf13/cast"
+	"gopkg.in/yaml.v2"
 )
 
 type ReplicationConfig struct {
@@ -25,7 +27,7 @@ func (rd ReplicationConfig) Value() (driver.Value, error) {
 
 type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
-	ObjectName    string         `json:"object_name,omitempty" yaml:"object_name,omitempty"`
+	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Columns       []string       `json:"columns,omitempty" yaml:"columns,flow,omitempty"`
 	PrimaryKey    []string       `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
@@ -50,8 +52,8 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 	if stream.UpdateKey == "" {
 		stream.UpdateKey = replicationCfg.Defaults.UpdateKey
 	}
-	if stream.ObjectName == "" {
-		stream.ObjectName = replicationCfg.Defaults.ObjectName
+	if stream.Object == "" {
+		stream.Object = replicationCfg.Defaults.Object
 	}
 	if stream.SourceOptions == nil {
 		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
@@ -59,4 +61,61 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 	if stream.TargetOptions == nil {
 		stream.TargetOptions = replicationCfg.Defaults.TargetOptions
 	}
+}
+
+// UnmarshalReplication converts a yaml file to a replication
+func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err error) {
+
+	m := g.M()
+	err = yaml.Unmarshal([]byte(replicYAML), &m)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
+	// source and target
+	source, ok := m["source"]
+	if !ok {
+		err = g.Error("did not find 'source' key")
+		return
+	}
+
+	target, ok := m["target"]
+	if !ok {
+		err = g.Error("did not find 'target' key")
+		return
+	}
+
+	defaults, ok := m["defaults"]
+	if !ok {
+		err = g.Error("did not find 'defaults' key")
+		return
+	}
+
+	streams, ok := m["streams"]
+	if !ok {
+		err = g.Error("did not find 'streams' key")
+		return
+	}
+
+	config = ReplicationConfig{
+		Source: cast.ToString(source),
+		Target: cast.ToString(target),
+	}
+
+	// parse defaults
+	err = g.Unmarshal(g.Marshal(defaults), &config.Defaults)
+	if err != nil {
+		err = g.Error(err, "could not parse 'defaults'")
+		return
+	}
+
+	// parse streams
+	err = g.Unmarshal(g.Marshal(streams), &config.Streams)
+	if err != nil {
+		err = g.Error(err, "could not parse 'streams'")
+		return
+	}
+
+	return
 }

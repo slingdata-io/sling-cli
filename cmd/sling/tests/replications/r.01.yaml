@@ -3,7 +3,7 @@ target: DEMO_POSTGRES
 
 defaults:
   mode: full-refresh
-  object_name: '{target_schema}.{stream_schema}_{stream_table}'
+  object: '{target_schema}.{stream_schema}_{stream_table}'
 
 streams:
   public.food_food_category:
