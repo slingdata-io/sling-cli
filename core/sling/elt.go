@@ -432,7 +432,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// get watermark
-	if t.Config.Mode == IncrementalMode {
+	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
 		dateLayout := iop.Iso8601ToGoLayout(srcConn.GetProp("date_layout"))
 		varMap := map[string]string{
@@ -496,6 +496,17 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	defer tgtConn.Close()
 
+	if t.usingCheckpoint() {
+		t.SetProgress("getting checkpoint value")
+		t.Config.Source.UpdateKey = slingLoadedAtColumn
+		varMap := map[string]string{} // should always be number
+		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
+		if err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+	}
+
 	if t.Config.Options.StdIn {
 		t.SetProgress("reading from stream (stdin)")
 	} else {
@@ -503,6 +514,14 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
+		if strings.Contains(err.Error(), "Provided 0 files") {
+			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			} else {
+				t.SetProgress("no files found")
+			}
+			return nil
+		}
 		err = g.Error(err, "could not read from file")
 		return
 	}
@@ -544,6 +563,14 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	}
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
+		if strings.Contains(err.Error(), "Provided 0 files") {
+			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			} else {
+				t.SetProgress("no files found")
+			}
+			return nil
+		}
 		err = g.Error(err, "Could not ReadFromFile")
 		return
 	}
@@ -621,7 +648,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
 
 	// get watermark
-	if t.Config.Mode == IncrementalMode {
+	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
 		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
 		if err != nil {
@@ -712,7 +739,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
-	if cfg.Mode == IncrementalMode {
+	// if cfg.Mode == IncrementalMode || (cfg.Mode == AppendMode && cfg.Source.UpdateKey != "") {
+	if t.usingCheckpoint() {
 		// select only records that have been modified after last max value
 		incrementalWhereCond := "1=1"
 		if cfg.IncrementalVal != "" {
@@ -799,6 +827,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		options := g.M()
 		g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
 		options["METADATA"] = g.Marshal(t.getMetadata())
+		options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()),
 			g.MapToKVArr(g.ToMapString(options))...,
@@ -1067,6 +1096,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
+	// if update-key is provided without primary-key, append incrementally
+	if t.Config.Source.UpdateKey != "" && len(t.Config.Source.PrimaryKey) == 0 {
+		t.Config.Mode = AppendMode
+	}
+
 	// Put data from tmp to final
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
@@ -1172,6 +1206,10 @@ func (t *TaskExecution) Cleanup() {
 	if t.df != nil {
 		t.df.CleanUp()
 	}
+}
+
+func (t *TaskExecution) usingCheckpoint() bool {
+	return t.Config.Source.UpdateKey != "" && (t.Config.Mode == IncrementalMode || t.Config.Mode == AppendMode)
 }
 
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {

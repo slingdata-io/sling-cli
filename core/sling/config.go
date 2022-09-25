@@ -232,10 +232,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	}
 
 	if srcDbProvided && tgtDbProvided {
-		if cfg.Mode == IncrementalMode && (len(cfg.Source.UpdateKey) == 0 || len(cfg.Source.PrimaryKey) == 0) {
-			err = g.Error("Must specify update_key / primary_key for 'incremental' mode")
-			return
-		}
 		Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided {
 		Type = FileToDB
@@ -402,7 +398,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.SrcConn = srcConn
 	}
 
-	// set mode if primary key is providedand mode isnn't
+	// set mode if primary key is provided and mode isnn't
 	if len(cfg.Source.PrimaryKey) > 0 && (cfg.Mode == "" || cfg.Mode == FullRefreshIncrementalMode) {
 		cfg.Mode = IncrementalMode
 	} else if cfg.Mode == FullRefreshIncrementalMode {

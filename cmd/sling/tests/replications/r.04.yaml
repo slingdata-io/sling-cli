@@ -1,0 +1,12 @@
+source: DO_SPACES
+target: PG_BIONIC
+
+defaults:
+  mode: full-refresh
+  object: '{target_schema}.{stream_file_name}'
+
+streams:
+  s3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb:
+    mode: append
+    update_key: _sling_loaded_at
+    object: public.rudder_events
