@@ -1,0 +1,9 @@
+source: DO_SPACES
+target: TEST_PG_SLING_MASTER
+
+defaults:
+  mode: full-refresh
+  object: '{target_schema}.{stream_file_name}'
+
+streams:
+  s3://ocral/temp/public.food_food_category.csv:

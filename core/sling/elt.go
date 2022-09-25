@@ -35,12 +35,17 @@ var AllowedProps = map[string]string{
 
 var start time.Time
 var PermitTableSchemaOptimization = false
-var AddLoadedAtColumn = false
+var MetadataLoadedAt = false
+var MetadataStreamURL = false
 var slingLoadedAtColumn = "_sling_loaded_at"
+var slingStreamURLColumn = "_sling_stream_url"
 
 func init() {
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		AddLoadedAtColumn = cast.ToBool(val)
+		MetadataLoadedAt = cast.ToBool(val)
+	}
+	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
+		MetadataStreamURL = cast.ToBool(val)
 	}
 }
 
@@ -203,11 +208,24 @@ func (t *TaskExecution) Execute() error {
 	return t.Err
 }
 
+func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
+	if MetadataLoadedAt {
+		metadata.LoadedAt.Key = slingLoadedAtColumn
+		metadata.LoadedAt.Value = t.StartTime.Unix()
+	}
+	if MetadataStreamURL {
+		metadata.StreamURL.Key = slingStreamURLColumn
+	}
+	return metadata
+}
+
 func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
+	options["METADATA"] = g.Marshal(t.getMetadata())
 	srcProps := append(
-		g.MapToKVArr(t.Config.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+		g.MapToKVArr(t.Config.SrcConn.DataS()),
+		g.MapToKVArr(g.ToMapString(options))...,
 	)
 	conn, err = database.NewConnContext(t.Context.Ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
@@ -334,6 +352,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
 		return err
 	}
+	srcConn.SetProp("METADATA", g.Marshal(t.getMetadata()))
 
 	t.SetProgress("reading from source api system (%s)", t.Config.SrcConn.Type)
 	t.df, err = t.ReadFromAPI(t.Config, srcConn)
@@ -390,6 +409,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
 		return err
 	}
+	srcConn.SetProp("METADATA", g.Marshal(t.getMetadata()))
 
 	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
@@ -778,8 +798,10 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		// construct props by merging with options
 		options := g.M()
 		g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
+		options["METADATA"] = g.Marshal(t.getMetadata())
 		props := append(
-			g.MapToKVArr(cfg.SrcConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
+			g.MapToKVArr(cfg.SrcConn.DataS()),
+			g.MapToKVArr(g.ToMapString(options))...,
 		)
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.SrcConn.URL(), props...)
@@ -974,22 +996,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	// add loaded_at column and set to now
-	if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
-		addLoadedAtColumn(&sampleData)
-		err = database.AddMissingColumns(tgtConn, cfg.Target.Options.TableTmp, sampleData.Columns)
-		if err != nil {
-			err = g.Error(err, "could not add loaded_at: "+targetTable)
-			return
-		}
-
-		_, err = tgtConn.Exec(g.F(`update %s set %s = %d where 1=1`, cfg.Target.Options.TableTmp, tgtConn.Quote(slingLoadedAtColumn), time.Now().Unix()))
-		if err != nil {
-			err = g.Error(err, "could not set loaded_at: "+targetTable)
-			return
-		}
-	}
-
 	// need to contain the final write in a transcation after data is loaded
 	txOptions := sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
 	switch tgtConn.GetType() {
@@ -1019,9 +1025,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample := iop.NewDataset(df.Columns)
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
-		if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
-			addLoadedAtColumn(&sample)
-		}
 		created, err := createTableIfNotExists(
 			tgtConn,
 			sample,
@@ -1059,14 +1062,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			err = database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
 			if err != nil {
 				err = g.Error(err, "could not add missing columns")
-				return cnt, err
-			}
-		} else if AddLoadedAtColumn || t.Config.Mode == SnapshotMode {
-			// add only loaded_at column
-			newCols := iop.Columns{sample.Columns.GetColumn(slingLoadedAtColumn)}
-			err = database.AddMissingColumns(tgtConn, targetTable, newCols)
-			if err != nil {
-				err = g.Error(err, "could not add loaded_at: "+targetTable)
 				return cnt, err
 			}
 		}
@@ -1324,19 +1319,4 @@ func getSQLText(filePath string) (string, error) {
 	}
 
 	return string(bytes), nil
-}
-
-func addLoadedAtColumn(data *iop.Dataset) {
-	if len(data.Columns) == 0 || data.Columns.GetColumn(slingLoadedAtColumn).Name != "" {
-		return
-	}
-	loadedAtCol := iop.Column{
-		Name: slingLoadedAtColumn,
-		Type: iop.IntegerType,
-		Stats: iop.ColumnStats{
-			TotalCnt: data.Columns[0].Stats.TotalCnt,
-			IntCnt:   data.Columns[0].Stats.TotalCnt,
-		},
-	}
-	data.Columns = append(data.Columns, loadedAtCol)
 }

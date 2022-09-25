@@ -481,14 +481,19 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		}
 
 		filePath := string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
+		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
+		fileName := string(re.ReplaceAll([]byte(pathArr[len(pathArr)-1]), []byte("_")))
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
+			m["stream_file_name"] = fileName
 		case dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
+			m["stream_file_name"] = fileName
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
+			m["stream_file_name"] = fileName
 			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")

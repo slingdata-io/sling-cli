@@ -1,0 +1,9 @@
+source: TEST_PG_SLING_MASTER
+target: DO_SPACES
+
+defaults:
+  mode: full-refresh
+  object: 's3://{target_bucket}/temp/{stream_schema}.{stream_table}.csv'
+
+streams:
+  public.food_food_category:
