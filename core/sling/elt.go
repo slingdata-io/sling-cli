@@ -498,7 +498,9 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
-		t.Config.Source.UpdateKey = slingLoadedAtColumn
+		if t.Config.Source.UpdateKey == "." {
+			t.Config.Source.UpdateKey = slingLoadedAtColumn
+		}
 		varMap := map[string]string{} // should always be number
 		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
 		if err != nil {

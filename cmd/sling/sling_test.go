@@ -117,7 +117,7 @@ func init() {
 
 func TestOne(t *testing.T) {
 	// return
-	path := "/tmp/temp.json"
+	path := "/__/devbox/sling-cli/cmd/sling/tests/tasks/task.01.json"
 	pathArr := strings.Split(path, "/")
 	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
 	runOneTask(t, file)
@@ -177,7 +177,10 @@ func TestTasks(t *testing.T) {
 	}
 
 	files, _ := g.ListDir(folderPath)
-	for _, file := range files {
+	for i, file := range files {
+		if i < 0 {
+			continue
+		}
 		runOneTask(t, file)
 
 		if t.Failed() {
