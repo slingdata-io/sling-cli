@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ var AllowedProps = map[string]string{
 }
 
 var start time.Time
-var PermitTableSchemaOptimization = false
+var PermitTableSchemaOptimization = true
 var MetadataLoadedAt = false
 var MetadataStreamURL = false
 var slingLoadedAtColumn = "_sling_loaded_at"
@@ -647,7 +646,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	t.Config.Target.columns, _ = tgtConn.GetSQLColumns("select * from " + t.Config.Target.Object)
+	pullTargetTableColumns(t.Config, tgtConn, false)
 
 	// get watermark
 	if t.usingCheckpoint() {
@@ -699,47 +698,50 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
-	srcTable := ""
-	sql := ""
+
 	fieldsStr := "*"
-	streamNameArr := regexp.MustCompile(`\s`).Split(cfg.Source.Stream, -1)
-	if len(streamNameArr) == 1 && !strings.Contains(cfg.Source.Stream, "/") { // has no whitespace or "/", is a table/view
-		srcTable = streamNameArr[0]
-		srcTable = setSchema(cast.ToString(cfg.Source.Data["schema"]), srcTable)
-		if len(cfg.Source.Columns) > 0 {
-			fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
-				return srcConn.Quote(f)
-			})
-			fieldsStr = strings.Join(fields, ", ")
-		}
-		sql = g.F(`select %s from %s`, fieldsStr, srcTable)
-	} else {
-		sql = cfg.Source.Stream
+	sTable, err := database.ParseTableName(cfg.Source.Stream, srcConn.GetType())
+	if err != nil {
+		err = g.Error(err, "Could not parse source stream text")
+		return t.df, err
+	} else if sTable.Schema == "" {
+		sTable.Schema = srcConn.Quote(cast.ToString(cfg.Source.Data["schema"]))
 	}
 
 	// check if referring to a SQL file
-	if strings.HasSuffix(strings.ToLower(cfg.Source.Stream), ".sql") {
+	if strings.Contains(cfg.Source.Stream, "/") || strings.HasSuffix(strings.ToLower(cfg.Source.Stream), ".sql") {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
 		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
 			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
-			if srcTable == "" {
+			if sTable.Name == "" {
 				return t.df, err
 			} else {
 				err = nil // don't return error in case the table full name ends with .sql
 				g.LogError(err)
 			}
 		} else {
-			sql = sqlFromFile
+			sTable.SQL = sqlFromFile
 		}
 	}
 
-	// Get source columns
-	cfg.Source.columns, err = srcConn.GetSQLColumns(g.R(sql, "incremental_where_cond", "1=0"))
-	if err != nil {
-		err = g.Error(err, "Could not obtain source columns")
-		return t.df, err
+	if len(cfg.Source.Columns) > 0 {
+		fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
+			return srcConn.Quote(f)
+		})
+		fieldsStr = strings.Join(fields, ", ")
 	}
+
+	// Get source columns
+	// if sTable.IsQuery() {
+	// 	cfg.Source.columns, err = srcConn.GetSQLColumns(g.R(sTable.SQL, "incremental_where_cond", "1=0"))
+	// } else {
+	// 	cfg.Source.columns, err = srcConn.GetTableColumns(sTable)
+	// }
+	// if err != nil {
+	// 	err = g.Error(err, "Could not obtain source columns")
+	// 	return t.df, err
+	// }
 
 	// if cfg.Mode == IncrementalMode || (cfg.Mode == AppendMode && cfg.Source.UpdateKey != "") {
 	if t.usingCheckpoint() {
@@ -752,38 +754,40 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
-				"update_key", srcConn.Quote(cfg.Source.columns.Normalize(cfg.Source.UpdateKey)),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
 		}
 
-		if srcTable != "" {
-			sql = g.R(
+		if sTable.SQL == "" {
+			sTable.SQL = g.R(
 				`select {fields} from {table} where {incremental_where_cond}`,
 				"fields", fieldsStr,
-				"table", srcTable,
+				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 			)
 		} else {
-			if !strings.Contains(sql, "{incremental_where_cond}") {
+			if !strings.Contains(sTable.SQL, "{incremental_where_cond}") {
 				err = g.Error("For incremental loading with custom SQL, need to include where clause placeholder {incremental_where_cond}. e.g: select * from my_table where col2='A' AND {incremental_where_cond}")
 				return t.df, err
 			}
-			sql = g.R(sql, "incremental_where_cond", incrementalWhereCond)
+			sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", incrementalWhereCond)
 		}
-	} else if cfg.Source.Limit > 0 && srcTable != "" {
-		sql = g.R(
+	} else if cfg.Source.Limit > 0 && sTable.SQL == "" {
+		sTable.SQL = g.R(
 			srcConn.Template().Core["limit"],
 			"fields", fieldsStr,
-			"table", srcTable,
+			"table", sTable.FDQN(),
 			"limit", cast.ToString(cfg.Source.Limit),
 		)
+	} else if sTable.SQL == "" {
+		sTable.SQL = g.F(`select %s from %s`, fieldsStr, sTable.FDQN())
 	}
 
-	df, err = srcConn.BulkExportFlow(sql)
+	df, err = srcConn.BulkExportFlow(sTable.SQL)
 	if err != nil {
-		err = g.Error(err, "Could not BulkStream: "+sql)
+		err = g.Error(err, "Could not BulkStream: "+sTable.SQL)
 		return t.df, err
 	}
 
@@ -991,6 +995,34 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
+	// set OnSchemaChange
+	df.OnSchemaChange = func(i int, newType iop.ColumnType) error {
+		df.Context.Lock()
+		defer df.Context.Unlock()
+
+		table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
+		if err != nil {
+			return g.Error(err, "could not get temp table name for schema change")
+		}
+		table.Columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
+		if err != nil {
+			return g.Error(err, "could not get table columns for schema change")
+		}
+
+		df.Columns[i].Type = newType
+		ok, err := tgtConn.OptimizeTable(&table, df.Columns)
+		if err != nil {
+			return g.Error(err, "could not change table schema")
+		} else if ok {
+			cfg.Target.columns = table.Columns
+			for i := range df.Columns {
+				df.Columns[i].Type = table.Columns[i].Type
+			}
+		}
+
+		return nil
+	}
+
 	t.SetProgress("streaming data")
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
@@ -1069,31 +1101,46 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			t.SetProgress("created table %s", targetTable)
 		}
 
-		// TODO: put corrective action here, based on StreamProcessor's result
-		// --> use StreamStats to generate new DDL, create the target
-		// table with the new DDL, then insert into.
-		// IF! Target table exists, and the DDL is insufficient, then
-		// have setting called PermitTableSchemaOptimization, which
-		// allows sling elt to alter the final table to fit the data
-		// if table doesn't exists, then easy-peasy, create it.
-		// change logic in createTableIfNotExists ot use StreamStats
-		// OptimizeTable creates the table if it's missing
-		// **Hole in this**: will truncate data points, since it is based
-		// only on new data being inserted... would need a complete
-		// stats of the target table to properly optimize.
-		if !created && PermitTableSchemaOptimization {
-			err = tgtConn.OptimizeTable(targetTable, sample.Columns)
-			if err != nil {
-				err = g.Error(err, "could not optimize table schema")
-				return cnt, err
+		if !created && cfg.Mode != FullRefreshMode {
+			if cfg.Target.Options.AddNewColumns {
+				ok, err := database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
+				if err != nil {
+					return cnt, g.Error(err, "could not add missing columns")
+				} else if ok {
+					_, err = pullTargetTableColumns(t.Config, tgtConn, true)
+					if err != nil {
+						return cnt, g.Error(err, "could not get table columns")
+					}
+				}
 			}
-			// if target table exists, add new columns (if we're not dropping)
-		}
-		if !created && cfg.Mode != FullRefreshMode && cfg.Target.Options.AddNewColumns {
-			err = database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
-			if err != nil {
-				err = g.Error(err, "could not add missing columns")
-				return cnt, err
+
+			if PermitTableSchemaOptimization {
+				table, err := database.ParseTableName(targetTable, tgtConn.GetType())
+				if err != nil {
+					return cnt, g.Error(err, "could not get table name for optimization")
+				}
+
+				table.Columns, err = pullTargetTableColumns(t.Config, tgtConn, false)
+				if err != nil {
+					return cnt, g.Error(err, "could not get table columns for optimization")
+				}
+
+				ok, err := tgtConn.OptimizeTable(&table, sample.Columns)
+				if err != nil {
+					return cnt, g.Error(err, "could not optimize table schema")
+				} else if ok {
+					cfg.Target.columns = table.Columns
+					for i := range df.Columns {
+						df.Columns[i].Type = table.Columns[i].Type
+						df.Columns[i].DbType = table.Columns[i].DbType
+						for _, ds := range df.StreamMap {
+							if len(ds.Columns) == len(df.Columns) {
+								ds.Columns[i].Type = table.Columns[i].Type
+								ds.Columns[i].DbType = table.Columns[i].DbType
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1243,6 +1290,17 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	return true, nil
 }
 
+func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
+	if len(cfg.Target.columns) == 0 || force {
+		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Object)
+		if err != nil {
+			err = g.Error(err, "could not get column list for "+cfg.Target.Object)
+			return
+		}
+	}
+	return cfg.Target.columns, nil
+}
+
 func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	// insert
 	tmpColumns, err := tgtConn.GetColumns(cfg.Target.Options.TableTmp)
@@ -1250,7 +1308,8 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		err = g.Error(err, "could not get column list for "+cfg.Target.Options.TableTmp)
 		return
 	}
-	tgtColumns, err := tgtConn.GetColumns(cfg.Target.Object)
+
+	tgtColumns, err := pullTargetTableColumns(cfg, tgtConn, false)
 	if err != nil {
 		err = g.Error(err, "could not get column list for "+cfg.Target.Object)
 		return

@@ -220,7 +220,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	if cfg.Mode == "" {
 		cfg.Mode = AppendMode
 	}
-	validMode := cfg.Mode != Mode("")
+
+	validMode := g.In(cfg.Mode, AppendMode, FullRefreshIncrementalMode, FullRefreshMode, IncrementalMode, SnapshotMode, TruncateMode)
 	if !validMode {
 		err = g.Error("must specify valid mode: append, full-refresh, incremental or truncate")
 		return
@@ -456,10 +457,10 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
-		schema, table := database.SplitTableFullName(cfg.Source.Stream)
-		if schema != "" && table != "" {
-			m["stream_schema"] = schema
-			m["stream_table"] = table
+		table, _ := database.ParseTableName(cfg.Source.Stream)
+		if table.Schema != "" && table.Name != "" {
+			m["stream_schema"] = table.Schema
+			m["stream_table"] = table.Name
 		}
 	}
 

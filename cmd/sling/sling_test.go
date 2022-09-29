@@ -101,7 +101,6 @@ var DBs = []*testDB{
 func init() {
 	env.InitLogger()
 	iop.RemoveTrailingDecZeros = true
-	sling.PermitTableSchemaOptimization = false
 	os.Setenv("SLING_FILE_ROW_LIMIT", "0")
 	for _, db := range DBs {
 		if db.URL == "" {
@@ -117,7 +116,7 @@ func init() {
 
 func TestOne(t *testing.T) {
 	// return
-	path := "/__/devbox/sling-cli/cmd/sling/tests/tasks/task.01.json"
+	path := "/Users/fritz/__/Git/sling-cli/cmd/sling/tests/test.yaml"
 	pathArr := strings.Split(path, "/")
 	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
 	runOneTask(t, file)
