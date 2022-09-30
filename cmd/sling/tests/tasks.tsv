@@ -11,17 +11,19 @@ POSTGRES	public.test1k	{}	MSSQL	dbo.test1k	full-refresh			{}	{}
 BIGQUERY	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
 SNOWFLAKE	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
 	file://tests/files/test1.csv	{}	POSTGRES	public.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	POSTGRES	public.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	POSTGRES	public.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	SNOWFLAKE	public.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	SNOWFLAKE	public.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	SNOWFLAKE	public.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	BIGQUERY	public.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	BIGQUERY	public.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	BIGQUERY	public.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	MYSQL	mysql.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	MYSQL	mysql.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	MYSQL	mysql.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	MSSQL	dbo.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	MSSQL	dbo.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	MSSQL	dbo.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 	file://tests/files/test1.csv	{}	ORACLE	system.test1	full-refresh			{}	{}	
-	file://tests/files/test1.upsert.csv	{}	ORACLE	system.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.upsert.csv	{}	ORACLE	system.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
+	file://tests/files/test1.csv	{}	SQLITE	main.test1	full-refresh			{}	{}	
+	file://tests/files/test1.upsert.csv	{}	SQLITE	main.test1	incremental	id	created_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 GITHUB_DBIO	commits	{}	POSTGRES	public.{source_name}_{stream_name}	full-refresh					{"validation_object": "public.github_dbio_commits"}
 GITHUB_DBIO	commits	{}	POSTGRES	public.{source_name}_{stream_name}	incremental	sha	created_at	{}	{}	{"validation_object": "public.github_dbio_commits"}
 NOTION	users	{}	POSTGRES	public.{source_name}_{stream_name}	full-refresh					{"validation_object": "public.notion_users"}

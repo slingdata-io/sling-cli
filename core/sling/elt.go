@@ -1336,10 +1336,22 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 
 	srcFields := tgtConn.CastColumnsForSelect(tmpColumns, tgtColumns)
 
+	srcTable, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
+	if err != nil {
+		err = g.Error(err, "unable to parse tmp table name")
+		return
+	}
+
+	tgtTable, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+	if err != nil {
+		err = g.Error(err, "unable to parse tmp table name")
+		return
+	}
+
 	sql := g.R(
 		tgtConn.Template().Core["insert_from_table"],
-		"tgt_table", cfg.Target.Object,
-		"src_table", cfg.Target.Options.TableTmp,
+		"tgt_table", tgtTable.FullName(),
+		"src_table", srcTable.FullName(),
 		"tgt_fields", strings.Join(tgtFields, ", "),
 		"src_fields", strings.Join(srcFields, ", "),
 	)
