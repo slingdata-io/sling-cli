@@ -827,12 +827,12 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config, client *airbyte.Airbyte) (df *i
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
 	var stream *iop.Datastream
+	options := g.M()
+	g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
+	options["METADATA"] = g.Marshal(t.getMetadata())
 
 	if cfg.SrcConn.URL() != "" {
 		// construct props by merging with options
-		options := g.M()
-		g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
-		options["METADATA"] = g.Marshal(t.getMetadata())
 		options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()),
@@ -852,7 +852,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 	} else {
-		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin))
+		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin), g.ToMapString(options))
 		if err != nil {
 			err = g.Error(err, "Could not MakeDatastream")
 			return t.df, err
