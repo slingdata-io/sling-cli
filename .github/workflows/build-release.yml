@@ -20,7 +20,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.18"
+          go-version: "1.19"
           
       # - uses: actions/cache@v3
       #   with:
@@ -66,7 +66,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.18"
+          go-version: "1.19"
           
       # - uses: actions/cache@v3
       #   with:
@@ -122,7 +122,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v1
         with:
-          go-version: "1.18"
+          go-version: "1.19"
           
       # - uses: actions/cache@v2
       #   with:
