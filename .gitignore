@@ -18,3 +18,4 @@ python/sling/bin/
 sling-mac
 sling-linux
 sling-win.exe
+dist/
