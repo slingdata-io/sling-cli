@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"SNOWFLAKE","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1k","options":{}}}
+{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"BIGQUERY","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1k","options":{}}}

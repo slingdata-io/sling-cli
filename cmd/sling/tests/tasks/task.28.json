@@ -1,1 +1,1 @@
-{"env":{"validation_object":"public.notion_users"},"mode":"full-refresh","options":{},"source":{"conn":"NOTION","options":{},"primary_key":[],"stream":"users","update_key":""},"target":{"conn":"POSTGRES","object":"public.{source_name}_{stream_name}","options":{}}}
+{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file://tests/files/test1.csv","update_key":""},"target":{"conn":"CLICKHOUSE","object":"default.test1","options":{}}}

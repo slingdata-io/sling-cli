@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"BIGQUERY","options":{},"primary_key":[],"stream":"public.test1k","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1k","options":{}}}
+{"env":{"validation_object":"public.tmp_ocral_test_1000_csv"},"mode":"append","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file:///tmp/ocral_test_1000.csv","update_key":""},"target":{"conn":"POSTGRES_SSH","object":"public.{stream_file_path}","options":{"add_new_columns":true}}}

@@ -116,7 +116,7 @@ func init() {
 
 func TestOne(t *testing.T) {
 	// return
-	path := "/Users/fritz/__/Git/sling-cli/cmd/sling/tests/test.yaml"
+	path := "tests/tasks/task.24.json"
 	pathArr := strings.Split(path, "/")
 	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
 	runOneTask(t, file)
@@ -177,9 +177,10 @@ func TestTasks(t *testing.T) {
 
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
-		if i < 0 {
-			continue
-		}
+		_ = i
+		// if i+1 < 18 {
+		// 	continue
+		// }
 		runOneTask(t, file)
 
 		if t.Failed() {
@@ -260,7 +261,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 				for i := range valuesDb {
 					valDb := data.Sp.ParseString(cast.ToString(valuesDb[i]))
 					valFile := data.Sp.ParseString(cast.ToString(valuesFile[i]))
-					if !assert.EqualValues(t, valFile, valDb) {
+					if !assert.EqualValues(t, valFile, valDb, g.F("row %d", i+1)) {
 						return
 					}
 				}

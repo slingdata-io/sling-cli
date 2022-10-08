@@ -1,1 +1,1 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file://tests/files/test1.csv","update_key":""},"target":{"conn":"MSSQL","object":"dbo.test1","options":{}}}
+{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file://tests/files/test1.csv","update_key":""},"target":{"conn":"MYSQL","object":"mysql.test1","options":{}}}

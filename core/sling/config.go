@@ -139,6 +139,9 @@ func (cfg *Config) SetDefault() {
 	if cfg.Target.Options.UseBulk == nil {
 		cfg.Target.Options.UseBulk = targetptions.UseBulk
 	}
+	if cfg.Target.Options.AdjustColumnType == nil {
+		cfg.Target.Options.AdjustColumnType = targetptions.AdjustColumnType
+	}
 	if cfg.Target.Options.DatetimeFormat == "" {
 		cfg.Target.Options.DatetimeFormat = targetptions.DatetimeFormat
 	}
@@ -617,15 +620,16 @@ type SourceOptions struct {
 
 // TargetOptions are target connection and stream processing options
 type TargetOptions struct {
-	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
-	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
-	Concurrency    int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
-	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
-	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
-	FileMaxRows    int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
-	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
-	UseBulk        *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
-	AddNewColumns  bool                `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
+	Header           *bool               `json:"header,omitempty" yaml:"header,omitempty"`
+	Compression      *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
+	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
+	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
+	FileMaxRows      int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
+	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
+	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
+	AddNewColumns    bool                `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
+	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -689,9 +693,10 @@ var TargetDBOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
-	UseBulk:        g.Bool(true),
-	DatetimeFormat: "auto",
-	MaxDecimals:    g.Int(-1),
+	UseBulk:          g.Bool(true),
+	AdjustColumnType: g.Bool(true),
+	DatetimeFormat:   "auto",
+	MaxDecimals:      g.Int(-1),
 }
 
 var TargetAPIOptionsDefault = TargetOptions{

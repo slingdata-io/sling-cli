@@ -33,7 +33,6 @@ var AllowedProps = map[string]string{
 }
 
 var start time.Time
-var PermitTableSchemaOptimization = true
 var MetadataLoadedAt = false
 var MetadataStreamURL = false
 var slingLoadedAtColumn = "_sling_loaded_at"
@@ -1042,6 +1041,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if cnt != tCnt {
 		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
 		return
+	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
+		err = g.Error("Loaded 0 records while sample data has records. Exiting.")
+		return
 	}
 	// aggregate stats from stream processors
 	df.SyncStats()
@@ -1064,6 +1066,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	switch tgtConn.GetType() {
 	case dbio.TypeDbSnowflake:
 		txOptions = sql.TxOptions{}
+	case dbio.TypeDbClickhouse:
+		txOptions = sql.TxOptions{Isolation: sql.LevelDefault}
 	}
 	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)
 	if err != nil {
@@ -1114,7 +1118,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				}
 			}
 
-			if PermitTableSchemaOptimization {
+			if cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType {
 				table, err := database.ParseTableName(targetTable, tgtConn.GetType())
 				if err != nil {
 					return cnt, g.Error(err, "could not get table name for optimization")
@@ -1278,7 +1282,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 		}
 	}
 
-	_, err = conn.Exec(tableDDL)
+	_, err = conn.ExecMulti(tableDDL)
 	if err != nil {
 		errorFilterTableExists := conn.GetTemplateValue("variable.error_filter_table_exists")
 		if errorFilterTableExists != "" && strings.Contains(err.Error(), errorFilterTableExists) {
@@ -1309,7 +1313,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		return
 	}
 
-	tgtColumns, err := pullTargetTableColumns(cfg, tgtConn, false)
+	tgtColumns, err := pullTargetTableColumns(cfg, tgtConn, true)
 	if err != nil {
 		err = g.Error(err, "could not get column list for "+cfg.Target.Object)
 		return
