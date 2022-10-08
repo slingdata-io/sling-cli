@@ -1,0 +1,66 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+project_name: sling
+
+before:
+  hooks:
+    - go mod edit -dropreplace='github.com/flarco/g' go.mod
+    - go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+    - go mod tidy
+    # you may remove this if you don't need go generate
+    - go generate ./...
+
+builds:
+  - main: ./cmd/sling
+    
+    env:
+      - CGO_ENABLED=1
+    goarch:
+      - amd64
+      - arm64
+    goos:
+      - windows
+    ldflags:
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}'"
+
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# mc policy set public DO/ocral/slingdata.io/cli
+blobs:
+  - provider: s3
+    endpoint: https://nyc3.digitaloceanspaces.com
+    bucket: ocral
+    folder: "slingdata.io/dist/{{.Version}}"
+    region: nyc3
+
+scoop:
+  - name: sling
+    bucket:
+      owner: slingdata-io
+      name: scoop-sling
+      branch: main
+    
+    url_template: "https://ocral.nyc3.digitaloceanspaces.com/slingdata.io/dist/{{ .Version }}/{{ .ArtifactName }}"
+
+    homepage: https:/slingdata.io/en/cli
+    
+    description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."

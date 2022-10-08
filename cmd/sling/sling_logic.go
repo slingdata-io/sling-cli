@@ -473,6 +473,12 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	execFileName, err := osext.Executable()
 	if err != nil {
 		return ok, g.Error(err, "Unable to determine executable path")
+	} else if strings.Contains(execFileName, "homebrew") {
+		g.Warn("Sling was installed with brew, please run `brew upgrade slingdata-io/sling/sling")
+		return ok, nil
+	} else if strings.Contains(execFileName, "scoop") {
+		g.Warn("Sling was installed with scoop, please run `scoop update slingdata-io/sling")
+		return ok, nil
 	}
 
 	fileStat, _ := os.Stat(execFileName)

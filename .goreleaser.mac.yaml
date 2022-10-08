@@ -4,7 +4,8 @@ project_name: sling
 
 before:
   hooks:
-    # You may remove this if you don't use go modules.
+    - go mod edit -dropreplace='github.com/flarco/g' go.mod
+    - go mod edit -dropreplace='github.com/flarco/dbio' go.mod
     - go mod tidy
     # you may remove this if you don't need go generate
     - go generate ./...
@@ -24,6 +25,10 @@ builds:
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}'"
 
+universal_binaries:
+  - id: sling
+    replace: false
+  
 archives:
   - replacements:
       darwin: Darwin
@@ -36,7 +41,7 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  name_template: "{{ incpatch .Version }}"
 
 changelog:
   sort: asc
@@ -45,6 +50,14 @@ changelog:
       - '^docs:'
       - '^test:'
 
+# mc policy set public DO/ocral/slingdata.io/cli
+blobs:
+  - provider: s3
+    endpoint: https://nyc3.digitaloceanspaces.com
+    bucket: ocral
+    folder: "slingdata.io/dist/{{.Version}}"
+    region: nyc3
+
 brews:
   - name: sling
     tap:
@@ -52,5 +65,7 @@ brews:
       name: homebrew-sling
       branch: main
     
+    url_template: "https://ocral.nyc3.digitaloceanspaces.com/slingdata.io/dist/{{ .Version }}/{{ .ArtifactName }}"
+
     homepage: https:/slingdata.io/en/cli
     description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."
