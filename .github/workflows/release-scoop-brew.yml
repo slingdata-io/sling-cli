@@ -6,7 +6,8 @@ on:
 jobs:
 
   release-brew:
-    runs-on: [self-hosted, macOS, ARM64]
+    # runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
@@ -29,7 +30,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
 
   release-scoop:
-    runs-on: [self-hosted, Windows]
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
