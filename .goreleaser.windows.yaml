@@ -33,12 +33,8 @@ archives:
 snapshot:
   name_template: "{{ incpatch .Version }}"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
+checksum:
+  name_template: '{{ .Runtime.Goos }}.{{ .Runtime.Goarch }}.checksums.txt'
 
 # mc policy set public DO/ocral/slingdata.io/cli
 blobs:
