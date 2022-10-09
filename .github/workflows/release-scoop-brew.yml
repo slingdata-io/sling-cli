@@ -21,13 +21,13 @@ jobs:
           go-version: 1.19
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v2
+        uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: v1.11.5
+          version: latest
           args: release --rm-dist --skip-validate -f .goreleaser.mac.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
 
@@ -47,12 +47,12 @@ jobs:
           go-version: 1.19
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v2
+        uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: v1.11.5
+          version: latest
           args: release --rm-dist --skip-validate -f .goreleaser.windows.yaml
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
