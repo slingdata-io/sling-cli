@@ -328,7 +328,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
 
-	err = t.df.Context.Err()
+	err = t.df.Err()
 	return
 
 }
@@ -374,7 +374,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 
 	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
 
-	err = t.df.Context.Err()
+	err = t.df.Err()
 	return
 
 }
@@ -689,8 +689,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	elapsed := int(time.Since(start).Seconds())
 	t.SetProgress("inserted %d rows in %d secs [%s r/s] %s", cnt, elapsed, getRate(cnt), bytesStr)
 
-	if t.df.Context.Err() != nil {
-		err = g.Error(t.df.Context.Err(), "Error running runDbToDb")
+	if t.df.Err() != nil {
+		err = g.Error(t.df.Err(), "Error running runDbToDb")
 	}
 	return
 }
@@ -1212,7 +1212,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// need to decide whether to drop or keep it for future use
 			return 0, err
 		}
-		g.Debug("%d TOTAL INSERTS / UPDATES", rowAffCnt)
+		if rowAffCnt > 0 {
+			g.Debug("%d TOTAL INSERTS / UPDATES", rowAffCnt)
+		}
 	}
 
 	// post SQL
@@ -1238,7 +1240,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return cnt, err
 	}
 
-	err = df.Context.Err()
+	err = df.Err()
 	return
 }
 
