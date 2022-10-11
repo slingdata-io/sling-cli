@@ -448,7 +448,6 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 func (cfg *Config) FormatTargetObjectName() (err error) {
 	m := g.M(
 		"run_timestamp", g.NowFileStr(),
-		"stream_name", strings.ToLower(cfg.Source.Stream),
 	)
 
 	if cfg.Source.Conn != "" {
@@ -459,6 +458,10 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
 	}
 
+	if cfg.SrcConn.Type.IsAPI() {
+		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
+	}
+
 	if cfg.SrcConn.Type.IsDb() {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
@@ -466,6 +469,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		} else if table.SQL == "" {
 			m["stream_schema"] = table.Schema
 			m["stream_table"] = table.Name
+			m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 		}
 	}
 
@@ -481,6 +485,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if err != nil {
 			return g.Error(err, "could not parse source stream url")
 		}
+		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
 		filePath := string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
@@ -518,6 +523,13 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		case dbio.TypeFileAzure:
 			m["target_account"] = cfg.Target.Data["account"]
 			m["target_container"] = cfg.Target.Data["container"]
+		}
+	}
+
+	// pass env values
+	for k, v := range cfg.Env {
+		if _, found := m[k]; !found && v != "" {
+			m[k] = v
 		}
 	}
 
