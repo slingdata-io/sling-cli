@@ -7,11 +7,11 @@ task.05		file:///tmp/ocral_test_1000.csv	{}	BIGQUERY	public.test1k	full-refresh	
 task.06		file:///tmp/ocral_test_1000.csv	{}	CLICKHOUSE	default.test1k	full-refresh			{}	{}	
 task.07	POSTGRES	public.test1k	{}	DO_SPACES	s3://{target_bucket}/{stream_schema}.{stream_table}.copy.csv				{}	{}	{"validation_object": "s3://ocral/public.test1k.copy.csv"}
 task.08	POSTGRES	public.test1k	{}	MYSQL	mysql.{stream_table}	full-refresh			{}	{}	{"validation_object": "mysql.test1k"}
-task.09	POSTGRES	public.test1k	{}	MSSQL	dbo.test1k	full-refresh			{}	{}	{"validation_object": "dbo.test1k"}
+task.09	POSTGRES	select * from public.test1k where 1=1	{}	MSSQL	dbo.test1k	full-refresh			{}	{}	{"validation_object": "dbo.test1k"}
 task.10		file:///tmp/ocral_test_1000.csv	{}	POSTGRES_SSH	public.{stream_file_path}	append			{"add_new_columns": true}	{}	{"validation_object": "public.tmp_ocral_test_1000_csv"}
-task.11	BIGQUERY	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
-task.12	SNOWFLAKE	public.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
-task.13	CLICKHOUSE	default.test1k	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
+task.11	BIGQUERY	select * from public.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
+task.12	SNOWFLAKE	select * from public.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
+task.13	CLICKHOUSE	select * from default.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
 task.14		file://tests/files/test1.csv	{}	POSTGRES	public.test1	full-refresh			{}	{}	
 task.15		file://tests/files/test1.upsert.csv	{}	POSTGRES	public.test1	incremental	id	create_dt	{"add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_col": 6}
 task.16		file://tests/files/test1.csv	{}	SNOWFLAKE	public.test1	full-refresh			{}	{}	

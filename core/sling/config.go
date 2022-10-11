@@ -463,10 +463,10 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
 			return g.Error(err, "could not parse stream table name")
+		} else if table.SQL == "" {
+			m["stream_schema"] = table.Schema
+			m["stream_table"] = table.Name
 		}
-
-		m["stream_schema"] = table.Schema
-		m["stream_table"] = table.Name
 	}
 
 	if cfg.TgtConn.Type.IsDb() {

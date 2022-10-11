@@ -116,7 +116,7 @@ func init() {
 
 func TestOne(t *testing.T) {
 	// return
-	path := "tests/tasks/task.24.json"
+	path := "tests/tasks/task.06.json"
 	pathArr := strings.Split(path, "/")
 	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
 	runOneTask(t, file)
