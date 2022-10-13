@@ -1,6 +1,7 @@
 package env
 
 import (
+	"embed"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -22,7 +23,17 @@ var (
 	DbNetDir        = os.Getenv("DBNET_HOME_DIR")
 	HomeDirEnvFile  = ""
 	DbNetDirEnvFile = ""
+	Env             = &EnvFile{}
 )
+
+//go:embed *
+var envFolder embed.FS
+
+type EnvFile struct {
+	Connections map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Variables   map[string]string      `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Worker      map[string]string      `json:"worker,omitempty" yaml:"worker,omitempty"`
+}
 
 func init() {
 	if HomeDir == "" {
@@ -38,6 +49,14 @@ func init() {
 	DbNetDirEnvFile = DbNetDir + "/env.yaml"
 
 	// os.Setenv("PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
+	// create env file if not exists
+	if !g.PathExists(HomeDirEnvFile) {
+		defaultEnvBytes, _ := envFolder.ReadFile("default.env.yaml")
+		ioutil.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
+	}
+
+	// load init env file
+	LoadSlingEnvFile()
 }
 
 // flatten and rename all children properly
@@ -106,6 +125,7 @@ func NormalizeEnvFile(filePath string) (env map[string]interface{}, err error) {
 	}
 	return
 }
+
 func FlattenEnvFile(filePath string) (env map[string]string, err error) {
 	if !g.PathExists(filePath) {
 		err = g.Error("%s does not exists", filePath)
@@ -191,9 +211,35 @@ func InitLogger() {
 	}
 }
 
-// Env returns the environment variables to propogate
-func Env() map[string]string {
-	return map[string]string{}
+func LoadSlingEnvFile() (ef EnvFile) {
+	ef = LoadEnvFile(HomeDirEnvFile)
+	Env = &ef
+	return
+}
+
+func LoadEnvFile(path string) (ef EnvFile) {
+	bytes, _ := ioutil.ReadFile(path)
+	err := yaml.Unmarshal(bytes, &ef)
+	if err != nil {
+		err = g.Error(err, "error parsing yaml string")
+		_ = err
+	}
+
+	// set env vars
+	envMap := map[string]string{}
+	for _, tuple := range os.Environ() {
+		key := strings.Split(tuple, "=")[0]
+		val := strings.TrimPrefix(tuple, key+"=")
+		envMap[key] = val
+	}
+
+	for k, v := range ef.Variables {
+		k = strings.ToUpper(k)
+		if _, found := envMap[k]; !found {
+			os.Setenv(k, v)
+		}
+	}
+	return ef
 }
 
 type Conn struct {
@@ -242,7 +288,9 @@ func GetLocalConns() []Conn {
 	}
 
 	if g.PathExists(DbNetDirEnvFile) {
-		profileConns, err := connection.ReadConnections(DbNetDirEnvFile)
+		m := g.M()
+		g.JSONConvert(LoadEnvFile(DbNetDirEnvFile), &m)
+		profileConns, err := connection.ReadConnections(m)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
 				c := Conn{
@@ -257,7 +305,9 @@ func GetLocalConns() []Conn {
 	}
 
 	if g.PathExists(HomeDirEnvFile) {
-		profileConns, err := connection.ReadConnections(HomeDirEnvFile)
+		m := g.M()
+		g.JSONConvert(LoadSlingEnvFile(), &m)
+		profileConns, err := connection.ReadConnections(m)
 		if !g.LogError(err) {
 			for _, conn := range profileConns {
 				c := Conn{
