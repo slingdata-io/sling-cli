@@ -225,6 +225,18 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		_ = err
 	}
 
+	if ef.Connections == nil {
+		ef.Connections = map[string]interface{}{}
+	}
+
+	if ef.Variables == nil {
+		ef.Variables = map[string]string{}
+	}
+
+	if ef.Worker == nil {
+		ef.Worker = map[string]string{}
+	}
+
 	// set env vars
 	envMap := map[string]string{}
 	for _, tuple := range os.Environ() {
