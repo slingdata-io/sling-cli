@@ -143,6 +143,11 @@ func TestTasks(t *testing.T) {
 	}
 
 	for i, rec := range data.Records() {
+		if g.In(rec["source_conn"], "GITHUB_DBIO", "NOTION") {
+			g.Warn("skipping since source_conn is %s", rec["source_conn"])
+			continue
+		}
+
 		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
 		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))

@@ -28,6 +28,7 @@ import (
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
+var telemetryMap = g.M("begin_time", time.Now().UnixMicro())
 
 var cliRun = &g.CliSC{
 	Name:                  "run",
@@ -247,11 +248,23 @@ func Track(event string, props ...map[string]interface{}) {
 	properties := analytics.NewProperties().
 		Set("application", "sling-cli").
 		Set("version", core.Version).
-		Set("os", runtime.GOOS)
+		Set("os", runtime.GOOS).
+		Set("emit_time", time.Now().UnixMicro())
+
+	for k, v := range telemetryMap {
+		properties.Set(k, v)
+	}
 
 	if len(props) > 0 {
 		for k, v := range props[0] {
 			properties.Set(k, v)
+		}
+	}
+
+	if g.CliObj != nil {
+		properties.Set("command", g.CliObj.Name)
+		if g.CliObj.UsedSC() != "" {
+			properties.Set("sub-command", g.CliObj.UsedSC())
 		}
 	}
 
@@ -321,11 +334,35 @@ func cliInit() int {
 	if ok {
 		if err != nil {
 			sentry.CaptureException(err)
+
+			if g.In(g.CliObj.Name, "conns", "update", "run") {
+				errString := err.Error()
+				E, ok := err.(*g.ErrType)
+				if ok {
+					errString = E.Debug()
+				}
+				telemetryMap["error"] = errString
+
+				eventName := g.CliObj.Name
+				if g.CliObj.UsedSC() != "" {
+					eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
+				}
+				Track(eventName)
+			}
 		}
 		g.LogFatal(err)
 	} else {
 		flaggy.ShowHelp("")
-		// Track("ShowHelp")
 	}
+
+	switch {
+	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover"):
+		Track(g.CliObj.Name + "_" + g.CliObj.UsedSC())
+	case g.CliObj.Name == "update":
+		Track(g.CliObj.Name)
+	case g.CliObj.Name == "run" && telemetryMap["job_type"] != nil:
+		Track(g.CliObj.Name)
+	}
+
 	return 0
 }

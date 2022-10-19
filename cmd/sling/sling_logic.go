@@ -192,21 +192,19 @@ func runTask(cfg *sling.Config) (err error) {
 	// track usage
 	defer func() {
 		inBytes, outBytes := task.GetBytes()
-		props := g.M(
-			"cmd", "exec",
-			"error", g.ErrMsgSimple(task.Err),
-			"job_type", task.Type,
-			"job_mode", task.Config.Mode,
-			"job_status", task.Status,
-			"job_src_type", task.Config.SrcConn.Type,
-			"job_tgt_type", task.Config.TgtConn.Type,
-			"job_start_time", task.StartTime,
-			"job_end_time", task.EndTime,
-			"job_rows_count", task.GetCount(),
-			"job_rows_in_bytes", inBytes,
-			"job_rows_out_bytes", outBytes,
-		)
-		Track("task.Execute", props)
+		telemetryMap["task_type"] = task.Type
+		telemetryMap["task_mode"] = task.Config.Mode
+		telemetryMap["task_status"] = task.Status
+		telemetryMap["task_source_type"] = task.Config.SrcConn.Type
+		telemetryMap["task_target_type"] = task.Config.TgtConn.Type
+		telemetryMap["task_start_time"] = task.StartTime
+		telemetryMap["task_end_time"] = task.EndTime
+		telemetryMap["task_rows_count"] = task.GetCount()
+		telemetryMap["task_rows_in_bytes"] = inBytes
+		telemetryMap["task_rows_out_bytes"] = outBytes
+		if cfg.Options.StdOut {
+			telemetryMap["task_tgt_type"] = "stdout"
+		}
 	}()
 
 	// run task
@@ -324,6 +322,8 @@ func processConns(c *g.CliSC) (bool, error) {
 			g.Warn("Invalid Connection name: %s", name)
 			return ok, nil
 		}
+
+		telemetryMap["conn_type"] = conn.Connection.Type.String()
 
 		streamNames := []string{}
 		switch {
@@ -447,7 +447,7 @@ func checkLatestVersion() (string, error) {
 
 func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
-	Track("updateCLI")
+
 	ok = true
 
 	// get latest version number
@@ -492,6 +492,9 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 		println("Unable to download update!")
 		return ok, g.Error(strings.ReplaceAll(err.Error(), url, ""))
 	}
+
+	telemetryMap["downloaded"] = true
+
 	err = os.Chmod(filePath, fileMode)
 	if err != nil {
 		println("Unable to make new binary executable.")
