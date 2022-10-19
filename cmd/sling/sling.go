@@ -14,6 +14,7 @@ import (
 	"github.com/denisbrodbeck/machineid"
 	"github.com/getsentry/sentry-go"
 	"github.com/rudderlabs/analytics-go"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -29,6 +30,7 @@ var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
 var telemetryMap = g.M("begin_time", time.Now().UnixMicro())
+var telemetry = true
 
 var cliRun = &g.CliSC{
 	Name:                  "run",
@@ -208,6 +210,10 @@ func init() {
 		}()
 	}
 
+	if val := os.Getenv("SLING_SEND_TELEMETRY"); val != "" {
+		telemetry = cast.ToBool(val)
+	}
+
 	// collect examples
 	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
 	examples = string(examplesBytes)
@@ -220,17 +226,19 @@ func init() {
 	cliUpdate.Make().Add()
 	// cliUi.Make().Add()
 
-	sentry.Init(sentry.ClientOptions{
-		// Either set your DSN here or set the SENTRY_DSN environment variable.
-		Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
-		// Either set environment and release here or set the SENTRY_ENVIRONMENT
-		// and SENTRY_RELEASE environment variables.
-		Environment: "Production",
-		Release:     "sling@" + core.Version,
-		// Enable printing of SDK debug messages.
-		// Useful when getting started or trying to figure something out.
-		Debug: false,
-	})
+	if telemetry {
+		sentry.Init(sentry.ClientOptions{
+			// Either set your DSN here or set the SENTRY_DSN environment variable.
+			Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
+			// Either set environment and release here or set the SENTRY_ENVIRONMENT
+			// and SENTRY_RELEASE environment variables.
+			Environment: lo.Ternary(core.Version == "dev", "Development", "Production"),
+			Release:     "sling@" + core.Version,
+			// Enable printing of SDK debug messages.
+			// Useful when getting started or trying to figure something out.
+			Debug: false,
+		})
+	}
 }
 
 func getRsClient() analytics.Client {
@@ -238,10 +246,8 @@ func getRsClient() analytics.Client {
 }
 
 func Track(event string, props ...map[string]interface{}) {
-	if val := os.Getenv("SLING_SEND_TELEMETRY"); val != "" {
-		if !cast.ToBool(val) {
-			return
-		}
+	if !telemetry {
+		return
 	}
 
 	rsClient := getRsClient()
