@@ -230,7 +230,16 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		return
 	}
 
-	if cfg.Mode == IncrementalMode && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
+	if cfg.Mode == IncrementalMode && cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
+		// use default keys if none are provided
+		if len(cfg.Source.PrimaryKey) == 0 {
+			cfg.Source.PrimaryKey = []string{"_bigtable_key"}
+		}
+
+		if cfg.Source.UpdateKey == "" {
+			cfg.Source.UpdateKey = "_bigtable_timestamp"
+		}
+	} else if cfg.Mode == IncrementalMode && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
 		err = g.Error("must specify value for 'primary_key' and 'update_key' for mode incremental in configration text (with: append, full-refresh, incremental or truncate")
 		return
 	}
@@ -471,7 +480,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if err != nil {
 			return g.Error(err, "could not parse stream table name")
 		} else if table.SQL == "" {
-			m["stream_schema"] = table.Schema
+			if table.Schema != "" {
+				m["stream_schema"] = table.Schema
+			}
 			m["stream_table"] = table.Name
 			m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 		}

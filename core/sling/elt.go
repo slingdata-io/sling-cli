@@ -784,6 +784,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.SQL = g.F(`select %s from %s`, fieldsStr, sTable.FDQN())
 	}
 
+	if srcConn.GetType() == dbio.TypeDbBigTable {
+		sTable.SQL = sTable.Name
+		srcConn.SetProp("start_time", t.Config.IncrementalVal)
+	}
+
 	df, err = srcConn.BulkExportFlow(sTable.SQL)
 	if err != nil {
 		err = g.Error(err, "Could not BulkStream: "+sTable.SQL)
@@ -934,9 +939,18 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 // load into temp table
 // insert / incremental / replace into target table
 func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
-	targetTable := cfg.Target.Object
 	defer t.PBar.Finish()
 
+	// detect empty
+	if len(df.Buffer) == 0 {
+		g.Warn("No data found in stream. Nothing to do.")
+		return
+	} else if len(df.Columns) == 0 {
+		err = g.Error("no stream columns detected")
+		return
+	}
+
+	targetTable := cfg.Target.Object
 	if cfg.Target.Options.TableTmp == "" {
 		cfg.Target.Options.TableTmp = targetTable
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
@@ -1375,15 +1389,21 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	// in order to get max value
 	// does table exists?
 	// get max value from key_field
+	table, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+	if err != nil {
+		err = g.Error(err, "could not parse target table name: %s", cfg.Target.Object)
+		return
+	}
+
 	sql := g.F(
 		"select max(%s) as max_val from %s",
 		tgtConn.Quote(cfg.Source.UpdateKey),
-		cfg.Target.Object,
+		table.FDQN(),
 	)
 
 	data, err := tgtConn.Query(sql)
 	if err != nil {
-		if strings.Contains(err.Error(), "exist") {
+		if strings.Contains(strings.ToLower(err.Error()), "exist") {
 			// table does not exists, will be create later
 			// set val to blank for full load
 			return "", nil
