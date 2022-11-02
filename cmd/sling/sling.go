@@ -366,7 +366,7 @@ func cliInit() int {
 		Track(g.CliObj.Name + "_" + g.CliObj.UsedSC())
 	case g.CliObj.Name == "update":
 		Track(g.CliObj.Name)
-	case g.CliObj.Name == "run" && telemetryMap["job_type"] != nil:
+	case g.CliObj.Name == "run" && telemetryMap["task_type"] != nil:
 		Track(g.CliObj.Name)
 	}
 
