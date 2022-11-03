@@ -205,6 +205,7 @@ func runTask(cfg *sling.Config) (err error) {
 		if cfg.Options.StdOut {
 			telemetryMap["task_tgt_type"] = "stdout"
 		}
+		Track("run") // telemetry
 	}()
 
 	// run task
@@ -449,6 +450,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
 
 	ok = true
+	telemetryMap["downloaded"] = false
 
 	// get latest version number
 	newVersion, err := checkLatestVersion()
@@ -459,6 +461,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 		return
 	}
 
+	telemetryMap["new_version"] = newVersion
 	url := ""
 	if runtime.GOOS == "linux" {
 		url = "https://files.ocral.org/slingdata.io/dist/sling-linux"

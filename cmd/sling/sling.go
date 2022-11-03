@@ -363,11 +363,9 @@ func cliInit() int {
 
 	switch {
 	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover"):
-		Track(g.CliObj.Name + "_" + g.CliObj.UsedSC())
+		Track("conns_" + g.CliObj.UsedSC())
 	case g.CliObj.Name == "update":
-		Track(g.CliObj.Name)
-	case g.CliObj.Name == "run" && telemetryMap["task_type"] != nil:
-		Track(g.CliObj.Name)
+		Track("update")
 	}
 
 	return 0
