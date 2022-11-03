@@ -31,6 +31,7 @@ var examples = ``
 var ctx = g.NewContext(context.Background())
 var telemetryMap = g.M("begin_time", time.Now().UnixMicro())
 var telemetry = true
+var interrupted = false
 
 var cliRun = &g.CliSC{
 	Name:                  "run",
@@ -309,6 +310,7 @@ func main() {
 	case <-interrupt:
 		if cliRun.Sc.Used {
 			println("\ninterrupting...")
+			interrupted = true
 			ctx.Cancel()
 			select {
 			case <-done:
@@ -341,13 +343,8 @@ func cliInit() int {
 		if err != nil {
 			sentry.CaptureException(err)
 
-			if g.In(g.CliObj.Name, "conns", "update", "run") {
-				errString := err.Error()
-				E, ok := err.(*g.ErrType)
-				if ok {
-					errString = E.Debug()
-				}
-				telemetryMap["error"] = errString
+			if g.In(g.CliObj.Name, "conns", "update") {
+				telemetryMap["error"] = getErrString(err)
 
 				eventName := g.CliObj.Name
 				if g.CliObj.UsedSC() != "" {
@@ -369,4 +366,15 @@ func cliInit() int {
 	}
 
 	return 0
+}
+
+func getErrString(err error) (errString string) {
+	if err != nil {
+		errString = err.Error()
+		E, ok := err.(*g.ErrType)
+		if ok {
+			errString = E.Debug()
+		}
+	}
+	return
 }

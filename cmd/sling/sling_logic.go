@@ -204,8 +204,16 @@ func runTask(cfg *sling.Config) (err error) {
 		telemetryMap["task_rows_out_bytes"] = outBytes
 		if cfg.Options.StdOut {
 			telemetryMap["task_tgt_type"] = "stdout"
+		} else {
+			delete(telemetryMap, "task_tgt_type")
 		}
-		Track("run") // telemetry
+
+		if err != nil {
+			telemetryMap["error"] = getErrString(err)
+		}
+
+		// telemetry
+		Track("run")
 	}()
 
 	// run task
@@ -240,6 +248,10 @@ func runReplication(cfgPath string) (err error) {
 
 	eG := g.ErrorGroup{}
 	for i, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
+		if interrupted {
+			break
+		}
+
 		stream := replication.Streams[name]
 		if stream == nil {
 			stream = &sling.ReplicationStreamConfig{}
