@@ -32,6 +32,18 @@ var ctx = g.NewContext(context.Background())
 var telemetryMap = g.M("begin_time", time.Now().UnixMicro())
 var telemetry = true
 var interrupted = false
+var machineID = ""
+var sentryOptions = sentry.ClientOptions{
+	// Either set your DSN here or set the SENTRY_DSN environment variable.
+	Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
+	// Either set environment and release here or set the SENTRY_ENVIRONMENT
+	// and SENTRY_RELEASE environment variables.
+	Environment: lo.Ternary(core.Version == "dev", "Development", "Production"),
+	Release:     "sling@" + core.Version,
+	// Enable printing of SDK debug messages.
+	// Useful when getting started or trying to figure something out.
+	Debug: false,
+}
 
 var cliRun = &g.CliSC{
 	Name:                  "run",
@@ -228,17 +240,8 @@ func init() {
 	// cliUi.Make().Add()
 
 	if telemetry {
-		sentry.Init(sentry.ClientOptions{
-			// Either set your DSN here or set the SENTRY_DSN environment variable.
-			Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
-			// Either set environment and release here or set the SENTRY_ENVIRONMENT
-			// and SENTRY_RELEASE environment variables.
-			Environment: lo.Ternary(core.Version == "dev", "Development", "Production"),
-			Release:     "sling@" + core.Version,
-			// Enable printing of SDK debug messages.
-			// Useful when getting started or trying to figure something out.
-			Debug: false,
-		})
+		machineID, _ = machineid.ProtectedID("sling")
+		sentry.Init(sentryOptions)
 	}
 }
 
@@ -275,9 +278,8 @@ func Track(event string, props ...map[string]interface{}) {
 		}
 	}
 
-	id, _ := machineid.ProtectedID("sling")
 	rsClient.Enqueue(analytics.Track{
-		UserId:     id,
+		UserId:     machineID,
 		Event:      event,
 		Properties: properties,
 	})
@@ -341,9 +343,8 @@ func cliInit() int {
 	ok, err := g.CliProcess()
 	if ok {
 		if err != nil {
-			sentry.CaptureException(err)
 
-			if g.In(g.CliObj.Name, "conns", "update") {
+			if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
 				telemetryMap["error"] = getErrString(err)
 
 				eventName := g.CliObj.Name
@@ -351,6 +352,36 @@ func cliInit() int {
 					eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
 				}
 				Track(eventName)
+			}
+
+			// sentry details
+			if telemetry {
+
+				evt := sentry.NewEvent()
+				evt.Environment = sentryOptions.Environment
+				evt.Release = sentryOptions.Release
+				evt.Level = sentry.LevelError
+				evt.Exception = []sentry.Exception{
+					{
+						Type: err.Error(),
+						// Value:      err.Error(),
+						Stacktrace: sentry.ExtractStacktrace(err),
+					},
+				}
+
+				E, ok := err.(*g.ErrType)
+				if ok {
+					evt.Exception[0].Type = E.Err
+					evt.Exception[0].Value = E.Full()
+				}
+
+				sentry.ConfigureScope(func(scope *sentry.Scope) {
+					scope.SetUser(sentry.User{ID: machineID})
+					scope.SetTransaction(E.Err)
+				})
+
+				sentry.CaptureEvent(evt)
+				// eid := sentry.CaptureException(err)
 			}
 		}
 		g.LogFatal(err)

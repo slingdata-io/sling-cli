@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/integrii/flaggy"
 	"github.com/samber/lo"
@@ -176,18 +177,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 }
 
 func runTask(cfg *sling.Config) (err error) {
-	err = cfg.Prepare()
-	if err != nil {
-		return g.Error(err, "could not set task configuration")
-	}
-
-	task := sling.NewTask(0, cfg)
-	if task.Err != nil {
-		return g.Error(task.Err)
-	}
-
-	// set context
-	task.Context = &ctx
+	var task *sling.TaskExecution
 
 	// track usage
 	defer func() {
@@ -216,14 +206,26 @@ func runTask(cfg *sling.Config) (err error) {
 		Track("run")
 	}()
 
+	err = cfg.Prepare()
+	if err != nil {
+		err = g.Error(err, "could not set task configuration")
+		return
+	}
+
+	task = sling.NewTask(0, cfg)
+	if task.Err != nil {
+		err = g.Error(task.Err)
+		return
+	}
+
+	// set context
+	task.Context = &ctx
+
 	// run task
 	err = task.Execute()
 	if err != nil {
 		return g.Error(err)
 	}
-
-	// g.PP(task.ProcStatsStart)
-	// g.PP(g.GetProcStats(os.Getpid()))
 
 	return nil
 }
@@ -292,6 +294,7 @@ func runReplication(cfgPath string) (err error) {
 			g.LogError(err)
 			eG.Capture(err)
 		}
+		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
 	}
 
 	return eG.Err()

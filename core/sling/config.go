@@ -111,45 +111,45 @@ func (cfg *Config) SetDefault() {
 	}
 
 	// set target options
-	var targetptions TargetOptions
+	var targetOptions TargetOptions
 	switch cfg.TgtConn.Type.Kind() {
 	case dbio.KindFile:
-		targetptions = TargetFileOptionsDefault
+		targetOptions = TargetFileOptionsDefault
 	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
-		targetptions = TargetDBOptionsDefault
+		targetOptions = TargetDBOptionsDefault
 	default:
-		targetptions = TargetDBOptionsDefault
+		targetOptions = TargetDBOptionsDefault
 	}
 
 	if cfg.Target.Options == nil {
-		cfg.Target.Options = &targetptions
+		cfg.Target.Options = &targetOptions
 	}
 	if cfg.Target.Options.Header == nil {
-		cfg.Target.Options.Header = targetptions.Header
+		cfg.Target.Options.Header = targetOptions.Header
 	}
 	if cfg.Target.Options.Compression == nil {
-		cfg.Target.Options.Compression = targetptions.Compression
+		cfg.Target.Options.Compression = targetOptions.Compression
 	}
 	if cfg.Target.Options.Concurrency == 0 {
-		cfg.Target.Options.Concurrency = targetptions.Concurrency
+		cfg.Target.Options.Concurrency = targetOptions.Concurrency
 	}
 	if cfg.Target.Options.FileMaxRows == 0 {
-		cfg.Target.Options.FileMaxRows = targetptions.FileMaxRows
+		cfg.Target.Options.FileMaxRows = targetOptions.FileMaxRows
 	}
 	if cfg.Target.Options.UseBulk == nil {
-		cfg.Target.Options.UseBulk = targetptions.UseBulk
+		cfg.Target.Options.UseBulk = targetOptions.UseBulk
 	}
 	if cfg.Target.Options.AdjustColumnType == nil {
-		cfg.Target.Options.AdjustColumnType = targetptions.AdjustColumnType
+		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
 	}
 	if cfg.Target.Options.DatetimeFormat == "" {
-		cfg.Target.Options.DatetimeFormat = targetptions.DatetimeFormat
+		cfg.Target.Options.DatetimeFormat = targetOptions.DatetimeFormat
 	}
 	if cfg.Target.Options.Delimiter == "" {
-		cfg.Target.Options.Delimiter = targetptions.Delimiter
+		cfg.Target.Options.Delimiter = targetOptions.Delimiter
 	}
 	if cfg.Target.Options.MaxDecimals == nil {
-		cfg.Target.Options.MaxDecimals = targetptions.MaxDecimals
+		cfg.Target.Options.MaxDecimals = targetOptions.MaxDecimals
 	}
 
 }

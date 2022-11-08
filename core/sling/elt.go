@@ -609,8 +609,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		return
 	}
 
-	tgtProps := g.MapToKVArr(t.Config.TgtConn.DataS())
-	tgtConn, err := database.NewConnContext(t.Context.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+	tgtConn, err := t.getTgtDBConn()
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -991,12 +990,16 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer
 	sampleData.SafeInference = true
+	sampleData.InferColumnTypes()
+	df.Columns = sampleData.Columns
+
 	_, err = createTableIfNotExists(tgtConn, sampleData, cfg.Target.Options.TableTmp, "")
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+cfg.Target.Options.TableTmp)
 		return
 	}
 	cfg.Target.TmpTableCreated = true
+	df.Columns = sampleData.Columns
 	t.AddCleanupTask(func() {
 		err := tgtConn.DropTable(cfg.Target.Options.TableTmp)
 		g.LogError(err)
@@ -1008,32 +1011,36 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
+	adjustColumnType := cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType
+
 	// set OnSchemaChange
-	df.OnSchemaChange = func(i int, newType iop.ColumnType) error {
-		df.Context.Lock()
-		defer df.Context.Unlock()
+	if adjustColumnType {
+		df.OnSchemaChange = func(i int, newType iop.ColumnType) error {
+			df.Context.Lock()
+			defer df.Context.Unlock()
 
-		table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
-		if err != nil {
-			return g.Error(err, "could not get temp table name for schema change")
-		}
-		table.Columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
-		if err != nil {
-			return g.Error(err, "could not get table columns for schema change")
-		}
-
-		df.Columns[i].Type = newType
-		ok, err := tgtConn.OptimizeTable(&table, df.Columns)
-		if err != nil {
-			return g.Error(err, "could not change table schema")
-		} else if ok {
-			cfg.Target.columns = table.Columns
-			for i := range df.Columns {
-				df.Columns[i].Type = table.Columns[i].Type
+			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
+			if err != nil {
+				return g.Error(err, "could not get temp table name for schema change")
 			}
-		}
+			table.Columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
+			if err != nil {
+				return g.Error(err, "could not get table columns for schema change")
+			}
 
-		return nil
+			df.Columns[i].Type = newType
+			ok, err := tgtConn.OptimizeTable(&table, df.Columns)
+			if err != nil {
+				return g.Error(err, "could not change table schema")
+			} else if ok {
+				cfg.Target.columns = table.Columns
+				for i := range df.Columns {
+					df.Columns[i].Type = table.Columns[i].Type
+				}
+			}
+
+			return nil
+		}
 	}
 
 	t.SetProgress("streaming data")
@@ -1119,9 +1126,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			t.SetProgress("created table %s", targetTable)
 		}
 
+		table, err := database.ParseTableName(targetTable, tgtConn.GetType())
+		if err != nil {
+			return cnt, g.Error(err, "could not get table name for optimization")
+		}
+
 		if !created && cfg.Mode != FullRefreshMode {
 			if cfg.Target.Options.AddNewColumns {
-				ok, err := database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
+				ok, err := database.AddMissingColumns(tgtConn, table, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
 				} else if ok {
@@ -1132,11 +1144,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				}
 			}
 
-			if cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType {
-				table, err := database.ParseTableName(targetTable, tgtConn.GetType())
-				if err != nil {
-					return cnt, g.Error(err, "could not get table name for optimization")
-				}
+			if adjustColumnType {
 
 				table.Columns, err = pullTargetTableColumns(t.Config, tgtConn, false)
 				if err != nil {
