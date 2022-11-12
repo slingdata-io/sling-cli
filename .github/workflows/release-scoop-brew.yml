@@ -31,8 +31,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
 
   release-scoop:
-    # runs-on: [self-hosted, Windows]
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows]
+    # runs-on: windows-latest
 
     steps:
       - name: Checkout
