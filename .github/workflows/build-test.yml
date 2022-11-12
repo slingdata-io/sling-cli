@@ -13,7 +13,7 @@ jobs:
     secrets: inherit
   
   build:
-    if: "! contains(github.event.head_commit.message, '[skip ci]')"
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
     runs-on: [self-hosted, linux]
     needs: [bump]
 
@@ -55,7 +55,7 @@ jobs:
           rm -rf $WORK_FOLDER/sling
 
   test:
-    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]'))"
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]') || contains(github.event.head_commit.message, '[bump]'))"
 
     needs: [build]
 

@@ -5,8 +5,8 @@ on: [workflow_dispatch, workflow_call]
 jobs:
 
   release-brew:
-    # runs-on: [self-hosted, macOS, ARM64]
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64]
+    # runs-on: macos-latest
 
     steps:
       - name: Checkout
