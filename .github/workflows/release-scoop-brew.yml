@@ -31,8 +31,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
 
   release-scoop:
-    runs-on: [self-hosted, Windows]
-    # runs-on: windows-latest
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -46,7 +46,8 @@ jobs:
           go-version: 1.19
 
       - name: Run GoReleaser
-        uses: flarco/goreleaser-action@master
+        # uses: flarco/goreleaser-action@master
+        uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: latest
