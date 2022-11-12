@@ -99,15 +99,15 @@ jobs:
       fail-fast: true
       matrix:
         # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
-        # runner: [macos-latest, ubuntu-18.04, windows-latest]
-        runner: [self-hosted-mac, ubuntu-18.04, windows-latest]
+        runner: [macos-latest, ubuntu-18.04, windows-latest]
+        # runner: [self-hosted-mac, ubuntu-18.04, windows-latest]
 
     # doesn't work, put double quote at the end
     # env:
     #   VERSION: ${{ needs.build.outputs.version }}"
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
 
       - name: Dump context
         env:
