@@ -349,10 +349,9 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = c.Connection
-		} else if !strings.Contains(cfg.Target.Conn, "://") && cfg.Target.Conn != "" {
+		} else if !strings.Contains(cfg.Target.Conn, "://") && cfg.Target.Conn != "" && cfg.TgtConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Target.Conn)
-		}
-		if cfg.TgtConn.Data == nil {
+		} else if cfg.TgtConn.Data == nil {
 			cfg.TgtConn.Data = g.M()
 		}
 		cfg.Target.Data = cfg.TgtConn.Data
@@ -391,10 +390,9 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = c.Connection
-		} else if !strings.Contains(cfg.Source.Conn, "://") && cfg.Source.Conn != "" {
+		} else if !strings.Contains(cfg.Source.Conn, "://") && cfg.Source.Conn != "" && cfg.SrcConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Source.Conn)
-		}
-		if cfg.SrcConn.Data == nil {
+		} else if cfg.SrcConn.Data == nil {
 			cfg.SrcConn.Data = g.M()
 		}
 		cfg.Source.Data = cfg.SrcConn.Data
