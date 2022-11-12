@@ -57,6 +57,10 @@ func (t *TaskExecution) IsStalled(window float64) bool {
 
 // GetBytes return the current total of bytes processed
 func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
+	if t.df == nil {
+		return
+	}
+
 	inBytes, outBytes = t.df.Bytes()
 	if inBytes == 0 && outBytes == 0 {
 		// use tx/rc bytes

@@ -181,21 +181,21 @@ func runTask(cfg *sling.Config) (err error) {
 
 	// track usage
 	defer func() {
-		inBytes, outBytes := task.GetBytes()
-		telemetryMap["task_type"] = task.Type
-		telemetryMap["task_mode"] = task.Config.Mode
-		telemetryMap["task_status"] = task.Status
-		telemetryMap["task_source_type"] = task.Config.SrcConn.Type
-		telemetryMap["task_target_type"] = task.Config.TgtConn.Type
-		telemetryMap["task_start_time"] = task.StartTime
-		telemetryMap["task_end_time"] = task.EndTime
-		telemetryMap["task_rows_count"] = task.GetCount()
-		telemetryMap["task_rows_in_bytes"] = inBytes
-		telemetryMap["task_rows_out_bytes"] = outBytes
-		if cfg.Options.StdOut {
-			telemetryMap["task_tgt_type"] = "stdout"
-		} else {
-			delete(telemetryMap, "task_tgt_type")
+		if task != nil {
+			inBytes, outBytes := task.GetBytes()
+			telemetryMap["task_type"] = task.Type
+			telemetryMap["task_mode"] = task.Config.Mode
+			telemetryMap["task_status"] = task.Status
+			telemetryMap["task_source_type"] = task.Config.SrcConn.Type
+			telemetryMap["task_target_type"] = task.Config.TgtConn.Type
+			telemetryMap["task_start_time"] = task.StartTime
+			telemetryMap["task_end_time"] = task.EndTime
+			telemetryMap["task_rows_count"] = task.GetCount()
+			telemetryMap["task_rows_in_bytes"] = inBytes
+			telemetryMap["task_rows_out_bytes"] = outBytes
+			if cfg.Options.StdOut {
+				telemetryMap["task_target_type"] = "stdout"
+			}
 		}
 
 		if err != nil {
