@@ -955,7 +955,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	targetTable := cfg.Target.Object
 	if cfg.Target.Options.TableTmp == "" {
-		cfg.Target.Options.TableTmp = targetTable
+		cfg.Target.Options.TableTmp = strings.ToLower(tgtConn.Unquote(targetTable))
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
 			if len(cfg.Target.Options.TableTmp) > 24 {
 				cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp[:24] // max is 30 chars
@@ -993,11 +993,19 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer
-	sampleData.SafeInference = true
-	sampleData.InferColumnTypes()
-	df.Columns = sampleData.Columns
+	sampleData.Inferred = df.Inferred
+	if !sampleData.Inferred {
+		sampleData.InferColumnTypes()
+		df.Columns = sampleData.Columns
+	}
 
-	_, err = createTableIfNotExists(tgtConn, sampleData, cfg.Target.Options.TableTmp, "")
+	_, err = createTableIfNotExists(
+		tgtConn,
+		sampleData,
+		cfg.Target.Options.TableTmp,
+		// fix tempTableDDL
+		strings.Replace(cfg.Target.Options.TableDDL, targetTable, cfg.Target.Options.TableTmp, 1),
+	)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+cfg.Target.Options.TableTmp)
 		return
