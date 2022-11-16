@@ -719,7 +719,8 @@ var TargetDBOptionsDefault = TargetOptions{
 		0,
 	),
 	UseBulk:          g.Bool(true),
-	AdjustColumnType: g.Bool(true),
+	AdjustColumnType: g.Bool(false),
+	AddNewColumns:    true,
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
 }

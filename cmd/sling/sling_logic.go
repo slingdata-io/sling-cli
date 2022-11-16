@@ -271,15 +271,17 @@ func runReplication(cfgPath string) (err error) {
 				Columns:    stream.Columns,
 				PrimaryKey: stream.PrimaryKey,
 				UpdateKey:  stream.UpdateKey,
-				Options:    stream.SourceOptions,
 			},
 			Target: sling.Target{
-				Conn:    replication.Target,
-				Object:  stream.Object,
-				Options: stream.TargetOptions,
+				Conn:   replication.Target,
+				Object: stream.Object,
 			},
 			Mode: stream.Mode,
 		}
+
+		// so that the next stream does not retain previous pointer values
+		g.Unmarshal(g.Marshal(stream.SourceOptions), cfg.Source.Options)
+		g.Unmarshal(g.Marshal(stream.TargetOptions), cfg.Target.Options)
 
 		if stream.SQL != "" {
 			cfg.Source.Stream = stream.SQL
