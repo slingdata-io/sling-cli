@@ -141,6 +141,10 @@ func (cfg *Config) SetDefault() {
 	}
 	if cfg.Target.Options.AdjustColumnType == nil {
 		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
+		if cfg.SrcConn.Type.Kind() == dbio.KindFile {
+			// if source stream is file, we have no schema reference
+			cfg.Target.Options.AdjustColumnType = g.Bool(true)
+		}
 	}
 	if cfg.Target.Options.DatetimeFormat == "" {
 		cfg.Target.Options.DatetimeFormat = targetOptions.DatetimeFormat
