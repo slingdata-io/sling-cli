@@ -45,7 +45,6 @@ jobs:
         run: |
           echo "VERSION -> $VERSION"
           echo "REF_NAME -> $REF_NAME"
-          echo "TAG -> $(git describe --tags --abbrev=0)"
 
           bash scripts/prep.gomod.sh
           export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
