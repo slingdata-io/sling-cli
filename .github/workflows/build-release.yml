@@ -8,7 +8,7 @@ on:
         required: false
 
 jobs:
-  build-for-release:
+  build:
     runs-on: [self-hosted, linux]
     timeout-minutes: 5
 
@@ -60,7 +60,7 @@ jobs:
 
   push:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build-for-release]
+    needs: [build]
     runs-on: [self-hosted, Linux]
     
     steps:
@@ -93,7 +93,7 @@ jobs:
 
   release:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build-for-release]
+    needs: [build]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
 
