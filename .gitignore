@@ -19,3 +19,4 @@ sling-mac
 sling-linux
 sling-win.exe
 dist/
+.secrets
