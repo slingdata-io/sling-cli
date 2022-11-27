@@ -17,4 +17,8 @@ GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli
 /bin/cp -f ./sling-linux /__/bin/sling
 /bin/cp -f ./sling-linux /tmp/
 
+cd -
+rm -rf /tmp/sling/
+chmod 777 /tmp/sling-linux
+
 echo "DONE"
