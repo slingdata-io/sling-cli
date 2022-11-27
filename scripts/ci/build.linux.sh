@@ -26,3 +26,5 @@ echo $VERSION > dist/version-linux
 
 cd dist/$VERSION
 tar -czvf sling.linux-amd64.tar.gz sling-linux
+
+echo "DONE"

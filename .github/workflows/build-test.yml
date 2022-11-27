@@ -51,7 +51,8 @@ jobs:
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
 
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
+          # docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
+          bash scripts/build.linux.sh $VERSION
           rm -rf $WORK_FOLDER/sling
 
   test:
