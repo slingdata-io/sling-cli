@@ -55,7 +55,7 @@ jobs:
           sudo rm -rf $WORK_FOLDER/sling
 
           echo $VERSION
-          VERSION=$(/tmp/sling-linux --version | sed 's/Version: //')
+          VERSION=$(/__/bin/sling --version | sed 's/Version: //')
           echo ::set-output name=version::$VERSION
 
   push:
@@ -78,7 +78,7 @@ jobs:
       
       - name: Push Docker
         run: |
-          /bin/cp /tmp/sling-linux ./sling
+          /bin/cp /__/bin/sling ./sling
           VERSION=$(./sling --version | sed 's/Version: //')
 
           source /__/devbox/.env.sh
