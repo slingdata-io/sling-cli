@@ -8,7 +8,7 @@ on:
         required: false
 
 jobs:
-  build:
+  build-for-release:
     runs-on: [self-hosted, linux]
     timeout-minutes: 5
 
@@ -60,7 +60,7 @@ jobs:
 
   push:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build]
+    needs: [build-for-release]
     runs-on: [self-hosted, Linux]
     
     steps:
@@ -93,7 +93,7 @@ jobs:
 
   release:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build]
+    needs: [build-for-release]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
 
@@ -184,6 +184,59 @@ jobs:
           event-type: release-python
           client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
 
-  release-scoop-brew:
-    uses: ./.github/workflows/release-scoop-brew.yml
-    secrets: inherit
+
+
+  release-brew:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 15
+    # runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --rm-dist --skip-validate -f .goreleaser.mac.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
+
+  release-scoop:
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Run GoReleaser
+        # uses: flarco/goreleaser-action@master
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --rm-dist --skip-validate -f .goreleaser.windows.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
