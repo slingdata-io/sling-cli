@@ -141,7 +141,7 @@ func (cfg *Config) SetDefault() {
 	}
 	if cfg.Target.Options.AdjustColumnType == nil {
 		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
-		if cfg.SrcConn.Type.Kind() == dbio.KindFile {
+		if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
 			// if source stream is file, we have no schema reference
 			cfg.Target.Options.AdjustColumnType = g.Bool(true)
 		}
@@ -722,11 +722,10 @@ var TargetDBOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
-	UseBulk:          g.Bool(true),
-	AdjustColumnType: g.Bool(false),
-	AddNewColumns:    true,
-	DatetimeFormat:   "auto",
-	MaxDecimals:      g.Int(-1),
+	UseBulk:        g.Bool(true),
+	AddNewColumns:  true,
+	DatetimeFormat: "auto",
+	MaxDecimals:    g.Int(-1),
 }
 
 var TargetAPIOptionsDefault = TargetOptions{
