@@ -6,6 +6,7 @@ jobs:
 
   release-brew:
     runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 15
     # runs-on: macos-latest
 
     steps:
@@ -33,6 +34,7 @@ jobs:
   release-scoop:
     # runs-on: [self-hosted, Windows]
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
