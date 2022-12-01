@@ -563,7 +563,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	// replace placeholders
-	cfg.Target.Object = g.Rm(cfg.Target.Object, m)
+	cfg.Target.Object = strings.ToLower(g.Rm(cfg.Target.Object, m))
 
 	// apply date map
 	dateMap := iop.GetISO8601DateMap(time.Now())
