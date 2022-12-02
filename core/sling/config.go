@@ -435,7 +435,11 @@ func (cfg *Config) Prepare() (err error) {
 				words = append(words, m.Group[0])
 			}
 		}
-		return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
+		// return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
+		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
+		for _, word := range words {
+			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
+		}
 	}
 
 	// done
@@ -559,7 +563,8 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	if len(blankKeys) > 0 {
-		return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
+		// return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
+		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
 	// replace placeholders
