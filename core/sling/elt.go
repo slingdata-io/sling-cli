@@ -158,7 +158,7 @@ func (t *TaskExecution) Execute() error {
 			return
 		}
 
-		g.Debug("type is %s", t.Type)
+		g.DebugLow("type is %s", t.Type)
 		switch t.Type {
 		case DbSQL:
 			t.Err = t.runDbSQL()
@@ -929,7 +929,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		return
 	}
 
-	g.Debug(
+	g.DebugLow(
 		"wrote %s: %d rows [%s r/s]",
 		humanize.Bytes(cast.ToUint64(bw)), cnt, getRate(cnt),
 	)
@@ -1088,9 +1088,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
 				return
 			}
-			if g.IsDebugLow() {
-				g.Debug(g.ErrMsgSimple(err))
-			}
+			g.DebugLow(g.ErrMsgSimple(err))
 		}
 	}
 
@@ -1247,7 +1245,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return 0, err
 		}
 		if rowAffCnt > 0 {
-			g.Debug("%d TOTAL INSERTS / UPDATES", rowAffCnt)
+			g.DebugLow("%d TOTAL INSERTS / UPDATES", rowAffCnt)
 		}
 	}
 
