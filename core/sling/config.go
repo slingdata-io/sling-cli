@@ -466,7 +466,7 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 
 func (cfg *Config) FormatTargetObjectName() (err error) {
 	m := g.M(
-		"run_timestamp", g.NowFileStr(),
+		"run_timestamp", time.Now().Format("2006_01_02_150405"),
 	)
 
 	if cfg.Source.Conn != "" {
