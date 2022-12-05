@@ -34,12 +34,8 @@ type Mode string
 const (
 	// TruncateMode is to truncate
 	TruncateMode Mode = "truncate"
-	// FullRefreshIncrementalMode is to drop or incremental
-	FullRefreshIncrementalMode Mode = "full-refresh+incremental"
 	// FullRefreshMode is to drop
 	FullRefreshMode Mode = "full-refresh"
-	// AppendMode is to append
-	AppendMode Mode = "append"
 	// IncrementalMode is to incremental
 	IncrementalMode Mode = "incremental"
 	// SnapshotMode is to snapshot
@@ -225,27 +221,33 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		cfg.Mode = AppendMode
+		cfg.Mode = FullRefreshMode
 	}
 
-	validMode := g.In(cfg.Mode, AppendMode, FullRefreshIncrementalMode, FullRefreshMode, IncrementalMode, SnapshotMode, TruncateMode)
+	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, SnapshotMode, TruncateMode)
 	if !validMode {
-		err = g.Error("must specify valid mode: append, full-refresh, incremental or truncate")
+		err = g.Error("must specify valid mode: full-refresh, incremental, snapshot or truncate")
 		return
 	}
 
-	if cfg.Mode == IncrementalMode && cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
-		// use default keys if none are provided
-		if len(cfg.Source.PrimaryKey) == 0 {
-			cfg.Source.PrimaryKey = []string{"_bigtable_key"}
-		}
+	if cfg.Mode == IncrementalMode {
+		if cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
+			// use default keys if none are provided
+			if len(cfg.Source.PrimaryKey) == 0 {
+				cfg.Source.PrimaryKey = []string{"_bigtable_key"}
+			}
 
-		if cfg.Source.UpdateKey == "" {
-			cfg.Source.UpdateKey = "_bigtable_timestamp"
+			if cfg.Source.UpdateKey == "" {
+				cfg.Source.UpdateKey = "_bigtable_timestamp"
+			}
+		} else if srcFileProvided && cfg.Source.UpdateKey == "" {
+			cfg.Source.UpdateKey = slingLoadedAtColumn
+		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey) == 0 {
+			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
+			return
 		}
-	} else if cfg.Mode == IncrementalMode && (len(cfg.Source.PrimaryKey) == 0 || len(cfg.Source.UpdateKey) == 0) {
-		err = g.Error("must specify value for 'primary_key' and 'update_key' for mode incremental in configration text (with: append, full-refresh, incremental or truncate")
-		return
+	} else if cfg.Mode == SnapshotMode {
+		slingLoadedAtColumn = "_sling_snapshot_at"
 	}
 
 	if srcDbProvided && tgtDbProvided {
@@ -417,13 +419,6 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.SrcConn = srcConn
 	}
 
-	// set mode if primary key is provided and mode isnn't
-	if len(cfg.Source.PrimaryKey) > 0 && (cfg.Mode == "" || cfg.Mode == FullRefreshIncrementalMode) {
-		cfg.Mode = IncrementalMode
-	} else if cfg.Mode == FullRefreshIncrementalMode {
-		cfg.Mode = FullRefreshMode
-	}
-
 	// format target name, now we have source info
 	err = cfg.FormatTargetObjectName()
 	if err != nil {
@@ -436,7 +431,7 @@ func (cfg *Config) Prepare() (err error) {
 			}
 		}
 		// return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
-		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
+		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
 		for _, word := range words {
 			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
 		}
@@ -511,16 +506,20 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		filePath := string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
 		fileName := string(re.ReplaceAll([]byte(pathArr[len(pathArr)-1]), []byte("_")))
+		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
+			m["stream_file_folder"] = fileFolder
 			m["stream_file_name"] = fileName
 		case dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
+			m["stream_file_folder"] = fileFolder
 			m["stream_file_name"] = fileName
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
+			m["stream_file_folder"] = fileFolder
 			m["stream_file_name"] = fileName
 			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
@@ -564,7 +563,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 	if len(blankKeys) > 0 {
 		// return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
-		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
+		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
 	// replace placeholders

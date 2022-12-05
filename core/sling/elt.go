@@ -210,8 +210,13 @@ func (t *TaskExecution) Execute() error {
 	return t.Err
 }
 
+func (t *TaskExecution) isFileIncremental() bool {
+	return t.Type == FileToDB && t.Config.Mode == IncrementalMode
+}
+
 func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
-	if MetadataLoadedAt {
+	// need to loaded_at column for file incremental
+	if MetadataLoadedAt || t.Type == FileToDB {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
 		metadata.LoadedAt.Value = t.StartTime.Unix()
 	}
@@ -603,7 +608,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 func (t *TaskExecution) runDbToDb() (err error) {
 	start = time.Now()
 	if t.Config.Mode == Mode("") {
-		t.Config.Mode = AppendMode
+		t.Config.Mode = FullRefreshMode
 	}
 
 	// Initiate connections
@@ -967,7 +972,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 	if cfg.Mode == "" {
-		cfg.Mode = AppendMode
+		cfg.Mode = FullRefreshMode
 	}
 
 	// pre SQL
@@ -1181,11 +1186,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	// if update-key is provided without primary-key, append incrementally
-	if t.Config.Source.UpdateKey != "" && len(t.Config.Source.PrimaryKey) == 0 {
-		t.Config.Mode = AppendMode
-	}
-
 	// Put data from tmp to final
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
@@ -1204,7 +1204,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 		t.SetProgress("dropped old table of " + targetTable)
 
-	} else if cfg.Mode == AppendMode || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
+	} else if (cfg.Mode == IncrementalMode && len(t.Config.Source.PrimaryKey) == 0) || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
@@ -1296,7 +1296,11 @@ func (t *TaskExecution) Cleanup() {
 }
 
 func (t *TaskExecution) usingCheckpoint() bool {
-	return t.Config.Source.UpdateKey != "" && (t.Config.Mode == IncrementalMode || t.Config.Mode == AppendMode)
+	if t.isFileIncremental() {
+		// need to loaded_at column for file incremental
+		t.Config.Source.UpdateKey = slingLoadedAtColumn
+	}
+	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
 }
 
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {
