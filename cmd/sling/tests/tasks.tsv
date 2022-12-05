@@ -8,7 +8,7 @@ task.06		file:///tmp/ocral_test_1000.csv	{}	CLICKHOUSE	default.test1k	full-refre
 task.07	POSTGRES	public.test1k	{}	DO_SPACES	s3://{target_bucket}/{stream_schema}.{stream_table}.copy.csv				{}	{}	{"validation_object": "s3://ocral/public.test1k.copy.csv"}
 task.08	POSTGRES	public.test1k	{}	MYSQL	mysql.{stream_table}	full-refresh			{}	{}	{"validation_object": "mysql.test1k"}
 task.09	POSTGRES	select * from public.test1k where 1=1	{}	MSSQL	dbo.test1k	full-refresh			{}	{}	{"validation_object": "dbo.test1k"}
-task.10		file:///tmp/ocral_test_1000.csv	{}	POSTGRES_SSH	public.{stream_file_path}	append			{"add_new_columns": true}	{}	{"validation_object": "public.tmp_ocral_test_1000_csv"}
+task.10		file:///tmp/ocral_test_1000.csv	{}	POSTGRES_SSH	public.{stream_file_path}	snapshot			{"add_new_columns": true}	{}	{"validation_object": "public.tmp_ocral_test_1000_csv"}
 task.11	BIGQUERY	select * from public.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
 task.12	SNOWFLAKE	select * from public.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	
 task.13	CLICKHOUSE	select * from default.test1k where 1=1	{}	POSTGRES	public.test1k	full-refresh			{}	{}	

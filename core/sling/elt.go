@@ -210,10 +210,6 @@ func (t *TaskExecution) Execute() error {
 	return t.Err
 }
 
-func (t *TaskExecution) isFileIncremental() bool {
-	return t.Type == FileToDB && t.Config.Mode == IncrementalMode
-}
-
 func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 	// need to loaded_at column for file incremental
 	if MetadataLoadedAt || t.Type == FileToDB {
@@ -1296,10 +1292,6 @@ func (t *TaskExecution) Cleanup() {
 }
 
 func (t *TaskExecution) usingCheckpoint() bool {
-	if t.isFileIncremental() {
-		// need to loaded_at column for file incremental
-		t.Config.Source.UpdateKey = slingLoadedAtColumn
-	}
 	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
 }
 

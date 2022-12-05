@@ -9,7 +9,7 @@ go test -run TestTasks
 cd -
 
 ## test cli commands
-go build -o sling cmd/sling/*.go && chmod +x sling-linux
+go build -o sling-linux cmd/sling/*.go && chmod +x sling-linux
 ./sling-linux --version
 
 cat cmd/sling/tests/files/test1.1.csv | ./sling-linux run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh

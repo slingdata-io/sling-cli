@@ -240,14 +240,13 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			if cfg.Source.UpdateKey == "" {
 				cfg.Source.UpdateKey = "_bigtable_timestamp"
 			}
-		} else if srcFileProvided && cfg.Source.UpdateKey == "" {
-			cfg.Source.UpdateKey = slingLoadedAtColumn
+		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
+			// need to loaded_at column for file incremental
+			MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
 			return
 		}
-	} else if cfg.Mode == SnapshotMode {
-		slingLoadedAtColumn = "_sling_snapshot_at"
 	}
 
 	if srcDbProvided && tgtDbProvided {
