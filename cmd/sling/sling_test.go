@@ -135,7 +135,7 @@ func TestTasks(t *testing.T) {
 
 	// generate files
 	os.RemoveAll(folderPath) // clean up
-	os.MkdirAll(folderPath, 0755)
+	os.MkdirAll(folderPath, 0777)
 
 	data, err := iop.ReadCsv(defFilePath)
 	if !g.AssertNoError(t, err) {
@@ -176,7 +176,7 @@ func TestTasks(t *testing.T) {
 		)
 		taskPath := filepath.Join(folderPath, g.F("task.%02d.json", i+1))
 		taskBytes := []byte(g.Marshal(task))
-		err = ioutil.WriteFile(taskPath, taskBytes, 0755)
+		err = ioutil.WriteFile(taskPath, taskBytes, 0777)
 		g.AssertNoError(t, err)
 	}
 
