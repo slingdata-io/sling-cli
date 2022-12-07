@@ -30,9 +30,9 @@ var (
 var envFolder embed.FS
 
 type EnvFile struct {
-	Connections map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Variables   map[string]string      `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Worker      map[string]string      `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Connections map[string]yaml.MapSlice `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Variables   yaml.MapSlice            `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Worker      map[string]string        `json:"worker,omitempty" yaml:"worker,omitempty"`
 }
 
 func init() {
@@ -211,6 +211,100 @@ func InitLogger() {
 	}
 }
 
+func WriteSlingEnvFile(ef EnvFile) (err error) {
+	return WriteEnvFile(HomeDirEnvFile, ef)
+}
+
+func WriteEnvFile(path string, ef EnvFile) (err error) {
+	connsMap := yaml.MapSlice{}
+
+	// order connections names
+	names := lo.Keys(ef.Connections)
+	sort.Strings(names)
+	for _, name := range names {
+		m := ef.Connections[name]
+		keyMap := lo.KeyBy(m, func(item yaml.MapItem) string { return cast.ToString(item.Key) })
+
+		// order connection keys (type first)
+		cMap := yaml.MapSlice{}
+		keys := lo.Map(m, func(item yaml.MapItem, i int) string { return cast.ToString(item.Key) })
+		sort.Strings(keys)
+		if item, ok := keyMap["type"]; ok {
+			cMap = append(cMap, yaml.MapItem{Key: "type", Value: item.Value})
+		}
+
+		for _, k := range keys {
+			if k == "type" {
+				continue // already put first
+			}
+			k = cast.ToString(k)
+			cMap = append(cMap, yaml.MapItem{Key: k, Value: keyMap[k].Value})
+		}
+
+		// add to connection map
+		connsMap = append(connsMap, yaml.MapItem{Key: name, Value: cMap})
+	}
+
+	efMap := yaml.MapSlice{
+		{Key: "connections", Value: connsMap},
+		{Key: "variables", Value: ef.Variables},
+		{Key: "worker", Value: ef.Worker},
+	}
+
+	envBytes, err := yaml.Marshal(efMap)
+	if err != nil {
+		return g.Error(err, "could not marshal into YAML")
+	}
+
+	output := []byte("# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n" + string(envBytes))
+
+	err = ioutil.WriteFile(HomeDirEnvFile, formatYAML(output), 0644)
+	if err != nil {
+		return g.Error(err, "could not write YAML file")
+	}
+
+	return
+}
+
+func formatYAML(input []byte) []byte {
+	newOutput := []byte{}
+	pIndent := 0
+	indent := 0
+	inIndent := true
+	prevC := byte('-')
+	for _, c := range input {
+		add := false
+		if c == ' ' && inIndent {
+			indent++
+			add = true
+		} else if c == '\n' {
+			pIndent = indent
+			indent = 0
+			add = true
+			inIndent = true
+		} else if prevC == '\n' {
+			newOutput = append(newOutput, '\n') // add extra space
+			add = true
+		} else if prevC == ' ' && pIndent > indent && inIndent {
+			newOutput = append(newOutput, '\n') // add extra space
+			for i := 0; i < indent; i++ {
+				newOutput = append(newOutput, ' ')
+			}
+			add = true
+			inIndent = false
+		} else {
+			add = true
+			inIndent = false
+		}
+
+		if add {
+			newOutput = append(newOutput, c)
+		}
+		prevC = c
+	}
+	return newOutput
+}
+
 func LoadSlingEnvFile() (ef EnvFile) {
 	ef = LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
@@ -226,11 +320,11 @@ func LoadEnvFile(path string) (ef EnvFile) {
 	}
 
 	if ef.Connections == nil {
-		ef.Connections = map[string]interface{}{}
+		ef.Connections = map[string]yaml.MapSlice{}
 	}
 
 	if ef.Variables == nil {
-		ef.Variables = map[string]string{}
+		ef.Variables = yaml.MapSlice{}
 	}
 
 	if ef.Worker == nil {
@@ -245,8 +339,9 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		envMap[key] = val
 	}
 
-	for k, v := range ef.Variables {
-		k = strings.ToUpper(k)
+	for _, item := range ef.Variables {
+		k := strings.ToUpper(cast.ToString(item.Key))
+		v := cast.ToString(item.Value)
 		if _, found := envMap[k]; !found {
 			os.Setenv(k, v)
 		}

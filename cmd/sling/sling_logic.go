@@ -15,6 +15,7 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
+	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -305,11 +306,45 @@ func runReplication(cfgPath string) (err error) {
 func processConns(c *g.CliSC) (bool, error) {
 	ok := true
 	switch c.UsedSC() {
-	case "add", "new":
+	case "set":
 		if len(c.Vals) == 0 {
 			flaggy.ShowHelp("")
 			return ok, nil
 		}
+
+		url := ""
+		kvMapSlice := yaml.MapSlice{}
+		kvArr := []string{cast.ToString(c.Vals["value properties..."])}
+		kvMap := g.KVArrToMap(append(kvArr, flaggy.TrailingArguments...)...)
+		for k, v := range kvMap {
+			k = strings.ToLower(k)
+			kvMapSlice = append(kvMapSlice, yaml.MapItem{Key: k, Value: v})
+			if k == "url" {
+				url = v
+			}
+		}
+		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
+
+		// parse url
+		if url != "" {
+			conn, err := connection.NewConnectionFromURL(name, url)
+			if err != nil {
+				return ok, g.Error(err, "could not parse url")
+			}
+			if _, ok := kvMap["type"]; !ok {
+				kvMapSlice = append(kvMapSlice, yaml.MapItem{Key: "type", Value: conn.Type.String()})
+				kvMap["type"] = conn.Type.String()
+			}
+		}
+
+		ef := env.LoadSlingEnvFile()
+		ef.Connections[name] = kvMapSlice
+		err := env.WriteSlingEnvFile(ef)
+		if err != nil {
+			return ok, g.Error(err, "could not write env file")
+		}
+		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, env.HomeDirEnvFile, name)
+
 	case "list", "show":
 		conns := env.GetLocalConns()
 		T := table.NewWriter()

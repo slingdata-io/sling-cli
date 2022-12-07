@@ -160,10 +160,6 @@ var cliConns = &g.CliSC{
 	Description:           "Manage local connections",
 	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
 	SubComs: []*g.CliSC{
-		// {
-		// 	Name:        "add",
-		// 	Description: "add new connection",
-		// },
 		{
 			Name:        "discover",
 			Description: "list available streams in connection",
@@ -197,6 +193,24 @@ var cliConns = &g.CliSC{
 		{
 			Name:        "list",
 			Description: "list local connections detected",
+		},
+		{
+			Name:        "set",
+			Description: "set a connection in the sling env file (~/.sling/env.yaml)",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to set",
+				},
+				{
+					Name:        "key=value properties...",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#local-connections",
+				},
+			},
 		},
 		{
 			Name:        "test",
@@ -338,6 +352,7 @@ func cliInit() int {
 		flaggy.AttachSubcommand(cli.Sc, 1)
 	}
 
+	flaggy.ShowHelpOnUnexpectedDisable()
 	flaggy.Parse()
 
 	ok, err := g.CliProcess()
