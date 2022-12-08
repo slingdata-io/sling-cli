@@ -15,6 +15,7 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
+	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling-cli/core"
@@ -333,6 +334,13 @@ func processConns(c *g.CliSC) (bool, error) {
 			if _, ok := kvMap["type"]; !ok {
 				kvMap["type"] = conn.Type.String()
 			}
+		}
+
+		t, found := kvMap["type"]
+		if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
+			return ok, g.Error("invalid type (%s). See https://docs.slingdata.io/sling-cli/environment#set-connections for help.", cast.ToString(t))
+		} else if !found {
+			return ok, g.Error("need to specify valid `type` key or provide `url`. See https://docs.slingdata.io/sling-cli/environment#set-connections for help.")
 		}
 
 		ef := env.LoadSlingEnvFile()
