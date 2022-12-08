@@ -313,15 +313,14 @@ func processConns(c *g.CliSC) (bool, error) {
 		}
 
 		url := ""
-		kvMapSlice := yaml.MapSlice{}
 		kvArr := []string{cast.ToString(c.Vals["value properties..."])}
-		kvMap := g.KVArrToMap(append(kvArr, flaggy.TrailingArguments...)...)
-		for k, v := range kvMap {
+		kvMap := map[string]interface{}{}
+		for k, v := range g.KVArrToMap(append(kvArr, flaggy.TrailingArguments...)...) {
 			k = strings.ToLower(k)
-			kvMapSlice = append(kvMapSlice, yaml.MapItem{Key: k, Value: v})
 			if k == "url" {
 				url = v
 			}
+			kvMap[k] = v
 		}
 		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
 
@@ -332,13 +331,12 @@ func processConns(c *g.CliSC) (bool, error) {
 				return ok, g.Error(err, "could not parse url")
 			}
 			if _, ok := kvMap["type"]; !ok {
-				kvMapSlice = append(kvMapSlice, yaml.MapItem{Key: "type", Value: conn.Type.String()})
 				kvMap["type"] = conn.Type.String()
 			}
 		}
 
 		ef := env.LoadSlingEnvFile()
-		ef.Connections[name] = kvMapSlice
+		ef.Connections[name] = kvMap
 		err := env.WriteSlingEnvFile(ef)
 		if err != nil {
 			return ok, g.Error(err, "could not write env file")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -30,23 +31,23 @@ var (
 var envFolder embed.FS
 
 type EnvFile struct {
-	Connections map[string]yaml.MapSlice `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Variables   yaml.MapSlice            `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Worker      map[string]string        `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Connections map[string]map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Variables   map[string]interface{}            `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Worker      map[string]string                 `json:"worker,omitempty" yaml:"worker,omitempty"`
 }
 
 func init() {
 	if HomeDir == "" {
-		HomeDir = g.UserHomeDir() + "/.sling"
+		HomeDir = path.Join(g.UserHomeDir(), ".sling")
 		os.Setenv("SLING_HOME_DIR", HomeDir)
 	}
 	if DbNetDir == "" {
-		DbNetDir = g.UserHomeDir() + "/.dbnet"
+		DbNetDir = path.Join(g.UserHomeDir(), ".dbnet")
 	}
 	os.MkdirAll(HomeDir, 0755)
 
-	HomeDirEnvFile = HomeDir + "/env.yaml"
-	DbNetDirEnvFile = DbNetDir + "/env.yaml"
+	HomeDirEnvFile = path.Join(HomeDir, "env.yaml")
+	DbNetDirEnvFile = path.Join(DbNetDir, "env.yaml")
 
 	// os.Setenv("PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
 	// create env file if not exists
@@ -222,15 +223,13 @@ func WriteEnvFile(path string, ef EnvFile) (err error) {
 	names := lo.Keys(ef.Connections)
 	sort.Strings(names)
 	for _, name := range names {
-		m := ef.Connections[name]
-		keyMap := lo.KeyBy(m, func(item yaml.MapItem) string { return cast.ToString(item.Key) })
-
+		keyMap := ef.Connections[name]
 		// order connection keys (type first)
 		cMap := yaml.MapSlice{}
-		keys := lo.Map(m, func(item yaml.MapItem, i int) string { return cast.ToString(item.Key) })
+		keys := lo.Keys(keyMap)
 		sort.Strings(keys)
-		if item, ok := keyMap["type"]; ok {
-			cMap = append(cMap, yaml.MapItem{Key: "type", Value: item.Value})
+		if v, ok := keyMap["type"]; ok {
+			cMap = append(cMap, yaml.MapItem{Key: "type", Value: v})
 		}
 
 		for _, k := range keys {
@@ -238,7 +237,7 @@ func WriteEnvFile(path string, ef EnvFile) (err error) {
 				continue // already put first
 			}
 			k = cast.ToString(k)
-			cMap = append(cMap, yaml.MapItem{Key: k, Value: keyMap[k].Value})
+			cMap = append(cMap, yaml.MapItem{Key: k, Value: keyMap[k]})
 		}
 
 		// add to connection map
@@ -320,11 +319,11 @@ func LoadEnvFile(path string) (ef EnvFile) {
 	}
 
 	if ef.Connections == nil {
-		ef.Connections = map[string]yaml.MapSlice{}
+		ef.Connections = map[string]map[string]interface{}{}
 	}
 
 	if ef.Variables == nil {
-		ef.Variables = yaml.MapSlice{}
+		ef.Variables = map[string]interface{}{}
 	}
 
 	if ef.Worker == nil {
@@ -339,11 +338,9 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		envMap[key] = val
 	}
 
-	for _, item := range ef.Variables {
-		k := strings.ToUpper(cast.ToString(item.Key))
-		v := cast.ToString(item.Value)
+	for k, v := range ef.Variables {
 		if _, found := envMap[k]; !found {
-			os.Setenv(k, v)
+			os.Setenv(k, cast.ToString(v))
 		}
 	}
 	return ef
