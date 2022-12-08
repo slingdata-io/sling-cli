@@ -156,7 +156,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	if replicationCfgPath != "" {
 		err = runReplication(replicationCfgPath)
 		if err != nil {
-			return ok, g.Error(err)
+			return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
 		}
 		return ok, nil
 
@@ -165,14 +165,14 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	if cfgStr != "" {
 		err = cfg.Unmarshal(cfgStr)
 		if err != nil {
-			return ok, g.Error(err, "could not parse task configuration")
+			return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
 		}
 	}
 
 	// run task
 	err = runTask(cfg)
 	if err != nil {
-		return ok, g.Error(err)
+		return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
 	}
 
 	return ok, nil
@@ -394,7 +394,7 @@ func processConns(c *g.CliSC) (bool, error) {
 			}
 			err = dbConn.Connect()
 			if err != nil {
-				return ok, g.Error(err, "could not connect to %s", name)
+				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
 			}
 			if discover {
 				schemata, err := dbConn.GetSchemata(schema, "")
@@ -413,7 +413,7 @@ func processConns(c *g.CliSC) (bool, error) {
 			}
 			err = fileClient.Init(context.Background())
 			if err != nil {
-				return ok, g.Error(err, "could not connect to %s", name)
+				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
 			}
 
 			url := conn.Connection.URL()
@@ -426,7 +426,7 @@ func processConns(c *g.CliSC) (bool, error) {
 
 			streamNames, err = fileClient.List(url)
 			if err != nil {
-				return ok, g.Error(err, "could not connect to %s", name)
+				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
 			}
 
 		case conn.Connection.Type.IsAirbyte():
@@ -447,7 +447,7 @@ func processConns(c *g.CliSC) (bool, error) {
 			}
 
 		default:
-			return ok, g.Error("Unhandled connection type: %s", conn.Connection.Type)
+			return ok, g.Error("Unhandled connection type: %s (see docs @ https://docs.slingdata.io/sling-cli)", conn.Connection.Type)
 		}
 
 		if discover {
