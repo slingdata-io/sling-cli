@@ -307,6 +307,25 @@ func runReplication(cfgPath string) (err error) {
 func processConns(c *g.CliSC) (bool, error) {
 	ok := true
 	switch c.UsedSC() {
+	case "unset":
+		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
+		if name == "" {
+			flaggy.ShowHelp("")
+			return ok, nil
+		}
+
+		ef := env.LoadSlingEnvFile()
+		_, ok := ef.Connections[name]
+		if !ok {
+			return true, g.Error("did not find connection `%s`", name)
+		}
+
+		delete(ef.Connections, name)
+		err := env.WriteSlingEnvFile(ef)
+		if err != nil {
+			return ok, g.Error(err, "could not write env file")
+		}
+		g.Info("connection `%s` has been removed from %s", name, env.HomeDirEnvFile)
 	case "set":
 		if len(c.Vals) == 0 {
 			flaggy.ShowHelp("")

@@ -157,7 +157,7 @@ var cliUi = &g.CliSC{
 var cliConns = &g.CliSC{
 	Name:                  "conns",
 	Singular:              "local connection",
-	Description:           "Manage local connections",
+	Description:           g.F("Manage local connections in the sling env file (%s)", env.HomeDirEnvFile),
 	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
 	SubComs: []*g.CliSC{
 		{
@@ -195,8 +195,32 @@ var cliConns = &g.CliSC{
 			Description: "list local connections detected",
 		},
 		{
+			Name:        "test",
+			Description: "test a local connection",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to test",
+				},
+			},
+		},
+		{
+			Name:        "unset",
+			Description: "remove a connection from the sling env file",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to remove",
+				},
+			},
+		},
+		{
 			Name:        "set",
-			Description: "set a connection in the sling env file (~/.sling/env.yaml)",
+			Description: "set a connection in the sling env file",
 			PosFlags: []g.Flag{
 				{
 					Name:        "name",
@@ -209,18 +233,6 @@ var cliConns = &g.CliSC{
 					ShortName:   "",
 					Type:        "string",
 					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#local-connections",
-				},
-			},
-		},
-		{
-			Name:        "test",
-			Description: "test a local connection",
-			PosFlags: []g.Flag{
-				{
-					Name:        "name",
-					ShortName:   "",
-					Type:        "string",
-					Description: "The name of the connection to test",
 				},
 			},
 		},
