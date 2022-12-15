@@ -51,7 +51,7 @@ func init() {
 
 	// os.Setenv("PROFILE_PATHS", g.F("%s,%s", HomeDirEnvFile, DbNetDirEnvFile))
 	// create env file if not exists
-	if !g.PathExists(HomeDirEnvFile) {
+	if HomeDir != "" && !g.PathExists(HomeDirEnvFile) {
 		defaultEnvBytes, _ := envFolder.ReadFile("default.env.yaml")
 		ioutil.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
 	}
