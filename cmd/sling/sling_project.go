@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
@@ -150,14 +151,14 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 	*/
 	ok = true
 	conns := lo.Filter(
-		env.GetLocalConns(),
-		func(c env.Conn, i int) bool {
+		connection.GetLocalConns(),
+		func(c connection.ConnEntry, i int) bool {
 			return c.Connection.Type.IsDb() || c.Connection.Type.IsFile()
 		},
 	)
 	dbConns := lo.Filter(
-		env.GetLocalConns(),
-		func(c env.Conn, i int) bool {
+		connection.GetLocalConns(),
+		func(c connection.ConnEntry, i int) bool {
 			return c.Connection.Type.IsDb()
 		},
 	)
@@ -169,11 +170,11 @@ func processProjectTasksGenerate(c *g.CliSC) (ok bool, err error) {
 
 	dbConnNames := lo.Map(
 		conns,
-		func(c env.Conn, i int) string { return c.Name },
+		func(c connection.ConnEntry, i int) string { return c.Name },
 	)
 	connNames := lo.Map(
 		conns,
-		func(c env.Conn, i int) string { return c.Name },
+		func(c connection.ConnEntry, i int) string { return c.Name },
 	)
 
 	prompt := promptui.Select{Label: "Source Connection", Items: dbConnNames}

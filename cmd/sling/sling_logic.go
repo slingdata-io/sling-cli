@@ -371,7 +371,7 @@ func processConns(c *g.CliSC) (bool, error) {
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, env.HomeDirEnvFile, name)
 
 	case "list", "show":
-		conns := env.GetLocalConns()
+		conns := connection.GetLocalConns()
 		T := table.NewWriter()
 		T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
 		for _, conn := range conns {
@@ -390,8 +390,8 @@ func processConns(c *g.CliSC) (bool, error) {
 		schema := cast.ToString(c.Vals["schema"])
 		folder := cast.ToString(c.Vals["folder"])
 
-		conns := map[string]env.Conn{}
-		for _, conn := range env.GetLocalConns() {
+		conns := map[string]connection.ConnEntry{}
+		for _, conn := range connection.GetLocalConns() {
 			conns[strings.ToLower(conn.Name)] = conn
 		}
 

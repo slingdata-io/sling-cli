@@ -15,7 +15,6 @@ import (
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/dbio/iop"
@@ -326,7 +325,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// get local connections
-	connsMap := lo.KeyBy(env.GetLocalConns(), func(c env.Conn) string {
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
 		return strings.ToLower(c.Connection.Name)
 	})
 

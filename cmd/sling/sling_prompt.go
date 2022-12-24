@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/c-bata/go-prompt"
+	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core"
-	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -52,7 +52,7 @@ func completer(in prompt.Document) []prompt.Suggest {
 		// suggestions based on previous word
 		switch {
 		case g.In(prevWord, "src-conn", "tgt-conn"):
-			for _, conn := range env.GetLocalConns() {
+			for _, conn := range connection.GetLocalConns() {
 				localSuggestions = append(localSuggestions, prompt.Suggest{Text: conn.Name, Description: conn.Description})
 			}
 			return prompt.FilterHasPrefix(localSuggestions, w, true)
