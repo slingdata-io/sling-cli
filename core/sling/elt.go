@@ -712,7 +712,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// check if referring to a SQL file
-	if strings.Contains(cfg.Source.Stream, "/") || strings.HasSuffix(strings.ToLower(cfg.Source.Stream), ".sql") {
+	if g.PathExists(cfg.Source.Stream) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
 		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
