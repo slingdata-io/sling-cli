@@ -34,7 +34,8 @@ var (
 	headers         = map[string]string{
 		"Content-Type": "application/json",
 	}
-	apiTokenFile = path.Join(env.HomeDir, ".api_token")
+	apiTokenFile    = path.Join(env.HomeDir, ".api_token")
+	updateAvailable = false
 )
 
 func init() {
@@ -152,6 +153,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	os.Setenv("SLING_CLI", "TRUE")
+
+	// check for update, and print note
+	go isUpdateAvailable()
+	defer printUpdateAvailable()
 
 	if replicationCfgPath != "" {
 		err = runReplication(replicationCfgPath)
@@ -521,6 +526,21 @@ func checkLatestVersion() (string, error) {
 		return "", g.Error(err, "Unable to check for latest version")
 	}
 	return newVersion, nil
+}
+
+func isUpdateAvailable() bool {
+	newVersion, err := checkLatestVersion()
+	if err != nil {
+		return false
+	}
+	updateAvailable = newVersion != core2.Version
+	return updateAvailable
+}
+
+func printUpdateAvailable() {
+	if updateAvailable {
+		g.Warn("FYI, a new sling version is available (please run `sling update`)")
+	}
 }
 
 func updateCLI(c *g.CliSC) (ok bool, err error) {
