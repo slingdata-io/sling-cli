@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io/ioutil"
 	"os"
-	"path"
 	"runtime"
 	"sort"
 	"strings"
@@ -30,48 +27,19 @@ import (
 
 var (
 	masterServerURL = os.Getenv("SLING_MASTER_URL")
-	masterSecret    = os.Getenv("SLING_MASTER_SECRET")
+	apiKey          = os.Getenv("SLING_API_KEY")
+	projectID       = os.Getenv("SLING_PROJECT")
 	headers         = map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type":     "application/json",
+		"Sling-API-Key":    apiKey,
+		"Sling-Project-ID": projectID,
 	}
-	apiTokenFile    = path.Join(env.HomeDir, ".api_token")
 	updateAvailable = false
 )
 
 func init() {
 	if masterServerURL == "" {
 		masterServerURL = "https://api.slingdata.io"
-	}
-}
-
-func setJWT() {
-	if a := headers["Authorization"]; a != "" {
-		return
-	}
-
-	// login and get JWT
-	apiTokenBytes, _ := ioutil.ReadFile(apiTokenFile)
-	apiToken := string(apiTokenBytes)
-	if apiToken == "" {
-		g.LogFatal(g.Error("no token cached. Are you logged in?"))
-	}
-
-	respStr, err := sling.ClientPost(
-		masterServerURL, "/app/login",
-		g.M("password", apiToken), headers)
-	g.LogFatal(err)
-
-	m := g.M()
-	err = json.Unmarshal([]byte(respStr), &m)
-	g.LogFatal(err, "could not parse token response")
-
-	jwt := cast.ToString(cast.ToStringMap(m["user"])["token"])
-	if jwt == "" {
-		g.LogFatal(g.Error("blank token"))
-	}
-
-	if headers["Authorization"] == "" {
-		headers["Authorization"] = "Bearer " + jwt
 	}
 }
 
@@ -238,17 +206,7 @@ func runTask(cfg *sling.Config) (err error) {
 }
 
 func runReplication(cfgPath string) (err error) {
-	cfgFile, err := os.Open(cfgPath)
-	if err != nil {
-		return g.Error(err, "Unable to open replication path: "+cfgPath)
-	}
-
-	cfgBytes, err := ioutil.ReadAll(cfgFile)
-	if err != nil {
-		return g.Error(err, "could not read from replication path: "+cfgPath)
-	}
-
-	replication, err := sling.UnmarshalReplication(string(cfgBytes))
+	replication, err := sling.LoadReplicationConfig(cfgPath)
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
 	}

@@ -2,6 +2,8 @@ package sling
 
 import (
 	"database/sql/driver"
+	"io"
+	"os"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -93,8 +95,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	defaults, ok := m["defaults"]
 	if !ok {
-		err = g.Error("did not find 'defaults' key")
-		return
+		defaults = g.M() // defaults not mandatory
 	}
 
 	streams, ok := m["streams"]
@@ -120,6 +121,27 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	if err != nil {
 		err = g.Error(err, "could not parse 'streams'")
 		return
+	}
+
+	return
+}
+
+func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error) {
+	cfgFile, err := os.Open(cfgPath)
+	if err != nil {
+		err = g.Error(err, "Unable to open replication path: "+cfgPath)
+		return
+	}
+
+	cfgBytes, err := io.ReadAll(cfgFile)
+	if err != nil {
+		err = g.Error(err, "could not read from replication path: "+cfgPath)
+		return
+	}
+
+	config, err = UnmarshalReplication(string(cfgBytes))
+	if err != nil {
+		err = g.Error(err, "Error parsing replication config")
 	}
 
 	return

@@ -87,23 +87,15 @@ func processAuth(c *g.CliSC) (ok bool, err error) {
 		}
 
 	case "logout":
-		os.RemoveAll(apiTokenFile)
 		g.Info("logged out!")
 	case "signup":
 		// open in browser signup page
 	case "token":
-		apiTokenBytes, _ := ioutil.ReadFile(apiTokenFile)
-		apiToken := string(apiTokenBytes)
-		if apiToken == "" {
-			return ok, g.Error("no token cached. Are you logged in?")
-		}
-		println(apiToken)
 	}
 	return
 }
 
 func processProjectConns(c *g.CliSC) (ok bool, err error) {
-	setJWT()
 	ok = true
 	switch c.Name {
 	case "set":
@@ -115,7 +107,6 @@ func processProjectConns(c *g.CliSC) (ok bool, err error) {
 }
 
 func processProjectVars(c *g.CliSC) (ok bool, err error) {
-	setJWT()
 	ok = true
 	switch c.Name {
 	case "set":

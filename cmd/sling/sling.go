@@ -154,10 +154,73 @@ var cliUi = &g.CliSC{
 	ExecProcess: slingUiServer,
 }
 
+var cliCloud = &g.CliSC{
+	Name:                  "cloud",
+	Singular:              "cloud",
+	Description:           "Deploy and trigger replications on the cloud",
+	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "deploy",
+			Description: "deploy a replication to the cloud",
+			PosFlags: []g.Flag{
+				{
+					Name:        "path",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The file or folder path of YAML file(s)",
+				},
+			},
+		},
+		{
+			Name:        "export",
+			Description: "export a replication to a YAML file",
+			PosFlags: []g.Flag{
+				{
+					Name:        "id",
+					Type:        "string",
+					Description: "The ID of the replication",
+				},
+				{
+					Name:        "path",
+					Type:        "string",
+					Description: "The folder path to export to",
+				},
+			},
+		},
+		{
+			Name:        "list",
+			Description: "list replications / streams deployed on the cloud",
+		},
+		// {
+		// 	Name:        "trigger",
+		// 	Description: "Trigger a replication on the cloud",
+		// 	Flags: []g.Flag{
+		// 		{
+		// 			Name:        "source",
+		// 			Type:        "string",
+		// 			Description: "The name of the source connection",
+		// 		},
+		// 		{
+		// 			Name:        "target",
+		// 			Type:        "string",
+		// 			Description: "The name of the target connection",
+		// 		},
+		// 		{
+		// 			Name:        "stream",
+		// 			Type:        "string",
+		// 			Description: "The name os the streams to trigger (optional)",
+		// 		},
+		// 	},
+		// },
+	},
+	ExecProcess: processCloud,
+}
+
 var cliConns = &g.CliSC{
 	Name:                  "conns",
 	Singular:              "local connection",
-	Description:           g.F("Manage local connections in the sling env file (%s)", env.HomeDirEnvFile),
+	Description:           "Manage local connections in the sling env file",
 	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
 	SubComs: []*g.CliSC{
 		{
@@ -259,6 +322,7 @@ func init() {
 
 	// cliInteractive.Make().Add()
 	// cliAuth.Make().Add()
+	cliCloud.Make().Add()
 	cliConns.Make().Add()
 	// cliProject.Make().Add()
 	cliRun.Make().Add()
