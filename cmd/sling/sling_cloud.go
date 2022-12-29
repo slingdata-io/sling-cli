@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -174,27 +175,39 @@ func listReplications() (data iop.Dataset, err error) {
 	return
 }
 
-func processCloud(c *g.CliSC) (bool, error) {
-	ok := true
+func processCloud(c *g.CliSC) (ok bool, err error) {
+	ok = true
 
-	if apiKey == "" {
+	if apiKey == "" && c.UsedSC() != "" {
 		g.Warn("Please provide an API key in environment variable SLING_API_KEY. If you don't have one, get one at https://app.slingdata.io")
 		return ok, nil
+	} else if c.UsedSC() != "" {
+		defer func() {
+			if err != nil {
+				telemetryMap["error"] = getErrString(err)
+			}
+			telemetryMap["sub_command"] = c.UsedSC()
+			// telemetry
+			Track("cloud")
+		}()
 	}
 
 	switch c.UsedSC() {
 	case "deploy":
+		var stat fs.FileInfo
 		path := cast.ToString(c.Vals["path"])
-		stat, err := os.Stat(path)
+		stat, err = os.Stat(path)
 		if os.IsNotExist(err) {
-			return ok, g.Error(err, "Path does not exists: %s", path)
+			err = g.Error(err, "Path does not exists: %s", path)
+			return
 		}
 
 		var files []g.FileItem
 		if stat.IsDir() {
 			files, err = g.ListDirRecursive(path)
 			if err != nil {
-				return ok, g.Error(err, "Could not list files in directory: %s", path)
+				err = g.Error(err, "Could not list files in directory: %s", path)
+				return
 			}
 		} else {
 			files = []g.FileItem{
@@ -212,52 +225,62 @@ func processCloud(c *g.CliSC) (bool, error) {
 		URL := masterServerURL + string(RouteAPIImport)
 		for _, file := range files {
 			if strings.HasSuffix(file.Name, ".yaml") || strings.HasSuffix(file.Name, ".yml") {
-				replication, err := sling.LoadReplicationConfig(path)
+				var replication sling.ReplicationConfig
+				replication, err = sling.LoadReplicationConfig(path)
 				if err != nil {
-					return ok, g.Error(err, "Could not load replication config: %s", path)
+					err = g.Error(err, "Could not load replication config: %s", path)
+					return
 				}
 
 				err = replication.ProcessWildcards()
 				if err != nil {
-					return ok, g.Error(err, "could not process streams using wildcard")
+					err = g.Error(err, "could not process streams using wildcard")
+					return
 				}
 
+				var respB []byte
 				payload, _ := yaml.Marshal(replication)
-				_, respB, err := net.ClientDo("POST", URL, bytes.NewBuffer(payload), headers)
+				_, respB, err = net.ClientDo("POST", URL, bytes.NewBuffer(payload), headers)
 				if err != nil {
-					return ok, g.Error(err, "Could not import replication: %s", path)
+					err = g.Error(err, "Could not import replication: %s", path)
+					return
 				}
 				respM := g.M()
 				g.Unmarshal(string(respB), &respM)
 				g.Info("successfully deployed replication #%d (%s)", cast.ToInt(respM["id"]), path)
 			}
 		}
-
 	case "export":
+		var respStr string
 		m := g.M("level", "replication", "id", c.Vals["id"])
-		respStr, err := ClientPost(masterServerURL, RouteAPIExport, m, headers)
+		respStr, err = ClientPost(masterServerURL, RouteAPIExport, m, headers)
 		if err != nil {
-			return ok, g.Error(err, "Could not list replications")
+			err = g.Error(err, "Could not list replications")
+			return
 		}
 
 		respM := g.M()
 		err = g.Unmarshal(respStr, &respM)
 		if err != nil {
-			return ok, g.Error(err, "Could not unmarshal export payload")
+			err = g.Error(err, "Could not unmarshal export payload")
+			return
 		}
 
 		path := cast.ToString(c.Vals["path"])
 		yamlPayload := cast.ToString(respM["output"])
 		err = ioutil.WriteFile(path, []byte(yamlPayload), 0755)
 		if err != nil {
-			return ok, g.Error(err, "Could not write to: %s", path)
+			err = g.Error(err, "Could not write to: %s", path)
+			return
 		}
 
 		g.Info("Wrote to %s", path)
 	case "list":
-		data, err := listReplications()
+		var data iop.Dataset
+		data, err = listReplications()
 		if err != nil {
-			return ok, g.Error(err, "Could not list replications")
+			err = g.Error(err, "Could not list replications")
+			return
 		}
 
 		data.Print(100)
