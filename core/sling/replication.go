@@ -4,8 +4,12 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/flarco/dbio/connection"
+	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -25,6 +29,74 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
 	return g.JSONValuer(rd, "{}")
+}
+
+// ProcessWildcards process the streams using wildcards
+// such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
+func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	wildcardNames := []string{}
+	for name := range rd.Streams {
+		if strings.Contains(name, "*") {
+			wildcardNames = append(wildcardNames, name)
+		}
+	}
+	if len(wildcardNames) == 0 {
+		return
+	}
+
+	// get local connections
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+	c, ok := connsMap[strings.ToLower(rd.Source)]
+	if !ok || !c.Connection.Type.IsDb() {
+		// wildcards only apply to database source connections
+		return
+	}
+
+	g.Debug("processing wildcards for %s", rd.Source)
+
+	conn, err := c.Connection.AsDatabase()
+	if err != nil {
+		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
+	} else if err = conn.Connect(); err != nil {
+		return g.Error(err, "could not connect to database for wildcard processing: %s", rd.Source)
+	}
+
+	for _, name := range wildcardNames {
+		schemaT, err := database.ParseTableName(name, c.Connection.Type)
+		if err != nil {
+			return g.Error(err, "could not parse stream name: %s", name)
+		} else if schemaT.Schema == "" {
+			continue
+		}
+
+		if schemaT.Name == "*" {
+			// get all tables in schema
+			g.Debug("getting tables for %s", name)
+			data, err := conn.GetTables(schemaT.Schema)
+			if err != nil {
+				return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
+			}
+
+			for _, row := range data.Rows {
+				table := database.Table{
+					Schema: schemaT.Schema,
+					Name:   cast.ToString(row[0]),
+				}
+
+				// add to stream map
+				newCfg := ReplicationStreamConfig{}
+				g.Unmarshal(g.Marshal(rd.Streams[name]), &newCfg) // copy config over
+				rd.Streams[table.FullName()] = &newCfg
+			}
+
+			// delete * from stream map
+			delete(rd.Streams, name)
+		}
+	}
+
+	return
 }
 
 type ReplicationStreamConfig struct {

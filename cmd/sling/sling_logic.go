@@ -211,6 +211,11 @@ func runReplication(cfgPath string) (err error) {
 		return g.Error(err, "Error parsing replication config")
 	}
 
+	err = replication.ProcessWildcards()
+	if err != nil {
+		return g.Error(err, "could not process streams using wildcard")
+	}
+
 	g.Info("Sling Replication [%d streams] | %s -> %s", len(replication.Streams), replication.Source, replication.Target)
 
 	eG := g.ErrorGroup{}

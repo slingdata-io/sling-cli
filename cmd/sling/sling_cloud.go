@@ -217,6 +217,11 @@ func processCloud(c *g.CliSC) (bool, error) {
 					return ok, g.Error(err, "Could not load replication config: %s", path)
 				}
 
+				err = replication.ProcessWildcards()
+				if err != nil {
+					return ok, g.Error(err, "could not process streams using wildcard")
+				}
+
 				payload, _ := yaml.Marshal(replication)
 				_, respB, err := net.ClientDo("POST", URL, bytes.NewBuffer(payload), headers)
 				if err != nil {
