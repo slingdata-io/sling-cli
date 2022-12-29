@@ -168,9 +168,13 @@ func runTask(cfg *sling.Config) (err error) {
 			telemetryMap["task_rows_count"] = task.GetCount()
 			telemetryMap["task_rows_in_bytes"] = inBytes
 			telemetryMap["task_rows_out_bytes"] = outBytes
-			if cfg.Options.StdOut {
-				telemetryMap["task_target_type"] = "stdout"
-			}
+		}
+
+		if cfg.Options.StdIn {
+			telemetryMap["task_source_type"] = "stdin"
+		}
+		if cfg.Options.StdOut {
+			telemetryMap["task_target_type"] = "stdout"
 		}
 
 		if err != nil {
@@ -498,6 +502,10 @@ func checkLatestVersion() (string, error) {
 }
 
 func isUpdateAvailable() bool {
+	if core2.Version == "dev" {
+		return false
+	}
+
 	newVersion, err := checkLatestVersion()
 	if err != nil {
 		return false

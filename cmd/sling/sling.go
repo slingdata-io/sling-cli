@@ -494,7 +494,7 @@ func getErrString(err error) (errString string) {
 	if err != nil {
 		errString = err.Error()
 		E, ok := err.(*g.ErrType)
-		if ok {
+		if ok && E.Debug() != "" {
 			errString = E.Debug()
 		}
 	}
