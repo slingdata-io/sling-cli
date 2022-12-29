@@ -143,6 +143,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	// run task
+	telemetryMap["run_mode"] = "task"
 	err = runTask(cfg)
 	if err != nil {
 		return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
@@ -270,6 +271,7 @@ func runReplication(cfgPath string) (err error) {
 			g.Info("[%d / %d] running stream `%s`", i+1, len(replication.Streams), name)
 		}
 
+		telemetryMap["run_mode"] = "replication"
 		err = runTask(&cfg)
 		if err != nil {
 			err = g.Error(err, "error for stream `%s`", name)
