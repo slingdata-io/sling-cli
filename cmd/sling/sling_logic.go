@@ -253,7 +253,13 @@ func runReplication(cfgPath string) (err error) {
 		}
 
 		println()
-		g.Info("[%d / %d] running stream `%s`", i+1, len(replication.Streams), name)
+
+		if stream.Disabled {
+			g.Info("[%d / %d] skipping stream `%s` since it is disabled", i+1, len(replication.Streams), name)
+			continue
+		} else {
+			g.Info("[%d / %d] running stream `%s`", i+1, len(replication.Streams), name)
+		}
 
 		err = runTask(&cfg)
 		if err != nil {
