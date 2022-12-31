@@ -432,51 +432,49 @@ func cliInit() int {
 	flaggy.Parse()
 
 	ok, err := g.CliProcess()
-	if ok {
-		if err != nil {
+	if err != nil {
 
-			if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
-				telemetryMap["error"] = getErrString(err)
+		if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
+			telemetryMap["error"] = getErrString(err)
 
-				eventName := g.CliObj.Name
-				if g.CliObj.UsedSC() != "" {
-					eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
-				}
-				Track(eventName)
+			eventName := g.CliObj.Name
+			if g.CliObj.UsedSC() != "" {
+				eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
+			}
+			Track(eventName)
+		}
+
+		// sentry details
+		if telemetry {
+
+			evt := sentry.NewEvent()
+			evt.Environment = sentryOptions.Environment
+			evt.Release = sentryOptions.Release
+			evt.Level = sentry.LevelError
+			evt.Exception = []sentry.Exception{
+				{
+					Type: err.Error(),
+					// Value:      err.Error(),
+					Stacktrace: sentry.ExtractStacktrace(err),
+				},
 			}
 
-			// sentry details
-			if telemetry {
-
-				evt := sentry.NewEvent()
-				evt.Environment = sentryOptions.Environment
-				evt.Release = sentryOptions.Release
-				evt.Level = sentry.LevelError
-				evt.Exception = []sentry.Exception{
-					{
-						Type: err.Error(),
-						// Value:      err.Error(),
-						Stacktrace: sentry.ExtractStacktrace(err),
-					},
-				}
-
-				E, ok := err.(*g.ErrType)
-				if ok {
-					evt.Exception[0].Type = E.Err
-					evt.Exception[0].Value = E.Full()
-				}
-
-				sentry.ConfigureScope(func(scope *sentry.Scope) {
-					scope.SetUser(sentry.User{ID: machineID})
-					scope.SetTransaction(E.Err)
-				})
-
-				sentry.CaptureEvent(evt)
-				// eid := sentry.CaptureException(err)
+			E, ok := err.(*g.ErrType)
+			if ok {
+				evt.Exception[0].Type = E.Err
+				evt.Exception[0].Value = E.Full()
 			}
+
+			sentry.ConfigureScope(func(scope *sentry.Scope) {
+				scope.SetUser(sentry.User{ID: machineID})
+				scope.SetTransaction(E.Err)
+			})
+
+			sentry.CaptureEvent(evt)
+			// eid := sentry.CaptureException(err)
 		}
 		g.LogFatal(err)
-	} else {
+	} else if !ok {
 		flaggy.ShowHelp("")
 	}
 

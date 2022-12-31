@@ -13,11 +13,9 @@ import (
 )
 
 var (
-	HomeDir         = os.Getenv("SLING_HOME_DIR")
-	DbNetDir        = os.Getenv("DBNET_HOME_DIR")
-	HomeDirEnvFile  = ""
-	DbNetDirEnvFile = ""
-	Env             = &env.EnvFile{}
+	HomeDir        = os.Getenv("SLING_HOME_DIR")
+	HomeDirEnvFile = ""
+	Env            = &env.EnvFile{}
 )
 
 //go:embed *
@@ -94,12 +92,9 @@ func InitLogger() {
 	}
 }
 
-func WriteSlingEnvFile(ef env.EnvFile) (err error) {
-	return env.WriteEnvFile(HomeDirEnvFile, ef)
-}
-
 func LoadSlingEnvFile() (ef env.EnvFile) {
 	ef = env.LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
+	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"
 	return
 }

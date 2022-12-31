@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"runtime"
 	"sort"
@@ -12,7 +11,6 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
-	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g/net"
 	core2 "github.com/slingdata-io/sling-cli/core"
@@ -20,7 +18,6 @@ import (
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
-	"github.com/jedib0t/go-pretty/table"
 	"github.com/kardianos/osext"
 	"github.com/spf13/cast"
 )
@@ -284,8 +281,12 @@ func runReplication(cfgPath string) (err error) {
 	return eG.Err()
 }
 
-func processConns(c *g.CliSC) (bool, error) {
-	ok := true
+func processConns(c *g.CliSC) (ok bool, err error) {
+	ok = true
+
+	ef := env.LoadSlingEnvFile()
+	ec := connection.EnvConns{EnvFile: &ef}
+
 	switch c.UsedSC() {
 	case "unset":
 		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
@@ -294,185 +295,62 @@ func processConns(c *g.CliSC) (bool, error) {
 			return ok, nil
 		}
 
-		ef := env.LoadSlingEnvFile()
-		_, ok := ef.Connections[name]
-		if !ok {
-			return true, g.Error("did not find connection `%s`", name)
-		}
-
-		delete(ef.Connections, name)
-		err := env.WriteSlingEnvFile(ef)
+		err := ec.Unset(name)
 		if err != nil {
-			return ok, g.Error(err, "could not write env file")
+			return ok, g.Error(err, "could not unset %s", name)
 		}
-		g.Info("connection `%s` has been removed from %s", name, env.HomeDirEnvFile)
+		g.Info("connection `%s` has been removed from %s", name, ec.EnvFile.Path)
 	case "set":
 		if len(c.Vals) == 0 {
 			flaggy.ShowHelp("")
 			return ok, nil
 		}
 
-		url := ""
 		kvArr := []string{cast.ToString(c.Vals["value properties..."])}
 		kvMap := map[string]interface{}{}
 		for k, v := range g.KVArrToMap(append(kvArr, flaggy.TrailingArguments...)...) {
 			k = strings.ToLower(k)
-			if k == "url" {
-				url = v
-			}
 			kvMap[k] = v
 		}
 		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
 
-		// parse url
-		if url != "" {
-			conn, err := connection.NewConnectionFromURL(name, url)
-			if err != nil {
-				return ok, g.Error(err, "could not parse url")
-			}
-			if _, ok := kvMap["type"]; !ok {
-				kvMap["type"] = conn.Type.String()
-			}
-		}
-
-		t, found := kvMap["type"]
-		if _, typeOK := dbio.ValidateType(cast.ToString(t)); found && !typeOK {
-			return ok, g.Error("invalid type (%s). See https://docs.slingdata.io/sling-cli/environment#set-connections for help.", cast.ToString(t))
-		} else if !found {
-			return ok, g.Error("need to specify valid `type` key or provide `url`. See https://docs.slingdata.io/sling-cli/environment#set-connections for help.")
-		}
-
-		ef := env.LoadSlingEnvFile()
-		ef.Connections[name] = kvMap
-		err := env.WriteSlingEnvFile(ef)
+		err := ec.Set(name, kvMap)
 		if err != nil {
-			return ok, g.Error(err, "could not write env file")
+			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
-		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, env.HomeDirEnvFile, name)
+		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
 
-	case "list", "show":
-		conns := connection.GetLocalConns()
-		T := table.NewWriter()
-		T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
-		for _, conn := range conns {
-			T.AppendRow(table.Row{conn.Name, conn.Description, conn.Source})
-		}
-		println(T.Render())
-	case "discover", "test":
+	case "list":
+		println(ec.List())
+
+	case "test":
 		name := cast.ToString(c.Vals["name"])
-		filter := cast.ToString(c.Vals["filter"])
-		if len(c.Vals) == 0 || name == "" {
-			flaggy.ShowHelp("")
-			return ok, nil
-		}
-
-		discover := c.UsedSC() == "discover"
-		schema := cast.ToString(c.Vals["schema"])
-		folder := cast.ToString(c.Vals["folder"])
-
-		conns := map[string]connection.ConnEntry{}
-		for _, conn := range connection.GetLocalConns() {
-			conns[strings.ToLower(conn.Name)] = conn
-		}
-
-		conn, ok1 := conns[strings.ToLower(name)]
-		if !ok1 || name == "" {
-			g.Warn("Invalid Connection name: %s", name)
-			return ok, nil
-		}
-
-		telemetryMap["conn_type"] = conn.Connection.Type.String()
-
-		streamNames := []string{}
-		switch {
-
-		case conn.Connection.Type.IsDb():
-			dbConn, err := conn.Connection.AsDatabase()
-			if err != nil {
-				return ok, g.Error(err, "could not initiate %s", name)
-			}
-			err = dbConn.Connect()
-			if err != nil {
-				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
-			}
-			if discover {
-				schemata, err := dbConn.GetSchemata(schema, "")
-				if err != nil {
-					return ok, g.Error(err, "could not discover %s", name)
-				}
-				for _, table := range schemata.Tables() {
-					streamNames = append(streamNames, table.FullName())
-				}
-			}
-
-		case conn.Connection.Type.IsFile():
-			fileClient, err := conn.Connection.AsFile()
-			if err != nil {
-				return ok, g.Error(err, "could not initiate %s", name)
-			}
-			err = fileClient.Init(context.Background())
-			if err != nil {
-				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
-			}
-
-			url := conn.Connection.URL()
-			if folder != "" {
-				if !strings.HasPrefix(folder, string(fileClient.FsType())+"://") {
-					return ok, g.Error("need to use proper URL for folder path. Example -> %s/my-folder", url)
-				}
-				url = folder
-			}
-
-			streamNames, err = fileClient.List(url)
-			if err != nil {
-				return ok, g.Error(err, "could not connect to %s (see docs @ https://docs.slingdata.io/sling-cli)", name)
-			}
-
-		case conn.Connection.Type.IsAirbyte():
-			client, err := conn.Connection.AsAirbyte()
-			if err != nil {
-				return ok, g.Error(err, "could not initiate %s", name)
-			}
-			err = client.Init(!discover)
-			if err != nil {
-				return ok, g.Error(err, "could not connect to %s", name)
-			}
-			if discover {
-				streams, err := client.Discover()
-				if err != nil {
-					return ok, g.Error(err, "could not discover %s", name)
-				}
-				streamNames = streams.Names()
-			}
-
-		default:
-			return ok, g.Error("Unhandled connection type: %s (see docs @ https://docs.slingdata.io/sling-cli)", conn.Connection.Type)
-		}
-
-		if discover {
-			// sort alphabetically
-			sort.Slice(streamNames, func(i, j int) bool {
-				return streamNames[i] < streamNames[j]
-			})
-
-			g.Info("Found %d streams:", len(streamNames))
-			filters := strings.Split(filter, ",")
-			for _, sn := range streamNames {
-				if filter == "" || g.IsMatched(filters, sn) {
-					println(g.F(" - %s", sn))
-				}
-			}
-			if len(streamNames) > 0 && conn.Connection.Type.IsFile() &&
-				folder == "" {
-				println()
-				g.Warn("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders")
-			}
-		} else {
+		ok, err = ec.Test(name)
+		if err != nil {
+			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+		} else if ok {
 			g.Info("success!") // successfully connected
+		}
+	case "discover":
+		name := cast.ToString(c.Vals["name"])
+		opt := connection.DiscoverOptions{
+			Schema: cast.ToString(c.Vals["schema"]),
+			Folder: cast.ToString(c.Vals["folder"]),
+			Filter: cast.ToString(c.Vals["filter"]),
+		}
+
+		streamNames, err := ec.Discover(name, opt)
+		if err != nil {
+			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+		}
+
+		g.Info("Found %d streams:", len(streamNames))
+		for _, sn := range streamNames {
+			println(g.F(" - %s", sn))
 		}
 
 	case "":
-		flaggy.ShowHelp("")
+		return false, nil
 	}
 	return ok, nil
 }
