@@ -331,6 +331,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		} else if ok {
 			g.Info("success!") // successfully connected
 		}
+
+		if conn, ok := ec.GetConnEntry(name); ok {
+			telemetryMap["conn_type"] = conn.Connection.Type.String()
+		}
 	case "discover":
 		name := cast.ToString(c.Vals["name"])
 		opt := connection.DiscoverOptions{
@@ -347,6 +351,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		g.Info("Found %d streams:", len(streamNames))
 		for _, sn := range streamNames {
 			println(g.F(" - %s", sn))
+		}
+
+		if conn, ok := ec.GetConnEntry(name); ok {
+			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
 
 	case "":
