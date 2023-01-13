@@ -460,6 +460,11 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 }
 
 func (cfg *Config) FormatTargetObjectName() (err error) {
+	replacePattern := regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean name
+	cleanUp := func(o string) string {
+		return string(replacePattern.ReplaceAll([]byte(o), []byte("_")))
+	}
+
 	m := g.M(
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
 	)
@@ -496,17 +501,16 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
-		re, _ := regexp.Compile(`\W+`)
 		url, err := net.NewURL(cfg.Source.Stream)
 		if err != nil {
 			return g.Error(err, "could not parse source stream url")
 		}
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		filePath := string(re.ReplaceAll([]byte(strings.TrimPrefix(url.Path(), "/")), []byte("_")))
+		filePath := cleanUp(strings.TrimPrefix(url.Path(), "/"))
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
-		fileName := string(re.ReplaceAll([]byte(pathArr[len(pathArr)-1]), []byte("_")))
-		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+		fileName := cleanUp(pathArr[len(pathArr)-1])
+		fileFolder := cleanUp(lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], ""))
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
@@ -525,9 +529,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
 			fileFolder, fileName := filepath.Split(path)
-			m["stream_file_folder"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(fileFolder, "/")), []byte("_")))
-			m["stream_file_name"] = string(re.ReplaceAll([]byte(strings.TrimPrefix(fileName, "/")), []byte("_")))
-			filePath = string(re.ReplaceAll([]byte(strings.TrimPrefix(path, "/")), []byte("_")))
+			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
+			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
+			filePath = cleanUp(strings.TrimPrefix(path, "/"))
 		}
 		if filePath != "" {
 			m["stream_file_path"] = filePath
