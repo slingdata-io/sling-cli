@@ -22,6 +22,7 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
+          cache: true
           
       # - uses: actions/cache@v3
       #   with:
@@ -68,6 +69,7 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
+          cache: true
           
       # - uses: actions/cache@v3
       #   with:
@@ -123,9 +125,10 @@ jobs:
           echo "VERSION -> $VERSION"
 
       - name: Set up GoLang
-        uses: actions/setup-go@v1
+        uses: actions/setup-go@v3
         with:
           go-version: "1.19"
+          cache: true
           
       # - uses: actions/cache@v2
       #   with:
@@ -200,7 +203,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: "1.19"
+          cache: true
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -227,7 +231,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: "1.19"
+          cache: true
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
@@ -255,7 +260,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.19
+          go-version: "1.19"
+          cache: true
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
