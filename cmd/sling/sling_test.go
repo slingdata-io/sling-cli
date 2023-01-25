@@ -538,3 +538,12 @@ options:
 		}
 	}
 }
+
+func TestOneReplication(t *testing.T) {
+	os.Setenv("SLING_CLI", "TRUE")
+	replicationCfgPath := "/Users/fritz/Downloads/mlops.slack.replication.yml"
+	err := runReplication(replicationCfgPath)
+	if g.AssertNoError(t, err) {
+		return
+	}
+}

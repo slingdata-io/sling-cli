@@ -201,7 +201,14 @@ func (t *TaskExecution) Execute() error {
 	} else {
 		t.SetProgress("execution failed")
 		t.Status = ExecStatusError
-		t.Err = g.Error(t.Err, "execution failed")
+		if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
+			eG := g.ErrorGroup{}
+			eG.Add(err)
+			eG.Add(t.Err)
+			t.Err = g.Error(eG.Err(), "execution failed")
+		} else {
+			t.Err = g.Error(t.Err, "execution failed")
+		}
 	}
 
 	now2 := time.Now()
@@ -222,7 +229,7 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 	return metadata
 }
 
-func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
+func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 	options["METADATA"] = g.Marshal(t.getMetadata())
@@ -230,7 +237,7 @@ func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
 		g.MapToKVArr(t.Config.SrcConn.DataS()),
 		g.MapToKVArr(g.ToMapString(options))...,
 	)
-	conn, err = database.NewConnContext(t.Context.Ctx, t.Config.SrcConn.URL(), srcProps...)
+	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -238,20 +245,23 @@ func (t *TaskExecution) getSrcDBConn() (conn database.Connection, err error) {
 	return
 }
 
-func (t *TaskExecution) getTgtDBConn() (conn database.Connection, err error) {
+func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connection, err error) {
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
 	tgtProps := append(
 		g.MapToKVArr(t.Config.TgtConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
 	)
-	conn, err = database.NewConnContext(t.Context.Ctx, t.Config.TgtConn.URL(), tgtProps...)
+
+	// Connection context should be different than task context
+	// fixme
+	conn, err = database.NewConnContext(ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
 	}
 
 	// set bulk
-	if t.Config.Target.Options.UseBulk == g.Bool(false) {
+	if val := t.Config.Target.Options.UseBulk; val != nil && !*val {
 		conn.SetProp("use_bulk", "false")
 		conn.SetProp("allow_bulk_import", "false")
 	}
@@ -262,7 +272,7 @@ func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
-	tgtConn, err := t.getTgtDBConn()
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -296,7 +306,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
 
-	srcConn, err := t.getSrcDBConn()
+	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -414,7 +424,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	}
 	srcConn.SetProp("METADATA", g.Marshal(t.getMetadata()))
 
-	tgtConn, err := t.getTgtDBConn()
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -484,7 +494,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
 
-	tgtConn, err := t.getTgtDBConn()
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -608,13 +618,13 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
-	srcConn, err := t.getSrcDBConn()
+	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
-	tgtConn, err := t.getTgtDBConn()
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
@@ -992,6 +1002,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error(err, "could not drop table "+cfg.Target.Options.TableTmp)
 		return
 	}
+
+	df.Pause() // to create DDL and set column change functions
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer
 	sampleData.Inferred = df.Inferred
@@ -1013,9 +1025,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
+
 	t.AddCleanupTask(func() {
-		err := tgtConn.DropTable(cfg.Target.Options.TableTmp)
-		g.LogError(err)
+		conn, err := t.getTgtDBConn(context.Background())
+		if err == nil {
+			err = conn.DropTable(cfg.Target.Options.TableTmp)
+			g.LogError(err)
+		}
 	})
 
 	err = tgtConn.BeginContext(df.Context.Ctx)
@@ -1026,9 +1042,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	adjustColumnType := cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType
 
-	// set OnSchemaChange
+	// set OnColumnChanged
 	if adjustColumnType {
-		df.OnSchemaChange = func(i int, newType iop.ColumnType) error {
+		df.OnColumnChanged = func(col iop.Column) error {
 			df.Context.Lock()
 			defer df.Context.Unlock()
 
@@ -1041,7 +1057,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return g.Error(err, "could not get table columns for schema change")
 			}
 
-			df.Columns[i].Type = newType
+			df.Columns[col.Position-1].Type = col.Type
 			ok, err := tgtConn.OptimizeTable(&table, df.Columns)
 			if err != nil {
 				return g.Error(err, "could not change table schema")
@@ -1056,6 +1072,28 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
+	// set OnColumnAdded
+	if cfg.Target.Options.AddNewColumns {
+		df.OnColumnAdded = func(col iop.Column) error {
+			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
+			if err != nil {
+				return g.Error(err, "could not get temp table name for column add")
+			}
+
+			ok, err := database.AddMissingColumns(tgtConn, table, iop.Columns{col})
+			if err != nil {
+				return g.Error(err, "could not add missing columns")
+			} else if ok {
+				_, err = pullTargetTableColumns(t.Config, tgtConn, true)
+				if err != nil {
+					return g.Error(err, "could not get table columns")
+				}
+			}
+			return nil
+		}
+	}
+
+	df.Unpause() // to create DDL and set column change functions
 	t.SetProgress("streaming data")
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
@@ -1076,7 +1114,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
 		return
 	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
-		err = g.Error("Loaded 0 records while sample data has records. Exiting.")
+		err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 		return
 	}
 	// aggregate stats from stream processors
