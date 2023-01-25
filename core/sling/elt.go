@@ -708,7 +708,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		err = g.Error(err, "Could not parse source stream text")
 		return t.df, err
 	} else if sTable.Schema == "" {
-		sTable.Schema = srcConn.Quote(cast.ToString(cfg.Source.Data["schema"]))
+		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
 	// check if referring to a SQL file
@@ -730,7 +730,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	if len(cfg.Source.Columns) > 0 {
 		fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
-			return srcConn.Quote(f)
+			return f
 		})
 		fieldsStr = strings.Join(fields, ", ")
 	}
@@ -757,7 +757,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", cfg.Source.UpdateKey,
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
@@ -1411,7 +1411,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		tgtConn.Quote(cfg.Source.UpdateKey),
+		cfg.Source.UpdateKey,
 		table.FDQN(),
 	)
 
