@@ -1411,7 +1411,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		cfg.Source.UpdateKey,
+		tgtConn.Quote(cfg.Source.UpdateKey),
 		table.FDQN(),
 	)
 
