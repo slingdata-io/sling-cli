@@ -539,9 +539,10 @@ options:
 	}
 }
 
-func testOneReplication(t *testing.T) {
+func TestOneReplication(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
-	replicationCfgPath := ""
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
+	replicationCfgPath := "/tmp/sling-replication.yaml"
 	err := runReplication(replicationCfgPath)
 	if g.AssertNoError(t, err) {
 		return
