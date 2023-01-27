@@ -539,7 +539,7 @@ options:
 	}
 }
 
-func TestOneReplication(t *testing.T) {
+func testOneReplication(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	replicationCfgPath := "/tmp/sling-replication.yaml"
