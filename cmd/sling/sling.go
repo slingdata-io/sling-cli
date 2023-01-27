@@ -340,7 +340,7 @@ func getRsClient() analytics.Client {
 }
 
 func Track(event string, props ...map[string]interface{}) {
-	if !telemetry {
+	if !telemetry || core.Version == "dev" {
 		return
 	}
 

@@ -538,3 +538,12 @@ options:
 		}
 	}
 }
+
+func testOneReplication(t *testing.T) {
+	os.Setenv("SLING_CLI", "TRUE")
+	replicationCfgPath := ""
+	err := runReplication(replicationCfgPath)
+	if g.AssertNoError(t, err) {
+		return
+	}
+}
