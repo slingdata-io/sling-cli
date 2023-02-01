@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
-          cache: true
+          cache: false
           
       # - uses: actions/cache@v3
       #   with:
@@ -69,7 +69,7 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
-          cache: true
+          cache: false
           
       # - uses: actions/cache@v3
       #   with:
@@ -204,7 +204,7 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
-          cache: true
+          cache: false
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3

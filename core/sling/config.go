@@ -596,10 +596,11 @@ type Config struct {
 	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
-	SrcConn        connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn        connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared       bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
-	IncrementalVal string                `json:"-" yaml:"-"`
+	SrcConn         connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
+	TgtConn         connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
+	Prepared        bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
+	IncrementalVal  string                `json:"-" yaml:"-"`
+	ReplicationMode bool                  `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface

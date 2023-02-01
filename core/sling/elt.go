@@ -32,6 +32,10 @@ var AllowedProps = map[string]string{
 	"range": "Optional for Excel source file. Default is largest table range",
 }
 
+// connPool a way to cache connections to that they don't have to reconnect
+// for each replication steps
+var connPool = map[string]database.Connection{}
+
 var start time.Time
 var MetadataLoadedAt = false
 var MetadataStreamURL = false
@@ -229,7 +233,19 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 	return metadata
 }
 
+func (t *TaskExecution) isUsingPool() bool {
+	if !cast.ToBool(os.Getenv("SLING_POOL")) {
+		return false
+	}
+	return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode
+}
+
 func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
+	// look for conn in cache
+	if conn, ok := connPool[t.Config.SrcConn.Hash()]; ok {
+		return conn, nil
+	}
+
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 	options["METADATA"] = g.Marshal(t.getMetadata())
@@ -242,10 +258,21 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
+
+	// cache connection is using replication from CLI
+	if t.isUsingPool() {
+		connPool[t.Config.SrcConn.Hash()] = conn
+	}
+
 	return
 }
 
 func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connection, err error) {
+	// look for conn in cache
+	if conn, ok := connPool[t.Config.TgtConn.Hash()]; ok {
+		return conn, nil
+	}
+
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
 	tgtProps := append(
@@ -258,6 +285,11 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
+	}
+
+	// cache connection is using replication from CLI
+	if t.isUsingPool() {
+		connPool[t.Config.TgtConn.Hash()] = conn
 	}
 
 	// set bulk
@@ -285,7 +317,9 @@ func (t *TaskExecution) runDbSQL() (err error) {
 		return
 	}
 
-	defer tgtConn.Close()
+	if !t.isUsingPool() {
+		defer tgtConn.Close()
+	}
 
 	t.SetProgress("executing sql on target database")
 	result, err := tgtConn.Exec(t.Config.Target.Object)
@@ -319,7 +353,9 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		return
 	}
 
-	defer srcConn.Close()
+	if !t.isUsingPool() {
+		defer srcConn.Close()
+	}
 
 	t.SetProgress("reading from source database")
 	defer t.Cleanup()
@@ -437,8 +473,10 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 		return
 	}
 
-	defer tgtConn.Close()
-	defer srcConn.Close()
+	if !t.isUsingPool() {
+		defer tgtConn.Close()
+		defer srcConn.Close()
+	}
 
 	// set schema if needed
 	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
@@ -507,7 +545,9 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		return
 	}
 
-	defer tgtConn.Close()
+	if !t.isUsingPool() {
+		defer tgtConn.Close()
+	}
 
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
@@ -644,8 +684,10 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		return
 	}
 
-	defer srcConn.Close()
-	defer tgtConn.Close()
+	if !t.isUsingPool() {
+		defer srcConn.Close()
+		defer tgtConn.Close()
+	}
 
 	defer func() {
 		if err != nil {
@@ -718,7 +760,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		err = g.Error(err, "Could not parse source stream text")
 		return t.df, err
 	} else if sTable.Schema == "" {
-		sTable.Schema = srcConn.Quote(cast.ToString(cfg.Source.Data["schema"]))
+		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
 	// check if referring to a SQL file
@@ -740,7 +782,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	if len(cfg.Source.Columns) > 0 {
 		fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
-			return srcConn.Quote(f)
+			return f
 		})
 		fieldsStr = strings.Join(fields, ", ")
 	}
@@ -767,7 +809,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", cfg.Source.UpdateKey,
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)

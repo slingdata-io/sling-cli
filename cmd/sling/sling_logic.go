@@ -248,7 +248,8 @@ func runReplication(cfgPath string) (err error) {
 				Conn:   replication.Target,
 				Object: stream.Object,
 			},
-			Mode: stream.Mode,
+			Mode:            stream.Mode,
+			ReplicationMode: true,
 		}
 
 		// so that the next stream does not retain previous pointer values
