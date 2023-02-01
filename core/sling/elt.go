@@ -1075,6 +1075,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnAdded
 	if cfg.Target.Options.AddNewColumns {
 		df.OnColumnAdded = func(col iop.Column) error {
+			df.Context.Lock()
+			defer df.Context.Unlock()
+
 			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
 			if err != nil {
 				return g.Error(err, "could not get temp table name for column add")
@@ -1117,6 +1120,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 		return
 	}
+
+	// FIXME: find root cause of why columns don't synch while streaming
+	df.SyncColumns()
+
 	// aggregate stats from stream processors
 	df.SyncStats()
 
@@ -1162,6 +1169,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample := iop.NewDataset(df.Columns)
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
+
 		created, err := createTableIfNotExists(
 			tgtConn,
 			sample,
