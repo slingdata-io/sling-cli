@@ -249,31 +249,36 @@ func runOneTask(t *testing.T, file g.FileItem) {
 	// validate file
 	if val, ok := task.Config.Env["validation_file"]; ok {
 		valFile := strings.TrimPrefix(val, "file://")
-		data, err := iop.ReadCsv(valFile)
+		dataFile, err := iop.ReadCsv(valFile)
 		if !g.AssertNoError(t, err) {
 			return
 		}
-		valCol := cast.ToInt(task.Config.Env["validation_col"])
+		orderByStr := ""
+		if len(task.Config.Source.PrimaryKey) > 0 {
+			orderByStr = strings.Join(task.Config.Source.PrimaryKey, ", ")
+		}
+		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
+		conn, _ := task.Config.TgtConn.AsDatabase()
+		dataDB, err := conn.Query(sql)
+		g.AssertNoError(t, err)
+		conn.Close()
+		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
 
-		valuesFile := data.ColValues(valCol)
-		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
-			orderByStr := ""
-			if len(task.Config.Source.PrimaryKey) > 0 {
-				orderByStr = strings.Join(task.Config.Source.PrimaryKey, ", ")
-			}
-			sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
-			data, err := conn.Query(sql)
-			g.AssertNoError(t, err)
-			conn.Close()
-
-			valuesDb := data.ColValues(valCol)
-			if assert.Equal(t, len(valuesFile), len(valuesDb)) {
-				for i := range valuesDb {
-					valDb := data.Sp.ParseString(cast.ToString(valuesDb[i]))
-					valFile := data.Sp.ParseString(cast.ToString(valuesFile[i]))
-					if !assert.EqualValues(t, valFile, valDb, g.F("row %d", i+1)) {
-						return
+			for _, valColS := range valCols {
+				valCol := cast.ToInt(valColS)
+				valuesFile := dataFile.ColValues(valCol)
+				valuesDb := dataDB.ColValues(valCol)
+				// g.P(dataDB.ColValues(0))
+				// g.P(dataDB.ColValues(1))
+				// g.P(valuesDb)
+				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+					for i := range valuesDb {
+						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
+						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
+						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s", i+1, valCol, dataDB.Columns[valCol].Name, file.Name)) {
+							return
+						}
 					}
 				}
 			}
@@ -539,9 +544,10 @@ options:
 	}
 }
 
-func TestOneReplication(t *testing.T) {
+func testOneReplication(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
-	replicationCfgPath := "/Users/fritz/Downloads/mlops.slack.replication.local.yml"
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
+	replicationCfgPath := "/tmp/sling-replication.yaml"
 	err := runReplication(replicationCfgPath)
 	if g.AssertNoError(t, err) {
 		return

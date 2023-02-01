@@ -1,0 +1,37 @@
+source: DO_SPACES
+target: SQLITE
+
+defaults:
+  object: 'main.{stream_file_name}_slack_data'
+  source_options:
+    flatten: true
+  mode: full-refresh
+
+streams:
+  s3://ocral/MLOps.community.test/mlops-questions-answered/:
+  s3://ocral/MLOps.community.test/mlops-special-project-berlin/:
+  s3://ocral/MLOps.community.test/channels.json:
+  s3://ocral/MLOps.community.test/integration_logs.json:
+  s3://ocral/MLOps.community.test/users.json:
+  s3://ocral/MLOps.community.test/be-shameless/:
+  s3://ocral/MLOps.community.test/colorado/:
+  s3://ocral/MLOps.community.test/content-archive/:
+  s3://ocral/MLOps.community.test/discussions/:
+  s3://ocral/MLOps.community.test/evangelism/:
+  s3://ocral/MLOps.community.test/events/:
+  s3://ocral/MLOps.community.test/fiddler/:
+  s3://ocral/MLOps.community.test/gcp/:
+  s3://ocral/MLOps.community.test/gen-ai/:
+  s3://ocral/MLOps.community.test/general/:
+  s3://ocral/MLOps.community.test/introduce-yourself/:
+  s3://ocral/MLOps.community.test/jobs/:
+  s3://ocral/MLOps.community.test/leadership/:
+  s3://ocral/MLOps.community.test/london/:
+  s3://ocral/MLOps.community.test/luxembourg/:
+  s3://ocral/MLOps.community.test/mlops-alerts/:
+  s3://ocral/MLOps.community.test/mlops-stacks/:
+  s3://ocral/MLOps.community.test/neptune-ai/:
+  s3://ocral/MLOps.community.test/nlp/:
+  s3://ocral/MLOps.community.test/random/:
+  s3://ocral/MLOps.community.test/washington-dc-the-capital/:
+  s3://ocral/MLOps.community.test/women-of-mlops/:

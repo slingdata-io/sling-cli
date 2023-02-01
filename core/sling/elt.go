@@ -1045,6 +1045,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnChanged
 	if adjustColumnType {
 		df.OnColumnChanged = func(col iop.Column) error {
+
+			// sleep to allow transaction to close
+			time.Sleep(100 * time.Millisecond)
+
 			df.Context.Lock()
 			defer df.Context.Unlock()
 
@@ -1075,6 +1079,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnAdded
 	if cfg.Target.Options.AddNewColumns {
 		df.OnColumnAdded = func(col iop.Column) error {
+
+			// sleep to allow transaction to close
+			time.Sleep(100 * time.Millisecond)
+
 			df.Context.Lock()
 			defer df.Context.Unlock()
 
@@ -1087,7 +1095,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			if err != nil {
 				return g.Error(err, "could not add missing columns")
 			} else if ok {
-				_, err = pullTargetTableColumns(t.Config, tgtConn, true)
+				_, err = pullTargetTempTableColumns(t.Config, tgtConn, true)
 				if err != nil {
 					return g.Error(err, "could not get table columns")
 				}
@@ -1375,6 +1383,17 @@ func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool
 		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Object)
 		if err != nil {
 			err = g.Error(err, "could not get column list for "+cfg.Target.Object)
+			return
+		}
+	}
+	return cfg.Target.columns, nil
+}
+
+func pullTargetTempTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
+	if len(cfg.Target.columns) == 0 || force {
+		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
+		if err != nil {
+			err = g.Error(err, "could not get column list for "+cfg.Target.Options.TableTmp)
 			return
 		}
 	}

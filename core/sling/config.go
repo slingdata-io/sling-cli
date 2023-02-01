@@ -512,18 +512,18 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		fileName := cleanUp(pathArr[len(pathArr)-1])
 		fileFolder := cleanUp(lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], ""))
 		switch cfg.SrcConn.Type {
-		case dbio.TypeFileS3:
+		case dbio.TypeFileS3, dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
-			m["stream_file_folder"] = fileFolder
-			m["stream_file_name"] = fileName
-		case dbio.TypeFileGoogle:
-			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
-			m["stream_file_folder"] = fileFolder
+			if fileFolder != "" {
+				m["stream_file_folder"] = fileFolder
+			}
 			m["stream_file_name"] = fileName
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
-			m["stream_file_folder"] = fileFolder
+			if fileFolder != "" {
+				m["stream_file_folder"] = fileFolder
+			}
 			m["stream_file_name"] = fileName
 			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
