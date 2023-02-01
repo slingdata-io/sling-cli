@@ -138,7 +138,7 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
 		if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
 			// if source stream is file, we have no schema reference
-			cfg.Target.Options.AdjustColumnType = g.Bool(true)
+			// cfg.Target.Options.AdjustColumnType = g.Bool(true) // TODO: fix change columns
 		}
 	}
 	if cfg.Target.Options.DatetimeFormat == "" {
@@ -512,22 +512,25 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		fileName := cleanUp(pathArr[len(pathArr)-1])
 		fileFolder := cleanUp(lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], ""))
 		switch cfg.SrcConn.Type {
-		case dbio.TypeFileS3:
+		case dbio.TypeFileS3, dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
-			m["stream_file_folder"] = fileFolder
-			m["stream_file_name"] = fileName
-		case dbio.TypeFileGoogle:
-			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
-			m["stream_file_folder"] = fileFolder
+			if fileFolder != "" {
+				m["stream_file_folder"] = fileFolder
+			}
 			m["stream_file_name"] = fileName
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
-			m["stream_file_folder"] = fileFolder
+			if fileFolder != "" {
+				m["stream_file_folder"] = fileFolder
+			}
 			m["stream_file_name"] = fileName
 			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
+			path = strings.TrimSuffix(path, "/")
+			path = strings.TrimSuffix(path, "\\")
+
 			fileFolder, fileName := filepath.Split(path)
 			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
 			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
@@ -567,7 +570,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 	if len(blankKeys) > 0 {
 		// return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
-		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
+		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
 	// replace placeholders
