@@ -13,11 +13,11 @@ jobs:
 
     steps:
       - name: List Connections
-        uses: slingdata-io/sling-action@v1
+        uses: slingdata-io/sling-action@v2
         with:
           command: conns list
         
       - name: Run Replication
-        uses: slingdata-io/sling-action@v1
+        uses: slingdata-io/sling-action@v2
         with:
           command: run -r cmd/sling/tests/replications/r.01.yaml
