@@ -138,7 +138,7 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
 		if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
 			// if source stream is file, we have no schema reference
-			// cfg.Target.Options.AdjustColumnType = g.Bool(true) // TODO: fix change columns
+			cfg.Target.Options.AdjustColumnType = g.Bool(true) // TODO: fix change columns
 		}
 	}
 	if cfg.Target.Options.DatetimeFormat == "" {
