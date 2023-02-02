@@ -15,11 +15,11 @@ jobs:
       - uses: actions/checkout@v2
         
       - name: List Connections
-        uses: slingdata-io/sling-action
+        uses: slingdata-io/sling-action@v1
         with:
           command: conns list
         
       - name: Run Replication
-        uses: slingdata-io/sling-action
+        uses: slingdata-io/sling-action@v1
         with:
           command: run -r cmd/sling/tests/replications/r.01.yaml
