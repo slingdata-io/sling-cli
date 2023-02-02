@@ -52,6 +52,7 @@ RUN cd /tmp && \
 
 ENV PATH="${PATH}:/usr/local/anaconda3/bin:/usr/local/go/bin:/root/go/bin:/code-server2:/opt/mssql-tools/bin:/usr/lib/oracle/19.3/client64/bin"
 
+ENV SLING_PACKAGE="DOCKER"
 ADD sling /usr/local/bin/sling
 RUN chmod 755 /usr/local/bin/sling
 

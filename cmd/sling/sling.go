@@ -331,6 +331,9 @@ func init() {
 
 	if telemetry {
 		machineID, _ = machineid.ProtectedID("sling")
+		if projectID != "" {
+			machineID = g.MD5(projectID) // hashed
+		}
 		sentry.Init(sentryOptions)
 	}
 }

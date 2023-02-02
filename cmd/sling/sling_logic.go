@@ -24,6 +24,7 @@ import (
 
 var (
 	masterServerURL = os.Getenv("SLING_MASTER_URL")
+	isDocker        = os.Getenv("SLING_PACKAGE") == "DOCKER"
 	apiKey          = os.Getenv("SLING_API_KEY")
 	projectID       = os.Getenv("SLING_PROJECT")
 	headers         = map[string]string{
@@ -166,6 +167,10 @@ func runTask(cfg *sling.Config) (err error) {
 			telemetryMap["task_rows_count"] = task.GetCount()
 			telemetryMap["task_rows_in_bytes"] = inBytes
 			telemetryMap["task_rows_out_bytes"] = outBytes
+		}
+
+		if projectID != "" {
+			telemetryMap["project_id"] = projectID
 		}
 
 		if cfg.Options.StdIn {
@@ -405,7 +410,11 @@ func isUpdateAvailable() bool {
 
 func printUpdateAvailable() {
 	if updateAvailable {
-		g.Warn("FYI, a new sling version is available (please run `sling update`)")
+		if isDocker {
+			g.Warn("FYI, a new sling version is available (please update your docker image with `docker pull slingdata/sling`)")
+		} else {
+			g.Warn("FYI, a new sling version is available (please run `sling update`)")
+		}
 	}
 }
 
