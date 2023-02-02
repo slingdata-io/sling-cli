@@ -1,0 +1,23 @@
+name: Test Sling Action
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-sling-action:
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 5
+    env:
+      TEST_PG_SLING_MASTER: ${{ secrets.TEST_PG_SLING_MASTER }}
+      DEMO_POSTGRES: ${{ secrets.DEMO_POSTGRES }}
+
+    steps:
+      - name: List Connections
+        uses: slingdata-io/sling-action@v1
+        with:
+          command: conns list
+        
+      - name: Run Replication
+        uses: slingdata-io/sling-action@v1
+        with:
+          command: run -r cmd/sling/tests/replications/r.01.yaml
