@@ -1,9 +1,9 @@
 source: TEST_PG_SLING_MASTER
-target: DEMO_POSTGRES
+target: SQLITE
 
 defaults:
   mode: full-refresh
-  object: '{target_schema}.{stream_schema}_{stream_table}'
+  object: 'main.{stream_schema}_{stream_table}'
 
 streams:
   public.food_food_category:
