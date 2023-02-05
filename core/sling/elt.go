@@ -1176,6 +1176,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	df.SyncColumns()
 
 	// aggregate stats from stream processors
+	df.Inferred = false
 	df.SyncStats()
 
 	// Checksum Comparison, data quality. Limit to 10k, cause sums get too high

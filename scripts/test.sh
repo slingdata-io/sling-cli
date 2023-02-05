@@ -3,7 +3,7 @@ set -e  # exit on error
 # sling
 
 # export _DEBUG=LOW
-# export _DEBUG_CALLER_LEVEL=7
+# export _DEBUG_CALLER_LEVEL=2
 export SLING_LOADED_AT_COLUMN=TRUE
 cd cmd/sling
 go test -run TestTasks
