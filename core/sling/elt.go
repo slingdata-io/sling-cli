@@ -1050,6 +1050,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	sampleData.Rows = df.Buffer
 	sampleData.Inferred = df.Inferred
 	if !sampleData.Inferred {
+		sampleData.SafeInference = true
 		sampleData.InferColumnTypes()
 		df.Columns = sampleData.Columns
 	}
