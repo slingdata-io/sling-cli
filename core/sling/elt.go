@@ -1031,7 +1031,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			err = g.Error(err, "could not get pre-sql body")
 			return cnt, err
 		}
-		_, err = tgtConn.Exec(sql)
+		_, err = tgtConn.ExecMulti(sql)
 		if err != nil {
 			err = g.Error(err, "could not execute pre-sql on target")
 			return cnt, err
@@ -1152,7 +1152,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
 		tgtConn.Rollback()
-		if os.Getenv("SLING_CLI") == "TRUE" && (cfg.SrcConn.Type.IsFile() || cfg.Options.StdIn) {
+		if os.Getenv("SLING_CLI") == "TRUE" && cfg.sourceIsFile() {
 			err = g.Error(err, "could not insert into %s. Maybe try a higher sample size (SAMPLE_SIZE=2000)?", targetTable)
 		} else {
 			err = g.Error(err, "could not insert into "+targetTable)
@@ -1176,7 +1176,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	df.SyncColumns()
 
 	// aggregate stats from stream processors
-	df.Inferred = false
+	df.Inferred = !cfg.sourceIsFile() // re-infer is source is file
 	df.SyncStats()
 
 	// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
@@ -1353,7 +1353,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return cnt, err
 			}
 		}
-		_, err = tgtConn.Exec(postSQL)
+		_, err = tgtConn.ExecMulti(postSQL)
 		if err != nil {
 			err = g.Error(err, "Error executing Target.PostSQL")
 			return cnt, err

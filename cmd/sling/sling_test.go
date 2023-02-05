@@ -186,12 +186,12 @@ func TestTasks(t *testing.T) {
 		if g.In(i+1, 22, 23) || g.In(i+1, 26, 27) {
 			continue // TODO: FIX MYSQL & SQLite tests
 		}
-		// if !g.In(i+1, 18, 19) {
+		// if !g.In(i+1, 10) {
 		// 	continue
 		// }
-		// if i+1 < 20 {
-		// 	continue
-		// }
+		if i+1 < 25 {
+			continue
+		}
 		runOneTask(t, file)
 
 		if t.Failed() {

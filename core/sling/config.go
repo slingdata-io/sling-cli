@@ -207,9 +207,13 @@ func setSchema(schema string, obj string) string {
 	return obj
 }
 
+func (cfg *Config) sourceIsFile() bool {
+	return cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+}
+
 func (cfg *Config) DetermineType() (Type JobType, err error) {
 
-	srcFileProvided := cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+	srcFileProvided := cfg.sourceIsFile()
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
