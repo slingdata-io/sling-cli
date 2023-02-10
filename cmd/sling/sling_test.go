@@ -544,7 +544,7 @@ options:
 	}
 }
 
-func testOneReplication(t *testing.T) {
+func TestOneReplication(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("CONCURENCY_LIMIT", "2")
