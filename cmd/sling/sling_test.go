@@ -189,9 +189,9 @@ func TestTasks(t *testing.T) {
 		// if !g.In(i+1, 10) {
 		// 	continue
 		// }
-		if i+1 < 25 {
-			continue
-		}
+		// if i+1 < 25 {
+		// 	continue
+		// }
 		runOneTask(t, file)
 
 		if t.Failed() {
