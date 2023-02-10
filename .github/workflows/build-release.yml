@@ -191,7 +191,7 @@ jobs:
 
   release-brew:
     runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 15
+    timeout-minutes: 20
     # runs-on: macos-latest
 
     steps:
@@ -220,7 +220,7 @@ jobs:
   release-scoop:
     # runs-on: [self-hosted, Windows]
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -249,7 +249,7 @@ jobs:
   release-linux:
     runs-on: ubuntu-latest
     # runs-on: [self-hosted, Linux]
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
