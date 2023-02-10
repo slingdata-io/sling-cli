@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"embed"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -304,13 +302,6 @@ var cliConns = &g.CliSC{
 }
 
 func init() {
-	// we need a webserver to get the pprof webserver
-	if cast.ToBool(os.Getenv("SLING_PPROF")) {
-		go func() {
-			g.Trace("Starting pprof webserver @ localhost:6060")
-			g.LogError(http.ListenAndServe("localhost:6060", nil))
-		}()
-	}
 
 	if val := os.Getenv("SLING_SEND_TELEMETRY"); val != "" {
 		telemetry = cast.ToBool(val)

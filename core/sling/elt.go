@@ -6,9 +6,12 @@ import (
 	"database/sql"
 	"io/ioutil"
 	"math"
+	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	_ "net/http/pprof"
 
 	"github.com/flarco/dbio"
 	"github.com/samber/lo"
@@ -48,6 +51,14 @@ func init() {
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		MetadataStreamURL = cast.ToBool(val)
+	}
+
+	// we need a webserver to get the pprof webserver
+	if cast.ToBool(os.Getenv("SLING_PPROF")) {
+		go func() {
+			g.Trace("Starting pprof webserver @ localhost:6060")
+			g.LogError(http.ListenAndServe("localhost:6060", nil))
+		}()
 	}
 }
 
