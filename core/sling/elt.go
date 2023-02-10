@@ -1056,7 +1056,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	df.Pause() // to create DDL and set column change functions
+	if paused := df.Pause(); !paused { // to create DDL and set column change functions
+		err = g.Error(err, "could not pause streams to infer columns")
+		return
+	}
+
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer
 	sampleData.Inferred = df.Inferred
