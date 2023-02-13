@@ -545,10 +545,12 @@ options:
 }
 
 func TestOneReplication(t *testing.T) {
+	sling.ShowProgress = false
+	os.Setenv("_DEBUG", "LOW")
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("CONCURENCY_LIMIT", "2")
-	replicationCfgPath := "/tmp/sling-replication.yaml"
+	replicationCfgPath := "/Users/fritz/Downloads/mlops.slack.replication.local.yml"
 	err := runReplication(replicationCfgPath)
 	if g.AssertNoError(t, err) {
 		return
