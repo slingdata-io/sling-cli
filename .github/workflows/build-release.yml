@@ -149,6 +149,15 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/ci/build.mac.sh $VERSION
 
+
+      - name: Configure Pagefile (Windows)
+        if: runner.os == 'windows'
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+            minimum-size: 16GB
+            maximum-size: 16GB
+            disk-root: "C:"
+
       - name: Build Sling (Windows)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
@@ -233,6 +242,13 @@ jobs:
         with:
           go-version: "1.19"
           cache: true
+
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+            minimum-size: 16GB
+            maximum-size: 16GB
+            disk-root: "C:"
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
