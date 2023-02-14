@@ -1,0 +1,42 @@
+name: Release Scoop
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  release-scoop:
+    runs-on: [self-hosted, Windows]
+    # runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.19"
+          cache: true
+
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+            minimum-size: 16GB
+            maximum-size: 16GB
+            disk-root: "C:"
+
+      - name: Run GoReleaser
+        # uses: flarco/goreleaser-action@master
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --rm-dist --skip-validate -f .goreleaser.windows.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
+
