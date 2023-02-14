@@ -52,7 +52,13 @@ jobs:
 
       - name: Build Sling (Windows)
         shell: msys2 {0}
-        run: .\scripts\ci\build.win.ps1 "dev"
+        run: |
+          go mod edit -dropreplace='github.com/flarco/g' go.mod
+          go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+          go mod tidy
+
+          # export CGO_CPPFLAGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_PARQUET_EXTENSION=1'
+          go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
       # - name: Run GoReleaser
       #   # uses: flarco/goreleaser-action@master
