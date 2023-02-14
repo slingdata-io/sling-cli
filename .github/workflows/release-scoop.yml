@@ -31,6 +31,7 @@ jobs:
         run: |
           "C:\__\programs\TDM-GCC-64\bin" >> $env:GITHUB_PATH
           cat $env:GITHUB_PATH
+          get-command cc1plus
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
