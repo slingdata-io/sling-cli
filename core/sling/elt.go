@@ -587,6 +587,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 				t.SetProgress("no files found")
 			}
 			return nil
+		} else if len(t.df.Streams) == 1 && t.df.Streams[0].IsClosed() {
+			return nil
 		}
 		err = g.Error(err, "could not read from file")
 		return
@@ -635,6 +637,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 			} else {
 				t.SetProgress("no files found")
 			}
+			return nil
+		} else if len(t.df.Streams) == 1 && t.df.Streams[0].IsClosed() {
 			return nil
 		}
 		err = g.Error(err, "Could not ReadFromFile")
@@ -935,7 +939,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		}
 	}
 
-	if len(df.Columns) == 0 {
+	if len(df.Columns) == 0 && !df.Streams[0].IsClosed() {
 		err = g.Error("Could not read columns")
 		return df, err
 	}
@@ -1105,10 +1109,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.OnColumnChanged = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
-			time.Sleep(100 * time.Millisecond)
+			// time.Sleep(100 * time.Millisecond)
 
-			df.Context.Lock()
-			defer df.Context.Unlock()
+			// df.Context.Lock()
+			// defer df.Context.Unlock()
 
 			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
 			if err != nil {
@@ -1139,10 +1143,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
-			time.Sleep(100 * time.Millisecond)
+			// time.Sleep(100 * time.Millisecond)
 
-			df.Context.Lock()
-			defer df.Context.Unlock()
+			// df.Context.Lock()
+			// defer df.Context.Unlock()
 
 			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
 			if err != nil {
