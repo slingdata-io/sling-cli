@@ -29,8 +29,8 @@ jobs:
             disk-root: "C:"
       - name: Set Path
         run: |
-          $env:GITHUB_PATH = "C:\__\programs\TDM-GCC-64\bin;" + $env:GITHUB_PATH
-          echo $env:GITHUB_PATH
+          "C:\__\programs\TDM-GCC-64\bin" >> $env:GITHUB_PATH
+          cat $env:GITHUB_PATH
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
