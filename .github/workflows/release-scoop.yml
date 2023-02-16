@@ -6,8 +6,8 @@ on:
 jobs:
 
   release-scoop:
-    # runs-on: [self-hosted, Windows]
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows]
+    # runs-on: windows-latest
 
     steps:
       - name: Checkout
