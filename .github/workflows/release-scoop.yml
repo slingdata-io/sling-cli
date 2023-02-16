@@ -67,7 +67,7 @@ jobs:
           go mod edit -dropreplace='github.com/flarco/dbio' go.mod
           go mod tidy
 
-          # export CGO_CPPFLAGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_PARQUET_EXTENSION=1'
+          export CGO_CPPFLAGS='-DDUCKDB_BUILD_LIBRARY'
           go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
       
       # - name: Set Path
