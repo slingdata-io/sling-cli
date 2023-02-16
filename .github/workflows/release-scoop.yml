@@ -6,8 +6,8 @@ on:
 jobs:
 
   release-scoop:
-    runs-on: [self-hosted, Windows]
-    # runs-on: windows-latest
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -30,42 +30,45 @@ jobs:
 
       ######################################
 
-      - uses: actions/setup-python@v2
-        with:
-          python-version: '3.7'
-
-      - name: Build
-        shell: bash
-        run: |
-          python scripts/ci/windows_ci.py
-          
-          go mod edit -dropreplace='github.com/flarco/g' go.mod
-          go mod edit -dropreplace='github.com/flarco/dbio' go.mod
-          go mod tidy
-
-          # export CGO_CPPFLAGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_PARQUET_EXTENSION=1'
-          go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
-
-      # - uses: msys2/setup-msys2@v2
+      # - uses: actions/setup-python@v2
       #   with:
-      #     msystem: MINGW64
-      #     update: true
-      #     install: git mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git
+      #     python-version: '3.7'
 
-      # - name: Put MSYS2_MinGW64 on PATH
-      #   # there is not yet an environment variable for this path from msys2/setup-msys2
-      #   shell: msys2 {0}
-      #   run: export PATH=D:/a/_temp/msys/msys64/mingw64/bin:$PATH
-
-      # - name: Build Sling (Windows)
-      #   shell: msys2 {0}
+      # - name: Build
+      #   shell: bash
       #   run: |
+      #     python scripts/ci/windows_ci.py
+
       #     go mod edit -dropreplace='github.com/flarco/g' go.mod
       #     go mod edit -dropreplace='github.com/flarco/dbio' go.mod
       #     go mod tidy
 
       #     # export CGO_CPPFLAGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_PARQUET_EXTENSION=1'
       #     go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: git mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-go
+
+
+      - name: Put MSYS2_MinGW64 on PATH
+        # there is not yet an environment variable for this path from msys2/setup-msys2
+        shell: msys2 {0}
+        run: |
+            export PATH=/mingw64/bin:$PATH
+            export PATH=$PATH:/mingw64/lib/go/bin
+
+      - name: Build Sling (Windows)
+        shell: msys2 {0}
+        run: |
+          go mod edit -dropreplace='github.com/flarco/g' go.mod
+          go mod edit -dropreplace='github.com/flarco/dbio' go.mod
+          go mod tidy
+
+          # export CGO_CPPFLAGS='-DCMAKE_BUILD_TYPE=Release -DBUILD_PARQUET_EXTENSION=1'
+          go build -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
       
       # - name: Set Path
       #   run: |
