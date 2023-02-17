@@ -30,7 +30,5 @@ task.28		file://tests/files/test1.csv	{}	SQLITE	main.test1	full-refresh			{"adju
 task.29		file://tests/files/test1.upsert.csv	{}	SQLITE	main.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
 task.30		file://tests/files/test1.csv	{}	CLICKHOUSE	default.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	
 task.31		file://tests/files/test1.upsert.csv	{}	CLICKHOUSE	default.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
-task.32	GITHUB_DBIO	commits	{}	POSTGRES	public.{source_name}_{stream_name}	full-refresh					{"validation_object": "public.github_dbio_commits"}
-task.33	GITHUB_DBIO	commits	{}	POSTGRES	public.{source_name}_{stream_name}	incremental	sha	created_at	{}	{}	{"validation_object": "public.github_dbio_commits"}
-task.34	NOTION	users	{}	POSTGRES	public.{source_name}_{stream_name}	full-refresh					{"validation_object": "public.notion_users"}
-task.35	NOTION	users	{}			full-refresh			{}	{"stdout": true}	
+task.32		file://tests/files/test1.csv	{}	DUCKDB	main.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	
+task.33		file://tests/files/test1.upsert.csv	{}	DUCKDB	main.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}

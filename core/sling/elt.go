@@ -1212,7 +1212,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// need to contain the final write in a transcation after data is loaded
 	txOptions := sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false}
 	switch tgtConn.GetType() {
-	case dbio.TypeDbSnowflake:
+	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		txOptions = sql.TxOptions{}
 	case dbio.TypeDbClickhouse:
 		txOptions = sql.TxOptions{Isolation: sql.LevelDefault}
