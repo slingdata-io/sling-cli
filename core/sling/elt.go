@@ -1095,7 +1095,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	err = tgtConn.BeginContext(df.Context.Ctx)
 	if err != nil {
-		err = g.Error(err, "could not open transcation to write to temp table")
+		err = g.Error(err, "could not open transaction to write to temp table")
 		return
 	}
 

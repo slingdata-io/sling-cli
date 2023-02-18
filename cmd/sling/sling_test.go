@@ -183,9 +183,6 @@ func TestTasks(t *testing.T) {
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		if g.In(i+1, 22, 23) || g.In(i+1, 26, 27) {
-			continue // TODO: FIX MYSQL & SQLite tests
-		}
 		// if !g.In(i+1, 10) {
 		// 	continue
 		// }
