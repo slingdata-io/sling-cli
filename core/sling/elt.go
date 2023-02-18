@@ -851,18 +851,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			"table", sTable.FDQN(),
 			"limit", cast.ToString(cfg.Source.Limit),
 		)
-	} else if sTable.SQL == "" {
-		sTable.SQL = g.F(`select %s from %s`, fieldsStr, sTable.FDQN())
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
-		sTable.SQL = sTable.Name
 		srcConn.SetProp("start_time", t.Config.IncrementalVal)
 	}
 
-	df, err = srcConn.BulkExportFlow(sTable.SQL)
+	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
-		err = g.Error(err, "Could not BulkStream: "+sTable.SQL)
+		err = g.Error(err, "Could not BulkExportFlow: "+sTable.Select())
 		return t.df, err
 	}
 
