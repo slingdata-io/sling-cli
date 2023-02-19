@@ -13,6 +13,7 @@ import (
 	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/filesys"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -125,11 +126,17 @@ func (cfg *Config) SetDefault() {
 	if cfg.Target.Options.Compression == nil {
 		cfg.Target.Options.Compression = targetOptions.Compression
 	}
+	if string(cfg.Target.Options.Format) == "" {
+		cfg.Target.Options.Format = targetOptions.Format
+	}
 	if cfg.Target.Options.Concurrency == 0 {
 		cfg.Target.Options.Concurrency = targetOptions.Concurrency
 	}
 	if cfg.Target.Options.FileMaxRows == 0 {
 		cfg.Target.Options.FileMaxRows = targetOptions.FileMaxRows
+	}
+	if cfg.Target.Options.FileMaxBytes == 0 {
+		cfg.Target.Options.FileMaxBytes = targetOptions.FileMaxBytes
 	}
 	if cfg.Target.Options.UseBulk == nil {
 		cfg.Target.Options.UseBulk = targetOptions.UseBulk
@@ -656,6 +663,7 @@ type SourceOptions struct {
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
+	Format         *filesys.FileType   `json:"format,omitempty" yaml:"format,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
 	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
@@ -671,6 +679,8 @@ type TargetOptions struct {
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
+	FileMaxBytes     int64               `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
+	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	AddNewColumns    bool                `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
@@ -726,6 +736,12 @@ var TargetFileOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
+	FileMaxBytes: lo.Ternary(
+		os.Getenv("FILE_MAX_BYTES") != "",
+		cast.ToInt64(os.Getenv("FILE_MAX_BYTES")),
+		0,
+	),
+	Format:         filesys.FileTypeCsv,
 	UseBulk:        g.Bool(true),
 	DatetimeFormat: "auto",
 	Delimiter:      ",",

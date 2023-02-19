@@ -64,13 +64,13 @@ var cliRun = &g.CliSC{
 			Name:        "src-conn",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The source database / API connection (name, conn string or URL).",
+			Description: "The source database / storage connection (name, conn string or URL).",
 		},
 		{
 			Name:        "src-stream",
 			ShortName:   "",
 			Type:        "string",
-			Description: "The source table (schema.table), local / cloud file path or API supported object name.\n                       Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
+			Description: "The source table (schema.table), local / cloud file path.\n                       Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
 		},
 		{
 			Name:        "src-options",
