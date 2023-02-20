@@ -946,7 +946,6 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 
 // WriteToFile writes to a target file
 func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error) {
-	var stream *iop.Datastream
 	var bw int64
 	defer t.PBar.Finish()
 
@@ -975,20 +974,26 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
-		stream = iop.MergeDataflow(df)
-		stream.SetConfig(map[string]string{"delimiter": ","})
-		reader := stream.NewCsvReader(0, 0)
-		bufStdout := bufio.NewWriter(os.Stdout)
-		defer bufStdout.Flush()
-		bw, err = filesys.Write(reader, bufStdout)
-		if err != nil {
-			err = g.Error(err, "Could not write to Stdout")
-			return
-		} else if err = stream.Context.Err(); err != nil {
-			err = g.Error(err, "encountered stream error")
-			return
+		for stream := range df.StreamCh {
+			stream.SetConfig(map[string]string{"delimiter": ","})
+			for batchR := range stream.NewCsvReaderChnl(0, 0) {
+				if len(batchR.Columns) != len(df.Columns) {
+					err = g.Error(err, "number columns have changed, not compatible with stdout.")
+					return
+				}
+				bufStdout := bufio.NewWriter(os.Stdout)
+				bw, err = filesys.Write(batchR.Reader, bufStdout)
+				bufStdout.Flush()
+				if err != nil {
+					err = g.Error(err, "Could not write to Stdout")
+					return
+				} else if err = stream.Context.Err(); err != nil {
+					err = g.Error(err, "encountered stream error")
+					return
+				}
+				cnt = cnt + uint64(batchR.Counter)
+			}
 		}
-		cnt = stream.Count
 	} else {
 		err = g.Error("target for output is not specified")
 		return
