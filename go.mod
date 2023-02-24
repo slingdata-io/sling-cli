@@ -6,7 +6,7 @@ require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.3.219
+	github.com/flarco/dbio v2.0.1
 	github.com/flarco/g v0.1.54
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/integrii/flaggy v1.5.2
@@ -49,7 +49,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/andybalholm/cascadia v1.1.0 // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
-	github.com/apache/thrift v0.13.1-0.20201008052519-daf620915714 // indirect
+	github.com/apache/thrift v0.16.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef // indirect
 	github.com/aws/aws-sdk-go v1.44.80 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.16.16 // indirect
@@ -85,6 +85,7 @@ require (
 	github.com/flarco/bigquery v0.0.9 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.5+incompatible // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
+	github.com/fraugster/parquet-go v0.12.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.1 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
@@ -99,7 +100,7 @@ require (
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/golang/snappy v0.0.3 // indirect
+	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v2.0.8+incompatible // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/uuid v1.3.0 // indirect
@@ -170,8 +171,6 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.1 // indirect
 	github.com/viant/xunsafe v0.8.0 // indirect
-	github.com/xitongsys/parquet-go v1.5.4 // indirect
-	github.com/xitongsys/parquet-go-source v0.0.0-20201014235637-c24a23d9ef1e // indirect
 	github.com/xo/dburl v0.3.0 // indirect
 	github.com/xtgo/uuid v0.0.0-20140804021211-a0b114877d4c // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect

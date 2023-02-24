@@ -20,4 +20,5 @@ cat cmd/sling/tests/files/test1.1.csv.gz | ./sling-linux run --tgt-conn POSTGRES
 ./sling-linux run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
 ./sling-linux run -r cmd/sling/tests/replications/r.05.yaml
 ./sling-linux run -r cmd/sling/tests/replications/r.06.yaml
+./sling-linux run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
 echo '' | ./sling-linux run --stdout
