@@ -418,7 +418,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = cfg.SrcConn.Data
 	}
 
-	if schemeType(cfg.Source.Stream).IsFile() {
+	if schemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
 	} else if cast.ToString(cfg.Source.Data["url"]) == "" {

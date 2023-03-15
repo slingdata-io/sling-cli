@@ -264,6 +264,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		g.MapToKVArr(t.Config.SrcConn.DataS()),
 		g.MapToKVArr(g.ToMapString(options))...,
 	)
+
 	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
@@ -779,7 +780,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// check if referring to a SQL file
-	if g.PathExists(cfg.Source.Stream) {
+	if schemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
 		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
@@ -791,6 +792,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				g.LogError(err)
 			}
 		} else {
+			cfg.Source.Stream = sqlFromFile
 			sTable.SQL = sqlFromFile
 		}
 	}

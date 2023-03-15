@@ -6,8 +6,8 @@ require (
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.0
-	github.com/flarco/dbio v0.3.225
-	github.com/flarco/g v0.1.54
+	github.com/flarco/dbio v0.3.226
+	github.com/flarco/g v0.1.55
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/integrii/flaggy v1.5.2
 	github.com/json-iterator/go v1.1.12
