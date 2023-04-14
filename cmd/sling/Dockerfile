@@ -1,6 +1,6 @@
-FROM ubuntu:bionic
+FROM ubuntu:focal
 
-RUN apt update && apt install -y unzip alien libaio1 mysql-client-core-5.7 sshpass openssh-server postgresql-client wget curl && \
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip alien libaio1 sshpass openssh-server postgresql-client wget curl && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
 
@@ -25,7 +25,7 @@ export PATH="$PATH:$ORACLE_HOME/bin" \
 ## from https://docs.microsoft.com/en-us/sql/linux/sql-server-linux-setup-tools?view=sql-server-ver15#ubuntu
 RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
 
-RUN curl https://packages.microsoft.com/config/ubuntu/16.04/prod.list | tee /etc/apt/sources.list.d/msprod.list
+RUN curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | tee /etc/apt/sources.list.d/msprod.list
 
 RUN export ACCEPT_EULA=y && apt-get update  && apt-get install -y mssql-tools unixodbc-dev && \
   apt-get clean && \
@@ -34,23 +34,7 @@ RUN export ACCEPT_EULA=y && apt-get update  && apt-get install -y mssql-tools un
 RUN echo ' \
 export PATH="$PATH:/opt/mssql-tools/bin"' >> /root/.bashrc
 
-# Azure CLI
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash 
-
-# SnowSQL
-RUN cd /tmp && \
-  curl -O https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.2/linux_x86_64/snowsql-1.2.5-linux_x86_64.bash && \
-  mkdir -p /usr/local/bin && \
-  SNOWSQL_DEST=/usr/local/bin SNOWSQL_LOGIN_SHELL=/root/.bashrc bash snowsql-1.2.5-linux_x86_64.bash && \
-  rm -f /tmp/snowsql-1.2.5-linux_x86_64.bash
-
-# gcloud util
-RUN cd /tmp && \
-  wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-286.0.0-linux-x86_64.tar.gz && \
-  tar -xf google-cloud-sdk-286.0.0-linux-x86_64.tar.gz && \
-  ./google-cloud-sdk/install.sh --usage-reporting false --path-update true --quiet
-
-ENV PATH="${PATH}:/usr/local/anaconda3/bin:/usr/local/go/bin:/root/go/bin:/code-server2:/opt/mssql-tools/bin:/usr/lib/oracle/19.3/client64/bin"
+ENV PATH="${PATH}:/usr/local/go/bin:/root/go/bin:/opt/mssql-tools/bin:/usr/lib/oracle/19.3/client64/bin"
 
 ENV SLING_PACKAGE="DOCKER"
 ADD sling /usr/local/bin/sling
