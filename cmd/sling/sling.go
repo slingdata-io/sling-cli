@@ -119,6 +119,12 @@ var cliRun = &g.CliSC{
 			Description: "The update key to use for incremental.\n",
 		},
 		{
+			Name:        "select",
+			ShortName:   "",
+			Type:        "string",
+			Description: "Select specific streams to run from a replication. (comma separated)",
+		},
+		{
 			Name:        "debug",
 			ShortName:   "d",
 			Type:        "bool",
@@ -313,7 +319,7 @@ func init() {
 
 	// cliInteractive.Make().Add()
 	// cliAuth.Make().Add()
-	cliCloud.Make().Add()
+	// cliCloud.Make().Add()
 	cliConns.Make().Add()
 	// cliProject.Make().Add()
 	cliRun.Make().Add()

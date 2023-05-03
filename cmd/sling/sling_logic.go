@@ -47,6 +47,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	replicationCfgPath := ""
 	cfgStr := ""
 	showExamples := false
+	selectStreams := []string{}
 	// saveAsJob := false
 
 	// determine if stdin data is piped
@@ -106,6 +107,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
+		case "select":
+			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
 		case "examples":
@@ -125,7 +128,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	defer printUpdateAvailable()
 
 	if replicationCfgPath != "" {
-		err = runReplication(replicationCfgPath)
+		err = runReplication(replicationCfgPath, selectStreams...)
 		if err != nil {
 			return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
 		}
@@ -212,7 +215,7 @@ func runTask(cfg *sling.Config) (err error) {
 	return nil
 }
 
-func runReplication(cfgPath string) (err error) {
+func runReplication(cfgPath string, selectStreams ...string) (err error) {
 	replication, err := sling.LoadReplicationConfig(cfgPath)
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
@@ -223,12 +226,21 @@ func runReplication(cfgPath string) (err error) {
 		return g.Error(err, "could not process streams using wildcard")
 	}
 
+	// clean up selectStreams
+	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
+		return strings.TrimSpace(v) != ""
+	})
+
 	g.Info("Sling Replication [%d streams] | %s -> %s", len(replication.Streams), replication.Source, replication.Target)
 
 	eG := g.ErrorGroup{}
 	for i, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
 		if interrupted {
 			break
+		}
+
+		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
+			continue
 		}
 
 		stream := replication.Streams[name]

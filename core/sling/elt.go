@@ -840,11 +840,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"incremental_where_cond", incrementalWhereCond,
 			)
 		} else {
-			if !strings.Contains(sTable.SQL, "{incremental_where_cond}") {
-				err = g.Error("For incremental loading with custom SQL, need to include where clause placeholder {incremental_where_cond}. e.g: select * from my_table where col2='A' AND {incremental_where_cond}")
-				return t.df, err
-			}
-			sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", incrementalWhereCond)
+			sTable.SQL = g.R(
+				sTable.SQL,
+				"incremental_where_cond", incrementalWhereCond,
+				"update_key", cfg.Source.UpdateKey,
+				"incremental_value", cfg.IncrementalVal,
+			)
 		}
 	} else if cfg.Source.Limit > 0 && sTable.SQL == "" {
 		sTable.SQL = g.R(
@@ -938,9 +939,11 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		}
 	}
 
-	if len(df.Columns) == 0 && !df.Streams[0].IsClosed() {
-		err = g.Error("Could not read columns")
-		return df, err
+	if len(df.Streams) == 0 {
+		streamName := lo.Ternary(cfg.SrcConn.URL() == "", "stdin", cfg.SrcConn.URL())
+		return df, g.Error("Could not read stream (%s)", streamName)
+	} else if len(df.Columns) == 0 && !df.Streams[0].IsClosed() {
+		return df, g.Error("Could not read columns")
 	}
 
 	return
@@ -1143,7 +1146,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set OnColumnAdded
-	if cfg.Target.Options.AddNewColumns {
+	if *cfg.Target.Options.AddNewColumns {
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -1264,7 +1267,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 
 		if !created && cfg.Mode != FullRefreshMode {
-			if cfg.Target.Options.AddNewColumns {
+			if *cfg.Target.Options.AddNewColumns {
 				ok, err := database.AddMissingColumns(tgtConn, table, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
@@ -1416,14 +1419,47 @@ func (t *TaskExecution) usingCheckpoint() bool {
 	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
 }
 
+func createSchemaIfNotExists(conn database.Connection, schemaName string) (created bool, err error) {
+	// check schema existence
+	schemasData, err := conn.GetSchemas()
+	if err != nil {
+		return false, g.Error(err, "Error getting schemas")
+	}
+
+	schemas := schemasData.ColValuesStr(0)
+	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
+	schemaName = strings.ToLower(schemaName)
+
+	if !lo.Contains(schemas, schemaName) {
+		_, err = conn.Exec(g.F("create schema %s", conn.Quote(schemaName)))
+		if err != nil {
+			return false, g.Error(err, "Error creating schema %s", conn.Quote(schemaName))
+		}
+		created = true
+	}
+
+	return created, nil
+}
+
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {
 
+	table, err := database.ParseTableName(tableName, conn.GetType())
+	if err != nil {
+		return false, g.Error(err, "could not parse table name: "+tableName)
+	}
+
 	// check table existence
-	exists, err := conn.TableExists(tableName)
+	exists, err := database.TableExists(conn, tableName)
 	if err != nil {
 		return false, g.Error(err, "Error checking table "+tableName)
 	} else if exists {
 		return false, nil
+	}
+
+	// create schema if not exist
+	_, err = createSchemaIfNotExists(conn, table.Schema)
+	if err != nil {
+		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
 	if tableDDL == "" {

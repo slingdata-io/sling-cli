@@ -151,6 +151,9 @@ func (cfg *Config) SetDefault() {
 			cfg.Target.Options.AdjustColumnType = g.Bool(true) // TODO: fix change columns
 		}
 	}
+	if cfg.Target.Options.AddNewColumns == nil {
+		cfg.Target.Options.AddNewColumns = targetOptions.AddNewColumns
+	}
 	if cfg.Target.Options.DatetimeFormat == "" {
 		cfg.Target.Options.DatetimeFormat = targetOptions.DatetimeFormat
 	}
@@ -687,7 +690,7 @@ type TargetOptions struct {
 	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
-	AddNewColumns    bool                `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
+	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -747,6 +750,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	),
 	Format:         filesys.FileTypeCsv,
 	UseBulk:        g.Bool(true),
+	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
@@ -759,7 +763,7 @@ var TargetDBOptionsDefault = TargetOptions{
 		0,
 	),
 	UseBulk:        g.Bool(true),
-	AddNewColumns:  true,
+	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
 }
@@ -771,6 +775,7 @@ var TargetAPIOptionsDefault = TargetOptions{
 		0,
 	),
 	UseBulk:        g.Bool(true),
+	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
 }
