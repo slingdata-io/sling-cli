@@ -85,5 +85,10 @@ jobs:
       #       ${{ runner.os }}-go-
 
       - name: Run Go Tests
+        env:
+          ENVKEY: ${{ secrets.ENVKEY }}
         run: |
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $PWD:/work --workdir /work flarco/devbox:base bash -c "bash scripts/prep.gomod.sh && source /__/devbox/.env.sh && _DEBUG='' bash scripts/test.sh"
+          /__/bin/envkey-source -f --dot-env > .env
+          sed -i "s/_DEBUG='TRUE'/_DEBUG=''/g" .env
+          
+          docker run --rm --env-file .env -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $PWD:/work --workdir /work flarco/devbox:base bash -c "bash scripts/prep.gomod.sh && bash scripts/test.sh"
