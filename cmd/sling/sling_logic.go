@@ -231,17 +231,21 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		return strings.TrimSpace(v) != ""
 	})
 
-	g.Info("Sling Replication [%d streams] | %s -> %s", len(replication.Streams), replication.Source, replication.Target)
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
+	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 
 	eG := g.ErrorGroup{}
-	for i, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
+	counter := 0
+	for _, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
 		if interrupted {
 			break
 		}
 
 		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
+			g.Debug("skipping stream `%s` since it is not selected", name)
 			continue
 		}
+		counter++
 
 		stream := replication.Streams[name]
 		if stream == nil {
@@ -280,10 +284,10 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		println()
 
 		if stream.Disabled {
-			g.Info("[%d / %d] skipping stream `%s` since it is disabled", i+1, len(replication.Streams), name)
+			g.Info("[%d / %d] skipping stream `%s` since it is disabled", counter, streamCnt, name)
 			continue
 		} else {
-			g.Info("[%d / %d] running stream `%s`", i+1, len(replication.Streams), name)
+			g.Info("[%d / %d] running stream `%s`", counter, streamCnt, name)
 		}
 
 		telemetryMap["run_mode"] = "replication"
