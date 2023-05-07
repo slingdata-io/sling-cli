@@ -95,6 +95,12 @@ var cliRun = &g.CliSC{
 			Description: "in-line options to further configure target (JSON or YAML).\n",
 		},
 		{
+			Name:        "select",
+			ShortName:   "",
+			Type:        "string",
+			Description: "Select specific streams to run from a replication. (comma separated)",
+		},
+		{
 			Name:        "stdout",
 			ShortName:   "",
 			Type:        "bool",
@@ -117,12 +123,6 @@ var cliRun = &g.CliSC{
 			ShortName:   "",
 			Type:        "string",
 			Description: "The update key to use for incremental.\n",
-		},
-		{
-			Name:        "select",
-			ShortName:   "",
-			Type:        "string",
-			Description: "Select specific streams to run from a replication. (comma separated)",
 		},
 		{
 			Name:        "debug",
