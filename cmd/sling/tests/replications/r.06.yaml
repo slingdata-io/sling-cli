@@ -10,7 +10,6 @@ defaults:
   mode: full-refresh
 
 streams:
-  gs://flarco_us_bucket/MLOps.community.test/mlops-questions-answered/:
-  gs://flarco_us_bucket/MLOps.community.test/mlops-special-project-berlin/:
-  gs://flarco_us_bucket/MLOps.community.test/channels.json:
-  gs://flarco_us_bucket/MLOps.community.test/integration_logs.json:
+  gs://flarco_us_bucket/mlo.community.test/be-shameless/:
+  gs://flarco_us_bucket/mlo.community.test/channels.json:
+  gs://flarco_us_bucket/mlo.community.test/integration_logs.json:
