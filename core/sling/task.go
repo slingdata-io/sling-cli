@@ -1,7 +1,9 @@
 package sling
 
 import (
+	"math"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -10,6 +12,30 @@ import (
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 )
+
+// TaskExecution is a sling ELT task run, synonymous to an execution
+type TaskExecution struct {
+	ExecID    int64      `json:"exec_id"`
+	Config    *Config    `json:"config"`
+	Type      JobType    `json:"type"`
+	Status    ExecStatus `json:"status"`
+	Err       error      `json:"error"`
+	StartTime *time.Time `json:"start_time"`
+	EndTime   *time.Time `json:"end_time"`
+	Bytes     uint64     `json:"bytes"`
+	Context   *g.Context `json:"-"`
+	Progress  string     `json:"progress"`
+
+	df            *iop.Dataflow `json:"-"`
+	prevRowCount  uint64
+	prevByteCount uint64
+	lastIncrement time.Time // the time of last row increment (to determine stalling)
+
+	ProgressHist   []string     `json:"progress_hist"`
+	PBar           *ProgressBar `json:"-"`
+	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning
+	cleanupFuncs   []func()
+}
 
 // ExecutionStatus is an execution status object
 type ExecutionStatus struct {
@@ -81,30 +107,6 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 	return
 }
 
-// TaskExecution is a sling ELT task run, synonymous to an execution
-type TaskExecution struct {
-	ExecID    int64      `json:"exec_id"`
-	Config    *Config    `json:"config"`
-	Type      JobType    `json:"type"`
-	Status    ExecStatus `json:"status"`
-	Err       error      `json:"error"`
-	StartTime *time.Time `json:"start_time"`
-	EndTime   *time.Time `json:"end_time"`
-	Bytes     uint64     `json:"bytes"`
-	Context   *g.Context `json:"-"`
-	Progress  string     `json:"progress"`
-
-	df            *iop.Dataflow `json:"-"`
-	prevRowCount  uint64
-	prevByteCount uint64
-	lastIncrement time.Time // the time of last row increment (to determine stalling)
-
-	ProgressHist   []string     `json:"progress_hist"`
-	PBar           *ProgressBar `json:"-"`
-	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning
-	cleanupFuncs   []func()
-}
-
 // SetProgress sets the progress
 func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	progressText = g.F(progressText, args...)
@@ -148,4 +150,124 @@ func (t *TaskExecution) GetTotalBytes() (rcBytes, txBytes uint64) {
 	case t.Type == FileToFile:
 	}
 	return
+}
+
+// IsStalled determines if the task has stalled (no row increment)
+func (t *TaskExecution) IsStalled(window float64) bool {
+	if strings.Contains(t.Progress, "pre-sql") || strings.Contains(t.Progress, "post-sql") {
+		return false
+	}
+	return time.Since(t.lastIncrement).Seconds() > window
+}
+
+// GetBytes return the current total of bytes processed
+func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
+	if t.df == nil {
+		return
+	}
+
+	inBytes, outBytes = t.df.Bytes()
+	if inBytes == 0 && outBytes == 0 {
+		// use tx/rc bytes
+		// stats := g.GetProcStats(os.Getpid())
+		// inBytes = stats.RcBytes - t.ProcStatsStart.RcBytes
+		// outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
+	}
+	return
+}
+
+func (t *TaskExecution) GetBytesString() (s string) {
+	inBytes, _ := t.GetBytes()
+	if inBytes == 0 {
+		return ""
+	}
+	return g.F("%s", humanize.Bytes(inBytes))
+	// if inBytes > 0 && inBytes == outBytes {
+	// 	return g.F("%s", humanize.Bytes(inBytes))
+	// }
+	// return g.F("%s -> %s", humanize.Bytes(inBytes), humanize.Bytes(outBytes))
+}
+
+// GetCount return the current count of rows processed
+func (t *TaskExecution) GetCount() (count uint64) {
+	if t.StartTime == nil {
+		return
+	}
+
+	return t.df.Count()
+}
+
+// GetRate return the speed of flow (rows / sec and bytes / sec)
+// secWindow is how many seconds back to measure (0 is since beginning)
+func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
+	var secElapsed float64
+	count := t.GetCount()
+	bytes, _ := t.GetBytes()
+	if t.StartTime == nil || t.StartTime.IsZero() {
+		return
+	} else if t.EndTime == nil || t.EndTime.IsZero() {
+		st := *t.StartTime
+		if secWindow <= 0 {
+			secElapsed = time.Since(st).Seconds()
+			rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
+			byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
+		} else {
+			rowRate = cast.ToInt64(math.Round(cast.ToFloat64((count - t.prevRowCount) / cast.ToUint64(secWindow))))
+			byteRate = cast.ToInt64(math.Round(cast.ToFloat64((bytes - t.prevByteCount) / cast.ToUint64(secWindow))))
+			if t.prevRowCount < count {
+				t.lastIncrement = time.Now()
+			}
+			t.prevRowCount = count
+			t.prevByteCount = bytes
+		}
+	} else {
+		st := *t.StartTime
+		et := *t.EndTime
+		secElapsed = cast.ToFloat64(et.UnixNano()-st.UnixNano()) / 1000000000.0
+		rowRate = cast.ToInt64(math.Round(cast.ToFloat64(count) / secElapsed))
+		byteRate = cast.ToInt64(math.Round(cast.ToFloat64(bytes) / secElapsed))
+	}
+	return
+}
+
+func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
+	// need to loaded_at column for file incremental
+	if MetadataLoadedAt || t.Type == FileToDB {
+		metadata.LoadedAt.Key = slingLoadedAtColumn
+		metadata.LoadedAt.Value = t.StartTime.Unix()
+	}
+	if MetadataStreamURL {
+		metadata.StreamURL.Key = slingStreamURLColumn
+	}
+	return metadata
+}
+
+func (t *TaskExecution) isUsingPool() bool {
+	if !cast.ToBool(os.Getenv("SLING_POOL")) {
+		return false
+	}
+	return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode
+}
+
+func (t *TaskExecution) AddCleanupTask(f func()) {
+	t.Context.Mux.Lock()
+	defer t.Context.Mux.Unlock()
+	t.cleanupFuncs = append(t.cleanupFuncs, f)
+}
+
+func (t *TaskExecution) Cleanup() {
+	t.Context.Mux.Lock()
+	defer t.Context.Mux.Unlock()
+
+	for i, f := range t.cleanupFuncs {
+		f()
+		t.cleanupFuncs[i] = func() {} // in case it gets called again
+	}
+	if t.df != nil {
+		t.df.CleanUp()
+	}
+}
+
+func (t *TaskExecution) usingCheckpoint() bool {
+	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
 }

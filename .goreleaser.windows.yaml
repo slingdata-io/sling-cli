@@ -22,7 +22,7 @@ builds:
     goos:
       - windows
     ldflags:
-      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}'"
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey={{.Env.RUDDERSTACK_KEY}}'"
 
 archives:
   - replacements:
@@ -46,15 +46,18 @@ blobs:
     folder: "slingdata.io/dist/{{.Version}}"
     region: nyc3
 
+release:
+  mode: replace
+  header: |
+    ## Sling {{ .Tag }} ({{ .Date }})
+
 scoop:
   name: sling
   bucket:
     owner: slingdata-io
     name: scoop-sling
     branch: main
-  
-  url_template: "https://ocral.nyc3.digitaloceanspaces.com/slingdata.io/dist/{{ .Version }}/{{ .ArtifactName }}"
 
-  homepage: https:/slingdata.io/en/cli
+  homepage: https:/slingdata.io/
 
   description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."

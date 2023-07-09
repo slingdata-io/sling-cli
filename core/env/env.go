@@ -16,6 +16,8 @@ var (
 	HomeDir        = os.Getenv("SLING_HOME_DIR")
 	HomeDirEnvFile = ""
 	Env            = &env.EnvFile{}
+	RudderstackKey = ""
+	RudderstackURL = "https://liveflarccszw.dataplane.rudderstack.com"
 )
 
 //go:embed *

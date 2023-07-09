@@ -27,7 +27,7 @@ builds:
     goos:
       - linux
     ldflags:
-      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}'"
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey={{.Env.RUDDERSTACK_KEY}}'"
 
 archives:
   - replacements:
@@ -43,6 +43,12 @@ snapshot:
 checksum:
   name_template: '{{ .Runtime.Goos }}.{{ .Runtime.Goarch }}.checksums.txt'
 
+dockers:
+  - dockerfile: 'cmd/sling/Dockerfile'
+    image_templates:
+    - "slingdata/sling:latest"
+    - "slingdata/sling:{{ .Tag }}"
+
 # mc policy set public DO/ocral/slingdata.io/cli
 blobs:
   - provider: s3
@@ -50,3 +56,8 @@ blobs:
     bucket: ocral
     folder: "slingdata.io/dist/{{.Version}}"
     region: nyc3
+
+release:
+  mode: replace
+  header: |
+    ## Sling {{ .Tag }} ({{ .Date }})

@@ -335,16 +335,12 @@ func init() {
 	}
 }
 
-func getRsClient() analytics.Client {
-	return analytics.New("1uXKxEPgIB9HXkTduvfwXmFak2l", "https://liveflarccszw.dataplane.rudderstack.com")
-}
-
 func Track(event string, props ...map[string]interface{}) {
 	if !telemetry || core.Version == "dev" {
 		return
 	}
 
-	rsClient := getRsClient()
+	rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
 	properties := analytics.NewProperties().
 		Set("application", "sling-cli").
 		Set("version", core.Version).
