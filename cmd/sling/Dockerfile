@@ -1,6 +1,6 @@
 FROM ubuntu:focal
 
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip alien libaio1 sshpass openssh-server postgresql-client wget curl && \
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip alien libaio1 postgresql-client wget curl && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
 
