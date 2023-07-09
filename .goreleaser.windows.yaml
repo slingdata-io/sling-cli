@@ -46,6 +46,11 @@ blobs:
     folder: "slingdata.io/dist/{{.Version}}"
     region: nyc3
 
+release:
+  mode: replace
+  header: |
+    ## Sling {{ .Tag }} ({{ .Date }})
+
 scoop:
   name: sling
   bucket:

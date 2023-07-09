@@ -56,3 +56,8 @@ blobs:
     bucket: ocral
     folder: "slingdata.io/dist/{{.Version}}"
     region: nyc3
+
+release:
+  mode: replace
+  header: |
+    ## Sling {{ .Tag }} ({{ .Date }})
