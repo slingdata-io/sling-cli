@@ -59,40 +59,6 @@ jobs:
           VERSION=$(/__/bin/sling --version | sed 's/Version: //')
           echo ::set-output name=version::$VERSION
 
-  push:
-    if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build]
-    runs-on: [self-hosted, Linux]
-    
-    steps:
-      - name: Set up GoLang
-        uses: actions/setup-go@v3
-        with:
-          go-version: "1.19"
-          cache: false
-          
-      # - uses: actions/cache@v3
-      #   with:
-      #     path: ~/go/pkg/mod
-      #     key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-go-
-      
-      - name: Push Docker
-        run: |
-          /bin/cp /__/bin/sling ./sling
-          VERSION=$(./sling --version | sed 's/Version: //')
-
-          source /__/devbox/.env.sh
-          export _DEBUG=''
-          echo "$DOCKER_PASSWORD!" | docker login -u slingdata --password-stdin
-
-          docker build -t slingdata/sling:$VERSION -f cmd/sling/Dockerfile .
-          docker tag slingdata/sling:$VERSION slingdata/sling:latest
-          docker push slingdata/sling:$VERSION
-          docker push slingdata/sling:latest
-          docker image rm -f slingdata/sling:$VERSION
-
   release:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
     needs: [build]
@@ -278,6 +244,12 @@ jobs:
         with:
           go-version: "1.19"
           cache: true
+
+      - name: Login docker
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
 
       - name: Run GoReleaser
         # uses: flarco/goreleaser-action@master
