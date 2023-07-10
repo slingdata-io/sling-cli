@@ -24,14 +24,6 @@ builds:
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey={{.Env.RUDDERSTACK_KEY}}'"
 
-archives:
-  - replacements:
-      darwin: Darwin
-      linux: Linux
-      windows: Windows
-      386: i386
-      amd64: x86_64
-
 snapshot:
   name_template: "{{ incpatch .Version }}"
 
