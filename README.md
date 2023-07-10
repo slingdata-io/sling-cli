@@ -1,10 +1,74 @@
 
 <p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
 
-<p align="center">Slings from a data source to a data target.</p>
+<p align="center" style="margin-bottom: 0px">Slings from a data source to a data target.</p>
+<p align="center">See <a href="https://docs.slingdata.io/">docs.slingdata.io</a> for more details.</p>
 
+
+Sling is a passion project turned into a free CLI & SaaS Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
+
+* Database to Database
+* File System to Database
+* Database to File System
+
+Ever wanted to quickly pipe in a CSV or JSON file into your database? Use sling to do so:
+
+```bash
+cat my_file.csv | sling run --tgt-conn MYDB --tgt-object my_schema.my_table
+```
+  
+Or want to copy data between two databases? Do it with sling:
+```bash
+sling run --src-conn PG_DB --src-stream public.transactions --tgt-conn MYSQL_DB --tgt-object mysql.bank_transactions --mode full-refresh
+```
+
+Sling can also easily manage our local connections with the `sling conns` command:
+
+```bash
+$ sling conns set MY_PG url='postgresql://postgres:myPassword@pghost:5432/postgres'
+
+$ sling conns list
++--------------------------+-----------------+-------------------+
+| CONN NAME                | CONN TYPE       | SOURCE            |
++--------------------------+-----------------+-------------------+
+| AWS_S3                   | FileSys - S3    | sling env yaml    |
+| FINANCE_BQ               | DB - BigQuery   | sling env yaml    |
+| DO_SPACES                | FileSys - S3    | sling env yaml    |
+| LOCALHOST_DEV            | DB - PostgreSQL | dbt profiles yaml |
+| MSSQL                    | DB - SQLServer  | sling env yaml    |
+| MYSQL                    | DB - MySQL      | sling env yaml    |
+| ORACLE_DB                | DB - Oracle     | env variable      |
+| MY_PG                    | DB - PostgreSQL | sling env yaml    |
++--------------------------+-----------------+-------------------+
+
+$ sling conns discover LOCALHOST_DEV
+9:05AM INF Found 344 streams:
+ - "public"."accounts"
+ - "public"."bills"
+ - "public"."connections"
+ ...
+```
 
 ## Installation
+
+#### Brew on Mac
+
+```shell
+brew install slingdata-io/sling/sling
+
+# You're good to go!
+sling -h
+```
+
+#### Scoop on Windows
+
+```powershell
+scoop bucket add sling https://github.com/slingdata-io/scoop-sling.git
+scoop install sling
+
+# You're good to go!
+sling -h
+```
 
 ### Compiling From Source
 
