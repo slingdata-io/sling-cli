@@ -51,7 +51,7 @@ release:
 
 brews:
   - name: sling
-    tap:
+    repository:
       owner: slingdata-io
       name: homebrew-sling
       branch: main

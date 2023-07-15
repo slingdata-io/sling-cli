@@ -175,7 +175,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --rm-dist --skip-validate -f .goreleaser.mac.yaml
+          args: release --clean --skip-validate -f .goreleaser.mac.yaml
 
   release-scoop:
     # runs-on: [self-hosted, Windows]
@@ -207,7 +207,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --rm-dist --skip-validate -f .goreleaser.windows.yaml
+          args: release --clean --skip-validate -f .goreleaser.windows.yaml
 
   release-linux:
     runs-on: ubuntu-latest
@@ -238,4 +238,4 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --rm-dist --skip-validate -f .goreleaser.linux.yaml
+          args: release --clean --skip-validate -f .goreleaser.linux.yaml

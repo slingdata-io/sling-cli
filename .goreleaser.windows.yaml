@@ -43,13 +43,13 @@ release:
   header: |
     ## Sling {{ .Tag }} ({{ .Date }})
 
-scoop:
-  name: sling
-  bucket:
-    owner: slingdata-io
-    name: scoop-sling
-    branch: main
+scoops:
+  - name: sling
+    repository:
+      owner: slingdata-io
+      name: scoop-sling
+      branch: main
 
-  homepage: https:/slingdata.io/
+    homepage: https:/slingdata.io/
 
-  description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."
+    description: "Data Integration made simple, from the command line. Extract and load data from popular data sources to destinations with high performance and ease."
