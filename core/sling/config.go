@@ -94,7 +94,13 @@ func (cfg *Config) SetDefault() {
 		cfg.Source.Options.NullIf = sourceOptions.NullIf
 	}
 	if cfg.Source.Options.JmesPath == nil {
-		cfg.Source.Options.NullIf = sourceOptions.JmesPath
+		cfg.Source.Options.JmesPath = sourceOptions.JmesPath
+	}
+	if cfg.Source.Options.Sheet == nil {
+		cfg.Source.Options.Sheet = sourceOptions.Sheet
+	}
+	if cfg.Source.Options.Range == nil {
+		cfg.Source.Options.Range = sourceOptions.Range
 	}
 	if cfg.Source.Options.DatetimeFormat == "" {
 		cfg.Source.Options.DatetimeFormat = sourceOptions.DatetimeFormat
@@ -676,6 +682,8 @@ type SourceOptions struct {
 	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
+	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
+	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 }
 
 // TargetOptions are target connection and stream processing options
