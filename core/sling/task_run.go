@@ -68,7 +68,7 @@ func (t *TaskExecution) Execute() error {
 	// get stats of process at beginning
 	t.ProcStatsStart = g.GetProcStats(os.Getpid())
 
-	// set deaults
+	// set defaults
 	t.Config.SetDefault()
 
 	// print for debugging
