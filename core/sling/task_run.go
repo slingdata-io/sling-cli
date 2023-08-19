@@ -183,7 +183,6 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	)
 
 	// Connection context should be different than task context
-	// fixme
 	conn, err = database.NewConnContext(ctx, t.Config.TgtConn.URL(), tgtProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
