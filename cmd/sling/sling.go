@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"embed"
+	"io"
+	"log"
 	"os"
 	"os/signal"
 	"runtime"
@@ -340,7 +342,14 @@ func Track(event string, props ...map[string]interface{}) {
 		return
 	}
 
-	rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
+	// rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
+	rudderConfig := analytics.Config{Logger: analytics.StdLogger(log.New(io.Discard, "sling ", log.LstdFlags))}
+	rsClient, err := analytics.NewWithConfig(env.RudderstackKey, env.RudderstackURL, rudderConfig)
+	if err != nil {
+		g.Trace("RudderClient Error: %s", err.Error())
+		return
+	}
+
 	properties := analytics.NewProperties().
 		Set("application", "sling-cli").
 		Set("version", core.Version).
