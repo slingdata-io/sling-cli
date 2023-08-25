@@ -19,6 +19,8 @@ type ReplicationConfig struct {
 	Target   string                              `json:"target,omitempty" yaml:"target,omitempty"`
 	Defaults ReplicationStreamConfig             `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
+
+	streamsOrdered []string
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -29,6 +31,11 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
 	return g.JSONValuer(rd, "{}")
+}
+
+// StreamsOrdered returns the stream names as ordered in the YAML file
+func (rd ReplicationConfig) StreamsOrdered() []string {
+	return rd.streamsOrdered
 }
 
 // ProcessWildcards process the streams using wildcards
@@ -193,6 +200,23 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	if err != nil {
 		err = g.Error(err, "could not parse 'streams'")
 		return
+	}
+
+	// get streams order
+	rootMap := yaml.MapSlice{}
+	err = yaml.Unmarshal([]byte(replicYAML), &rootMap)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
+	for _, rootNode := range rootMap {
+		if cast.ToString(rootNode.Key) == "streams" {
+			streamsNodes := rootNode.Value.(yaml.MapSlice)
+			for _, streamsNode := range streamsNodes {
+				config.streamsOrdered = append(config.streamsOrdered, cast.ToString(streamsNode.Key))
+			}
+		}
 	}
 
 	return

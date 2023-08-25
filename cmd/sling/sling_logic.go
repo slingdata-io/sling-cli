@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -236,7 +235,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 	eG := g.ErrorGroup{}
 	counter := 0
-	for _, name := range sort.StringSlice(lo.Keys(replication.Streams)) {
+	for _, name := range replication.StreamsOrdered() {
 		if interrupted {
 			break
 		}
