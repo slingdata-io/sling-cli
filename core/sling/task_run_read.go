@@ -150,9 +150,7 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config, client *airbyte.Airbyte) (df *i
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
 
 	var stream *iop.Datastream
-	options := g.M()
-	g.Unmarshal(g.Marshal(cfg.Source.Options), &options)
-	options["METADATA"] = g.Marshal(t.getMetadata())
+	options := t.sourceOptionsMap()
 
 	if cfg.SrcConn.URL() != "" {
 		// construct props by merging with options

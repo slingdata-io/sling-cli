@@ -114,6 +114,9 @@ func (cfg *Config) SetDefault() {
 	if cfg.Source.Options.MaxDecimals == nil {
 		cfg.Source.Options.MaxDecimals = sourceOptions.MaxDecimals
 	}
+	if cfg.Source.Options.Columns == nil {
+		cfg.Source.Options.Columns = sourceOptions.Columns
+	}
 
 	// set target options
 	var targetOptions TargetOptions
@@ -684,6 +687,7 @@ type SourceOptions struct {
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
+	Columns        map[string]string   `json:"columns,omitempty" yaml:"columns,omitempty"`
 }
 
 // TargetOptions are target connection and stream processing options

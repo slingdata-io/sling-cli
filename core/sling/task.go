@@ -271,3 +271,14 @@ func (t *TaskExecution) Cleanup() {
 func (t *TaskExecution) usingCheckpoint() bool {
 	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
 }
+
+func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
+	options = g.M()
+	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
+	options["METADATA"] = g.Marshal(t.getMetadata())
+	if t.Config.Source.Options.Columns != nil {
+		// set as string so that StreamProcessor parses it
+		options["columns"] = g.Marshal(t.Config.Source.Options.Columns)
+	}
+	return
+}

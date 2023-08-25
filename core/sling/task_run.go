@@ -148,9 +148,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		return conn, nil
 	}
 
-	options := g.M()
-	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
-	options["METADATA"] = g.Marshal(t.getMetadata())
+	options := t.sourceOptionsMap()
 	srcProps := append(
 		g.MapToKVArr(t.Config.SrcConn.DataS()),
 		g.MapToKVArr(g.ToMapString(options))...,
