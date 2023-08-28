@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      LOCAL: '{type: local, url: file:///tmp}'
       SQLITE: 'sqlite://./test.db'
 
     steps:
