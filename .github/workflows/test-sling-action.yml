@@ -1,15 +1,16 @@
 name: Test Sling Action
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:on:
+  repository_dispatch:
+    types: [test-sling-action]
 
 jobs:
   test-sling-action:
-    runs-on: [self-hosted, linux]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      TEST_PG_SLING_MASTER: ${{ secrets.TEST_PG_SLING_MASTER }}
-      SQLITE: ${{ secrets.SQLITE }}
+      SQLITE: 'sqlite://./test.db'
 
     steps:
       - uses: actions/checkout@v2
@@ -22,4 +23,4 @@ jobs:
       - name: Run Replication
         uses: slingdata-io/sling-action@v1
         with:
-          command: run -r cmd/sling/tests/replications/r.01.yaml
+          command: run -r cmd/sling/tests/replications/r.00.yaml

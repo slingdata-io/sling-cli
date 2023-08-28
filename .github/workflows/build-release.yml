@@ -239,3 +239,8 @@ jobs:
           distribution: goreleaser
           version: latest
           args: release --clean --skip-validate -f .goreleaser.linux.yaml
+
+      - name: Dispatch test-sling-action
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          event-type: test-sling-action

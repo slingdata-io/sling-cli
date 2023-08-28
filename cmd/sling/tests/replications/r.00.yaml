@@ -1,0 +1,9 @@
+source: LOCAL
+target: SQLITE
+
+defaults:
+  mode: full-refresh
+
+streams:
+  file://./cmd/sling/tests/files/test1.1.csv:
+    object: 'main.test'
