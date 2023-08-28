@@ -53,7 +53,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           bash scripts/prep.gomod.sh
-          export WORK_FOLDER=/__/work/${GITHUB_RUN_NUMBER}
+          export WORK_FOLDER=/__/work/sling-cli/${GITHUB_RUN_NUMBER}
           mkdir -p $WORK_FOLDER
           cp -r . $WORK_FOLDER/sling
           sudo chmod -R 777 $WORK_FOLDER
@@ -210,7 +210,7 @@ jobs:
           args: release --clean --skip-validate -f .goreleaser.windows.yaml
 
   release-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     # runs-on: [self-hosted, Linux]
     timeout-minutes: 20
 
