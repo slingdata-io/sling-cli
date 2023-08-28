@@ -1,7 +1,7 @@
 name: Test Sling Action
 
 on:
-  workflow_dispatch:on:
+  workflow_dispatch:
   repository_dispatch:
     types: [test-sling-action]
 
