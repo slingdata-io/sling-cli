@@ -117,6 +117,9 @@ func (cfg *Config) SetDefault() {
 	if cfg.Source.Options.Columns == nil {
 		cfg.Source.Options.Columns = sourceOptions.Columns
 	}
+	if cfg.Source.Options.Transforms == nil || len(cfg.Source.Options.Transforms) == 0 {
+		cfg.Source.Options.Transforms = sourceOptions.Transforms
+	}
 
 	// set target options
 	var targetOptions TargetOptions
@@ -362,7 +365,7 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error("invalid source connection (blank or not found)")
 	}
 	if !cfg.Options.StdOut && cfg.Target.Conn == "" && cfg.Target.Object == "" {
-		if os.Getenv("SLING_CLI") == "TRUE" {
+		if cast.ToBool(os.Getenv("SLING_CLI")) {
 			return g.Error("invalid target connection (blank or not found). Did you mean to use the `--stdout` flag?")
 		}
 		return g.Error("invalid target connection (blank or not found)")
@@ -688,6 +691,7 @@ type SourceOptions struct {
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Columns        map[string]string   `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 }
 
 // TargetOptions are target connection and stream processing options

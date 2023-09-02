@@ -246,7 +246,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
 	if err != nil {
 		tgtConn.Rollback()
-		if os.Getenv("SLING_CLI") == "TRUE" && cfg.sourceIsFile() {
+		if cast.ToBool(os.Getenv("SLING_CLI")) && cfg.sourceIsFile() {
 			err = g.Error(err, "could not insert into %s. Maybe try a higher sample size (SAMPLE_SIZE=2000)?", targetTable)
 		} else {
 			err = g.Error(err, "could not insert into "+targetTable)

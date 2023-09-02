@@ -243,7 +243,7 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 }
 
 func (t *TaskExecution) isUsingPool() bool {
-	if !cast.ToBool(os.Getenv("SLING_POOL")) {
+	if val := os.Getenv("SLING_POOL"); val != "" && !cast.ToBool(val) {
 		return false
 	}
 	return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode
@@ -279,6 +279,10 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 	if t.Config.Source.Options.Columns != nil {
 		// set as string so that StreamProcessor parses it
 		options["columns"] = g.Marshal(t.Config.Source.Options.Columns)
+	}
+	if t.Config.Source.Options.Transforms != nil && len(t.Config.Source.Options.Transforms) > 0 {
+		// set as string so that StreamProcessor parses it
+		options["transforms"] = g.Marshal(t.Config.Source.Options.Transforms)
 	}
 	return
 }

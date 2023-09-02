@@ -11,6 +11,7 @@ import (
 
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
@@ -163,6 +164,11 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// cache connection is using replication from CLI
 	if t.isUsingPool() {
 		connPool[t.Config.SrcConn.Hash()] = conn
+	}
+
+	// set read_only if sqlite / duckdb since it's a source
+	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
+		conn.SetProp("read_only", "true")
 	}
 
 	return
@@ -374,8 +380,8 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		defer tgtConn.Close()
-		defer srcConn.Close()
+		t.AddCleanupTask(func() { tgtConn.Close() })
+		t.AddCleanupTask(func() { srcConn.Close() })
 	}
 
 	// set schema if needed
@@ -446,7 +452,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		defer tgtConn.Close()
+		t.AddCleanupTask(func() { tgtConn.Close() })
 	}
 
 	if t.usingCheckpoint() {
@@ -589,8 +595,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		defer srcConn.Close()
-		defer tgtConn.Close()
+		t.AddCleanupTask(func() { srcConn.Close() })
+		t.AddCleanupTask(func() { tgtConn.Close() })
 	}
 
 	defer func() {
