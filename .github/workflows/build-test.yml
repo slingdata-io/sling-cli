@@ -91,4 +91,4 @@ jobs:
           /__/bin/envkey-source -f > .env.sh
           sed -i "s/_DEBUG='TRUE'/_DEBUG=''/g" .env.sh
           
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $PWD:/work --workdir /work flarco/devbox:base bash -c "source .env.sh && bash scripts/prep.gomod.sh && bash scripts/test.sh"
+          docker run -i --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $PWD:/work --workdir /work flarco/devbox:base bash -c "source .env.sh && bash scripts/prep.gomod.sh && bash scripts/test.sh"
