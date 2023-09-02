@@ -270,6 +270,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			},
 			Mode:            stream.Mode,
 			ReplicationMode: true,
+			Env:             g.ToMapString(replication.Env),
 		}
 
 		// so that the next stream does not retain previous pointer values

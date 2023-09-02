@@ -232,11 +232,11 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 
 func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 	// need to loaded_at column for file incremental
-	if MetadataLoadedAt || t.Type == FileToDB {
+	if t.Config.MetadataLoadedAt || t.Type == FileToDB {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
 		metadata.LoadedAt.Value = t.StartTime.Unix()
 	}
-	if MetadataStreamURL {
+	if t.Config.MetadataStreamURL {
 		metadata.StreamURL.Key = slingStreamURLColumn
 	}
 	return metadata

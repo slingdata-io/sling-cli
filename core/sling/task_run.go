@@ -29,19 +29,10 @@ var AllowedProps = map[string]string{
 var connPool = map[string]database.Connection{}
 
 var start time.Time
-var MetadataLoadedAt = false
-var MetadataStreamURL = false
 var slingLoadedAtColumn = "_sling_loaded_at"
 var slingStreamURLColumn = "_sling_stream_url"
 
 func init() {
-	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		MetadataLoadedAt = cast.ToBool(val)
-	}
-	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
-		MetadataStreamURL = cast.ToBool(val)
-	}
-
 	// we need a webserver to get the pprof webserver
 	if cast.ToBool(os.Getenv("SLING_PPROF")) {
 		go func() {

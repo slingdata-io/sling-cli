@@ -176,6 +176,20 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.MaxDecimals = targetOptions.MaxDecimals
 	}
 
+	// set vars
+	for k, v := range cfg.Env {
+		os.Setenv(k, v)
+	}
+
+	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
+		cfg.MetadataLoadedAt = cast.ToBool(val)
+	}
+	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
+		cfg.MetadataStreamURL = cast.ToBool(val)
+	}
+	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
+		iop.SampleSize = cast.ToInt(val)
+	}
 }
 
 // Unmarshal parse a configuration file path or config text
@@ -270,13 +284,13 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			}
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
-			MetadataLoadedAt = true
+			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
 			return
 		}
 	} else if cfg.Mode == SnapshotMode {
-		MetadataLoadedAt = true // needed for snapshot mode
+		cfg.MetadataLoadedAt = true // needed for snapshot mode
 	}
 
 	if srcDbProvided && tgtDbProvided {
@@ -630,6 +644,9 @@ type Config struct {
 	Prepared        bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
 	IncrementalVal  string                `json:"-" yaml:"-"`
 	ReplicationMode bool                  `json:"-" yaml:"-"`
+
+	MetadataLoadedAt  bool `json:"-" yaml:"-"`
+	MetadataStreamURL bool `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
