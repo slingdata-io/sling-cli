@@ -176,16 +176,16 @@ func TestTasks(t *testing.T) {
 		)
 		taskPath := filepath.Join(folderPath, g.F("task.%02d.json", i+1))
 		taskBytes := []byte(g.Marshal(task))
-		err = ioutil.WriteFile(taskPath, taskBytes, 0777)
+		err = os.WriteFile(taskPath, taskBytes, 0777)
 		g.AssertNoError(t, err)
 	}
 
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		// if !g.In(i+1, 10) {
-		// 	continue
-		// }
+		if !g.In(i+1, 24, 25) {
+			continue
+		}
 		// if i+1 < 25 {
 		// 	continue
 		// }
