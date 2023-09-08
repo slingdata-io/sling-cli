@@ -5,7 +5,7 @@
 <p align="center">See <a href="https://docs.slingdata.io/">docs.slingdata.io</a> for more details.</p>
 
 
-Sling is a passion project turned into a free CLI & SaaS Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
+Sling is a passion project turned into a free CLI Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
 
 * Database to Database
 * File System to Database
