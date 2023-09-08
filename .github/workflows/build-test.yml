@@ -5,6 +5,8 @@ on:
   repository_dispatch:
     types: [build-test]
   push:
+    branches:    
+        - main
 
 jobs:
   bump:
