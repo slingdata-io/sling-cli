@@ -183,10 +183,10 @@ func TestTasks(t *testing.T) {
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		if !g.In(i+1, 24, 25) {
-			continue
-		}
-		// if i+1 < 25 {
+		// if !g.In(i+1, 24, 25) {
+		// 	continue
+		// }
+		// if i+1 < 14 {
 		// 	continue
 		// }
 		runOneTask(t, file)
