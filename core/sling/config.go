@@ -541,6 +541,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if targetSchema := cast.ToString(cfg.Target.Data["schema"]); targetSchema != "" {
 			m["target_schema"] = strings.ToLower(targetSchema)
 		}
+
+		// normalize lower-casing of object names
+		cfg.Target.Object = strings.ToLower(cfg.Target.Object)
 	}
 
 	if cfg.SrcConn.Type.IsFile() {

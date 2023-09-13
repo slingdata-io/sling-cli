@@ -63,7 +63,7 @@ jobs:
           bash scripts/build.linux.sh $VERSION
 
   test:
-    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]') || contains(github.event.head_commit.message, '[bump]'))"
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[no test]') || contains(github.event.head_commit.message, '[nt]') || contains(github.event.head_commit.message, '[bump]'))"
 
     needs: [build-for-test]
 
