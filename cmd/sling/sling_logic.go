@@ -427,9 +427,9 @@ func isUpdateAvailable() bool {
 func printUpdateAvailable() {
 	if updateAvailable {
 		if isDocker {
-			g.Warn("FYI, a new sling version is available (please update your docker image with `docker pull slingdata/sling`)")
+			println("FYI, a new sling version is available (please update your docker image with `docker pull slingdata/sling`)")
 		} else {
-			g.Warn("FYI, a new sling version is available (please run `sling update`)")
+			println("FYI, a new sling version is available (please run `sling update`)")
 		}
 	}
 }
