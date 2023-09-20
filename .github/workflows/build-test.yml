@@ -72,25 +72,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        
+      - name: Configure Environment
+        uses: flarco/envkey-action@main
+        with:
+          envkey: ${{ secrets.ENVKEY }}
 
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
           go-version: "1.19"
           cache: false
-          
-      # - uses: actions/cache@v3
-      #   with:
-      #     path: ~/go/pkg/mod
-      #     key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-go-
 
       - name: Run Go Tests
-        env:
-          ENVKEY: ${{ secrets.ENVKEY }}
         run: |
-          /__/bin/envkey-source -f > .env.sh
-          sed -i "s/_DEBUG='TRUE'/_DEBUG=''/g" .env.sh
-          
-          docker run -i --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v $PWD:/work --workdir /work flarco/devbox:base bash -c "source .env.sh && bash scripts/prep.gomod.sh && bash scripts/test.sh"
+          export DEBUG=''
+          bash scripts/prep.gomod.sh && bash scripts/test.sh
