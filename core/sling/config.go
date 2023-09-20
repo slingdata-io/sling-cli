@@ -710,7 +710,7 @@ type SourceOptions struct {
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
-	Columns        map[string]string   `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 }
 

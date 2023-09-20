@@ -276,9 +276,38 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 	options["METADATA"] = g.Marshal(t.getMetadata())
+
 	if t.Config.Source.Options.Columns != nil {
+		columns := iop.Columns{}
+		switch colsCasted := t.Config.Source.Options.Columns.(type) {
+		case map[string]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: colName,
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
+		case []map[string]any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case []any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case iop.Columns:
+			columns = colsCasted
+		default:
+			g.Warn("Config.Source.Options.Columns not handled")
+		}
+
 		// set as string so that StreamProcessor parses it
-		options["columns"] = g.Marshal(t.Config.Source.Options.Columns)
+		options["columns"] = g.Marshal(iop.NewColumns(columns...))
 	}
 	if t.Config.Source.Options.Transforms != nil && len(t.Config.Source.Options.Transforms) > 0 {
 		// set as string so that StreamProcessor parses it

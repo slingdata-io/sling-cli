@@ -183,10 +183,13 @@ func TestTasks(t *testing.T) {
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		// if !g.In(i+1, 24, 25) {
+		if g.In(i+1, 12) {
+			continue // broken ssh connection
+		}
+		// if !g.In(i+1, 12) {
 		// 	continue
 		// }
-		// if i+1 < 14 {
+		// if i+1 < 13 {
 		// 	continue
 		// }
 		runOneTask(t, file)

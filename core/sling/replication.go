@@ -8,6 +8,7 @@ import (
 
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
+	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -220,7 +221,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
-	// get streams order
+	// get streams & columns order
 	rootMap := yaml.MapSlice{}
 	err = yaml.Unmarshal([]byte(replicYAML), &rootMap)
 	if err != nil {
@@ -229,15 +230,56 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	}
 
 	for _, rootNode := range rootMap {
+		if cast.ToString(rootNode.Key) == "defaults" {
+			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
+				if cast.ToString(defaultsNode.Key) == "source_options" {
+					config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(defaultsNode.Value.(yaml.MapSlice))
+				}
+			}
+		}
+	}
+
+	for _, rootNode := range rootMap {
 		if cast.ToString(rootNode.Key) == "streams" {
 			streamsNodes := rootNode.Value.(yaml.MapSlice)
 			for _, streamsNode := range streamsNodes {
-				config.streamsOrdered = append(config.streamsOrdered, cast.ToString(streamsNode.Key))
+				key := cast.ToString(streamsNode.Key)
+				config.streamsOrdered = append(config.streamsOrdered, key)
+				if streamsNode.Value == nil {
+					continue
+				}
+				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
+					if cast.ToString(streamConfigNode.Key) == "source_options" {
+						if stream, ok := config.Streams[key]; ok {
+							if stream.SourceOptions == nil {
+								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
+							}
+							stream.SourceOptions.Columns = getSourceOptionsColumns(streamConfigNode.Value.(yaml.MapSlice))
+						}
+					}
+				}
 			}
 		}
 	}
 
 	return
+}
+
+func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns iop.Columns) {
+	for _, sourceOptionsNode := range sourceOptionsNodes {
+		if cast.ToString(sourceOptionsNode.Key) == "columns" {
+			for _, columnNode := range sourceOptionsNode.Value.(yaml.MapSlice) {
+				col := iop.Column{
+					Name: cast.ToString(columnNode.Key),
+					Type: iop.ColumnType(cast.ToString(columnNode.Value)),
+				}
+				columns = append(columns, col)
+			}
+			columns = iop.NewColumns(columns...)
+		}
+	}
+
+	return columns
 }
 
 func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error) {

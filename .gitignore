@@ -20,3 +20,4 @@ sling-linux
 sling-win.exe
 dist/
 .secrets
+.DS_Store

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/flarco/dbio"
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
@@ -26,7 +27,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
 	schemaName = strings.ToLower(schemaName)
 
-	if !lo.Contains(schemas, schemaName) {
+	if !lo.Contains(schemas, schemaName) && conn.GetType() != dbio.TypeDbSQLite {
 		_, err = conn.Exec(g.F("create schema %s", conn.Quote(schemaName)))
 		if err != nil {
 			return false, g.Error(err, "Error creating schema %s", conn.Quote(schemaName))
