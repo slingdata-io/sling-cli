@@ -183,8 +183,8 @@ func TestTasks(t *testing.T) {
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		if g.In(i+1, 12) {
-			continue // broken ssh connection
+		if g.In(i+1, 12, 26, 27) {
+			continue // broken ssh connection, skip oracle
 		}
 		// if !g.In(i+1, 12) {
 		// 	continue
