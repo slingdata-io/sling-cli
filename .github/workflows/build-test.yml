@@ -68,7 +68,7 @@ jobs:
     needs: [build-for-test]
 
     runs-on: [self-hosted, linux]
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v2
