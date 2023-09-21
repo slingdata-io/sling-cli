@@ -38,7 +38,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.19"
+          go-version: "1.20"
           cache: false
           
       # - uses: actions/cache@v3
@@ -81,7 +81,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.19"
+          go-version: "1.20"
           cache: false
 
       - name: Run Go Tests

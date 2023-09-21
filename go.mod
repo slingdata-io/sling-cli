@@ -1,6 +1,6 @@
 module github.com/slingdata-io/sling-cli
 
-go 1.19
+go 1.20
 
 require (
 	github.com/c-bata/go-prompt v0.2.6
