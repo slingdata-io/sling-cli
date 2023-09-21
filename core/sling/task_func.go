@@ -17,6 +17,10 @@ import (
 )
 
 func createSchemaIfNotExists(conn database.Connection, schemaName string) (created bool, err error) {
+	if conn.GetType() == dbio.TypeDbSQLite {
+		return
+	}
+
 	// check schema existence
 	schemasData, err := conn.GetSchemas()
 	if err != nil {
@@ -26,8 +30,14 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	schemas := schemasData.ColValuesStr(0)
 	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
 	schemaName = strings.ToLower(schemaName)
+	if schemaName == "" {
+		schemaName = conn.GetProp("schema")
+		if schemaName == "" {
+			return false, g.Error("did not specify schema. Please specify schema in object name.")
+		}
+	}
 
-	if !lo.Contains(schemas, schemaName) && conn.GetType() != dbio.TypeDbSQLite {
+	if !lo.Contains(schemas, schemaName) {
 		_, err = conn.Exec(g.F("create schema %s", conn.Quote(schemaName)))
 		if err != nil {
 			return false, g.Error(err, "Error creating schema %s", conn.Quote(schemaName))
