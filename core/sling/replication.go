@@ -147,9 +147,14 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 	}
 	if stream.SourceOptions == nil {
 		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
+	} else if replicationCfg.Defaults.SourceOptions != nil {
+		stream.SourceOptions.SetDefaults(*replicationCfg.Defaults.SourceOptions)
 	}
+
 	if stream.TargetOptions == nil {
 		stream.TargetOptions = replicationCfg.Defaults.TargetOptions
+	} else if replicationCfg.Defaults.TargetOptions != nil {
+		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
 	}
 
 	// FIXME: temp fix for full-refresh+incremental

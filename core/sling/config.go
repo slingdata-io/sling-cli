@@ -76,50 +76,9 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if cfg.Source.Options == nil {
-		cfg.Source.Options = &sourceOptions
+		cfg.Source.Options = &SourceOptions{}
 	}
-	if cfg.Source.Options.TrimSpace == nil {
-		cfg.Source.Options.TrimSpace = sourceOptions.TrimSpace
-	}
-	if cfg.Source.Options.EmptyAsNull == nil {
-		cfg.Source.Options.EmptyAsNull = sourceOptions.EmptyAsNull
-	}
-	if cfg.Source.Options.Header == nil {
-		cfg.Source.Options.Header = sourceOptions.Header
-	}
-	if cfg.Source.Options.Compression == nil {
-		cfg.Source.Options.Compression = sourceOptions.Compression
-	}
-	if cfg.Source.Options.NullIf == nil {
-		cfg.Source.Options.NullIf = sourceOptions.NullIf
-	}
-	if cfg.Source.Options.JmesPath == nil {
-		cfg.Source.Options.JmesPath = sourceOptions.JmesPath
-	}
-	if cfg.Source.Options.Sheet == nil {
-		cfg.Source.Options.Sheet = sourceOptions.Sheet
-	}
-	if cfg.Source.Options.Range == nil {
-		cfg.Source.Options.Range = sourceOptions.Range
-	}
-	if cfg.Source.Options.DatetimeFormat == "" {
-		cfg.Source.Options.DatetimeFormat = sourceOptions.DatetimeFormat
-	}
-	if cfg.Source.Options.SkipBlankLines == nil {
-		cfg.Source.Options.SkipBlankLines = sourceOptions.SkipBlankLines
-	}
-	if cfg.Source.Options.Delimiter == "" {
-		cfg.Source.Options.Delimiter = sourceOptions.Delimiter
-	}
-	if cfg.Source.Options.MaxDecimals == nil {
-		cfg.Source.Options.MaxDecimals = sourceOptions.MaxDecimals
-	}
-	if cfg.Source.Options.Columns == nil {
-		cfg.Source.Options.Columns = sourceOptions.Columns
-	}
-	if cfg.Source.Options.Transforms == nil || len(cfg.Source.Options.Transforms) == 0 {
-		cfg.Source.Options.Transforms = sourceOptions.Transforms
-	}
+	cfg.Source.Options.SetDefaults(sourceOptions)
 
 	// set target options
 	var targetOptions TargetOptions
@@ -133,47 +92,13 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if cfg.Target.Options == nil {
-		cfg.Target.Options = &targetOptions
+		cfg.Target.Options = &TargetOptions{}
 	}
-	if cfg.Target.Options.Header == nil {
-		cfg.Target.Options.Header = targetOptions.Header
-	}
-	if cfg.Target.Options.Compression == nil {
-		cfg.Target.Options.Compression = targetOptions.Compression
-	}
-	if string(cfg.Target.Options.Format) == "" {
-		cfg.Target.Options.Format = targetOptions.Format
-	}
-	if cfg.Target.Options.Concurrency == 0 {
-		cfg.Target.Options.Concurrency = targetOptions.Concurrency
-	}
-	if cfg.Target.Options.FileMaxRows == 0 {
-		cfg.Target.Options.FileMaxRows = targetOptions.FileMaxRows
-	}
-	if cfg.Target.Options.FileMaxBytes == 0 {
-		cfg.Target.Options.FileMaxBytes = targetOptions.FileMaxBytes
-	}
-	if cfg.Target.Options.UseBulk == nil {
-		cfg.Target.Options.UseBulk = targetOptions.UseBulk
-	}
-	if cfg.Target.Options.AdjustColumnType == nil {
-		cfg.Target.Options.AdjustColumnType = targetOptions.AdjustColumnType
-		if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
-			// if source stream is file, we have no schema reference
-			cfg.Target.Options.AdjustColumnType = g.Bool(false) // TODO: fix change columns
-		}
-	}
-	if cfg.Target.Options.AddNewColumns == nil {
-		cfg.Target.Options.AddNewColumns = targetOptions.AddNewColumns
-	}
-	if cfg.Target.Options.DatetimeFormat == "" {
-		cfg.Target.Options.DatetimeFormat = targetOptions.DatetimeFormat
-	}
-	if cfg.Target.Options.Delimiter == "" {
-		cfg.Target.Options.Delimiter = targetOptions.Delimiter
-	}
-	if cfg.Target.Options.MaxDecimals == nil {
-		cfg.Target.Options.MaxDecimals = targetOptions.MaxDecimals
+	cfg.Target.Options.SetDefaults(targetOptions)
+
+	if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
+		// if source stream is file, we have no schema reference
+		cfg.Target.Options.AdjustColumnType = g.Bool(false)
 	}
 
 	// set vars
@@ -503,12 +428,35 @@ func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
 }
 
 func (cfg *Config) FormatTargetObjectName() (err error) {
+	m, err := cfg.GetFormatMap()
+	if err != nil {
+		return g.Error(err, "could not get formatting variables")
+	}
+
+	if cfg.TgtConn.Type.IsDb() {
+		// normalize lower-casing of object names
+		cfg.Target.Object = strings.ToLower(cfg.Target.Object)
+	}
+
+	// replace placeholders
+	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
+
+	if schemeType(cfg.Target.Object).IsFile() {
+		cfg.Target.Data["url"] = cfg.Target.Object
+		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	}
+
+	return nil
+}
+
+// GetFormatMap returns a map to format a string with provided with variables
+func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	replacePattern := regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean name
 	cleanUp := func(o string) string {
 		return string(replacePattern.ReplaceAll([]byte(o), []byte("_")))
 	}
 
-	m := g.M(
+	m = g.M(
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
 	)
 
@@ -527,7 +475,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	if cfg.SrcConn.Type.IsDb() {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
-			return g.Error(err, "could not parse stream table name")
+			return m, g.Error(err, "could not parse stream table name")
 		} else if table.SQL == "" {
 			if table.Schema != "" {
 				m["stream_schema"] = table.Schema
@@ -538,18 +486,23 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
-		if targetSchema := cast.ToString(cfg.Target.Data["schema"]); targetSchema != "" {
-			m["target_schema"] = strings.ToLower(targetSchema)
+		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		if err != nil {
+			return m, g.Error(err, "could not parse target table name")
 		}
 
-		// normalize lower-casing of object names
-		cfg.Target.Object = strings.ToLower(cfg.Target.Object)
+		m["target_schema"] = table.Schema
+		m["target_table"] = table.Name
+
+		if table.Schema == "" {
+			m["target_schema"] = cast.ToString(cfg.Target.Data["schema"])
+		}
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
 		url, err := net.NewURL(cfg.Source.Stream)
 		if err != nil {
-			return g.Error(err, "could not parse source stream url")
+			return m, g.Error(err, "could not parse source stream url")
 		}
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
@@ -616,22 +569,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 	if len(blankKeys) > 0 {
 		// return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
-		g.Warn("Could not successfully format target object name. Blank values for: %s", strings.Join(blankKeys, ", "))
+		g.Warn("Could not successfully get format values. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
-	// replace placeholders
-	cfg.Target.Object = g.Rm(cfg.Target.Object, m)
-
-	// apply date map
-	dateMap := iop.GetISO8601DateMap(time.Now())
-	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, dateMap))
-
-	if schemeType(cfg.Target.Object).IsFile() {
-		cfg.Target.Data["url"] = cfg.Target.Object
-		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	// apply date variables
+	for k, v := range iop.GetISO8601DateMap(time.Now()) {
+		m[k] = v
 	}
 
-	return nil
+	return
 }
 
 // Config is the new config struct
@@ -814,4 +760,105 @@ var TargetAPIOptionsDefault = TargetOptions{
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
+}
+
+func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
+
+	if o == nil {
+		o = &sourceOptions
+	}
+	if o.TrimSpace == nil {
+		o.TrimSpace = sourceOptions.TrimSpace
+	}
+	if o.EmptyAsNull == nil {
+		o.EmptyAsNull = sourceOptions.EmptyAsNull
+	}
+	if o.Header == nil {
+		o.Header = sourceOptions.Header
+	}
+	if o.Compression == nil {
+		o.Compression = sourceOptions.Compression
+	}
+	if o.NullIf == nil {
+		o.NullIf = sourceOptions.NullIf
+	}
+	if o.JmesPath == nil {
+		o.JmesPath = sourceOptions.JmesPath
+	}
+	if o.Sheet == nil {
+		o.Sheet = sourceOptions.Sheet
+	}
+	if o.Range == nil {
+		o.Range = sourceOptions.Range
+	}
+	if o.DatetimeFormat == "" {
+		o.DatetimeFormat = sourceOptions.DatetimeFormat
+	}
+	if o.SkipBlankLines == nil {
+		o.SkipBlankLines = sourceOptions.SkipBlankLines
+	}
+	if o.Delimiter == "" {
+		o.Delimiter = sourceOptions.Delimiter
+	}
+	if o.MaxDecimals == nil {
+		o.MaxDecimals = sourceOptions.MaxDecimals
+	}
+	if o.Columns == nil {
+		o.Columns = sourceOptions.Columns
+	}
+	if o.Transforms == nil || len(o.Transforms) == 0 {
+		o.Transforms = sourceOptions.Transforms
+	}
+
+}
+
+func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
+
+	if o == nil {
+		o = &targetOptions
+	}
+	if o.Header == nil {
+		o.Header = targetOptions.Header
+	}
+	if o.Compression == nil {
+		o.Compression = targetOptions.Compression
+	}
+	if string(o.Format) == "" {
+		o.Format = targetOptions.Format
+	}
+	if o.Concurrency == 0 {
+		o.Concurrency = targetOptions.Concurrency
+	}
+	if o.FileMaxRows == 0 {
+		o.FileMaxRows = targetOptions.FileMaxRows
+	}
+	if o.FileMaxBytes == 0 {
+		o.FileMaxBytes = targetOptions.FileMaxBytes
+	}
+	if o.UseBulk == nil {
+		o.UseBulk = targetOptions.UseBulk
+	}
+	if o.PreSQL == "" {
+		o.PreSQL = targetOptions.PreSQL
+	}
+	if o.PostSQL == "" {
+		o.PostSQL = targetOptions.PostSQL
+	}
+	if o.AdjustColumnType == nil {
+		o.AdjustColumnType = targetOptions.AdjustColumnType
+	}
+
+	if o.AddNewColumns == nil {
+		o.AddNewColumns = targetOptions.AddNewColumns
+	}
+	if o.DatetimeFormat == "" {
+		o.DatetimeFormat = targetOptions.DatetimeFormat
+	}
+	if o.Delimiter == "" {
+		o.Delimiter = targetOptions.Delimiter
+	}
+	if o.MaxDecimals == nil {
+		o.MaxDecimals = targetOptions.MaxDecimals
+	}
+
 }

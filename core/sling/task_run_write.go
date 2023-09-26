@@ -113,21 +113,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Mode = FullRefreshMode
 	}
 
-	// pre SQL
-	if cfg.Target.Options.PreSQL != "" {
-		t.SetProgress("executing pre-sql")
-		sql, err := getSQLText(cfg.Target.Options.PreSQL)
-		if err != nil {
-			err = g.Error(err, "could not get pre-sql body")
-			return cnt, err
-		}
-		_, err = tgtConn.ExecMulti(sql)
-		if err != nil {
-			err = g.Error(err, "could not execute pre-sql on target")
-			return cnt, err
-		}
-	}
-
 	// Drop & Create the temp table
 	err = tgtConn.DropTable(cfg.Target.Options.TableTmp)
 	if err != nil {
@@ -264,6 +249,28 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 		err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 		return
+	}
+
+	// pre SQL
+	if preSQL := cfg.Target.Options.PreSQL; preSQL != "" {
+		t.SetProgress("executing pre-sql")
+		preSQL, err = getSQLText(preSQL)
+		if err != nil {
+			err = g.Error(err, "could not get pre-sql body")
+			return cnt, err
+		}
+
+		fMap, err := t.Config.GetFormatMap()
+		if err != nil {
+			err = g.Error(err, "could not get format map for pre-sql")
+			return cnt, err
+		}
+
+		_, err = tgtConn.ExecMulti(g.Rm(preSQL, fMap))
+		if err != nil {
+			err = g.Error(err, "could not execute pre-sql on target")
+			return cnt, err
+		}
 	}
 
 	// FIXME: find root cause of why columns don't synch while streaming
@@ -440,14 +447,20 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// post SQL
 	if postSQL := cfg.Target.Options.PostSQL; postSQL != "" {
 		t.SetProgress("executing post-sql")
-		if strings.HasSuffix(strings.ToLower(postSQL), ".sql") {
-			postSQL, err = getSQLText(cfg.Target.Options.PostSQL)
-			if err != nil {
-				err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
-				return cnt, err
-			}
+
+		postSQL, err = getSQLText(postSQL)
+		if err != nil {
+			err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
+			return cnt, err
 		}
-		_, err = tgtConn.ExecMulti(postSQL)
+
+		fMap, err := t.Config.GetFormatMap()
+		if err != nil {
+			err = g.Error(err, "could not get format map for post-sql")
+			return cnt, err
+		}
+
+		_, err = tgtConn.ExecMulti(g.Rm(postSQL, fMap))
 		if err != nil {
 			err = g.Error(err, "Error executing Target.PostSQL")
 			return cnt, err

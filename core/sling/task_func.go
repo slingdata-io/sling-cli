@@ -1,7 +1,6 @@
 package sling
 
 import (
-	"io/ioutil"
 	"math"
 	"os"
 	"strings"
@@ -234,16 +233,15 @@ func getRate(cnt uint64) string {
 }
 
 // getSQLText process source sql file / text
-func getSQLText(filePath string) (string, error) {
-	filePath = strings.TrimPrefix(filePath, "file://")
-	_, err := os.Stat(filePath)
-	if err != nil {
-		return "", g.Error(err, "Could not find file -> "+filePath)
-	}
-	bytes, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return "", g.Error(err, "Could not ReadFile: "+filePath)
+func getSQLText(sqlStringPath string) (string, error) {
+	if g.PathExists(sqlStringPath) || strings.HasPrefix(sqlStringPath, "file://") {
+		sqlStringPath = strings.TrimPrefix(sqlStringPath, "file://")
+		bytes, err := os.ReadFile(sqlStringPath)
+		if err != nil {
+			return "", g.Error(err, "Could not ReadFile: "+sqlStringPath)
+		}
+		return string(bytes), nil
 	}
 
-	return string(bytes), nil
+	return sqlStringPath, nil
 }
