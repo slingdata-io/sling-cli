@@ -96,7 +96,7 @@ func (cfg *Config) SetDefault() {
 	}
 	cfg.Target.Options.SetDefaults(targetOptions)
 
-	if cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn {
+	if cfg.Target.Options.AdjustColumnType == nil && (cfg.SrcConn.Type.Kind() == dbio.KindFile || cfg.Options.StdIn) {
 		// if source stream is file, we have no schema reference
 		cfg.Target.Options.AdjustColumnType = g.Bool(false)
 	}
