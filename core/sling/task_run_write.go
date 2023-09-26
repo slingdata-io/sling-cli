@@ -399,7 +399,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 		t.SetProgress("dropped old table of " + targetTable)
 
-	} else if (cfg.Mode == IncrementalMode && len(t.Config.Source.PrimaryKey) == 0) || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
+	} else if (cfg.Mode == IncrementalMode && len(t.Config.Source.PrimaryKey()) == 0) || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
 		// create if not exists and insert directly
 		err = insertFromTemp(cfg, tgtConn)
 		if err != nil {
@@ -432,7 +432,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// create final if not exists
 		// delete from final and insert
 		// or update (such as merge or ON CONFLICT)
-		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Source.PrimaryKey)
+		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Source.PrimaryKey())
 		if err != nil {
 			err = g.Error(err, "Could not incremental from temp")
 			// data is still in temp table at this point

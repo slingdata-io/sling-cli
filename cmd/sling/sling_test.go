@@ -253,9 +253,9 @@ func runOneTask(t *testing.T, file g.FileItem) {
 		if !g.AssertNoError(t, err) {
 			return
 		}
-		orderByStr := ""
-		if len(task.Config.Source.PrimaryKey) > 0 {
-			orderByStr = strings.Join(task.Config.Source.PrimaryKey, ", ")
+		orderByStr := "1"
+		if len(task.Config.Source.PrimaryKey()) > 0 {
+			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
 		}
 		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
 		conn, _ := task.Config.TgtConn.AsDatabase()

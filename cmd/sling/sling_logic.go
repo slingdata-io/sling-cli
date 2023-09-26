@@ -81,7 +81,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Target.Conn = cast.ToString(v)
 
 		case "primary-key":
-			cfg.Source.PrimaryKey = strings.Split(cast.ToString(v), ",")
+			cfg.Source.PrimaryKeyI = strings.Split(cast.ToString(v), ",")
 
 		case "update-key":
 			cfg.Source.UpdateKey = cast.ToString(v)
@@ -110,6 +110,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
+			if cfg.Options.Debug {
+				os.Setenv("DEBUG", "LOW")
+			}
 		case "examples":
 			showExamples = cast.ToBool(v)
 		}
@@ -258,11 +261,11 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 		cfg := sling.Config{
 			Source: sling.Source{
-				Conn:       replication.Source,
-				Stream:     name,
-				Columns:    stream.Columns,
-				PrimaryKey: stream.PrimaryKey,
-				UpdateKey:  stream.UpdateKey,
+				Conn:        replication.Source,
+				Stream:      name,
+				Columns:     stream.Columns,
+				PrimaryKeyI: stream.PrimaryKey(),
+				UpdateKey:   stream.UpdateKey,
 			},
 			Target: sling.Target{
 				Conn:   replication.Target,

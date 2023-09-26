@@ -59,9 +59,6 @@ func InitLogger() {
 		}
 	}
 
-	// fmt.Printf("g.LogLevel = %d\n", g.GetLogLevel())
-	// fmt.Printf("g.zerolog = %d\n", zerolog.GlobalLevel())
-
 	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
 	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
 	outputOut.FormatErrFieldValue = func(i interface{}) string {
@@ -70,27 +67,24 @@ func InitLogger() {
 	outputErr.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
 	}
-	// if os.Getenv("ZLOG") != "PROD" {
-	// 	zlog.Logger = zerolog.New(outputErr).With().Timestamp().Logger()
-	// }
 
 	if os.Getenv("G_LOGGING") == "TASK" {
 		outputOut.NoColor = true
 		outputErr.NoColor = true
-		g.LogOut = zerolog.New(outputOut).With().Timestamp().Logger()
-		g.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.ZLogOut = zerolog.New(outputOut).With().Timestamp().Logger()
+		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	} else if os.Getenv("G_LOGGING") == "MASTER" || os.Getenv("G_LOGGING") == "WORKER" {
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
-		g.LogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
-		g.LogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
+		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
+		g.ZLogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
 		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM"}
 		if g.IsDebugLow() {
 			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
 		}
-		g.LogOut = zerolog.New(outputErr).With().Timestamp().Logger()
-		g.LogErr = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.ZLogOut = zerolog.New(outputErr).With().Timestamp().Logger()
+		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	}
 }
 

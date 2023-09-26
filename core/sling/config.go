@@ -200,8 +200,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	if cfg.Mode == IncrementalMode {
 		if cfg.SrcConn.Info().Type == dbio.TypeDbBigTable {
 			// use default keys if none are provided
-			if len(cfg.Source.PrimaryKey) == 0 {
-				cfg.Source.PrimaryKey = []string{"_bigtable_key"}
+			if len(cfg.Source.PrimaryKey()) == 0 {
+				cfg.Source.PrimaryKeyI = []string{"_bigtable_key"}
 			}
 
 			if cfg.Source.UpdateKey == "" {
@@ -210,7 +210,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = true
-		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey) == 0 {
+		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
 			return
 		}
@@ -310,8 +310,8 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error("invalid target connection (blank or not found)")
 	}
 
-	if cfg.Options.Debug && os.Getenv("_DEBUG") == "" {
-		os.Setenv("_DEBUG", "DEBUG")
+	if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
+		os.Setenv("DEBUG", "LOW")
 	}
 	if cfg.Options.StdIn && cfg.Source.Stream == "" {
 		cfg.Source.Stream = "stdin"
@@ -617,16 +617,18 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn       string                 `json:"conn" yaml:"conn"`
-	Stream     string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Columns    []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
-	PrimaryKey []string               `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey  string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Limit      int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
-	Options    *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn        string                 `json:"conn" yaml:"conn"`
+	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Columns     []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
+	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Limit       int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
 
-	columns iop.Columns `json:"-" yaml:"-"`
+func (s *Source) PrimaryKey() []string {
+	return castPrimaryKey(s.PrimaryKeyI)
 }
 
 // Target is a target of data
@@ -861,4 +863,21 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 		o.MaxDecimals = targetOptions.MaxDecimals
 	}
 
+}
+
+func castPrimaryKey(pkI any) (pk []string) {
+	switch pkV := pkI.(type) {
+	case []string:
+		return pkV
+	case string:
+		return []string{pkV}
+	case *string:
+		return []string{*pkV}
+	case []any:
+		for _, v := range pkV {
+			pk = append(pk, cast.ToString(v))
+		}
+		return pk
+	}
+	return
 }
