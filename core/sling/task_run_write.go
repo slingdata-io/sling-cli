@@ -47,8 +47,10 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
+		options := map[string]string{"delimiter": ","}
+		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
 		for stream := range df.StreamCh {
-			stream.SetConfig(map[string]string{"delimiter": ","})
+			stream.SetConfig(options)
 			for batchR := range stream.NewCsvReaderChnl(0, 0) {
 				if len(batchR.Columns) != len(df.Columns) {
 					err = g.Error(err, "number columns have changed, not compatible with stdout.")
