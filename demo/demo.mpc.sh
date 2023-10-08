@@ -40,7 +40,7 @@ bigquery:
 ' > ~/.dbt/profiles.yml
 ###########################
 # on ubuntu
-docker run -v ~/sling.demo.prep.sh:/root/prep.sh --rm -it --hostname sling ubuntu:focal bash
+docker run -v ~/sling.demo.prep.sh:/root/prep.sh --rm -it --hostname machine ubuntu:focal bash
 bash /root/prep.sh
 export PS1="\[\033[36m\]\u\[\033[m\]@\[\033[32m\]\h:\[\033[33;1m\]\w\[\033[m\]\$ "
 export PATH=$PATH:$PWD

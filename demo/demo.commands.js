@@ -1,4 +1,4 @@
-
+// In Automator
 async function run(input, parameters) {
   
   var se = Application('System Events');
@@ -18,7 +18,7 @@ async function run(input, parameters) {
     {text: "sling run --src-conn my_pg --src-stream 'select * from postgres.accounts where rating > 50 limit 10' --stdout"},
     {delay: 5},
     {text: "sling run --src-conn my_pg --src-stream 'postgres.accounts' --tgt-conn clickhouse --tgt-object default.accounts --mode full-refresh"},
-    {delay: 13},
+    {delay: 15},
     {text: "export my_duck='duckdb://./duck.db'"},
     {delay: 2},
     {text: "sling conns list"},
@@ -42,7 +42,7 @@ async function run(input, parameters) {
     for(let c of command.text) {
       se.keystroke(c)
 
-      delay(0.1 * Math.random())
+      delay(0.04 * Math.random())
     }
     se.keyCode(36)
   }
