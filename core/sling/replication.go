@@ -92,8 +92,9 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 			for _, row := range data.Rows {
 				table := database.Table{
-					Schema: schemaT.Schema,
-					Name:   cast.ToString(row[0]),
+					Schema:  schemaT.Schema,
+					Name:    cast.ToString(row[0]),
+					Dialect: conn.GetType(),
 				}
 
 				// add to stream map

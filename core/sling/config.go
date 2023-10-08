@@ -433,13 +433,17 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
-	if cfg.TgtConn.Type.IsDb() {
-		// normalize lower-casing of object names
-		cfg.Target.Object = strings.ToLower(cfg.Target.Object)
-	}
-
 	// replace placeholders
 	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
+
+	if cfg.TgtConn.Type.IsDb() {
+		// normalize casing of object names
+		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
+		if err != nil {
+			return g.Error(err, "could not get parse target table name")
+		}
+		cfg.Target.Object = table.FullName()
+	}
 
 	if schemeType(cfg.Target.Object).IsFile() {
 		cfg.Target.Data["url"] = cfg.Target.Object
