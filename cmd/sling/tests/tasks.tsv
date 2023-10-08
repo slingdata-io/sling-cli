@@ -30,5 +30,5 @@ task.28		file://tests/files/test1.csv	{}	SQLITE	main.test1	full-refresh			{"adju
 task.29		file://tests/files/test1.upsert.csv	{}	SQLITE	main.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
 task.30		file://tests/files/test1.csv	{}	CLICKHOUSE	default.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	
 task.31		file://tests/files/test1.upsert.csv	{}	CLICKHOUSE	default.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
-task.32		file://tests/files/test1.csv	{}	DUCKDB	main.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	
+task.32		file://tests/files/test1.csv	{}	DUCKDB	main.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	{"delete_duck_db": true}
 task.33		file://tests/files/test1.upsert.csv	{}	DUCKDB	main.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}

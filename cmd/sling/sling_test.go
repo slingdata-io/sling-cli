@@ -224,6 +224,10 @@ func runOneTask(t *testing.T, file g.FileItem) {
 		}
 	}
 
+	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
+		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
+	}
+
 	// g.PP(task)
 	if g.AssertNoError(t, task.Err) {
 		err = task.Execute()
