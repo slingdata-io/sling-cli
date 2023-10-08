@@ -1,1 +1,1 @@
-{"env":{"validation_object":"dbo.test1k"},"mode":"full-refresh","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"select * from public.test1k where 1=1","update_key":""},"target":{"conn":"MSSQL","object":"dbo.test1k","options":{}}}
+{"env":{"validation_object":"\"dbo\".\"test1k\""},"mode":"full-refresh","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"select * from public.test1k where 1=1","update_key":""},"target":{"conn":"MSSQL","object":"dbo.test1k","options":{}}}
