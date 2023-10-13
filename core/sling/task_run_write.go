@@ -14,6 +14,7 @@ import (
 	"github.com/flarco/dbio/filesys"
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/spf13/cast"
 )
 
@@ -100,16 +101,29 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	targetTable := cfg.Target.Object
 	if cfg.Target.Options.TableTmp == "" {
-		cfg.Target.Options.TableTmp = strings.ToLower(tgtConn.Unquote(targetTable))
-		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
-			if len(cfg.Target.Options.TableTmp) > 24 {
-				cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp[:24] // max is 30 chars
-			}
-			// some weird column / commit error, not picking up latest columns
-			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp" + g.RandString(g.NumericRunes, 1) + strings.ToLower(g.RandString(g.AplhanumericRunes, 1))
-		} else {
-			cfg.Target.Options.TableTmp = cfg.Target.Options.TableTmp + "_tmp"
+		tableTmp, err := database.ParseTableName(targetTable, tgtConn.GetType())
+		if err != nil {
+			return 0, g.Error(err, "no not parse object table name")
 		}
+
+		suffix := lo.Ternary(tgtConn.GetType().DBNameUpperCase(), "_TMP", "_tmp")
+		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
+			if len(tableTmp.Name) > 24 {
+				tableTmp.Name = tableTmp.Name[:24] // max is 30 chars
+			}
+
+			// some weird column / commit error, not picking up latest columns
+			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AplhanumericRunes, 1)
+			suffix2 = lo.Ternary(
+				tgtConn.GetType().DBNameUpperCase(),
+				strings.ToUpper(suffix2),
+				strings.ToLower(suffix2),
+			)
+			suffix = suffix + suffix2
+		}
+
+		tableTmp.Name = tableTmp.Name + suffix
+		cfg.Target.Options.TableTmp = tableTmp.FullName()
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = FullRefreshMode
@@ -169,12 +183,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnChanged
 	if adjustColumnType {
 		df.OnColumnChanged = func(col iop.Column) error {
-
-			// sleep to allow transaction to close
-			// time.Sleep(100 * time.Millisecond)
-
-			// df.Context.Lock()
-			// defer df.Context.Unlock()
 
 			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
 			if err != nil {
