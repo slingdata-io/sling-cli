@@ -542,9 +542,6 @@ func TestOptions(t *testing.T) {
 				assert.Equal(t, testCase.expected, options, msg)
 			}
 		}
-		if t.Failed() {
-			return
-		}
 	}
 }
 
