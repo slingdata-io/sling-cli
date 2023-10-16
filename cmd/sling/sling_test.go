@@ -491,6 +491,63 @@ func TestDbToOut(t *testing.T) {
 	}
 }
 
+func TestOptions(t *testing.T) {
+	testCases := []struct {
+		input       string
+		shouldError bool
+		expected    map[string]any
+	}{
+		{
+			input:       ``,
+			shouldError: false,
+		},
+		{
+			input:       `.`,
+			shouldError: true,
+		},
+		{
+			input:    `{"use_bulk":false}`,
+			expected: map[string]any{"use_bulk": false},
+		},
+		{
+			input:    `{"use_bulk": false}`,
+			expected: map[string]any{"use_bulk": false},
+		},
+		{
+			input:    `{use_bulk: false}`,
+			expected: map[string]any{"use_bulk": false},
+		},
+		{
+			input:    `use_bulk: false`,
+			expected: map[string]any{"use_bulk": false},
+		},
+		{
+			input:       `{use_bulk:false}`,
+			shouldError: true,
+		},
+		{
+			input:       `use_bulk:false`,
+			shouldError: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		options, err := parseOptions(testCase.input)
+		msg := g.F("with input: `%s`", testCase.input)
+		if testCase.shouldError {
+			assert.Error(t, err, msg)
+		} else {
+			assert.NoError(t, err, msg)
+			if testCase.expected != nil {
+				assert.Equal(t, testCase.expected, options, msg)
+			}
+		}
+		if t.Failed() {
+			return
+		}
+	}
+}
+
 func TestCfgPath(t *testing.T) {
 
 	testCfg := func(path string) (err error) {
