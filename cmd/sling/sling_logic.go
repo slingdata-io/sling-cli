@@ -72,11 +72,16 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				}
 			}
 		case "src-options":
-			err = yaml.Unmarshal([]byte(cast.ToString(v)), &cfg.Source.Options)
+			payload := cast.ToString(v)
+			options, err := parseOptions(payload)
 			if err != nil {
-				return ok, g.Error(err, "invalid source options -> %s", cast.ToString(v))
+				return ok, g.Error(err, "invalid source options -> %s", payload)
 			}
 
+			err = g.JSONConvert(options, &cfg.Source.Options)
+			if err != nil {
+				return ok, g.Error(err, "invalid source options -> %s", payload)
+			}
 		case "tgt-conn":
 			cfg.Target.Conn = cast.ToString(v)
 
@@ -94,13 +99,15 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				}
 			}
 		case "tgt-options":
-			stdout := cfg.Options.StdOut
-			err = yaml.Unmarshal([]byte(cast.ToString(v)), &cfg.Target.Options)
+			payload := cast.ToString(v)
+			options, err := parseOptions(payload)
 			if err != nil {
-				return ok, g.Error(err, "invalid target options -> %s", cast.ToString(v))
+				return ok, g.Error(err, "invalid target options -> %s", payload)
 			}
-			if stdout {
-				cfg.Options.StdOut = stdout
+
+			err = g.JSONConvert(options, &cfg.Target.Options)
+			if err != nil {
+				return ok, g.Error(err, "invalid target options -> %s", payload)
 			}
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
@@ -512,4 +519,32 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	g.Info("Updated to " + strings.TrimSpace(string(newVersion)))
 
 	return ok, nil
+}
+
+func parseOptions(payload string) (options map[string]any, err error) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return map[string]any{}, nil
+	}
+
+	// try json
+	options, err = g.UnmarshalMap(payload)
+	if err == nil {
+		return options, nil
+	}
+
+	// try yaml
+	err = yaml.Unmarshal([]byte(payload), &options)
+	if err != nil {
+		return options, g.Error(err, "could not parse options")
+	}
+
+	// validate, check for typos
+	for k := range options {
+		if strings.Contains(k, ":") {
+			return options, g.Error("invalid key: %s", k)
+		}
+	}
+
+	return options, nil
 }
