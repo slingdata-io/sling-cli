@@ -72,10 +72,21 @@ sling -h
 
 ### Compiling From Source
 
+#### Linux or Mac
 ```bash
 git clone https://github.com/slingdata-io/sling-cli.git
 cd sling
-go build -o sling cmd/sling/*.go
+bash scripts/build.sh
+
+./sling --help
+```
+
+#### Windows (PowerShell)
+```bash
+git clone https://github.com/slingdata-io/sling-cli.git
+cd sling
+
+.\scripts\build.ps1
 
 ./sling --help
 ```

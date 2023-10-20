@@ -58,7 +58,7 @@ jobs:
           cp -r . $WORK_FOLDER/sling
           sudo chmod -R 777 $WORK_FOLDER
 
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.linux.sh $VERSION
+          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.test.sh $VERSION
           sudo rm -rf $WORK_FOLDER/sling
 
           echo $VERSION
