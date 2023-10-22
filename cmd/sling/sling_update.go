@@ -136,7 +136,7 @@ func checkUpdate() {
 	arr := []map[string]any{}
 	g.JSONUnmarshal(respB, &arr)
 	if len(arr) > 0 && arr[0] != nil {
-		updateVersion = cast.ToString(arr[0]["name"])
+		updateVersion = strings.TrimPrefix(cast.ToString(arr[0]["name"]), "v")
 		isNew, err := g.CompareVersions(core.Version, updateVersion)
 		if err != nil {
 			g.DebugLow("Error comparing versions: %s", err.Error())
