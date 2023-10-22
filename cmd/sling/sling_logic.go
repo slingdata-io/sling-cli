@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -11,13 +10,10 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/flarco/dbio/connection"
-	"github.com/flarco/g/net"
-	core2 "github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
-	"github.com/kardianos/osext"
 	"github.com/spf13/cast"
 )
 
@@ -31,7 +27,8 @@ var (
 		"Sling-API-Key":    apiKey,
 		"Sling-Project-ID": projectID,
 	}
-	updateAvailable = false
+	updateMessage = ""
+	updateVersion = ""
 )
 
 func init() {
@@ -133,7 +130,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	os.Setenv("SLING_CLI", "TRUE")
 
 	// check for update, and print note
-	go isUpdateAvailable()
+	go checkUpdate()
 	defer printUpdateAvailable()
 
 	if replicationCfgPath != "" {
@@ -395,130 +392,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	return ok, nil
 }
 
-func slingUiServer(c *g.CliSC) (ok bool, err error) {
-	Track("slingUiServer")
-	ok = true
-	return
-}
-
-func checkLatestVersion() (string, error) {
-	url := ""
-	if runtime.GOOS == "linux" {
-		url = "https://files.ocral.org/slingdata.io/dist/version-linux"
-	} else if runtime.GOOS == "darwin" {
-		url = "https://files.ocral.org/slingdata.io/dist/version-mac"
-	} else if runtime.GOOS == "windows" {
-		url = "https://files.ocral.org/slingdata.io/dist/version-win"
-	} else {
-		return "", g.Error("OS Unsupported: %s", runtime.GOOS)
-	}
-
-	_, respBytes, err := net.ClientDo("GET", url, nil, map[string]string{}, 5)
-	newVersion := strings.TrimSpace(string(respBytes))
-	if err != nil {
-		return "", g.Error(err, "Unable to check for latest version")
-	}
-	return newVersion, nil
-}
-
-func isUpdateAvailable() bool {
-	if core2.Version == "dev" {
-		return false
-	}
-
-	newVersion, err := checkLatestVersion()
-	if err != nil {
-		return false
-	}
-	updateAvailable = newVersion != core2.Version
-	return updateAvailable
-}
-
 func printUpdateAvailable() {
-	if updateAvailable {
-		if isDocker {
-			println("FYI, a new sling version is available (please update your docker image with `docker pull slingdata/sling`)")
-		} else {
-			println("FYI, a new sling version is available (please run `sling update`)")
-		}
+	if updateVersion != "" {
+		println(updateMessage)
 	}
-}
-
-func updateCLI(c *g.CliSC) (ok bool, err error) {
-	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
-
-	ok = true
-	telemetryMap["downloaded"] = false
-
-	// get latest version number
-	newVersion, err := checkLatestVersion()
-	if err != nil {
-		return ok, g.Error(err)
-	} else if newVersion == core2.Version {
-		g.Info("Already up-to-date!")
-		return
-	}
-
-	telemetryMap["new_version"] = newVersion
-	url := ""
-	if runtime.GOOS == "linux" {
-		url = "https://files.ocral.org/slingdata.io/dist/sling-linux"
-	} else if runtime.GOOS == "darwin" {
-		url = "https://files.ocral.org/slingdata.io/dist/sling-mac"
-	} else if runtime.GOOS == "windows" {
-		url = "https://files.ocral.org/slingdata.io/dist/sling-win.exe"
-	} else {
-		return ok, g.Error("OS Unsupported: %s", runtime.GOOS)
-	}
-
-	execFileName, err := osext.Executable()
-	if err != nil {
-		return ok, g.Error(err, "Unable to determine executable path")
-	} else if strings.Contains(execFileName, "homebrew") {
-		g.Warn("Sling was installed with brew, please run `brew upgrade slingdata-io/sling/sling`")
-		return ok, nil
-	} else if strings.Contains(execFileName, "scoop") {
-		g.Warn("Sling was installed with scoop, please run `scoop update sling`")
-		return ok, nil
-	}
-
-	fileStat, _ := os.Stat(execFileName)
-	fileMode := fileStat.Mode()
-
-	filePath := execFileName + ".new"
-
-	g.Info("Downloading latest version (%s)", newVersion)
-	err = net.DownloadFile(url, filePath)
-	if err != nil {
-		println("Unable to download update!")
-		return ok, g.Error(strings.ReplaceAll(err.Error(), url, ""))
-	}
-
-	telemetryMap["downloaded"] = true
-
-	err = os.Chmod(filePath, fileMode)
-	if err != nil {
-		println("Unable to make new binary executable.")
-		return ok, err
-	}
-
-	err = os.Rename(execFileName, execFileName+".old")
-	if err != nil {
-		println("Unable to rename current binary executable. Try with sudo or admin?")
-		return ok, err
-	}
-
-	err = os.Rename(filePath, execFileName)
-	if err != nil {
-		println("Unable to rename current binary executable. Try with sudo or admin?")
-		return ok, err
-	}
-
-	os.Remove(execFileName + ".old")
-
-	g.Info("Updated to " + strings.TrimSpace(string(newVersion)))
-
-	return ok, nil
 }
 
 func parseOptions(payload string) (options map[string]any, err error) {

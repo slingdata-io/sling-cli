@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
@@ -613,4 +614,16 @@ func TestOneReplication(t *testing.T) {
 	if g.AssertNoError(t, err) {
 		return
 	}
+}
+
+func TestExtract(t *testing.T) {
+	core.Version = "v1.0.43"
+
+	checkUpdate()
+	assert.NotEmpty(t, updateVersion)
+
+	printUpdateAvailable()
+
+	err := ExtractTarGz("/Users/fritz/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", "/Users/fritz/Downloads/sling")
+	g.AssertNoError(t, err)
 }

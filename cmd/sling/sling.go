@@ -8,13 +8,11 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/getsentry/sentry-go"
-	"github.com/kardianos/osext"
 	"github.com/rudderlabs/analytics-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
@@ -154,12 +152,6 @@ var cliUpdate = &g.CliSC{
 	Name:        "update",
 	Description: "Update Sling to the latest version",
 	ExecProcess: updateCLI,
-}
-
-var cliUi = &g.CliSC{
-	Name:        "ui",
-	Description: "Open the Sling app in a browser",
-	ExecProcess: slingUiServer,
 }
 
 var cliCloud = &g.CliSC{
@@ -344,21 +336,6 @@ func Track(event string, props ...map[string]interface{}) {
 		return
 	}
 
-	slingPackage := ""
-	execFileName, _ := osext.Executable()
-	switch {
-	case isDocker:
-		slingPackage = "docker"
-	case strings.Contains(execFileName, "homebrew"):
-		slingPackage = "homebrew"
-	case strings.Contains(execFileName, "scoop"):
-		slingPackage = "scoop"
-	case strings.Contains(execFileName, "python"):
-		slingPackage = "python"
-	default:
-		slingPackage = "binary"
-	}
-
 	// rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
 	rudderConfig := analytics.Config{Logger: analytics.StdLogger(log.New(io.Discard, "sling ", log.LstdFlags))}
 	rsClient, err := analytics.NewWithConfig(env.RudderstackKey, env.RudderstackURL, rudderConfig)
@@ -370,7 +347,7 @@ func Track(event string, props ...map[string]interface{}) {
 	properties := analytics.NewProperties().
 		Set("application", "sling-cli").
 		Set("version", core.Version).
-		Set("package", slingPackage).
+		Set("package", getSlingPackage()).
 		Set("os", runtime.GOOS).
 		Set("emit_time", time.Now().UnixMicro())
 
