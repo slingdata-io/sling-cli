@@ -13,7 +13,7 @@ go mod tidy
 export VERSION=$1
 echo "VERSION -> $VERSION"
 sed -i "s/dev/$VERSION/g" core/version.go
-GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION'" -o sling-linux cmd/sling/*.go
+GOOS=linux GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey=$RUDDERSTACK_KEY'" -o sling-linux cmd/sling/*.go
 
 ./sling-linux --version
 VERSION=$(./sling-linux --version | sed 's/Version: //')

@@ -18,7 +18,7 @@ go mod edit -dropreplace='github.com/flarco/dbio' go.mod
 go mod tidy
 
 (Get-Content core/version.go).replace('dev', "$env:VERSION") | Set-Content core/version.go
-go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
+go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey=$env:RUDDERSTACK_KEY'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
 
 .\sling-win.exe --version
 $env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
