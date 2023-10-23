@@ -75,7 +75,7 @@ sling -h
 #### Linux or Mac
 ```bash
 git clone https://github.com/slingdata-io/sling-cli.git
-cd sling
+cd sling-cli
 bash scripts/build.sh
 
 ./sling --help
@@ -84,11 +84,11 @@ bash scripts/build.sh
 #### Windows (PowerShell)
 ```bash
 git clone https://github.com/slingdata-io/sling-cli.git
-cd sling
+cd sling-cli
 
 .\scripts\build.ps1
 
-./sling --help
+.\sling --help
 ```
 
 ### Installing via Python Wrapper
