@@ -432,7 +432,10 @@ func cliInit() int {
 	flaggy.Parse()
 
 	ok, err := g.CliProcess()
-	if err != nil {
+	if err != nil || telemetryMap["error"] != nil {
+		if err == nil && telemetryMap["error"] != nil {
+			err = g.Error(cast.ToString(telemetryMap["error"]))
+		}
 
 		if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
 			telemetryMap["error"] = getErrString(err)

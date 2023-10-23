@@ -158,6 +158,10 @@ jobs:
     timeout-minutes: 20
     # runs-on: macos-latest
 
+    defaults:
+      run:
+        working-directory: /tmp
+
     steps:
       - name: Checkout
         uses: actions/checkout@v1

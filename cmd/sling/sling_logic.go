@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -45,6 +46,13 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	showExamples := false
 	selectStreams := []string{}
 	// saveAsJob := false
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			telemetryMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+		}
+	}()
 
 	// determine if stdin data is piped
 	// https://stackoverflow.com/a/26567513
