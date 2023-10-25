@@ -459,7 +459,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
-	if t.Config.Options.StdIn {
+	if t.Config.Options.StdIn && t.Config.SrcConn.Type.IsUnknown() {
 		t.SetProgress("reading from stream (stdin)")
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)
@@ -510,7 +510,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 
 	start = time.Now()
 
-	if t.Config.Options.StdIn {
+	if t.Config.Options.StdIn && t.Config.SrcConn.Type.IsUnknown() {
 		t.SetProgress("reading from stream (stdin)")
 	} else {
 		t.SetProgress("reading from source file system (%s)", t.Config.SrcConn.Type)

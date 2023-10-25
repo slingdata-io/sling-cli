@@ -190,7 +190,7 @@ func runTask(cfg *sling.Config) (err error) {
 			telemetryMap["project_id"] = projectID
 		}
 
-		if cfg.Options.StdIn {
+		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
 			telemetryMap["task_source_type"] = "stdin"
 		}
 		if cfg.Options.StdOut {
