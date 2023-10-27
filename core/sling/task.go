@@ -268,8 +268,9 @@ func (t *TaskExecution) Cleanup() {
 	}
 }
 
+// usingCheckpoint means it has an update_key and is incremental mode
 func (t *TaskExecution) usingCheckpoint() bool {
-	return t.Config.Source.UpdateKey != "" && t.Config.Mode == IncrementalMode
+	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 
 func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {

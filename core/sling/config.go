@@ -631,6 +631,14 @@ type Source struct {
 	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
+func (s *Source) HasUpdateKey() bool {
+	return s.UpdateKey != ""
+}
+
+func (s *Source) HasPrimaryKey() bool {
+	return strings.Join(s.PrimaryKey(), "") != ""
+}
+
 func (s *Source) PrimaryKey() []string {
 	return castPrimaryKey(s.PrimaryKeyI)
 }

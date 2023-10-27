@@ -53,19 +53,26 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	if t.usingCheckpoint() {
-		// select only records that have been modified after last max value
+		// default true value
 		incrementalWhereCond := "1=1"
+
+		// select only records that have been modified after last max value
 		if cfg.IncrementalVal != "" {
-			greaterThan := ">="
-			if val := os.Getenv("SLING_GREATER_THAN_EQUAL"); val != "" {
-				greaterThan = lo.Ternary(cast.ToBool(val), ">=", ">")
-			}
+			// if primary key is defined, use greater than or equal
+			// in case that many timestamp values are the same and
+			// IncrementalVal has been truncated in target database system
+			greaterThan := lo.Ternary(t.Config.Source.HasPrimaryKey(), ">=", ">")
+
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
 				"update_key", cfg.Source.UpdateKey,
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
+		} else {
+			// allows the use of coalesce in custom SQL using {incremental_value}
+			// this will be null when target table does not exists
+			cfg.IncrementalVal = "null"
 		}
 
 		if sTable.SQL == "" {
@@ -76,6 +83,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"incremental_where_cond", incrementalWhereCond,
 			)
 		} else {
+			if !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
+				err = g.Error("Since using incremental mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.")
+				return t.df, err
+			}
+
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
