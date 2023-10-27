@@ -590,13 +590,6 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		t.AddCleanupTask(func() { tgtConn.Close() })
 	}
 
-	defer func() {
-		if err != nil {
-			// g.Trace(strings.Join(srcConn.Base().Log, ";\n"))
-			// g.Trace(strings.Join(tgtConn.Base().Log, ";\n"))
-		}
-	}()
-
 	// set schema if needed
 	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)

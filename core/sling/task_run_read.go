@@ -52,18 +52,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		fieldsStr = strings.Join(fields, ", ")
 	}
 
-	// Get source columns
-	// if sTable.IsQuery() {
-	// 	cfg.Source.columns, err = srcConn.GetSQLColumns(g.R(sTable.SQL, "incremental_where_cond", "1=0"))
-	// } else {
-	// 	cfg.Source.columns, err = srcConn.GetTableColumns(sTable)
-	// }
-	// if err != nil {
-	// 	err = g.Error(err, "Could not obtain source columns")
-	// 	return t.df, err
-	// }
-
-	// if cfg.Mode == IncrementalMode || (cfg.Mode == AppendMode && cfg.Source.UpdateKey != "") {
 	if t.usingCheckpoint() {
 		// select only records that have been modified after last max value
 		incrementalWhereCond := "1=1"
