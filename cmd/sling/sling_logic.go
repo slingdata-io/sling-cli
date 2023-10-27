@@ -36,6 +36,10 @@ func init() {
 	if masterServerURL == "" {
 		masterServerURL = "https://api.slingdata.io"
 	}
+
+	if projectID == "" {
+		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
+	}
 }
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -184,6 +188,20 @@ func runTask(cfg *sling.Config) (err error) {
 			telemetryMap["task_rows_count"] = task.GetCount()
 			telemetryMap["task_rows_in_bytes"] = inBytes
 			telemetryMap["task_rows_out_bytes"] = outBytes
+			telemetryMap["task_options"] = g.Marshal(g.M(
+				"src_has_primary_key", task.Config.Source.HasPrimaryKey(),
+				"src_has_update_key", task.Config.Source.HasUpdateKey(),
+				"src_flatten", task.Config.Source.Options.Flatten,
+				"src_format", task.Config.Source.Options.Format,
+				"src_transforms", task.Config.Source.Options.Transforms,
+				"tgt_file_max_rows", task.Config.Target.Options.FileMaxRows,
+				"tgt_file_max_bytes", task.Config.Target.Options.FileMaxBytes,
+				"tgt_format", task.Config.Target.Options.Format,
+				"tgt_use_bulk", task.Config.Target.Options.UseBulk,
+				"tgt_add_new_columns", task.Config.Target.Options.AddNewColumns,
+				"tgt_adjust_column_type", task.Config.Target.Options.AdjustColumnType,
+				"tgt_column_casing", task.Config.Target.Options.ColumnCasing,
+			))
 		}
 
 		if projectID != "" {
