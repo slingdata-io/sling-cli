@@ -354,9 +354,6 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Options.StdOut {
 		os.Setenv("CONCURRENCY", "1")
 	}
-	if val := os.Getenv("SLING_LIMIT"); val != "" {
-		cfg.Source.Limit = cast.ToInt(val)
-	}
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
@@ -626,9 +623,19 @@ type Source struct {
 	Columns     []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Limit       int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
+
+func (s *Source) Limit() int {
+	if val := os.Getenv("SLING_LIMIT"); val != "" {
+		return cast.ToInt(val)
+	}
+
+	if s.Options.Limit == nil {
+		return 0
+	}
+	return *s.Options.Limit
 }
 
 func (s *Source) HasUpdateKey() bool {
@@ -670,6 +677,7 @@ type SourceOptions struct {
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
+	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 }

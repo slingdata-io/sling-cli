@@ -1,7 +1,8 @@
 source:
   conn: testing
   stream: testing
-  limit: 111
+  options:
+    limit: 111
 
 target:
   conn: testing

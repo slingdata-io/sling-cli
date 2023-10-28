@@ -95,12 +95,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"incremental_value", cfg.IncrementalVal,
 			)
 		}
-	} else if cfg.Source.Limit > 0 && sTable.SQL == "" {
+	} else if cfg.Source.Limit() > 0 && sTable.SQL == "" {
 		sTable.SQL = g.R(
 			srcConn.Template().Core["limit"],
 			"fields", fieldsStr,
 			"table", sTable.FDQN(),
-			"limit", cast.ToString(cfg.Source.Limit),
+			"sql", "select * from "+sTable.FDQN(),
+			"limit", cast.ToString(cfg.Source.Limit()),
 		)
 	}
 
@@ -166,7 +167,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns, Limit: cfg.Source.Limit}
+		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns, Limit: cfg.Source.Limit()}
 		df, err = fs.ReadDataflow(cfg.SrcConn.URL(), fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
