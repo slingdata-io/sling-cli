@@ -131,12 +131,12 @@ func checkUpdate() {
 		instruction = "Please run `docker pull slingdata/sling` and recreate your container."
 	}
 
-	const url = "https://api.github.com/repos/slingdata-io/sling-cli/tags"
+	const url = "https://api.github.com/repos/slingdata-io/sling-cli/releases"
 	_, respB, _ := net.ClientDo("GET", url, nil, nil)
 	arr := []map[string]any{}
 	g.JSONUnmarshal(respB, &arr)
 	if len(arr) > 0 && arr[0] != nil {
-		updateVersion = strings.TrimPrefix(cast.ToString(arr[0]["name"]), "v")
+		updateVersion = strings.TrimPrefix(cast.ToString(arr[0]["tag_name"]), "v")
 		isNew, err := g.CompareVersions(core.Version, updateVersion)
 		if err != nil {
 			g.DebugLow("Error comparing versions: %s", err.Error())

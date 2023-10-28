@@ -1,8 +1,10 @@
 {
   "source": {
     "stream": "testing", 
-    "limit": 111, 
-    "conn": "testing"
+    "conn": "testing",
+    "options": {
+      "limit": 111
+    }
   }, 
   "target": {
     "options": {

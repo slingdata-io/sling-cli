@@ -42,6 +42,15 @@ const (
 	SnapshotMode Mode = "snapshot"
 )
 
+// ColumnCasing is the casing method to use
+type ColumnCasing string
+
+const (
+	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
+	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
+	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
+)
+
 // NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg *Config, err error) {
 	// set default, unmarshalling will overwrite
@@ -354,9 +363,6 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Options.StdOut {
 		os.Setenv("CONCURRENCY", "1")
 	}
-	if val := os.Getenv("SLING_LIMIT"); val != "" {
-		cfg.Source.Limit = cast.ToInt(val)
-	}
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
@@ -626,9 +632,27 @@ type Source struct {
 	Columns     []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Limit       int                    `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
+
+func (s *Source) Limit() int {
+	if val := os.Getenv("SLING_LIMIT"); val != "" {
+		return cast.ToInt(val)
+	}
+
+	if s.Options.Limit == nil {
+		return 0
+	}
+	return *s.Options.Limit
+}
+
+func (s *Source) HasUpdateKey() bool {
+	return s.UpdateKey != ""
+}
+
+func (s *Source) HasPrimaryKey() bool {
+	return strings.Join(s.PrimaryKey(), "") != ""
 }
 
 func (s *Source) PrimaryKey() []string {
@@ -662,6 +686,7 @@ type SourceOptions struct {
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
+	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 }
@@ -680,6 +705,7 @@ type TargetOptions struct {
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
+	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -742,6 +768,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
+	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 var TargetDBOptionsDefault = TargetOptions{
@@ -754,6 +781,7 @@ var TargetDBOptionsDefault = TargetOptions{
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
+	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 var TargetAPIOptionsDefault = TargetOptions{
@@ -866,7 +894,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = targetOptions.MaxDecimals
 	}
-
+	if o.ColumnCasing == nil {
+		o.ColumnCasing = targetOptions.ColumnCasing
+	}
 }
 
 func castPrimaryKey(pkI any) (pk []string) {

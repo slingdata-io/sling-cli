@@ -562,7 +562,7 @@ func TestCfgPath(t *testing.T) {
 		assert.EqualValues(t, "testing", cfg.Target.Object)
 		assert.EqualValues(t, "testing", cfg.TgtConn.URL())
 		assert.EqualValues(t, "testing", cfg.Mode)
-		assert.EqualValues(t, 111, cfg.Source.Limit)
+		assert.EqualValues(t, 111, cfg.Source.Limit())
 		assert.EqualValues(t, "testing", cfg.Target.Options.TableDDL)
 		assert.EqualValues(t, "testing", cfg.Target.Options.TableTmp)
 		assert.EqualValues(t, "testing", cfg.Target.Options.PostSQL)
