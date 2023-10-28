@@ -41,6 +41,9 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 
+		// apply column casing
+		applyColumnCasing(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
+
 		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL())
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
@@ -48,6 +51,9 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
+		// apply column casing
+		applyColumnCasing(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
+
 		options := map[string]string{"delimiter": ","}
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
 		for stream := range df.StreamCh {
@@ -98,6 +104,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error("no stream columns detected")
 		return
 	}
+
+	// apply column casing
+	applyColumnCasing(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
 	targetTable := cfg.Target.Object
 	if cfg.Target.Options.TableTmp == "" {

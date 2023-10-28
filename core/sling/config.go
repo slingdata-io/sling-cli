@@ -42,6 +42,15 @@ const (
 	SnapshotMode Mode = "snapshot"
 )
 
+// ColumnCasing is the casing method to use
+type ColumnCasing string
+
+const (
+	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
+	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
+	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
+)
+
 // NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg *Config, err error) {
 	// set default, unmarshalling will overwrite
@@ -696,6 +705,7 @@ type TargetOptions struct {
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
+	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
 	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
 	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
@@ -758,6 +768,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
+	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 var TargetDBOptionsDefault = TargetOptions{
@@ -770,6 +781,7 @@ var TargetDBOptionsDefault = TargetOptions{
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
+	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 var TargetAPIOptionsDefault = TargetOptions{
@@ -882,7 +894,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = targetOptions.MaxDecimals
 	}
-
+	if o.ColumnCasing == nil {
+		o.ColumnCasing = targetOptions.ColumnCasing
+	}
 }
 
 func castPrimaryKey(pkI any) (pk []string) {

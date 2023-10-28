@@ -3,6 +3,7 @@ package sling
 import (
 	"math"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -315,4 +316,46 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 		options["transforms"] = g.Marshal(t.Config.Source.Options.Transforms)
 	}
 	return
+}
+
+var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+
+// apply column casing
+func applyColumnCasing(df *iop.Dataflow, connType dbio.Type, casing *ColumnCasing) {
+
+	if casing == nil || *casing == SourceColumnCasing {
+		return
+	}
+
+	applyCase := func(name string, toSnake bool) string {
+		// convert to snake case
+		if toSnake {
+			name = matchAllCap.ReplaceAllString(name, "${1}_${2}")
+		}
+
+		// clean up other weird chars
+		name = iop.CleanName(name)
+
+		// lower case for target file system
+		if connType.DBNameUpperCase() {
+			return strings.ToUpper(name)
+		}
+		return strings.ToLower(name)
+	}
+
+	// convert to target system casing
+	for i := range df.Columns {
+		df.Columns[i].Name = applyCase(df.Columns[i].Name, *casing == SnakeColumnCasing)
+	}
+
+	// propagate names
+	for _, ds := range df.Streams {
+		for i := range ds.Columns {
+			ds.Columns[i].Name = applyCase(ds.Columns[i].Name, *casing == SnakeColumnCasing)
+		}
+
+		for i := range ds.CurrentBatch.Columns {
+			ds.CurrentBatch.Columns[i].Name = applyCase(ds.CurrentBatch.Columns[i].Name, *casing == SnakeColumnCasing)
+		}
+	}
 }
