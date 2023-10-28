@@ -36,10 +36,6 @@ func init() {
 	if masterServerURL == "" {
 		masterServerURL = "https://api.slingdata.io"
 	}
-
-	if projectID == "" {
-		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
-	}
 }
 
 func processRun(c *g.CliSC) (ok bool, err error) {
