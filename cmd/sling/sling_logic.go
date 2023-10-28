@@ -445,7 +445,7 @@ func parseOptions(payload string) (options map[string]any, err error) {
 	// validate, check for typos
 	for k := range options {
 		if strings.Contains(k, ":") {
-			return options, g.Error("invalid key: %s", k)
+			return options, g.Error("invalid key: %s. Try adding a space after the colon.", k)
 		}
 	}
 
