@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [build-test]
-  push:
-    branches:    
-        - main
 
 jobs:
   build-for-test:

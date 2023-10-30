@@ -323,6 +323,9 @@ func init() {
 	// cliUi.Make().Add()
 
 	if telemetry {
+		if projectID == "" {
+			projectID = os.Getenv("GITHUB_REPOSITORY_ID")
+		}
 		machineID, _ = machineid.ProtectedID("sling")
 		if projectID != "" {
 			machineID = g.MD5(projectID) // hashed
