@@ -292,6 +292,10 @@ func schemeType(url string) dbio.Type {
 		return dbio.TypeUnknown
 	}
 
+	if strings.HasPrefix(url, "https") && strings.Contains(url, ".core.windows.") {
+		return dbio.TypeFileAzure
+	}
+
 	scheme := strings.Split(url, "://")[0]
 	t, _ := dbio.ValidateType(scheme)
 	return t
@@ -346,8 +350,6 @@ func (cfg *Config) Prepare() (err error) {
 		if err != nil {
 			return g.Error(err, "could not format target object name")
 		}
-	} else if cast.ToString(cfg.Target.Data["url"]) == "" {
-		cfg.Target.Data["url"] = cfg.Target.Conn
 	}
 
 	if cfg.TgtConn.Type.IsUnknown() {
@@ -381,8 +383,6 @@ func (cfg *Config) Prepare() (err error) {
 	if schemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
-	} else if cast.ToString(cfg.Source.Data["url"]) == "" {
-		cfg.Source.Data["url"] = cfg.Source.Conn
 	}
 
 	if cfg.SrcConn.Type.IsUnknown() {

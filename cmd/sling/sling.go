@@ -251,6 +251,12 @@ var cliConns = &g.CliSC{
 					Type:        "string",
 					Description: "discover streams in a specific schema (for database connections)",
 				},
+				{
+					Name:        "recursive",
+					ShortName:   "",
+					Type:        "bool",
+					Description: "List all files recursively.",
+				},
 			},
 		},
 		{
