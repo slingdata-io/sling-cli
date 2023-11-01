@@ -389,9 +389,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	case "discover":
 		name := cast.ToString(c.Vals["name"])
 		opt := connection.DiscoverOptions{
-			Schema: cast.ToString(c.Vals["schema"]),
-			Folder: cast.ToString(c.Vals["folder"]),
-			Filter: cast.ToString(c.Vals["filter"]),
+			Schema:    cast.ToString(c.Vals["schema"]),
+			Folder:    cast.ToString(c.Vals["folder"]),
+			Filter:    cast.ToString(c.Vals["filter"]),
+			Recursive: cast.ToBool(c.Vals["recursive"]),
 		}
 
 		streamNames, err := ec.Discover(name, opt)
