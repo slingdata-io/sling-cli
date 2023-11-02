@@ -161,11 +161,6 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 	} else if replicationCfg.Defaults.TargetOptions != nil {
 		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
 	}
-
-	// FIXME: temp fix for full-refresh+incremental
-	if stream.Mode == "full-refresh+incremental" {
-		stream.Mode = FullRefreshMode
-	}
 }
 
 // UnmarshalReplication converts a yaml file to a replication
