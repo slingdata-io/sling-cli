@@ -350,6 +350,8 @@ func (cfg *Config) Prepare() (err error) {
 		if err != nil {
 			return g.Error(err, "could not format target object name")
 		}
+	} else if !schemeType(cfg.Target.Conn).IsUnknown() && cast.ToString(cfg.Target.Data["url"]) == "" {
+		cfg.Target.Data["url"] = cfg.Target.Conn
 	}
 
 	if cfg.TgtConn.Type.IsUnknown() {
@@ -383,6 +385,8 @@ func (cfg *Config) Prepare() (err error) {
 	if schemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
+	} else if !schemeType(cfg.Source.Conn).IsUnknown() && cast.ToString(cfg.Source.Data["url"]) == "" {
+		cfg.Source.Data["url"] = cfg.Source.Conn
 	}
 
 	if cfg.SrcConn.Type.IsUnknown() {
