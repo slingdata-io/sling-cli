@@ -311,8 +311,8 @@ var cliConns = &g.CliSC{
 
 func init() {
 
-	if val := os.Getenv("SLING_SEND_TELEMETRY"); val != "" {
-		telemetry = cast.ToBool(val)
+	if val := os.Getenv("SLING_DISABLE_TELEMETRY"); val != "" {
+		telemetry = !cast.ToBool(val)
 	}
 
 	// collect examples
