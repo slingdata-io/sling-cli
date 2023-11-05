@@ -190,7 +190,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	// srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	srcAPIProvided := false // disable API sourcing
 	srcStreamProvided := cfg.Source.Stream != ""
 
 	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
