@@ -173,6 +173,12 @@ func runTask(cfg *sling.Config) (err error) {
 	// track usage
 	defer func() {
 		if task != nil {
+			if task.Config.Source.Options == nil {
+				task.Config.Source.Options = &sling.SourceOptions{}
+			}
+			if task.Config.Target.Options == nil {
+				task.Config.Target.Options = &sling.TargetOptions{}
+			}
 			inBytes, outBytes := task.GetBytes()
 			telemetryMap["task_type"] = task.Type
 			telemetryMap["task_mode"] = task.Config.Mode
