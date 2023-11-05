@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flarco/dbio"
+	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
 	"github.com/flarco/dbio/filesys"
 	"github.com/flarco/dbio/iop"
@@ -28,7 +29,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// check if referring to a SQL file
-	if schemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
+	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
 		sqlFromFile, err := getSQLText(cfg.Source.Stream)
 		if err != nil {
