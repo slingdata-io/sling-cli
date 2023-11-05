@@ -105,9 +105,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	// apply column casing
-	applyColumnCasing(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
-
 	targetTable := cfg.Target.Object
 	if cfg.Target.Options.TableTmp == "" {
 		tableTmp, err := database.ParseTableName(targetTable, tgtConn.GetType())
@@ -149,6 +146,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error(err, "could not pause streams to infer columns")
 		return
 	}
+
+	// apply column casing
+	applyColumnCasing(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer
