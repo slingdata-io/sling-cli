@@ -190,7 +190,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	// srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
+	srcAPIProvided := false // disable API sourcing
 	srcStreamProvided := cfg.Source.Stream != ""
 
 	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
@@ -287,20 +288,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	return Type, err
 }
 
-func schemeType(url string) dbio.Type {
-	if !strings.Contains(url, "://") {
-		return dbio.TypeUnknown
-	}
-
-	if strings.HasPrefix(url, "https") && strings.Contains(url, ".core.windows.") {
-		return dbio.TypeFileAzure
-	}
-
-	scheme := strings.Split(url, "://")[0]
-	t, _ := dbio.ValidateType(scheme)
-	return t
-}
-
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {
@@ -344,14 +331,21 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = cfg.TgtConn.Data
 	}
 
-	if schemeType(cfg.Target.Object).IsFile() {
+	if connection.SchemeType(cfg.Target.Object).IsFile() {
 		// format target name, especially veriable hostname
 		err = cfg.FormatTargetObjectName()
 		if err != nil {
 			return g.Error(err, "could not format target object name")
 		}
-	} else if !schemeType(cfg.Target.Conn).IsUnknown() && cast.ToString(cfg.Target.Data["url"]) == "" {
-		cfg.Target.Data["url"] = cfg.Target.Conn
+	} else if cast.ToString(cfg.Target.Data["url"]) == "" {
+		if !connection.SchemeType(cfg.Target.Conn).IsUnknown() {
+			cfg.Target.Data["url"] = cfg.Target.Conn
+		} else if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
+			// object is not url, but relative path
+			prefix := strings.TrimSuffix(cfg.TgtConn.URL(), "/")
+			path := "/" + strings.TrimPrefix(cfg.Target.Object, "/")
+			cfg.Target.Data["url"] = prefix + path
+		}
 	}
 
 	if cfg.TgtConn.Type.IsUnknown() {
@@ -382,11 +376,18 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = cfg.SrcConn.Data
 	}
 
-	if schemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
+	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
-	} else if !schemeType(cfg.Source.Conn).IsUnknown() && cast.ToString(cfg.Source.Data["url"]) == "" {
-		cfg.Source.Data["url"] = cfg.Source.Conn
+	} else if cast.ToString(cfg.Source.Data["url"]) == "" {
+		if !connection.SchemeType(cfg.Source.Conn).IsUnknown() {
+			cfg.Source.Data["url"] = cfg.Source.Conn
+		} else if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
+			// stream is not url, but relative path
+			prefix := strings.TrimSuffix(cfg.SrcConn.URL(), "/")
+			path := "/" + strings.TrimPrefix(cfg.Source.Stream, "/")
+			cfg.Source.Data["url"] = prefix + path
+		}
 	}
 
 	if cfg.SrcConn.Type.IsUnknown() {
@@ -455,7 +456,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		cfg.Target.Object = table.FullName()
 	}
 
-	if schemeType(cfg.Target.Object).IsFile() {
+	if connection.SchemeType(cfg.Target.Object).IsFile() {
 		cfg.Target.Data["url"] = cfg.Target.Object
 		cfg.TgtConn.Data["url"] = cfg.Target.Object
 	}
@@ -554,7 +555,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 	}
 
-	if t := schemeType(cfg.Target.Object); t.IsFile() {
+	if t := connection.SchemeType(cfg.Target.Object); t.IsFile() {
 		switch t {
 		case dbio.TypeFileS3:
 			m["target_bucket"] = cfg.Target.Data["bucket"]
