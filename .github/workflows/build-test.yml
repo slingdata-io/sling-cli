@@ -53,6 +53,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - uses: ouzi-dev/commit-status-updater@v2
+        with:
+          name: test
         
       - name: Configure Environment
         uses: flarco/envkey-action@main
@@ -69,3 +72,9 @@ jobs:
         run: |
           export DEBUG=''
           bash scripts/prep.gomod.sh && bash scripts/test.sh
+
+      - if: always()
+        uses: ouzi-dev/commit-status-updater@v2
+        with:
+          name: test
+          status: "${{ job.status }}"

@@ -332,7 +332,11 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	if connection.SchemeType(cfg.Target.Object).IsFile() {
-		// format target name, especially veriable hostname
+		if connection.SchemeType(cfg.Target.Object) == dbio.TypeFileLocal {
+			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, `\`, `/`) // windows path fix
+		}
+
+		// format target name, especially variable hostname
 		err = cfg.FormatTargetObjectName()
 		if err != nil {
 			return g.Error(err, "could not format target object name")
@@ -374,6 +378,10 @@ func (cfg *Config) Prepare() (err error) {
 			cfg.SrcConn.Data = g.M()
 		}
 		cfg.Source.Data = cfg.SrcConn.Data
+	}
+
+	if connection.SchemeType(cfg.Source.Stream) == dbio.TypeFileLocal {
+		cfg.Source.Stream = strings.ReplaceAll(cfg.Source.Stream, `\`, `/`) // windows path fix
 	}
 
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
