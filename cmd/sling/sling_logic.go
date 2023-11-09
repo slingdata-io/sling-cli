@@ -382,18 +382,24 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 	case "test":
 		name := cast.ToString(c.Vals["name"])
-		ok, err = ec.Test(name)
-		if err != nil {
-			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
-		} else if ok {
-			g.Info("success!") // successfully connected
-		}
-
 		if conn, ok := ec.GetConnEntry(name); ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
+
+		ok, err = ec.Test(name)
+		if err != nil {
+			telemetryMap["task_status"] = "error"
+			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+		} else if ok {
+			telemetryMap["task_status"] = "success"
+			g.Info("success!") // successfully connected
+		}
 	case "discover":
 		name := cast.ToString(c.Vals["name"])
+		if conn, ok := ec.GetConnEntry(name); ok {
+			telemetryMap["conn_type"] = conn.Connection.Type.String()
+		}
+
 		opt := connection.DiscoverOptions{
 			Schema:    cast.ToString(c.Vals["schema"]),
 			Folder:    cast.ToString(c.Vals["folder"]),
@@ -403,16 +409,14 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		streamNames, err := ec.Discover(name, opt)
 		if err != nil {
+			telemetryMap["task_status"] = "error"
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 
+		telemetryMap["task_status"] = "success"
 		g.Info("Found %d streams:", len(streamNames))
 		for _, sn := range streamNames {
 			println(g.F(" - %s", sn))
-		}
-
-		if conn, ok := ec.GetConnEntry(name); ok {
-			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
 
 	case "":
