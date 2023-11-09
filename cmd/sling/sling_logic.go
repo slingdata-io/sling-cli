@@ -344,6 +344,9 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	ef := env.LoadSlingEnvFile()
 	ec := connection.EnvConns{EnvFile: &ef}
 
+	telemetryMap["task_start_time"] = time.Now()
+	defer func() { telemetryMap["task_end_time"] = time.Now() }()
+
 	switch c.UsedSC() {
 	case "unset":
 		name := strings.ToUpper(cast.ToString(c.Vals["name"]))
