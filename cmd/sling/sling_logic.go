@@ -345,7 +345,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	ec := connection.EnvConns{EnvFile: &ef}
 
 	telemetryMap["task_start_time"] = time.Now()
-	defer func() { telemetryMap["task_end_time"] = time.Now() }()
+	defer func() {
+		telemetryMap["task_status"] = lo.Ternary(err != nil, "error", "success")
+		telemetryMap["task_end_time"] = time.Now()
+	}()
 
 	switch c.UsedSC() {
 	case "unset":
@@ -391,10 +394,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		ok, err = ec.Test(name)
 		if err != nil {
-			telemetryMap["task_status"] = "error"
 			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		} else if ok {
-			telemetryMap["task_status"] = "success"
 			g.Info("success!") // successfully connected
 		}
 	case "discover":
@@ -410,13 +411,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			Recursive: cast.ToBool(c.Vals["recursive"]),
 		}
 
-		streamNames, err := ec.Discover(name, opt)
+		var streamNames []string
+		streamNames, err = ec.Discover(name, opt)
 		if err != nil {
-			telemetryMap["task_status"] = "error"
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 
-		telemetryMap["task_status"] = "success"
 		g.Info("Found %d streams:", len(streamNames))
 		for _, sn := range streamNames {
 			println(g.F(" - %s", sn))
