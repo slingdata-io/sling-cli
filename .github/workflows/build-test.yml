@@ -54,7 +54,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: LouisBrunner/checks-action@v1.6.2
-        if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: test
