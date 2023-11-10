@@ -424,6 +424,11 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
+	// add md5 of options, so that wee reconnect for various options
+	// see variable `connPool`
+	cfg.SrcConn.Data["_source_options_md5"] = g.MD5(g.Marshal(cfg.Source.Options))
+	cfg.TgtConn.Data["_target_options_md5"] = g.MD5(g.Marshal(cfg.Target.Options))
+
 	// done
 	cfg.Prepared = true
 	return
