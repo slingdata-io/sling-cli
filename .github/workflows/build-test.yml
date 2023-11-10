@@ -53,11 +53,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: LouisBrunner/checks-action@v1.6.2
+      - uses: myrotvorets/set-commit-status-action@master
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: test
-          conclusion: ${{ job.status }}
+          status: pending
         
       - name: Configure Environment
         uses: flarco/envkey-action@main
@@ -75,11 +74,8 @@ jobs:
           export DEBUG=''
           bash scripts/prep.gomod.sh && bash scripts/test.sh
 
-      - uses: LouisBrunner/checks-action@v1.6.2
+      - uses: myrotvorets/set-commit-status-action@master
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: test
-          conclusion: ${{ job.status }}
-          output: |
-            {"summary":"${{ steps.test.outputs.summary }}"}
+          status: ${{ job.status }}
