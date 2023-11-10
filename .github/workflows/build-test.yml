@@ -53,9 +53,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: ouzi-dev/commit-status-updater@v2
+      - uses: myrotvorets/set-commit-status-action@master
         with:
-          name: test
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
+          status: pending
         
       - name: Configure Environment
         uses: flarco/envkey-action@main
@@ -73,8 +75,9 @@ jobs:
           export DEBUG=''
           bash scripts/prep.gomod.sh && bash scripts/test.sh
 
-      - if: always()
-        uses: ouzi-dev/commit-status-updater@v2
+      - uses: myrotvorets/set-commit-status-action@master
+        if: always()
         with:
-          name: test
-          status: "${{ job.status }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
+          status: ${{ job.status }}

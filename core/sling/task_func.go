@@ -168,7 +168,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		err = g.Error(err, "Could not execute SQL: "+sql)
 		return
 	}
-	g.Debug("inserted rows into `%s` from temp table `%s`", cfg.Target.Object, cfg.Target.Options.TableTmp)
+	g.Debug("inserted rows into %s from temp table %s", cfg.Target.Object, cfg.Target.Options.TableTmp)
 	return
 }
 

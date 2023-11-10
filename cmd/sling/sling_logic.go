@@ -250,6 +250,8 @@ func runTask(cfg *sling.Config) (err error) {
 }
 
 func runReplication(cfgPath string, selectStreams ...string) (err error) {
+	startTime := time.Now()
+
 	replication, err := sling.LoadReplicationConfig(cfgPath)
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
@@ -335,6 +337,10 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
 	}
 
+	println()
+	delta := time.Since(startTime)
+	g.Info("Sling Replication Completed in %s | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
+
 	return eG.Err()
 }
 
@@ -343,6 +349,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 	ef := env.LoadSlingEnvFile()
 	ec := connection.EnvConns{EnvFile: &ef}
+
+	telemetryMap["task_start_time"] = time.Now()
+	defer func() {
+		telemetryMap["task_status"] = lo.Ternary(err != nil, "error", "success")
+		telemetryMap["task_end_time"] = time.Now()
+	}()
 
 	switch c.UsedSC() {
 	case "unset":
@@ -382,18 +394,22 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 	case "test":
 		name := cast.ToString(c.Vals["name"])
+		if conn, ok := ec.GetConnEntry(name); ok {
+			telemetryMap["conn_type"] = conn.Connection.Type.String()
+		}
+
 		ok, err = ec.Test(name)
 		if err != nil {
 			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		} else if ok {
 			g.Info("success!") // successfully connected
 		}
-
+	case "discover":
+		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
-	case "discover":
-		name := cast.ToString(c.Vals["name"])
+
 		opt := connection.DiscoverOptions{
 			Schema:    cast.ToString(c.Vals["schema"]),
 			Folder:    cast.ToString(c.Vals["folder"]),
@@ -401,7 +417,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			Recursive: cast.ToBool(c.Vals["recursive"]),
 		}
 
-		streamNames, err := ec.Discover(name, opt)
+		var streamNames []string
+		streamNames, err = ec.Discover(name, opt)
 		if err != nil {
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
@@ -409,10 +426,6 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		g.Info("Found %d streams:", len(streamNames))
 		for _, sn := range streamNames {
 			println(g.F(" - %s", sn))
-		}
-
-		if conn, ok := ec.GetConnEntry(name); ok {
-			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
 
 	case "":
