@@ -339,7 +339,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 	println()
 	delta := time.Since(startTime)
-	g.Info("Sling Replication Completed [%s] | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
+	g.Info("Sling Replication Completed in %s | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
 
 	return eG.Err()
 }
