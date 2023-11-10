@@ -250,6 +250,8 @@ func runTask(cfg *sling.Config) (err error) {
 }
 
 func runReplication(cfgPath string, selectStreams ...string) (err error) {
+	startTime := time.Now()
+
 	replication, err := sling.LoadReplicationConfig(cfgPath)
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
@@ -334,6 +336,10 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
 	}
+
+	println()
+	delta := time.Since(startTime)
+	g.Info("Sling Replication Completed [%s] | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
 
 	return eG.Err()
 }
