@@ -53,9 +53,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: ouzi-dev/commit-status-updater@v2
+      - uses: LouisBrunner/checks-action@v1.6.2
+        if: always()
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           name: test
+          conclusion: pending
         
       - name: Configure Environment
         uses: flarco/envkey-action@main
@@ -73,8 +76,11 @@ jobs:
           export DEBUG=''
           bash scripts/prep.gomod.sh && bash scripts/test.sh
 
-      - if: always()
-        uses: ouzi-dev/commit-status-updater@v2
+      - uses: LouisBrunner/checks-action@v1.6.2
+        if: always()
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           name: test
-          status: "${{ job.status }}"
+          conclusion: ${{ job.status }}
+          output: |
+            {"summary":"${{ steps.test.outputs.summary }}"}
