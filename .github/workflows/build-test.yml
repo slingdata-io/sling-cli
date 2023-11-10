@@ -56,6 +56,7 @@ jobs:
       - uses: myrotvorets/set-commit-status-action@master
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
           status: pending
         
       - name: Configure Environment
@@ -78,4 +79,5 @@ jobs:
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
           status: ${{ job.status }}
