@@ -57,7 +57,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: test
-          conclusion: pending
+          conclusion: ${{ job.status }}
         
       - name: Configure Environment
         uses: flarco/envkey-action@main
