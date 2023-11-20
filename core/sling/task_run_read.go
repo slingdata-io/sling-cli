@@ -110,6 +110,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		srcConn.SetProp("start_time", t.Config.IncrementalVal)
 	}
 
+	// expand variables for custom SQL
+	fMap, err := t.Config.GetFormatMap()
+	if err != nil {
+		err = g.Error(err, "could not get format map for pre-sql")
+		return t.df, err
+	}
+	sTable.SQL = g.Rm(sTable.SQL, fMap)
+
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
 		err = g.Error(err, "Could not BulkExportFlow: "+sTable.Select())

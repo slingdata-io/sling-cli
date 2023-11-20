@@ -431,6 +431,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// done
 	cfg.Prepared = true
+	g.Warn(" ==> " + cfg.Target.Object)
 	return
 }
 
@@ -472,6 +473,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	if connection.SchemeType(cfg.Target.Object).IsFile() {
 		cfg.Target.Data["url"] = cfg.Target.Object
 		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	} else if cfg.TgtConn.Type.IsFile() {
+		url := cast.ToString(cfg.Target.Data["url"])
+		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
 	}
 
 	return nil
