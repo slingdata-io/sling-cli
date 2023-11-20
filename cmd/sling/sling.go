@@ -535,9 +535,7 @@ func errorHelper(err error) (helpString string) {
 		}
 
 		switch {
-		case strings.Contains(errString, "utf8"):
-			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
-		case strings.Contains(errString, "ascii"):
+		case strings.Contains(errString, "utf8") || strings.Contains(errString, "ascii"):
 			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
 		case strings.Contains(errString, "failed to verify certificate"):
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
