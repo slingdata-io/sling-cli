@@ -319,7 +319,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// set from shell env variable, if value starts with $ and found
 	for k, v := range cfg.Env {
-		cfg.Env[k] = os.ExpandEnv(cast.ToString(v))
+		cfg.Env[k] = os.ExpandEnv(v)
 	}
 
 	// Set Target
