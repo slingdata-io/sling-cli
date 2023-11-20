@@ -220,11 +220,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 		// set from shell env variable, if value starts with $ and found
 		for k, v := range config.Env {
-			vStr := cast.ToString(v)
-			if !strings.HasPrefix(vStr, "$") {
-				continue
-			}
-			config.Env[k] = os.ExpandEnv(vStr)
+			config.Env[k] = os.ExpandEnv(cast.ToString(v))
 		}
 	}
 
