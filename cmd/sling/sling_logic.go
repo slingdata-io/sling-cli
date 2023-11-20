@@ -78,7 +78,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "src-options":
 			payload := cast.ToString(v)
-			options, err := parseOptions(payload)
+			options, err := parsePayload(payload, true)
 			if err != nil {
 				return ok, g.Error(err, "invalid source options -> %s", payload)
 			}
@@ -105,7 +105,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "tgt-options":
 			payload := cast.ToString(v)
-			options, err := parseOptions(payload)
+			options, err := parsePayload(payload, true)
 			if err != nil {
 				return ok, g.Error(err, "invalid target options -> %s", payload)
 			}
@@ -113,6 +113,22 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			err = g.JSONConvert(options, &cfg.Target.Options)
 			if err != nil {
 				return ok, g.Error(err, "invalid target options -> %s", payload)
+			}
+		case "env":
+			payload := cast.ToString(v)
+			env, err := parsePayload(payload, false)
+			if err != nil {
+				return ok, g.Error(err, "invalid target options -> %s", payload)
+			}
+
+			err = g.JSONConvert(env, &cfg.Env)
+			if err != nil {
+				return ok, g.Error(err, "invalid env variable map -> %s", payload)
+			}
+
+			// set from shell env variable, if value starts with $ and found
+			for k, v := range cfg.Env {
+				cfg.Env[k] = os.ExpandEnv(cast.ToString(v))
 			}
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
@@ -440,7 +456,7 @@ func printUpdateAvailable() {
 	}
 }
 
-func parseOptions(payload string) (options map[string]any, err error) {
+func parsePayload(payload string, validate bool) (options map[string]any, err error) {
 	payload = strings.TrimSpace(payload)
 	if payload == "" {
 		return map[string]any{}, nil
@@ -459,9 +475,11 @@ func parseOptions(payload string) (options map[string]any, err error) {
 	}
 
 	// validate, check for typos
-	for k := range options {
-		if strings.Contains(k, ":") {
-			return options, g.Error("invalid key: %s. Try adding a space after the colon.", k)
+	if validate {
+		for k := range options {
+			if strings.Contains(k, ":") {
+				return options, g.Error("invalid key: %s. Try adding a space after the colon.", k)
+			}
 		}
 	}
 

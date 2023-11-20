@@ -109,6 +109,12 @@ var cliRun = &g.CliSC{
 			Description: "Output the stream to standard output (STDOUT).",
 		},
 		{
+			Name:        "env",
+			ShortName:   "",
+			Type:        "string",
+			Description: "in-line environment variable map to pass in (JSON or YAML).",
+		},
+		{
 			Name:        "mode",
 			ShortName:   "m",
 			Type:        "string",
