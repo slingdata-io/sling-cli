@@ -118,7 +118,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			payload := cast.ToString(v)
 			env, err := parsePayload(payload, false)
 			if err != nil {
-				return ok, g.Error(err, "invalid target options -> %s", payload)
+				return ok, g.Error(err, "invalid env variable map -> %s", payload)
 			}
 
 			err = g.JSONConvert(env, &cfg.Env)
