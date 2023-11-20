@@ -431,7 +431,6 @@ func (cfg *Config) Prepare() (err error) {
 
 	// done
 	cfg.Prepared = true
-	g.Warn(" ==> " + cfg.Target.Object)
 	return
 }
 
