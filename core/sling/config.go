@@ -317,6 +317,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Stream = "stdin"
 	}
 
+	// set from shell env variable, if value starts with $ and found
+	for k, v := range cfg.Env {
+		cfg.Env[k] = os.ExpandEnv(cast.ToString(v))
+	}
+
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {

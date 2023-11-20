@@ -217,11 +217,6 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 			err = g.Error(err, "could not parse 'env'")
 			return
 		}
-
-		// set from shell env variable, if value starts with $ and found
-		for k, v := range config.Env {
-			config.Env[k] = os.ExpandEnv(cast.ToString(v))
-		}
 	}
 
 	// parse streams

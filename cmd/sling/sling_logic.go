@@ -125,11 +125,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			if err != nil {
 				return ok, g.Error(err, "invalid env variable map -> %s", payload)
 			}
-
-			// set from shell env variable, if value starts with $ and found
-			for k, v := range cfg.Env {
-				cfg.Env[k] = os.ExpandEnv(cast.ToString(v))
-			}
 		case "stdout":
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
