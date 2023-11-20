@@ -317,6 +317,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Stream = "stdin"
 	}
 
+	// set from shell env variable, if value starts with $ and found
+	for k, v := range cfg.Env {
+		cfg.Env[k] = os.ExpandEnv(v)
+	}
+
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
@@ -472,6 +477,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	if connection.SchemeType(cfg.Target.Object).IsFile() {
 		cfg.Target.Data["url"] = cfg.Target.Object
 		cfg.TgtConn.Data["url"] = cfg.Target.Object
+	} else if cfg.TgtConn.Type.IsFile() {
+		url := cast.ToString(cfg.Target.Data["url"])
+		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
 	}
 
 	return nil

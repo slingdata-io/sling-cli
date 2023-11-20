@@ -533,7 +533,7 @@ func TestOptions(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		options, err := parseOptions(testCase.input)
+		options, err := parsePayload(testCase.input, true)
 		msg := g.F("with input: `%s`", testCase.input)
 		if testCase.shouldError {
 			assert.Error(t, err, msg)
