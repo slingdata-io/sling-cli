@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -494,7 +493,7 @@ func cliInit() int {
 			// eid := sentry.CaptureException(err)
 		}
 
-		if eh := errorHelper(err); eh != "" {
+		if eh := sling.ErrorHelper(err); eh != "" {
 			println()
 			println(color.MagentaString(eh))
 			println()
@@ -521,28 +520,6 @@ func getErrString(err error) (errString string) {
 		E, ok := err.(*g.ErrType)
 		if ok && E.Debug() != "" {
 			errString = E.Debug()
-		}
-	}
-	return
-}
-
-func errorHelper(err error) (helpString string) {
-	if err != nil {
-		errString := strings.ToLower(err.Error())
-		E, ok := err.(*g.ErrType)
-		if ok && E.Debug() != "" {
-			errString = strings.ToLower(E.Full())
-		}
-
-		switch {
-		case strings.Contains(errString, "utf8") || strings.Contains(errString, "ascii"):
-			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
-		case strings.Contains(errString, "failed to verify certificate"):
-			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
-		case strings.Contains(errString, "ssl is not enabled on the server"):
-			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
-		case strings.Contains(errString, "invalid input syntax for type"):
-			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher."
 		}
 	}
 	return
