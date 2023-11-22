@@ -66,7 +66,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
-				"update_key", cfg.Source.UpdateKey,
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
@@ -92,7 +92,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", cfg.Source.UpdateKey,
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"incremental_value", cfg.IncrementalVal,
 			)
 		}
