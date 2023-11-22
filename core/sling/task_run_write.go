@@ -42,7 +42,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 
 		// apply column casing
-		applyColumnCasing(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
+		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
 		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL())
 		if err != nil {
@@ -52,7 +52,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		cnt = df.Count()
 	} else if cfg.Options.StdOut {
 		// apply column casing
-		applyColumnCasing(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
+		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
 
 		options := map[string]string{"delimiter": ","}
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
@@ -148,7 +148,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// apply column casing
-	applyColumnCasing(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
+	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
 	sampleData := iop.NewDataset(df.Columns)
 	sampleData.Rows = df.Buffer

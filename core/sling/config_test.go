@@ -66,23 +66,23 @@ func TestColumnCasing(t *testing.T) {
 	targetCasing := TargetColumnCasing
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"})
-	applyColumnCasing(df, dbio.TypeDbSnowflake, &sourceCasing)
+	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &sourceCasing)
 	assert.Equal(t, "myCol", df.Columns[0].Name)
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"}, iop.Column{Name: "hey-hey"})
-	applyColumnCasing(df, dbio.TypeDbSnowflake, &snakeCasing)
+	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &snakeCasing)
 	assert.Equal(t, "MY_COL", df.Columns[0].Name)
 	assert.Equal(t, "HEY_HEY", df.Columns[1].Name)
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"})
-	applyColumnCasing(df, dbio.TypeDbSnowflake, &targetCasing)
+	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &targetCasing)
 	assert.Equal(t, "MYCOL", df.Columns[0].Name)
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "DHL OriginalTracking-Number"})
-	applyColumnCasing(df, dbio.TypeDbDuckDb, &targetCasing)
+	applyColumnCasingToDf(df, dbio.TypeDbDuckDb, &targetCasing)
 	assert.Equal(t, "dhl_originaltracking_number", df.Columns[0].Name)
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "DHL OriginalTracking-Number"})
-	applyColumnCasing(df, dbio.TypeDbDuckDb, &snakeCasing)
+	applyColumnCasingToDf(df, dbio.TypeDbDuckDb, &snakeCasing)
 	assert.Equal(t, "dhl_original_tracking_number", df.Columns[0].Name)
 }
