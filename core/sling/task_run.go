@@ -76,6 +76,9 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		g.DebugLow("type is %s", t.Type)
+		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
+		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
+
 		switch t.Type {
 		case DbSQL:
 			t.Err = t.runDbSQL()
