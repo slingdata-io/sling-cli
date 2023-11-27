@@ -290,6 +290,14 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 				}
 				columns = append(columns, col)
 			}
+		case map[any]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: cast.ToString(colName),
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
 		case []map[string]any:
 			for _, colItem := range colsCasted {
 				col := iop.Column{}
@@ -305,7 +313,7 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 		case iop.Columns:
 			columns = colsCasted
 		default:
-			g.Warn("Config.Source.Options.Columns not handled")
+			g.Warn("Config.Source.Options.Columns not handled: %T", t.Config.Source.Options.Columns)
 		}
 
 		// set as string so that StreamProcessor parses it
