@@ -183,9 +183,14 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 		return
 	}
 
+	tgtUpdateKey := cfg.Source.UpdateKey
+	if cc := cfg.Target.Options.ColumnCasing; cc != nil && *cc != SourceColumnCasing {
+		tgtUpdateKey = applyColumnCasing(tgtUpdateKey, *cc == SnakeColumnCasing, tgtConn.GetType())
+	}
+
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		tgtConn.Quote(cfg.Source.UpdateKey),
+		tgtConn.Quote(tgtUpdateKey),
 		table.FDQN(),
 	)
 
@@ -197,7 +202,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 			// set val to blank for full load
 			return "", nil
 		}
-		err = g.Error(err, "could not get max value for "+cfg.Source.UpdateKey)
+		err = g.Error(err, "could not get max value for "+tgtUpdateKey)
 		return
 	}
 	if len(data.Rows) == 0 {

@@ -290,6 +290,14 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 				}
 				columns = append(columns, col)
 			}
+		case map[any]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: cast.ToString(colName),
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
 		case []map[string]any:
 			for _, colItem := range colsCasted {
 				col := iop.Column{}
@@ -305,7 +313,7 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 		case iop.Columns:
 			columns = colsCasted
 		default:
-			g.Warn("Config.Source.Options.Columns not handled")
+			g.Warn("Config.Source.Options.Columns not handled: %T", t.Config.Source.Options.Columns)
 		}
 
 		// set as string so that StreamProcessor parses it
@@ -321,41 +329,63 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
 
 // apply column casing
-func applyColumnCasing(df *iop.Dataflow, connType dbio.Type, casing *ColumnCasing) {
+func applyColumnCasingToDf(df *iop.Dataflow, connType dbio.Type, casing *ColumnCasing) {
 
 	if casing == nil || *casing == SourceColumnCasing {
 		return
 	}
 
-	applyCase := func(name string, toSnake bool) string {
-		// convert to snake case
-		if toSnake {
-			name = matchAllCap.ReplaceAllString(name, "${1}_${2}")
-		}
-
-		// clean up other weird chars
-		name = iop.CleanName(name)
-
-		// lower case for target file system
-		if connType.DBNameUpperCase() {
-			return strings.ToUpper(name)
-		}
-		return strings.ToLower(name)
-	}
-
 	// convert to target system casing
 	for i := range df.Columns {
-		df.Columns[i].Name = applyCase(df.Columns[i].Name, *casing == SnakeColumnCasing)
+		df.Columns[i].Name = applyColumnCasing(df.Columns[i].Name, *casing == SnakeColumnCasing, connType)
 	}
 
 	// propagate names
 	for _, ds := range df.Streams {
 		for i := range ds.Columns {
-			ds.Columns[i].Name = applyCase(ds.Columns[i].Name, *casing == SnakeColumnCasing)
+			ds.Columns[i].Name = applyColumnCasing(ds.Columns[i].Name, *casing == SnakeColumnCasing, connType)
 		}
 
 		for i := range ds.CurrentBatch.Columns {
-			ds.CurrentBatch.Columns[i].Name = applyCase(ds.CurrentBatch.Columns[i].Name, *casing == SnakeColumnCasing)
+			ds.CurrentBatch.Columns[i].Name = applyColumnCasing(ds.CurrentBatch.Columns[i].Name, *casing == SnakeColumnCasing, connType)
 		}
 	}
+}
+
+func applyColumnCasing(name string, toSnake bool, connType dbio.Type) string {
+	// convert to snake case
+	if toSnake {
+		name = matchAllCap.ReplaceAllString(name, "${1}_${2}")
+	}
+
+	// clean up other weird chars
+	name = iop.CleanName(name)
+
+	// lower case for target file system
+	if connType.DBNameUpperCase() {
+		return strings.ToUpper(name)
+	}
+	return strings.ToLower(name)
+}
+
+func ErrorHelper(err error) (helpString string) {
+	if err != nil {
+		errString := strings.ToLower(err.Error())
+		E, ok := err.(*g.ErrType)
+		if ok && E.Debug() != "" {
+			errString = strings.ToLower(E.Full())
+		}
+
+		switch {
+		case strings.Contains(errString, "utf8") || strings.Contains(errString, "ascii"):
+			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
+		case strings.Contains(errString, "failed to verify certificate"):
+			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
+		case strings.Contains(errString, "ssl is not enabled on the server"):
+			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
+		case strings.Contains(errString, "invalid input syntax for type") || (strings.Contains(errString, " value ") && strings.Contains(errString, "is not recognized")):
+			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
+		}
+	}
+	return
 }
