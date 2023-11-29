@@ -196,8 +196,11 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	data, err := tgtConn.Query(sql)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "exist") ||
-			strings.Contains(strings.ToLower(err.Error()), "not found") {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "exist") ||
+			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "no such table") ||
+			strings.Contains(errMsg, "invalid") {
 			// table does not exists, will be create later
 			// set val to blank for full load
 			return "", nil
