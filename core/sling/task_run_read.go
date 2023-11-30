@@ -57,6 +57,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		// default true value
 		incrementalWhereCond := "1=1"
 
+		// get source columns to match update-key
+		// in case column casing needs adjustment
+		sourceCols, _ := pullSourceTableColumns(t.Config, srcConn, sTable.FullName())
+		if updateCol := sourceCols.GetColumn(cfg.Source.UpdateKey); updateCol.Name != "" {
+			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
+		}
+
 		// select only records that have been modified after last max value
 		if cfg.IncrementalVal != "" {
 			// if primary key is defined, use greater than or equal
@@ -66,7 +73,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
@@ -92,7 +99,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"incremental_value", cfg.IncrementalVal,
 			)
 		}

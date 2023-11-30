@@ -87,6 +87,15 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	return true, nil
 }
 
+func pullSourceTableColumns(cfg *Config, srcConn database.Connection, table string) (cols iop.Columns, err error) {
+	cfg.Source.columns, err = srcConn.GetColumns(table)
+	if err != nil {
+		err = g.Error(err, "could not get column list for "+table)
+		return
+	}
+	return cfg.Source.columns, nil
+}
+
 func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
 	if len(cfg.Target.columns) == 0 || force {
 		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Object)
@@ -188,16 +197,26 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 		tgtUpdateKey = applyColumnCasing(tgtUpdateKey, *cc == SnakeColumnCasing, tgtConn.GetType())
 	}
 
+	// get target columns to match update-key
+	// in case column casing needs adjustment
+	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
+	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol.Name != "" {
+		tgtUpdateKey = updateCol.Name // overwrite with correct casing
+	}
+
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		tgtConn.Quote(tgtUpdateKey),
+		tgtConn.Quote(tgtUpdateKey, false),
 		table.FDQN(),
 	)
 
 	data, err := tgtConn.Query(sql)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "exist") ||
-			strings.Contains(strings.ToLower(err.Error()), "not found") {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "exist") ||
+			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "no such table") ||
+			strings.Contains(errMsg, "invalid object") {
 			// table does not exists, will be create later
 			// set val to blank for full load
 			return "", nil

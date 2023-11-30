@@ -660,6 +660,8 @@ type Source struct {
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+
+	columns iop.Columns `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
