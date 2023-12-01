@@ -790,7 +790,7 @@ var TargetFileOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_BYTES")),
 		0,
 	),
-	Format:         filesys.FileTypeCsv,
+	Format:         filesys.FileTypeNone,
 	UseBulk:        g.Bool(true),
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
@@ -885,7 +885,7 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
-	if string(o.Format) == "" {
+	if o.Format == filesys.FileTypeNone {
 		o.Format = targetOptions.Format
 	}
 	if o.Concurrency == 0 {
