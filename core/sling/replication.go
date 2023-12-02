@@ -40,6 +40,24 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 	return rd.streamsOrdered
 }
 
+// HasStream returns true if the stream name exists
+func (rd ReplicationConfig) HasStream(name string) bool {
+
+	normalize := func(n string) string {
+		n = strings.ReplaceAll(n, "`", "")
+		n = strings.ReplaceAll(n, `"`, "")
+		n = strings.ToLower(n)
+		return n
+	}
+
+	for streamName := range rd.Streams {
+		if normalize(streamName) == normalize(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
@@ -95,6 +113,10 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 					Schema:  schemaT.Schema,
 					Name:    cast.ToString(row[0]),
 					Dialect: conn.GetType(),
+				}
+
+				if rd.HasStream(table.FullName()) {
+					continue
 				}
 
 				// add to stream map
