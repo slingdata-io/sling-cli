@@ -1,0 +1,19 @@
+source: postgres
+target: aws_s3
+
+defaults:
+  mode: full-refresh
+  object: 'test1k/{YEAR}'
+  target_options:
+    file_max_rows: 1000000 # multiple files
+    compression: gzip
+
+streams:
+  test1:
+    sql: |
+      select * from public.test1k
+      where date_trunc('year', create_date) = '{YEAR}-01-01'
+    
+env:
+  # pass in env vars, e.g. YEAR=2005
+  YEAR: $YEAR
