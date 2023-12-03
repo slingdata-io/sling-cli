@@ -7,8 +7,8 @@ require (
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.13.0
-	github.com/flarco/dbio v0.4.36
-	github.com/flarco/g v0.1.65
+	github.com/flarco/dbio v0.4.37
+	github.com/flarco/g v0.1.66
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/google/uuid v1.3.0
 	github.com/integrii/flaggy v1.5.2
@@ -129,6 +129,7 @@ require (
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/kr/fs v0.1.0 // indirect
+	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011 // indirect
 	github.com/lib/pq v1.10.2 // indirect
 	github.com/linkedin/goavro/v2 v2.12.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
