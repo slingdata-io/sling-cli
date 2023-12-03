@@ -221,7 +221,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
-			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
+			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		}
 	} else if cfg.Mode == SnapshotMode {

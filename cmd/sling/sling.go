@@ -48,20 +48,20 @@ var sentryOptions = sentry.ClientOptions{
 
 var cliRun = &g.CliSC{
 	Name:                  "run",
-	Description:           "Execute an ad-hoc task",
+	Description:           "Execute a run",
 	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
 	Flags: []g.Flag{
 		{
 			Name:        "config",
 			ShortName:   "c",
 			Type:        "string",
-			Description: "The config string or file to use (JSON or YAML).",
+			Description: "The task config string or file to use (JSON or YAML).",
 		},
 		{
 			Name:        "replication",
 			ShortName:   "r",
 			Type:        "string",
-			Description: "The replication config file to use to run multiple tasks (YAML).\n",
+			Description: "The replication config file to use (JSON or YAML).\n",
 		},
 		{
 			Name:        "src-conn",
@@ -308,7 +308,7 @@ var cliConns = &g.CliSC{
 					Name:        "key=value properties...",
 					ShortName:   "",
 					Type:        "string",
-					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#local-connections",
+					Description: "The key=value properties to set. See https://docs.slingdata.io/sling-cli/environment#set-connections",
 				},
 			},
 		},
