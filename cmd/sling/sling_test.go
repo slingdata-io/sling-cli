@@ -577,7 +577,7 @@ func TestCfgPath(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testOneTask(t *testing.T) {
+func Test1Task(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
 	config := &sling.Config{}
 	cfgStr := `
@@ -603,7 +603,7 @@ options:
 	}
 }
 
-func TestOneReplication(t *testing.T) {
+func Test1Replication(t *testing.T) {
 	sling.ShowProgress = false
 	os.Setenv("_DEBUG", "LOW")
 	os.Setenv("SLING_CLI", "TRUE")
