@@ -141,7 +141,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
-	Columns       []string       `json:"columns,omitempty" yaml:"columns,flow,omitempty"`
+	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`

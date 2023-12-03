@@ -308,7 +308,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			Source: sling.Source{
 				Conn:        replication.Source,
 				Stream:      name,
-				Columns:     stream.Columns,
+				Select:      stream.Select,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
 			},

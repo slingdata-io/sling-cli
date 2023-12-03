@@ -46,8 +46,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if len(cfg.Source.Columns) > 0 {
-		fields := lo.Map(cfg.Source.Columns, func(f string, i int) string {
+	if len(cfg.Source.Select) > 0 {
+		fields := lo.Map(cfg.Source.Select, func(f string, i int) string {
 			return f
 		})
 		fieldsStr = strings.Join(fields, ", ")
@@ -142,7 +142,7 @@ func (t *TaskExecution) ReadFromAPI(cfg *Config, client *airbyte.Airbyte) (df *i
 
 	if cfg.SrcConn.Type.IsAirbyte() {
 		config := airbyte.StreamConfig{
-			Columns:   cfg.Source.Columns,
+			Columns:   cfg.Source.Select,
 			StartDate: cfg.IncrementalVal,
 		}
 		stream, err = client.Stream(cfg.Source.Stream, config)
@@ -183,7 +183,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Columns, Limit: cfg.Source.Limit()}
+		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Select, Limit: cfg.Source.Limit()}
 		df, err = fs.ReadDataflow(cfg.SrcConn.URL(), fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
