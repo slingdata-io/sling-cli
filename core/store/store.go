@@ -7,6 +7,7 @@ import (
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/spf13/cast"
 	"gorm.io/gorm/clause"
 )
 
@@ -96,6 +97,10 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		exec.Err = g.String(t.Err.Error())
 	}
 
+	if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
+		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))
+	}
+
 	return &exec
 }
 
@@ -115,20 +120,21 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 			Replication: *t.Replication,
 		}
 
+		payload := replication.Replication.OriginalCfg()
+
 		// clean up
 		if strings.Contains(replication.Replication.Source, "://") {
-			replication.Replication.Source = strings.Split(replication.Replication.Source, "://")[0] + "://"
+			cleanSource := strings.Split(replication.Replication.Source, "://")[0] + "://"
+			payload = strings.ReplaceAll(payload, replication.Replication.Source, cleanSource)
 		}
 
 		if strings.Contains(replication.Replication.Target, "://") {
-			replication.Replication.Target = strings.Split(replication.Replication.Target, "://")[0] + "://"
+			cleanTarget := strings.Split(replication.Replication.Target, "://")[0] + "://"
+			payload = strings.ReplaceAll(payload, replication.Replication.Target, cleanTarget)
 		}
 
-		delete(replication.Replication.Env, "SLING_PROJECT_ID")
-		delete(replication.Replication.Env, "SLING_CONFIG_PATH")
-
 		// set md5
-		replication.MD5 = g.MD5(g.Marshal(replication.Replication))
+		replication.MD5 = g.MD5(payload)
 	}
 
 	// clean up

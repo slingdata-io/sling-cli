@@ -658,6 +658,7 @@ func (cfg Config) Value() (driver.Value, error) {
 	out := string(jBytes)
 	out = strings.ReplaceAll(out, `,"_src_conn":{}`, ``)
 	out = strings.ReplaceAll(out, `,"_tgt_conn":{}`, ``)
+	out = strings.ReplaceAll(out, `,"primary_key":null`, ``)
 
 	return []byte(out), err
 }

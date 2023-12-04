@@ -85,6 +85,8 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		t.PBar = NewPBar(time.Second)
 		ticker := time.NewTicker(1 * time.Second)
 		go func() {
+			defer ticker.Stop()
+
 			for {
 				select {
 				case <-ticker.C:
@@ -97,6 +99,9 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("rowRate", g.F("%s r/s", humanize.Comma(rowRate)))
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
+
+					// update rows every 1sec
+					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
 					if t.PBar.finished || t.df.Err() != nil {

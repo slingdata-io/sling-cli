@@ -8,7 +8,6 @@ import (
 
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -23,6 +22,12 @@ type ReplicationConfig struct {
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
 
 	streamsOrdered []string
+	originalCfg    string
+}
+
+// OriginalCfg returns original config
+func (rd *ReplicationConfig) OriginalCfg() string {
+	return rd.originalCfg
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -32,7 +37,16 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
-	return g.JSONValuer(rd, "{}")
+	if rd.OriginalCfg() != "" {
+		return []byte(rd.OriginalCfg()), nil
+	}
+
+	jBytes, err := json.Marshal(rd)
+	if err != nil {
+		return nil, g.Error(err, "could not marshal")
+	}
+
+	return jBytes, err
 }
 
 // StreamsOrdered returns the stream names as ordered in the YAML file
@@ -292,17 +306,13 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	return
 }
 
-func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns iop.Columns) {
+func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[string]any) {
+	columns = map[string]any{}
 	for _, sourceOptionsNode := range sourceOptionsNodes {
 		if cast.ToString(sourceOptionsNode.Key) == "columns" {
 			for _, columnNode := range sourceOptionsNode.Value.(yaml.MapSlice) {
-				col := iop.Column{
-					Name: cast.ToString(columnNode.Key),
-					Type: iop.ColumnType(cast.ToString(columnNode.Value)),
-				}
-				columns = append(columns, col)
+				columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
 			}
-			columns = iop.NewColumns(columns...)
 		}
 	}
 
@@ -326,6 +336,8 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 	}
+
+	config.originalCfg = g.Marshal(config)
 	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return
