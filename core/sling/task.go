@@ -14,6 +14,9 @@ import (
 	"github.com/spf13/cast"
 )
 
+// Set in the store/store.go file for history keeping
+var StoreInsert, StoreUpdate func(t *TaskExecution)
+
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
 	ExecID    int64      `json:"exec_id"`
@@ -32,6 +35,7 @@ type TaskExecution struct {
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
 
+	Replication    *ReplicationConfig
 	ProgressHist   []string     `json:"progress_hist"`
 	PBar           *ProgressBar `json:"-"`
 	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning

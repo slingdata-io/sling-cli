@@ -326,6 +326,7 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 	}
+	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return
 }

@@ -2,7 +2,7 @@ package sling
 
 import (
 	"database/sql/driver"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -135,7 +135,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 			return g.Error(err, "Unable to open cfgStr: "+cfgStr)
 		}
 
-		cfgBytes, err = ioutil.ReadAll(cfgFile)
+		cfgBytes, err = io.ReadAll(cfgFile)
 		if err != nil {
 			return g.Error(err, "could not read from cfgFile")
 		}
@@ -164,6 +164,11 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.TgtConn.Data == nil {
 		cfg.TgtConn.Data = g.M()
+	}
+
+	// add config path
+	if _, err := os.Stat(cfgStr); err == nil && !cfg.ReplicationMode {
+		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
 	return nil
@@ -318,6 +323,10 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set from shell env variable, if value starts with $ and found
+	if cfg.Env == nil {
+		cfg.Env = map[string]string{}
+	}
+
 	for k, v := range cfg.Env {
 		cfg.Env[k] = os.ExpandEnv(v)
 	}
