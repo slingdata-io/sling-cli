@@ -2,7 +2,7 @@ package sling
 
 import (
 	"database/sql/driver"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -135,7 +135,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 			return g.Error(err, "Unable to open cfgStr: "+cfgStr)
 		}
 
-		cfgBytes, err = ioutil.ReadAll(cfgFile)
+		cfgBytes, err = io.ReadAll(cfgFile)
 		if err != nil {
 			return g.Error(err, "could not read from cfgFile")
 		}
@@ -164,6 +164,11 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	if cfg.TgtConn.Data == nil {
 		cfg.TgtConn.Data = g.M()
+	}
+
+	// add config path
+	if _, err := os.Stat(cfgStr); err == nil && !cfg.ReplicationMode {
+		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
 	return nil
@@ -221,7 +226,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
-			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/configuration#mode")
+			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		}
 	} else if cfg.Mode == SnapshotMode {
@@ -318,6 +323,10 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set from shell env variable, if value starts with $ and found
+	if cfg.Env == nil {
+		cfg.Env = map[string]string{}
+	}
+
 	for k, v := range cfg.Env {
 		cfg.Env[k] = os.ExpandEnv(v)
 	}
@@ -641,7 +650,17 @@ func (cfg *Config) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (cfg Config) Value() (driver.Value, error) {
-	return g.JSONValuer(cfg, "{}")
+	jBytes, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, g.Error(err, "could not marshal")
+	}
+
+	out := string(jBytes)
+	out = strings.ReplaceAll(out, `,"_src_conn":{}`, ``)
+	out = strings.ReplaceAll(out, `,"_tgt_conn":{}`, ``)
+	out = strings.ReplaceAll(out, `,"primary_key":null`, ``)
+
+	return []byte(out), err
 }
 
 // ConfigOptions are configuration options
@@ -655,7 +674,7 @@ type ConfigOptions struct {
 type Source struct {
 	Conn        string                 `json:"conn" yaml:"conn"`
 	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Columns     []string               `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select columns
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
@@ -790,7 +809,7 @@ var TargetFileOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_BYTES")),
 		0,
 	),
-	Format:         filesys.FileTypeCsv,
+	Format:         filesys.FileTypeNone,
 	UseBulk:        g.Bool(true),
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
@@ -885,7 +904,7 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
-	if string(o.Format) == "" {
+	if o.Format == filesys.FileTypeNone {
 		o.Format = targetOptions.Format
 	}
 	if o.Concurrency == 0 {

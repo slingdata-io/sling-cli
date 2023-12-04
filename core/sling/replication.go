@@ -8,7 +8,6 @@ import (
 
 	"github.com/flarco/dbio/connection"
 	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -23,6 +22,12 @@ type ReplicationConfig struct {
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
 
 	streamsOrdered []string
+	originalCfg    string
+}
+
+// OriginalCfg returns original config
+func (rd *ReplicationConfig) OriginalCfg() string {
+	return rd.originalCfg
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -32,12 +37,39 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
-	return g.JSONValuer(rd, "{}")
+	if rd.OriginalCfg() != "" {
+		return []byte(rd.OriginalCfg()), nil
+	}
+
+	jBytes, err := json.Marshal(rd)
+	if err != nil {
+		return nil, g.Error(err, "could not marshal")
+	}
+
+	return jBytes, err
 }
 
 // StreamsOrdered returns the stream names as ordered in the YAML file
 func (rd ReplicationConfig) StreamsOrdered() []string {
 	return rd.streamsOrdered
+}
+
+// HasStream returns true if the stream name exists
+func (rd ReplicationConfig) HasStream(name string) bool {
+
+	normalize := func(n string) string {
+		n = strings.ReplaceAll(n, "`", "")
+		n = strings.ReplaceAll(n, `"`, "")
+		n = strings.ToLower(n)
+		return n
+	}
+
+	for streamName := range rd.Streams {
+		if normalize(streamName) == normalize(name) {
+			return true
+		}
+	}
+	return false
 }
 
 // ProcessWildcards process the streams using wildcards
@@ -97,6 +129,10 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 					Dialect: conn.GetType(),
 				}
 
+				if rd.HasStream(table.FullName()) {
+					continue
+				}
+
 				// add to stream map
 				newCfg := ReplicationStreamConfig{}
 				g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
@@ -119,7 +155,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
-	Columns       []string       `json:"columns,omitempty" yaml:"columns,flow,omitempty"`
+	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
@@ -270,17 +306,13 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	return
 }
 
-func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns iop.Columns) {
+func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[string]any) {
+	columns = map[string]any{}
 	for _, sourceOptionsNode := range sourceOptionsNodes {
 		if cast.ToString(sourceOptionsNode.Key) == "columns" {
 			for _, columnNode := range sourceOptionsNode.Value.(yaml.MapSlice) {
-				col := iop.Column{
-					Name: cast.ToString(columnNode.Key),
-					Type: iop.ColumnType(cast.ToString(columnNode.Value)),
-				}
-				columns = append(columns, col)
+				columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
 			}
-			columns = iop.NewColumns(columns...)
 		}
 	}
 
@@ -304,6 +336,9 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 	}
+
+	config.originalCfg = g.Marshal(config)
+	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return
 }

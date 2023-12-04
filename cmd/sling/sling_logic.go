@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/flarco/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -36,6 +39,9 @@ func init() {
 	if masterServerURL == "" {
 		masterServerURL = "https://api.slingdata.io"
 	}
+
+	// init sqlite
+	store.InitDB()
 }
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -170,7 +176,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	// run task
 	telemetryMap["run_mode"] = "task"
-	err = runTask(cfg)
+	err = runTask(cfg, nil)
 	if err != nil {
 		return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
 	}
@@ -178,7 +184,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	return ok, nil
 }
 
-func runTask(cfg *sling.Config) (err error) {
+func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
 	var task *sling.TaskExecution
 
 	// track usage
@@ -242,7 +248,16 @@ func runTask(cfg *sling.Config) (err error) {
 		return
 	}
 
+	// try to get project_id
+	setProjectID(cfg.Env["SLING_CONFIG_PATH"])
+	cfg.Env["SLING_PROJECT_ID"] = projectID
+
 	task = sling.NewTask(0, cfg)
+	task.Replication = replication
+
+	// insert into store for history keeping
+	sling.StoreInsert(task)
+
 	if task.Err != nil {
 		err = g.Error(task.Err)
 		return
@@ -308,7 +323,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			Source: sling.Source{
 				Conn:        replication.Source,
 				Stream:      name,
-				Columns:     stream.Columns,
+				Select:      stream.Select,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
 			},
@@ -339,7 +354,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 
 		telemetryMap["run_mode"] = "replication"
-		err = runTask(&cfg)
+		err = runTask(&cfg, &replication)
 		if err != nil {
 			err = g.Error(err, "error for stream `%s`", name)
 			g.LogError(err)
@@ -479,4 +494,23 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 	}
 
 	return options, nil
+}
+
+// setProjectID attempts to get the first sha of the repo
+func setProjectID(cfgPath string) {
+	if cfgPath == "" {
+		return
+	}
+
+	cfgPath, _ = filepath.Abs(cfgPath)
+
+	if fs, err := os.Stat(cfgPath); err == nil && !fs.IsDir() {
+		// get first sha
+		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+		cmd.Dir = filepath.Dir(cfgPath)
+		out, err := cmd.Output()
+		if err == nil {
+			projectID = strings.TrimSpace(string(out))
+		}
+	}
 }

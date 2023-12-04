@@ -75,6 +75,9 @@ func (t *TaskExecution) Execute() error {
 			return
 		}
 
+		// update into store
+		StoreUpdate(t)
+
 		g.DebugLow("type is %s", t.Type)
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
@@ -98,6 +101,9 @@ func (t *TaskExecution) Execute() error {
 			t.SetProgress("task execution configuration is invalid")
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
 		}
+
+		// update into store
+		StoreUpdate(t)
 	}()
 
 	select {
@@ -133,6 +139,9 @@ func (t *TaskExecution) Execute() error {
 
 	now2 := time.Now()
 	t.EndTime = &now2
+
+	// update into store
+	StoreUpdate(t)
 
 	return t.Err
 }

@@ -14,6 +14,9 @@ import (
 	"github.com/spf13/cast"
 )
 
+// Set in the store/store.go file for history keeping
+var StoreInsert, StoreUpdate func(t *TaskExecution)
+
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
 	ExecID    int64      `json:"exec_id"`
@@ -32,6 +35,7 @@ type TaskExecution struct {
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
 
+	Replication    *ReplicationConfig
 	ProgressHist   []string     `json:"progress_hist"`
 	PBar           *ProgressBar `json:"-"`
 	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning
@@ -81,6 +85,8 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		t.PBar = NewPBar(time.Second)
 		ticker := time.NewTicker(1 * time.Second)
 		go func() {
+			defer ticker.Stop()
+
 			for {
 				select {
 				case <-ticker.C:
@@ -93,6 +99,9 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("rowRate", g.F("%s r/s", humanize.Comma(rowRate)))
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
+
+					// update rows every 1sec
+					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
 					if t.PBar.finished || t.df.Err() != nil {
@@ -378,13 +387,13 @@ func ErrorHelper(err error) (helpString string) {
 
 		switch {
 		case strings.Contains(errString, "utf8") || strings.Contains(errString, "ascii"):
-			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
+			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/run/configuration#source"
 		case strings.Contains(errString, "failed to verify certificate"):
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case strings.Contains(errString, "ssl is not enabled on the server"):
 			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
 		case strings.Contains(errString, "invalid input syntax for type") || (strings.Contains(errString, " value ") && strings.Contains(errString, "is not recognized")):
-			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/running-tasks#advanced-options"
+			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/run/configuration#source"
 		}
 	}
 	return
