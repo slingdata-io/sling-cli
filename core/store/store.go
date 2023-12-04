@@ -100,6 +100,9 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 }
 
 func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replication) {
+	if t.Config == nil {
+		return
+	}
 
 	task = &Task{
 		Type: t.Type,
@@ -142,6 +145,8 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 
 	task.Task.SrcConn = connection.Connection{}
 	task.Task.TgtConn = connection.Connection{}
+
+	task.Task.Prepared = false
 
 	delete(task.Task.Env, "SLING_PROJECT_ID")
 	delete(task.Task.Env, "SLING_CONFIG_PATH")

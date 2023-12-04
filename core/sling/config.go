@@ -650,7 +650,16 @@ func (cfg *Config) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (cfg Config) Value() (driver.Value, error) {
-	return g.JSONValuer(cfg, "{}")
+	jBytes, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, g.Error(err, "could not marshal")
+	}
+
+	out := string(jBytes)
+	out = strings.ReplaceAll(out, `,"_src_conn":{}`, ``)
+	out = strings.ReplaceAll(out, `,"_tgt_conn":{}`, ``)
+
+	return []byte(out), err
 }
 
 // ConfigOptions are configuration options
