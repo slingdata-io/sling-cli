@@ -154,6 +154,10 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 
 // Store saves the task into the local sqlite
 func StoreInsert(t *sling.TaskExecution) {
+	if Db == nil {
+		return
+	}
+
 	// make execution
 	exec := ToExecutionObject(t)
 
@@ -189,6 +193,10 @@ func StoreInsert(t *sling.TaskExecution) {
 
 // Store saves the task into the local sqlite
 func StoreUpdate(t *sling.TaskExecution) {
+	if Db == nil {
+		return
+	}
+
 	exec := &Execution{ID: t.ExecID}
 	err := Db.First(exec).Error
 	if err != nil {
