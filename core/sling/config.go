@@ -672,7 +672,7 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn        string                 `json:"conn" yaml:"conn"`
+	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select columns
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
@@ -708,7 +708,7 @@ func (s *Source) PrimaryKey() []string {
 
 // Target is a target of data
 type Target struct {
-	Conn    string                 `json:"conn" yaml:"conn"`
+	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
 	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
