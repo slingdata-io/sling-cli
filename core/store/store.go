@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Execution struct {
 	ExitCode  int              `json:"exit_code"`
 	Output    string           `json:"output" sql:"default ''"`
 	Rows      uint64           `json:"rows"`
+	Pid       int              `json:"pid"`
 
 	// ProjectID represents the project or the repository.
 	// If .git exists, grab first commit with `git rev-list --max-parents=0 HEAD`.
@@ -91,6 +93,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
+		Pid:       os.Getpid(),
 	}
 
 	if t.Err != nil {
