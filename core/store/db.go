@@ -6,6 +6,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var (
@@ -31,7 +32,9 @@ func InitDB() {
 
 	g.LogError(err, "Could not initialize sqlite connection: %s", dbURL)
 
-	Db, err = Conn.GetGormConn(&gorm.Config{})
+	Db, err = Conn.GetGormConn(&gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	g.LogError(err, "Could not connect to sqlite database: %s", dbURL)
 
 	allTables := []interface{}{
