@@ -253,6 +253,8 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 			err = g.Error(err, "could not parse 'env'")
 			return
 		}
+	} else {
+		config.Env = map[string]any{}
 	}
 
 	// parse streams
@@ -335,6 +337,7 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 	config, err = UnmarshalReplication(string(cfgBytes))
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
+		return
 	}
 
 	config.originalCfg = g.Marshal(config)

@@ -290,7 +290,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 	// clean up selectStreams
 	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
-		return strings.TrimSpace(v) != ""
+		return replication.HasStream(v)
 	})
 
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
