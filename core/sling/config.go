@@ -112,7 +112,7 @@ func (cfg *Config) SetDefault() {
 
 	// set max_decimals
 	switch cfg.TgtConn.Type {
-	case dbio.TypeDbBigQuery, dbio.TypeDbOracle, dbio.TypeDbBigTable:
+	case dbio.TypeDbBigQuery, dbio.TypeDbBigTable:
 		cfg.Source.Options.MaxDecimals = g.Int(9)
 		cfg.Target.Options.MaxDecimals = g.Int(9)
 	case dbio.TypeDbClickhouse:
