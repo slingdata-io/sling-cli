@@ -35,10 +35,10 @@ type TaskExecution struct {
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
 
-	Replication    *ReplicationConfig
-	ProgressHist   []string     `json:"progress_hist"`
-	PBar           *ProgressBar `json:"-"`
-	ProcStatsStart g.ProcStats  `json:"-"` // process stats at beginning
+	Replication    *ReplicationConfig `json:"replication"`
+	ProgressHist   []string           `json:"progress_hist"`
+	PBar           *ProgressBar       `json:"-"`
+	ProcStatsStart g.ProcStats        `json:"-"` // process stats at beginning
 	cleanupFuncs   []func()
 }
 
