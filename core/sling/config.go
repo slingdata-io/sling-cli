@@ -110,6 +110,16 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.AdjustColumnType = g.Bool(false)
 	}
 
+	// set max_decimals
+	switch cfg.TgtConn.Type {
+	case dbio.TypeDbBigQuery, dbio.TypeDbOracle, dbio.TypeDbBigTable:
+		cfg.Source.Options.MaxDecimals = g.Int(9)
+		cfg.Target.Options.MaxDecimals = g.Int(9)
+	case dbio.TypeDbClickhouse:
+		cfg.Source.Options.MaxDecimals = g.Int(11)
+		cfg.Target.Options.MaxDecimals = g.Int(11)
+	}
+
 	// set vars
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
