@@ -304,7 +304,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 
 		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
-			g.Debug("skipping stream `%s` since it is not selected", name)
+			g.Debug("skipping stream %s since it is not selected", name)
 			continue
 		}
 		counter++
@@ -347,16 +347,16 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		println()
 
 		if stream.Disabled {
-			g.Info("[%d / %d] skipping stream `%s` since it is disabled", counter, streamCnt, name)
+			g.Info("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
 			continue
 		} else {
-			g.Info("[%d / %d] running stream `%s`", counter, streamCnt, name)
+			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
 		telemetryMap["run_mode"] = "replication"
 		err = runTask(&cfg, &replication)
 		if err != nil {
-			err = g.Error(err, "error for stream `%s`", name)
+			err = g.Error(err, "error for stream %s", name)
 			g.LogError(err)
 			eG.Capture(err)
 		}
