@@ -30,7 +30,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
 	schemaName = strings.ToLower(schemaName)
 	if schemaName == "" {
-		schemaName = conn.GetProp("schema")
+		schemaName = strings.ToLower(conn.GetProp("schema"))
 		if schemaName == "" {
 			return false, g.Error("did not specify schema. Please specify schema in object name.")
 		}
