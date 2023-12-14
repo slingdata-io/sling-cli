@@ -770,21 +770,21 @@ var SourceFileOptionsDefault = SourceOptions{
 	DatetimeFormat: "AUTO",
 	SkipBlankLines: g.Bool(false),
 	Delimiter:      ",",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var SourceDBOptionsDefault = SourceOptions{
 	EmptyAsNull:    g.Bool(true),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var SourceAPIOptionsDefault = SourceOptions{
 	EmptyAsNull:    g.Bool(true),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var TargetFileOptionsDefault = TargetOptions{
