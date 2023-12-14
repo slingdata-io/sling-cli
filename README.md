@@ -70,6 +70,18 @@ scoop install sling
 sling -h
 ```
 
+#### Binary on Linux
+
+```powershell
+curl -LO 'https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_amd64.tar.gz' \
+  && tar xf sling_linux_amd64.tar.gz \
+  && rm -f sling_linux_amd64.tar.gz \
+  && chmod +x sling
+
+# You're good to go!
+sling -h
+```
+
 ### Compiling From Source
 
 #### Linux or Mac
