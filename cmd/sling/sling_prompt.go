@@ -56,7 +56,7 @@ func completer(in prompt.Document) []prompt.Suggest {
 				localSuggestions = append(localSuggestions, prompt.Suggest{Text: conn.Name, Description: conn.Description})
 			}
 			return prompt.FilterHasPrefix(localSuggestions, w, true)
-		case g.In(prevWord, cast.ToSlice(stringFlags)...):
+		case g.In(prevWord, stringFlags...):
 			return []prompt.Suggest{}
 		}
 

@@ -110,6 +110,16 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.AdjustColumnType = g.Bool(false)
 	}
 
+	// set max_decimals
+	switch cfg.TgtConn.Type {
+	case dbio.TypeDbBigQuery, dbio.TypeDbBigTable:
+		cfg.Source.Options.MaxDecimals = g.Int(9)
+		cfg.Target.Options.MaxDecimals = g.Int(9)
+	case dbio.TypeDbClickhouse:
+		cfg.Source.Options.MaxDecimals = g.Int(11)
+		cfg.Target.Options.MaxDecimals = g.Int(11)
+	}
+
 	// set vars
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
@@ -336,7 +346,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
-			cfg.TgtConn = c.Connection
+			cfg.TgtConn = *c.Connection.Copy()
 		} else if !strings.Contains(cfg.Target.Conn, "://") && cfg.Target.Conn != "" && cfg.TgtConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Target.Conn)
 		} else if cfg.TgtConn.Data == nil {
@@ -385,7 +395,7 @@ func (cfg *Config) Prepare() (err error) {
 	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
-			cfg.SrcConn = c.Connection
+			cfg.SrcConn = *c.Connection.Copy()
 		} else if !strings.Contains(cfg.Source.Conn, "://") && cfg.Source.Conn != "" && cfg.SrcConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Source.Conn)
 		} else if cfg.SrcConn.Data == nil {
@@ -770,21 +780,21 @@ var SourceFileOptionsDefault = SourceOptions{
 	DatetimeFormat: "AUTO",
 	SkipBlankLines: g.Bool(false),
 	Delimiter:      ",",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var SourceDBOptionsDefault = SourceOptions{
 	EmptyAsNull:    g.Bool(true),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var SourceAPIOptionsDefault = SourceOptions{
 	EmptyAsNull:    g.Bool(true),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(9),
+	MaxDecimals:    g.Int(-1),
 }
 
 var TargetFileOptionsDefault = TargetOptions{
