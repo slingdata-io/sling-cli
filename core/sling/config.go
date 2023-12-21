@@ -40,6 +40,8 @@ const (
 	IncrementalMode Mode = "incremental"
 	// SnapshotMode is to snapshot
 	SnapshotMode Mode = "snapshot"
+	// BackfillMode is to backfill
+	BackfillMode Mode = "backfill"
 )
 
 // ColumnCasing is the casing method to use
@@ -216,9 +218,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		cfg.Mode = FullRefreshMode
 	}
 
-	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, SnapshotMode, TruncateMode)
+	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode)
 	if !validMode {
-		err = g.Error("must specify valid mode: full-refresh, incremental, snapshot or truncate")
+		err = g.Error("must specify valid mode: full-refresh, incremental, backfill, snapshot or truncate")
 		return
 	}
 
@@ -237,6 +239,18 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			return
+		}
+	} else if cfg.Mode == BackfillMode {
+		if cfg.Source.UpdateKey == "" || len(cfg.Source.PrimaryKey()) == 0 {
+			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			return
+		}
+		if cfg.Source.Options.Range == nil {
+			err = g.Error("must specify range (source.options.range or --range) for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			return
+		} else if rangeArr := strings.Split(*cfg.Source.Options.Range, ","); len(rangeArr) != 2 {
+			err = g.Error("must specify valid range value for backfill mode separated by one comma, for example `2021-01-01,2021-02-01`. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		}
 	} else if cfg.Mode == SnapshotMode {
