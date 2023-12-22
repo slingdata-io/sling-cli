@@ -119,7 +119,7 @@ var cliRun = &g.CliSC{
 			Name:        "mode",
 			ShortName:   "m",
 			Type:        "string",
-			Description: "The target load mode to use: append, incremental, truncate, full-refresh.\n                       Default is append. For incremental, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
+			Description: "The target load mode to use: backfill, incremental, truncate, snapshot, full-refresh.\n                       Default is full-refresh. For incremental, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
 		},
 		{
 			Name:        "limit",
