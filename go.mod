@@ -7,7 +7,7 @@ require (
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.13.0
-	github.com/flarco/dbio v0.4.52
+	github.com/flarco/dbio v0.4.53
 	github.com/flarco/g v0.1.67
 	github.com/getsentry/sentry-go v0.11.0
 	github.com/google/uuid v1.3.0
