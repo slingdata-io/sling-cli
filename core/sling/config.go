@@ -246,7 +246,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		}
-		if cfg.Source.Options.Range == nil {
+		if cfg.Source.Options == nil || cfg.Source.Options.Range == nil {
 			err = g.Error("must specify range (source.options.range or --range) for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			return
 		} else if rangeArr := strings.Split(*cfg.Source.Options.Range, ","); len(rangeArr) != 2 {
