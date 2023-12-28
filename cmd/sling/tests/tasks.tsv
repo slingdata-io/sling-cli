@@ -32,3 +32,6 @@ task.30		file://tests/files/test1.csv	{}	CLICKHOUSE	default.test1	full-refresh		
 task.31		file://tests/files/test1.upsert.csv	{}	CLICKHOUSE	default.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
 task.32		file://tests/files/test1.csv	{}	DUCKDB	main.test1	full-refresh			{"adjust_column_type":true, "add_new_columns":true}	{}	{"delete_duck_db": true}
 task.33		file://tests/files/test1.upsert.csv	{}	DUCKDB	main.test1	incremental	id	create_dt	{"adjust_column_type":true, "add_new_columns":true}	{}	{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6"}
+task.34	POSTGRES	public.test1k	{"range":"2001-01-01,2010-01-01"}	MYSQL	mysql.{stream_table}	backfill	id	create_date	{}	{}	{"validation_object": "`mysql`.`test1k`"}
+task.35	POSTGRES	select * from public.test1k where {incremental_where_cond}	{"range":"2001-01-01,2010-01-01"}	MSSQL	dbo.test1k	backfill	id	create_date	{}	{}	{"validation_object": "\"dbo\".\"test1k\""}
+task.36	CLICKHOUSE	select * from default.test1k where {incremental_where_cond}	{"range":"2001-01-01,2010-01-01"}	POSTGRES	public.test1k	backfill	id	create_date	{}	{}	
