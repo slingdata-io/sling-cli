@@ -102,6 +102,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "update-key":
 			cfg.Source.UpdateKey = cast.ToString(v)
 
+		case "limit":
+			if cfg.Source.Options == nil {
+				cfg.Source.Options = &sling.SourceOptions{}
+			}
+			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
+
+		case "range":
+			if cfg.Source.Options == nil {
+				cfg.Source.Options = &sling.SourceOptions{}
+			}
+			cfg.Source.Options.Range = g.String(cast.ToString(v))
+
 		case "tgt-object", "tgt-table", "tgt-file":
 			cfg.Target.Object = cast.ToString(v)
 			if strings.Contains(cfg.Target.Object, "://") {

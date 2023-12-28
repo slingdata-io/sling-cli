@@ -18,12 +18,6 @@ import (
 	"github.com/spf13/cast"
 )
 
-// AllowedProps allowed properties
-var AllowedProps = map[string]string{
-	"sheet": "Provided for Excel source files. Default is first sheet",
-	"range": "Optional for Excel source file. Default is largest table range",
-}
-
 // connPool a way to cache connections to that they don't have to reconnect
 // for each replication steps
 var connPool = map[string]database.Connection{}

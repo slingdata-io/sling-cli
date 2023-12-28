@@ -446,7 +446,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// need to decide whether to drop or keep it for future use
 			return 0, err
 		}
-	} else if cfg.Mode == IncrementalMode {
+	} else if cfg.Mode == IncrementalMode || cfg.Mode == BackfillMode {
 		// insert in temp
 		// create final if not exists
 		// delete from final and insert

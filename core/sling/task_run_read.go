@@ -53,14 +53,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		fieldsStr = strings.Join(fields, ", ")
 	}
 
-	if t.usingCheckpoint() {
+	if t.usingCheckpoint() || t.Config.Mode == BackfillMode {
 		// default true value
 		incrementalWhereCond := "1=1"
 
 		// get source columns to match update-key
 		// in case column casing needs adjustment
 		sourceCols, _ := pullSourceTableColumns(t.Config, srcConn, sTable.FullName())
-		if updateCol := sourceCols.GetColumn(cfg.Source.UpdateKey); updateCol.Name != "" {
+		updateCol := sourceCols.GetColumn(cfg.Source.UpdateKey)
+		if updateCol.Name != "" {
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
 
@@ -83,16 +84,47 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			cfg.IncrementalVal = "null"
 		}
 
+		if t.Config.Mode == BackfillMode {
+			rangeArr := strings.Split(*cfg.Source.Options.Range, ",")
+			startValue := rangeArr[0]
+			endValue := rangeArr[1]
+
+			if !updateCol.IsNumber() {
+				startValue = `'` + startValue + `'`
+				endValue = `'` + endValue + `'`
+			}
+
+			incrementalWhereCond = g.R(
+				`{update_key} >= {start_value} and {update_key} <= {end_value}`,
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"start_value", startValue,
+				"end_value", endValue,
+			)
+		}
+
 		if sTable.SQL == "" {
+			limitTop := ""
+			limitEnd := ""
+			if cfg.Source.Limit() > 0 {
+				if g.In(srcConn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+					limitTop = g.F("top %d", cfg.Source.Limit())
+				} else {
+					limitEnd = g.F("limit %d", cfg.Source.Limit())
+				}
+			}
+
 			sTable.SQL = g.R(
-				`select {fields} from {table} where {incremental_where_cond}`,
+				`select{limit_top} {fields} from {table} where {incremental_where_cond} order by {update_key} asc {limit_end}`,
 				"fields", fieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"limit_top", lo.Ternary(limitTop != "", " "+limitTop, ""),
+				"limit_end", limitEnd,
 			)
 		} else {
 			if !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
-				err = g.Error("Since using incremental mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.")
+				err = g.Error("Since using incremental/backfill mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.")
 				return t.df, err
 			}
 
