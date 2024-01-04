@@ -122,6 +122,12 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.MaxDecimals = g.Int(11)
 	}
 
+	// set parse_bit for MySQL
+	switch cfg.SrcConn.Type {
+	case dbio.TypeDbMySQL:
+		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+	}
+
 	// set vars
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
