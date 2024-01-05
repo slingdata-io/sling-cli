@@ -1,0 +1,10 @@
+source: LOCAL
+target: SQLITE
+
+defaults:
+  mode: full-refresh
+  object: 'main.{stream_file_name}'
+
+streams:
+  file://./tests/files/parquet/*:
+  file://./tests/files/*.csv:

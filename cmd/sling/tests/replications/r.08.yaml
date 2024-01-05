@@ -1,0 +1,9 @@
+source: DO_SPACES
+target: SQLITE
+
+defaults:
+  mode: full-refresh
+  object: 'main.do_{stream_file_name}'
+
+streams:
+  s3://ocral/test.fs.write/*:
