@@ -581,6 +581,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			return m, g.Error(err, "could not parse source stream url")
 		}
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
+		m["stream_file_folder"] = ""
+		m["stream_file_name"] = ""
+		m["stream_file_ext"] = ""
 
 		filePath := cleanUp(strings.TrimPrefix(url.Path(), "/"))
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
@@ -614,6 +617,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if filePath != "" {
 			m["stream_file_path"] = filePath
 		}
+
 		if fileNameArr := strings.Split(fileName, "."); len(fileNameArr) > 1 {
 			// remove extension
 			m["stream_file_ext"] = fileNameArr[len(fileNameArr)-1]
