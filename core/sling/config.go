@@ -606,13 +606,18 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			path = strings.TrimSuffix(path, "/")
 			path = strings.TrimSuffix(path, "\\")
 
-			fileFolder, fileName := filepath.Split(path)
+			fileFolder, fileName = filepath.Split(path)
 			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
 			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
 			filePath = cleanUp(strings.TrimPrefix(path, "/"))
 		}
 		if filePath != "" {
 			m["stream_file_path"] = filePath
+		}
+		if fileNameArr := strings.Split(fileName, "."); len(fileNameArr) > 1 {
+			// remove extension
+			m["stream_file_ext"] = fileNameArr[len(fileNameArr)-1]
+			m["stream_file_name"] = strings.TrimSuffix(fileName, "."+fileNameArr[len(fileNameArr)-1])
 		}
 	}
 
