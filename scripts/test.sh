@@ -32,6 +32,9 @@ cat cmd/sling/tests/files/test3.json | ./sling-linux run --src-options "flatten:
 ./sling-linux run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
 ./sling-linux run -r cmd/sling/tests/replications/r.05.yaml
 ./sling-linux run -r cmd/sling/tests/replications/r.06.yaml
+./sling-linux run -r cmd/sling/tests/replications/r.07.yaml
+./sling-linux run -r cmd/sling/tests/replications/r.08.yaml
+./sling-linux run -r cmd/sling/tests/replications/r.09.yaml
 
 ./sling-linux run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
 
