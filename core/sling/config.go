@@ -581,29 +581,27 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			return m, g.Error(err, "could not parse source stream url")
 		}
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
-		m["stream_file_folder"] = ""
-		m["stream_file_name"] = ""
-		m["stream_file_ext"] = ""
 
-		filePath := cleanUp(strings.TrimPrefix(url.Path(), "/"))
+		filePath := strings.TrimPrefix(url.Path(), "/")
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
-		fileName := cleanUp(pathArr[len(pathArr)-1])
-		fileFolder := cleanUp(lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], ""))
+		fileName := pathArr[len(pathArr)-1]
+		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3, dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
 			if fileFolder != "" {
-				m["stream_file_folder"] = fileFolder
+				m["stream_file_folder"] = cleanUp(fileFolder)
 			}
-			m["stream_file_name"] = fileName
+			m["stream_file_name"] = cleanUp(fileName)
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
 			if fileFolder != "" {
-				m["stream_file_folder"] = fileFolder
+				m["stream_file_folder"] = cleanUp(fileFolder)
 			}
-			m["stream_file_name"] = fileName
-			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
+			m["stream_file_name"] = cleanUp(fileName)
+			filePath = strings.TrimPrefix(cleanUp(filePath), cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
 			path = strings.TrimSuffix(path, "/")
@@ -615,13 +613,26 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			filePath = cleanUp(strings.TrimPrefix(path, "/"))
 		}
 		if filePath != "" {
-			m["stream_file_path"] = filePath
+			m["stream_file_path"] = cleanUp(filePath)
 		}
 
 		if fileNameArr := strings.Split(fileName, "."); len(fileNameArr) > 1 {
 			// remove extension
 			m["stream_file_ext"] = fileNameArr[len(fileNameArr)-1]
-			m["stream_file_name"] = strings.TrimSuffix(fileName, "."+fileNameArr[len(fileNameArr)-1])
+			if len(fileNameArr) >= 3 {
+				// in case of compression (2 extension tokens)
+				for _, suff := range []string{"gz", "zst", "snappy"} {
+					if m["stream_file_ext"] == suff {
+						m["stream_file_ext"] = fileNameArr[len(fileNameArr)-2] + "_" + fileNameArr[len(fileNameArr)-1]
+						break
+					}
+				}
+			}
+
+			m["stream_file_name"] = strings.TrimSuffix(
+				cast.ToString(m["stream_file_name"]),
+				"_"+cast.ToString(m["stream_file_ext"]),
+			)
 		}
 	}
 
