@@ -3,7 +3,7 @@ target: SQLITE
 
 defaults:
   mode: full-refresh
-  object: 'main.{stream_file_name}'
+  object: 'main.{stream_file_folder}_{stream_file_name}'
 
 streams:
   file://./tests/files/parquet/*:

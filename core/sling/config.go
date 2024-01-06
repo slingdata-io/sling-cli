@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -604,10 +603,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			filePath = strings.TrimPrefix(cleanUp(filePath), cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
+			path = strings.ReplaceAll(path, `\`, `/`)
 			path = strings.TrimSuffix(path, "/")
-			path = strings.TrimSuffix(path, "\\")
+			pathArr = strings.Split(path, "/")
 
-			fileFolder, fileName = filepath.Split(path)
+			fileName = pathArr[len(pathArr)-1]
+			fileFolder = lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+
 			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
 			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
 			filePath = cleanUp(strings.TrimPrefix(path, "/"))
