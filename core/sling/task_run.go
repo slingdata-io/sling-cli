@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	_ "net/http/pprof"
 
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/dbio"
@@ -72,6 +74,7 @@ func (t *TaskExecution) Execute() error {
 		// update into store
 		StoreUpdate(t)
 
+		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
