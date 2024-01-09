@@ -147,7 +147,8 @@ func (cfg *Config) SetDefault() {
 // Unmarshal parse a configuration file path or config text
 func (cfg *Config) Unmarshal(cfgStr string) error {
 	cfgBytes := []byte(cfgStr)
-	if _, err := os.Stat(cfgStr); err == nil {
+	_, errStat := os.Stat(cfgStr)
+	if errStat == nil {
 		cfgFile, err := os.Open(cfgStr)
 		if err != nil {
 			return g.Error(err, "Unable to open cfgStr: "+cfgStr)
@@ -161,7 +162,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	err := yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
-		return g.Error(err, "Error parsing cfgBytes")
+		if errStat != nil {
+			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
+		}
+		return g.Error(err, "Error parsing config")
 	}
 
 	if cfg.Env == nil {
