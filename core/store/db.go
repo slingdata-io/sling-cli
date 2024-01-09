@@ -49,7 +49,7 @@ func InitDB() {
 		if DropAll {
 			Db.Exec(g.F(`drop table if exists "%s"`, tableName))
 		}
-		g.Debug("Creating table: " + tableName)
+		g.Trace("Creating table: " + tableName)
 		err = Db.AutoMigrate(table)
 		g.LogError(err, "error AutoMigrating table: "+tableName)
 	}
