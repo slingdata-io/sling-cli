@@ -1,4 +1,4 @@
-source: LOCAL
+source: local://
 target: SQLITE
 
 defaults:
@@ -6,5 +6,5 @@ defaults:
   object: 'main.{stream_file_folder}_{stream_file_name}'
 
 streams:
-  file://./tests/files/parquet/*:
-  file://./tests/files/*.csv:
+  file://./cmd/sling/tests/files/parquet/*:
+  file://./cmd/sling/tests/files/*.csv:
