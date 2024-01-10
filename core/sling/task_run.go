@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	_ "net/http/pprof"
 
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/dbio"
@@ -72,6 +74,7 @@ func (t *TaskExecution) Execute() error {
 		// update into store
 		StoreUpdate(t)
 
+		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
@@ -280,7 +283,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		return
 	}
 
-	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
+	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
 
 	err = t.df.Err()
 	return
@@ -326,7 +329,7 @@ func (t *TaskExecution) runAPIToFile() (err error) {
 		return
 	}
 
-	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
+	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
 
 	err = t.df.Err()
 	return
@@ -423,7 +426,7 @@ func (t *TaskExecution) runAPIToDB() (err error) {
 	}
 
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
 
 	if err != nil {
 		err = g.Error(t.df.Err(), "error in transfer")
@@ -504,7 +507,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
 
 	if err != nil {
 		err = g.Error(t.df.Err(), "error in transfer")
@@ -550,7 +553,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 		return
 	}
 
-	t.SetProgress("wrote %d rows [%s r/s]", cnt, getRate(cnt))
+	t.SetProgress("wrote %d rows to %s [%s r/s]", cnt, t.getTargetObjectValue(), getRate(cnt))
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error in runFileToFile")
@@ -643,7 +646,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		bytesStr = "[" + val + "]"
 	}
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows in %d secs [%s r/s] %s", cnt, elapsed, getRate(cnt), bytesStr)
+	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s] %s", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt), bytesStr)
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error running runDbToDb")

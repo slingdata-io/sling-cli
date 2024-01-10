@@ -259,6 +259,28 @@ func (t *TaskExecution) isUsingPool() bool {
 	return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode
 }
 
+func (t *TaskExecution) getTargetObjectValue() string {
+
+	switch t.Type {
+	case FileToDB:
+		return t.Config.Target.Object
+	case DbToDb:
+		return t.Config.Target.Object
+	case DbToFile:
+		if t.Config.Options.StdOut {
+			return "stdout"
+		}
+		return t.Config.TgtConn.URL()
+	case FileToFile:
+		if t.Config.Options.StdOut {
+			return "stdout"
+		}
+		return t.Config.TgtConn.URL()
+	}
+
+	return ""
+}
+
 func (t *TaskExecution) AddCleanupTask(f func()) {
 	t.Context.Mux.Lock()
 	defer t.Context.Mux.Unlock()

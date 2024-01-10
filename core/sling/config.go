@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -122,6 +121,13 @@ func (cfg *Config) SetDefault() {
 		cfg.Target.Options.MaxDecimals = g.Int(11)
 	}
 
+	// set default transforms
+	switch cfg.SrcConn.Type {
+	case dbio.TypeDbMySQL:
+		// parse_bit for MySQL
+		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+	}
+
 	// set vars
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
@@ -141,7 +147,8 @@ func (cfg *Config) SetDefault() {
 // Unmarshal parse a configuration file path or config text
 func (cfg *Config) Unmarshal(cfgStr string) error {
 	cfgBytes := []byte(cfgStr)
-	if _, err := os.Stat(cfgStr); err == nil {
+	_, errStat := os.Stat(cfgStr)
+	if errStat == nil {
 		cfgFile, err := os.Open(cfgStr)
 		if err != nil {
 			return g.Error(err, "Unable to open cfgStr: "+cfgStr)
@@ -155,7 +162,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	err := yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
-		return g.Error(err, "Error parsing cfgBytes")
+		if errStat != nil {
+			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
+		}
+		return g.Error(err, "Error parsing config")
 	}
 
 	if cfg.Env == nil {
@@ -575,37 +585,60 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		filePath := cleanUp(strings.TrimPrefix(url.Path(), "/"))
+		filePath := strings.TrimPrefix(url.Path(), "/")
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
-		fileName := cleanUp(pathArr[len(pathArr)-1])
-		fileFolder := cleanUp(lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], ""))
+		fileName := pathArr[len(pathArr)-1]
+		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3, dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
 			if fileFolder != "" {
-				m["stream_file_folder"] = fileFolder
+				m["stream_file_folder"] = cleanUp(fileFolder)
 			}
-			m["stream_file_name"] = fileName
+			m["stream_file_name"] = cleanUp(fileName)
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
 			if fileFolder != "" {
-				m["stream_file_folder"] = fileFolder
+				m["stream_file_folder"] = cleanUp(fileFolder)
 			}
-			m["stream_file_name"] = fileName
-			filePath = strings.TrimPrefix(filePath, cast.ToString(m["source_container"])+"_")
+			m["stream_file_name"] = cleanUp(fileName)
+			filePath = strings.TrimPrefix(cleanUp(filePath), cast.ToString(m["source_container"])+"_")
 		case dbio.TypeFileLocal:
 			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
+			path = strings.ReplaceAll(path, `\`, `/`)
 			path = strings.TrimSuffix(path, "/")
-			path = strings.TrimSuffix(path, "\\")
+			pathArr = strings.Split(path, "/")
 
-			fileFolder, fileName := filepath.Split(path)
+			fileName = pathArr[len(pathArr)-1]
+			fileFolder = lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+
 			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
 			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
 			filePath = cleanUp(strings.TrimPrefix(path, "/"))
 		}
 		if filePath != "" {
-			m["stream_file_path"] = filePath
+			m["stream_file_path"] = cleanUp(filePath)
+		}
+
+		if fileNameArr := strings.Split(fileName, "."); len(fileNameArr) > 1 {
+			// remove extension
+			m["stream_file_ext"] = fileNameArr[len(fileNameArr)-1]
+			if len(fileNameArr) >= 3 {
+				// in case of compression (2 extension tokens)
+				for _, suff := range []string{"gz", "zst", "snappy"} {
+					if m["stream_file_ext"] == suff {
+						m["stream_file_ext"] = fileNameArr[len(fileNameArr)-2] + "_" + fileNameArr[len(fileNameArr)-1]
+						break
+					}
+				}
+			}
+
+			m["stream_file_name"] = strings.TrimSuffix(
+				cast.ToString(m["stream_file_name"]),
+				"_"+cast.ToString(m["stream_file_ext"]),
+			)
 		}
 	}
 

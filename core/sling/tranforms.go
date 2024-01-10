@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/flarco/dbio/iop"
@@ -20,6 +21,7 @@ var transforms = map[string]iop.TransformFunc{
 	"replace_accents":    func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
 	"trim_space":         func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
 	"parse_uuid":         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	"parse_bit":          func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
 	"decode_latin1":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
 	"decode_latin5":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
 	"decode_latin9":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
@@ -49,6 +51,13 @@ func ParseUUID(sp *iop.StreamProcessor, val string) (string, error) {
 			return val, g.Error(err, "could not transform while running ParseUUID")
 		}
 		return newVal.String(), nil
+	}
+	return val, nil
+}
+
+func ParseBit(sp *iop.StreamProcessor, val string) (string, error) {
+	if len(val) == 1 && (val == "\x00" || val == "\x01") {
+		return fmt.Sprintf("%b", []uint8(val)[0]), nil
 	}
 	return val, nil
 }

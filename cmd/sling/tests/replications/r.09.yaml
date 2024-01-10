@@ -1,0 +1,9 @@
+source: postgres
+target: sqlite
+
+defaults:
+  mode: full-refresh
+  object: 'main.pg_{stream_table}'
+
+streams:
+  public.my_table*:

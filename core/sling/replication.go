@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
 	"os"
@@ -78,7 +79,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	wildcardNames := []string{}
 	for name := range rd.Streams {
 		if name == "*" {
-			return g.Error("Must specify schema when using wildcard: 'my_schema.*', not '*'")
+			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if strings.Contains(name, "*") {
 			wildcardNames = append(wildcardNames, name)
 		}
@@ -92,12 +93,28 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		return strings.ToLower(c.Connection.Name)
 	})
 	c, ok := connsMap[strings.ToLower(rd.Source)]
-	if !ok || !c.Connection.Type.IsDb() {
-		// wildcards only apply to database source connections
-		return
+	if !ok {
+		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
+			c = connection.LocalFileConnEntry()
+		} else {
+			return
+		}
 	}
 
-	g.Debug("processing wildcards for %s", rd.Source)
+	if c.Connection.Type.IsDb() {
+		return rd.ProcessWildcardsDatabase(c, wildcardNames)
+	}
+
+	if c.Connection.Type.IsFile() {
+		return rd.ProcessWildcardsFile(c, wildcardNames)
+	}
+
+	return g.Error("invalid connection for wildcards: %s", rd.Source)
+}
+
+func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
+
+	g.DebugLow("processing wildcards for %s", rd.Source)
 
 	conn, err := c.Connection.AsDatabase()
 	if err != nil {
@@ -114,7 +131,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 			continue
 		}
 
-		if schemaT.Name == "*" {
+		if strings.Contains(schemaT.Name, "*") {
 			// get all tables in schema
 			g.Debug("getting tables for %s", wildcardName)
 			data, err := conn.GetTables(schemaT.Schema)
@@ -134,10 +151,15 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 				}
 
 				// add to stream map
-				newCfg := ReplicationStreamConfig{}
-				g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-				rd.Streams[table.FullName()] = &newCfg
-				rd.streamsOrdered = append(rd.streamsOrdered, table.FullName())
+				if g.WildCardMatch(
+					strings.ToLower(table.FullName()),
+					[]string{strings.ToLower(schemaT.FullName())},
+				) {
+					newCfg := ReplicationStreamConfig{}
+					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
+					rd.Streams[table.FullName()] = &newCfg
+					rd.streamsOrdered = append(rd.streamsOrdered, table.FullName())
+				}
 			}
 
 			// delete * from stream map
@@ -146,6 +168,47 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 				return v != wildcardName
 			})
 
+		}
+	}
+	return
+}
+
+func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildcardNames []string) (err error) {
+	g.DebugLow("processing wildcards for %s", rd.Source)
+
+	fs, err := c.Connection.AsFile()
+	if err != nil {
+		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
+	} else if err = fs.Init(context.Background()); err != nil {
+		return g.Error(err, "could not connect to file system for wildcard processing: %s", rd.Source)
+	}
+
+	for _, wildcardName := range wildcardNames {
+		nameParts := strings.Split(wildcardName, "/")
+		lastPart := nameParts[len(nameParts)-1]
+
+		if strings.Contains(lastPart, "*") {
+			parent := strings.TrimSuffix(wildcardName, lastPart)
+
+			paths, err := fs.ListRecursive(parent)
+			if err != nil {
+				return g.Error(err, "could not list %s", parent)
+			}
+
+			for _, path := range paths {
+				if g.WildCardMatch(path, []string{lastPart}) && !rd.HasStream(path) {
+					newCfg := ReplicationStreamConfig{}
+					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
+					rd.Streams[path] = &newCfg
+					rd.streamsOrdered = append(rd.streamsOrdered, path)
+				}
+			}
+
+			// delete from stream map
+			delete(rd.Streams, wildcardName)
+			rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
+				return v != wildcardName && v != parent
+			})
 		}
 	}
 
