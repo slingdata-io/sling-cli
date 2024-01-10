@@ -267,6 +267,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task = sling.NewTask(0, cfg)
 	task.Replication = replication
 
+	if cast.ToBool(cfg.Env["SLING_DRY_RUN"]) || cast.ToBool(os.Getenv("SLING_DRY_RUN")) {
+		return nil
+	}
+
 	// insert into store for history keeping
 	sling.StoreInsert(task)
 
