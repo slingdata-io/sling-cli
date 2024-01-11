@@ -68,12 +68,12 @@ func InitLogger() {
 		return fmt.Sprintf("%s", i)
 	}
 
-	if os.Getenv("G_LOGGING") == "TASK" {
+	if os.Getenv("SLING_LOGGING") == "NO_COLOR" {
 		outputOut.NoColor = true
 		outputErr.NoColor = true
 		g.ZLogOut = zerolog.New(outputOut).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
-	} else if os.Getenv("G_LOGGING") == "MASTER" || os.Getenv("G_LOGGING") == "WORKER" {
+	} else if os.Getenv("SLING_LOGGING") == "JSON" {
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
