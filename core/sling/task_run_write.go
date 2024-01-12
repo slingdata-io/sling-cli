@@ -97,10 +97,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	defer t.PBar.Finish()
 
 	// detect empty
-	if len(df.Buffer) == 0 {
-		g.Warn("No data found in stream. Nothing to do.")
-		return
-	} else if len(df.Columns) == 0 {
+	if len(df.Columns) == 0 {
 		err = g.Error("no stream columns detected")
 		return
 	}
@@ -292,21 +289,26 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	// FIXME: find root cause of why columns don't synch while streaming
-	df.SyncColumns()
+	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) {
+		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY_TABLES=TRUE")
+		return
+	} else if cnt > 0 {
+		// FIXME: find root cause of why columns don't synch while streaming
+		df.SyncColumns()
 
-	// aggregate stats from stream processors
-	df.Inferred = !cfg.sourceIsFile() // re-infer is source is file
-	df.SyncStats()
+		// aggregate stats from stream processors
+		df.Inferred = !cfg.sourceIsFile() // re-infer is source is file
+		df.SyncStats()
 
-	// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
-	if df.Count() <= 10000 {
-		err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
-		if err != nil {
-			if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
-				return
+		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
+		if df.Count() <= 10000 {
+			err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
+			if err != nil {
+				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
+					return
+				}
+				g.DebugLow(g.ErrMsgSimple(err))
 			}
-			g.DebugLow(g.ErrMsgSimple(err))
 		}
 	}
 
@@ -326,7 +328,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	defer tgtConn.Rollback() // rollback in case of error
 
-	if cnt > 0 {
+	{
 		if cfg.Mode == FullRefreshMode {
 			// drop, (create if not exists) and insert directly
 			err = tgtConn.DropTable(targetTable)
