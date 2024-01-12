@@ -264,8 +264,17 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	setProjectID(cfg.Env["SLING_CONFIG_PATH"])
 	cfg.Env["SLING_PROJECT_ID"] = projectID
 
+	// set logging
+	if val := cfg.Env["SLING_LOGGING"]; val != "" {
+		os.Setenv("SLING_LOGGING", val)
+	}
+
 	task = sling.NewTask(0, cfg)
 	task.Replication = replication
+
+	if cast.ToBool(cfg.Env["SLING_DRY_RUN"]) || cast.ToBool(os.Getenv("SLING_DRY_RUN")) {
+		return nil
+	}
 
 	// insert into store for history keeping
 	sling.StoreInsert(task)

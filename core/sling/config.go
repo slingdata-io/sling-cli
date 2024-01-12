@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -854,7 +853,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	Concurrency: lo.Ternary(
 		os.Getenv("CONCURRENCY") != "",
 		cast.ToInt(os.Getenv("CONCURRENCY")),
-		runtime.NumCPU(),
+		7,
 	),
 	FileMaxRows: lo.Ternary(
 		os.Getenv("FILE_MAX_ROWS") != "",
