@@ -19,6 +19,7 @@ var decWindows1252 = charmap.Windows1252.NewDecoder()
 
 var transforms = map[string]iop.TransformFunc{
 	"replace_accents":    func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
+	"replace_0x00":       func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
 	"trim_space":         func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
 	"parse_uuid":         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
 	"parse_bit":          func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
@@ -60,4 +61,8 @@ func ParseBit(sp *iop.StreamProcessor, val string) (string, error) {
 		return fmt.Sprintf("%b", []uint8(val)[0]), nil
 	}
 	return val, nil
+}
+
+func Replace0x00(sp *iop.StreamProcessor, val string) (string, error) {
+	return strings.ReplaceAll(val, "\x00", ""), nil
 }
