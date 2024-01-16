@@ -347,6 +347,44 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 			g.Warn("Config.Source.Options.Columns not handled: %T", t.Config.Source.Options.Columns)
 		}
 
+		// parse lenght, precision, scale
+		regexExtract := `[a-zA-Z]+ *\( *(\d+) *(, *\d+)* *\)`
+		for i, col := range columns {
+			colType := strings.TrimSpace(string(col.Type))
+			if !strings.HasSuffix(colType, ")") {
+				continue
+			}
+
+			// fix type value
+			parts := strings.Split(colType, "(")
+			col.Type = iop.ColumnType(strings.TrimSpace(parts[0]))
+
+			matches := g.Matches(colType, regexExtract)
+			if len(matches) == 1 {
+				vals := matches[0].Group
+
+				if len(vals) > 0 {
+					vals[0] = strings.TrimSpace(vals[0])
+					// grab length or precision
+					if col.Type.IsString() {
+						col.Stats.MaxLen = cast.ToInt(vals[0])
+					} else if col.Type.IsNumber() {
+						col.DbPrecision = cast.ToInt(vals[0])
+					}
+				}
+
+				if len(vals) > 1 {
+					vals[1] = strings.TrimSpace(strings.ReplaceAll(vals[1], ",", ""))
+					// grab scale
+					if col.Type.IsNumber() {
+						col.DbScale = cast.ToInt(vals[1])
+					}
+				}
+
+				columns[i] = col
+			}
+		}
+
 		// set as string so that StreamProcessor parses it
 		options["columns"] = g.Marshal(iop.NewColumns(columns...))
 	}
