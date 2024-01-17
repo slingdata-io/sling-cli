@@ -163,6 +163,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
+	g.Trace("%#v", df.Columns.Types())
+
 	return
 }
 
@@ -240,6 +242,8 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	} else if len(df.Columns) == 0 && !df.Streams[0].IsClosed() {
 		return df, g.Error("Could not read columns")
 	}
+
+	g.Trace("%#v", df.Columns.Types())
 
 	return
 }
