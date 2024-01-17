@@ -156,7 +156,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.Columns = sampleData.Columns
 	}
 
-	// set table ddl
+	// check table ddl
 	if cfg.Target.Options.TableDDL != "" && !strings.Contains(cfg.Target.Options.TableDDL, targetTable) {
 		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s", targetTable)
 		return
