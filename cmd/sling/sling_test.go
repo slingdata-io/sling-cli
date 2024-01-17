@@ -609,7 +609,7 @@ func Test1Replication(t *testing.T) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("CONCURENCY_LIMIT", "2")
-	replicationCfgPath := "/Users/fritz/Downloads/mlops.slack.replication.local.yml"
+	replicationCfgPath := g.UserHomeDir() + "/Downloads/mlops.slack.replication.local.yml"
 	err := runReplication(replicationCfgPath)
 	if g.AssertNoError(t, err) {
 		return
@@ -624,6 +624,6 @@ func TestExtract(t *testing.T) {
 
 	printUpdateAvailable()
 
-	err := ExtractTarGz("/Users/fritz/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", "/Users/fritz/Downloads/sling")
+	err := ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
 	g.AssertNoError(t, err)
 }
