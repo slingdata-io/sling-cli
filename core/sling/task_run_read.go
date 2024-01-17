@@ -134,6 +134,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"incremental_value", cfg.IncrementalVal,
 			)
+
+			if cfg.Source.Limit() > 0 {
+				sTable.SQL = g.R(
+					srcConn.Template().Core["limit"],
+					"sql", sTable.SQL,
+					"limit", cast.ToString(cfg.Source.Limit()),
+				)
+			}
 		}
 	} else if cfg.Source.Limit() > 0 && sTable.SQL == "" {
 		sTable.SQL = g.R(
