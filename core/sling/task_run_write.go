@@ -156,6 +156,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.Columns = sampleData.Columns
 	}
 
+	// check table ddl
+	if cfg.Target.Options.TableDDL != "" && !strings.Contains(cfg.Target.Options.TableDDL, targetTable) {
+		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s", targetTable)
+		return
+	}
+
 	_, err = createTableIfNotExists(
 		tgtConn,
 		sampleData,
@@ -248,9 +254,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		tgtConn.Rollback()
 		if cast.ToBool(os.Getenv("SLING_CLI")) && cfg.sourceIsFile() {
-			err = g.Error(err, "could not insert into %s.", targetTable)
+			err = g.Error(err, "could not insert into %s.", cfg.Target.Options.TableTmp)
 		} else {
-			err = g.Error(err, "could not insert into "+targetTable)
+			err = g.Error(err, "could not insert into "+cfg.Target.Options.TableTmp)
 		}
 		return
 	}

@@ -347,6 +347,44 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 			g.Warn("Config.Source.Options.Columns not handled: %T", t.Config.Source.Options.Columns)
 		}
 
+		// parse lenght, precision, scale
+		regexExtract := `[a-zA-Z]+ *\( *(\d+) *(, *\d+)* *\)`
+		for i, col := range columns {
+			colType := strings.TrimSpace(string(col.Type))
+			if !strings.HasSuffix(colType, ")") {
+				continue
+			}
+
+			// fix type value
+			parts := strings.Split(colType, "(")
+			col.Type = iop.ColumnType(strings.TrimSpace(parts[0]))
+
+			matches := g.Matches(colType, regexExtract)
+			if len(matches) == 1 {
+				vals := matches[0].Group
+
+				if len(vals) > 0 {
+					vals[0] = strings.TrimSpace(vals[0])
+					// grab length or precision
+					if col.Type.IsString() {
+						col.Stats.MaxLen = cast.ToInt(vals[0])
+					} else if col.Type.IsNumber() {
+						col.DbPrecision = cast.ToInt(vals[0])
+					}
+				}
+
+				if len(vals) > 1 {
+					vals[1] = strings.TrimSpace(strings.ReplaceAll(vals[1], ",", ""))
+					// grab scale
+					if col.Type.IsNumber() {
+						col.DbScale = cast.ToInt(vals[1])
+					}
+				}
+
+				columns[i] = col
+			}
+		}
+
 		// set as string so that StreamProcessor parses it
 		options["columns"] = g.Marshal(iop.NewColumns(columns...))
 	}
@@ -414,10 +452,12 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case strings.Contains(errString, "ssl is not enabled on the server"):
 			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
-		case strings.Contains(errString, "invalid input syntax for type") || (strings.Contains(errString, " value ") && strings.Contains(errString, "is not recognized")) || strings.Contains(errString, "invalid character value"):
+		case strings.Contains(errString, "invalid input syntax for type") || (strings.Contains(errString, " value ") && strings.Contains(errString, "is not recognized")) || strings.Contains(errString, "invalid character value") && strings.Contains(errString, " exceeds "):
 			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/run/configuration#source"
 		case strings.Contains(errString, "bcp import"):
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/sling-cli/run/configuration#target"
+		case strings.Contains(errString, "[AppendRow]: converting"):
+			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/sling-cli/run/configuration#target"
 		}
 	}
 	return

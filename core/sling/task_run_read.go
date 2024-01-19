@@ -134,6 +134,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"incremental_value", cfg.IncrementalVal,
 			)
+
+			if cfg.Source.Limit() > 0 {
+				sTable.SQL = g.R(
+					srcConn.Template().Core["limit"],
+					"sql", sTable.SQL,
+					"limit", cast.ToString(cfg.Source.Limit()),
+				)
+			}
 		}
 	} else if cfg.Source.Limit() > 0 && sTable.SQL == "" {
 		sTable.SQL = g.R(
@@ -162,6 +170,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		err = g.Error(err, "Could not BulkExportFlow: "+sTable.Select())
 		return t.df, err
 	}
+
+	g.Trace("%#v", df.Columns.Types())
 
 	return
 }
@@ -240,6 +250,8 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	} else if len(df.Columns) == 0 && !df.Streams[0].IsClosed() {
 		return df, g.Error("Could not read columns")
 	}
+
+	g.Trace("%#v", df.Columns.Types())
 
 	return
 }

@@ -3,6 +3,7 @@ package sling
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
@@ -18,15 +19,17 @@ var decWindows1250 = charmap.Windows1250.NewDecoder()
 var decWindows1252 = charmap.Windows1252.NewDecoder()
 
 var transforms = map[string]iop.TransformFunc{
-	"replace_accents":    func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
-	"trim_space":         func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
-	"parse_uuid":         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
-	"parse_bit":          func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
-	"decode_latin1":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
-	"decode_latin5":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
-	"decode_latin9":      func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
-	"decode_windows1250": func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
-	"decode_windows1252": func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
+	"replace_accents":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
+	"replace_0x00":          func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
+	"replace_non_printable": func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
+	"trim_space":            func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
+	"parse_uuid":            func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	"parse_bit":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
+	"decode_latin1":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
+	"decode_latin5":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
+	"decode_latin9":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
+	"decode_windows1250":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
+	"decode_windows1252":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
 }
 
 func init() {
@@ -60,4 +63,14 @@ func ParseBit(sp *iop.StreamProcessor, val string) (string, error) {
 		return fmt.Sprintf("%b", []uint8(val)[0]), nil
 	}
 	return val, nil
+}
+
+func Replace0x00(sp *iop.StreamProcessor, val string) (string, error) {
+	return strings.ReplaceAll(val, "\x00", ""), nil // replace the NUL character
+}
+
+func ReplaceNonPrint(sp *iop.StreamProcessor, val string) (string, error) {
+	return strings.TrimFunc(val, func(r rune) bool {
+		return !unicode.IsGraphic(r)
+	}), nil
 }
