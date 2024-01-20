@@ -65,18 +65,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
 
-		// convert string to timestamp/datetime if needed
-		convert := func(value string) string {
-			if !updateCol.Type.IsDatetime() {
-				return value
-			}
-			switch srcConn.GetType() {
-			case dbio.TypeDbClickhouse:
-				value = g.F("parseDateTime64BestEffortOrNull(%s)", value)
-			}
-			return value
-		}
-
 		// select only records that have been modified after last max value
 		if cfg.IncrementalVal != "" {
 			// if primary key is defined, use greater than or equal
@@ -87,7 +75,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			incrementalWhereCond = g.R(
 				"{update_key} {gt} {value}",
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"value", convert(cfg.IncrementalVal),
+				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
 			)
 		} else {
@@ -109,8 +97,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			incrementalWhereCond = g.R(
 				`{update_key} >= {start_value} and {update_key} <= {end_value}`,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"start_value", convert(startValue),
-				"end_value", convert(endValue),
+				"start_value", startValue,
+				"end_value", endValue,
 			)
 		}
 
@@ -144,7 +132,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"incremental_value", convert(cfg.IncrementalVal),
+				"incremental_value", cfg.IncrementalVal,
 			)
 
 			if cfg.Source.Limit() > 0 {
