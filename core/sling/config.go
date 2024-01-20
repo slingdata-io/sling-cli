@@ -554,13 +554,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse stream table name")
-		} else if table.SQL == "" {
+		} else {
 			if table.Schema != "" {
 				m["stream_schema"] = table.Schema
 			}
 			m["stream_table"] = table.Name
-			m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 		}
+		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
