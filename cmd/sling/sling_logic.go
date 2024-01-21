@@ -76,6 +76,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "src-stream", "src-table", "src-sql", "src-file":
+			cfg.StreamName = cast.ToString(v)
 			cfg.Source.Stream = cast.ToString(v)
 			if strings.Contains(cfg.Source.Stream, "://") {
 				if _, ok := c.Vals["src-conn"]; !ok { // src-conn not specified
@@ -355,6 +356,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			Mode:            stream.Mode,
 			ReplicationMode: true,
 			Env:             g.ToMapString(replication.Env),
+			StreamName:      name,
 		}
 
 		// so that the next stream does not retain previous pointer values
