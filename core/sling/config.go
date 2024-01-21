@@ -684,6 +684,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m[k] = v
 	}
 
+	// log format map
+	g.Trace("object format map: %s", g.Marshal(m))
+
 	return
 }
 
