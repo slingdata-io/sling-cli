@@ -556,7 +556,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			return m, g.Error(err, "could not parse stream table name")
 		}
 
-		if table.SQL != "" {
+		if table.SQL != "" && cfg.StreamName != "" {
 			table, err = database.ParseTableName(cfg.StreamName, cfg.SrcConn.Type)
 			if err != nil {
 				return m, g.Error(err, "could not parse stream name: %s", cfg.StreamName)
@@ -566,7 +566,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			m["stream_schema"] = table.Schema
 		}
 		m["stream_table"] = table.Name
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
+
+		if cfg.StreamName != "" {
+			m["stream_name"] = strings.ToLower(cfg.StreamName)
+		}
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
