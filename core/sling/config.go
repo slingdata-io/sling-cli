@@ -547,20 +547,29 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsAPI() {
-		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
+		m["stream_name"] = strings.ToLower(cfg.StreamName)
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse stream table name")
-		} else {
-			if table.Schema != "" {
-				m["stream_schema"] = table.Schema
-			}
-			m["stream_table"] = table.Name
 		}
-		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
+
+		if table.SQL != "" && cfg.StreamName != "" {
+			table, err = database.ParseTableName(cfg.StreamName, cfg.SrcConn.Type)
+			if err != nil {
+				return m, g.Error(err, "could not parse stream name: %s", cfg.StreamName)
+			}
+		}
+		if table.Schema != "" {
+			m["stream_schema"] = table.Schema
+		}
+		m["stream_table"] = table.Name
+
+		if cfg.StreamName != "" {
+			m["stream_name"] = strings.ToLower(cfg.StreamName)
+		}
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
@@ -678,6 +687,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m[k] = v
 	}
 
+	// log format map
+	g.Trace("object format map: %s", g.Marshal(m))
+
 	return
 }
 
@@ -689,6 +701,7 @@ type Config struct {
 	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
+	StreamName      string                `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	SrcConn         connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
 	TgtConn         connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
 	Prepared        bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
