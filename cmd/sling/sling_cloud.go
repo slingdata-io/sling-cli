@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/fs"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -268,7 +267,7 @@ func processCloud(c *g.CliSC) (ok bool, err error) {
 
 		path := cast.ToString(c.Vals["path"])
 		yamlPayload := cast.ToString(respM["output"])
-		err = ioutil.WriteFile(path, []byte(yamlPayload), 0755)
+		err = os.WriteFile(path, []byte(yamlPayload), 0755)
 		if err != nil {
 			err = g.Error(err, "Could not write to: %s", path)
 			return
