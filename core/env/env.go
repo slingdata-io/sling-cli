@@ -3,7 +3,6 @@ package env
 import (
 	"embed"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	env "github.com/flarco/dbio/env"
@@ -32,7 +31,7 @@ func init() {
 	os.MkdirAll(HomeDir, 0755)
 	if HomeDir != "" && !g.PathExists(HomeDirEnvFile) {
 		defaultEnvBytes, _ := envFolder.ReadFile("default.env.yaml")
-		ioutil.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
+		os.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
 	}
 
 	// other sources of creds
