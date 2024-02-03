@@ -134,7 +134,7 @@ func (t *TaskExecution) GetTotalBytes() (rcBytes, txBytes uint64) {
 	procStatsEnd := g.GetProcStats(os.Getpid())
 
 	switch {
-	case g.In(t.Config.SrcConn.Type, dbio.TypeDbPostgres, dbio.TypeDbOracle, dbio.TypeDbMySQL):
+	case g.In(t.Config.SrcConn.Type, dbio.TypeDbPostgres, dbio.TypeDbOracle, dbio.TypeDbMySQL, dbio.TypeDbStarRocks, dbio.TypeDbMariaDB):
 		rcBytes = procStatsEnd.RcBytes - t.ProcStatsStart.RcBytes
 	case g.In(t.Config.SrcConn.Type, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery, dbio.TypeDbRedshift):
 		rcBytes = procStatsEnd.RcBytes - t.ProcStatsStart.RcBytes

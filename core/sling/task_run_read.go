@@ -171,6 +171,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
+	t.setColumnKeys(df)
+
 	g.Trace("%#v", df.Columns.Types())
 
 	return
@@ -251,7 +253,20 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		return df, g.Error("Could not read columns")
 	}
 
+	t.setColumnKeys(df)
+
 	g.Trace("%#v", df.Columns.Types())
 
 	return
+}
+
+// setColumnKeys sets the column keys
+func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) {
+	if t.Config.Source.HasPrimaryKey() {
+		df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...)
+	}
+
+	if t.Config.Source.HasUpdateKey() {
+		df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey)
+	}
 }

@@ -122,7 +122,7 @@ func (cfg *Config) SetDefault() {
 
 	// set default transforms
 	switch cfg.SrcConn.Type {
-	case dbio.TypeDbMySQL:
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
 		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
 	}
