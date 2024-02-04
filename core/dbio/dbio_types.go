@@ -14,10 +14,6 @@ const (
 	KindDatabase Kind = "database"
 	// KindFile for files (cloud, sftp)
 	KindFile Kind = "file"
-	// KindAPI for APIs
-	KindAPI Kind = "api"
-	// KindAPI for Airbyte
-	KindAirbyte Kind = "airbyte"
 	// KindUnknown for unknown
 	KindUnknown Kind = ""
 )
@@ -52,9 +48,6 @@ const (
 	TypeDbAzure      Type = "azuresql"
 	TypeDbAzureDWH   Type = "azuredwh"
 	TypeDbClickhouse Type = "clickhouse"
-
-	TypeAPIGit Type = "git"
-	// TypeAPIGithub Type = "github"
 )
 
 // ValidateType returns true is type is valid
@@ -115,8 +108,6 @@ func (t Type) Kind() Kind {
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileHTTP, Type("https"):
 		return KindFile
-	case TypeAPIGit:
-		return KindAPI
 	}
 	return KindUnknown
 }
@@ -134,16 +125,6 @@ func (t Type) IsNoSQL() bool {
 // IsFile returns true if file connection
 func (t Type) IsFile() bool {
 	return t.Kind() == KindFile
-}
-
-// IsAPI returns true if API connection
-func (t Type) IsAPI() bool {
-	return t.Kind() == KindAPI
-}
-
-// IsAirbyte returns true if Airbyte connection
-func (t Type) IsAirbyte() bool {
-	return t.Kind() == KindAirbyte
 }
 
 // IsUnknown returns true if unknown
@@ -177,8 +158,6 @@ func (t Type) NameLong() string {
 		TypeDbSQLServer:  "DB - SQLServer",
 		TypeDbAzure:      "DB - Azure",
 		TypeDbClickhouse: "DB - Clickhouse",
-		TypeAPIGit:       "API - Git",
-		// TypeAPIGithub:   "API - Github",
 	}
 
 	return mapping[t]
@@ -210,8 +189,6 @@ func (t Type) Name() string {
 		TypeDbSQLServer:  "SQLServer",
 		TypeDbClickhouse: "Clickhouse",
 		TypeDbAzure:      "Azure",
-		TypeAPIGit:       "Git",
-		// TypeAPIGithub:   "Github",
 	}
 
 	return mapping[t]

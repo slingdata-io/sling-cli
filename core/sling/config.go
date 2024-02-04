@@ -78,7 +78,7 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type.Kind() {
 	case dbio.KindFile:
 		sourceOptions = SourceFileOptionsDefault
-	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+	case dbio.KindDatabase:
 		sourceOptions = SourceDBOptionsDefault
 	default:
 		sourceOptions = SourceDBOptionsDefault
@@ -94,7 +94,7 @@ func (cfg *Config) SetDefault() {
 	switch cfg.TgtConn.Type.Kind() {
 	case dbio.KindFile:
 		targetOptions = TargetFileOptionsDefault
-	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+	case dbio.KindDatabase:
 		targetOptions = TargetDBOptionsDefault
 	default:
 		targetOptions = TargetDBOptionsDefault
@@ -539,10 +539,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	if cfg.Target.Conn != "" {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
-	}
-
-	if cfg.SrcConn.Type.IsAPI() {
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
