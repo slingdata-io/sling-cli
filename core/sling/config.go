@@ -217,10 +217,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
 	// srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
-	srcAPIProvided := false // disable API sourcing
 	srcStreamProvided := cfg.Source.Stream != ""
 
-	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided)
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
@@ -274,10 +273,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		Type = FileToFile
-	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided {
-		Type = APIToDb
-	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		Type = APIToFile
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != "" {
 		cfg.Target.Object = cfg.Target.Options.PostSQL
 		Type = DbSQL
