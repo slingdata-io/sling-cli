@@ -1,6 +1,6 @@
 # dbio
 
-`dbio` is a golang library for all things Database, Storage, API I/O processing.
+`dbio` is a golang library for all things Database, Storage I/O processing.
 
 The particularly useful struct used are:
 * `Datastream`: https://github.com/slingdata-io/sling-cli/core/dbio/blob/main/iop/datastream.go
