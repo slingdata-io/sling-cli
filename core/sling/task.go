@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 

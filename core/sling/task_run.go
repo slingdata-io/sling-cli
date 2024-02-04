@@ -13,10 +13,9 @@ import (
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
 )
 
@@ -90,10 +89,6 @@ func (t *TaskExecution) Execute() error {
 			t.Err = t.runDbToFile()
 		case FileToFile:
 			t.Err = t.runFileToFile()
-		case APIToDb:
-			t.Err = t.runAPIToDB()
-		case APIToFile:
-			t.Err = t.runAPIToFile()
 		default:
 			t.SetProgress("task execution configuration is invalid")
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
@@ -290,52 +285,6 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 }
 
-func (t *TaskExecution) runAPIToFile() (err error) {
-
-	start = time.Now()
-
-	t.SetProgress("connecting to source api system (%s)", t.Config.SrcConn.Info().Type)
-	srcConn, err := t.Config.SrcConn.AsAirbyte()
-	if err != nil {
-		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
-		return err
-	}
-	defer srcConn.Close()
-
-	err = srcConn.Init(false)
-	if err != nil {
-		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
-		return err
-	}
-	srcConn.SetProp("METADATA", g.Marshal(t.getMetadata()))
-
-	t.SetProgress("reading from source api system (%s)", t.Config.SrcConn.Type)
-	t.df, err = t.ReadFromAPI(t.Config, srcConn)
-	if err != nil {
-		err = g.Error(err, "could not read from api")
-		return
-	}
-	defer t.df.Close()
-
-	if t.Config.Options.StdOut {
-		t.SetProgress("writing to target stream (stdout)")
-	} else {
-		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
-	}
-	defer t.Cleanup()
-	cnt, err := t.WriteToFile(t.Config, t.df)
-	if err != nil {
-		err = g.Error(err, "Could not WriteToFile")
-		return
-	}
-
-	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
-
-	err = t.df.Err()
-	return
-
-}
-
 func (t *TaskExecution) runFolderToDB() (err error) {
 	/*
 		This will take a URL as a folder path
@@ -345,92 +294,6 @@ func (t *TaskExecution) runFolderToDB() (err error) {
 		3. keep list of file inserted in Job.Settings (view handleExecutionHeartbeat in server_ws.go).
 
 	*/
-	return
-}
-
-func (t *TaskExecution) runAPIToDB() (err error) {
-
-	start = time.Now()
-
-	t.SetProgress("connecting to source api system (%s)", t.Config.SrcConn.Info().Type)
-	srcConn, err := t.Config.SrcConn.AsAirbyte()
-	if err != nil {
-		err = g.Error(err, "Could not obtain client for: %s", t.Config.SrcConn.Type)
-		return err
-	}
-
-	err = srcConn.Init(false)
-	if err != nil {
-		err = g.Error(err, "Could not init connection for: %s", t.Config.SrcConn.Type)
-		return err
-	}
-	srcConn.SetProp("METADATA", g.Marshal(t.getMetadata()))
-
-	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
-	if err != nil {
-		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
-		return
-	}
-
-	if !t.isUsingPool() {
-		t.AddCleanupTask(func() { tgtConn.Close() })
-		t.AddCleanupTask(func() { srcConn.Close() })
-	}
-
-	// set schema if needed
-	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
-	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
-
-	// get watermark
-	if t.usingCheckpoint() {
-		t.SetProgress("getting checkpoint value")
-		dateLayout := iop.Iso8601ToGoLayout(srcConn.GetProp("date_layout"))
-		varMap := map[string]string{
-			"timestamp_layout":     dateLayout,
-			"timestamp_layout_str": "{value}",
-			"date_layout":          dateLayout,
-			"date_layout_str":      "{value}",
-		}
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
-		if err != nil {
-			err = g.Error(err, "Could not get incremental value")
-			return err
-		}
-	}
-
-	t.SetProgress("reading from source api system (%s)", t.Config.SrcConn.Type)
-	t.df, err = t.ReadFromAPI(t.Config, srcConn)
-	if err != nil {
-		err = g.Error(err, "could not read from api")
-		return
-	}
-	defer t.df.Close()
-
-	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
-	defer t.Cleanup()
-	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
-	if err != nil {
-		err = g.Error(err, "could not write to database")
-		if t.Config.Target.TmpTableCreated {
-			// need to drop residue
-			tgtConn.DropTable(t.Config.Target.Options.TableTmp)
-		}
-		return
-	}
-
-	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
-
-	if err != nil {
-		err = g.Error(t.df.Err(), "error in transfer")
-	}
 	return
 }
 

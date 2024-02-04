@@ -1,0 +1,22 @@
+[
+  {
+    "id": 19,
+    "first_name": "AOCG,\"\n883",
+    "last_name": "Lumox",
+    "email": "ilumox0@unc.edu",
+    "target": true,
+    "create_dt": "2019-02-11 11:23:00.000",
+    "rating": 35.987,
+    "extraCol2": "44.751"
+  },
+  {
+    "id": 21,
+    "first_name": "Alexis",
+    "last_name": "Fewtrell",
+    "email": "afewtrellh@google.cn",
+    "target": true,
+    "create_dt": "2019-05-31 14:55:31.000",
+    "rating": 44.751,
+    "extraCol2": 44.751
+  }
+ ]

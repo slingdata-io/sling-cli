@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
 	"gorm.io/gorm/clause"

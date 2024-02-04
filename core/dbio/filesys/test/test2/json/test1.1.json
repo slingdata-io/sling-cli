@@ -1,0 +1,165 @@
+[
+  {
+    "id": 1,
+    "first_name": "AOCG,\"\n883",
+    "last_name": "Lumox",
+    "email": "ilumox0@unc.edu",
+    "target": true,
+    "create_dt": "2019-02-11 11:23:00.000",
+    "rating": 35.987
+  },
+  {
+    "id": 2,
+    "first_name": "Terrell",
+    "last_name": "EKOZ,989",
+    "email": "tmee1@example.com",
+    "target": true,
+    "create_dt": "2019-08-19 17:02:09.000",
+    "rating": 89.983
+  },
+  {
+    "id": 3,
+    "first_name": "Frayda",
+    "last_name": "Comolli",
+    "email": "fcomolli2@cbslocal.com",
+    "target": false,
+    "create_dt": "2019-08-07 16:48:12.000",
+    "rating": 89.401
+  },
+  {
+    "id": 4,
+    "first_name": "Alphonse",
+    "last_name": "Crookshank",
+    "email": "acrookshank3@mapy.cz",
+    "target": true,
+    "create_dt": "2019-03-31 14:41:45.000",
+    "rating": 19.933
+  },
+  {
+    "id": 5,
+    "first_name": "Mathilda",
+    "last_name": "Deaves",
+    "email": "mdeaves4@va.gov",
+    "target": true,
+    "create_dt": "2019-07-15 21:20:39.000",
+    "rating": 90.643
+  },
+  {
+    "id": 6,
+    "first_name": "Trixi",
+    "last_name": "Livens",
+    "email": "tlivens5@cargocollective.com",
+    "target": true,
+    "create_dt": "2019-06-20 10:58:40.000",
+    "rating": 74.341
+  },
+  {
+    "id": 7,
+    "first_name": "Ida",
+    "last_name": "Domican",
+    "email": "idomican6@gravatar.com",
+    "target": false,
+    "create_dt": "2019-03-11 09:18:34.000",
+    "rating": 55.454
+  },
+  {
+    "id": 8,
+    "first_name": "Bogey",
+    "last_name": "Kears",
+    "email": "bkears7@nih.gov",
+    "target": false,
+    "create_dt": "2019-09-11 22:08:40.000",
+    "rating": 3.869
+  },
+  {
+    "id": 9,
+    "first_name": "Janifer",
+    "last_name": "Melanaphy",
+    "email": "jmelanaphy8@alibaba.com",
+    "target": true,
+    "create_dt": "2019-02-19 16:23:06.000",
+    "rating": 48.234,
+    "extraCol": true
+  },
+  {
+    "id": 10,
+    "first_name": "Kaela",
+    "last_name": "Illsley",
+    "email": "killsley9@feedburner.com",
+    "target": false,
+    "create_dt": "2019-04-17 05:05:18.000",
+    "rating": 86.13
+  },
+  {
+    "id": 11,
+    "first_name": "Yorgos",
+    "last_name": "Ruprechter",
+    "email": "yruprechtera@baidu.com",
+    "target": false,
+    "create_dt": "2019-01-03 05:57:01.000",
+    "rating": 88.736
+  },
+  {
+    "id": 12,
+    "first_name": "Bunni",
+    "last_name": "Bothams",
+    "email": "bbothamsb@amazon.co.jp",
+    "target": false,
+    "create_dt": "2019-08-12 14:51:09.000",
+    "rating": 94.945
+  },
+  {
+    "id": 13,
+    "first_name": "Sharon",
+    "last_name": "Atwater",
+    "email": "satwaterc@webeden.co.uk",
+    "target": false,
+    "create_dt": "2019-05-22 09:38:10.000",
+    "rating": 30.112
+  },
+  {
+    "id": 14,
+    "first_name": "Ellen",
+    "last_name": "Real",
+    "email": "ereald@amazonaws.com",
+    "target": true,
+    "create_dt": "2019-02-01 18:47:06.000",
+    "rating": 6.877
+  },
+  {
+    "id": 15,
+    "first_name": "Charissa",
+    "last_name": "Ballance",
+    "email": "cballancee@amazonaws.com",
+    "target": true,
+    "create_dt": "2019-07-25 04:34:02.000",
+    "rating": 8.514
+  },
+  {
+    "id": 16,
+    "first_name": "Zorina",
+    "last_name": "Cudiff",
+    "email": "zcudifff@jigsy.com",
+    "target": false,
+    "create_dt": "2019-10-06 04:13:55.000",
+    "rating": 27.63
+  },
+  {
+    "id": 17,
+    "first_name": "Grove",
+    "last_name": "Kenrack",
+    "email": "gkenrackg@chronoengine.com",
+    "target": true,
+    "create_dt": "2019-09-01 05:11:02.000",
+    "rating": 18.658
+  },
+  {
+    "id": 18,
+    "first_name": "Alexis",
+    "last_name": "Fewtrell",
+    "email": "afewtrellh@google.cn",
+    "target": true,
+    "create_dt": "2019-05-31 14:55:31.000",
+    "rating": 44.751
+  }
+ ]

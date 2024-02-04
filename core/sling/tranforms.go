@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 )

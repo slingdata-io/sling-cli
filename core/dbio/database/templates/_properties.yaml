@@ -1,0 +1,352 @@
+
+
+
+oracle:
+  title: 'Oracle'
+  kind: database
+  required: ["host", "port", "username"]
+  url_template: ['oracle://{username}:{password}@{host}:{port}/{sid}', 'oracle://{username}:{password}@{tns}']
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: ORCL_FINANCE'
+    sid:
+      type: text
+      title: SID or Service Name
+      description: 'The Oracle System ID / Service Name of the instance'
+    tns:
+      type: text
+      description: 'The Oracle TNS string of the instance'
+    host:
+      type: text
+      description: 'The hostname / ip of the connection, e.g.: my.server.com or 192.65.43.11'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 1521
+
+snowflake:
+  title: 'Snowflake'
+  kind: database
+  fields: ["host", "database", "schema", "role", "username", "password", "warehouse"]
+  required: ["host", "database", "schema", "role", "username", "password"]
+  url_template: 'snowflake://{username}:{password}@{host}.snowflakecomputing.com:443/{database}?schema={schema}&warehouse={warehouse}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DB_MARKETING'
+    host:
+      type: text
+      description: 'The hostname of the connection, e.g.: pua90768.us-east-11'
+    database:
+      type: text
+      description: 'The database name of the instance'
+    role:
+      type: text
+      description: 'The role name of the user'
+    warehouse:
+      type: text
+      description: 'The warehouse name to use'
+    schema:
+      type: text
+      description: 'The default schema to use when connecting, e.g. public'
+      default: public
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+
+redshift:
+  title: 'Redshift'
+  kind: database
+  required: ["host", "port", "database", "username", 'aws_bucket', 'aws_access_key_id', 'aws_secret_access_key']
+  url_template: 'redshift://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}'
+  properties:
+    database:
+      type: text
+      description: 'The database name of the instance'
+    host:
+      type: text
+      description: 'The hostname of the connection, e.g.: redshift-cluster-1.abcdefg.us-east-1.redshift.amazonaws.com'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 5439
+    sslmode:
+      type: dropdown
+      options: ['disable', 'require']
+      title: SSL mode
+      description: the SSL mode to use when connection
+      default: disable
+    aws_bucket:
+      type: text
+      title: Bucket name
+      description: The name of the S3 Bucket for Bulk Loading
+    aws_access_key_id:
+      type: text
+      title: AWS Access Key
+      description: The AWS Access Key ID to access the bucket for Bulk Loading
+    aws_secret_access_key:
+      type: text
+      title: AWS Secret Key
+      description: The AWS Secret Key to access the bucket for Bulk Loading
+      secret: true
+
+postgres:
+  title: 'Postges'
+  kind: database
+  required: ["host", "port", "database", "username"]
+  url_template: 'postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: PG_MARKETING'
+    database:
+      type: text
+      description: 'The database name of the instance'
+    host:
+      type: text
+      description: 'The hostname / ip of the connection, e.g.: my.server.com or 192.65.43.11'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 5432
+    sslmode:
+      type: dropdown
+      options: ['disable', 'require']
+      title: SSL mode to use
+      default: disable
+
+
+bigquery:
+  title: 'Big Query'
+  kind: database
+  required: ["dataset", "project", "credentials_json"]
+  url_template: 'bigquery://{project}/{location}/{dataset}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: BQ_DWH'
+    dataset:
+      type: text
+      title: Dataset ID
+      description: 'The BigQuery dataset id'
+    project:
+      type: text
+      title: Project ID
+      description: 'The GCP project ID for the project containing the dataset.'
+    credentials_json:
+      type: text
+      title: Upload Service Account JSON
+      description: 'Upload Service Account JSON'
+    location:
+      type: dropdown
+      options: ['asia-east1','asia-east2','asia-northeast1','asia-northeast2','asia-northeast3','asia-south1','asia-southeast1','asia-southeast2','australia-southeast1','europe-north1','europe-west1','europe-west2','europe-west3','europe-west4','europe-west6','northamerica-northeast1','southamerica-east1','us-central1','us-east1','us-east4','us-west1','us-west2','us-west3','us-west4']
+      description: The dataset regional location
+    gc_bucket:
+      type: text
+      title: Google Cloud Bucket
+      description: The name of the Google Cloud Storage Bucket
+
+
+mysql:
+  title: 'MySQL'
+  kind: database
+  required: ["host", "port", "database", "username"]
+  url_template: 'mysql://{username}:{password}@{host}:{port}/{database}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DB_MARKETING'
+    database:
+      type: text
+      description: 'The database name of the instance'
+    host:
+      type: text
+      description: 'The hostname / ip of the connection, e.g.: my.server.com or 192.65.43.11'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 3306
+      
+sqlserver:
+  title: 'MS SQL Server'
+  kind: database
+  required: ["host", "port", "database", "username"]
+  url_template: 'sqlserver://{username}:{password}@{host}:{port}/{database}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DB_MARKETING'
+    database:
+      type: text
+      description: 'The database name of the instance'
+    host:
+      type: text
+      description: 'The hostname / ip of the connection, e.g.: my.server.com or 192.65.43.11'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 1433
+      
+azuresql:
+  title: 'Azure SQL Server'
+  kind: database
+  required: ["host", "port", "database", "username"]
+  url_template: 'sqlserver://{username}:{password}@{host}:{port}/{database}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: DB_MARKETING'
+    database:
+      type: text
+      description: 'The database name of the instance'
+    host:
+      type: text
+      description: 'The hostname, e.g.: my.server.database.windows.net'
+    username:
+      type: text
+      description: 'The username to access the instance'
+    password:
+      type: text
+      description: 'The password to access the instance'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the instance'
+      default: 1433
+
+s3:
+  title: 'AWS S3'
+  kind: file
+  required: ["bucket", "access_key_id", "secret_access_key"]
+  url_template: 's3://{bucket}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the S3 connection. No spaces are allowed, will be all caps. Example: S3_MAIN'
+    bucket:
+      type: text
+      title: Bucket name
+      description: The name of the S3 Bucket
+    access_key_id:
+      type: text
+      title: AWS Access Key
+      description: The AWS Access Key ID to access the bucket
+    secret_access_key:
+      type: text
+      title: AWS Secret Key
+      description: The AWS Secret Key to access the bucket
+      secret: true
+    endpoint:
+      type: text
+      title: Endpoint Hostname
+      description: The hostname of the endpoint (e.g. nyc3.digitaloceanspaces.com)
+
+azure:
+  title: 'Azure Storage'
+  kind: file
+  required: ["account", "sas_svc_url"]
+  url_template: 'azure://{account}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: AZ_CSV_ARCHIVE'
+    account:
+      type: text
+      title: Storage Account Name
+      description: The name of the Azure Storage Account
+    sas_svc_url: 
+      title: Azure Shared access signature
+      type: text
+      description: The Shared access signature to access the storage account
+
+gs:
+  title: 'Google Storage'
+  kind: file
+  required: ["bucket", "credentials_json"]
+  url_template: 'gs://{bucket}'
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the connection. No spaces are allowed, will be all caps. Example: GS_ARCHIVE'
+    bucket:
+      type: text
+      title: Google Cloud Bucket
+      description: The name of the Google Cloud Storage Bucket
+    credentials_json:
+      type: upload-google
+      title: Upload Service Account JSON
+      description: 'Upload Service Account JSON'
+
+sftp:
+  title: 'SFTP'
+  kind: file
+  required: ["host", "port", "username"]
+  properties:
+    name:
+      type: text
+      title: Connection Name
+      description: 'The name of the SFTP connection. No spaces are allowed, will be all caps. Example: SFTP_BACKUPS'
+    host:
+      type: text
+      description: 'The hostname or IP of the server'
+    username:
+      type: text
+      description: 'The username to use to access the server'
+    password:
+      type: text
+      description: 'Optional: The password to use to access the server'
+      secret: true
+    port:
+      type: integer
+      description: 'The port of the server'
+      default: 22

@@ -14,7 +14,6 @@ echo "version -> $version"
 echo "VERSION -> $env:VERSION"
 
 go mod edit -dropreplace='github.com/flarco/g' go.mod
-go mod edit -dropreplace='github.com/flarco/dbio' go.mod
 go mod tidy
 
 (Get-Content core/version.go).replace('dev', "$env:VERSION") | Set-Content core/version.go

@@ -5,7 +5,6 @@ project_name: sling
 before:
   hooks:
     - go mod edit -dropreplace='github.com/flarco/g' go.mod
-    - go mod edit -dropreplace='github.com/flarco/dbio' go.mod
     - go mod tidy
     # you may remove this if you don't need go generate
     - go generate ./...

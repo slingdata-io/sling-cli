@@ -20,9 +20,9 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
-	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
 )
 

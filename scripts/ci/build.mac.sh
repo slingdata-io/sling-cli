@@ -7,7 +7,6 @@ mkdir -p $TMPDIR
 
 echo "Building sling-mac"
 go mod edit -dropreplace='github.com/flarco/g' go.mod
-go mod edit -dropreplace='github.com/flarco/dbio' go.mod
 go mod tidy
 
 export VERSION=$1

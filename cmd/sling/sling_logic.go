@@ -12,7 +12,7 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
-	"github.com/flarco/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"

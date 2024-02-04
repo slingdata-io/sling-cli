@@ -1,9 +1,9 @@
 package store
 
 import (
-	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/connection"
-	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/filesys"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"gopkg.in/yaml.v2"
 )
 
