@@ -216,7 +216,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	// srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
 	srcStreamProvided := cfg.Source.Stream != ""
 
 	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided)
@@ -306,15 +305,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		if targetErrMsg != "" {
 			output = append(output, g.F("error -> %s", targetErrMsg))
 		}
-
-		// []string{
-		// 	g.F("Source File Provided: %t", srcFileProvided),
-		// 	g.F("Target File Provided: %t", tgtFileProvided),
-		// 	g.F("Source DB Provided: %t", srcDbProvided),
-		// 	g.F("Target DB Provided: %t", tgtDbProvided),
-		// 	g.F("Source Stream Provided: %t", srcStreamProvided),
-		// 	g.F("Source API Provided: %t", srcAPIProvided),
-		// }
 
 		err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
 	}
@@ -840,13 +830,6 @@ var SourceDBOptionsDefault = SourceOptions{
 	MaxDecimals:    g.Int(-1),
 }
 
-var SourceAPIOptionsDefault = SourceOptions{
-	EmptyAsNull:    g.Bool(true),
-	NullIf:         g.String("NULL"),
-	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(-1),
-}
-
 var TargetFileOptionsDefault = TargetOptions{
 	Header: g.Bool(true),
 	Compression: lo.Ternary(
@@ -889,18 +872,6 @@ var TargetDBOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
 	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
-}
-
-var TargetAPIOptionsDefault = TargetOptions{
-	FileMaxRows: lo.Ternary(
-		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
-	),
-	UseBulk:        g.Bool(true),
-	AddNewColumns:  g.Bool(true),
-	DatetimeFormat: "auto",
-	MaxDecimals:    g.Int(-1),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

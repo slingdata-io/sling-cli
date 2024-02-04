@@ -40,7 +40,6 @@ type ConnectionInt interface {
 	ToMap() map[string]interface{}
 	AsDatabase() (database.Connection, error)
 	AsFile() (filesys.FileSysClient, error)
-	// AsAPI() interface{}
 	Set(map[string]interface{})
 }
 
