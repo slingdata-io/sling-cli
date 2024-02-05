@@ -128,6 +128,12 @@ var cliRun = &g.CliSC{
 			Description: "The maximum number of rows to pull.",
 		},
 		{
+			Name:        "iterate",
+			ShortName:   "",
+			Type:        "string",
+			Description: "Have sling run continuously a number of times (useful for backfilling).\n                       Accepts an integer above 0, or 'infinite' to run indefinitely. If the run fails, sling will exit",
+		},
+		{
 			Name:        "range",
 			ShortName:   "",
 			Type:        "string",
