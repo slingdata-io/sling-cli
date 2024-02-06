@@ -218,7 +218,7 @@ func (conn *StarRocksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 		return conn.StreamLoad(feURL, tableFName, df)
 	}
 
-	g.Warn("Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
+	g.Debug("WARN: Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
 
 	return conn.BaseConn.BulkImportFlow(tableFName, df)
 }
