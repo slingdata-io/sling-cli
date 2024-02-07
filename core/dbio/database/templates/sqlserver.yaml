@@ -1,0 +1,321 @@
+core:
+  drop_table: IF OBJECT_ID(N'{table}', N'U') IS NOT NULL DROP TABLE {table}
+  drop_view: IF OBJECT_ID(N'{view}', N'V') IS NOT NULL DROP VIEW {view}
+  create_temporary_table: 'create table #{table} ({col_types})'
+  replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
+  replace_temp: |
+    insert into {table} ({names})
+    select {names} from {temp_table}
+    on conflict ({pk_fields}) do nothing;
+    update {table} as t1 set {set_fields2}
+    from (select * from {temp_table}) as t2
+    where {pk_fields_equal}
+  limit: select top {limit} * from ( {sql} ) as t
+  insert: insert into {table} ({cols}) values ({values})
+  insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
+  insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing
+  insert_ignore_temp: insert into {table} ({names}) select {names} from {temp_table} on conflict ({pk_fields}) do nothing
+  update_temp: |
+    update {table} as t1 set {set_fields2}
+    from (select * from {temp_table}) as t2
+    where {pk_fields_equal2}
+  sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
+  rename_table: ALTER TABLE {table} RENAME TO {new_table}
+  bulk_insert: |
+    BULK INSERT {table}
+    FROM '/dev/stdin'
+    WITH (
+      BATCHSIZE = 5000,
+      ERRORFILE = '/dev/stderr',
+      MAXERRORS = 0,
+      FORMAT = 'CSV',
+      FIELDTERMINATOR = ','
+    )
+  column_names: '{sql}'
+  add_column: alter table {table} add {column} {type}
+  alter_columns: alter table {table} alter column {col_ddl}
+  modify_column: '{column} {type}'
+
+
+metadata:
+  databases: select db_name() as name
+  
+  current_database: select db_name() 
+    
+  schemas: |
+    select schema_name
+    from information_schema.schemata
+    order by schema_name
+    
+  tables: |
+    select table_name
+    from information_schema.tables
+    where table_type = 'BASE TABLE'
+      and table_schema = '{schema}'
+    order by table_name
+    
+  views: |
+    select table_name
+    from information_schema.tables
+    where table_type = 'VIEW'
+      and table_schema = '{schema}'
+    order by table_name
+
+  columns: |
+    select column_name, data_type
+    from information_schema.columns
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+    order by ordinal_position
+
+  primary_keys: |
+    select tco.constraint_name as pk_name,
+           kcu.ordinal_position as position,
+           kcu.column_name as column_name
+    from information_schema.table_constraints tco
+    join information_schema.key_column_usage kcu 
+         on kcu.constraint_name = tco.constraint_name
+         and kcu.constraint_schema = tco.constraint_schema
+         and kcu.constraint_name = tco.constraint_name
+    where kcu.table_schema = '{schema}'
+      and kcu.table_name = '{table}'
+    order by kcu.table_schema,
+             kcu.table_name,
+             position
+
+  indexes: |
+    SELECT
+      ind.name as index_name,
+      col.name as column_name
+    FROM sys.indexes ind
+    INNER JOIN sys.index_columns ic ON ind.object_id = ic.object_id
+      and ind.index_id = ic.index_id
+    INNER JOIN sys.columns col ON ic.object_id = col.object_id
+      and ic.column_id = col.column_id
+    INNER JOIN sys.tables t ON ind.object_id = t.object_id
+    WHERE schema_name(t.schema_id) = '{schema}' and t.name = '{table}'
+      AND ind.is_primary_key = 0
+      AND ind.is_unique = 0
+      AND ind.is_unique_constraint = 0
+      AND t.is_ms_shipped = 0
+    ORDER BY
+      ind.name,
+      ind.index_id,
+      ic.index_column_id
+  
+  columns_full: |
+    with tables as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then 'true'
+          else 'false'
+        end as is_view
+      from information_schema.tables
+      where table_schema = '{schema}' and table_name = '{table}'
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables
+      on tables.table_catalog = cols.table_catalog
+      and tables.table_schema = cols.table_schema
+      and tables.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+
+  schemata: |
+    with tables as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then 'true'
+          else 'false'
+        end as is_view
+      from information_schema.tables
+      where 1=1
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      tables.is_view as is_view,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables
+      on tables.table_catalog = cols.table_catalog
+      and tables.table_schema = cols.table_schema
+      and tables.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+  
+  ddl_table:
+    exec sp_describe_first_result_set @tsql= N'Select * from "{schema}"."{table}"'
+  
+  ddl_view: |
+    select definition as ddl
+    from sys.sql_modules  
+    where object_id = object_id('"{schema}"."{table}"')
+  
+  sessions:
+    select *
+    from pg_stat_activity
+    where state = 'active'
+
+  session_terminate:
+    select pg_terminate_backend({pid})
+
+analysis:
+  field_chars: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field, sum(case when cast({field} as text) ~ '\n' then 1 else 0 end) as cnt_nline, 
+      sum(case when cast({field} as text) ~ '\t' then 1 else 0 end) as cnt_tab, 
+      sum(case when cast({field} as text) ~ ',' then 1 else 0 end) as cnt_comma, 
+      sum(case when cast({field} as text) ~ '"' then 1 else 0 end) as cnt_dquote, 
+      min(datalength(cast({field} as text))) as f_min_len, 
+      max(datalength(cast({field} as text))) as f_max_len
+    from "{schema}"."{table}"
+
+  field_stat_len: |
+    -- field_stat_len {table}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      '{type}' as type,
+      count(*) as tot_cnt,
+      min(datalength({field})) as f_min_len,
+      max(datalength({field})) as f_max_len
+    from "{schema}"."{table}"
+
+  field_stat_deep: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*),1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*),1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt,
+      min({field}) as f_min,
+      max({field}) as f_max,
+      min(datalength(cast({field} as text))) as f_min_len,
+      max(datalength(cast({field} as text))) as f_max_len
+    from "{schema}"."{table}"
+
+  distro_field: |
+    with t1 as (
+      select
+        '{field}'::text as field,
+        {field},
+        count(*) cnt
+      from "{schema}"."{table}"
+      group by {field}
+      order by count(*) desc
+    )
+    , t2 as (
+      select
+        '{field}'::text as field,
+        count(*) ttl_cnt
+      from "{schema}"."{table}"
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2
+      on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_group: |
+    with t1 as (
+      select
+        '{field}'::text as field,
+        {group_expr} as group_exp,
+        {field},        
+        count(*) cnt
+      from "{schema}"."{table}"
+      group by {field}, {group_expr}
+      order by count(*) desc
+    )
+    , t2 as (
+      select
+        '{field}'::text as field,
+        count(*) ttl_cnt
+      from "{schema}"."{table}"
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      t1.group_exp,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2
+      on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_date: |
+    with t1 as (
+        select
+          '{field}'::text as field,
+          extract(year from {field}) as year,
+          extract(month from {field}) as month,
+          count(*) cnt
+        from "{schema}"."{table}"
+        group by extract(year from {field}), extract(month from {field})
+        order by extract(year from {field}), extract(month from {field})
+      )
+      , t2 as (
+        select '{field}'::text as field, count(*) ttl_cnt
+        from "{schema}"."{table}"
+      )
+      select 
+        '{schema}' as schema_nm,
+        '{table}' as table_nm,
+        t1.field,
+        t1.year,
+        t1.month,
+        cnt,
+        round(100.0 * cnt / ttl_cnt, 2) as prct
+      from t1
+      join t2
+        on t1.field = t2.field
+      order by t1.year, t1.month
+
+function:
+  truncate_f: round({field}, 2, 1)
+  truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
+  sleep: waitfor delay '00:00:{seconds}.000'
+  checksum_string: datalength({field})
+  checksum_integer: 'CAST({field} as bigint)'
+  checksum_boolean: len({field})
+  checksum_json: datalength(replace(CONVERT(VARCHAR(MAX), {field}), ' ', ''))
+  checksum_datetime: (CAST(DATEDIFF(ss, '01-01-1970 00:00:00', {field}) as bigint) * 1000000) + DATEPART(microsecond, {field})
+  checksum_decimal: ABS(CAST({field} as bigint))
+
+
+variable:
+  bind_string: "@p{c}"
+  batch_rows: 200
+  batch_values: 2000
+  bool_as: string
+  error_filter_table_exists: already

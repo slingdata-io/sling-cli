@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	env "github.com/flarco/dbio/env"
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
+	env "github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/spf13/cast"
 )
 

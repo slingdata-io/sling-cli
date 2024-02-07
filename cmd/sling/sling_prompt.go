@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/c-bata/go-prompt"
-	"github.com/flarco/dbio/connection"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/spf13/cast"
 )
 

@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/connection"
-	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/filesys"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"gopkg.in/yaml.v2"
 )
 
@@ -78,7 +78,7 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type.Kind() {
 	case dbio.KindFile:
 		sourceOptions = SourceFileOptionsDefault
-	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+	case dbio.KindDatabase:
 		sourceOptions = SourceDBOptionsDefault
 	default:
 		sourceOptions = SourceDBOptionsDefault
@@ -94,7 +94,7 @@ func (cfg *Config) SetDefault() {
 	switch cfg.TgtConn.Type.Kind() {
 	case dbio.KindFile:
 		targetOptions = TargetFileOptionsDefault
-	case dbio.KindDatabase, dbio.KindAPI, dbio.KindAirbyte:
+	case dbio.KindDatabase:
 		targetOptions = TargetDBOptionsDefault
 	default:
 		targetOptions = TargetDBOptionsDefault
@@ -122,7 +122,7 @@ func (cfg *Config) SetDefault() {
 
 	// set default transforms
 	switch cfg.SrcConn.Type {
-	case dbio.TypeDbMySQL:
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
 		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
 	}
@@ -216,11 +216,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
-	// srcAPIProvided := cfg.SrcConn.Info().Type.IsAPI() || cfg.SrcConn.Info().Type.IsAirbyte()
-	srcAPIProvided := false // disable API sourcing
 	srcStreamProvided := cfg.Source.Stream != ""
 
-	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t, srcAPIProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided, srcAPIProvided)
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided)
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
@@ -274,10 +272,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		Type = FileToFile
-	} else if srcAPIProvided && srcStreamProvided && tgtDbProvided {
-		Type = APIToDb
-	} else if srcAPIProvided && srcStreamProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		Type = APIToFile
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != "" {
 		cfg.Target.Object = cfg.Target.Options.PostSQL
 		Type = DbSQL
@@ -311,15 +305,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		if targetErrMsg != "" {
 			output = append(output, g.F("error -> %s", targetErrMsg))
 		}
-
-		// []string{
-		// 	g.F("Source File Provided: %t", srcFileProvided),
-		// 	g.F("Target File Provided: %t", tgtFileProvided),
-		// 	g.F("Source DB Provided: %t", srcDbProvided),
-		// 	g.F("Target DB Provided: %t", tgtDbProvided),
-		// 	g.F("Source Stream Provided: %t", srcStreamProvided),
-		// 	g.F("Source API Provided: %t", srcAPIProvided),
-		// }
 
 		err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
 	}
@@ -544,10 +529,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	if cfg.Target.Conn != "" {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
-	}
-
-	if cfg.SrcConn.Type.IsAPI() {
-		m["stream_name"] = strings.ToLower(cfg.StreamName)
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
@@ -849,13 +830,6 @@ var SourceDBOptionsDefault = SourceOptions{
 	MaxDecimals:    g.Int(-1),
 }
 
-var SourceAPIOptionsDefault = SourceOptions{
-	EmptyAsNull:    g.Bool(true),
-	NullIf:         g.String("NULL"),
-	DatetimeFormat: "AUTO",
-	MaxDecimals:    g.Int(-1),
-}
-
 var TargetFileOptionsDefault = TargetOptions{
 	Header: g.Bool(true),
 	Compression: lo.Ternary(
@@ -898,18 +872,6 @@ var TargetDBOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	MaxDecimals:    g.Int(-1),
 	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
-}
-
-var TargetAPIOptionsDefault = TargetOptions{
-	FileMaxRows: lo.Ternary(
-		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
-	),
-	UseBulk:        g.Bool(true),
-	AddNewColumns:  g.Bool(true),
-	DatetimeFormat: "auto",
-	MaxDecimals:    g.Int(-1),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {

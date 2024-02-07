@@ -16,9 +16,9 @@ import (
 
 	"github.com/slingdata-io/sling-cli/core/sling"
 
-	d "github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
+	d "github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 )
 

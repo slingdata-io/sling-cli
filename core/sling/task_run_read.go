@@ -5,14 +5,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/connection"
-	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/filesys"
-	"github.com/flarco/dbio/iop"
-	"github.com/flarco/dbio/saas/airbyte"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
@@ -171,36 +170,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
+	t.setColumnKeys(df)
+
 	g.Trace("%#v", df.Columns.Types())
-
-	return
-}
-
-// ReadFromAPI reads from a source API
-func (t *TaskExecution) ReadFromAPI(cfg *Config, client *airbyte.Airbyte) (df *iop.Dataflow, err error) {
-
-	df = iop.NewDataflow()
-	var stream *iop.Datastream
-
-	if cfg.SrcConn.Type.IsAirbyte() {
-		config := airbyte.StreamConfig{
-			Columns:   cfg.Source.Select,
-			StartDate: cfg.IncrementalVal,
-		}
-		stream, err = client.Stream(cfg.Source.Stream, config)
-		if err != nil {
-			err = g.Error(err, "Could not read stream '%s' for connection: %s", cfg.Source.Stream, cfg.SrcConn.Type)
-			return t.df, err
-		}
-
-		df, err = iop.MakeDataFlow(stream)
-		if err != nil {
-			err = g.Error(err, "Could not MakeDataFlow")
-			return t.df, err
-		}
-	} else {
-		err = g.Error("API type not implemented: %s", cfg.SrcConn.Type)
-	}
 
 	return
 }
@@ -251,7 +223,20 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		return df, g.Error("Could not read columns")
 	}
 
+	t.setColumnKeys(df)
+
 	g.Trace("%#v", df.Columns.Types())
 
 	return
+}
+
+// setColumnKeys sets the column keys
+func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) {
+	if t.Config.Source.HasPrimaryKey() {
+		df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...)
+	}
+
+	if t.Config.Source.HasUpdateKey() {
+		df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey)
+	}
 }

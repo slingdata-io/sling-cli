@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/flarco/dbio/connection"
-	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )

@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/flarco/dbio"
-	"github.com/flarco/dbio/database"
-	"github.com/flarco/dbio/iop"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
@@ -215,6 +215,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "exist") ||
 			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "unknown") ||
 			strings.Contains(errMsg, "no such table") ||
 			strings.Contains(errMsg, "invalid object") {
 			// table does not exists, will be create later

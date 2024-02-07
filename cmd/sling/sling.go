@@ -20,9 +20,9 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
-	"github.com/flarco/dbio/database"
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
 )
 
@@ -126,6 +126,12 @@ var cliRun = &g.CliSC{
 			ShortName:   "l",
 			Type:        "string",
 			Description: "The maximum number of rows to pull.",
+		},
+		{
+			Name:        "iterate",
+			ShortName:   "",
+			Type:        "string",
+			Description: "Have sling run continuously a number of times (useful for backfilling).\n                       Accepts an integer above 0, or 'infinite' to run indefinitely. If the run fails, sling will exit",
 		},
 		{
 			Name:        "range",

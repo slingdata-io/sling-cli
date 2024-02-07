@@ -12,7 +12,7 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
-	"github.com/flarco/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -51,7 +51,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	cfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
-	// saveAsJob := false
+	iterate := 1
+	itNumber := 1
 
 	// recover from panic
 	defer func() {
@@ -109,6 +110,14 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
 
+		case "iterate":
+			if cast.ToString(v) == "infinite" {
+				iterate = -1
+			} else if val := cast.ToInt(v); val > 0 {
+				iterate = val
+			} else {
+				return ok, g.Error("invalid value for `iterate`")
+			}
 		case "range":
 			if cfg.Source.Options == nil {
 				cfg.Source.Options = &sling.SourceOptions{}
@@ -171,33 +180,42 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	go checkUpdate()
 	defer printUpdateAvailable()
 
-	if replicationCfgPath != "" {
-		err = runReplication(replicationCfgPath, selectStreams...)
-		if err != nil {
-			return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
+	for {
+		if replicationCfgPath != "" {
+			//  run replication
+			err = runReplication(replicationCfgPath, selectStreams...)
+			if err != nil {
+				return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
+			}
+		} else {
+			// run task
+			if cfgStr != "" {
+				err = cfg.Unmarshal(cfgStr)
+				if err != nil {
+					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
+				}
+			}
+
+			err = runTask(cfg, nil)
+			if err != nil {
+				return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
+			}
 		}
-		return ok, nil
-
-	}
-
-	if cfgStr != "" {
-		err = cfg.Unmarshal(cfgStr)
-		if err != nil {
-			return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
+		if iterate > 0 && itNumber >= iterate {
+			break
 		}
-	}
 
-	// run task
-	telemetryMap["run_mode"] = "task"
-	err = runTask(cfg, nil)
-	if err != nil {
-		return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
+		itNumber++
+		time.Sleep(1 * time.Second) // sleep for one second
+		println()
+		g.Info("Iteration #%d", itNumber)
 	}
 
 	return ok, nil
 }
 
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
+	telemetryMap["run_mode"] = "task"
 	var task *sling.TaskExecution
 
 	// track usage

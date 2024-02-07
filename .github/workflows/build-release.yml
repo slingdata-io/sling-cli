@@ -27,7 +27,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: false
           
       # - uses: actions/cache@v3
@@ -99,7 +99,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Build Sling (Linux)
@@ -171,7 +171,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: false
 
       - name: Run GoReleaser
@@ -195,7 +195,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Configure Pagefile
@@ -213,9 +213,8 @@ jobs:
           version: latest
           args: release --clean --skip-validate -f .goreleaser.windows.yaml
 
-  release-linux:
-    runs-on: ubuntu-20.04
-    # runs-on: [self-hosted, Linux]
+  release-linux-arm64:
+    runs-on: [self-hosted, Linux, ARM64]
     timeout-minutes: 20
 
     steps:
@@ -227,7 +226,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Login docker
@@ -242,7 +241,39 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip-validate -f .goreleaser.linux.yaml
+          args: release --clean --skip-validate -f .goreleaser.linux.arm64.yaml
+
+  release-linux-amd64:
+    runs-on: ubuntu-20.04
+    needs: [ release-linux-arm64 ] # for multi-platform docker image
+    # runs-on: [self-hosted, Linux]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.21"
+          cache: true
+
+      - name: Login docker
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
+
+      - name: Run GoReleaser
+        # uses: flarco/goreleaser-action@master
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --skip-validate -f .goreleaser.linux.amd64.yaml
 
       - name: Dispatch test-sling-action
         uses: peter-evans/repository-dispatch@v2
