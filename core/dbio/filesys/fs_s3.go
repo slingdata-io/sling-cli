@@ -70,10 +70,6 @@ func cleanKeyS3(key string) string {
 // Connect initiates the Google Cloud Storage client
 func (fs *S3FileSysClient) Connect() (err error) {
 
-	if fs.GetProp("ACCESS_KEY_ID") == "" || fs.GetProp("SECRET_ACCESS_KEY") == "" {
-		return g.Error("Need to set 'ACCESS_KEY_ID' and 'SECRET_ACCESS_KEY' to interact with S3")
-	}
-
 	endpoint := fs.GetProp("ENDPOINT")
 	region := fs.GetProp("REGION", "DEFAULT_REGION")
 	if region == "" {
@@ -81,20 +77,25 @@ func (fs *S3FileSysClient) Connect() (err error) {
 	}
 
 	// https://docs.aws.amazon.com/sdk-for-go/api/service/s3/
-	fs.session, err = session.NewSession(&aws.Config{
-		Credentials: credentials.NewStaticCredentials(
-			fs.GetProp("ACCESS_KEY_ID"),
-			fs.GetProp("SECRET_ACCESS_KEY"),
-			fs.GetProp("SESSION_TOKEN"),
-		),
+	awsConfig := &aws.Config{
 		Region:                         aws.String(region),
 		S3ForcePathStyle:               aws.Bool(true),
 		DisableRestProtocolURICleaning: aws.Bool(true),
 		Endpoint:                       aws.String(endpoint),
 		// LogLevel: aws.LogLevel(aws.LogDebugWithHTTPBody),
-	})
+	}
+
+	if fs.GetProp("ACCESS_KEY_ID") != "" && fs.GetProp("SECRET_ACCESS_KEY") != "" {
+		awsConfig.Credentials = credentials.NewStaticCredentials(
+			fs.GetProp("ACCESS_KEY_ID"),
+			fs.GetProp("SECRET_ACCESS_KEY"),
+			fs.GetProp("SESSION_TOKEN"),
+		)
+	}
+
+	fs.session, err = session.NewSession(awsConfig)
 	if err != nil {
-		err = g.Error(err, "Could not create AWS session")
+		err = g.Error(err, "Could not create AWS session (did not provide ACCESS_KEY_ID/SECRET_ACCESS_KEY or default AWS profile).")
 		return
 	}
 
