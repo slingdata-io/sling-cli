@@ -158,6 +158,8 @@ func (s *SAS) nextFunc(it *Iterator) bool {
 		return false
 	} else if eof {
 		return false
+	} else if s.dataIndex > len(s.Data.Rows)-1 {
+		return false
 	}
 
 	it.Row = s.Data.Rows[s.dataIndex]
