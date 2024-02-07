@@ -41,8 +41,19 @@ checksum:
 dockers:
   - dockerfile: 'cmd/sling/Dockerfile'
     image_templates:
-    - "slingdata/sling:latest"
-    - "slingdata/sling:{{ .Tag }}"
+    - "slingdata/sling:{{ .Tag }}-amd64"
+
+# https://goreleaser.com/cookbooks/multi-platform-docker-images/#creating-multi-platform-docker-images-with-goreleaser
+docker_manifests:
+- name_template: 'slingdata/sling:latest'
+  image_templates:
+  - 'slingdata/sling::{{ .Tag }}-amd64'
+  - 'slingdata/sling::{{ .Tag }}-arm64'
+
+- name_template: 'slingdata/sling:{{ .Tag }}'
+  image_templates:
+  - 'slingdata/sling::{{ .Tag }}-amd64'
+  - 'slingdata/sling::{{ .Tag }}-arm64'
 
 # mc policy set public DO/ocral/slingdata.io/cli
 blobs:
