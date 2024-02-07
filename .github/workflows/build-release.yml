@@ -27,7 +27,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: false
           
       # - uses: actions/cache@v3
@@ -99,7 +99,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Build Sling (Linux)
@@ -171,7 +171,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: false
 
       - name: Run GoReleaser
@@ -195,7 +195,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Configure Pagefile
@@ -226,7 +226,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Login docker
@@ -258,7 +258,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.20"
+          go-version: "1.21"
           cache: true
 
       - name: Login docker
