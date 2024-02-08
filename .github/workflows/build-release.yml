@@ -139,7 +139,7 @@ jobs:
           out_dir: slingdata.io/dist
 
   release-python:
-    needs: [release]
+    needs: [ release-linux-amd64, release-brew, release-scoop ]
     runs-on: ubuntu-latest
 
     steps:
