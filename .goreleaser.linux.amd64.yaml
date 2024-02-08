@@ -47,13 +47,13 @@ dockers:
 docker_manifests:
 - name_template: 'slingdata/sling:latest'
   image_templates:
-  - 'slingdata/sling::{{ .Tag }}-amd64'
-  - 'slingdata/sling::{{ .Tag }}-arm64'
+  - 'slingdata/sling:{{ .Tag }}-amd64'
+  # - 'slingdata/sling:{{ .Tag }}-arm64'
 
 - name_template: 'slingdata/sling:{{ .Tag }}'
   image_templates:
-  - 'slingdata/sling::{{ .Tag }}-amd64'
-  - 'slingdata/sling::{{ .Tag }}-arm64'
+  - 'slingdata/sling:{{ .Tag }}-amd64'
+  # - 'slingdata/sling:{{ .Tag }}-arm64'
 
 # mc policy set public DO/ocral/slingdata.io/cli
 blobs:
