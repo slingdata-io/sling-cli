@@ -115,7 +115,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		}
 
 		sql := g.R(
-			"INSERT {table} ({fields}) VALUES {values} "+noDebugKey,
+			"INSERT INTO {table} ({fields}) VALUES {values} "+noDebugKey,
 			"table", tableFName,
 			"fields", strings.Join(insFields, ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
