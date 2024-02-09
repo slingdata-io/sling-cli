@@ -753,7 +753,7 @@ func (s *Source) HasPrimaryKey() bool {
 }
 
 func (s *Source) PrimaryKey() []string {
-	return castPrimaryKey(s.PrimaryKeyI)
+	return castKeyArray(s.PrimaryKeyI)
 }
 
 // Target is a target of data
@@ -977,19 +977,19 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 }
 
-func castPrimaryKey(pkI any) (pk []string) {
-	switch pkV := pkI.(type) {
+func castKeyArray(keyI any) (key []string) {
+	switch keyV := keyI.(type) {
 	case []string:
-		return pkV
+		return keyV
 	case string:
-		return []string{pkV}
+		return []string{keyV}
 	case *string:
-		return []string{*pkV}
+		return []string{*keyV}
 	case []any:
-		for _, v := range pkV {
-			pk = append(pk, cast.ToString(v))
+		for _, v := range keyV {
+			key = append(key, cast.ToString(v))
 		}
-		return pk
+		return key
 	}
 	return
 }

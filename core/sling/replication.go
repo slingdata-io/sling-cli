@@ -229,7 +229,7 @@ type ReplicationStreamConfig struct {
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
-	return castPrimaryKey(s.PrimaryKeyI)
+	return castKeyArray(s.PrimaryKeyI)
 }
 
 func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
