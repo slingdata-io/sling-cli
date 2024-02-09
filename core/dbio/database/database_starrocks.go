@@ -300,8 +300,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// set format to JSON
 	fs.SetProp("format", "json")
-	fs.SetProp("file_max_rows", "500000")
-	fs.SetProp("file_max_bytes", "50000000")
+	fs.SetProp("file_max_rows", "50000")
+	fs.SetProp("file_max_bytes", "5000000")
 
 	localPath := path.Join(getTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
