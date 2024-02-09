@@ -67,10 +67,12 @@ const (
 type KeyType string
 
 const (
-	PrimaryKey   KeyType = "primary_key"
 	AggregateKey KeyType = "aggregate_key"
-	UpdateKey    KeyType = "update_key"
+	DuplicateKey KeyType = "duplicate_key"
+	HashKey      KeyType = "hash_key"
+	PrimaryKey   KeyType = "primary_key"
 	SortKey      KeyType = "sort_key"
+	UpdateKey    KeyType = "update_key"
 )
 
 // ColumnStats holds statistics for a column

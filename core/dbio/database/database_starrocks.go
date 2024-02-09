@@ -115,7 +115,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		}
 
 		sql := g.R(
-			"INSERT {table} ({fields}) VALUES {values} "+noDebugKey,
+			"INSERT INTO {table} ({fields}) VALUES {values} "+noDebugKey,
 			"table", tableFName,
 			"fields", strings.Join(insFields, ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
@@ -208,16 +208,16 @@ func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temp
 	}
 
 	// replace keys
-	distroColNames := []string{}
-	hashColNames := []string{}
-	tableDistroType := "duplicate"
+	var distroColNames, hashColNames []string
+	var tableDistroType string
 
 	if len(pkCols) > 0 {
 		tableDistroType = "primary"
 		pkColNames := lo.Map(pkCols.Names(), func(col string, i int) string { return conn.Quote(col) })
 		distroColNames = pkColNames
 		hashColNames = pkColNames
-	} else if len(sortCols) > 0 {
+	} else {
+		tableDistroType = "duplicate"
 		sortColNames := lo.Map(sortCols.Names(), func(col string, i int) string { return conn.Quote(col) })
 		distroColNames = sortColNames
 		hashColNames = sortColNames

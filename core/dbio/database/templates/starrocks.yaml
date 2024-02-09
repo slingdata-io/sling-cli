@@ -8,7 +8,7 @@ core:
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
   upsert: |
-    INSERT {tgt_table}
+    INSERT INTO {tgt_table}
       ({insert_fields})
     SELECT {src_fields}
     FROM {src_table} src
