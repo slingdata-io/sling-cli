@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -97,14 +98,16 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 			rowVals := lo.Map(row, func(val any, i int) string {
 				valCount++
 				newVal := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
-				newVal = strings.ReplaceAll(newVal, `"`, `""`)
-				newVal = strings.ReplaceAll(newVal, `\`, `\\`)
 				switch {
 				case ds.Columns[i].Type.IsNumber():
 					return newVal
 				case ds.Columns[i].Type.IsBool():
 					return newVal
+				case ds.Columns[i].Type == iop.BinaryType:
+					return `X'` + hex.EncodeToString([]byte(newVal)) + `'`
 				default:
+					newVal = strings.ReplaceAll(newVal, `"`, `""`)
+					newVal = strings.ReplaceAll(newVal, `\`, `\\`)
 					return `"` + newVal + `"`
 				}
 			})
@@ -112,7 +115,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		}
 
 		sql := g.R(
-			"INSERT OVERWRITE {table} ({fields}) VALUES {values} "+noDebugKey,
+			"INSERT {table} ({fields}) VALUES {values} "+noDebugKey,
 			"table", tableFName,
 			"fields", strings.Join(insFields, ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
