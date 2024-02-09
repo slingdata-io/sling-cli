@@ -344,8 +344,9 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.URI))
 		}
 
+		timeout := 300
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
-		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers)
+		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, timeout)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
 			if redirectUrl != nil {
@@ -353,7 +354,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				redirectUrlStr := strings.ReplaceAll(redirectUrl.String(), "127.0.0.1", fu.U.Hostname())
 				redirectUrl, _ = url.Parse(redirectUrlStr)
 				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
-				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers)
+				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
 		}
 
