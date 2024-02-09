@@ -197,8 +197,9 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 // GenerateDDL genrate a DDL based on a dataset
 func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
 	pkCols := data.Columns.GetKeys(iop.PrimaryKey)
-	if len(pkCols) == 0 {
-		return "", g.Error("did not provide primary key for creating StarRocks table")
+	sortCols := data.Columns.GetKeys(iop.SortKey)
+	if len(pkCols) == 0 && len(sortCols) == 0 {
+		return "", g.Error("did not provide sort-key or primary-key for creating StarRocks table")
 	}
 
 	sql, err := conn.BaseConn.GenerateDDL(tableFName, data, temporary)
@@ -207,8 +208,25 @@ func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temp
 	}
 
 	// replace keys
-	pkColNames := lo.Map(pkCols.Names(), func(col string, i int) string { return conn.Quote(col) })
-	sql = strings.ReplaceAll(sql, "{primary_key}", strings.Join(pkColNames, ", "))
+	distroColNames := []string{}
+	hashColNames := []string{}
+	tableDistroType := "duplicate"
+
+	if len(pkCols) > 0 {
+		tableDistroType = "primary"
+		pkColNames := lo.Map(pkCols.Names(), func(col string, i int) string { return conn.Quote(col) })
+		distroColNames = pkColNames
+		hashColNames = pkColNames
+	} else if len(sortCols) > 0 {
+		sortColNames := lo.Map(sortCols.Names(), func(col string, i int) string { return conn.Quote(col) })
+		distroColNames = sortColNames
+		hashColNames = sortColNames
+	}
+	sql = strings.ReplaceAll(sql, "{distribution_key}", strings.Join(distroColNames, ", "))
+	sql = strings.ReplaceAll(sql, "{hash_key}", strings.Join(hashColNames, ", "))
+
+	// set table distribution type
+	sql = strings.ReplaceAll(sql, "{distribution_type}", tableDistroType)
 
 	return sql, nil
 }

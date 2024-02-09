@@ -1,7 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop table if exists {view}
-  create_table: create table if not exists {table} ({col_types}) duplicate key({primary_key}) distributed by hash({primary_key})
+  create_table: create table if not exists {table} ({col_types}) {distribution_type} key({distribution_key}) distributed by hash({hash_key})
   create_index: create index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
