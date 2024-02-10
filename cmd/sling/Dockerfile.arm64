@@ -1,5 +1,8 @@
 FROM --platform=linux/arm64 ubuntu:focal
 
+RUN echo 'nameserver 8.8.8.8 \
+  nameserver 8.8.4.4' > /etc/resolv.conf
+
 RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg && \
   apt clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
