@@ -142,12 +142,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				)
 			}
 		}
-	} else if cfg.Source.Limit() > 0 && sTable.SQL == "" {
+	} else if cfg.Source.Limit() > 0 {
+		if sTable.SQL == "" {
+			sTable.SQL = "select * from " + sTable.FDQN()
+		}
 		sTable.SQL = g.R(
 			srcConn.Template().Core["limit"],
 			"fields", fieldsStr,
 			"table", sTable.FDQN(),
-			"sql", "select * from "+sTable.FDQN(),
+			"sql", sTable.SQL,
 			"limit", cast.ToString(cfg.Source.Limit()),
 		)
 	}
