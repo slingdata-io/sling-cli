@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -1173,9 +1172,9 @@ func (ds *Datastream) NewCsvBytesChnl(chunkRowSize int) (dataChn chan *[]byte) {
 		defer close(dataChn)
 		for {
 			reader := ds.NewCsvReader(chunkRowSize, 0)
-			data, err := ioutil.ReadAll(reader)
+			data, err := io.ReadAll(reader)
 			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error ioutil.ReadAll(reader)"))
+				ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
 				ds.Context.Cancel()
 				return
 			}
@@ -1190,7 +1189,7 @@ func (ds *Datastream) NewCsvBufferReader(limit int, bytesLimit int64) *bytes.Rea
 	reader := ds.NewCsvReader(limit, bytesLimit)
 	data, err := io.ReadAll(reader) // puts data in memory
 	if err != nil {
-		ds.Context.CaptureErr(g.Error(err, "Error ioutil.ReadAll(reader)"))
+		ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
 	}
 	return bytes.NewReader(data)
 }
