@@ -195,7 +195,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
+func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
 	primaryKeyCols := data.Columns.GetKeys(iop.PrimaryKey)
 	dupKeyCols := data.Columns.GetKeys(iop.DuplicateKey)
 	hashKeyCols := data.Columns.GetKeys(iop.HashKey)
@@ -216,7 +216,7 @@ func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temp
 		}
 	}
 
-	sql, err := conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+	sql, err := conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}

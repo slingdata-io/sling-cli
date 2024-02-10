@@ -61,8 +61,8 @@ func isRedshift(URL string) (isRs bool) {
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *RedshiftConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}

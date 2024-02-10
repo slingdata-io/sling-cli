@@ -10,6 +10,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -271,12 +272,12 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 		} else if t.Config.Source.HasPrimaryKey() {
 			addRowIDCol = false
 		} else {
-			t.Config.Target.Options.TableKeys = TableKeys{}
+			t.Config.Target.Options.TableKeys = database.TableKeys{}
 		}
 
 		if addRowIDCol {
 			metadata.RowID.Key = slingRowIDColumn
-			t.Config.Target.Options.TableKeys[TableKeyFromKeyType(iop.HashKey)] = []string{slingRowIDColumn}
+			t.Config.Target.Options.TableKeys[database.TableKey(iop.HashKey.AsTableKey())] = []string{slingRowIDColumn}
 		}
 	}
 

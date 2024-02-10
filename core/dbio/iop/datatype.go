@@ -66,6 +66,10 @@ const (
 
 type KeyType string
 
+func (kt KeyType) AsTableKey() string {
+	return strings.TrimSuffix(string(kt), "_key")
+}
+
 const (
 	AggregateKey    KeyType = "aggregate_key"
 	ClusterKey      KeyType = "cluster_key"
@@ -168,8 +172,8 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 
 // SetKeys sets key columns
 func (cols Columns) SetKeys(keyType KeyType, names ...string) {
-	for i, col := range cols {
-		for _, name := range names {
+	for _, name := range names {
+		for i, col := range cols {
 			if strings.EqualFold(name, col.Name) {
 				col.SetMetadata(string(keyType), "true")
 				cols[i] = col

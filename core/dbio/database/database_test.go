@@ -552,8 +552,11 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	stream, err = csv1.ReadStream()
 	g.AssertNoError(t, err)
 
-	csvTable := db.schema + ".test1"
-	err = conn.DropTable(csvTable)
+	csvTableName := db.schema + ".test1"
+	err = conn.DropTable(csvTableName)
+	g.AssertNoError(t, err)
+
+	csvTable, err := ParseTableName(csvTableName, conn.GetType())
 	g.AssertNoError(t, err)
 
 	sampleData := iop.NewDataset(stream.Columns)
@@ -572,13 +575,13 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 		conn.SetProp("AWS_BUCKET", os.Getenv("AWS_BUCKET"))
 		// err = conn.Begin()
 		g.AssertNoError(t, err)
-		_, err = conn.BulkImportStream(csvTable, stream)
+		_, err = conn.BulkImportStream(csvTableName, stream)
 		if !g.AssertNoError(t, err) {
 			return
 		}
 
 		// select back to assert equality
-		count, err := conn.GetCount(csvTable)
+		count, err := conn.GetCount(csvTableName)
 		g.AssertNoError(t, err)
 		assert.Equal(t, 1000, cast.ToInt(count))
 
@@ -656,7 +659,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 
 	// Extract / Load Test
 	if !strings.Contains("redshift,bigquery,sqlite3,sqlserver,azuresql,azuredwh,clickhouse,duckdb", db.name) {
-		ELTest(t, db, csvTable)
+		ELTest(t, db, csvTableName)
 		if t.Failed() {
 			return
 		}
@@ -935,7 +938,10 @@ func TestLargeDataset(t *testing.T) {
 		err = conn.DropTable(tableName)
 		g.AssertNoError(t, err)
 
-		ddl, err := conn.GenerateDDL(tableName, data, false)
+		table, err := ParseTableName(tableName, conn.GetType())
+		g.AssertNoError(t, err)
+
+		ddl, err := conn.GenerateDDL(table, data, false)
 		g.AssertNoError(t, err)
 
 		_, err = conn.ExecMulti(ddl)

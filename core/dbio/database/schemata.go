@@ -19,6 +19,7 @@ type Table struct {
 	SQL      string      `json:"sql,omitempty"`
 	Dialect  dbio.Type   `json:"dialect,omitempty"`
 	Columns  iop.Columns `json:"columns,omitempty"`
+	Keys     TableKeys   `json:"keys,omitempty"`
 }
 
 func (t *Table) IsQuery() bool {
@@ -100,6 +101,14 @@ func (t *Table) Select(fields ...string) string {
 		fieldsStr = strings.Join(fields, ", ")
 	}
 	return g.F(`select %s from %s`, fieldsStr, t.FDQN())
+}
+
+type TableKeys map[TableKey][]string
+
+type TableKey string
+
+func (tk TableKey) AsKeyType() iop.KeyType {
+	return iop.KeyType(string(tk) + "_key")
 }
 
 // Database represents a schemata database

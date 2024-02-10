@@ -160,14 +160,17 @@ func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *SnowflakeConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}
 
 	clusterBy := ""
-	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
+	if keys, ok := table.Keys[TableKey(iop.ClusterKey.AsTableKey())]; ok {
+		// allow custom SQL expression for clustering
+		clusterBy = g.F("cluster by (%s)", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
 		colNames := quoteColNames(conn, keyCols.Names())
 		clusterBy = g.F("cluster by (%s)", strings.Join(colNames, ", "))
 	}

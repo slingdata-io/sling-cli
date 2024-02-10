@@ -168,6 +168,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Target.Options.TableTmp,
 		// fix tempTableDDL
 		strings.Replace(cfg.Target.Options.TableDDL, targetTable, cfg.Target.Options.TableTmp, 1),
+		cfg.Target.Options.TableKeys,
 	)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+cfg.Target.Options.TableTmp)
@@ -355,6 +356,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			sample,
 			targetTable,
 			cfg.Target.Options.TableDDL,
+			cfg.Target.Options.TableKeys,
 		)
 		if err != nil {
 			err = g.Error(err, "could not create table "+targetTable)

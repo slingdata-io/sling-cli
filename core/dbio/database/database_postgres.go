@@ -72,8 +72,8 @@ func (conn *PostgresConn) CopyToStdout(sql string) (stdOutReader io.Reader, err 
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *PostgresConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}

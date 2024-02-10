@@ -66,14 +66,17 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *ClickhouseConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}
 
 	partitionBy := ""
-	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+	if keys, ok := table.Keys[TableKey(iop.PartitionKey.AsTableKey())]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
 		colNames := quoteColNames(conn, keyCols.Names())
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}

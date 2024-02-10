@@ -264,8 +264,8 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *BigQueryConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}

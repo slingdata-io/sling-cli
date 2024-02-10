@@ -47,12 +47,15 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
-func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {
+func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string, tableKeys database.TableKeys) (created bool, err error) {
 
 	table, err := database.ParseTableName(tableName, conn.GetType())
 	if err != nil {
 		return false, g.Error(err, "could not parse table name: "+tableName)
 	}
+
+	// set table keys
+	table.Keys = tableKeys
 
 	// check table existence
 	exists, err := database.TableExists(conn, tableName)
@@ -69,7 +72,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 	}
 
 	if tableDDL == "" {
-		tableDDL, err = conn.GenerateDDL(tableName, data, false)
+		tableDDL, err = conn.GenerateDDL(table, data, false)
 		if err != nil {
 			return false, g.Error(err, "Could not generate DDL for "+tableName)
 		}

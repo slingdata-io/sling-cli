@@ -835,23 +835,11 @@ type TargetOptions struct {
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
-	TableKeys TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
-	TableTmp  string    `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	TableDDL  string    `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	PreSQL    string    `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL   string    `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
-}
-
-type TableKeys map[TableKey][]string
-
-type TableKey string
-
-func (tk TableKey) AsKeyType() iop.KeyType {
-	return iop.KeyType(string(tk) + "_key")
-}
-
-func TableKeyFromKeyType(kt iop.KeyType) TableKey {
-	return TableKey(strings.TrimSuffix(string(kt), "_key"))
+	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
+	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	TableDDL  string             `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	PreSQL    string             `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL   string             `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
