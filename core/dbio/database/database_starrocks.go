@@ -196,10 +196,24 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 
 // GenerateDDL genrate a DDL based on a dataset
 func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
-	pkCols := data.Columns.GetKeys(iop.PrimaryKey)
-	sortCols := data.Columns.GetKeys(iop.SortKey)
-	if len(pkCols) == 0 && len(sortCols) == 0 {
-		return "", g.Error("did not provide sort-key or primary-key for creating StarRocks table")
+	primaryKeyCols := data.Columns.GetKeys(iop.PrimaryKey)
+	dupKeyCols := data.Columns.GetKeys(iop.DuplicateKey)
+	hashKeyCols := data.Columns.GetKeys(iop.HashKey)
+	aggKeyCols := data.Columns.GetKeys(iop.AggregateKey)
+	uniqueKeyCols := data.Columns.GetKeys(iop.UniqueKey)
+
+	if len(hashKeyCols) == 0 {
+		if len(primaryKeyCols) > 0 {
+			hashKeyCols = primaryKeyCols
+		} else if len(dupKeyCols) > 0 {
+			hashKeyCols = dupKeyCols
+		} else if len(aggKeyCols) > 0 {
+			hashKeyCols = aggKeyCols
+		} else if len(uniqueKeyCols) > 0 {
+			hashKeyCols = uniqueKeyCols
+		} else {
+			return "", g.Error("did not provide primary-key, duplicate-key, aggregate-key or hash-key for creating StarRocks table")
+		}
 	}
 
 	sql, err := conn.BaseConn.GenerateDDL(tableFName, data, temporary)
@@ -208,25 +222,39 @@ func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temp
 	}
 
 	// replace keys
-	var distroColNames, hashColNames []string
-	var tableDistroType string
+	var distroColNames []string
+	var tableDistro string
 
-	if len(pkCols) > 0 {
-		tableDistroType = "primary"
-		pkColNames := lo.Map(pkCols.Names(), func(col string, i int) string { return conn.Quote(col) })
-		distroColNames = pkColNames
-		hashColNames = pkColNames
-	} else {
-		tableDistroType = "duplicate"
-		sortColNames := lo.Map(sortCols.Names(), func(col string, i int) string { return conn.Quote(col) })
-		distroColNames = sortColNames
-		hashColNames = sortColNames
+	quoteColNames := func(names []string) []string {
+		return lo.Map(names, func(col string, i int) string {
+			return conn.Quote(col)
+		})
 	}
-	sql = strings.ReplaceAll(sql, "{distribution_key}", strings.Join(distroColNames, ", "))
+
+	if len(primaryKeyCols) > 0 {
+		tableDistro = "primary"
+		distroColNames = quoteColNames(primaryKeyCols.Names())
+	} else if len(dupKeyCols) > 0 {
+		tableDistro = "duplicate"
+		distroColNames = quoteColNames(dupKeyCols.Names())
+	} else if len(aggKeyCols) > 0 {
+		tableDistro = "aggregate"
+		distroColNames = quoteColNames(aggKeyCols.Names())
+	} else if len(uniqueKeyCols) > 0 {
+		tableDistro = "unique"
+		distroColNames = quoteColNames(uniqueKeyCols.Names())
+	}
+
+	// set hash key
+	hashColNames := quoteColNames(hashKeyCols.Names())
 	sql = strings.ReplaceAll(sql, "{hash_key}", strings.Join(hashColNames, ", "))
 
-	// set table distribution type
-	sql = strings.ReplaceAll(sql, "{distribution_type}", tableDistroType)
+	// set table distribution type & keys
+	distribution := ""
+	if tableDistro != "" && len(distroColNames) > 0 {
+		distribution = g.F("%s key(%s)", tableDistro, strings.Join(distroColNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{distribution}", distribution)
 
 	return sql, nil
 }

@@ -239,4 +239,10 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) {
 	if t.Config.Source.HasUpdateKey() {
 		df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey)
 	}
+
+	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
+		for tableKey, keys := range tkMap {
+			df.Columns.SetKeys(tableKey.AsKeyType(), keys...)
+		}
+	}
 }

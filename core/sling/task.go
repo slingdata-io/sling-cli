@@ -249,6 +249,37 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 	if t.Config.MetadataStreamURL {
 		metadata.StreamURL.Key = slingStreamURLColumn
 	}
+
+	if t.Config.MetadataRowID {
+		metadata.RowID.Key = slingRowIDColumn
+	}
+
+	if t.Config.MetadataRowNum {
+		metadata.RowNum.Key = slingRowNumColumn
+	}
+
+	// StarRocks: add _sling_row_id column if there is no primary,
+	// duplicate or hash key defined and set as Hash Key
+	if t.Config.TgtConn.Type == dbio.TypeDbStarRocks {
+		addRowIDCol := true
+		if t.Config.Target.Options.TableKeys != nil {
+			for tableKey := range t.Config.Target.Options.TableKeys {
+				if g.In(tableKey.AsKeyType(), iop.PrimaryKey, iop.HashKey, iop.DuplicateKey, iop.UniqueKey, iop.AggregateKey) {
+					addRowIDCol = false
+				}
+			}
+		} else if t.Config.Source.HasPrimaryKey() {
+			addRowIDCol = false
+		} else {
+			t.Config.Target.Options.TableKeys = TableKeys{}
+		}
+
+		if addRowIDCol {
+			metadata.RowID.Key = slingRowIDColumn
+			t.Config.Target.Options.TableKeys[TableKeyFromKeyType(iop.HashKey)] = []string{slingRowIDColumn}
+		}
+	}
+
 	return metadata
 }
 
