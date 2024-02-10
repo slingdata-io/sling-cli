@@ -68,12 +68,18 @@ type KeyType string
 
 const (
 	AggregateKey KeyType = "aggregate_key"
+	ClusterKey   KeyType = "cluster_key"
 	DuplicateKey KeyType = "duplicate_key"
 	HashKey      KeyType = "hash_key"
+	IndexKey     KeyType = "index_key"
+	PartitionKey KeyType = "partition_key"
 	PrimaryKey   KeyType = "primary_key"
 	SortKey      KeyType = "sort_key"
+	UniqueKey    KeyType = "unique_key"
 	UpdateKey    KeyType = "update_key"
 )
+
+var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, IndexKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
