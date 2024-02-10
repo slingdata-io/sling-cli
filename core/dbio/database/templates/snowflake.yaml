@@ -1,7 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
-  create_table: create table {table} ({col_types})
+  create_table: create table {table} ({col_types}) {cluster_by}
   create_index: create index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}

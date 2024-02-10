@@ -71,6 +71,23 @@ func (conn *PostgresConn) CopyToStdout(sql string) (stdOutReader io.Reader, err 
 	return stdOutReader, err
 }
 
+// GenerateDDL generates a DDL based on a dataset
+func (conn *PostgresConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+	if err != nil {
+		return sql, g.Error(err)
+	}
+
+	partitionBy := ""
+	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+
+	return strings.TrimSpace(sql), nil
+}
+
 // BulkExportStream uses the bulk dumping (COPY)
 func (conn *PostgresConn) BulkExportStream(sql string) (ds *iop.Datastream, err error) {
 	_, err = exec.LookPath("psql")

@@ -194,7 +194,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 	return
 }
 
-// GenerateDDL genrate a DDL based on a dataset
+// GenerateDDL generates a DDL based on a dataset
 func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
 	primaryKeyCols := data.Columns.GetKeys(iop.PrimaryKey)
 	dupKeyCols := data.Columns.GetKeys(iop.DuplicateKey)
@@ -225,28 +225,22 @@ func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temp
 	var distroColNames []string
 	var tableDistro string
 
-	quoteColNames := func(names []string) []string {
-		return lo.Map(names, func(col string, i int) string {
-			return conn.Quote(col)
-		})
-	}
-
 	if len(primaryKeyCols) > 0 {
 		tableDistro = "primary"
-		distroColNames = quoteColNames(primaryKeyCols.Names())
+		distroColNames = quoteColNames(conn, primaryKeyCols.Names())
 	} else if len(dupKeyCols) > 0 {
 		tableDistro = "duplicate"
-		distroColNames = quoteColNames(dupKeyCols.Names())
+		distroColNames = quoteColNames(conn, dupKeyCols.Names())
 	} else if len(aggKeyCols) > 0 {
 		tableDistro = "aggregate"
-		distroColNames = quoteColNames(aggKeyCols.Names())
+		distroColNames = quoteColNames(conn, aggKeyCols.Names())
 	} else if len(uniqueKeyCols) > 0 {
 		tableDistro = "unique"
-		distroColNames = quoteColNames(uniqueKeyCols.Names())
+		distroColNames = quoteColNames(conn, uniqueKeyCols.Names())
 	}
 
 	// set hash key
-	hashColNames := quoteColNames(hashKeyCols.Names())
+	hashColNames := quoteColNames(conn, hashKeyCols.Names())
 	sql = strings.ReplaceAll(sql, "{hash_key}", strings.Join(hashColNames, ", "))
 
 	// set table distribution type & keys

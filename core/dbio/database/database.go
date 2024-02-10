@@ -3381,3 +3381,9 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 
 	return
 }
+
+func quoteColNames(conn Connection, names []string) []string {
+	return lo.Map(names, func(col string, i int) string {
+		return conn.Quote(col)
+	})
+}

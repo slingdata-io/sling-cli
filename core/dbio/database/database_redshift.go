@@ -60,6 +60,30 @@ func isRedshift(URL string) (isRs bool) {
 	return isRs
 }
 
+// GenerateDDL generates a DDL based on a dataset
+func (conn *RedshiftConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+	if err != nil {
+		return sql, g.Error(err)
+	}
+
+	distKey := ""
+	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{dist_key}", distKey)
+
+	sortKey := ""
+	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{sort_key}", sortKey)
+
+	return strings.TrimSpace(sql), nil
+}
+
 // Unload unloads a query to S3
 func (conn *RedshiftConn) Unload(tables ...Table) (s3Path string, err error) {
 
