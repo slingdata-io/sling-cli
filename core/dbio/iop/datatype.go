@@ -168,16 +168,22 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 }
 
 // SetKeys sets key columns
-func (cols Columns) SetKeys(keyType KeyType, names ...string) {
-	for _, name := range names {
+func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
+	for _, colName := range colNames {
+		found := false
 		for i, col := range cols {
-			if strings.EqualFold(name, col.Name) {
+			if strings.EqualFold(colName, col.Name) {
 				key := string(keyType) + "_key"
 				col.SetMetadata(key, "true")
 				cols[i] = col
+				found = true
 			}
 		}
+		if !found {
+			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+		}
 	}
+	return
 }
 
 // IsDummy returns true if the columns are injected by CreateDummyFields

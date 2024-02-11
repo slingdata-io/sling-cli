@@ -173,7 +173,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 
-	t.setColumnKeys(df)
+	err = t.setColumnKeys(df)
+	if err != nil {
+		err = g.Error(err, "Could not set column keys")
+		return t.df, err
+	}
 
 	g.Trace("%#v", df.Columns.Types())
 
@@ -226,7 +230,11 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		return df, g.Error("Could not read columns")
 	}
 
-	t.setColumnKeys(df)
+	err = t.setColumnKeys(df)
+	if err != nil {
+		err = g.Error(err, "Could not set column keys")
+		return t.df, err
+	}
 
 	g.Trace("%#v", df.Columns.Types())
 
@@ -234,18 +242,22 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 }
 
 // setColumnKeys sets the column keys
-func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) {
+func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
+	eG := g.ErrorGroup{}
+
 	if t.Config.Source.HasPrimaryKey() {
-		df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...)
+		eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
 	}
 
 	if t.Config.Source.HasUpdateKey() {
-		df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey)
+		eG.Capture(df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey))
 	}
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
-			df.Columns.SetKeys(tableKey, keys...)
+			eG.Capture(df.Columns.SetKeys(tableKey, keys...))
 		}
 	}
+
+	return eG.Err()
 }
