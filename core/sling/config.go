@@ -138,6 +138,11 @@ func (cfg *Config) SetDefault() {
 		os.Setenv(k, v)
 	}
 
+	// default mode
+	if cfg.Mode == "" {
+		cfg.Mode = FullRefreshMode
+	}
+
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
 		cfg.MetadataLoadedAt = cast.ToBool(val)
 	}
