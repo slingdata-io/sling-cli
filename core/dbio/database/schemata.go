@@ -106,13 +106,7 @@ func (t *Table) Select(fields ...string) string {
 	return g.F(`select %s from %s`, fieldsStr, t.FDQN())
 }
 
-type TableKeys map[TableKey][]string
-
-type TableKey string
-
-func (tk TableKey) AsKeyType() iop.KeyType {
-	return iop.KeyType(string(tk) + "_key")
-}
+type TableKeys map[iop.KeyType][]string
 
 // Database represents a schemata database
 type Database struct {

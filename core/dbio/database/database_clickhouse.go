@@ -73,7 +73,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	}
 
 	partitionBy := ""
-	if keys, ok := table.Keys[TableKey(iop.PartitionKey.AsTableKey())]; ok {
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {

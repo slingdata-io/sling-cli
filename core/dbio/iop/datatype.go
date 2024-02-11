@@ -66,22 +66,18 @@ const (
 
 type KeyType string
 
-func (kt KeyType) AsTableKey() string {
-	return strings.TrimSuffix(string(kt), "_key")
-}
-
 const (
-	AggregateKey    KeyType = "aggregate_key"
-	ClusterKey      KeyType = "cluster_key"
-	DistributionKey KeyType = "distribution_key"
-	DuplicateKey    KeyType = "duplicate_key"
-	HashKey         KeyType = "hash_key"
-	IndexKey        KeyType = "index_key"
-	PartitionKey    KeyType = "partition_key"
-	PrimaryKey      KeyType = "primary_key"
-	SortKey         KeyType = "sort_key"
-	UniqueKey       KeyType = "unique_key"
-	UpdateKey       KeyType = "update_key"
+	AggregateKey    KeyType = "aggregate"
+	ClusterKey      KeyType = "cluster"
+	DistributionKey KeyType = "distribution"
+	DuplicateKey    KeyType = "duplicate"
+	HashKey         KeyType = "hash"
+	IndexKey        KeyType = "index"
+	PartitionKey    KeyType = "partition"
+	PrimaryKey      KeyType = "primary"
+	SortKey         KeyType = "sort"
+	UniqueKey       KeyType = "unique"
+	UpdateKey       KeyType = "update"
 )
 
 var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
@@ -163,7 +159,8 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 func (cols Columns) GetKeys(keyType KeyType) Columns {
 	keys := Columns{}
 	for _, col := range cols {
-		if cast.ToBool(col.Metadata[string(keyType)]) {
+		key := string(keyType) + "_key"
+		if cast.ToBool(col.Metadata[key]) {
 			keys = append(keys, col)
 		}
 	}
@@ -175,7 +172,8 @@ func (cols Columns) SetKeys(keyType KeyType, names ...string) {
 	for _, name := range names {
 		for i, col := range cols {
 			if strings.EqualFold(name, col.Name) {
-				col.SetMetadata(string(keyType), "true")
+				key := string(keyType) + "_key"
+				col.SetMetadata(key, "true")
 				cols[i] = col
 			}
 		}

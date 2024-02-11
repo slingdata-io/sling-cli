@@ -167,7 +167,7 @@ func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 	}
 
 	clusterBy := ""
-	if keys, ok := table.Keys[TableKey(iop.ClusterKey.AsTableKey())]; ok {
+	if keys, ok := table.Keys[iop.ClusterKey]; ok {
 		// allow custom SQL expression for clustering
 		clusterBy = g.F("cluster by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {

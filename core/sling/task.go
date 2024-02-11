@@ -265,7 +265,7 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 		addRowIDCol := true
 		if t.Config.Target.Options.TableKeys != nil {
 			for tableKey := range t.Config.Target.Options.TableKeys {
-				if g.In(tableKey.AsKeyType(), iop.PrimaryKey, iop.HashKey, iop.DuplicateKey, iop.UniqueKey, iop.AggregateKey) {
+				if g.In(tableKey, iop.PrimaryKey, iop.HashKey, iop.DuplicateKey, iop.UniqueKey, iop.AggregateKey) {
 					addRowIDCol = false
 				}
 			}
@@ -277,7 +277,7 @@ func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
 
 		if addRowIDCol {
 			metadata.RowID.Key = slingRowIDColumn
-			t.Config.Target.Options.TableKeys[database.TableKey(iop.HashKey.AsTableKey())] = []string{slingRowIDColumn}
+			t.Config.Target.Options.TableKeys[iop.HashKey] = []string{slingRowIDColumn}
 		}
 	}
 

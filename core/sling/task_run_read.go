@@ -245,7 +245,7 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) {
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
-			df.Columns.SetKeys(tableKey.AsKeyType(), keys...)
+			df.Columns.SetKeys(tableKey, keys...)
 		}
 	}
 }

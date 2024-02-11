@@ -486,9 +486,9 @@ func (cfg *Config) Prepare() (err error) {
 	if tkMap := cfg.Target.Options.TableKeys; tkMap != nil {
 		for _, kt := range lo.Keys(tkMap) {
 			// append _key
-			ktAllowed := strings.ReplaceAll(g.Marshal(iop.KeyTypes), `_key`, ``)
+			ktAllowed := g.Marshal(iop.KeyTypes)
 			ktAllowed = strings.TrimSuffix(strings.TrimPrefix(ktAllowed, "["), "]")
-			if !g.In(kt.AsKeyType(), iop.KeyTypes...) {
+			if !g.In(kt, iop.KeyTypes...) {
 				g.Warn("%s is not a valid table key type. Valid table key types are: %s", kt, ktAllowed)
 				delete(cfg.Target.Options.TableKeys, kt)
 			}
