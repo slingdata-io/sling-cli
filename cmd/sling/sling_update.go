@@ -9,6 +9,7 @@ import (
 	"path"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -116,6 +117,9 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 
 func checkUpdate() {
 	if core.Version == "dev" {
+		return
+	} else if time.Now().Second()%4 != 0 {
+		// a way to check/notify about a new version less frequently
 		return
 	}
 
