@@ -6,9 +6,11 @@ defaults:
   object: 'public.{stream_schema}_{stream_table}'
   target_options:
     add_new_columns: true
-    datetime_format: 2006-01-02 15:04:05.000000 -07
 
 streams:
   public.test1k:
     primary_key: [id]
     update_key: create_date
+    target_options:
+      table_keys:
+        cluster: [ date(CREATE_DATE) ]
