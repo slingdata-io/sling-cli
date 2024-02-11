@@ -33,8 +33,6 @@ jobs:
 
   release-linux-amd64:
     runs-on: ubuntu-20.04
-    needs: [ release-linux-arm64 ] # for multi-platform docker image
-    # runs-on: [self-hosted, Linux]
     timeout-minutes: 20
 
     steps:
