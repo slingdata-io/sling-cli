@@ -1,4 +1,5 @@
 core:
+  create_table: create table {table} ({col_types}) {dist_key} {sort_key}
   drop_table: drop table if exists {table} cascade
   drop_view: drop view if exists {view}
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}

@@ -263,6 +263,30 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	return
 }
 
+// GenerateDDL generates a DDL based on a dataset
+func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return sql, g.Error(err)
+	}
+
+	partitionBy := ""
+	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+
+	clusterBy := ""
+	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		clusterBy = g.F("cluster by %s", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)
+
+	return strings.TrimSpace(sql), nil
+}
+
 type bQTypeCols struct {
 	numericCols  []int
 	datetimeCols []int

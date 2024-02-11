@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -97,14 +98,16 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 			rowVals := lo.Map(row, func(val any, i int) string {
 				valCount++
 				newVal := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
-				newVal = strings.ReplaceAll(newVal, `"`, `""`)
-				newVal = strings.ReplaceAll(newVal, `\`, `\\`)
 				switch {
 				case ds.Columns[i].Type.IsNumber():
 					return newVal
 				case ds.Columns[i].Type.IsBool():
 					return newVal
+				case ds.Columns[i].Type == iop.BinaryType:
+					return `X'` + hex.EncodeToString([]byte(newVal)) + `'`
 				default:
+					newVal = strings.ReplaceAll(newVal, `"`, `""`)
+					newVal = strings.ReplaceAll(newVal, `\`, `\\`)
 					return `"` + newVal + `"`
 				}
 			})
@@ -112,7 +115,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		}
 
 		sql := g.R(
-			"INSERT OVERWRITE {table} ({fields}) VALUES {values} "+noDebugKey,
+			"INSERT INTO {table} ({fields}) VALUES {values} "+noDebugKey,
 			"table", tableFName,
 			"fields", strings.Join(insFields, ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
@@ -191,21 +194,61 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 	return
 }
 
-// GenerateDDL genrate a DDL based on a dataset
-func (conn *StarRocksConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
-	pkCols := data.Columns.GetKeys(iop.PrimaryKey)
-	if len(pkCols) == 0 {
-		return "", g.Error("did not provide primary key for creating StarRocks table")
+// GenerateDDL generates a DDL based on a dataset
+func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+	primaryKeyCols := data.Columns.GetKeys(iop.PrimaryKey)
+	dupKeyCols := data.Columns.GetKeys(iop.DuplicateKey)
+	hashKeyCols := data.Columns.GetKeys(iop.HashKey)
+	aggKeyCols := data.Columns.GetKeys(iop.AggregateKey)
+	uniqueKeyCols := data.Columns.GetKeys(iop.UniqueKey)
+
+	if len(hashKeyCols) == 0 {
+		if len(primaryKeyCols) > 0 {
+			hashKeyCols = primaryKeyCols
+		} else if len(dupKeyCols) > 0 {
+			hashKeyCols = dupKeyCols
+		} else if len(aggKeyCols) > 0 {
+			hashKeyCols = aggKeyCols
+		} else if len(uniqueKeyCols) > 0 {
+			hashKeyCols = uniqueKeyCols
+		} else {
+			return "", g.Error("did not provide primary-key, duplicate-key, aggregate-key or hash-key for creating StarRocks table")
+		}
 	}
 
-	sql, err := conn.BaseConn.GenerateDDL(tableFName, data, temporary)
+	sql, err := conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
 	}
 
 	// replace keys
-	pkColNames := lo.Map(pkCols.Names(), func(col string, i int) string { return conn.Quote(col) })
-	sql = strings.ReplaceAll(sql, "{primary_key}", strings.Join(pkColNames, ", "))
+	var distroColNames []string
+	var tableDistro string
+
+	if len(primaryKeyCols) > 0 {
+		tableDistro = "primary"
+		distroColNames = quoteColNames(conn, primaryKeyCols.Names())
+	} else if len(dupKeyCols) > 0 {
+		tableDistro = "duplicate"
+		distroColNames = quoteColNames(conn, dupKeyCols.Names())
+	} else if len(aggKeyCols) > 0 {
+		tableDistro = "aggregate"
+		distroColNames = quoteColNames(conn, aggKeyCols.Names())
+	} else if len(uniqueKeyCols) > 0 {
+		tableDistro = "unique"
+		distroColNames = quoteColNames(conn, uniqueKeyCols.Names())
+	}
+
+	// set hash key
+	hashColNames := quoteColNames(conn, hashKeyCols.Names())
+	sql = strings.ReplaceAll(sql, "{hash_key}", strings.Join(hashColNames, ", "))
+
+	// set table distribution type & keys
+	distribution := ""
+	if tableDistro != "" && len(distroColNames) > 0 {
+		distribution = g.F("%s key(%s)", tableDistro, strings.Join(distroColNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{distribution}", distribution)
 
 	return sql, nil
 }
@@ -279,8 +322,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// set format to JSON
 	fs.SetProp("format", "json")
-	fs.SetProp("file_max_rows", "500000")
-	fs.SetProp("file_max_bytes", "50000000")
+	fs.SetProp("file_max_rows", "50000")
+	fs.SetProp("file_max_bytes", "5000000")
 
 	localPath := path.Join(getTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
@@ -323,8 +366,9 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.URI))
 		}
 
+		timeout := 300
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
-		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers)
+		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, timeout)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
 			if redirectUrl != nil {
@@ -332,7 +376,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				redirectUrlStr := strings.ReplaceAll(redirectUrl.String(), "127.0.0.1", fu.U.Hostname())
 				redirectUrl, _ = url.Parse(redirectUrlStr)
 				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
-				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers)
+				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
 		}
 

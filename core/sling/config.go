@@ -127,9 +127,20 @@ func (cfg *Config) SetDefault() {
 		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
 	}
 
+	// set default metadata
+	switch {
+	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
+		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+	}
+
 	// set vars
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
+	}
+
+	// default mode
+	if cfg.Mode == "" {
+		cfg.Mode = FullRefreshMode
 	}
 
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
@@ -137,6 +148,12 @@ func (cfg *Config) SetDefault() {
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		cfg.MetadataStreamURL = cast.ToBool(val)
+	}
+	if val := os.Getenv("SLING_ROW_ID_COLUMN"); val != "" {
+		cfg.MetadataRowID = cast.ToBool(val)
+	}
+	if val := os.Getenv("SLING_ROW_NUM_COLUMN"); val != "" {
+		cfg.MetadataRowNum = cast.ToBool(val)
 	}
 	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
 		iop.SampleSize = cast.ToInt(val)
@@ -398,6 +415,10 @@ func (cfg *Config) Prepare() (err error) {
 		os.Setenv("CONCURRENCY", "1")
 	}
 
+	if cfg.Target.Options == nil {
+		cfg.Target.Options = &TargetOptions{}
+	}
+
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
 	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
@@ -460,6 +481,19 @@ func (cfg *Config) Prepare() (err error) {
 	// see variable `connPool`
 	cfg.SrcConn.Data["_source_options_md5"] = g.MD5(g.Marshal(cfg.Source.Options))
 	cfg.TgtConn.Data["_target_options_md5"] = g.MD5(g.Marshal(cfg.Target.Options))
+
+	// validate table keys
+	if tkMap := cfg.Target.Options.TableKeys; tkMap != nil {
+		for _, kt := range lo.Keys(tkMap) {
+			// append _key
+			ktAllowed := g.Marshal(iop.KeyTypes)
+			ktAllowed = strings.TrimSuffix(strings.TrimPrefix(ktAllowed, "["), "]")
+			if !g.In(kt, iop.KeyTypes...) {
+				g.Warn("%s is not a valid table key type. Valid table key types are: %s", kt, ktAllowed)
+				delete(cfg.Target.Options.TableKeys, kt)
+			}
+		}
+	}
 
 	// done
 	cfg.Prepared = true
@@ -691,6 +725,8 @@ type Config struct {
 
 	MetadataLoadedAt  bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool `json:"-" yaml:"-"`
+	MetadataRowNum    bool `json:"-" yaml:"-"`
+	MetadataRowID     bool `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -753,7 +789,7 @@ func (s *Source) HasPrimaryKey() bool {
 }
 
 func (s *Source) PrimaryKey() []string {
-	return castPrimaryKey(s.PrimaryKeyI)
+	return castKeyArray(s.PrimaryKeyI)
 }
 
 // Target is a target of data
@@ -804,10 +840,11 @@ type TargetOptions struct {
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
-	TableTmp string `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	TableDDL string `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	PreSQL   string `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL  string `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
+	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	TableDDL  string             `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	PreSQL    string             `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL   string             `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
@@ -975,21 +1012,24 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.ColumnCasing == nil {
 		o.ColumnCasing = targetOptions.ColumnCasing
 	}
+	if o.TableKeys == nil {
+		o.TableKeys = targetOptions.TableKeys
+	}
 }
 
-func castPrimaryKey(pkI any) (pk []string) {
-	switch pkV := pkI.(type) {
+func castKeyArray(keyI any) (key []string) {
+	switch keyV := keyI.(type) {
 	case []string:
-		return pkV
+		return keyV
 	case string:
-		return []string{pkV}
+		return []string{keyV}
 	case *string:
-		return []string{*pkV}
+		return []string{*keyV}
 	case []any:
-		for _, v := range pkV {
-			pk = append(pk, cast.ToString(v))
+		for _, v := range keyV {
+			key = append(key, cast.ToString(v))
 		}
-		return pk
+		return key
 	}
 	return
 }

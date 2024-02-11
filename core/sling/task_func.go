@@ -47,17 +47,12 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
-func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableName string, tableDDL string) (created bool, err error) {
-
-	table, err := database.ParseTableName(tableName, conn.GetType())
-	if err != nil {
-		return false, g.Error(err, "could not parse table name: "+tableName)
-	}
+func createTableIfNotExists(conn database.Connection, data iop.Dataset, table database.Table) (created bool, err error) {
 
 	// check table existence
-	exists, err := database.TableExists(conn, tableName)
+	exists, err := database.TableExists(conn, table.FullName())
 	if err != nil {
-		return false, g.Error(err, "Error checking table "+tableName)
+		return false, g.Error(err, "Error checking table "+table.FullName())
 	} else if exists {
 		return false, nil
 	}
@@ -68,20 +63,20 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, tableNam
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	if tableDDL == "" {
-		tableDDL, err = conn.GenerateDDL(tableName, data, false)
+	if table.DDL == "" {
+		table.DDL, err = conn.GenerateDDL(table, data, false)
 		if err != nil {
-			return false, g.Error(err, "Could not generate DDL for "+tableName)
+			return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 		}
 	}
 
-	_, err = conn.ExecMulti(tableDDL)
+	_, err = conn.ExecMulti(table.DDL)
 	if err != nil {
 		errorFilterTableExists := conn.GetTemplateValue("variable.error_filter_table_exists")
 		if errorFilterTableExists != "" && strings.Contains(err.Error(), errorFilterTableExists) {
-			return false, g.Error(err, "Error creating table %s as it already exists", tableName)
+			return false, g.Error(err, "Error creating table %s as it already exists", table.FullName())
 		}
-		return false, g.Error(err, "Error creating table "+tableName)
+		return false, g.Error(err, "Error creating table "+table.FullName())
 	}
 
 	return true, nil

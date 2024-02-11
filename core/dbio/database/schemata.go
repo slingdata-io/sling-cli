@@ -17,8 +17,12 @@ type Table struct {
 	Database string      `json:"database,omitempty"`
 	IsView   bool        `json:"is_view,omitempty"` // whether is a view
 	SQL      string      `json:"sql,omitempty"`
+	DDL      string      `json:"ddl,omitempty"`
 	Dialect  dbio.Type   `json:"dialect,omitempty"`
 	Columns  iop.Columns `json:"columns,omitempty"`
+	Keys     TableKeys   `json:"keys,omitempty"`
+
+	Raw string `json:"raw"`
 }
 
 func (t *Table) IsQuery() bool {
@@ -101,6 +105,8 @@ func (t *Table) Select(fields ...string) string {
 	}
 	return g.F(`select %s from %s`, fieldsStr, t.FDQN())
 }
+
+type TableKeys map[iop.KeyType][]string
 
 // Database represents a schemata database
 type Database struct {
@@ -272,6 +278,7 @@ type ColumnType struct {
 
 func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	table.Dialect = dialect
+	table.Raw = text
 
 	textLower := strings.ToLower(text)
 	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) {

@@ -1,14 +1,13 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop table if exists {view}
-  create_table: create table if not exists {table} ({col_types}) duplicate key({primary_key}) distributed by hash({primary_key})
-  create_index: create index {index} on {table} ({cols})
+  create_table: create table if not exists {table} ({col_types}) {distribution} distributed by hash({hash_key})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
   upsert: |
-    INSERT OVERWRITE {tgt_table}
+    INSERT INTO {tgt_table}
       ({insert_fields})
     SELECT {src_fields}
     FROM {src_table} src

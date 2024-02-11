@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -18,6 +17,7 @@ import (
 	"github.com/flarco/g/json"
 	jit "github.com/json-iterator/go"
 	parquet "github.com/parquet-go/parquet-go"
+	"github.com/segmentio/ksuid"
 
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -74,6 +74,8 @@ type KeyValue struct {
 type Metadata struct {
 	StreamURL KeyValue `json:"stream_url"`
 	LoadedAt  KeyValue `json:"loaded_at"`
+	RowNum    KeyValue `json:"row_num"`
+	RowID     KeyValue `json:"row_id"`
 }
 
 // AsMap return as map
@@ -472,7 +474,7 @@ loop:
 	}
 
 	// add metadata
-	metaValuesMap := map[int]any{}
+	metaValuesMap := map[int]func(it *Iterator) any{}
 	{
 		// ensure there are no duplicates
 		ensureName := func(name string) string {
@@ -491,7 +493,9 @@ loop:
 				Position: len(ds.Columns) + 1,
 			}
 			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = ds.Metadata.LoadedAt.Value
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.LoadedAt.Value
+			}
 		}
 
 		if ds.Metadata.StreamURL.Key != "" && ds.Metadata.StreamURL.Value != nil {
@@ -502,21 +506,54 @@ loop:
 				Position: len(ds.Columns) + 1,
 			}
 			ds.Columns = append(ds.Columns, col)
-			metaValuesMap[col.Position-1] = ds.Metadata.StreamURL.Value
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.StreamURL.Value
+			}
+		}
+
+		if ds.Metadata.RowNum.Key != "" {
+			ds.Metadata.RowNum.Key = ensureName(ds.Metadata.RowNum.Key)
+			col := Column{
+				Name:     ds.Metadata.RowNum.Key,
+				Type:     BigIntType,
+				Position: len(ds.Columns) + 1,
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return it.Counter
+			}
+		}
+
+		if ds.Metadata.RowID.Key != "" {
+			ds.Metadata.RowID.Key = ensureName(ds.Metadata.RowID.Key)
+			col := Column{
+				Name:     ds.Metadata.RowID.Key,
+				Type:     StringType,
+				Position: len(ds.Columns) + 1,
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				for {
+					uid, err := ksuid.NewRandom()
+					if err == nil {
+						return uid.String()
+					}
+				}
+			}
 		}
 	}
 
 	// setMetaValues sets mata column values
-	setMetaValues := func(row []any) []any { return row }
+	setMetaValues := func(it *Iterator) []any { return it.Row }
 	if len(metaValuesMap) > 0 {
-		setMetaValues = func(row []any) []any {
-			for len(row) < len(ds.Columns) {
-				row = append(row, nil)
+		setMetaValues = func(it *Iterator) []any {
+			for len(it.Row) < len(ds.Columns) {
+				it.Row = append(it.Row, nil)
 			}
-			for i, v := range metaValuesMap {
-				row[i] = v
+			for i, f := range metaValuesMap {
+				it.Row[i] = f(it)
 			}
-			return row
+			return it.Row
 		}
 	}
 
@@ -558,7 +595,7 @@ loop:
 		schemaChgLoop:
 			for {
 				// reprocess row if needed (to expand it as needed)
-				ds.it.Row = setMetaValues(ds.it.Row)
+				ds.it.Row = setMetaValues(ds.it)
 				if ds.it.IsCasted {
 					row = ds.it.Row
 				} else {
@@ -1173,9 +1210,9 @@ func (ds *Datastream) NewCsvBytesChnl(chunkRowSize int) (dataChn chan *[]byte) {
 		defer close(dataChn)
 		for {
 			reader := ds.NewCsvReader(chunkRowSize, 0)
-			data, err := ioutil.ReadAll(reader)
+			data, err := io.ReadAll(reader)
 			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error ioutil.ReadAll(reader)"))
+				ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
 				ds.Context.Cancel()
 				return
 			}
@@ -1190,7 +1227,7 @@ func (ds *Datastream) NewCsvBufferReader(limit int, bytesLimit int64) *bytes.Rea
 	reader := ds.NewCsvReader(limit, bytesLimit)
 	data, err := io.ReadAll(reader) // puts data in memory
 	if err != nil {
-		ds.Context.CaptureErr(g.Error(err, "Error ioutil.ReadAll(reader)"))
+		ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
 	}
 	return bytes.NewReader(data)
 }

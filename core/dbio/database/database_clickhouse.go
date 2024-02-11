@@ -65,6 +65,26 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 	return Tx, nil
 }
 
+// GenerateDDL generates a DDL based on a dataset
+func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return sql, g.Error(err)
+	}
+
+	partitionBy := ""
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := quoteColNames(conn, keyCols.Names())
+		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+
+	return strings.TrimSpace(sql), nil
+}
+
 // BulkImportStream inserts a stream into a table
 func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns

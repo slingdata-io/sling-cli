@@ -80,7 +80,7 @@ type Connection interface {
 	ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
 	ExecMulti(sql string, args ...interface{}) (result sql.Result, err error)
 	ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
-	GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error)
+	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, fields []string, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
 	GetAnalysis(string, map[string]interface{}) (string, error)
@@ -1657,8 +1657,13 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
 // CreateTemporaryTable creates a temp table based on provided columns
 func (conn *BaseConn) CreateTemporaryTable(tableName string, cols iop.Columns) (err error) {
+	table, err := ParseTableName(tableName, conn.Type)
+	if err != nil {
+		return g.Error(err, "Could not parse table name: "+tableName)
+	}
+
 	// generate ddl
-	tableDDL, err := conn.GenerateDDL(tableName, cols.Dataset(), true)
+	tableDDL, err := conn.GenerateDDL(table, cols.Dataset(), true)
 	if err != nil {
 		return g.Error(err, "Could not generate DDL for "+tableName)
 	}
@@ -1684,9 +1689,14 @@ func (conn *BaseConn) CreateTable(tableName string, cols iop.Columns, tableDDL s
 		return nil
 	}
 
+	table, err := ParseTableName(tableName, conn.Type)
+	if err != nil {
+		return g.Error(err, "Could not parse table name: "+tableName)
+	}
+
 	// generate ddl
 	if tableDDL == "" {
-		tableDDL, err = conn.GenerateDDL(tableName, cols.Dataset(), false)
+		tableDDL, err = conn.GenerateDDL(table, cols.Dataset(), false)
 		if err != nil {
 			return g.Error(err, "Could not generate DDL for "+tableName)
 		}
@@ -2324,7 +2334,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 }
 
 // GenerateDDL genrate a DDL based on a dataset
-func (conn *BaseConn) GenerateDDL(tableFName string, data iop.Dataset, temporary bool) (string, error) {
+func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
 
 	if !data.Inferred || data.SafeInference {
 		if len(data.Columns) > 0 && data.Columns[0].Stats.TotalCnt == 0 && data.Columns[0].Type == "" {
@@ -2357,7 +2367,7 @@ func (conn *BaseConn) GenerateDDL(tableFName string, data iop.Dataset, temporary
 
 	ddl := g.R(
 		createTemplate,
-		"table", tableFName,
+		"table", table.FullName(),
 		"col_types", strings.Join(columnsDDL, ",\n"),
 	)
 
@@ -3380,4 +3390,10 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 	}
 
 	return
+}
+
+func quoteColNames(conn Connection, names []string) []string {
+	return lo.Map(names, func(col string, i int) string {
+		return conn.Quote(col)
+	})
 }

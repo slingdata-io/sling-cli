@@ -102,13 +102,19 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	targetTable := cfg.Target.Object
-	if cfg.Target.Options.TableTmp == "" {
-		tableTmp, err := database.ParseTableName(targetTable, tgtConn.GetType())
-		if err != nil {
-			return 0, g.Error(err, "no not parse object table name")
-		}
+	targetTable, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+	if err != nil {
+		return 0, g.Error(err, "could not parse object table name")
+	}
+	targetTable.DDL = cfg.Target.Options.TableDDL
+	targetTable.Keys = cfg.Target.Options.TableKeys
 
+	var tableTmp database.Table
+	if cfg.Target.Options.TableTmp == "" {
+		tableTmp, err = database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+		if err != nil {
+			return 0, g.Error(err, "could not parse object table name")
+		}
 		suffix := lo.Ternary(tgtConn.GetType().DBNameUpperCase(), "_TMP", "_tmp")
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
 			if len(tableTmp.Name) > 24 {
@@ -127,15 +133,21 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 		tableTmp.Name = tableTmp.Name + suffix
 		cfg.Target.Options.TableTmp = tableTmp.FullName()
-	}
-	if cfg.Mode == "" {
-		cfg.Mode = FullRefreshMode
+	} else {
+		tableTmp, err = database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
+		if err != nil {
+			return 0, g.Error(err, "could not parse temp table name")
+		}
 	}
 
+	// set DDL
+	tableTmp.DDL = strings.Replace(cfg.Target.Options.TableDDL, targetTable.Raw, tableTmp.FullName(), 1)
+	tableTmp.Keys = targetTable.Keys
+
 	// Drop & Create the temp table
-	err = tgtConn.DropTable(cfg.Target.Options.TableTmp)
+	err = tgtConn.DropTable(tableTmp.FullName())
 	if err != nil {
-		err = g.Error(err, "could not drop table "+cfg.Target.Options.TableTmp)
+		err = g.Error(err, "could not drop table "+tableTmp.FullName())
 		return
 	}
 
@@ -157,20 +169,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// check table ddl
-	if cfg.Target.Options.TableDDL != "" && !strings.Contains(cfg.Target.Options.TableDDL, targetTable) {
-		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s", targetTable)
+	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
+		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s", targetTable.Raw)
 		return
 	}
 
-	_, err = createTableIfNotExists(
-		tgtConn,
-		sampleData,
-		cfg.Target.Options.TableTmp,
-		// fix tempTableDDL
-		strings.Replace(cfg.Target.Options.TableDDL, targetTable, cfg.Target.Options.TableTmp, 1),
-	)
+	_, err = createTableIfNotExists(tgtConn, sampleData, tableTmp)
 	if err != nil {
-		err = g.Error(err, "could not create temp table "+cfg.Target.Options.TableTmp)
+		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
 		return
 	}
 	cfg.Target.TmpTableCreated = true
@@ -179,7 +185,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	t.AddCleanupTask(func() {
 		conn, err := t.getTgtDBConn(context.Background())
 		if err == nil {
-			err = conn.DropTable(cfg.Target.Options.TableTmp)
+			err = conn.DropTable(tableTmp.FullName())
 			g.LogError(err)
 		}
 	})
@@ -195,24 +201,19 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnChanged
 	if adjustColumnType {
 		df.OnColumnChanged = func(col iop.Column) error {
-
-			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
-			if err != nil {
-				return g.Error(err, "could not get temp table name for schema change")
-			}
-			table.Columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
+			tableTmp.Columns, err = tgtConn.GetColumns(tableTmp.FullName())
 			if err != nil {
 				return g.Error(err, "could not get table columns for schema change")
 			}
 
 			df.Columns[col.Position-1].Type = col.Type
-			ok, err := tgtConn.OptimizeTable(&table, df.Columns)
+			ok, err := tgtConn.OptimizeTable(&tableTmp, df.Columns)
 			if err != nil {
 				return g.Error(err, "could not change table schema")
 			} else if ok {
-				cfg.Target.columns = table.Columns
+				cfg.Target.columns = tableTmp.Columns
 				for i := range df.Columns {
-					df.Columns[i].Type = table.Columns[i].Type
+					df.Columns[i].Type = tableTmp.Columns[i].Type
 				}
 			}
 
@@ -230,12 +231,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// df.Context.Lock()
 			// defer df.Context.Unlock()
 
-			table, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
-			if err != nil {
-				return g.Error(err, "could not get temp table name for column add")
-			}
-
-			ok, err := database.AddMissingColumns(tgtConn, table, iop.Columns{col})
+			ok, err := database.AddMissingColumns(tgtConn, tableTmp, iop.Columns{col})
 			if err != nil {
 				return g.Error(err, "could not add missing columns")
 			} else if ok {
@@ -250,13 +246,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	df.Unpause() // to create DDL and set column change functions
 	t.SetProgress("streaming data")
-	cnt, err = tgtConn.BulkImportFlow(cfg.Target.Options.TableTmp, df)
+	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
 	if err != nil {
 		tgtConn.Rollback()
 		if cast.ToBool(os.Getenv("SLING_CLI")) && cfg.sourceIsFile() {
-			err = g.Error(err, "could not insert into %s.", cfg.Target.Options.TableTmp)
+			err = g.Error(err, "could not insert into %s.", tableTmp.FullName())
 		} else {
-			err = g.Error(err, "could not insert into "+cfg.Target.Options.TableTmp)
+			err = g.Error(err, "could not insert into "+tableTmp.FullName())
 		}
 		return
 	}
@@ -264,7 +260,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	tgtConn.Commit()
 	t.PBar.Finish()
 
-	tCnt, _ := tgtConn.GetCount(cfg.Target.Options.TableTmp)
+	tCnt, _ := tgtConn.GetCount(tableTmp.FullName())
 	if cnt != tCnt {
 		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
 		return
@@ -308,7 +304,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
 		if df.Count() <= 10000 {
-			err = tgtConn.CompareChecksums(cfg.Target.Options.TableTmp, df.Columns)
+			err = tgtConn.CompareChecksums(tableTmp.FullName(), df.Columns)
 			if err != nil {
 				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
 					return
@@ -337,12 +333,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	{
 		if cfg.Mode == FullRefreshMode {
 			// drop, (create if not exists) and insert directly
-			err = tgtConn.DropTable(targetTable)
+			err = tgtConn.DropTable(targetTable.FullName())
 			if err != nil {
-				err = g.Error(err, "could not drop table "+targetTable)
+				err = g.Error(err, "could not drop table "+targetTable.FullName())
 				return cnt, err
 			}
-			t.SetProgress("dropped table " + targetTable)
+			t.SetProgress("dropped table " + targetTable.FullName())
 		}
 
 		// create table if not exists
@@ -350,27 +346,17 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
 
-		created, err := createTableIfNotExists(
-			tgtConn,
-			sample,
-			targetTable,
-			cfg.Target.Options.TableDDL,
-		)
+		created, err := createTableIfNotExists(tgtConn, sample, targetTable)
 		if err != nil {
-			err = g.Error(err, "could not create table "+targetTable)
+			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return cnt, err
 		} else if created {
-			t.SetProgress("created table %s", targetTable)
-		}
-
-		table, err := database.ParseTableName(targetTable, tgtConn.GetType())
-		if err != nil {
-			return cnt, g.Error(err, "could not get table name for optimization")
+			t.SetProgress("created table %s", targetTable.FullName())
 		}
 
 		if !created && cfg.Mode != FullRefreshMode {
 			if *cfg.Target.Options.AddNewColumns {
-				ok, err := database.AddMissingColumns(tgtConn, table, sample.Columns)
+				ok, err := database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
 				} else if ok {
@@ -383,23 +369,23 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 			if adjustColumnType {
 
-				table.Columns, err = pullTargetTableColumns(t.Config, tgtConn, false)
+				targetTable.Columns, err = pullTargetTableColumns(t.Config, tgtConn, false)
 				if err != nil {
 					return cnt, g.Error(err, "could not get table columns for optimization")
 				}
 
-				ok, err := tgtConn.OptimizeTable(&table, sample.Columns)
+				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not optimize table schema")
 				} else if ok {
-					cfg.Target.columns = table.Columns
+					cfg.Target.columns = targetTable.Columns
 					for i := range df.Columns {
-						df.Columns[i].Type = table.Columns[i].Type
-						df.Columns[i].DbType = table.Columns[i].DbType
+						df.Columns[i].Type = targetTable.Columns[i].Type
+						df.Columns[i].DbType = targetTable.Columns[i].DbType
 						for _, ds := range df.StreamMap {
 							if len(ds.Columns) == len(df.Columns) {
-								ds.Columns[i].Type = table.Columns[i].Type
-								ds.Columns[i].DbType = table.Columns[i].DbType
+								ds.Columns[i].Type = targetTable.Columns[i].Type
+								ds.Columns[i].DbType = targetTable.Columns[i].DbType
 							}
 						}
 					}
@@ -413,18 +399,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		t.SetProgress("0 rows inserted. Nothing to do.")
 	} else if cfg.Mode == "drop (need to optimize temp table in place)" {
 		// use swap
-		err = tgtConn.SwapTable(cfg.Target.Options.TableTmp, targetTable)
+		err = tgtConn.SwapTable(tableTmp.FullName(), targetTable.FullName())
 		if err != nil {
-			err = g.Error(err, "could not swap tables %s to %s", cfg.Target.Options.TableTmp, targetTable)
+			err = g.Error(err, "could not swap tables %s to %s", tableTmp.FullName(), targetTable.FullName())
 			return 0, err
 		}
-
-		err = tgtConn.DropTable(cfg.Target.Options.TableTmp)
-		if err != nil {
-			err = g.Error(err, "could not drop table "+cfg.Target.Options.TableTmp)
-			return
-		}
-		t.SetProgress("dropped old table of " + targetTable)
 
 	} else if (cfg.Mode == IncrementalMode && len(t.Config.Source.PrimaryKey()) == 0) || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode {
 		// create if not exists and insert directly
@@ -437,14 +416,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// truncate (create if not exists) and insert directly
 		truncSQL := g.R(
 			tgtConn.GetTemplateValue("core.truncate_table"),
-			"table", targetTable,
+			"table", targetTable.FullName(),
 		)
 		_, err = tgtConn.Exec(truncSQL)
 		if err != nil {
-			err = g.Error(err, "Could not truncate table: "+targetTable)
+			err = g.Error(err, "Could not truncate table: "+targetTable.FullName())
 			return
 		}
-		t.SetProgress("truncated table " + targetTable)
+		t.SetProgress("truncated table " + targetTable.FullName())
 
 		// insert
 		err = insertFromTemp(cfg, tgtConn)
@@ -459,7 +438,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		// create final if not exists
 		// delete from final and insert
 		// or update (such as merge or ON CONFLICT)
-		rowAffCnt, err := tgtConn.Upsert(cfg.Target.Options.TableTmp, targetTable, cfg.Source.PrimaryKey())
+		rowAffCnt, err := tgtConn.Upsert(tableTmp.FullName(), targetTable.FullName(), cfg.Source.PrimaryKey())
 		if err != nil {
 			err = g.Error(err, "Could not incremental from temp")
 			// data is still in temp table at this point

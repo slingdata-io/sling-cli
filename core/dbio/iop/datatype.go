@@ -67,11 +67,20 @@ const (
 type KeyType string
 
 const (
-	PrimaryKey   KeyType = "primary_key"
-	AggregateKey KeyType = "aggregate_key"
-	UpdateKey    KeyType = "update_key"
-	SortKey      KeyType = "sort_key"
+	AggregateKey    KeyType = "aggregate"
+	ClusterKey      KeyType = "cluster"
+	DistributionKey KeyType = "distribution"
+	DuplicateKey    KeyType = "duplicate"
+	HashKey         KeyType = "hash"
+	IndexKey        KeyType = "index"
+	PartitionKey    KeyType = "partition"
+	PrimaryKey      KeyType = "primary"
+	SortKey         KeyType = "sort"
+	UniqueKey       KeyType = "unique"
+	UpdateKey       KeyType = "update"
 )
+
+var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
@@ -150,7 +159,8 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 func (cols Columns) GetKeys(keyType KeyType) Columns {
 	keys := Columns{}
 	for _, col := range cols {
-		if cast.ToBool(col.Metadata[string(keyType)]) {
+		key := string(keyType) + "_key"
+		if cast.ToBool(col.Metadata[key]) {
 			keys = append(keys, col)
 		}
 	}
@@ -158,15 +168,22 @@ func (cols Columns) GetKeys(keyType KeyType) Columns {
 }
 
 // SetKeys sets key columns
-func (cols Columns) SetKeys(keyType KeyType, names ...string) {
-	for i, col := range cols {
-		for _, name := range names {
-			if strings.EqualFold(name, col.Name) {
-				col.SetMetadata(string(keyType), "true")
+func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
+	for _, colName := range colNames {
+		found := false
+		for i, col := range cols {
+			if strings.EqualFold(colName, col.Name) {
+				key := string(keyType) + "_key"
+				col.SetMetadata(key, "true")
 				cols[i] = col
+				found = true
 			}
 		}
+		if !found {
+			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+		}
 	}
+	return
 }
 
 // IsDummy returns true if the columns are injected by CreateDummyFields

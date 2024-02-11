@@ -38,10 +38,10 @@ archives:
 checksum:
   name_template: '{{ .Runtime.Goos }}.{{ .Runtime.Goarch }}.checksums.txt'
 
-# dockers:
-#   - dockerfile: 'cmd/sling/Dockerfile'
-#     image_templates:
-#     - "slingdata/sling:{{ .Tag }}-arm64"
+dockers:
+  - dockerfile: 'cmd/sling/Dockerfile.arm64'
+    image_templates:
+    - "slingdata/sling:{{ .Tag }}-arm64"
 
 # mc policy set public DO/ocral/slingdata.io/cli
 blobs:
