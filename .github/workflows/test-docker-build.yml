@@ -2,9 +2,40 @@ name: Test Docker Build
 
 on: [workflow_dispatch]
 
+env:
+  GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
+  RUDDERSTACK_KEY: ${{ secrets.RUDDERSTACK_KEY }}
+
 jobs:
-  test1:
-    runs-on: [self-hosted, Linux, ARM64]
+  # test1:
+  #   runs-on: [self-hosted, Linux, ARM64]
+
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
+      
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v3
+  #       with:
+  #         go-version: "1.21"
+  #         cache: true
+          
+  #     - name: Build Sling
+  #       run: bash scripts/build.sh
+
+  #     - name: Build Docker
+  #       run: |
+  #         docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:dev-arm64 . 
+
+  release-linux-amd64:
+    runs-on: ubuntu-20.04
+    needs: [ release-linux-arm64 ] # for multi-platform docker image
+    # runs-on: [self-hosted, Linux]
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -17,10 +48,21 @@ jobs:
         with:
           go-version: "1.21"
           cache: true
-          
-      - name: Build Sling
-        run: bash scripts/build.sh
 
-      - name: Build Docker
+      - name: Login docker
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:dev-arm64 . 
+          echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
+
+      - name: Dispatch test-sling-action
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          event-type: test-sling-action

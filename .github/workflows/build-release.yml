@@ -179,7 +179,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip-validate -f .goreleaser.mac.yaml
+          args: release --clean --skip=validate -f .goreleaser.mac.yaml
 
   release-scoop:
     # runs-on: [self-hosted, Windows]
@@ -206,12 +206,11 @@ jobs:
             disk-root: "C:"
 
       - name: Run GoReleaser
-        # uses: flarco/goreleaser-action@master
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip-validate -f .goreleaser.windows.yaml
+          args: release --clean --skip=validate -f .goreleaser.windows.yaml
 
   release-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
@@ -236,12 +235,20 @@ jobs:
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
 
       - name: Run GoReleaser
-        # uses: flarco/goreleaser-action@master
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip-validate -f .goreleaser.linux.arm64.yaml
+          args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml
+
+      # pushing to docker manually
+      # could not figure out how to make arm64 work in goreleaser
+      - name: Push to Docker Manually
+        run: |
+          rm -f sling && cp dist/sling_linux_arm64/sling .
+          export SLING_VERSION=$( ./sling --version | sed 's/Version: //')
+          docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:$SLING_VERSION-arm64 . 
+          docker push slingdata/sling:$SLING_VERSION-arm64
 
   release-linux-amd64:
     runs-on: ubuntu-20.04
@@ -268,12 +275,11 @@ jobs:
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
 
       - name: Run GoReleaser
-        # uses: flarco/goreleaser-action@master
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip-validate -f .goreleaser.linux.amd64.yaml
+          args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
 
       - name: Dispatch test-sling-action
         uses: peter-evans/repository-dispatch@v2
