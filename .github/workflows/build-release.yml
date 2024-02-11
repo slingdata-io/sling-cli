@@ -248,7 +248,9 @@ jobs:
           rm -f sling && cp dist/sling_linux_arm64/sling .
           export SLING_VERSION=$( ./sling --version | sed 's/Version: //')
           docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:$SLING_VERSION-arm64 . 
+          docker tag slingdata/sling:$SLING_VERSION-arm64 slingdata/sling-cloud:latest-arm64
           docker push slingdata/sling:$SLING_VERSION-arm64
+          docker push slingdata/sling:latest-arm64
 
   release-linux-amd64:
     runs-on: ubuntu-20.04
