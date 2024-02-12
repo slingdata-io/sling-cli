@@ -169,6 +169,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	os.Setenv("SLING_CLI", "TRUE")
+	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
 	// check for update, and print note
 	go checkUpdate()
