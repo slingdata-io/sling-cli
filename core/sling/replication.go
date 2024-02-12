@@ -339,7 +339,10 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		if cast.ToString(rootNode.Key) == "defaults" {
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
-					config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(defaultsNode.Value.(yaml.MapSlice))
+					value, ok := defaultsNode.Value.(yaml.MapSlice)
+					if ok {
+						config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(value)
+					}
 				}
 			}
 		}
@@ -347,7 +350,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	for _, rootNode := range rootMap {
 		if cast.ToString(rootNode.Key) == "streams" {
-			streamsNodes := rootNode.Value.(yaml.MapSlice)
+			streamsNodes, ok := rootNode.Value.(yaml.MapSlice)
+			if !ok {
+				continue
+			}
+
 			for _, streamsNode := range streamsNodes {
 				key := cast.ToString(streamsNode.Key)
 				config.streamsOrdered = append(config.streamsOrdered, key)
@@ -360,7 +367,10 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
-							stream.SourceOptions.Columns = getSourceOptionsColumns(streamConfigNode.Value.(yaml.MapSlice))
+							value, ok := streamConfigNode.Value.(yaml.MapSlice)
+							if ok {
+								stream.SourceOptions.Columns = getSourceOptionsColumns(value)
+							}
 						}
 					}
 				}
@@ -397,10 +407,7 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	// expand variables
-	cfgString := expandEnvVars(string(cfgBytes))
-
-	config, err = UnmarshalReplication(cfgString)
+	config, err = UnmarshalReplication(string(cfgBytes))
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 		return
