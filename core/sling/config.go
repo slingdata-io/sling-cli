@@ -162,6 +162,9 @@ func (cfg *Config) SetDefault() {
 
 // Unmarshal parse a configuration file path or config text
 func (cfg *Config) Unmarshal(cfgStr string) error {
+	// expand variables
+	cfgStr = expandEnvVars(cfgStr)
+
 	cfgBytes := []byte(cfgStr)
 	_, errStat := os.Stat(cfgStr)
 	if errStat == nil {
@@ -1032,4 +1035,15 @@ func castKeyArray(keyI any) (key []string) {
 		return key
 	}
 	return
+}
+
+// expandEnvVars replaces $KEY or ${KEY} with its environment variable value
+// only if the variable is present in the environment.
+// If not present, $KEY or ${KEY} will remain in the config text.
+func expandEnvVars(text string) string {
+	for key, value := range g.KVArrToMap(os.Environ()...) {
+		text = strings.ReplaceAll(text, "$"+key+"", value)
+		text = strings.ReplaceAll(text, "${"+key+"}", value)
+	}
+	return text
 }

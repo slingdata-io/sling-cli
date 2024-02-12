@@ -397,7 +397,10 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	config, err = UnmarshalReplication(string(cfgBytes))
+	// expand variables
+	cfgString := expandEnvVars(string(cfgBytes))
+
+	config, err = UnmarshalReplication(cfgString)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 		return
