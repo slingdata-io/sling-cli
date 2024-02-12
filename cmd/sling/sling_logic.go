@@ -22,13 +22,10 @@ import (
 )
 
 var (
-	masterServerURL = os.Getenv("SLING_MASTER_URL")
-	isDocker        = os.Getenv("SLING_PACKAGE") == "DOCKER"
-	apiKey          = os.Getenv("SLING_API_KEY")
-	projectID       = os.Getenv("SLING_PROJECT")
-	headers         = map[string]string{
+	isDocker  = os.Getenv("SLING_PACKAGE") == "DOCKER"
+	projectID = os.Getenv("SLING_PROJECT")
+	headers   = map[string]string{
 		"Content-Type":     "application/json",
-		"Sling-API-Key":    apiKey,
 		"Sling-Project-ID": projectID,
 	}
 	updateMessage = ""
@@ -36,9 +33,6 @@ var (
 )
 
 func init() {
-	if masterServerURL == "" {
-		masterServerURL = "https://api.slingdata.io"
-	}
 
 	// init sqlite
 	store.InitDB()
