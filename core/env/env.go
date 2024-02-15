@@ -34,6 +34,10 @@ func init() {
 		os.WriteFile(HomeDirEnvFile, defaultEnvBytes, 0644)
 	}
 
+	if content := os.Getenv("SLING_ENV_YAML"); content != "" {
+		os.Setenv("ENV_YAML", content)
+	}
+
 	// other sources of creds
 	env.SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
 	env.SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
