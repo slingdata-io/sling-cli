@@ -227,7 +227,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			telemetryMap["task_type"] = task.Type
 			telemetryMap["task_mode"] = task.Config.Mode
 			telemetryMap["task_status"] = task.Status
+			telemetryMap["task_source_md5"] = task.Config.Source.MD5()
 			telemetryMap["task_source_type"] = task.Config.SrcConn.Type
+			telemetryMap["task_target_md5"] = task.Config.Target.MD5()
 			telemetryMap["task_target_type"] = task.Config.TgtConn.Type
 			telemetryMap["task_start_time"] = task.StartTime
 			telemetryMap["task_end_time"] = task.EndTime

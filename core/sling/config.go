@@ -767,21 +767,19 @@ func (cfg Config) Value() (driver.Value, error) {
 
 func (cfg *Config) MD5() string {
 	payload := g.Marshal(g.M(
-		"source", cfg.Source,
-		"target", cfg.Target,
+		"source", cfg.Source.MD5(),
+		"target", cfg.Target.MD5(),
 		"mode", cfg.Mode,
 		"options", cfg.Options,
 	))
 
 	// clean up
 	if strings.Contains(cfg.Source.Conn, "://") {
-		cleanSource := strings.Split(cfg.Source.Conn, "://")[0] + "://"
-		payload = strings.ReplaceAll(payload, g.Marshal(cfg.Source.Conn), g.Marshal(cleanSource))
+		payload = cleanConnURL(payload, cfg.Source.Conn)
 	}
 
 	if strings.Contains(cfg.Target.Conn, "://") {
-		cleanTarget := strings.Split(cfg.Target.Conn, "://")[0] + "://"
-		payload = strings.ReplaceAll(payload, g.Marshal(cfg.Target.Conn), g.Marshal(cleanTarget))
+		payload = cleanConnURL(payload, cfg.Target.Conn)
 	}
 
 	return g.MD5(payload)
@@ -830,6 +828,22 @@ func (s *Source) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
+func (s *Source) MD5() string {
+	payload := g.Marshal(g.M(
+		"conn", s.Conn,
+		"stream", s.Stream,
+		"primary_key", s.PrimaryKeyI,
+		"update_key", s.UpdateKey,
+		"options", s.Options,
+	))
+
+	if strings.Contains(s.Conn, "://") {
+		payload = cleanConnURL(payload, s.Conn)
+	}
+
+	return g.MD5(payload)
+}
+
 // Target is a target of data
 type Target struct {
 	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
@@ -839,6 +853,20 @@ type Target struct {
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
+}
+
+func (t *Target) MD5() string {
+	payload := g.Marshal(g.M(
+		"conn", t.Conn,
+		"object", t.Object,
+		"options", t.Options,
+	))
+
+	if strings.Contains(t.Conn, "://") {
+		payload = cleanConnURL(payload, t.Conn)
+	}
+
+	return g.MD5(payload)
 }
 
 // SourceOptions are connection and stream processing options
@@ -1081,4 +1109,10 @@ func expandEnvVars(text string) string {
 		text = strings.ReplaceAll(text, "${"+key+"}", value)
 	}
 	return text
+}
+
+func cleanConnURL(payload, connURL string) string {
+	cleanSource := strings.Split(connURL, "://")[0] + "://"
+	payload = strings.ReplaceAll(payload, g.Marshal(connURL), g.Marshal(cleanSource))
+	return payload
 }
