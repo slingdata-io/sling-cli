@@ -223,6 +223,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 				task.Config.Target.Options = &sling.TargetOptions{}
 			}
 			inBytes, outBytes := task.GetBytes()
+			telemetryMap["task_md5"] = task.Config.MD5()
 			telemetryMap["task_type"] = task.Type
 			telemetryMap["task_mode"] = task.Config.Mode
 			telemetryMap["task_status"] = task.Status
@@ -390,6 +391,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 
 		telemetryMap["run_mode"] = "replication"
+		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
 			err = g.Error(err, "error for stream %s", name)

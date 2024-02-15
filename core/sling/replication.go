@@ -31,6 +31,29 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 	return rd.originalCfg
 }
 
+// MD5 returns a md5 hash of the config
+func (rd *ReplicationConfig) MD5() string {
+	payload := g.Marshal(g.M(
+		"source", rd.Source,
+		"target", rd.Target,
+		"defaults", rd.Defaults,
+		"streams", rd.Streams,
+	))
+
+	// clean up
+	if strings.Contains(rd.Source, "://") {
+		cleanSource := strings.Split(rd.Source, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(rd.Source), g.Marshal(cleanSource))
+	}
+
+	if strings.Contains(rd.Target, "://") {
+		cleanTarget := strings.Split(rd.Target, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(rd.Target), g.Marshal(cleanTarget))
+	}
+
+	return g.MD5(payload)
+}
+
 // Scan scan value into Jsonb, implements sql.Scanner interface
 func (rd *ReplicationConfig) Scan(value interface{}) error {
 	return g.JSONScanner(rd, value)

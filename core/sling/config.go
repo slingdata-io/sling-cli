@@ -765,6 +765,28 @@ func (cfg Config) Value() (driver.Value, error) {
 	return []byte(out), err
 }
 
+func (cfg *Config) MD5() string {
+	payload := g.Marshal(g.M(
+		"source", cfg.Source,
+		"target", cfg.Target,
+		"mode", cfg.Mode,
+		"options", cfg.Options,
+	))
+
+	// clean up
+	if strings.Contains(cfg.Source.Conn, "://") {
+		cleanSource := strings.Split(cfg.Source.Conn, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(cfg.Source.Conn), g.Marshal(cleanSource))
+	}
+
+	if strings.Contains(cfg.Target.Conn, "://") {
+		cleanTarget := strings.Split(cfg.Target.Conn, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(cfg.Target.Conn), g.Marshal(cleanTarget))
+	}
+
+	return g.MD5(payload)
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
