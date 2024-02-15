@@ -498,6 +498,19 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
+	// validate conn data keys
+	for key := range cfg.SrcConn.Data {
+		if strings.Contains(key, ":") {
+			g.Warn("source connection %s has an invalid property -> %s", cfg.Source.Conn, key)
+		}
+	}
+
+	for key := range cfg.TgtConn.Data {
+		if strings.Contains(key, ":") {
+			g.Warn("target connection %s has an invalid property -> %s", cfg.Target.Conn, key)
+		}
+	}
+
 	// done
 	cfg.Prepared = true
 	return
