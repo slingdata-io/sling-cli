@@ -149,9 +149,10 @@ func TestParquetDecimal(t *testing.T) {
 	correctDecValues := []string{}
 	for i := 0; i < 5; i++ {
 		intVal := g.RandInt64(1000000)
-		correctIntValues = append(correctIntValues, intVal)
-		decVal := g.F("%d.%d", g.RandInt64(1000000), g.RandInt64(1000000))
-		correctDecValues = append(correctDecValues, decVal)
+		decVal := g.F("%d.%d", g.RandInt64(1000000), g.RandInt64(1000000000))
+		if i == 0 {
+			decVal = "-1.2"
+		}
 
 		rec := []parquet.Value{
 			parquet.ValueOf(intVal), // big_int_type
@@ -159,6 +160,9 @@ func TestParquetDecimal(t *testing.T) {
 			// parquet.ValueOf(decVal), // float_type
 		}
 		_, err = fw.WriteRows([]parquet.Row{rec})
+
+		correctIntValues = append(correctIntValues, intVal)
+		correctDecValues = append(correctDecValues, decVal)
 	}
 	g.LogFatal(err)
 
