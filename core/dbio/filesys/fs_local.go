@@ -39,7 +39,7 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 	path = cleanLocalFilePath(path)
 	file, err := os.Stat(path)
 	if err != nil {
-		return // likely means the path does not exist, no need to delete
+		return nil // likely means the path does not exist, no need to delete
 	}
 
 	switch mode := file.Mode(); {
