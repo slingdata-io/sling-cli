@@ -46,6 +46,10 @@ var sentryOptions = sentry.ClientOptions{
 	Debug: false,
 }
 
+func init() {
+	env.InitLogger()
+}
+
 var cliRun = &g.CliSC{
 	Name:                  "run",
 	Description:           "Execute a run",
@@ -364,15 +368,22 @@ func main() {
 		exitCode = cliInit()
 	}()
 
+	exit := func() {
+		env.StdErrW.Close()
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(exitCode)
+	}
+
 	select {
 	case <-done:
-		os.Exit(exitCode)
+		exit()
 	case <-kill:
-		println("\nkilling process...")
-		os.Exit(111)
+		env.Println("\nkilling process...")
+		exitCode = 111
+		exit()
 	case <-interrupt:
 		if cliRun.Sc.Used {
-			println("\ninterrupting...")
+			env.Println("\ninterrupting...")
 			interrupted = true
 			ctx.Cancel()
 			select {
@@ -380,13 +391,12 @@ func main() {
 			case <-time.After(5 * time.Second):
 			}
 		}
-		os.Exit(exitCode)
+		exit()
 		return
 	}
 }
 
 func cliInit() int {
-	env.InitLogger()
 
 	// Set your program's name and description.  These appear in help output.
 	flaggy.SetName("sling")
@@ -449,9 +459,9 @@ func cliInit() int {
 		}
 
 		if eh := sling.ErrorHelper(err); eh != "" {
-			println()
-			println(color.MagentaString(eh))
-			println()
+			env.Println("")
+			env.Println(color.MagentaString(eh))
+			env.Println("")
 		}
 
 		g.LogFatal(err)

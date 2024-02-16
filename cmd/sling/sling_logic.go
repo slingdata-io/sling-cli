@@ -32,7 +32,6 @@ var (
 )
 
 func init() {
-
 	// init sqlite
 	store.InitDB()
 }
@@ -156,6 +155,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.Debug = cast.ToBool(v)
 			if cfg.Options.Debug {
 				os.Setenv("DEBUG", "LOW")
+				env.SetLogger()
 			}
 		case "examples":
 			showExamples = cast.ToBool(v)

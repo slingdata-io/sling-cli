@@ -72,7 +72,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	g.Info("Downloading latest version (%s)", updateVersion)
 	err = net.DownloadFile(url, tazGzFilePath)
 	if err != nil {
-		println("Unable to download update!")
+		g.Warn("Unable to download update!")
 		return ok, g.Error(strings.ReplaceAll(err.Error(), url, ""))
 	}
 
@@ -81,7 +81,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// expand archive
 	err = ExtractTarGz(tazGzFilePath, folderPath)
 	if err != nil {
-		println("Unable to download update!")
+		g.Warn("Unable to download update!")
 		return ok, err
 	}
 
@@ -91,19 +91,19 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	}
 	err = os.Chmod(filePath, fileMode)
 	if err != nil {
-		println("Unable to make new binary executable.")
+		g.Warn("Unable to make new binary executable.")
 		return ok, err
 	}
 
 	err = os.Rename(execFileName, execFileName+".old")
 	if err != nil {
-		println("Unable to rename current binary executable. Try with sudo or admin?")
+		g.Warn("Unable to rename current binary executable. Try with sudo or admin?")
 		return ok, err
 	}
 
 	err = os.Rename(filePath, execFileName)
 	if err != nil {
-		println("Unable to rename current binary executable. Try with sudo or admin?")
+		g.Warn("Unable to rename current binary executable. Try with sudo or admin?")
 		return ok, err
 	}
 

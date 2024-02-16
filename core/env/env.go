@@ -1,8 +1,10 @@
 package env
 
 import (
+	"bufio"
 	"embed"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/flarco/g"
@@ -17,6 +19,11 @@ var (
 	Env            = &env.EnvFile{}
 	RudderstackKey = ""
 	RudderstackURL = "https://liveflarccszw.dataplane.rudderstack.com"
+
+	OsStdErr  *os.File
+	StderrR   io.ReadCloser
+	StdErrW   *os.File
+	StdErrChn chan string
 )
 
 //go:embed *
@@ -43,27 +50,26 @@ func init() {
 	env.SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
 }
 
-// InitLogger initializes the g Logger
-func InitLogger() {
+func SetLogger() {
 	g.SetZeroLogLevel(zerolog.InfoLevel)
 	g.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
 
 	if os.Getenv("_DEBUG_CALLER_LEVEL") != "" {
 		g.CallerLevel = cast.ToInt(os.Getenv("_DEBUG_CALLER_LEVEL"))
 	}
-	if os.Getenv("_DEBUG") == "TRACE" {
+	if os.Getenv("DEBUG") == "TRACE" {
 		g.SetZeroLogLevel(zerolog.TraceLevel)
 		g.SetLogLevel(g.TraceLevel)
-	} else if os.Getenv("_DEBUG") != "" {
+	} else if os.Getenv("DEBUG") != "" {
 		g.SetZeroLogLevel(zerolog.DebugLevel)
 		g.SetLogLevel(g.DebugLevel)
-		if os.Getenv("_DEBUG") == "LOW" {
+		if os.Getenv("DEBUG") == "LOW" {
 			g.SetLogLevel(g.LowDebugLevel)
 		}
 	}
 
 	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
-	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
+	outputErr := zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "2006-01-02 15:04:05"}
 	outputOut.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
 	}
@@ -82,14 +88,45 @@ func InitLogger() {
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
-		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM"}
+		outputErr = zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "3:04PM"}
 		if g.IsDebugLow() {
-			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
+			outputErr = zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "2006-01-02 15:04:05"}
 		}
 		g.ZLogOut = zerolog.New(outputErr).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	}
 }
+
+// InitLogger initializes the g Logger
+func InitLogger() {
+
+	// capture stdErr
+	OsStdErr = os.Stderr
+	StderrR, StdErrW, _ = os.Pipe()
+	os.Stderr = StdErrW
+
+	SetLogger()
+
+	StderrReader := bufio.NewReader(StderrR)
+
+	go func() {
+		buf := make([]byte, 4*1024)
+		for {
+			nr, err := StderrReader.Read(buf)
+			if err == nil && nr > 0 {
+				text := string(buf[0:nr])
+				print(text)
+				if StdErrChn != nil {
+					StdErrChn <- text
+				}
+			}
+		}
+	}()
+}
+
+func Print(text string) { fmt.Fprintf(StdErrW, "%s", text) }
+
+func Println(text string) { fmt.Fprintf(StdErrW, "%s\n", text) }
 
 func LoadSlingEnvFile() (ef env.EnvFile) {
 	ef = env.LoadEnvFile(HomeDirEnvFile)

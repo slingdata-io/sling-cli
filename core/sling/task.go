@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -35,6 +36,7 @@ type TaskExecution struct {
 	prevRowCount  uint64
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
+	Output        string    `json:"-"`
 
 	Replication    *ReplicationConfig `json:"replication"`
 	ProgressHist   []string           `json:"progress_hist"`
@@ -68,6 +70,23 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
 	}
+
+	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
+		t.AppendOutput(" -- args: " + args + "\n")
+	}
+
+	// stdErr output
+	go func() {
+		env.StdErrChn = make(chan string, 1000)
+
+		for {
+			if t.EndTime != nil {
+				env.StdErrChn = nil
+				break
+			}
+			t.AppendOutput(<-env.StdErrChn) // process output
+		}
+	}()
 
 	err := cfg.Prepare()
 	if err != nil {
@@ -185,6 +204,10 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 		// outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
 	}
 	return
+}
+
+func (t *TaskExecution) AppendOutput(text string) {
+	t.Output = t.Output + text
 }
 
 func (t *TaskExecution) GetBytesString() (s string) {

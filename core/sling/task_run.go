@@ -11,11 +11,11 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/slingdata-io/sling-cli/core"
-	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -42,7 +42,7 @@ func init() {
 // Execute runs a Sling task.
 // This may be a file/db to file/db transfer
 func (t *TaskExecution) Execute() error {
-	env.InitLogger()
+	env.SetLogger()
 
 	done := make(chan struct{})
 	now := time.Now()
