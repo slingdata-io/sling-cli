@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -101,8 +101,7 @@ var DBs = []*testDB{
 
 func init() {
 	env.InitLogger()
-	iop.RemoveTrailingDecZeros = true
-	os.Setenv("SLING_FILE_ROW_LIMIT", "0")
+	// iop.RemoveTrailingDecZeros = true
 	for _, db := range DBs {
 		if db.URL == "" {
 			log.Fatal("No Env Var URL for " + db.name)
@@ -303,7 +302,7 @@ func TestInToDb(t *testing.T) {
 
 	tReader, err := iop.AutoDecompress(bufio.NewReader(testFile1))
 	g.AssertNoError(t, err)
-	testFile1Bytes, err = ioutil.ReadAll(tReader)
+	testFile1Bytes, err = io.ReadAll(tReader)
 	testFile1.Close()
 
 	for _, tgtDB := range DBs {
@@ -448,11 +447,11 @@ func TestDbToOut(t *testing.T) {
 
 		testFile1, err := os.Open("tests/files/test1.result.csv")
 		g.AssertNoError(t, err)
-		testFile1Bytes, err = ioutil.ReadAll(testFile1)
+		testFile1Bytes, err = io.ReadAll(testFile1)
 
 		testFile2, err := os.Open(filePath2)
 		g.AssertNoError(t, err)
-		testFile2Bytes, err := ioutil.ReadAll(testFile2)
+		testFile2Bytes, err := io.ReadAll(testFile2)
 
 		if srcDB.name != "SQLite" {
 			// SQLite uses int for bool, so it will not match
@@ -605,7 +604,7 @@ options:
 
 func Test1Replication(t *testing.T) {
 	sling.ShowProgress = false
-	os.Setenv("_DEBUG", "LOW")
+	os.Setenv("DEBUG", "LOW")
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("CONCURENCY_LIMIT", "2")
