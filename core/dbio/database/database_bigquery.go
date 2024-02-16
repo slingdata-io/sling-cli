@@ -343,15 +343,19 @@ func (conn *BigQueryConn) getItColumns(itSchema bigquery.Schema) (cols iop.Colum
 	cols = make(iop.Columns, len(itSchema))
 	for i, field := range itSchema {
 		cols[i] = iop.Column{
-			Name:     field.Name,
-			Position: i + 1,
-			Type:     NativeTypeToGeneral(field.Name, string(field.Type), conn),
-			DbType:   string(field.Type),
+			Name:        field.Name,
+			Position:    i + 1,
+			Type:        NativeTypeToGeneral(field.Name, string(field.Type), conn),
+			DbType:      string(field.Type),
+			DbPrecision: cast.ToInt(field.Precision),
+			DbScale:     cast.ToInt(field.Scale),
+			Sourced:     true,
 		}
 		cols[i].SetLengthPrecisionScale()
 
 		if g.In(field.Type, bigquery.NumericFieldType, bigquery.FloatFieldType) {
 			bQTC.numericCols = append(bQTC.numericCols, i)
+			cols[i].Sourced = false // need to infer the decimal lengths
 		} else if field.Type == "DATETIME" || field.Type == bigquery.TimestampFieldType {
 			bQTC.datetimeCols = append(bQTC.datetimeCols, i)
 		} else if field.Type == "DATE" {
@@ -444,7 +448,7 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 
 	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
 	ds.NoDebug = strings.Contains(sql, noDebugKey)
-	ds.Inferred = !InferDBStream
+	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 	if !ds.NoDebug {
 		ds.SetMetadata(conn.GetProp("METADATA"))
 		ds.SetConfig(conn.Props())
@@ -780,6 +784,13 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return conn.BaseConn.BulkExportFlow(tables...)
 	}
 
+	// get columns
+	columns, err := conn.GetSQLColumns(tables...)
+	if err != nil {
+		err = g.Error(err, "Could not get columns.")
+		return
+	}
+
 	gsURL, err := conn.Unload(tables...)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
@@ -798,28 +809,14 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
+	// need to set columns so they match the source table
+	df.AddColumns(columns, true) // overwrite types so we don't need to infer
+	df.Inferred = df.Columns.Sourced()
+
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
 	return
 }
-
-// CopyToGCS demonstrates using an export task to
-// write the contents of a table into Cloud Storage as CSV.
-// func (conn *BigQueryConn) CopyFromGS(tableFName string, gcsURI string) error {
-// 	ctx, cancel := context.WithTimeout(conn.Context().Ctx, time.Second*50)
-// 	defer cancel()
-// 	rc, err := client.Bucket(bucket).Object(object).NewReader(ctx)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rc.Close()
-
-// 	data, err := ioutil.ReadAll(rc)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return data, nil
-// }
 
 // Unload to Google Cloud Storage
 func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {

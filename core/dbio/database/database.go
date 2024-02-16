@@ -974,7 +974,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
 	ds.NoDebug = strings.Contains(query, noDebugKey)
-	ds.Inferred = !InferDBStream
+	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 	if !ds.NoDebug {
 		// don't set metadata for internal queries
 		ds.SetMetadata(conn.GetProp("METADATA"))
@@ -1362,13 +1362,18 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		col.Stats.MaxLen = colType.Length
 		col.Stats.MaxDecLen = 0
 
+		// mark types that don't depend on length, precision or scale as sourced (inferred)
+		if !g.In(col.Type, iop.DecimalType) {
+			col.Sourced = true
+		}
+
 		if colType.Sourced {
 			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
-				col.Sourced = colType.Sourced
+				col.Sourced = true
 			}
 
 			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake) {
-				col.Sourced = colType.Sourced
+				col.Sourced = true
 				col.DbPrecision = colType.Precision
 				col.DbScale = colType.Scale
 				col.Stats.MaxDecLen = lo.Ternary(colType.Scale > ddlMinDecScale, colType.Scale, ddlMinDecScale)
@@ -1536,6 +1541,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 				DatabaseTypeName: cast.ToString(rec["data_type"]),
 				Precision:        cast.ToInt(rec["precision"]),
 				Scale:            cast.ToInt(rec["scale"]),
+				Sourced:          true,
 			})
 		}
 	} else {
@@ -2322,6 +2328,9 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 		precision := lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
 		precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
+
+		minPrecision := col.Stats.MaxLen + scale
+		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 
 		nativeType = strings.ReplaceAll(
 			nativeType,
