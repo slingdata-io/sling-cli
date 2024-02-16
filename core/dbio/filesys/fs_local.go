@@ -39,17 +39,18 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 	path = cleanLocalFilePath(path)
 	file, err := os.Stat(path)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such file or directory") || strings.Contains(err.Error(), "cannot find") {
-			// path is already deleted
-			return nil
-		}
-
-		err = g.Error(err, "Unable to Stat "+path)
-		return
+		return // likely means the path does not exist, no need to delete
 	}
 
 	switch mode := file.Mode(); {
 	case mode.IsDir():
+		// some safety measure to not delete root system folders
+		slashCount := len(path) - len(strings.ReplaceAll(path, "/", ""))
+		if slashCount <= 2 && (strings.HasPrefix(path, "/") || strings.Contains(path, ":/")) {
+			g.Warn("directory '%s' is close to root. Not deleting.", path)
+			return
+		}
+
 		err = os.RemoveAll(path)
 		if err != nil {
 			err = g.Error(err, "Unable to delete "+path)
