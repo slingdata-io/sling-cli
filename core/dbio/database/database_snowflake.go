@@ -207,10 +207,13 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		}
 	// case "STAGE":
 	// 	// TODO: This is not working, buggy driver. Use SQL Rows stream
-	// 	if conn.getOrCreateStage("") != "" {
+	// 	if stage := conn.getOrCreateStage(tables[0].Schema); stage != "" {
 	// 		filePath, err = conn.UnloadViaStage(tables...)
+	// 		if err != nil {
+	// 			err = g.Error(err, "Could not unload to stage.")
+	// 			return
+	// 		}
 	// 	} else {
-	// 		g.Warn("could not get or create stage. Using cursor stream.")
 	// 		return conn.BaseConn.BulkExportFlow(tables...)
 	// 	}
 	default:
@@ -538,7 +541,7 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 	return nil
 }
 
-func (conn *SnowflakeConn) UnloadViaStage(sqls ...string) (filePath string, err error) {
+func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err error) {
 
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
@@ -568,10 +571,10 @@ func (conn *SnowflakeConn) UnloadViaStage(sqls ...string) (filePath string, err 
 
 	conn.Exec("REMOVE " + stageFolderPath)
 	defer conn.Exec("REMOVE " + stageFolderPath)
-	for i, sql := range sqls {
+	for i, table := range tables {
 		stagePathPart := fmt.Sprintf("%s/u%02d-", stageFolderPath, i+1)
 		conn.Context().Wg.Write.Add()
-		go unload(sql, stagePathPart)
+		go unload(table.Select(), stagePathPart)
 	}
 
 	conn.Context().Wg.Write.Wait()
