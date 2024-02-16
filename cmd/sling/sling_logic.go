@@ -22,7 +22,6 @@ import (
 )
 
 var (
-	isDocker  = os.Getenv("SLING_PACKAGE") == "DOCKER"
 	projectID = os.Getenv("SLING_PROJECT")
 	headers   = map[string]string{
 		"Content-Type":     "application/json",

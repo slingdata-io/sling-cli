@@ -151,11 +151,11 @@ func checkUpdate() {
 }
 
 func getSlingPackage() string {
-	slingPackage := ""
+	slingPackage := strings.ToLower(os.Getenv("SLING_PACKAGE"))
 	execFileName, _ := osext.Executable()
 	switch {
-	case isDocker:
-		slingPackage = "docker"
+	case g.In(slingPackage, "docker", "dagster", "airflow", "temporal", "orkes"):
+		_ = slingPackage
 	case strings.Contains(execFileName, "homebrew"):
 		slingPackage = "homebrew"
 	case strings.Contains(execFileName, "scoop"):
