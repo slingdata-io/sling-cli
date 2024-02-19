@@ -2,7 +2,6 @@ package iop
 
 import (
 	"io"
-	"io/ioutil"
 	"strings"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestCompression(t *testing.T) {
 	cReader = cp.Compress(reader)
 	dReader, err = cp.Decompress(cReader)
 	g.AssertNoError(t, err)
-	result, err = ioutil.ReadAll(dReader)
+	result, err = io.ReadAll(dReader)
 	g.AssertNoError(t, err)
 	assert.Equal(t, value, string(result))
 
@@ -32,7 +31,7 @@ func TestCompression(t *testing.T) {
 	cReader = cp.Compress(reader)
 	dReader, err = cp.Decompress(cReader)
 	g.AssertNoError(t, err)
-	result, err = ioutil.ReadAll(dReader)
+	result, err = io.ReadAll(dReader)
 	g.AssertNoError(t, err)
 	assert.Equal(t, value, string(result))
 
@@ -42,7 +41,7 @@ func TestCompression(t *testing.T) {
 	cReader = cp.Compress(reader)
 	dReader, err = cp.Decompress(cReader)
 	g.AssertNoError(t, err)
-	result, err = ioutil.ReadAll(dReader)
+	result, err = io.ReadAll(dReader)
 	g.AssertNoError(t, err)
 	assert.Equal(t, value, string(result))
 

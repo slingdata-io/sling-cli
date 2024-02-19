@@ -748,7 +748,7 @@ func (conn *BaseConn) LoadTemplates() error {
 
 	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
 	if err != nil {
-		return g.Error(err, "ioutil.ReadAll(baseTemplateFile)")
+		return g.Error(err, "io.ReadAll(baseTemplateFile)")
 	}
 
 	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &conn.template); err != nil {
@@ -757,7 +757,7 @@ func (conn *BaseConn) LoadTemplates() error {
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + conn.Type.String() + ".yaml")
 	if err != nil {
-		return g.Error(err, "ioutil.ReadAll(templateFile) for "+conn.Type)
+		return g.Error(err, "io.ReadAll(templateFile) for "+conn.Type)
 	}
 
 	template := Template{}
