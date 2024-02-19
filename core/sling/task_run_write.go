@@ -54,11 +54,17 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
 
+		limit := cast.ToUint64(cfg.Source.Limit())
 		options := map[string]string{"delimiter": ","}
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
+
 		for stream := range df.StreamCh {
 			stream.SetConfig(options)
-			for batchR := range stream.NewCsvReaderChnl(0, 0) {
+			for batchR := range stream.NewCsvReaderChnl(cast.ToInt(limit), 0) {
+				if limit > 0 && cnt >= limit {
+					return
+				}
+
 				if len(batchR.Columns) != len(df.Columns) {
 					err = g.Error(err, "number columns have changed, not compatible with stdout.")
 					return
