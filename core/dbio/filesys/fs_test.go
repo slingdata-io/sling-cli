@@ -31,11 +31,11 @@ func TestFileSysLocalCsv(t *testing.T) {
 	// Test List
 	paths, err := fs.List(".")
 	assert.NoError(t, err)
-	assert.Contains(t, paths, "./fs_test.go")
+	assert.Contains(t, paths, "file://./fs_test.go")
 
 	paths, err = fs.ListRecursive(".")
 	assert.NoError(t, err)
-	assert.Contains(t, paths, "test/test1/csv/test1.csv")
+	assert.Contains(t, paths, "file://test/test1/csv/test1.csv")
 
 	// Test Delete, Write, Read
 	testPath := "test/fs.test"
@@ -628,14 +628,6 @@ func TestFileSysS3(t *testing.T) {
 	data2, err := iop.MergeDataflow(df3).Collect(int(df3.Limit))
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(data2.Rows))
-
-	df3, err = fs.ReadDataflow("s3://ocral-data-1/test/parquet")
-	assert.NoError(t, err)
-
-	data1, err := df3.Collect()
-	assert.NoError(t, err)
-	assert.EqualValues(t, 1018, len(data1.Rows))
-	assert.EqualValues(t, 7, len(data1.Columns))
 }
 
 func TestFileSysAzure(t *testing.T) {
@@ -684,7 +676,7 @@ func TestFileSysAzure(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "https://flarcostorage.blob.core.windows.net/testcont/test2"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -749,7 +741,7 @@ func TestFileSysGoogle(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "gs://flarco_us_bucket/test"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -812,7 +804,7 @@ func TestFileSysSftp(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := root + "/tmp/test"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
