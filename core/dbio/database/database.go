@@ -1181,6 +1181,8 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 			g.Trace("RowsAffected: %d", ra)
 			Res.rowsAffected = Res.rowsAffected + ra
 		}
+		delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+		time.Sleep(time.Duration(delay) * time.Second)
 	}
 
 	err = eG.Err()

@@ -192,10 +192,10 @@ func (r bqResult) RowsAffected() (int64, error) {
 	return cast.ToInt64(r.TotalRows), nil
 }
 
-// ExecContext runs a sql query with context, returns `error`
-func (conn *BigQueryConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	return conn.ExecContext(ctx, sql, args...)
-}
+// // ExecContext runs a sql query with context, returns `error`
+// func (conn *BigQueryConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+// 	return conn.ExecContext(ctx, sql, args...)
+// }
 
 func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 
@@ -231,7 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	if noDebug {
 		g.Trace(sql)
 	} else {
-		g.Debug(sql)
+		g.Debug(CleanSQL(conn, sql))
 	}
 
 	q := conn.Client.Query(sql)
