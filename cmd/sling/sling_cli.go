@@ -375,8 +375,6 @@ func main() {
 	}()
 
 	exit := func() {
-		env.StdErrW.Close()
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(exitCode)
 	}
 

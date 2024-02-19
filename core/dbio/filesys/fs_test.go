@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -48,7 +47,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(readers[0])
+	testBytes, err := io.ReadAll(readers[0])
 	assert.NoError(t, err)
 	assert.Equal(t, testString, string(testBytes))
 
@@ -242,6 +241,12 @@ func TestFileSysLocalParquet(t *testing.T) {
 	assert.EqualValues(t, 7, len(data1.Columns))
 	// g.Info(g.Marshal(data1.Columns.Types()))
 
+	df2, err := iop.MakeDataFlow(data1.Stream())
+	assert.NoError(t, err)
+
+	_, err = fs.WriteDataflow(df2, "file:///tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+
 }
 
 func TestFileSysLocalSAS(t *testing.T) {
@@ -363,7 +368,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -559,7 +564,7 @@ func TestFileSysAzure(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -623,7 +628,7 @@ func TestFileSysGoogle(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -686,7 +691,7 @@ func TestFileSysSftp(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))

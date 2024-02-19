@@ -101,27 +101,30 @@ func SetLogger() {
 func InitLogger() {
 
 	// capture stdErr
-	OsStdErr = os.Stderr
+	// OsStdErr = os.Stderr
+	// StdErrW = os.Stderr
 	StderrR, StdErrW, _ = os.Pipe()
-	os.Stderr = StdErrW
+	// os.Stderr = StdErrW
 
 	SetLogger()
 
-	StderrReader := bufio.NewReader(StderrR)
+	if StderrR != nil {
+		StderrReader := bufio.NewReader(StderrR)
 
-	go func() {
-		buf := make([]byte, 4*1024)
-		for {
-			nr, err := StderrReader.Read(buf)
-			if err == nil && nr > 0 {
-				text := string(buf[0:nr])
-				print(text)
-				if StdErrChn != nil {
-					StdErrChn <- text
+		go func() {
+			buf := make([]byte, 4*1024)
+			for {
+				nr, err := StderrReader.Read(buf)
+				if err == nil && nr > 0 {
+					text := string(buf[0:nr])
+					print(text)
+					if StdErrChn != nil {
+						StdErrChn <- text
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
 }
 
 func Print(text string) { fmt.Fprintf(StdErrW, "%s", text) }
