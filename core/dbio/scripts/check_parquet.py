@@ -1,6 +1,7 @@
 import pyarrow.parquet as pq
+import sys
 
-file = pq.ParquetFile("/tmp/test.parquet")
+file = pq.ParquetFile(sys.argv[1])
 
 print(f'num_row_groups: {file.num_row_groups}')
 print(f'metadata: {file.metadata}')
