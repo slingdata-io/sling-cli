@@ -2731,7 +2731,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		return strings.ToLower(c.Name)
 	})
 
-	colDDLs := []string{}
+	colsChanging := iop.Columns{}
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
@@ -2785,27 +2785,59 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 			continue
 		}
 
-		// alter field to resize column
-		colDDL := g.R(
-			conn.GetTemplateValue("core.modify_column"),
-			"column", conn.Self().Quote(col.Name),
-			"type", newNativeType,
-		)
-		colDDLs = append(colDDLs, colDDL)
 		table.Columns[i].Type = newCol.Type
 		table.Columns[i].DbType = newNativeType
+		colsChanging = append(colsChanging, table.Columns[i])
 	}
 
-	if len(colDDLs) == 0 {
+	if len(colsChanging) == 0 {
 		return false, nil
 	}
 
 	ddlParts := []string{}
-	for _, colDDL := range colDDLs {
+
+	for _, col := range colsChanging {
+		// to safely modify the column type
+		colNameTemp := g.RandSuffix(col.Name+"_", 3)
+
+		// add new column with new type
 		ddlParts = append(ddlParts, g.R(
-			conn.GetTemplateValue("core.alter_columns"),
+			conn.GetTemplateValue("core.add_column"),
 			"table", table.FullName(),
-			"col_ddl", colDDL,
+			"column", conn.Self().Quote(colNameTemp),
+			"type", col.DbType,
+		))
+
+		// update set to cast old values
+		oldColCasted := g.R(
+			conn.GetTemplateValue("function.cast_as"),
+			"field", conn.Self().Quote(col.Name),
+			"type", col.DbType,
+		)
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.update"),
+			"table", table.FullName(),
+			"set_fields", g.R(
+				"{temp_column} = {old_column_casted}",
+				"temp_column", conn.Self().Quote(colNameTemp),
+				"old_column_casted", oldColCasted,
+			),
+			"pk_fields_equal", "1=1",
+		))
+
+		// drop old column
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.drop_column"),
+			"table", table.FullName(),
+			"column", conn.Self().Quote(col.Name),
+		))
+
+		// rename new column to old name
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.rename_column"),
+			"table", table.FullName(),
+			"column", conn.Self().Quote(colNameTemp),
+			"new_column", conn.Self().Quote(col.Name),
 		))
 	}
 
@@ -3102,13 +3134,16 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 
 // CleanSQL removes creds from the query
 func CleanSQL(conn Connection, sql string) string {
-	// if g.In(os.Getenv("DEBUG"), "LOW", "TRACE") {
+	sql = strings.TrimSpace(sql)
+
 	if os.Getenv("DEBUG") != "" {
 		return sql
 	}
 
-	for _, v := range conn.Props() {
+	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
+			continue
+		} else if g.In(k, "database", "schema") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")
