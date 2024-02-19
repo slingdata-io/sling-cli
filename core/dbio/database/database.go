@@ -2833,11 +2833,21 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		))
 
 		// rename new column to old name
+		tableName := table.FullName()
+		oldColName := conn.Self().Quote(colNameTemp)
+		newColName := conn.Self().Quote(col.Name)
+
+		if g.In(conn.Type, dbio.TypeDbSQLServer) {
+			tableName = strings.ReplaceAll(table.FullName(), GetQualifierQuote(conn.Type), "")
+			oldColName = colNameTemp
+			newColName = col.Name
+		}
+
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
-			"table", table.FullName(),
-			"column", conn.Self().Quote(colNameTemp),
-			"new_column", conn.Self().Quote(col.Name),
+			"table", tableName,
+			"column", oldColName,
+			"new_column", newColName,
 		))
 	}
 

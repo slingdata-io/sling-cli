@@ -19,6 +19,7 @@ core:
     where {pk_fields_equal2}
   sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
+  rename_column: EXEC sp_rename '{table}.{column}', '{new_column}', 'COLUMN'
   limit: select top {limit} * from ( {sql} ) as t
   bulk_insert: |
     BULK INSERT {table}
