@@ -6,6 +6,7 @@ core:
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   alter_columns: alter table {table} modify column {col_ddl}
   modify_column: '{column} {type}'
+  update: alter table {table} update {set_fields} where {pk_fields_equal}
 
 
 metadata:
