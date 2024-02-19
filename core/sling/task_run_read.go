@@ -166,6 +166,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		return t.df, err
 	}
 	sTable.SQL = g.Rm(sTable.SQL, fMap)
+	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {

@@ -608,6 +608,7 @@ func (df *Dataflow) WaitClosed() {
 func (df *Dataflow) Collect() (data Dataset, err error) {
 	var datas []Dataset
 
+	data = NewDataset(df.Columns)
 	for ds := range df.StreamCh {
 		d, err := ds.Collect(int(df.Limit))
 		if err != nil {

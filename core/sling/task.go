@@ -103,13 +103,15 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 	if ShowProgress {
 		// progress bar ticker
 		t.PBar = NewPBar(time.Second)
-		ticker := time.NewTicker(1 * time.Second)
+		ticker1s := time.NewTicker(1 * time.Second)
+		ticker10s := time.NewTicker(10 * time.Second)
 		go func() {
-			defer ticker.Stop()
+			defer ticker1s.Stop()
+			defer ticker10s.Stop()
 
 			for {
 				select {
-				case <-ticker.C:
+				case <-ticker1s.C:
 					cnt := t.df.Count()
 					if cnt > 1000 {
 						t.PBar.Start()
@@ -120,7 +122,8 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
 
-					// update rows every 1sec
+				case <-ticker10s.C:
+					// update rows every 10sec
 					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
