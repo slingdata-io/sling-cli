@@ -2725,7 +2725,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
 	if len(table.Columns) != len(newColumns) {
 		return false, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.Type, dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
+	} else if g.In(conn.Type, dbio.TypeDbSQLite) {
 		return false, nil
 	}
 

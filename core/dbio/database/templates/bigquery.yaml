@@ -398,7 +398,7 @@ variable:
   bind_string: "?"
   quote_char: '`'
   error_filter_table_exists: duplicate
-  multi_exec_delay: 2
+  multi_exec_delay: 2 # https://cloud.google.com/bigquery/quotas#data-manipulation-language-statements
 
 error_filter:
   table_not_exist: exist
