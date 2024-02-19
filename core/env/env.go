@@ -17,8 +17,7 @@ var (
 	HomeDir        = os.Getenv("SLING_HOME_DIR")
 	HomeDirEnvFile = ""
 	Env            = &env.EnvFile{}
-	RudderstackKey = ""
-	RudderstackURL = "https://liveflarccszw.dataplane.rudderstack.com"
+	PlausibleURL   = ""
 
 	OsStdErr  *os.File
 	StderrR   io.ReadCloser

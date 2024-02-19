@@ -26,7 +26,7 @@ builds:
     goos:
       - linux
     ldflags:
-      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.RudderstackKey={{.Env.RUDDERSTACK_KEY}}'"
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}'"
 
 snapshot:
   name_template: "{{ incpatch .Version }}"

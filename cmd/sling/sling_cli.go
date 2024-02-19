@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"embed"
-	"io"
-	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/fatih/color"
 	"github.com/getsentry/sentry-go"
-	"github.com/rudderlabs/analytics-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/integrii/flaggy"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
@@ -317,44 +317,50 @@ func Track(event string, props ...map[string]interface{}) {
 		return
 	}
 
-	// rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
-	rudderConfig := analytics.Config{Logger: analytics.StdLogger(log.New(io.Discard, "sling ", log.LstdFlags))}
-	rsClient, err := analytics.NewWithConfig(env.RudderstackKey, env.RudderstackURL, rudderConfig)
-	if err != nil {
-		g.Trace("RudderClient Error: %s", err.Error())
-		return
-	}
-
-	properties := analytics.NewProperties().
-		Set("application", "sling-cli").
-		Set("version", core.Version).
-		Set("package", getSlingPackage()).
-		Set("os", runtime.GOOS).
-		Set("emit_time", time.Now().UnixMicro())
+	properties := g.M(
+		"application", "sling-cli",
+		"version", core.Version,
+		"package", getSlingPackage(),
+		"os", runtime.GOOS,
+		"emit_time", time.Now().UnixMicro(),
+		"user_id", machineID,
+	)
 
 	for k, v := range telemetryMap {
-		properties.Set(k, v)
+		properties[k] = v
 	}
 
 	if len(props) > 0 {
 		for k, v := range props[0] {
-			properties.Set(k, v)
+			properties[k] = v
 		}
 	}
 
+	properties["command"] = g.CliObj.Name
 	if g.CliObj != nil {
-		properties.Set("command", g.CliObj.Name)
 		if g.CliObj.UsedSC() != "" {
-			properties.Set("sub-command", g.CliObj.UsedSC())
+			properties["sub-command"] = g.CliObj.UsedSC()
 		}
 	}
 
-	rsClient.Enqueue(analytics.Track{
-		UserId:     machineID,
-		Event:      event,
-		Properties: properties,
-	})
-	rsClient.Close()
+	if env.PlausibleURL != "" {
+		propsPayload := g.Marshal(properties)
+		payload := map[string]string{
+			"name":     event,
+			"url":      "http://events.slingdata.io/sling-cli",
+			"props":    propsPayload,
+			"referrer": "http://" + getSlingPackage(),
+		}
+		h := map[string]string{
+			"Content-Type": "application/json",
+			"User-Agent":   g.F("sling-cli/%s (%s) %s", core.Version, runtime.GOOS, machineID),
+		}
+		body := strings.NewReader(g.Marshal(payload))
+		resp, respBytes, _ := net.ClientDo(http.MethodPost, env.PlausibleURL, body, h, 5)
+		if resp != nil {
+			g.Trace("post event response: %s\n%s", resp.Status, string(respBytes))
+		}
+	}
 }
 
 func main() {
