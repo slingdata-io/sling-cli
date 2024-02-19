@@ -6,8 +6,6 @@ import (
 	"log"
 	"os"
 	"reflect"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,27 +14,8 @@ import (
 	"github.com/apache/arrow/go/v16/parquet/file"
 	"github.com/apache/arrow/go/v16/parquet/schema"
 	"github.com/flarco/g"
-	"github.com/samber/lo"
-	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
-
-func DecimalIntToString(dec int64, precision int, scale int) string {
-	sign := ""
-	if dec < 0 {
-		sign = "-"
-		dec = -dec
-	}
-	ans := strconv.FormatInt(dec, 10)
-	if scale > 0 {
-		if scale > len(ans) {
-			ans = strings.Repeat("0", scale-(len(ans))+1) + ans
-		}
-		radixLoc := len(ans) - scale
-		ans = ans[:radixLoc] + "." + ans[radixLoc:]
-	}
-	return sign + ans
-}
 
 func TestDecimal(t *testing.T) {
 
@@ -54,32 +33,32 @@ func TestDecimal(t *testing.T) {
 	g.Info("%#v", DecimalByteArrayToString([]byte(bigEndian[2]), 10, 0))
 
 	g.Warn("%#v", []byte(bigEndian[0]))
-	g.Info("%#v", StringToDecimalByteArray("123456", 9, 0, parquet.Types.FixedLenByteArray, 3))
-	g.Info("%#v", StringToDecimalByteArray("123456", 9, 0, parquet.Types.ByteArray, -1))
+	g.Info("%#v", StringToDecimalByteArray("123456", MakeDecNumScale(1), parquet.Types.FixedLenByteArray, 3))
+	g.Info("%#v", StringToDecimalByteArray("123456", MakeDecNumScale(1), parquet.Types.ByteArray, -1))
 
 	g.Warn("%#v", []byte(bigEndian[1]))
-	g.Info("%#v", StringToDecimalByteArray("987654", 9, 0, parquet.Types.ByteArray, -1))
+	g.Info("%#v", StringToDecimalByteArray("987654", MakeDecNumScale(1), parquet.Types.ByteArray, -1))
 
 	g.Warn("%#v", []byte(bigEndian[2]))
-	g.Info("%#v", StringToDecimalByteArray("-123456", 9, 0, parquet.Types.ByteArray, -1))
-	g.Info("%#v", DecimalByteArrayToString(StringToDecimalByteArray("-123456", 9, 0, parquet.Types.ByteArray, -1), 10, 0))
+	g.Info("%#v", StringToDecimalByteArray("-123456", MakeDecNumScale(1), parquet.Types.ByteArray, -1))
+	g.Info("%#v", DecimalByteArrayToString(StringToDecimalByteArray("-123456", MakeDecNumScale(1), parquet.Types.ByteArray, -1), 10, 0))
 
 	precision := 10
 	scale := 0
 	decValStr := "-123456"
-	decValBytes := StringToDecimalByteArray(decValStr, precision, scale, parquet.Types.ByteArray, -1)
+	decValBytes := StringToDecimalByteArray(decValStr, MakeDecNumScale(scale), parquet.Types.ByteArray, -1)
 	assert.Equal(t, decValStr, DecimalByteArrayToString(decValBytes, precision, scale))
 
 	precision = 15
 	scale = 6
 	decValStr = "-123456.789000"
-	decValBytes = StringToDecimalByteArray(decValStr, precision, scale, parquet.Types.ByteArray, -1)
+	decValBytes = StringToDecimalByteArray(decValStr, MakeDecNumScale(scale), parquet.Types.ByteArray, -1)
 	assert.Equal(t, decValStr, DecimalByteArrayToString(decValBytes, precision, scale))
 
 	precision = 40
 	scale = 20
 	decValStr = "12345612345600000000.12345612345600000000"
-	decValBytes = StringToDecimalByteArray(decValStr, precision, scale, parquet.Types.ByteArray, 60)
+	decValBytes = StringToDecimalByteArray(decValStr, MakeDecNumScale(scale), parquet.Types.ByteArray, 60)
 	assert.Equal(t, decValStr, DecimalByteArrayToString(decValBytes, precision, scale))
 }
 
@@ -182,74 +161,6 @@ func TestNewParquetWriter(t *testing.T) {
 		}...,
 	)
 
-	var mapPhysicalType = map[ColumnType]parquet.Type{
-		BigIntType:     parquet.Types.Int64,
-		BinaryType:     parquet.Types.ByteArray,
-		BoolType:       parquet.Types.Boolean,
-		DatetimeType:   parquet.Types.Int64,
-		DateType:       parquet.Types.Int64,
-		DecimalType:    parquet.Types.ByteArray,
-		FloatType:      parquet.Types.Double,
-		IntegerType:    parquet.Types.Int64,
-		JsonType:       parquet.Types.ByteArray,
-		SmallIntType:   parquet.Types.Int32,
-		StringType:     parquet.Types.ByteArray,
-		TextType:       parquet.Types.ByteArray,
-		TimestampType:  parquet.Types.Int64,
-		TimestampzType: parquet.Types.Int64,
-		TimeType:       parquet.Types.ByteArray,
-		TimezType:      parquet.Types.ByteArray,
-	}
-
-	rep := parquet.Repetitions.Undefined
-	fields := make([]schema.Node, len(columns))
-	for i, col := range columns {
-		fields[i], _ = schema.NewPrimitiveNode(col.Name, rep, mapPhysicalType[col.Type], -1, 12)
-
-		pType := mapPhysicalType[col.Type]
-
-		var node schema.Node
-		fieldID := int32(-1)
-		switch {
-		case col.Type == FloatType:
-			node, err = schema.NewPrimitiveNode(col.Name, rep, pType, -1, -1)
-		case col.Type == DecimalType:
-			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, col.DbPrecision)
-			col.DbScale = lo.Ternary(col.DbScale == 0, 9, col.DbScale)
-			columns[i] = col
-			lType := schema.NewDecimalLogicalType(int32(col.DbPrecision), int32(col.DbScale))
-			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, col.DbPrecision+col.DbScale, fieldID)
-		case col.IsInteger():
-			node, err = schema.NewPrimitiveNode(col.Name, rep, pType, -1, -1)
-		case col.IsDatetime():
-			lType := schema.NewTimestampLogicalType(true, schema.TimeUnitNanos)
-			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, -1, fieldID)
-		case col.IsBool():
-			node = schema.NewBooleanNode(col.Name, rep, fieldID)
-		// case col.Type == JsonType:
-		// 	node, err = schema.NewPrimitiveNodeConverted(col.Name, rep, pType, schema.ConvertedTypes.JSON, -1, 0, 0, fieldID)
-		default:
-			node, err = schema.NewPrimitiveNodeConverted(col.Name, rep, pType, schema.ConvertedTypes.UTF8, -1, 0, 0, fieldID)
-		}
-		if err != nil {
-			log.Fatal(g.Error(err, "could not get create parquet schema node for %s", col.Name))
-		}
-		fields[i] = node
-	}
-
-	node, _ := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
-	schema := schema.NewSchema(node)
-
-	codec := compress.Codecs.Snappy
-	opts := make([]parquet.WriterProperty, 0)
-	for i := range columns {
-		opts = append(opts, parquet.WithCompressionFor(schema.Column(i).Name(), codec))
-	}
-
-	props := parquet.NewWriterProperties(opts...)
-	writer := file.NewParquetWriter(f, schema.Root(), file.WithWriterProps(props))
-	g.LogFatal(err)
-
 	rows := [][]any{
 		{
 			"hello",             // col_string
@@ -271,214 +182,23 @@ func TestNewParquetWriter(t *testing.T) {
 		},
 	}
 
-	writeWithSerialRowGroup := func() (err error) {
+	data := NewDataset(columns)
 
-		rowGroup := writer.AppendRowGroup()
-		batchSize := 100
-
-		for c, col := range columns {
-			colValuesBatch := []any{}
-			colWriter, err := rowGroup.NextColumn()
-			if err != nil {
-				log.Fatal(g.Error(err, "could not get next column in Row Group"))
-			}
-
-			for r := range rows {
-				colValuesBatch = append(colValuesBatch, rows[r][c])
-				if len(colValuesBatch) == batchSize {
-					err = writeColumnValues(&col, colWriter, colValuesBatch)
-					if err != nil {
-						log.Fatal(g.Error(err, "could not close writeBatchValues"))
-					}
-					colValuesBatch = []any{} // reset
-				}
-			}
-
-			// write remaining
-			err = writeColumnValues(&col, colWriter, colValuesBatch)
-			if err != nil {
-				log.Fatal(g.Error(err, "could not close writeBatchValues"))
-			}
-
-			colWriter.Close()
-		}
-
-		err = rowGroup.Close()
-		if err != nil {
-			log.Fatal(g.Error(err, "could not close rowGroup"))
-		}
-
-		// get bytes written
-		_ = rowGroup.TotalBytesWritten()
-
-		return
+	for _, row := range rows {
+		data.Append(row)
 	}
 
-	writeWithBufferedRowGroup := func() (err error) {
-		rowGroup := writer.AppendBufferedRowGroup()
+	pw, err := NewParquetArrowWriter(f, columns, compress.Codecs.Snappy)
+	g.LogFatal(err)
 
-		colWriters := make([]file.ColumnChunkWriter, len(columns))
-		for i := range columns {
-			colWriters[i], _ = rowGroup.Column(i)
+	for batch := range data.Stream().BatchChan {
+		for row := range batch.Rows {
+			err := pw.WriteRow(row)
+			g.LogFatal(err)
 		}
-
-		colValuesBuffer := make([][]any, len(columns))
-		for r, row := range rows {
-			for c, val := range row {
-				if c < len(colValuesBuffer) {
-					colValuesBuffer[c] = append(colValuesBuffer[c], val)
-				}
-			}
-
-			if r%100 == 0 {
-				for i, col := range columns {
-					err = writeColumnValues(&col, colWriters[i], colValuesBuffer[i])
-					if err != nil {
-						log.Fatal(g.Error(err, "could not write colValuesBuffer"))
-					}
-				}
-				colValuesBuffer = make([][]any, len(columns)) // reset
-
-				// size at 128MB per row group
-				if rowGroup.TotalBytesWritten() >= 128*1000*1000 {
-					err = rowGroup.Close()
-					if err != nil {
-						log.Fatal(g.Error(err, "could not close rowGroup"))
-					}
-					rowGroup = writer.AppendBufferedRowGroup() // new row group
-				}
-			}
-		}
-
-		// any remaining
-		for i, col := range columns {
-			err = writeColumnValues(&col, colWriters[i], colValuesBuffer[i])
-			if err != nil {
-				log.Fatal(g.Error(err, "could not write colValuesBuffer"))
-			}
-		}
-
-		// close things
-		for i := range colWriters {
-			err = colWriters[i].Close()
-			if err != nil {
-				log.Fatal(g.Error(err, "could not close colWriter"))
-			}
-
-			// get bytes written
-			_ = colWriters[i].TotalBytesWritten()
-		}
-
-		err = rowGroup.Close()
-		if err != nil {
-			log.Fatal(g.Error(err, "could not close rowGroup"))
-		}
-
-		// get bytes written
-		_ = rowGroup.TotalBytesWritten()
-
-		return nil
 	}
 
-	_ = writeWithSerialRowGroup
-	_ = writeWithBufferedRowGroup
-
-	err = writeWithBufferedRowGroup()
-	if err != nil {
-		log.Fatal(g.Error(err, "could not write row groups"))
-	}
-
-	err = writer.Close()
-	if err != nil {
-		log.Fatal(g.Error(err, "could not close parquet writer"))
-	}
-
-}
-
-func writeColumnValues(col *Column, writer file.ColumnChunkWriter, colValuesBatch []any) (err error) {
-	if len(colValuesBatch) == 0 {
-		return
-	}
-
-	var offset int64
-	defLevels := make([]int16, len(colValuesBatch))
-	for j := range defLevels {
-		defLevels[j] = 0
-	}
-	defLevels = nil
-
-	switch w := writer.(type) {
-	case *file.Int32ColumnChunkWriter:
-		values := make([]int32, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			values[i] = cast.ToInt32(val)
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.Int64ColumnChunkWriter:
-		values := make([]int64, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			if col.IsDatetime() {
-				tVal, _ := cast.ToTimeE(val)
-				values[i] = cast.ToInt64(tVal.UnixNano())
-			} else {
-				values[i] = cast.ToInt64(val)
-			}
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.Float32ColumnChunkWriter:
-		values := make([]float32, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			values[i] = cast.ToFloat32(val)
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.Float64ColumnChunkWriter:
-		values := make([]float64, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			values[i] = cast.ToFloat64(val)
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.BooleanColumnChunkWriter:
-		values := make([]bool, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			values[i] = cast.ToBool(val)
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	// case *file.Int96ColumnChunkWriter:
-	// 	values := make([]parquet.Int96, len(colValuesBatch))
-	// 	for i, val := range colValuesBatch {
-	// 	}
-	// 	offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.ByteArrayColumnChunkWriter:
-		values := make([]parquet.ByteArray, len(colValuesBatch))
-		for i, val := range colValuesBatch {
-			valS := cast.ToString(val)
-			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, col.DbPrecision, col.DbScale, parquet.Types.ByteArray, -1)
-			} else {
-				values[i] = []byte(cast.ToString(val))
-			}
-		}
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	case *file.FixedLenByteArrayColumnChunkWriter:
-		values := make([]parquet.FixedLenByteArray, len(colValuesBatch))
-
-		for i, val := range colValuesBatch {
-			valS := cast.ToString(val)
-			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, col.DbPrecision, col.DbScale, parquet.Types.FixedLenByteArray, decimalFixedLenByteArraySize(col.DbPrecision))
-			} else {
-				values[i] = []byte(cast.ToString(val))
-			}
-		}
-
-		offset, err = w.WriteBatch(values, defLevels, nil)
-	default:
-		err = g.Error("unimplemented ColumnChunkWriter: %#v", w)
-		return
-	}
-	_ = offset
-
-	return
+	pw.Close()
 }
 
 const defaultBatchSize = 128

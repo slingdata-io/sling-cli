@@ -465,15 +465,16 @@ var parquetMapPhysicalType = map[ColumnType]parquet.Type{
 
 type ParquetArrowWriter struct {
 	Writer          *file.Writer
-	ds              *Datastream
+	columns         Columns
 	rowGroup        file.BufferedRowGroupWriter
 	colWriters      []file.ColumnChunkWriter
 	colValuesBuffer [][]any
+	decNumScale     []*big.Rat
 }
 
-func NewParquetArrowWriter(w io.Writer, ds *Datastream, codec compress.Compression) (p *ParquetArrowWriter, err error) {
+func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compression) (p *ParquetArrowWriter, err error) {
 
-	p = &ParquetArrowWriter{ds: ds}
+	p = &ParquetArrowWriter{columns: columns, decNumScale: make([]*big.Rat, len(columns))}
 	schema, err := p.makeSchema()
 	if err != nil {
 		return nil, g.Error(err, "could not make schema")
@@ -551,7 +552,7 @@ func (p *ParquetArrowWriter) Close() (err error) {
 }
 
 func (p *ParquetArrowWriter) Columns() Columns {
-	return p.ds.Columns
+	return p.columns
 }
 
 func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
@@ -570,9 +571,14 @@ func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
 		case col.Type == DecimalType:
 			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, col.DbPrecision)
 			col.DbScale = lo.Ternary(col.DbScale == 0, 9, col.DbScale)
-			p.ds.Columns[i] = col
+			p.columns[i] = col
 			lType := schema.NewDecimalLogicalType(int32(col.DbPrecision), int32(col.DbScale))
 			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, col.DbPrecision+col.DbScale, fieldID)
+			if col.DbScale > 0 {
+				p.decNumScale[i] = MakeDecNumScale(col.DbScale)
+			} else {
+				p.decNumScale[i] = MakeDecNumScale(1)
+			}
 		case col.IsInteger():
 			node, err = schema.NewPrimitiveNode(col.Name, rep, pType, -1, -1)
 		case col.IsDatetime():
@@ -688,7 +694,7 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 		for i, val := range colValuesBatch {
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, col.DbPrecision, col.DbScale, parquet.Types.ByteArray, -1)
+				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.ByteArray, -1)
 			} else {
 				values[i] = []byte(cast.ToString(val))
 			}
@@ -700,7 +706,7 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 		for i, val := range colValuesBatch {
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, col.DbPrecision, col.DbScale, parquet.Types.FixedLenByteArray, decimalFixedLenByteArraySize(col.DbPrecision))
+				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.FixedLenByteArray, decimalFixedLenByteArraySize(col.DbPrecision))
 			} else {
 				values[i] = []byte(cast.ToString(val))
 			}
@@ -745,13 +751,19 @@ func DecimalByteArrayToString(dec []byte, precision int, scale int) string {
 	return sign + sa
 }
 
-// StringToDecimalByteArray converts a string decimal to bytes
-// improvised from https://github.com/xitongsys/parquet-go/blob/8ca067b2bd324788a77bf61d4e1ef9a5f8b4b1d2/types/types.go#L81
-func StringToDecimalByteArray(s string, precision int, scale int, pType parquet.Type, length int) (decBytes []byte) {
+func MakeDecNumScale(scale int) *big.Rat {
 	numSca := big.NewRat(1, 1)
 	for i := 0; i < scale; i++ {
 		numSca.Mul(numSca, big.NewRat(10, 1))
 	}
+	return numSca
+}
+
+// StringToDecimalByteArray converts a string decimal to bytes
+// improvised from https://github.com/xitongsys/parquet-go/blob/8ca067b2bd324788a77bf61d4e1ef9a5f8b4b1d2/types/types.go#L81
+// This function is costly, and slows write dramatically. TODO: Find ways to optimize, if possible
+func StringToDecimalByteArray(s string, numSca *big.Rat, pType parquet.Type, length int) (decBytes []byte) {
+
 	num := new(big.Rat)
 	num.SetString(s)
 	num.Mul(num, numSca)
@@ -766,11 +778,11 @@ func StringToDecimalByteArray(s string, precision int, scale int, pType parquet.
 
 	} else if pType == parquet.Types.FixedLenByteArray {
 		s = num.String()
-		res := StrIntToBinary(s, "BigEndian", length, true)
+		res := StrIntToBinary(s, "BigEndian", length, strings.HasPrefix(s, "-"))
 		return []byte(res)
 	} else {
 		s = num.String()
-		res := StrIntToBinary(s, "BigEndian", 0, true)
+		res := StrIntToBinary(s, "BigEndian", 0, strings.HasPrefix(s, "-"))
 		return []byte(res)
 	}
 }

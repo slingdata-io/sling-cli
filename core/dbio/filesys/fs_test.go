@@ -273,6 +273,9 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 
 	g.Info("writing to %s with OldParquet", filePath)
 
+	_ = arrowParquet.Types.FixedLenByteArray // to keep import
+	numScale := iop.MakeDecNumScale(6)
+
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
@@ -284,9 +287,8 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 					case col.IsBool():
 						row[i] = cast.ToBool(row[i]) // since is stored as string
 					case col.IsDecimal():
-						_ = arrowParquet.Types.FixedLenByteArray
 						row[i] = cast.ToString(row[i])
-						// row[i] = iop.StringToDecimalByteArray(cast.ToString(row[i]), 16, 6, arrowParquet.Types.FixedLenByteArray, 16)
+						row[i] = iop.StringToDecimalByteArray(cast.ToString(row[i]), numScale, arrowParquet.Types.FixedLenByteArray, 16) // works for decimals with precision <= 16, very limited
 					case col.IsDatetime():
 						switch valT := row[i].(type) {
 						case time.Time:

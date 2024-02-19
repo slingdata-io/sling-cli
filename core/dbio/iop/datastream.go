@@ -1539,7 +1539,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 				codec = compress.Codecs.Uncompressed
 			}
 
-			pw, err = NewParquetArrowWriter(pipeW, ds, codec)
+			pw, err = NewParquetArrowWriter(pipeW, ds.Columns, codec)
 			if err != nil {
 				return g.Error(err, "could not create parquet writer")
 			}
