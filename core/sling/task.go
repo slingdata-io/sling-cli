@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -35,6 +36,7 @@ type TaskExecution struct {
 	prevRowCount  uint64
 	prevByteCount uint64
 	lastIncrement time.Time // the time of last row increment (to determine stalling)
+	Output        string    `json:"-"`
 
 	Replication    *ReplicationConfig `json:"replication"`
 	ProgressHist   []string           `json:"progress_hist"`
@@ -69,6 +71,23 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 		cleanupFuncs: []func(){},
 	}
 
+	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
+		t.AppendOutput(" -- args: " + args + "\n")
+	}
+
+	// stdErr output
+	go func() {
+		env.StdErrChn = make(chan string, 1000)
+
+		for {
+			if t.EndTime != nil {
+				env.StdErrChn = nil
+				break
+			}
+			t.AppendOutput(<-env.StdErrChn) // process output
+		}
+	}()
+
 	err := cfg.Prepare()
 	if err != nil {
 		t.Err = g.Error(err, "could not prepare task")
@@ -84,13 +103,15 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 	if ShowProgress {
 		// progress bar ticker
 		t.PBar = NewPBar(time.Second)
-		ticker := time.NewTicker(1 * time.Second)
+		ticker1s := time.NewTicker(1 * time.Second)
+		ticker10s := time.NewTicker(10 * time.Second)
 		go func() {
-			defer ticker.Stop()
+			defer ticker1s.Stop()
+			defer ticker10s.Stop()
 
 			for {
 				select {
-				case <-ticker.C:
+				case <-ticker1s.C:
 					cnt := t.df.Count()
 					if cnt > 1000 {
 						t.PBar.Start()
@@ -101,7 +122,8 @@ func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
 
-					// update rows every 1sec
+				case <-ticker10s.C:
+					// update rows every 10sec
 					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
@@ -185,6 +207,10 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 		// outBytes = stats.TxBytes - t.ProcStatsStart.TxBytes
 	}
 	return
+}
+
+func (t *TaskExecution) AppendOutput(text string) {
+	t.Output = t.Output + text
 }
 
 func (t *TaskExecution) GetBytesString() (s string) {

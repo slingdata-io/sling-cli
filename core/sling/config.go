@@ -162,6 +162,9 @@ func (cfg *Config) SetDefault() {
 
 // Unmarshal parse a configuration file path or config text
 func (cfg *Config) Unmarshal(cfgStr string) error {
+	// expand variables
+	cfgStr = expandEnvVars(cfgStr)
+
 	cfgBytes := []byte(cfgStr)
 	_, errStat := os.Stat(cfgStr)
 	if errStat == nil {
@@ -495,6 +498,19 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
+	// validate conn data keys
+	for key := range cfg.SrcConn.Data {
+		if strings.Contains(key, ":") {
+			g.Warn("source connection %s has an invalid property -> %s", cfg.Source.Conn, key)
+		}
+	}
+
+	for key := range cfg.TgtConn.Data {
+		if strings.Contains(key, ":") {
+			g.Warn("target connection %s has an invalid property -> %s", cfg.Target.Conn, key)
+		}
+	}
+
 	// done
 	cfg.Prepared = true
 	return
@@ -749,6 +765,26 @@ func (cfg Config) Value() (driver.Value, error) {
 	return []byte(out), err
 }
 
+func (cfg *Config) MD5() string {
+	payload := g.Marshal(g.M(
+		"source", cfg.Source.MD5(),
+		"target", cfg.Target.MD5(),
+		"mode", cfg.Mode,
+		"options", cfg.Options,
+	))
+
+	// clean up
+	if strings.Contains(cfg.Source.Conn, "://") {
+		payload = cleanConnURL(payload, cfg.Source.Conn)
+	}
+
+	if strings.Contains(cfg.Target.Conn, "://") {
+		payload = cleanConnURL(payload, cfg.Target.Conn)
+	}
+
+	return g.MD5(payload)
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
@@ -792,6 +828,22 @@ func (s *Source) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
+func (s *Source) MD5() string {
+	payload := g.Marshal(g.M(
+		"conn", s.Conn,
+		"stream", s.Stream,
+		"primary_key", s.PrimaryKeyI,
+		"update_key", s.UpdateKey,
+		"options", s.Options,
+	))
+
+	if strings.Contains(s.Conn, "://") {
+		payload = cleanConnURL(payload, s.Conn)
+	}
+
+	return g.MD5(payload)
+}
+
 // Target is a target of data
 type Target struct {
 	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
@@ -801,6 +853,20 @@ type Target struct {
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
+}
+
+func (t *Target) MD5() string {
+	payload := g.Marshal(g.M(
+		"conn", t.Conn,
+		"object", t.Object,
+		"options", t.Options,
+	))
+
+	if strings.Contains(t.Conn, "://") {
+		payload = cleanConnURL(payload, t.Conn)
+	}
+
+	return g.MD5(payload)
 }
 
 // SourceOptions are connection and stream processing options
@@ -1032,4 +1098,21 @@ func castKeyArray(keyI any) (key []string) {
 		return key
 	}
 	return
+}
+
+// expandEnvVars replaces $KEY or ${KEY} with its environment variable value
+// only if the variable is present in the environment.
+// If not present, $KEY or ${KEY} will remain in the config text.
+func expandEnvVars(text string) string {
+	for key, value := range g.KVArrToMap(os.Environ()...) {
+		text = strings.ReplaceAll(text, "$"+key+"", value)
+		text = strings.ReplaceAll(text, "${"+key+"}", value)
+	}
+	return text
+}
+
+func cleanConnURL(payload, connURL string) string {
+	cleanSource := strings.Split(connURL, "://")[0] + "://"
+	payload = strings.ReplaceAll(payload, g.Marshal(connURL), g.Marshal(cleanSource))
+	return payload
 }

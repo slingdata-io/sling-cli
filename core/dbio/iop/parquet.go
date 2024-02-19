@@ -6,6 +6,7 @@ import (
 
 	"io"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ func (p *Parquet) Columns() Columns {
 			Name:     CleanName(field.Name()),
 			Type:     typeMap[colType],
 			Position: len(cols) + 1,
+			Sourced:  !g.In(typeMap[colType], DecimalType),
 		}
 
 		cols = append(cols, c)
@@ -70,6 +72,15 @@ func (p *Parquet) Columns() Columns {
 }
 
 func (p *Parquet) nextFunc(it *Iterator) bool {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			g.Warn("recovered from panic: %#v\n%s", r, string(debug.Stack()))
+			err := g.Error("panic occurred! %#v", r)
+			it.Context.CaptureErr(err)
+		}
+	}()
+
 	row := map[string]any{}
 	err := p.Reader.Read(&row)
 	if err == io.EOF {
@@ -100,7 +111,7 @@ func NewRecNode(cols Columns) *RecNode {
 
 	for i, col := range cols {
 		field := structField{name: col.Name, index: []int{col.Position - 1}}
-		field.Node = nodeOf(col.GoType(), []string{})
+		field.Node = nodeOf(col, []string{})
 		rn.fields[i] = field
 	}
 
@@ -247,8 +258,9 @@ func (groupType) LogicalType() *format.LogicalType { return nil }
 
 func (groupType) ConvertedType() *deprecated.ConvertedType { return nil }
 
-func nodeOf(t reflect.Type, tag []string) parquet.Node {
-	switch t {
+func nodeOf(col Column, tag []string) parquet.Node {
+
+	switch col.GoType() {
 	case reflect.TypeOf(deprecated.Int96{}):
 		return parquet.Leaf(parquet.Int96Type)
 	case reflect.TypeOf(uuid.UUID{}):
@@ -258,7 +270,25 @@ func nodeOf(t reflect.Type, tag []string) parquet.Node {
 	}
 
 	var n parquet.Node
-	switch t.Kind() {
+	switch col.Type {
+	case FloatType:
+		n = parquet.Leaf(parquet.DoubleType)
+		return &goNode{Node: n, gotype: col.GoType()}
+	case DecimalType:
+		precision := 16
+		scale := 6
+		// n = parquet.Decimal(9, 24, parquet.DoubleType)
+		// n = parquet.Decimal(4, 12, parquet.FixedLenByteArrayType(16))
+		// l := int(math.Ceil((math.Log10(2) + float64(precision)) / math.Log10(256)))
+		// g.Warn("length => %d", l)
+		// n = parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(16))
+		n = parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(16))
+		// parquet.DoubleValue(0.9).
+		// n = parquet.String()
+		return &goNode{Node: n, gotype: col.GoType()}
+	}
+
+	switch col.GoType().Kind() {
 	case reflect.Bool:
 		n = parquet.Leaf(parquet.BooleanType)
 
@@ -266,46 +296,47 @@ func nodeOf(t reflect.Type, tag []string) parquet.Node {
 		n = parquet.Int(64)
 
 	case reflect.Int8, reflect.Int16, reflect.Int32:
-		n = parquet.Int(t.Bits())
+		n = parquet.Int(col.GoType().Bits())
 
 	case reflect.Uint, reflect.Uintptr, reflect.Uint64:
 		n = parquet.Uint(64)
 
 	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		n = parquet.Uint(t.Bits())
+		n = parquet.Uint(col.GoType().Bits())
 
 	case reflect.Float32:
-		// n = parquet.Leaf(parquet.FloatType)
+		n = parquet.Leaf(parquet.FloatType)
 		// n = parquet.Decimal(9, 24, parquet.FixedLenByteArrayType(64))
 		// n = parquet.Decimal(9, 24, parquet.DoubleType)
 		// n = parquet.Decimal(1, 1, parquet.FixedLenByteArrayType(1))
-		n = parquet.String()
 
 	case reflect.Float64:
-		// n = parquet.Leaf(parquet.DoubleType)
+		n = parquet.Leaf(parquet.DoubleType)
 		// n = parquet.Decimal(9, 24, parquet.DoubleType)
+		// n = parquet.Decimal(4, 12, parquet.FixedLenByteArrayType(16))
 		// l := int(math.Ceil((math.Log10(2) + float64(10)) / math.Log10(256)))
 		// g.Warn("length => %d", l)
 		// n = parquet.Decimal(0, 10, parquet.FixedLenByteArrayType(l))
 		// parquet.DoubleValue(0.9).
-		n = parquet.String()
 
 	case reflect.String:
 		n = parquet.String()
 
 	case reflect.Ptr:
-		n = parquet.Optional(nodeOf(t.Elem(), nil))
+		col.goType = col.GoType().Elem()
+		n = parquet.Optional(nodeOf(col, nil))
 
 	case reflect.Slice:
-		if elem := t.Elem(); elem.Kind() == reflect.Uint8 { // []byte?
+		if elem := col.GoType().Elem(); elem.Kind() == reflect.Uint8 { // []byte?
 			n = parquet.Leaf(parquet.ByteArrayType)
 		} else {
-			n = parquet.Repeated(nodeOf(elem, nil))
+			col.goType = elem
+			n = parquet.Repeated(nodeOf(col, nil))
 		}
 
 	case reflect.Array:
-		if t.Elem().Kind() == reflect.Uint8 {
-			n = parquet.Leaf(parquet.FixedLenByteArrayType(t.Len()))
+		if col.GoType().Elem().Kind() == reflect.Uint8 {
+			n = parquet.Leaf(parquet.FixedLenByteArrayType(col.GoType().Len()))
 		}
 
 	case reflect.Map:
@@ -313,7 +344,7 @@ func nodeOf(t reflect.Type, tag []string) parquet.Node {
 
 	}
 
-	return &goNode{Node: n, gotype: t}
+	return &goNode{Node: n, gotype: col.GoType()}
 }
 
 type goNode struct {

@@ -446,7 +446,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		cond1 := cs.TotalCnt > 0 && cs.NullCnt == cs.TotalCnt
 		cond2 := !isString && cs.StringCnt == 0
 
-		if (cond1 || cond2) && sp.ds != nil && !sp.ds.Inferred {
+		if (cond1 || cond2) && sp.ds != nil && !col.Sourced {
 			// this is an attempt to cast correctly "uncasted" columns
 			// (defaulting at string). This will not work in most db insert cases,
 			// as the ds.Shape() function will change it back to the "string" type,

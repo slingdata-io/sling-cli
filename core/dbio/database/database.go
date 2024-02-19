@@ -748,7 +748,7 @@ func (conn *BaseConn) LoadTemplates() error {
 
 	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
 	if err != nil {
-		return g.Error(err, "ioutil.ReadAll(baseTemplateFile)")
+		return g.Error(err, "io.ReadAll(baseTemplateFile)")
 	}
 
 	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &conn.template); err != nil {
@@ -757,7 +757,7 @@ func (conn *BaseConn) LoadTemplates() error {
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + conn.Type.String() + ".yaml")
 	if err != nil {
-		return g.Error(err, "ioutil.ReadAll(templateFile) for "+conn.Type)
+		return g.Error(err, "io.ReadAll(templateFile) for "+conn.Type)
 	}
 
 	template := Template{}
@@ -974,7 +974,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	ds = iop.NewDatastreamIt(queryContext.Ctx, conn.Data.Columns, nextFunc)
 	ds.NoDebug = strings.Contains(query, noDebugKey)
-	ds.Inferred = !InferDBStream
+	ds.Inferred = !InferDBStream && ds.Columns.Sourced()
 	if !ds.NoDebug {
 		// don't set metadata for internal queries
 		ds.SetMetadata(conn.GetProp("METADATA"))
@@ -1181,6 +1181,8 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 			g.Trace("RowsAffected: %d", ra)
 			Res.rowsAffected = Res.rowsAffected + ra
 		}
+		delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+		time.Sleep(time.Duration(delay) * time.Second)
 	}
 
 	err = eG.Err()
@@ -1362,13 +1364,18 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		col.Stats.MaxLen = colType.Length
 		col.Stats.MaxDecLen = 0
 
+		// mark types that don't depend on length, precision or scale as sourced (inferred)
+		if !g.In(col.Type, iop.DecimalType) {
+			col.Sourced = true
+		}
+
 		if colType.Sourced {
 			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
-				col.Sourced = colType.Sourced
+				col.Sourced = true
 			}
 
 			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake) {
-				col.Sourced = colType.Sourced
+				col.Sourced = true
 				col.DbPrecision = colType.Precision
 				col.DbScale = colType.Scale
 				col.Stats.MaxDecLen = lo.Ternary(colType.Scale > ddlMinDecScale, colType.Scale, ddlMinDecScale)
@@ -1415,9 +1422,9 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 		colType = iop.ColumnType(matchedType)
 	} else {
 		if dbType != "" {
-			g.Warn("using string since type '%s' not mapped for col '%s': %#v", dbType, name, colType)
+			g.Warn("using text since type '%s' not mapped for col '%s'", dbType, name)
 		}
-		colType = iop.StringType // default as string
+		colType = iop.TextType // default as text
 	}
 	return
 }
@@ -1536,6 +1543,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 				DatabaseTypeName: cast.ToString(rec["data_type"]),
 				Precision:        cast.ToInt(rec["precision"]),
 				Scale:            cast.ToInt(rec["scale"]),
+				Sourced:          true,
 			})
 		}
 	} else {
@@ -2323,6 +2331,9 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
 		precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
 
+		minPrecision := col.Stats.MaxLen + scale
+		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+
 		nativeType = strings.ReplaceAll(
 			nativeType,
 			"(,)",
@@ -2714,7 +2725,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
 	if len(table.Columns) != len(newColumns) {
 		return false, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.Type, dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
+	} else if g.In(conn.Type, dbio.TypeDbSQLite) {
 		return false, nil
 	}
 
@@ -2722,7 +2733,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		return strings.ToLower(c.Name)
 	})
 
-	colDDLs := []string{}
+	colsChanging := iop.Columns{}
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
@@ -2776,27 +2787,69 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 			continue
 		}
 
-		// alter field to resize column
-		colDDL := g.R(
-			conn.GetTemplateValue("core.modify_column"),
-			"column", conn.Self().Quote(col.Name),
-			"type", newNativeType,
-		)
-		colDDLs = append(colDDLs, colDDL)
 		table.Columns[i].Type = newCol.Type
 		table.Columns[i].DbType = newNativeType
+		colsChanging = append(colsChanging, table.Columns[i])
 	}
 
-	if len(colDDLs) == 0 {
+	if len(colsChanging) == 0 {
 		return false, nil
 	}
 
 	ddlParts := []string{}
-	for _, colDDL := range colDDLs {
+
+	for _, col := range colsChanging {
+		// to safely modify the column type
+		colNameTemp := g.RandSuffix(col.Name+"_", 3)
+
+		// add new column with new type
 		ddlParts = append(ddlParts, g.R(
-			conn.GetTemplateValue("core.alter_columns"),
+			conn.GetTemplateValue("core.add_column"),
 			"table", table.FullName(),
-			"col_ddl", colDDL,
+			"column", conn.Self().Quote(colNameTemp),
+			"type", col.DbType,
+		))
+
+		// update set to cast old values
+		oldColCasted := g.R(
+			conn.GetTemplateValue("function.cast_as"),
+			"field", conn.Self().Quote(col.Name),
+			"type", col.DbType,
+		)
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.update"),
+			"table", table.FullName(),
+			"set_fields", g.R(
+				"{temp_column} = {old_column_casted}",
+				"temp_column", conn.Self().Quote(colNameTemp),
+				"old_column_casted", oldColCasted,
+			),
+			"pk_fields_equal", "1=1",
+		))
+
+		// drop old column
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.drop_column"),
+			"table", table.FullName(),
+			"column", conn.Self().Quote(col.Name),
+		))
+
+		// rename new column to old name
+		tableName := table.FullName()
+		oldColName := conn.Self().Quote(colNameTemp)
+		newColName := conn.Self().Quote(col.Name)
+
+		if g.In(conn.Type, dbio.TypeDbSQLServer) {
+			tableName = strings.ReplaceAll(table.FullName(), GetQualifierQuote(conn.Type), "")
+			oldColName = colNameTemp
+			newColName = col.Name
+		}
+
+		ddlParts = append(ddlParts, g.R(
+			conn.GetTemplateValue("core.rename_column"),
+			"table", tableName,
+			"column", oldColName,
+			"new_column", newColName,
 		))
 	}
 
@@ -3093,13 +3146,16 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 
 // CleanSQL removes creds from the query
 func CleanSQL(conn Connection, sql string) string {
-	// if g.In(os.Getenv("DEBUG"), "LOW", "TRACE") {
+	sql = strings.TrimSpace(sql)
+
 	if os.Getenv("DEBUG") != "" {
 		return sql
 	}
 
-	for _, v := range conn.Props() {
+	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
+			continue
+		} else if g.In(k, "database", "schema") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")

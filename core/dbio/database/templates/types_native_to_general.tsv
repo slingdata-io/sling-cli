@@ -125,6 +125,7 @@ postgres	int4	integer	col_int4 int4	TRUE	TRUE	signed four-byte integer
 postgres	int8	bigint	col_int8 int8	TRUE	TRUE	signed eight-byte integer
 postgres	integer	integer	col_integer integer	TRUE	TRUE	signed four-byte integer
 postgres	interval	datetime	col_interval interval	FALSE	FALSE	time span
+postgres	_uuid	json	col__uuid json	TRUE	TRUE	array of uuid
 postgres	json	json	col_json json	TRUE	TRUE	textual JSON data
 postgres	jsonb	json	col_jsonb jsonb	TRUE	TRUE	binary JSON data, decomposed
 postgres	line	string	col_line line	FALSE	FALSE	infinite line on a plane

@@ -22,13 +22,9 @@ import (
 )
 
 var (
-	masterServerURL = os.Getenv("SLING_MASTER_URL")
-	isDocker        = os.Getenv("SLING_PACKAGE") == "DOCKER"
-	apiKey          = os.Getenv("SLING_API_KEY")
-	projectID       = os.Getenv("SLING_PROJECT")
-	headers         = map[string]string{
+	projectID = os.Getenv("SLING_PROJECT")
+	headers   = map[string]string{
 		"Content-Type":     "application/json",
-		"Sling-API-Key":    apiKey,
 		"Sling-Project-ID": projectID,
 	}
 	updateMessage = ""
@@ -36,10 +32,6 @@ var (
 )
 
 func init() {
-	if masterServerURL == "" {
-		masterServerURL = "https://api.slingdata.io"
-	}
-
 	// init sqlite
 	store.InitDB()
 }
@@ -158,11 +150,14 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
 		case "select":
+			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
+		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
 			if cfg.Options.Debug {
 				os.Setenv("DEBUG", "LOW")
+				env.SetLogger()
 			}
 		case "examples":
 			showExamples = cast.ToBool(v)
@@ -175,6 +170,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	os.Setenv("SLING_CLI", "TRUE")
+	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
 	// check for update, and print note
 	go checkUpdate()
@@ -220,6 +216,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	// track usage
 	defer func() {
+		taskMap := g.M()
+		taskStats := g.M()
+		taskOptions := g.M()
+
 		if task != nil {
 			if task.Config.Source.Options == nil {
 				task.Config.Source.Options = &sling.SourceOptions{}
@@ -227,31 +227,35 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			if task.Config.Target.Options == nil {
 				task.Config.Target.Options = &sling.TargetOptions{}
 			}
+
 			inBytes, outBytes := task.GetBytes()
-			telemetryMap["task_type"] = task.Type
-			telemetryMap["task_mode"] = task.Config.Mode
-			telemetryMap["task_status"] = task.Status
-			telemetryMap["task_source_type"] = task.Config.SrcConn.Type
-			telemetryMap["task_target_type"] = task.Config.TgtConn.Type
-			telemetryMap["task_start_time"] = task.StartTime
-			telemetryMap["task_end_time"] = task.EndTime
-			telemetryMap["task_rows_count"] = task.GetCount()
-			telemetryMap["task_rows_in_bytes"] = inBytes
-			telemetryMap["task_rows_out_bytes"] = outBytes
-			telemetryMap["task_options"] = g.Marshal(g.M(
-				"src_has_primary_key", task.Config.Source.HasPrimaryKey(),
-				"src_has_update_key", task.Config.Source.HasUpdateKey(),
-				"src_flatten", task.Config.Source.Options.Flatten,
-				"src_format", task.Config.Source.Options.Format,
-				"src_transforms", task.Config.Source.Options.Transforms,
-				"tgt_file_max_rows", task.Config.Target.Options.FileMaxRows,
-				"tgt_file_max_bytes", task.Config.Target.Options.FileMaxBytes,
-				"tgt_format", task.Config.Target.Options.Format,
-				"tgt_use_bulk", task.Config.Target.Options.UseBulk,
-				"tgt_add_new_columns", task.Config.Target.Options.AddNewColumns,
-				"tgt_adjust_column_type", task.Config.Target.Options.AdjustColumnType,
-				"tgt_column_casing", task.Config.Target.Options.ColumnCasing,
-			))
+			taskStats["start_time"] = task.StartTime
+			taskStats["end_time"] = task.EndTime
+			taskStats["rows_count"] = task.GetCount()
+			taskStats["rows_in_bytes"] = inBytes
+			taskStats["rows_out_bytes"] = outBytes
+
+			taskOptions["src_has_primary_key"] = task.Config.Source.HasPrimaryKey()
+			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
+			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
+			taskOptions["src_format"] = task.Config.Source.Options.Format
+			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
+			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
+			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
+			taskOptions["tgt_format"] = task.Config.Target.Options.Format
+			taskOptions["tgt_use_bulk"] = task.Config.Target.Options.UseBulk
+			taskOptions["tgt_add_new_columns"] = task.Config.Target.Options.AddNewColumns
+			taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
+			taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
+
+			taskMap["md5"] = task.Config.MD5()
+			taskMap["type"] = task.Type
+			taskMap["mode"] = task.Config.Mode
+			taskMap["status"] = task.Status
+			taskMap["source_md5"] = task.Config.Source.MD5()
+			taskMap["source_type"] = task.Config.SrcConn.Type
+			taskMap["target_md5"] = task.Config.Target.MD5()
+			taskMap["target_type"] = task.Config.TgtConn.Type
 		}
 
 		if projectID != "" {
@@ -259,15 +263,19 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		}
 
 		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
-			telemetryMap["task_source_type"] = "stdin"
+			taskMap["source_type"] = "stdin"
 		}
 		if cfg.Options.StdOut {
-			telemetryMap["task_target_type"] = "stdout"
+			taskMap["target_type"] = "stdout"
 		}
 
 		if err != nil {
 			telemetryMap["error"] = getErrString(err)
 		}
+
+		telemetryMap["task_stats"] = g.Marshal(taskStats)
+		telemetryMap["task_options"] = g.Marshal(taskOptions)
+		telemetryMap["task"] = g.Marshal(taskMap)
 
 		// telemetry
 		Track("run")
@@ -395,6 +403,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 
 		telemetryMap["run_mode"] = "replication"
+		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
 			err = g.Error(err, "error for stream %s", name)

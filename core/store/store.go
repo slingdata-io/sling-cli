@@ -89,7 +89,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
 		Bytes:     t.Bytes,
-		Output:    "",
+		Output:    t.Output,
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
@@ -97,7 +97,12 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 	}
 
 	if t.Err != nil {
-		exec.Err = g.String(t.Err.Error())
+		err, ok := t.Err.(*g.ErrType)
+		if ok {
+			exec.Err = g.String(err.Full())
+		} else {
+			exec.Err = g.String(t.Err.Error())
+		}
 	}
 
 	if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
@@ -123,21 +128,8 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 			Replication: *t.Replication,
 		}
 
-		payload := replication.Replication.OriginalCfg()
-
-		// clean up
-		if strings.Contains(replication.Replication.Source, "://") {
-			cleanSource := strings.Split(replication.Replication.Source, "://")[0] + "://"
-			payload = strings.ReplaceAll(payload, replication.Replication.Source, cleanSource)
-		}
-
-		if strings.Contains(replication.Replication.Target, "://") {
-			cleanTarget := strings.Split(replication.Replication.Target, "://")[0] + "://"
-			payload = strings.ReplaceAll(payload, replication.Replication.Target, cleanTarget)
-		}
-
 		// set md5
-		replication.MD5 = g.MD5(payload)
+		replication.MD5 = t.Replication.MD5()
 	}
 
 	// clean up
@@ -161,7 +153,7 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 	delete(task.Task.Env, "SLING_CONFIG_PATH")
 
 	// set md5
-	task.MD5 = g.MD5(g.Marshal(task.Task))
+	task.MD5 = t.Config.MD5()
 
 	return
 }

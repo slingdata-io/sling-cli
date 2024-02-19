@@ -394,7 +394,7 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 	ds.SetConfig(fs.Props())
 
 	if strings.Contains(strings.ToLower(urlStr), ".xlsx") {
-		g.Debug("%s, reading datastream from %s", ds.ID, urlStr)
+		g.Debug("reading datastream from %s", urlStr)
 		reader, err := fs.Self().GetReader(urlStr)
 		if err != nil {
 			err = g.Error(err, "Error getting Excel reader")
@@ -424,18 +424,19 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		return eDs, nil
 	}
 
+	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
+	if string(fileFormat) == "" {
+		fileFormat = InferFileFormat(urlStr)
+		fs.SetProp("FORMAT", string(fileFormat))
+	}
+
 	// CSV, JSON or XML files
 	go func() {
 		// manage concurrency
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-		if string(fileFormat) == "" {
-			fileFormat = InferFileFormat(urlStr)
-		}
-
-		g.Debug("%s, reading datastream from %s [format=%s]", ds.ID, urlStr, fileFormat)
+		g.Debug("reading datastream from %s [format=%s]", urlStr, fileFormat)
 		reader, err := fs.Self().GetReader(urlStr)
 		if err != nil {
 			fs.Context().CaptureErr(g.Error(err, "Error getting reader"))
@@ -895,14 +896,18 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 	df.Context = &ctx
 	dsCh := make(chan *iop.Datastream)
 	fs.setDf(df)
+	fs.SetProp("selectFields", g.Marshal(cfg.Columns))
 
 	go func() {
 		defer close(dsCh)
 
 		pushDatastream := func(ds *iop.Datastream) {
-			if len(cfg.Columns) > 1 {
+			// use selected fields only when not parquet
+			skipSelect := g.In(fs.GetProp("FORMAT"), string(FileTypeParquet))
+			if len(cfg.Columns) > 1 && !skipSelect {
 				cols := iop.NewColumnsFromFields(cfg.Columns...)
 				fm := ds.Columns.FieldMap(true)
+				ds.Columns.DbTypes()
 				transf := func(in []interface{}) (out []interface{}) {
 					for _, col := range cols {
 						if i, ok := fm[strings.ToLower(col.Name)]; ok {
@@ -1135,7 +1140,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = url
 	ds.SetConfig(fs.Client().Props())
-	g.Debug("%s, reading datastream from %s [format=%s]", ds.ID, url, fileType)
+	g.Debug("reading datastream from %s [format=%s]", url, fileType)
 
 	setError := func(err error) {
 		ds.Context.CaptureErr(err)

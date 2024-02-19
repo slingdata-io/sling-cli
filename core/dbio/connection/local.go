@@ -86,6 +86,28 @@ func GetLocalConns(force ...bool) []ConnEntry {
 
 	}
 
+	// env.yaml as an Environment variable
+	if content := os.Getenv("ENV_YAML"); content != "" {
+		m := g.M()
+		err := yaml.Unmarshal([]byte(content), &m)
+		if err != nil {
+			g.LogError(g.Error(err, "could not parse ENV_YAML content"))
+		} else {
+			profileConns, err := ReadConnections(m)
+			if !g.LogError(err) {
+				for _, conn := range profileConns {
+					c := ConnEntry{
+						Name:        strings.ToUpper(conn.Info().Name),
+						Description: conn.Type.NameLong(),
+						Source:      "env-var env yaml",
+						Connection:  conn,
+					}
+					connsMap[c.Name] = c
+				}
+			}
+		}
+	}
+
 	// Environment variables
 	for key, val := range g.KVArrToMap(os.Environ()...) {
 		var conn Connection

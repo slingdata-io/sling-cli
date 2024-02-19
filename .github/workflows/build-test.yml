@@ -73,7 +73,13 @@ jobs:
       - name: Run Go Tests
         run: |
           export DEBUG=''
-          bash scripts/prep.gomod.sh && bash scripts/test.sh
+          bash scripts/prep.gomod.sh
+          
+          bash scripts/test.sh
+
+          cd core/dbio
+          bash scripts/test.sh
+
 
       - uses: myrotvorets/set-commit-status-action@master
         if: always()

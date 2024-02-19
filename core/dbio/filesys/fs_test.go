@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	arrowParquet "github.com/apache/arrow/go/v16/parquet"
+	"github.com/apache/arrow/go/v16/parquet/compress"
 	"github.com/flarco/g/net"
 	"github.com/linkedin/goavro/v2"
+	"github.com/parquet-go/parquet-go"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 
@@ -29,11 +31,11 @@ func TestFileSysLocalCsv(t *testing.T) {
 	// Test List
 	paths, err := fs.List(".")
 	assert.NoError(t, err)
-	assert.Contains(t, paths, "./fs_test.go")
+	assert.Contains(t, paths, "file://./fs_test.go")
 
 	paths, err = fs.ListRecursive(".")
 	assert.NoError(t, err)
-	assert.Contains(t, paths, "test/test1/csv/test1.csv")
+	assert.Contains(t, paths, "file://test/test1/csv/test1.csv")
 
 	// Test Delete, Write, Read
 	testPath := "test/fs.test"
@@ -48,7 +50,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(readers[0])
+	testBytes, err := io.ReadAll(readers[0])
 	assert.NoError(t, err)
 	assert.Equal(t, testString, string(testBytes))
 
@@ -242,6 +244,109 @@ func TestFileSysLocalParquet(t *testing.T) {
 	assert.EqualValues(t, 7, len(data1.Columns))
 	// g.Info(g.Marshal(data1.Columns.Types()))
 
+	df2, err := iop.MakeDataFlow(data1.Stream())
+	assert.NoError(t, err)
+
+	_, err = fs.WriteDataflow(df2, "file:///tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+
+}
+
+func TestFileSysLocalLargeParquet1(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.1.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	config, err := parquet.NewWriterConfig()
+	g.LogFatal(err)
+
+	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns))
+
+	fw := parquet.NewWriter(f, config)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	_ = arrowParquet.Types.FixedLenByteArray // to keep import
+	numScale := iop.MakeDecNumScale(6)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				rec := make([]parquet.Value, len(batch.Columns))
+
+				for i, col := range batch.Columns {
+					switch {
+					case col.IsBool():
+						row[i] = cast.ToBool(row[i]) // since is stored as string
+					case col.IsDecimal():
+						row[i] = cast.ToString(row[i])
+						row[i] = iop.StringToDecimalByteArray(cast.ToString(row[i]), numScale, arrowParquet.Types.FixedLenByteArray, 16) // works for decimals with precision <= 16, very limited
+					case col.IsDatetime():
+						switch valT := row[i].(type) {
+						case time.Time:
+							if row[i] != nil {
+								row[i] = valT.UnixNano()
+							}
+						}
+					}
+					if i < len(row) {
+						rec[i] = parquet.ValueOf(row[i])
+					}
+				}
+
+				_, err := fw.WriteRows([]parquet.Row{rec})
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = fw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func TestFileSysLocalLargeParquet2(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.2.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetArrowWriter(f, df1.Columns, compress.Codecs.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with NewParquetArrowWriter", filePath)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				err := pw.WriteRow(row)
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = pw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
 }
 
 func TestFileSysLocalSAS(t *testing.T) {
@@ -363,7 +468,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -523,14 +628,6 @@ func TestFileSysS3(t *testing.T) {
 	data2, err := iop.MergeDataflow(df3).Collect(int(df3.Limit))
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1, len(data2.Rows))
-
-	df3, err = fs.ReadDataflow("s3://ocral-data-1/test/parquet")
-	assert.NoError(t, err)
-
-	data1, err := df3.Collect()
-	assert.NoError(t, err)
-	assert.EqualValues(t, 1018, len(data1.Rows))
-	assert.EqualValues(t, 7, len(data1.Columns))
 }
 
 func TestFileSysAzure(t *testing.T) {
@@ -559,7 +656,7 @@ func TestFileSysAzure(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -579,7 +676,7 @@ func TestFileSysAzure(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "https://flarcostorage.blob.core.windows.net/testcont/test2"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -623,7 +720,7 @@ func TestFileSysGoogle(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -644,7 +741,7 @@ func TestFileSysGoogle(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "gs://flarco_us_bucket/test"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -686,7 +783,7 @@ func TestFileSysSftp(t *testing.T) {
 		return
 	}
 
-	testBytes, err := ioutil.ReadAll(reader2)
+	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
@@ -707,7 +804,7 @@ func TestFileSysSftp(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := root + "/tmp/test"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 

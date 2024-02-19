@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -128,7 +127,7 @@ func TestSplitCarrRet2(t *testing.T) {
 
 	needsCleanUp := detectCarrRet(testBytes)
 	g.P(needsCleanUp)
-	b, err := ioutil.ReadAll(reader)
+	b, err := io.ReadAll(reader)
 	assert.NoError(t, err)
 	assert.NotEqual(t, "", string(b))
 	g.P(string(b))

@@ -86,6 +86,7 @@ func (a *Avro) Columns() Columns {
 		cols[i].Type = StringType
 		if typ, ok := typeMap[key]; ok {
 			cols[i].Type = typ
+			cols[i].Sourced = !g.In(typ, DecimalType)
 		}
 	}
 

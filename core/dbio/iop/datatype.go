@@ -28,7 +28,7 @@ type Column struct {
 	DbType      string       `json:"db_type,omitempty"`
 	DbPrecision int          `json:"db_precision,omitempty"`
 	DbScale     int          `json:"db_scale,omitempty"`
-	Sourced     bool         `json:"-"` // whether is was sourced from a typed source
+	Sourced     bool         `json:"-"` // whether col was sourced/inferred from a typed source
 	Stats       ColumnStats  `json:"stats,omitempty"`
 	goType      reflect.Type `json:"-"`
 
@@ -184,6 +184,17 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 		}
 	}
 	return
+}
+
+// Sourced returns true if the columns are all sourced
+func (cols Columns) Sourced() (sourced bool) {
+	sourced = true
+	for _, col := range cols {
+		if !col.Sourced {
+			sourced = false
+		}
+	}
+	return sourced
 }
 
 // IsDummy returns true if the columns are injected by CreateDummyFields
@@ -586,57 +597,60 @@ func CompareColumns(columns1 Columns, columns2 Columns) (reshape bool, err error
 
 // InferFromStats using the stats to infer data types
 func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
-	for j := range columns {
-		colStats := columns[j].Stats
-		if colStats.TotalCnt == 0 {
-			// do nothing
-		} else if colStats.StringCnt > 0 || colStats.NullCnt == colStats.TotalCnt {
+	for j, col := range columns {
+		colStats := col.Stats
+
+		if colStats.TotalCnt == 0 || colStats.NullCnt == colStats.TotalCnt || col.Sourced {
+			// do nothing, keep existing type if defined
+		} else if colStats.StringCnt > 0 {
 			if colStats.MaxLen > 255 {
-				columns[j].Type = TextType
+				col.Type = TextType
 			} else {
-				columns[j].Type = StringType
+				col.Type = StringType
 			}
 			if safe {
-				columns[j].Type = TextType // max out
+				col.Type = TextType // max out
 			}
-			columns[j].goType = reflect.TypeOf("string")
+			col.goType = reflect.TypeOf("string")
 
 			colStats.Min = 0
 			if colStats.NullCnt == colStats.TotalCnt {
 				colStats.MinLen = 0
 			}
 		} else if colStats.JsonCnt+colStats.NullCnt == colStats.TotalCnt {
-			columns[j].Type = JsonType
-			columns[j].goType = reflect.TypeOf("json")
+			col.Type = JsonType
+			col.goType = reflect.TypeOf("json")
 		} else if colStats.BoolCnt+colStats.NullCnt == colStats.TotalCnt {
-			columns[j].Type = BoolType
-			columns[j].goType = reflect.TypeOf(true)
+			col.Type = BoolType
+			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
 		} else if colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			if colStats.Min*10 < -2147483648 || colStats.Max*10 > 2147483647 {
-				columns[j].Type = BigIntType
+				col.Type = BigIntType
 			} else {
-				columns[j].Type = IntegerType
+				col.Type = IntegerType
 			}
-			columns[j].goType = reflect.TypeOf(int64(0))
+			col.goType = reflect.TypeOf(int64(0))
 
-			if safe {
-				// cast as decimal for safety
-				columns[j].Type = DecimalType
-				columns[j].goType = reflect.TypeOf(float64(0.0))
-			}
+			// if safe {
+			// 	// cast as decimal for safety
+			// 	col.Type = DecimalType
+			// 	col.goType = reflect.TypeOf(float64(0.0))
+			// }
 		} else if colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
-			columns[j].Type = DatetimeType
-			columns[j].goType = reflect.TypeOf(time.Now())
+			col.Type = DatetimeType
+			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
 		} else if colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
-			columns[j].Type = DecimalType
-			columns[j].goType = reflect.TypeOf(float64(0.0))
+			col.Type = DecimalType
+			col.goType = reflect.TypeOf(float64(0.0))
 		}
 		if !noDebug {
-			g.Trace("%s - %s %s", columns[j].Name, columns[j].Type, g.Marshal(colStats))
+			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(colStats))
 		}
-		columns[j].Stats = colStats
+
+		col.Stats = colStats
+		columns[j] = col
 	}
 	return columns
 }

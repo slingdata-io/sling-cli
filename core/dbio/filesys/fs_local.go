@@ -39,17 +39,18 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 	path = cleanLocalFilePath(path)
 	file, err := os.Stat(path)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such file or directory") || strings.Contains(err.Error(), "cannot find") {
-			// path is already deleted
-			return nil
-		}
-
-		err = g.Error(err, "Unable to Stat "+path)
-		return
+		return nil // likely means the path does not exist, no need to delete
 	}
 
 	switch mode := file.Mode(); {
 	case mode.IsDir():
+		// some safety measure to not delete root system folders
+		slashCount := len(path) - len(strings.ReplaceAll(path, "/", ""))
+		if slashCount <= 2 && (strings.HasPrefix(path, "/") || strings.Contains(path, ":/")) {
+			g.Warn("directory '%s' is close to root. Not deleting.", path)
+			return
+		}
+
 		err = os.RemoveAll(path)
 		if err != nil {
 			err = g.Error(err, "Unable to delete "+path)
@@ -90,8 +91,13 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 	ds.Metadata.StreamURL.Value = path
 	ds.SetConfig(fs.Props())
 
+	// set selectFields for pruning at source
+	selectFields := []string{}
+	g.Unmarshal(fs.GetProp("selectFields"), &selectFields)
+	ds.Columns = iop.NewColumnsFromFields(selectFields...)
+
 	if strings.Contains(strings.ToLower(path), ".xlsx") {
-		g.Debug("%s, reading datastream from %s", ds.ID, path)
+		g.Debug("reading datastream from %s", path)
 		eDs, err := getExcelStream(fs.Self(), bufio.NewReader(file))
 		if err != nil {
 			err = g.Error(err, "Error consuming Excel reader")
@@ -100,17 +106,18 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 		return eDs, nil
 	}
 
+	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
+	if string(fileFormat) == "" {
+		fileFormat = InferFileFormat(path)
+		fs.SetProp("FORMAT", string(fileFormat))
+	}
+
 	go func() {
 		// manage concurrency
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-		if string(fileFormat) == "" {
-			fileFormat = InferFileFormat(path)
-		}
-
-		g.Debug("%s, reading datastream from %s [format=%s]", ds.ID, path, fileFormat)
+		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
 
 		switch fileFormat {
 		case FileTypeJson, FileTypeJsonLines:

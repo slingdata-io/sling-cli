@@ -11,7 +11,7 @@ env:
   GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
   AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
-  RUDDERSTACK_KEY: ${{ secrets.RUDDERSTACK_KEY }}
+  PLAUSIBLE_URL: ${{ secrets.PLAUSIBLE_URL }}
 
 jobs:
   build:

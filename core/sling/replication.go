@@ -31,6 +31,29 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 	return rd.originalCfg
 }
 
+// MD5 returns a md5 hash of the config
+func (rd *ReplicationConfig) MD5() string {
+	payload := g.Marshal(g.M(
+		"source", rd.Source,
+		"target", rd.Target,
+		"defaults", rd.Defaults,
+		"streams", rd.Streams,
+	))
+
+	// clean up
+	if strings.Contains(rd.Source, "://") {
+		cleanSource := strings.Split(rd.Source, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(rd.Source), g.Marshal(cleanSource))
+	}
+
+	if strings.Contains(rd.Target, "://") {
+		cleanTarget := strings.Split(rd.Target, "://")[0] + "://"
+		payload = strings.ReplaceAll(payload, g.Marshal(rd.Target), g.Marshal(cleanTarget))
+	}
+
+	return g.MD5(payload)
+}
+
 // Scan scan value into Jsonb, implements sql.Scanner interface
 func (rd *ReplicationConfig) Scan(value interface{}) error {
 	return g.JSONScanner(rd, value)
@@ -339,7 +362,10 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		if cast.ToString(rootNode.Key) == "defaults" {
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
-					config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(defaultsNode.Value.(yaml.MapSlice))
+					value, ok := defaultsNode.Value.(yaml.MapSlice)
+					if ok {
+						config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(value)
+					}
 				}
 			}
 		}
@@ -347,7 +373,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	for _, rootNode := range rootMap {
 		if cast.ToString(rootNode.Key) == "streams" {
-			streamsNodes := rootNode.Value.(yaml.MapSlice)
+			streamsNodes, ok := rootNode.Value.(yaml.MapSlice)
+			if !ok {
+				continue
+			}
+
 			for _, streamsNode := range streamsNodes {
 				key := cast.ToString(streamsNode.Key)
 				config.streamsOrdered = append(config.streamsOrdered, key)
@@ -360,7 +390,10 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
-							stream.SourceOptions.Columns = getSourceOptionsColumns(streamConfigNode.Value.(yaml.MapSlice))
+							value, ok := streamConfigNode.Value.(yaml.MapSlice)
+							if ok {
+								stream.SourceOptions.Columns = getSourceOptionsColumns(value)
+							}
 						}
 					}
 				}

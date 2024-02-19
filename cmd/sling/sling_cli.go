@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"embed"
-	"io"
-	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
 	"github.com/fatih/color"
 	"github.com/getsentry/sentry-go"
-	"github.com/rudderlabs/analytics-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/integrii/flaggy"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/spf13/cast"
@@ -44,6 +44,10 @@ var sentryOptions = sentry.ClientOptions{
 	// Enable printing of SDK debug messages.
 	// Useful when getting started or trying to figure something out.
 	Debug: false,
+}
+
+func init() {
+	env.InitLogger()
 }
 
 var cliRun = &g.CliSC{
@@ -99,9 +103,15 @@ var cliRun = &g.CliSC{
 		},
 		{
 			Name:        "select",
+			ShortName:   "s",
+			Type:        "string",
+			Description: "Select specific columns from the source stream. (comma separated)",
+		},
+		{
+			Name:        "streams",
 			ShortName:   "",
 			Type:        "string",
-			Description: "Select specific streams to run from a replication. (comma separated)",
+			Description: "Only run specific streams from a replication. (comma separated)",
 		},
 		{
 			Name:        "stdout",
@@ -177,69 +187,6 @@ var cliUpdate = &g.CliSC{
 	Name:        "update",
 	Description: "Update Sling to the latest version",
 	ExecProcess: updateCLI,
-}
-
-var cliCloud = &g.CliSC{
-	Name:                  "cloud",
-	Singular:              "cloud",
-	Description:           "Deploy and trigger replications on the cloud",
-	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
-	SubComs: []*g.CliSC{
-		{
-			Name:        "deploy",
-			Description: "deploy a replication to the cloud",
-			PosFlags: []g.Flag{
-				{
-					Name:        "path",
-					ShortName:   "",
-					Type:        "string",
-					Description: "The file or folder path of YAML file(s)",
-				},
-			},
-		},
-		{
-			Name:        "export",
-			Description: "export a replication to a YAML file",
-			PosFlags: []g.Flag{
-				{
-					Name:        "id",
-					Type:        "string",
-					Description: "The ID of the replication",
-				},
-				{
-					Name:        "path",
-					Type:        "string",
-					Description: "The folder path to export to",
-				},
-			},
-		},
-		{
-			Name:        "list",
-			Description: "list replications / streams deployed on the cloud",
-		},
-		// {
-		// 	Name:        "trigger",
-		// 	Description: "Trigger a replication on the cloud",
-		// 	Flags: []g.Flag{
-		// 		{
-		// 			Name:        "source",
-		// 			Type:        "string",
-		// 			Description: "The name of the source connection",
-		// 		},
-		// 		{
-		// 			Name:        "target",
-		// 			Type:        "string",
-		// 			Description: "The name of the target connection",
-		// 		},
-		// 		{
-		// 			Name:        "stream",
-		// 			Type:        "string",
-		// 			Description: "The name os the streams to trigger (optional)",
-		// 		},
-		// 	},
-		// },
-	},
-	ExecProcess: processCloud,
 }
 
 var cliConns = &g.CliSC{
@@ -370,44 +317,50 @@ func Track(event string, props ...map[string]interface{}) {
 		return
 	}
 
-	// rsClient := analytics.New(env.RudderstackKey, env.RudderstackURL)
-	rudderConfig := analytics.Config{Logger: analytics.StdLogger(log.New(io.Discard, "sling ", log.LstdFlags))}
-	rsClient, err := analytics.NewWithConfig(env.RudderstackKey, env.RudderstackURL, rudderConfig)
-	if err != nil {
-		g.Trace("RudderClient Error: %s", err.Error())
-		return
-	}
-
-	properties := analytics.NewProperties().
-		Set("application", "sling-cli").
-		Set("version", core.Version).
-		Set("package", getSlingPackage()).
-		Set("os", runtime.GOOS).
-		Set("emit_time", time.Now().UnixMicro())
+	properties := g.M(
+		"application", "sling-cli",
+		"version", core.Version,
+		"package", getSlingPackage(),
+		"os", runtime.GOOS,
+		"emit_time", time.Now().UnixMicro(),
+		"user_id", machineID,
+	)
 
 	for k, v := range telemetryMap {
-		properties.Set(k, v)
+		properties[k] = v
 	}
 
 	if len(props) > 0 {
 		for k, v := range props[0] {
-			properties.Set(k, v)
+			properties[k] = v
 		}
 	}
 
+	properties["command"] = g.CliObj.Name
 	if g.CliObj != nil {
-		properties.Set("command", g.CliObj.Name)
 		if g.CliObj.UsedSC() != "" {
-			properties.Set("sub-command", g.CliObj.UsedSC())
+			properties["sub-command"] = g.CliObj.UsedSC()
 		}
 	}
 
-	rsClient.Enqueue(analytics.Track{
-		UserId:     machineID,
-		Event:      event,
-		Properties: properties,
-	})
-	rsClient.Close()
+	if env.PlausibleURL != "" {
+		propsPayload := g.Marshal(properties)
+		payload := map[string]string{
+			"name":     event,
+			"url":      "http://events.slingdata.io/sling-cli",
+			"props":    propsPayload,
+			"referrer": "http://" + getSlingPackage(),
+		}
+		h := map[string]string{
+			"Content-Type": "application/json",
+			"User-Agent":   g.F("sling-cli/%s (%s) %s", core.Version, runtime.GOOS, machineID),
+		}
+		body := strings.NewReader(g.Marshal(payload))
+		resp, respBytes, _ := net.ClientDo(http.MethodPost, env.PlausibleURL, body, h, 5)
+		if resp != nil {
+			g.Trace("post event response: %s\n%s", resp.Status, string(respBytes))
+		}
+	}
 }
 
 func main() {
@@ -427,15 +380,20 @@ func main() {
 		exitCode = cliInit()
 	}()
 
+	exit := func() {
+		os.Exit(exitCode)
+	}
+
 	select {
 	case <-done:
-		os.Exit(exitCode)
+		exit()
 	case <-kill:
-		println("\nkilling process...")
-		os.Exit(111)
+		env.Println("\nkilling process...")
+		exitCode = 111
+		exit()
 	case <-interrupt:
 		if cliRun.Sc.Used {
-			println("\ninterrupting...")
+			env.Println("\ninterrupting...")
 			interrupted = true
 			ctx.Cancel()
 			select {
@@ -443,13 +401,12 @@ func main() {
 			case <-time.After(5 * time.Second):
 			}
 		}
-		os.Exit(exitCode)
+		exit()
 		return
 	}
 }
 
 func cliInit() int {
-	env.InitLogger()
 
 	// Set your program's name and description.  These appear in help output.
 	flaggy.SetName("sling")
@@ -512,9 +469,9 @@ func cliInit() int {
 		}
 
 		if eh := sling.ErrorHelper(err); eh != "" {
-			println()
-			println(color.MagentaString(eh))
-			println()
+			env.Println("")
+			env.Println(color.MagentaString(eh))
+			env.Println("")
 		}
 
 		g.LogFatal(err)

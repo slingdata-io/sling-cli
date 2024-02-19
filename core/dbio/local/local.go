@@ -3,7 +3,7 @@ package local
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -80,7 +80,7 @@ func (home *Home) parseProfile() (err error) {
 			return g.Error(err, "Unable to open profile: "+profilePath)
 		}
 
-		cfgBytes, err := ioutil.ReadAll(cfgFile)
+		cfgBytes, err := io.ReadAll(cfgFile)
 		if err != nil {
 			return g.Error(err, "could not read from home profile")
 		}

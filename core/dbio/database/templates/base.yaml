@@ -9,7 +9,10 @@ core:
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
-  limit: select * from ( {sql} ) as t limit {limit}
+  limit: |
+    select * from (
+      {sql}
+    ) as t limit {limit}
   insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from {src_table}
   truncate_table: truncate table {table}
   alter_columns: alter table {table} {col_ddl}
@@ -338,6 +341,7 @@ function:
   replace: replace({string_expr}, {to_replace}, {replacement})
   str_utf8: '{ field }'
   string_type: varchar
+  cast_as: cast({field} as {type})
   cast_to_string: cast({field} as varchar)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
