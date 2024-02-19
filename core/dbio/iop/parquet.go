@@ -6,6 +6,7 @@ import (
 
 	"io"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ func (p *Parquet) Columns() Columns {
 			Name:     CleanName(field.Name()),
 			Type:     typeMap[colType],
 			Position: len(cols) + 1,
+			Sourced:  !g.In(typeMap[colType], DecimalType),
 		}
 
 		cols = append(cols, c)
@@ -70,6 +72,15 @@ func (p *Parquet) Columns() Columns {
 }
 
 func (p *Parquet) nextFunc(it *Iterator) bool {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			g.Warn("recovered from panic: %#v\n%s", r, string(debug.Stack()))
+			err := g.Error("panic occurred! %#v", r)
+			it.Context.CaptureErr(err)
+		}
+	}()
+
 	row := map[string]any{}
 	err := p.Reader.Read(&row)
 	if err == io.EOF {

@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v16/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/json"
 	jit "github.com/json-iterator/go"
-	parquet "github.com/parquet-go/parquet-go"
 	"github.com/segmentio/ksuid"
 
 	"github.com/samber/lo"
@@ -814,14 +814,17 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeParquetReaderSeeker(reader io.ReaderAt) (err error) {
-	p, err := NewParquetStream(reader, Columns{})
+func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
+	selected := ds.Columns.Names()
+
+	// p, err := NewParquetStream(reader, Columns{}) // old version
+	p, err := NewParquetArrowStream(reader, selected)
 	if err != nil {
 		return g.Error(err, "could create parquet stream")
 	}
 
 	ds.Columns = p.Columns()
-	ds.Inferred = true
+	ds.Inferred = ds.Columns.Sourced()
 	ds.it = ds.NewIterator(ds.Columns, p.nextFunc)
 
 	err = ds.Start()
@@ -867,7 +870,7 @@ func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) 
 	}
 
 	ds.Columns = a.Columns()
-	ds.Inferred = true
+	ds.Inferred = ds.Columns.Sourced()
 	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
 
 	err = ds.Start()
@@ -1502,14 +1505,15 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 	tbw := int64(0)
 
 	go func() {
-		var fw *parquet.Writer
+		var pw *ParquetArrowWriter
 		var br *BatchReader
+		var err error
 
 		defer close(readerChn)
 
 		nextPipe := func(batch *Batch) error {
-			if fw != nil {
-				fw.Close()
+			if pw != nil {
+				pw.Close()
 			}
 
 			pipeW.Close() // close the prior reader?
@@ -1518,16 +1522,27 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			// new reader
 			pipeR, pipeW = io.Pipe()
 
-			config, err := parquet.NewWriterConfig()
-			if err != nil {
-				return g.Error(err, "could not create parquet writer config")
-			}
-			config.Schema = getParquetSchema(batch.Columns)
-
-			fw = parquet.NewWriter(pipeW, config)
-
 			br = &BatchReader{batch, batch.Columns, pipeR, 0}
 			readerChn <- br
+
+			// default compression is snappy
+			codec := compress.Codecs.Snappy
+
+			switch compression {
+			case SnappyCompressorType:
+				codec = compress.Codecs.Snappy
+			case ZStandardCompressorType:
+				codec = compress.Codecs.Zstd
+			case GzipCompressorType:
+				codec = compress.Codecs.Gzip
+			case NoneCompressorType:
+				codec = compress.Codecs.Uncompressed
+			}
+
+			pw, err = NewParquetArrowWriter(pipeW, ds, codec)
+			if err != nil {
+				return g.Error(err, "could not create parquet writer")
+			}
 
 			return nil
 		}
@@ -1542,29 +1557,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			}
 
 			for row := range batch.Rows {
-				rec := make([]parquet.Value, len(batch.Columns))
-
-				for i, col := range batch.Columns {
-					switch {
-					case col.IsBool():
-						row[i] = cast.ToBool(row[i]) // since is stored as string
-					case col.IsDecimal():
-						row[i] = cast.ToString(row[i])
-					case col.IsDatetime():
-						switch valT := row[i].(type) {
-						case time.Time:
-							if row[i] != nil {
-								row[i] = valT.UnixMicro()
-							}
-						}
-					}
-					if i < len(row) {
-						rec[i] = parquet.ValueOf(row[i])
-					}
-				}
-				// g.PP(rec)
-
-				_, err := fw.WriteRows([]parquet.Row{rec})
+				err := pw.WriteRow(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
 					ds.Context.Cancel()
@@ -1584,9 +1577,10 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			}
 		}
 
-		if fw != nil {
-			fw.Close()
+		if pw != nil {
+			pw.Close()
 		}
+
 		pipeW.Close()
 
 	}()
