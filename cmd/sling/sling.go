@@ -103,9 +103,15 @@ var cliRun = &g.CliSC{
 		},
 		{
 			Name:        "select",
+			ShortName:   "s",
+			Type:        "string",
+			Description: "Select specific columns from the source stream. (comma separated)",
+		},
+		{
+			Name:        "streams",
 			ShortName:   "",
 			Type:        "string",
-			Description: "Select specific streams to run from a replication. (comma separated)",
+			Description: "Only run specific streams from a replication. (comma separated)",
 		},
 		{
 			Name:        "stdout",

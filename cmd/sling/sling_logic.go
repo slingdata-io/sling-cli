@@ -150,6 +150,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
 		case "select":
+			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
+		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
