@@ -323,7 +323,13 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	// set format to JSON
 	fs.SetProp("format", "json")
 	fs.SetProp("file_max_rows", "50000")
-	fs.SetProp("file_max_bytes", "5000000")
+	if val := conn.GetProp("file_max_rows"); val != "" {
+		fs.SetProp("file_max_rows", val)
+	}
+	fs.SetProp("file_max_bytes", "10000000")
+	if val := conn.GetProp("file_max_bytes"); val != "" {
+		fs.SetProp("file_max_bytes", val)
+	}
 
 	localPath := path.Join(getTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
@@ -372,7 +378,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
 			if redirectUrl != nil {
-				g.Debug("FE url redirected to %s://%s", redirectUrl.Scheme, redirectUrl.Host)
+				// g.Debug("FE url redirected to %s://%s", redirectUrl.Scheme, redirectUrl.Host)
 				redirectUrlStr := strings.ReplaceAll(redirectUrl.String(), "127.0.0.1", fu.U.Hostname())
 				redirectUrl, _ = url.Parse(redirectUrlStr)
 				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
@@ -380,19 +386,29 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			}
 		}
 
+		respString := strings.ReplaceAll(string(respBytes), "127.0.0.1", fu.U.Hostname())
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.URI, tableFName, string(respBytes)))
+			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.URI, tableFName, respString))
 			df.Context.Cancel()
 		} else {
-			g.Debug("stream-load completed for %s => %s", localFile.URI, string(respBytes))
+			respMap, _ := g.UnmarshalMap(respString)
+			g.Debug("stream-load completed for %s => %s", localFile.URI, respString)
+			if cast.ToString(respMap["Status"]) == "Fail" {
+				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.URI, tableFName, respString))
+				df.Context.Cancel()
+			}
 		}
 	}
 
 	for localFile := range fileReadyChn {
 		conn.Context().Wg.Write.Add()
 		go loadFromLocal(localFile, tableFName)
+		if df.Err() != nil {
+			return df.Count(), df.Err()
+		}
 	}
 
+	g.Debug("Done submitting data. Waiting load completion.")
 	conn.Context().Wg.Write.Wait()
 	if df.Err() != nil {
 		return df.Count(), g.Error(df.Err(), "Error importing to StarRocks")
