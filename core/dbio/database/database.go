@@ -2840,7 +2840,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		newColName := conn.Self().Quote(col.Name)
 
 		if g.In(conn.Type, dbio.TypeDbSQLServer) {
-			tableName = strings.ReplaceAll(table.FullName(), GetQualifierQuote(conn.Type), "")
+			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
 		}

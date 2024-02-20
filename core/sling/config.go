@@ -808,7 +808,7 @@ type ConfigOptions struct {
 type Source struct {
 	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select columns
+	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
