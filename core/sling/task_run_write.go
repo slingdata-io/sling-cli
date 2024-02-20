@@ -150,6 +150,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	tableTmp.DDL = strings.Replace(cfg.Target.Options.TableDDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.Keys = targetTable.Keys
 
+	// create schema if not exist
+	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
+	if err != nil {
+		err = g.Error(err, "Error checking & creating schema "+tableTmp.Schema)
+		return
+	}
+
 	// Drop & Create the temp table
 	err = tgtConn.DropTable(tableTmp.FullName())
 	if err != nil {
