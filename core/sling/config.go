@@ -596,7 +596,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if table.Schema != "" {
 			m["stream_schema"] = table.Schema
 		}
-		m["stream_table"] = table.Name
+		if table.Name != "" {
+			m["stream_table"] = table.Name
+		}
 
 		if cfg.StreamName != "" {
 			m["stream_name"] = strings.ToLower(cfg.StreamName)
