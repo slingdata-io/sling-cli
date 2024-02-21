@@ -321,17 +321,33 @@ func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns
 
 // ChangeColumn applies a column type change
 func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
-
-	switch {
-	case ds == nil || ds.Columns[i].Type == newType:
-		return
-	case ds.Columns[i].Type == TextType && newType == StringType:
+	if ds == nil {
 		return
 	}
 
-	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, ds.Columns[i].Type, newType)
-	ds.Columns[i].Type = newType
+	oldType := ds.Columns[i].Type
+
+	switch {
+	case oldType == newType:
+		return
+	case oldType == TextType && newType == StringType:
+		return
+	}
+
+	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, oldType, newType)
+	setChangedType(&ds.Columns[i], newType)
 	ds.schemaChgChan <- schemaChg{I: i, Type: newType}
+}
+
+func setChangedType(col *Column, newType ColumnType) {
+	oldType := col.Type
+	// make type sticky
+	nonStringToString := oldType != StringType && newType == StringType
+	intToDecimal := oldType.IsInteger() && newType == DecimalType
+	if nonStringToString || intToDecimal {
+		col.Sourced = true
+	}
+	col.Type = newType
 }
 
 // GetFields return the fields of the Data
@@ -618,12 +634,12 @@ loop:
 						ds.CurrentBatch.Close()
 
 						if schemaChgVal.Added {
-							g.DebugLow("%s, adding columns %s", ds.ID, g.Marshal(schemaChgVal.Cols.Types()))
+							g.DebugLow("adding columns %s", g.Marshal(schemaChgVal.Cols.Types()))
 							if _, ok := df.AddColumns(schemaChgVal.Cols, false, ds.ID); !ok {
 								ds.schemaChgChan <- schemaChgVal // requeue to try adding again
 							}
 						} else {
-							g.DebugLow("%s, changing column %s to %s", ds.ID, df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
+							g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
 							if !df.ChangeColumn(schemaChgVal.I, schemaChgVal.Type, ds.ID) {
 								ds.schemaChgChan <- schemaChgVal // requeue to try changing again
 							}

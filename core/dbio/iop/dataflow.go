@@ -274,7 +274,7 @@ func (df *Dataflow) ChangeColumn(i int, newType ColumnType, exceptDs ...string) 
 	// wait for current batches to close
 	df.CloseCurrentBatches()
 
-	df.Columns[i].Type = newType
+	setChangedType(&df.Columns[i], newType)
 	if err := df.OnColumnChanged(df.Columns[i]); err != nil {
 		df.Context.CaptureErr(err)
 	} else {
