@@ -105,7 +105,7 @@ var cliRun = &g.CliSC{
 			Name:        "select",
 			ShortName:   "s",
 			Type:        "string",
-			Description: "Select specific columns from the source stream. (comma separated)",
+			Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
 		},
 		{
 			Name:        "streams",
