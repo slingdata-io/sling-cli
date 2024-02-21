@@ -211,7 +211,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 }
 
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
-	telemetryMap["run_mode"] = "task"
 	var task *sling.TaskExecution
 
 	// track usage
