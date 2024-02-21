@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
-	"github.com/fatih/color"
 	"github.com/getsentry/sentry-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
@@ -438,13 +437,6 @@ func cliInit() int {
 			Track(eventName)
 		}
 
-		eh := sling.ErrorHelper(err)
-		if eh != "" {
-			env.Println("")
-			env.Println(color.MagentaString(eh))
-			env.Println("")
-		}
-
 		// sentry details
 		if telemetry && core.Version != "dev" {
 			evt := sentry.NewEvent()
@@ -478,7 +470,7 @@ func cliInit() int {
 				evt.Message = E.Debug()
 			}
 
-			if eh != "" {
+			if eh := sling.ErrorHelper(err); eh != "" {
 				evt.Message = evt.Message + "\n\n" + eh
 			}
 
