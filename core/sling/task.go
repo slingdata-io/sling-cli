@@ -470,18 +470,22 @@ func ErrorHelper(err error) (helpString string) {
 			errString = strings.ToLower(E.Full())
 		}
 
+		contains := func(text string) bool {
+			return strings.Contains(errString, strings.ToLower(text))
+		}
+
 		switch {
-		case strings.Contains(errString, "utf8") || strings.Contains(errString, "ascii"):
+		case contains("utf8") || contains("ascii"):
 			helpString = "Perhaps the 'transforms' source option could help with encodings? See https://docs.slingdata.io/sling-cli/run/configuration#source"
-		case strings.Contains(errString, "failed to verify certificate"):
+		case contains("failed to verify certificate"):
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
-		case strings.Contains(errString, "ssl is not enabled on the server"):
+		case contains("ssl is not enabled on the server"):
 			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
-		case strings.Contains(errString, "invalid input syntax for type") || (strings.Contains(errString, " value ") && strings.Contains(errString, "is not recognized")) || strings.Contains(errString, "invalid character value") || strings.Contains(errString, " exceeds ") || strings.Contains(errString, `Could not convert string "NaN"`):
+		case contains("invalid input syntax for type") || (contains(" value ") && contains("is not recognized")) || contains("invalid character value") || contains(" exceeds ") || contains(`could not convert string "nan"`) || contains("provided schema does not match"):
 			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/run/configuration#source"
-		case strings.Contains(errString, "bcp import"):
+		case contains("bcp import"):
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/sling-cli/run/configuration#target"
-		case strings.Contains(errString, "[AppendRow]: converting"):
+		case contains("[AppendRow]: converting"):
 			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/sling-cli/run/configuration#target"
 		}
 	}
