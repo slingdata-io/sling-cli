@@ -38,7 +38,15 @@ type nextRow struct {
 	err error
 }
 
-func NewParquetArrowStream(reader *os.File, selected []string) (p *ParquetArrowReader, err error) {
+func NewParquetArrowReader(reader *os.File, selected []string) (p *ParquetArrowReader, err error) {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			g.Warn("recovered from panic: %#v\n%s", r, string(debug.Stack()))
+			err = g.Error("panic occurred! %#v", r)
+		}
+	}()
+
 	r, err := file.NewParquetReader(reader)
 	if err != nil {
 		return p, g.Error(err, "could not open parquet reader")
@@ -206,14 +214,14 @@ func (p *ParquetArrowReader) readRowsLoop() {
 				return
 			}
 
-			col, err := rowGroup.Column(colI)
+			colReader, err := rowGroup.Column(colI)
 			if err != nil {
 				log.Fatalf("unable to fetch column=%d err=%s", colI, err)
 				p.nextRow <- nextRow{err: g.Error(err, "unable to fetch column=%d", colI)}
 				return
 			}
-			scanners[i] = NewParquetArrowDumper(col)
-			fields[i] = col.Descriptor().Path()
+			scanners[i] = NewParquetArrowDumper(colReader)
+			fields[i] = colReader.Descriptor().Path()
 		}
 
 		for {
@@ -229,9 +237,17 @@ func (p *ParquetArrowReader) readRowsLoop() {
 
 					switch v := val.(type) {
 					case parquet.ByteArray:
-						val = v.String()
+						if col.Type == DecimalType {
+							val = DecimalByteArrayToString(v.Bytes(), col.DbPrecision, col.DbScale)
+						} else {
+							val = v.String()
+						}
 					case parquet.FixedLenByteArray:
-						val = v.String()
+						if col.Type == DecimalType {
+							val = DecimalByteArrayToString(v.Bytes(), col.DbPrecision, col.DbScale)
+						} else {
+							val = v.String()
+						}
 					}
 
 					row[i] = val
@@ -569,11 +585,12 @@ func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
 		case col.Type == FloatType:
 			node, err = schema.NewPrimitiveNode(col.Name, rep, pType, -1, -1)
 		case col.Type == DecimalType:
+			rep = parquet.Repetitions.Required
 			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, col.DbPrecision)
 			col.DbScale = lo.Ternary(col.DbScale == 0, 9, col.DbScale)
 			p.columns[i] = col
 			lType := schema.NewDecimalLogicalType(int32(col.DbPrecision), int32(col.DbScale))
-			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, col.DbPrecision+col.DbScale, fieldID)
+			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, 16, fieldID)
 			if col.DbScale > 0 {
 				p.decNumScale[i] = MakeDecNumScale(col.DbScale)
 			} else {
@@ -694,7 +711,7 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 		for i, val := range colValuesBatch {
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.ByteArray, -1)
+				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.ByteArray, 16)
 			} else {
 				values[i] = []byte(cast.ToString(val))
 			}
@@ -706,7 +723,7 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 		for i, val := range colValuesBatch {
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
-				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.FixedLenByteArray, decimalFixedLenByteArraySize(col.DbPrecision))
+				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.FixedLenByteArray, 16)
 			} else {
 				values[i] = []byte(cast.ToString(val))
 			}
@@ -782,7 +799,7 @@ func StringToDecimalByteArray(s string, numSca *big.Rat, pType parquet.Type, len
 		return []byte(res)
 	} else {
 		s = num.String()
-		res := StrIntToBinary(s, "BigEndian", 0, strings.HasPrefix(s, "-"))
+		res := StrIntToBinary(s, "BigEndian", length, strings.HasPrefix(s, "-"))
 		return []byte(res)
 	}
 }

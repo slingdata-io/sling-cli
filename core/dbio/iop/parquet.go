@@ -5,13 +5,17 @@ import (
 	// "io"
 
 	"io"
+	"math/big"
 	"reflect"
 	"runtime/debug"
 	"strings"
 	"time"
 
+	arrowParquet "github.com/apache/arrow/go/v16/parquet"
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/samber/lo"
+	"github.com/spf13/cast"
 
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
@@ -28,7 +32,7 @@ type Parquet struct {
 	colMap map[string]int
 }
 
-func NewParquetStream(reader io.ReaderAt, columns Columns) (p *Parquet, err error) {
+func NewParquetReader(reader io.ReaderAt, columns Columns) (p *Parquet, err error) {
 	pr := parquet.NewReader(reader)
 	if err != nil {
 		err = g.Error(err, "could not get parquet reader")
@@ -97,6 +101,80 @@ func (p *Parquet) nextFunc(it *Iterator) bool {
 		it.Row[i] = v
 	}
 	return true
+}
+
+type ParquetWriter struct {
+	Writer      *parquet.Writer
+	columns     Columns
+	decNumScale []*big.Rat
+}
+
+func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *ParquetWriter, err error) {
+
+	// make scale big.Rat numbers
+	decNumScale := make([]*big.Rat, len(columns))
+	for i, col := range columns {
+		col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, lo.Ternary(col.DbPrecision > 36, 36, col.DbPrecision))
+		col.DbScale = lo.Ternary(col.DbScale == 0, 9, lo.Ternary(col.DbScale > 16, 16, col.DbScale))
+		columns[i] = col
+
+		if col.DbScale > 0 {
+			decNumScale[i] = MakeDecNumScale(col.DbScale)
+		} else {
+			decNumScale[i] = MakeDecNumScale(1)
+		}
+	}
+
+	config, err := parquet.NewWriterConfig()
+	if err != nil {
+		return nil, g.Error(err, "could not create parquet writer config")
+	}
+	config.Schema = getParquetSchema(columns)
+	config.Compression = codec
+
+	fw := parquet.NewWriter(w, config)
+
+	return &ParquetWriter{
+		Writer:      fw,
+		columns:     columns,
+		decNumScale: decNumScale,
+	}, nil
+
+}
+
+func (pw *ParquetWriter) WriteRow(row []any) error {
+	rec := make([]parquet.Value, len(pw.columns))
+
+	for i, col := range pw.columns {
+		switch {
+		case col.IsBool():
+			row[i] = cast.ToBool(row[i]) // since is stored as string
+		case col.IsDecimal():
+			// row[i] = cast.ToString(row[i])
+			row[i] = StringToDecimalByteArray(cast.ToString(row[i]), pw.decNumScale[i], arrowParquet.Types.FixedLenByteArray, 16)
+		case col.IsDatetime():
+			switch valT := row[i].(type) {
+			case time.Time:
+				if row[i] != nil {
+					row[i] = valT.UnixNano()
+				}
+			}
+		}
+		if i < len(row) {
+			rec[i] = parquet.ValueOf(row[i])
+		}
+	}
+
+	_, err := pw.Writer.WriteRows([]parquet.Row{rec})
+	if err != nil {
+		return g.Error(err, "error writing row")
+	}
+
+	return nil
+}
+
+func (pw *ParquetWriter) Close() error {
+	return pw.Writer.Close()
 }
 
 func getParquetSchema(cols Columns) *parquet.Schema {
@@ -275,16 +353,7 @@ func nodeOf(col Column, tag []string) parquet.Node {
 		n = parquet.Leaf(parquet.DoubleType)
 		return &goNode{Node: n, gotype: col.GoType()}
 	case DecimalType:
-		precision := 16
-		scale := 6
-		// n = parquet.Decimal(9, 24, parquet.DoubleType)
-		// n = parquet.Decimal(4, 12, parquet.FixedLenByteArrayType(16))
-		// l := int(math.Ceil((math.Log10(2) + float64(precision)) / math.Log10(256)))
-		// g.Warn("length => %d", l)
-		// n = parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(16))
-		n = parquet.Decimal(scale, precision, parquet.FixedLenByteArrayType(16))
-		// parquet.DoubleValue(0.9).
-		// n = parquet.String()
+		n = parquet.Decimal(col.DbScale, col.DbPrecision, parquet.FixedLenByteArrayType(16))
 		return &goNode{Node: n, gotype: col.GoType()}
 	}
 
@@ -306,18 +375,9 @@ func nodeOf(col Column, tag []string) parquet.Node {
 
 	case reflect.Float32:
 		n = parquet.Leaf(parquet.FloatType)
-		// n = parquet.Decimal(9, 24, parquet.FixedLenByteArrayType(64))
-		// n = parquet.Decimal(9, 24, parquet.DoubleType)
-		// n = parquet.Decimal(1, 1, parquet.FixedLenByteArrayType(1))
 
 	case reflect.Float64:
 		n = parquet.Leaf(parquet.DoubleType)
-		// n = parquet.Decimal(9, 24, parquet.DoubleType)
-		// n = parquet.Decimal(4, 12, parquet.FixedLenByteArrayType(16))
-		// l := int(math.Ceil((math.Log10(2) + float64(10)) / math.Log10(256)))
-		// g.Warn("length => %d", l)
-		// n = parquet.Decimal(0, 10, parquet.FixedLenByteArrayType(l))
-		// parquet.DoubleValue(0.9).
 
 	case reflect.String:
 		n = parquet.String()

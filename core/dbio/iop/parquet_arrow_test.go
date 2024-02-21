@@ -198,7 +198,8 @@ func TestNewParquetWriter(t *testing.T) {
 		}
 	}
 
-	pw.Close()
+	err = pw.Close()
+	g.LogFatal(err)
 }
 
 const defaultBatchSize = 128

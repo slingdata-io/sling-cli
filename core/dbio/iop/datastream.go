@@ -12,11 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/arrow/go/v16/parquet/compress"
+	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/json"
 	jit "github.com/json-iterator/go"
+	parquet "github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
 
 	"github.com/samber/lo"
@@ -818,7 +820,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
 
 	// p, err := NewParquetStream(reader, Columns{}) // old version
-	p, err := NewParquetArrowStream(reader, selected)
+	p, err := NewParquetArrowReader(reader, selected)
 	if err != nil {
 		return g.Error(err, "could create parquet stream")
 	}
@@ -1495,9 +1497,10 @@ func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (re
 	return readerChn
 }
 
-// NewParquetReaderChnl provides a channel of readers as the limit is reached
+// NewParquetArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
-func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+// WARN: Not using this one since it doesn't write Decimals properly.
+func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 
 	pipeR, pipeW := io.Pipe()
@@ -1526,17 +1529,17 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			readerChn <- br
 
 			// default compression is snappy
-			codec := compress.Codecs.Snappy
+			codec := arrowCompress.Codecs.Snappy
 
 			switch compression {
 			case SnappyCompressorType:
-				codec = compress.Codecs.Snappy
+				codec = arrowCompress.Codecs.Snappy
 			case ZStandardCompressorType:
-				codec = compress.Codecs.Zstd
+				codec = arrowCompress.Codecs.Zstd
 			case GzipCompressorType:
-				codec = compress.Codecs.Gzip
+				codec = arrowCompress.Codecs.Gzip
 			case NoneCompressorType:
-				codec = compress.Codecs.Uncompressed
+				codec = arrowCompress.Codecs.Uncompressed
 			}
 
 			pw, err = NewParquetArrowWriter(pipeW, ds.Columns, codec)
@@ -1581,6 +1584,100 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			pw.Close()
 		}
 
+		pipeW.Close()
+
+	}()
+
+	return readerChn
+}
+
+// NewParquetReaderChnl provides a channel of readers as the limit is reached
+// each channel flows as fast as the consumer consumes
+func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+
+	pipeR, pipeW := io.Pipe()
+
+	tbw := int64(0)
+
+	go func() {
+		var pw *ParquetWriter
+		var br *BatchReader
+		var err error
+
+		defer close(readerChn)
+
+		nextPipe := func(batch *Batch) error {
+			if pw != nil {
+				pw.Close()
+			}
+
+			pipeW.Close() // close the prior reader?
+			tbw = 0       // reset
+
+			// new reader
+			pipeR, pipeW = io.Pipe()
+
+			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			readerChn <- br
+
+			// default compression is snappy
+			var codec compress.Codec
+			codec = &parquet.Snappy
+
+			switch compression {
+			case SnappyCompressorType:
+				codec = &parquet.Snappy
+			case ZStandardCompressorType:
+				codec = &parquet.Zstd
+			case GzipCompressorType:
+				codec = &parquet.Gzip
+			case NoneCompressorType:
+				codec = &parquet.Uncompressed
+			}
+
+			pw, err = NewParquetWriter(pipeW, batch.Columns, codec)
+			if err != nil {
+				return g.Error(err, "could not create parquet writer")
+			}
+
+			return nil
+		}
+
+		for batch := range ds.BatchChan {
+			if batch.ColumnsChanged() || batch.IsFirst() {
+				err := nextPipe(batch)
+				if err != nil {
+					ds.Context.CaptureErr(err)
+					return
+				}
+			}
+
+			for row := range batch.Rows {
+
+				err := pw.WriteRow(row)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing row"))
+					ds.Context.Cancel()
+					pipeW.Close()
+					return
+				}
+
+				br.Counter++
+
+				if (rowLimit > 0 && br.Counter >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+					err = nextPipe(batch)
+					if err != nil {
+						ds.Context.CaptureErr(err)
+						return
+					}
+				}
+			}
+		}
+
+		if pw != nil {
+			pw.Close()
+		}
 		pipeW.Close()
 
 	}()
