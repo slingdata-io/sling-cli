@@ -503,7 +503,8 @@ func cliInit() int {
 			sentry.Flush(2 * time.Second)
 		}
 
-		g.LogFatal(err)
+		g.PrintFatal(err)
+		return 1
 	} else if !ok {
 		flaggy.ShowHelp("")
 	}
