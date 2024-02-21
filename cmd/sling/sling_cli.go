@@ -438,9 +438,15 @@ func cliInit() int {
 			Track(eventName)
 		}
 
+		eh := sling.ErrorHelper(err)
+		if eh != "" {
+			env.Println("")
+			env.Println(color.MagentaString(eh))
+			env.Println("")
+		}
+
 		// sentry details
 		if telemetry {
-
 			evt := sentry.NewEvent()
 			evt.Environment = sentryOptions.Environment
 			evt.Release = sentryOptions.Release
@@ -453,25 +459,44 @@ func cliInit() int {
 				},
 			}
 
+			// set transaction
+			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
+			evt.Transaction = cast.ToString(taskMap["type"])
+
 			E, ok := err.(*g.ErrType)
 			if ok {
-				evt.Exception[0].Type = E.Err
-				evt.Exception[0].Value = E.Full()
+				lastCaller := E.LastCaller()
+				evt.Exception[0].Type = lastCaller
+				evt.Exception[0].Value = lastCaller
+
+				if arr := strings.Split(lastCaller, " "); len(arr) > 1 {
+					evt.Exception[0].Type = strings.TrimPrefix(lastCaller, arr[0]+" ")
+				}
+
+				evt.Exception[0].Stacktrace = sentry.ExtractStacktrace(err)
+
+				evt.Message = E.Debug()
+			}
+
+			if eh != "" {
+				evt.Message = evt.Message + "\n\n" + eh
 			}
 
 			sentry.ConfigureScope(func(scope *sentry.Scope) {
 				scope.SetUser(sentry.User{ID: machineID})
-				scope.SetTransaction(E.Err)
+
+				sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
+				targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
+
+				scope.SetTag("source_type", sourceType)
+				scope.SetTag("target_type", targetType)
+				scope.SetTag("mode", cast.ToString(taskMap["mode"]))
+				scope.SetTag("type", cast.ToString(taskMap["type"]))
 			})
 
 			sentry.CaptureEvent(evt)
-			// eid := sentry.CaptureException(err)
-		}
-
-		if eh := sling.ErrorHelper(err); eh != "" {
-			env.Println("")
-			env.Println(color.MagentaString(eh))
-			env.Println("")
+			// sentry.CaptureException(err)
+			sentry.Flush(2 * time.Second)
 		}
 
 		g.LogFatal(err)

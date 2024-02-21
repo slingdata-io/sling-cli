@@ -21,7 +21,7 @@ require (
 	github.com/fatih/color v1.15.0
 	github.com/flarco/bigquery v0.0.9
 	github.com/flarco/g v0.1.68
-	github.com/getsentry/sentry-go v0.11.0
+	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/godror/godror v0.31.0
 	github.com/google/uuid v1.5.0
