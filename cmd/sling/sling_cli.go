@@ -446,7 +446,7 @@ func cliInit() int {
 		}
 
 		// sentry details
-		if telemetry {
+		if telemetry && core.Version != "dev" {
 			evt := sentry.NewEvent()
 			evt.Environment = sentryOptions.Environment
 			evt.Release = sentryOptions.Release
