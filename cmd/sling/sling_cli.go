@@ -492,6 +492,10 @@ func cliInit() int {
 				scope.SetTag("target_type", targetType)
 				scope.SetTag("mode", cast.ToString(taskMap["mode"]))
 				scope.SetTag("type", cast.ToString(taskMap["type"]))
+				scope.SetTag("package", getSlingPackage())
+				if projectID != "" {
+					scope.SetTag("project_id", projectID)
+				}
 			})
 
 			sentry.CaptureEvent(evt)
