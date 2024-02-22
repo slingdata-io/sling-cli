@@ -606,6 +606,8 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 		if colStats.TotalCnt == 0 || colStats.NullCnt == colStats.TotalCnt || col.Sourced {
 			// do nothing, keep existing type if defined
 		} else if colStats.StringCnt > 0 {
+			col.Sourced = true // do not allow type change
+
 			if colStats.MaxLen > 255 {
 				col.Type = TextType
 			} else {
