@@ -692,7 +692,7 @@ func (col *Column) SetLengthPrecisionScale() {
 			// grab length or precision
 			if col.Type.IsString() {
 				col.Stats.MaxLen = cast.ToInt(vals[0])
-			} else if col.Type.IsNumber() {
+			} else if col.IsNumber() || col.IsDatetime() {
 				col.DbPrecision = cast.ToInt(vals[0])
 			}
 		}
@@ -836,6 +836,15 @@ func (ct ColumnType) IsNumber() bool {
 // IsBool returns whether the column is a boolean
 func (ct ColumnType) IsBool() bool {
 	return ct == BoolType
+}
+
+// IsDatetime returns whether the column is a datetime object
+func (ct ColumnType) IsDate() bool {
+	switch ct {
+	case DateType:
+		return true
+	}
+	return false
 }
 
 // IsDatetime returns whether the column is a datetime object
