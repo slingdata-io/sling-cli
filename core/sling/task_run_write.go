@@ -150,6 +150,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	tableTmp.DDL = strings.Replace(cfg.Target.Options.TableDDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.Keys = targetTable.Keys
 
+	// create schema if not exist
+	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
+	if err != nil {
+		err = g.Error(err, "Error checking & creating schema "+tableTmp.Schema)
+		return
+	}
+
 	// Drop & Create the temp table
 	err = tgtConn.DropTable(tableTmp.FullName())
 	if err != nil {
@@ -268,7 +275,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	tCnt, _ := tgtConn.GetCount(tableTmp.FullName())
 	if cnt != tCnt {
-		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing. Aborting", tCnt, cnt)
+		err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 		return
 	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 		err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))

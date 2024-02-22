@@ -18,7 +18,7 @@ import (
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
 
-	fieldsStr := "*"
+	selectFieldsStr := "*"
 	sTable, err := database.ParseTableName(cfg.Source.Stream, srcConn.GetType())
 	if err != nil {
 		err = g.Error(err, "Could not parse source stream text")
@@ -45,11 +45,47 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
+	// get source columns
+	st := sTable
+	st.SQL = g.R(st.SQL, "incremental_where_cond", "1=1") // so we get the columns, and not change the orig SQL
+	sTable.Columns, err = srcConn.GetSQLColumns(st)
+	if err != nil {
+		err = g.Error(err, "Could not get source columns")
+		return t.df, err
+	}
+
 	if len(cfg.Source.Select) > 0 {
 		fields := lo.Map(cfg.Source.Select, func(f string, i int) string {
 			return f
 		})
-		fieldsStr = strings.Join(fields, ", ")
+
+		excluded := lo.Filter(cfg.Source.Select, func(f string, i int) bool {
+			return strings.HasPrefix(f, "-")
+		})
+
+		if len(excluded) > 0 {
+			if len(excluded) != len(cfg.Source.Select) {
+				return t.df, g.Error("All specified select columns must be excluded with prefix '-'. Cannot do partial exclude.")
+			}
+
+			q := database.GetQualifierQuote(srcConn.GetType())
+			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
+				for _, exField := range excluded {
+					exField = strings.ReplaceAll(strings.TrimPrefix(exField, "-"), q, "")
+					if strings.EqualFold(c.Name, exField) {
+						return false
+					}
+				}
+				return true
+			})
+
+			if len(includedCols) == 0 {
+				return t.df, g.Error("All available columns were excluded")
+			}
+			fields = iop.Columns(includedCols).Names()
+		}
+
+		selectFieldsStr = strings.Join(fields, ", ")
 	}
 
 	if t.usingCheckpoint() || t.Config.Mode == BackfillMode {
@@ -58,8 +94,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		// get source columns to match update-key
 		// in case column casing needs adjustment
-		sourceCols, _ := pullSourceTableColumns(t.Config, srcConn, sTable.FullName())
-		updateCol := sourceCols.GetColumn(cfg.Source.UpdateKey)
+		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey)
 		if updateCol.Name != "" {
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
@@ -114,7 +149,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			sTable.SQL = g.R(
 				`select{limit_top} {fields} from {table} where {incremental_where_cond} order by {update_key} asc {limit_end}`,
-				"fields", fieldsStr,
+				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
@@ -148,7 +183,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 		sTable.SQL = g.R(
 			srcConn.Template().Core["limit"],
-			"fields", fieldsStr,
+			"fields", selectFieldsStr,
 			"table", sTable.FDQN(),
 			"sql", sTable.SQL,
 			"limit", cast.ToString(cfg.Source.Limit()),
@@ -167,6 +202,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 	sTable.SQL = g.Rm(sTable.SQL, fMap)
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
+
+	// construct SELECT statement for selected fields
+	if sTable.SQL == "" && selectFieldsStr != "*" {
+		sTable.SQL = sTable.Select(strings.Split(selectFieldsStr, ",")...)
+	}
 
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/denisbrodbeck/machineid"
-	"github.com/fatih/color"
 	"github.com/getsentry/sentry-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
@@ -30,7 +29,7 @@ import (
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
-var telemetryMap = g.M("begin_time", time.Now().UnixMicro())
+var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "task")
 var telemetry = true
 var interrupted = false
 var machineID = ""
@@ -105,7 +104,7 @@ var cliRun = &g.CliSC{
 			Name:        "select",
 			ShortName:   "s",
 			Type:        "string",
-			Description: "Select specific columns from the source stream. (comma separated)",
+			Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
 		},
 		{
 			Name:        "streams",
@@ -439,8 +438,7 @@ func cliInit() int {
 		}
 
 		// sentry details
-		if telemetry {
-
+		if telemetry && core.Version != "dev" {
 			evt := sentry.NewEvent()
 			evt.Environment = sentryOptions.Environment
 			evt.Release = sentryOptions.Release
@@ -453,28 +451,52 @@ func cliInit() int {
 				},
 			}
 
+			// set transaction
+			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
+			evt.Transaction = cast.ToString(taskMap["type"])
+
 			E, ok := err.(*g.ErrType)
 			if ok {
-				evt.Exception[0].Type = E.Err
-				evt.Exception[0].Value = E.Full()
+				lastCaller := E.LastCaller()
+				evt.Exception[0].Type = lastCaller
+				evt.Exception[0].Value = lastCaller
+
+				if arr := strings.Split(lastCaller, " "); len(arr) > 1 {
+					evt.Exception[0].Type = strings.TrimPrefix(lastCaller, arr[0]+" ")
+				}
+
+				evt.Exception[0].Stacktrace = sentry.ExtractStacktrace(err)
+
+				evt.Message = E.Debug()
+			}
+
+			if eh := sling.ErrorHelper(err); eh != "" {
+				evt.Message = evt.Message + "\n\n" + eh
 			}
 
 			sentry.ConfigureScope(func(scope *sentry.Scope) {
 				scope.SetUser(sentry.User{ID: machineID})
-				scope.SetTransaction(E.Err)
+
+				sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
+				targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
+
+				scope.SetTag("source_type", sourceType)
+				scope.SetTag("target_type", targetType)
+				scope.SetTag("mode", cast.ToString(taskMap["mode"]))
+				scope.SetTag("type", cast.ToString(taskMap["type"]))
+				scope.SetTag("package", getSlingPackage())
+				if projectID != "" {
+					scope.SetTag("project_id", projectID)
+				}
 			})
 
 			sentry.CaptureEvent(evt)
-			// eid := sentry.CaptureException(err)
+			// sentry.CaptureException(err)
+			sentry.Flush(2 * time.Second)
 		}
 
-		if eh := sling.ErrorHelper(err); eh != "" {
-			env.Println("")
-			env.Println(color.MagentaString(eh))
-			env.Println("")
-		}
-
-		g.LogFatal(err)
+		g.PrintFatal(err)
+		return 1
 	} else if !ok {
 		flaggy.ShowHelp("")
 	}

@@ -12,11 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/arrow/go/v16/parquet/compress"
+	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/json"
 	jit "github.com/json-iterator/go"
+	parquet "github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
 
 	"github.com/samber/lo"
@@ -319,17 +321,33 @@ func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns
 
 // ChangeColumn applies a column type change
 func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
-
-	switch {
-	case ds == nil || ds.Columns[i].Type == newType:
-		return
-	case ds.Columns[i].Type == TextType && newType == StringType:
+	if ds == nil {
 		return
 	}
 
-	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, ds.Columns[i].Type, newType)
-	ds.Columns[i].Type = newType
+	oldType := ds.Columns[i].Type
+
+	switch {
+	case oldType == newType:
+		return
+	case oldType == TextType && newType == StringType:
+		return
+	}
+
+	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, oldType, newType)
+	setChangedType(&ds.Columns[i], newType)
 	ds.schemaChgChan <- schemaChg{I: i, Type: newType}
+}
+
+func setChangedType(col *Column, newType ColumnType) {
+	oldType := col.Type
+	// make type sticky
+	nonStringToString := oldType != StringType && newType == StringType
+	intToDecimal := oldType.IsInteger() && newType == DecimalType
+	if nonStringToString || intToDecimal {
+		col.Sourced = true
+	}
+	col.Type = newType
 }
 
 // GetFields return the fields of the Data
@@ -588,9 +606,6 @@ loop:
 
 	loop:
 		for ds.it.next() {
-			// if !ds.NoDebug {
-			// 	g.Warn("ds.it.next() ROW %s > %d", ds.ID, ds.it.Counter)
-			// }
 
 		schemaChgLoop:
 			for {
@@ -616,12 +631,12 @@ loop:
 						ds.CurrentBatch.Close()
 
 						if schemaChgVal.Added {
-							g.DebugLow("%s, adding columns %s", ds.ID, g.Marshal(schemaChgVal.Cols.Types()))
+							g.DebugLow("adding columns %s", g.Marshal(schemaChgVal.Cols.Types()))
 							if _, ok := df.AddColumns(schemaChgVal.Cols, false, ds.ID); !ok {
 								ds.schemaChgChan <- schemaChgVal // requeue to try adding again
 							}
 						} else {
-							g.DebugLow("%s, changing column %s to %s", ds.ID, df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
+							// g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
 							if !df.ChangeColumn(schemaChgVal.I, schemaChgVal.Type, ds.ID) {
 								ds.schemaChgChan <- schemaChgVal // requeue to try changing again
 							}
@@ -818,7 +833,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
 
 	// p, err := NewParquetStream(reader, Columns{}) // old version
-	p, err := NewParquetArrowStream(reader, selected)
+	p, err := NewParquetArrowReader(reader, selected)
 	if err != nil {
 		return g.Error(err, "could create parquet stream")
 	}
@@ -1495,9 +1510,10 @@ func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (re
 	return readerChn
 }
 
-// NewParquetReaderChnl provides a channel of readers as the limit is reached
+// NewParquetArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
-func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+// WARN: Not using this one since it doesn't write Decimals properly.
+func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 
 	pipeR, pipeW := io.Pipe()
@@ -1526,17 +1542,17 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			readerChn <- br
 
 			// default compression is snappy
-			codec := compress.Codecs.Snappy
+			codec := arrowCompress.Codecs.Snappy
 
 			switch compression {
 			case SnappyCompressorType:
-				codec = compress.Codecs.Snappy
+				codec = arrowCompress.Codecs.Snappy
 			case ZStandardCompressorType:
-				codec = compress.Codecs.Zstd
+				codec = arrowCompress.Codecs.Zstd
 			case GzipCompressorType:
-				codec = compress.Codecs.Gzip
+				codec = arrowCompress.Codecs.Gzip
 			case NoneCompressorType:
-				codec = compress.Codecs.Uncompressed
+				codec = arrowCompress.Codecs.Uncompressed
 			}
 
 			pw, err = NewParquetArrowWriter(pipeW, ds.Columns, codec)
@@ -1581,6 +1597,100 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			pw.Close()
 		}
 
+		pipeW.Close()
+
+	}()
+
+	return readerChn
+}
+
+// NewParquetReaderChnl provides a channel of readers as the limit is reached
+// each channel flows as fast as the consumer consumes
+func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+
+	pipeR, pipeW := io.Pipe()
+
+	tbw := int64(0)
+
+	go func() {
+		var pw *ParquetWriter
+		var br *BatchReader
+		var err error
+
+		defer close(readerChn)
+
+		nextPipe := func(batch *Batch) error {
+			if pw != nil {
+				pw.Close()
+			}
+
+			pipeW.Close() // close the prior reader?
+			tbw = 0       // reset
+
+			// new reader
+			pipeR, pipeW = io.Pipe()
+
+			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			readerChn <- br
+
+			// default compression is snappy
+			var codec compress.Codec
+			codec = &parquet.Snappy
+
+			switch compression {
+			case SnappyCompressorType:
+				codec = &parquet.Snappy
+			case ZStandardCompressorType:
+				codec = &parquet.Zstd
+			case GzipCompressorType:
+				codec = &parquet.Gzip
+			case NoneCompressorType:
+				codec = &parquet.Uncompressed
+			}
+
+			pw, err = NewParquetWriter(pipeW, batch.Columns, codec)
+			if err != nil {
+				return g.Error(err, "could not create parquet writer")
+			}
+
+			return nil
+		}
+
+		for batch := range ds.BatchChan {
+			if batch.ColumnsChanged() || batch.IsFirst() {
+				err := nextPipe(batch)
+				if err != nil {
+					ds.Context.CaptureErr(err)
+					return
+				}
+			}
+
+			for row := range batch.Rows {
+
+				err := pw.WriteRow(row)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing row"))
+					ds.Context.Cancel()
+					pipeW.Close()
+					return
+				}
+
+				br.Counter++
+
+				if (rowLimit > 0 && br.Counter >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+					err = nextPipe(batch)
+					if err != nil {
+						ds.Context.CaptureErr(err)
+						return
+					}
+				}
+			}
+		}
+
+		if pw != nil {
+			pw.Close()
+		}
 		pipeW.Close()
 
 	}()

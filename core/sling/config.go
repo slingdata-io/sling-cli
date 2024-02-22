@@ -596,7 +596,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if table.Schema != "" {
 			m["stream_schema"] = table.Schema
 		}
-		m["stream_table"] = table.Name
+		if table.Name != "" {
+			m["stream_table"] = table.Name
+		}
 
 		if cfg.StreamName != "" {
 			m["stream_name"] = strings.ToLower(cfg.StreamName)
@@ -604,17 +606,25 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
+		m["object_name"] = cfg.Target.Object
+
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse target table name")
 		}
 
-		m["target_schema"] = table.Schema
-		m["target_table"] = table.Name
+		m["object_schema"] = table.Schema
+		m["object_table"] = table.Name
 
-		if table.Schema == "" {
-			m["target_schema"] = cast.ToString(cfg.Target.Data["schema"])
+		if targetSchema := cast.ToString(cfg.Target.Data["schema"]); targetSchema != "" {
+			m["target_schema"] = targetSchema
+			if table.Schema == "" {
+				m["object_schema"] = targetSchema
+			}
 		}
+
+		// legacy
+		m["target_table"] = m["object_table"]
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
@@ -682,6 +692,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if t := connection.SchemeType(cfg.Target.Object); t.IsFile() {
+		m["object_name"] = strings.ToLower(cfg.Target.Object)
+
 		switch t {
 		case dbio.TypeFileS3:
 			m["target_bucket"] = cfg.Target.Data["bucket"]
@@ -796,7 +808,7 @@ type ConfigOptions struct {
 type Source struct {
 	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
 	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select columns
+	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`

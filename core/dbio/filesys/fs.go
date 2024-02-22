@@ -275,7 +275,7 @@ func getExcelStream(fs FileSysClient, reader io.Reader) (ds *iop.Datastream, err
 
 	if sheetName == "" {
 		sheetName = xls.Sheets[0]
-	} else if sheetNameArr := strings.Split(sheetName, "!"); len(sheetName) == 2 {
+	} else if sheetNameArr := strings.Split(sheetName, "!"); len(sheetNameArr) == 2 {
 		sheetName = sheetNameArr[0]
 		sheetRange = sheetNameArr[1]
 	}
@@ -537,7 +537,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		return df, nil
 	}
 
-	g.DebugLow("listing path: %s", url)
+	g.Trace("listing path: %s", url)
 	paths, err := fs.Self().ListRecursive(url)
 	if err != nil {
 		err = g.Error(err, "Error getting paths")

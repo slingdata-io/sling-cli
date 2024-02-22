@@ -436,6 +436,7 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 			newCols[i].Stats.MaxLen = lo.Ternary(col.Stats.MaxLen > 0, col.Stats.MaxLen, newCols[i].Stats.MaxLen)
 			newCols[i].DbPrecision = lo.Ternary(col.DbPrecision > 0, col.DbPrecision, newCols[i].DbPrecision)
 			newCols[i].DbScale = lo.Ternary(col.DbScale > 0, col.DbScale, newCols[i].DbScale)
+			newCols[i].Sourced = true
 			if !newCols[i].Type.IsValid() {
 				g.Warn("Provided unknown column type (%s) for column '%s'. Using string.", newCols[i].Type, newCols[i].Name)
 				newCols[i].Type = StringType
@@ -451,6 +452,7 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 				newCols[i].Stats.MaxLen = lo.Ternary(col.Stats.MaxLen > 0, col.Stats.MaxLen, newCols[i].Stats.MaxLen)
 				newCols[i].DbPrecision = lo.Ternary(col.DbPrecision > 0, col.DbPrecision, newCols[i].DbPrecision)
 				newCols[i].DbScale = lo.Ternary(col.DbScale > 0, col.DbScale, newCols[i].DbScale)
+				newCols[i].Sourced = true
 			} else {
 				g.Warn("Provided unknown column type (%s) for column '%s'. Using string.", col.Type, col.Name)
 				newCols[i].Type = StringType
@@ -462,6 +464,7 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 			if col.Type.IsValid() {
 				g.Debug("casting column '%s' as '%s'", newCols[i].Name, col.Type)
 				newCols[i].Type = col.Type
+				newCols[i].Sourced = true
 			} else {
 				g.Warn("Provided unknown column type (%s) for column '%s'. Using string.", col.Type, newCols[i].Name)
 				newCols[i].Type = StringType
@@ -603,6 +606,8 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 		if colStats.TotalCnt == 0 || colStats.NullCnt == colStats.TotalCnt || col.Sourced {
 			// do nothing, keep existing type if defined
 		} else if colStats.StringCnt > 0 {
+			col.Sourced = true // do not allow type change
+
 			if colStats.MaxLen > 255 {
 				col.Type = TextType
 			} else {
@@ -750,6 +755,15 @@ func (col *Column) IsUnique() bool {
 		return false
 	}
 	return col.Stats.TotalCnt == col.Stats.UniqCnt
+}
+
+func (col *Column) HasNulls() bool {
+	return col.Stats.TotalCnt > 0 && col.Stats.TotalCnt == col.Stats.NullCnt
+}
+
+// HasNullsPlus1 denotes when a column is all nulls plus 1 non-null
+func (col *Column) HasNullsPlus1() bool {
+	return col.Stats.TotalCnt > 0 && col.Stats.TotalCnt == col.Stats.NullCnt+1
 }
 
 // IsString returns whether the column is a string

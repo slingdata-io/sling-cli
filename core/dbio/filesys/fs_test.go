@@ -252,7 +252,7 @@ func TestFileSysLocalParquet(t *testing.T) {
 
 }
 
-func TestFileSysLocalLargeParquet1(t *testing.T) {
+func TestFileSysLocalLargeParquet01(t *testing.T) {
 	t.Parallel()
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -274,12 +274,16 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	g.Info("writing to %s with OldParquet", filePath)
 
 	_ = arrowParquet.Types.FixedLenByteArray // to keep import
-	numScale := iop.MakeDecNumScale(6)
+	numScale := iop.MakeDecNumScale(16)
+	_ = numScale
 
 	start := time.Now()
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
 			for row := range batch.Rows {
+				if batch.Count > 10000 {
+					continue
+				}
 				rec := make([]parquet.Value, len(batch.Columns))
 
 				for i, col := range batch.Columns {
@@ -309,6 +313,43 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	}
 
 	err = fw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func TestFileSysLocalLargeParquet1(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.1.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriter(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				if batch.Count > 10000 {
+					continue
+				}
+				err = pw.WriteRow(row)
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = pw.Close()
 	assert.NoError(t, err)
 
 	duration := float64(int64(time.Since(start).Seconds()*100)) / 100

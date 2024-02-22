@@ -331,6 +331,10 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		fs.SetProp("file_max_bytes", val)
 	}
 
+	// set format to CSV
+	// fs.SetProp("format", "csv")
+	// fs.SetProp("header", "false")
+
 	localPath := path.Join(getTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
 	if err != nil {
@@ -348,9 +352,15 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		}
 	}()
 
+	// col names must match ddl
+	colNames := lo.Map(df.Columns.Names(), func(name string, i int) string {
+		q := conn.template.Variable["quote_char"]
+		return strings.ReplaceAll(conn.Quote(name), q, "")
+	})
+
 	headers := map[string]string{
 		"Expect":  "100-continue",
-		"columns": strings.Join(df.Columns.Names(), ", "),
+		"columns": strings.Join(colNames, ", "),
 
 		// CSV doesn't work well for multi-line values
 		// "format":           "CSV",

@@ -91,10 +91,16 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 }
 
 func (t *Table) Select(fields ...string) string {
+	fields = lo.Map(fields, func(f string, i int) string {
+		q := GetQualifierQuote(t.Dialect)
+		f = strings.TrimSpace(f)
+		return q + strings.ReplaceAll(f, q, "") + q
+	})
+
 	if t.IsQuery() {
 		if len(fields) > 0 {
 			fieldsStr := strings.Join(fields, ", ")
-			return g.F(`select %s from ( %s ) t`, fieldsStr, t.SQL)
+			return g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
 		}
 		return t.SQL
 	}
@@ -103,7 +109,7 @@ func (t *Table) Select(fields ...string) string {
 	if len(fields) > 0 {
 		fieldsStr = strings.Join(fields, ", ")
 	}
-	return g.F(`select %s from %s`, fieldsStr, t.FDQN())
+	return g.F("select %s from %s", fieldsStr, t.FDQN())
 }
 
 type TableKeys map[iop.KeyType][]string

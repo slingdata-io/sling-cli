@@ -10,6 +10,7 @@ import (
 
 	_ "net/http/pprof"
 
+	"github.com/fatih/color"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -133,6 +134,14 @@ func (t *TaskExecution) Execute() error {
 
 	now2 := time.Now()
 	t.EndTime = &now2
+
+	// show help text
+	eh := ErrorHelper(t.Err)
+	if eh != "" {
+		env.Println("")
+		env.Println(color.MagentaString(eh))
+		env.Println("")
+	}
 
 	// update into store
 	StoreUpdate(t)

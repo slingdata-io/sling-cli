@@ -34,7 +34,11 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	telemetryMap["new_version"] = updateVersion
 	url := ""
 	if runtime.GOOS == "linux" {
-		url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_amd64.tar.gz"
+		if runtime.GOARCH == "amd64" {
+			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_amd64.tar.gz"
+		} else {
+			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_arm64.tar.gz"
+		}
 	} else if runtime.GOOS == "darwin" {
 		if runtime.GOARCH == "amd64" {
 			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_darwin_amd64.tar.gz"
@@ -42,7 +46,11 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_darwin_arm64.tar.gz"
 		}
 	} else if runtime.GOOS == "windows" {
-		url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_windows_amd64.tar.gz"
+		if runtime.GOARCH == "amd64" {
+			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_windows_amd64.tar.gz"
+		} else {
+			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_windows_arm64.tar.gz"
+		}
 	} else {
 		return ok, g.Error("OS Unsupported: %s", runtime.GOOS)
 	}
