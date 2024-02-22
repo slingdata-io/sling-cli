@@ -46,7 +46,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	// get source columns
-	sTable.Columns, err = srcConn.GetSQLColumns(sTable)
+	st := sTable
+	st.SQL = g.R(st.SQL, "incremental_where_cond", "1=1") // so we get the columns, and not change the orig SQL
+	sTable.Columns, err = srcConn.GetSQLColumns(st)
 	if err != nil {
 		err = g.Error(err, "Could not get source columns")
 		return t.df, err
