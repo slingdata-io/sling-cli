@@ -2858,6 +2858,8 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
 
+	println()
+
 	return true, nil
 }
 
