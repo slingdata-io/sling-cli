@@ -149,7 +149,9 @@ func (pw *ParquetWriter) WriteRow(row []any) error {
 		switch {
 		case col.IsBool():
 			row[i] = cast.ToBool(row[i]) // since is stored as string
-		case col.IsDecimal():
+		case col.Type == FloatType:
+			row[i] = cast.ToFloat64(row[i])
+		case col.Type == DecimalType:
 			// row[i] = cast.ToString(row[i])
 			row[i] = StringToDecimalByteArray(cast.ToString(row[i]), pw.decNumScale[i], arrowParquet.Types.FixedLenByteArray, 16)
 		case col.IsDatetime():

@@ -154,7 +154,7 @@ func (p *ParquetArrowReader) Columns() Columns {
 		col.Metadata["logicalType"] = lType.String()
 		col.Metadata["convertedType"] = cType.String()
 
-		tsType, tsTypeOK := lType.(schema.TimestampLogicalType)
+		tsType, tsTypeOK := lType.(*schema.TimestampLogicalType)
 		if tsTypeOK && g.In(pType.String(), "INT32", "INT64", "INT96") {
 			col.Type = DatetimeType
 			col.Sourced = true
