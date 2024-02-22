@@ -606,9 +606,6 @@ loop:
 
 	loop:
 		for ds.it.next() {
-			// if !ds.NoDebug {
-			// 	g.Warn("ds.it.next() ROW %s > %d", ds.ID, ds.it.Counter)
-			// }
 
 		schemaChgLoop:
 			for {
@@ -639,7 +636,7 @@ loop:
 								ds.schemaChgChan <- schemaChgVal // requeue to try adding again
 							}
 						} else {
-							g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
+							// g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
 							if !df.ChangeColumn(schemaChgVal.I, schemaChgVal.Type, ds.ID) {
 								ds.schemaChgChan <- schemaChgVal // requeue to try changing again
 							}
