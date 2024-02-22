@@ -637,7 +637,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		filePath := strings.TrimPrefix(url.Path(), "/")
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
 		fileName := pathArr[len(pathArr)-1]
-		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+		fileFolder := ""
+		if len(pathArr) > 1 {
+			fileFolder = pathArr[len(pathArr)-2]
+		}
 
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3, dbio.TypeFileGoogle:
