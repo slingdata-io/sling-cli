@@ -251,7 +251,7 @@ func (c *CSV) getReader(delimiter string) (*csv.Reader, error) {
 			return r, g.Error(err, "could not detect delimiter")
 		} else if !c.NoDebug && deli != ',' {
 			if delimiter == "" {
-				g.Info("delimiter auto-detected: %#v", string(deli))
+				g.Debug("delimiter auto-detected: %#v", string(deli))
 			} else {
 				g.Debug("delimiter used: %#v", string(deli))
 			}
