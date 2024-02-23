@@ -666,6 +666,19 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
+func reconnectIfClosed(conn Connection) (err error) {
+	// g.Warn("connected => %s", conn.GetProp("connected"))
+	if conn.GetProp("connected") != "true" {
+		g.Debug("connection was closed, reconnecting")
+		err = conn.Self().Connect()
+		if err != nil {
+			err = g.Error(err, "Could not connect")
+			return
+		}
+	}
+	return
+}
+
 // Close closes the connection
 func (conn *BaseConn) Close() error {
 	var err error
@@ -861,6 +874,12 @@ func (conn *BaseConn) StreamRows(sql string, options ...map[string]interface{}) 
 
 // StreamRowsContext streams the rows of a sql query with context, returns `result`, `error`
 func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
+	}
+
 	Limit := uint64(0) // infinite
 	if val := cast.ToUint64(getQueryOptions(options)["limit"]); val > 0 {
 		Limit = val
@@ -1104,14 +1123,12 @@ func (conn *BaseConn) Prepare(query string) (stmt *sql.Stmt, err error) {
 
 // Exec runs a sql query, returns `error`
 func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
-	if !cast.ToBool(conn.GetProp("connected")) {
-		g.Debug("connection was closed, reconnecting")
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
+
 	result, err = conn.Self().ExecContext(conn.Context().Ctx, sql, args...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
@@ -1121,13 +1138,12 @@ func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, 
 
 // ExecMulti runs mutiple sql queries, returns `error`
 func (conn *BaseConn) ExecMulti(sql string, args ...interface{}) (result sql.Result, err error) {
-	if conn.GetProp("connected") != "true" {
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
+
 	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sql, args...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
@@ -1203,12 +1219,10 @@ func (conn *BaseConn) MustExec(sql string, args ...interface{}) (result sql.Resu
 
 // Query runs a sql query, returns `result`, `error`
 func (conn *BaseConn) Query(sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
-	if conn.GetProp("connected") != "true" {
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
 
 	ds, err := conn.Self().StreamRows(sql, options...)
