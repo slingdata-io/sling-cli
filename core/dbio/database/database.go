@@ -2305,7 +2305,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	if strings.HasSuffix(nativeType, "()") {
 		length := col.Stats.MaxLen
 		if col.IsString() {
-			if !col.Sourced || length == 0 {
+			if !col.Sourced || length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
 					length = 255
