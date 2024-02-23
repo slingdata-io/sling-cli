@@ -322,11 +322,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// set format to JSON
 	fs.SetProp("format", "json")
-	fs.SetProp("file_max_rows", "50000")
+	// fs.SetProp("file_max_rows", "50000")
 	if val := conn.GetProp("file_max_rows"); val != "" {
 		fs.SetProp("file_max_rows", val)
 	}
-	fs.SetProp("file_max_bytes", "10000000")
+	// fs.SetProp("file_max_bytes", "10000000")
 	if val := conn.GetProp("file_max_bytes"); val != "" {
 		fs.SetProp("file_max_bytes", val)
 	}
@@ -372,8 +372,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		"strip_outer_array": "true",
 	}
 
+	// seems to not work well with parallel loading, 1 at a time
+	loadCtx := g.NewContext(conn.context.Ctx, 1)
+
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
-		defer conn.Context().Wg.Write.Done()
+		defer loadCtx.Wg.Write.Done()
 		g.Debug("loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
 		defer os.Remove(localFile.URI)
@@ -411,15 +414,15 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	}
 
 	for localFile := range fileReadyChn {
-		conn.Context().Wg.Write.Add()
+		loadCtx.Wg.Write.Add()
 		go loadFromLocal(localFile, tableFName)
 		if df.Err() != nil {
 			return df.Count(), df.Err()
 		}
 	}
 
-	g.Debug("Done submitting data. Waiting load completion.")
-	conn.Context().Wg.Write.Wait()
+	g.Debug("Done submitting data. Waiting for load completion.")
+	loadCtx.Wg.Write.Wait()
 	if df.Err() != nil {
 		return df.Count(), g.Error(df.Err(), "Error importing to StarRocks")
 	}
