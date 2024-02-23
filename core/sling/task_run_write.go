@@ -195,7 +195,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
 
-	t.AddCleanupTask(func() {
+	t.AddCleanupTaskFirst(func() {
 		conn, err := t.getTgtDBConn(context.Background())
 		if err == nil {
 			err = conn.DropTable(tableTmp.FullName())

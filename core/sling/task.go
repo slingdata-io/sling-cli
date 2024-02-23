@@ -339,7 +339,13 @@ func (t *TaskExecution) getTargetObjectValue() string {
 	return ""
 }
 
-func (t *TaskExecution) AddCleanupTask(f func()) {
+func (t *TaskExecution) AddCleanupTaskFirst(f func()) {
+	t.Context.Mux.Lock()
+	defer t.Context.Mux.Unlock()
+	t.cleanupFuncs = append([]func(){f}, t.cleanupFuncs...)
+}
+
+func (t *TaskExecution) AddCleanupTaskLast(f func()) {
 	t.Context.Mux.Lock()
 	defer t.Context.Mux.Unlock()
 	t.cleanupFuncs = append(t.cleanupFuncs, f)

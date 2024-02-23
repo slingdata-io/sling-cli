@@ -334,7 +334,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		t.AddCleanupTask(func() { tgtConn.Close() })
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
 	if t.usingCheckpoint() {
@@ -477,8 +477,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		t.AddCleanupTask(func() { srcConn.Close() })
-		t.AddCleanupTask(func() { tgtConn.Close() })
+		t.AddCleanupTaskLast(func() { srcConn.Close() })
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
 	// set schema if needed
