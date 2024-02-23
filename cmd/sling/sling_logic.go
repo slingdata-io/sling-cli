@@ -40,7 +40,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
 	cfg := &sling.Config{}
 	replicationCfgPath := ""
-	cfgStr := ""
+	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
 	iterate := 1
@@ -63,9 +63,11 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	for k, v := range c.Vals {
 		switch k {
 		case "replication":
+			telemetryMap["run_mode"] = "replication"
 			replicationCfgPath = cast.ToString(v)
 		case "config":
-			cfgStr = cast.ToString(v)
+			telemetryMap["run_mode"] = "task"
+			taskCfgStr = cast.ToString(v)
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "src-stream", "src-table", "src-sql", "src-file":
@@ -169,6 +171,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
+	if replicationCfgPath != "" && taskCfgStr != "" {
+		return ok, g.Error("cannot provide replication and task configuration. Choose one.")
+	}
+
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
@@ -185,8 +191,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		} else {
 			// run task
-			if cfgStr != "" {
-				err = cfg.Unmarshal(cfgStr)
+			if taskCfgStr != "" {
+				err = cfg.Unmarshal(taskCfgStr)
 				if err != nil {
 					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
 				}
@@ -401,7 +407,6 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
-		telemetryMap["run_mode"] = "replication"
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {

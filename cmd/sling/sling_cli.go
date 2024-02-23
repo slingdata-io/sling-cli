@@ -29,7 +29,7 @@ import (
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
-var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "task")
+var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "cli")
 var telemetry = true
 var interrupted = false
 var machineID = ""
