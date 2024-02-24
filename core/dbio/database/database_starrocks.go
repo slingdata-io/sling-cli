@@ -165,6 +165,8 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 				valCount++
 				newVal := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
 				switch {
+				case val == nil:
+					return "NULL"
 				case ds.Columns[i].Type.IsNumber():
 					return newVal
 				case ds.Columns[i].Type.IsBool():
@@ -406,6 +408,14 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	if err != nil {
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
+
+	// TODO: use reader to fead HTTP directly. Need to get proper redirected URL first.
+	// for ds := range df.StreamCh {
+	// 	readerChn := ds.NewJsonReaderChnl(0, 0)
+	// 	for reader := range readerChn {
+
+	// 	}
+	// }
 
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
