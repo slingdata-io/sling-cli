@@ -37,7 +37,7 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "0.9.2"
+var DuckDbVersion = "0.10.0"
 var DuckDbUseTempFile = false
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
 var duckDbReadOnlyHint = "/* -readonly */"
@@ -106,7 +106,12 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.DuckDbs[connURL] = conn
 		connPool.Mux.Unlock()
 	}
+
 	conn.SetProp("connected", "true")
+
+	// init extensions
+	conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
+
 	return nil
 }
 

@@ -139,6 +139,7 @@ function:
   sleep: select sqlite3_sleep({seconds}*1000)
   checksum_datetime: CAST((epoch({field}) || substr(strftime('%f',{field}),4) ) as bigint)
   checksum_decimal: 'abs(cast({field} as bigint))'
+  checksum_boolean: 'length({field}::string)'
 
 variable:
   bool_as: integer
