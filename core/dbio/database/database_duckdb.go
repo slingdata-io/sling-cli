@@ -424,11 +424,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		return result, g.Error(err, "could not get cmd duckdb")
 	}
 
-	if strings.Contains(sql, noDebugKey) {
-		g.Trace(sql)
-	} else {
-		g.DebugLow(CleanSQL(conn, sql), args...)
-	}
+	conn.LogSQL(sql, args...)
 
 	var out []byte
 	fileContext := DuckDbFileContext[conn.URL]
@@ -493,11 +489,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	}
 	defer func() { os.Remove(sqlPath) }()
 
-	if strings.Contains(sql, noDebugKey) {
-		g.Trace(sql)
-	} else {
-		g.DebugLow(sql)
-	}
+	conn.LogSQL(sql)
 
 	cmd.Args = append(cmd.Args, "-csv")
 
@@ -675,11 +667,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		stderrBuf := bytes.NewBuffer([]byte{})
 		sql := strings.Join(sqlLines, ";\n")
 
-		if strings.Contains(sql, noDebugKey) {
-			g.Trace(sql)
-		} else {
-			g.DebugLow(sql)
-		}
+		conn.LogSQL(sql)
 
 		cmd, sqlPath, err := conn.getCmd(sql, cast.ToBool(conn.GetProp("read_only")))
 		if err != nil {

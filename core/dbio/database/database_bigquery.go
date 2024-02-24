@@ -227,12 +227,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	}
 
 	res := bqResult{}
-	noDebug := strings.Contains(sql, noDebugKey)
-	if noDebug {
-		g.Trace(sql)
-	} else {
-		g.Debug(CleanSQL(conn, sql))
-	}
+	conn.LogSQL(sql)
 
 	q := conn.Client.Query(sql)
 	q.QueryConfig = bigquery.QueryConfig{
@@ -381,12 +376,8 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 		return ds, nil
 	}
 
-	noDebug := strings.Contains(sql, noDebugKey)
-	if noDebug {
-		g.Trace(sql)
-	} else {
-		g.Debug(sql)
-	}
+	conn.LogSQL(sql)
+
 	queryContext := g.NewContext(ctx)
 	q := conn.Client.Query(sql)
 	q.QueryConfig = bigquery.QueryConfig{

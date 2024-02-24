@@ -105,11 +105,8 @@ func (t *BaseTransaction) Exec(sql string, args ...interface{}) (result sql.Resu
 // QueryContext queries rows
 func (t *BaseTransaction) QueryContext(ctx context.Context, q string, args ...interface{}) (result *sqlx.Rows, err error) {
 	t.log = append(t.log, q)
-	if strings.Contains(q, noDebugKey) {
-		g.Trace(q)
-	} else {
-		g.Debug(q)
-	}
+
+	t.Conn.Base().LogSQL(q, args...)
 	result, err = t.Tx.QueryxContext(ctx, q, args...)
 	if err != nil {
 		err = g.Error(err, "Error executing query")
@@ -124,11 +121,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		return
 	}
 
-	if strings.Contains(q, noDebugKey) {
-		g.Trace(q)
-	} else {
-		g.Debug(CleanSQL(t.Conn, q), args...)
-	}
+	t.Conn.Base().LogSQL(q, args...)
 
 	t.log = append(t.log, q)
 	result, err = t.Tx.ExecContext(ctx, q, args...)
@@ -136,7 +129,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		if strings.Contains(q, noDebugKey) && !g.IsDebugLow() {
 			err = g.Error(err, "Error executing query")
 		} else {
-			err = g.Error(err, "Error executing "+CleanSQL(t.Conn, q))
+			err = g.Error(err, "Error executing: "+CleanSQL(t.Conn, q))
 		}
 	}
 

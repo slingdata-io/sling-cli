@@ -694,11 +694,28 @@ func (conn *BaseConn) Close() error {
 	return err
 }
 
-// AddLog logs a text for debugging
-func (conn *BaseConn) AddLog(text string) {
-	conn.Log = append(conn.Log, text)
+// LogSQL logs a query for debugging
+func (conn *BaseConn) LogSQL(query string, args ...any) {
+	noColor := g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+
+	query = strings.TrimSpace(query)
+	query = strings.TrimSuffix(query, ";")
+
+	conn.Log = append(conn.Log, query)
 	if len(conn.Log) > 300 {
 		conn.Log = conn.Log[1:]
+	}
+
+	if strings.Contains(query, noDebugKey) {
+		if !noColor {
+			query = color.CyanString(query)
+		}
+		g.Trace(query, args...)
+	} else {
+		if !noColor {
+			query = color.CyanString(query)
+		}
+		g.Debug(CleanSQL(conn, query), args...)
 	}
 }
 
@@ -892,16 +909,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	queryContext := g.NewContext(ctx)
 
-	// conn.AddLog(query)
+	conn.LogSQL(query)
 	var result *sqlx.Rows
 	if conn.tx != nil {
 		result, err = conn.tx.QueryContext(queryContext.Ctx, query)
 	} else {
-		if strings.Contains(query, noDebugKey) {
-			g.Trace(query)
-		} else {
-			g.Debug(query)
-		}
 		result, err = conn.db.QueryxContext(queryContext.Ctx, query)
 	}
 
@@ -1076,7 +1088,6 @@ func (conn *BaseConn) Commit() (err error) {
 	}
 
 	tx := conn.tx
-	conn.AddLog("COMMIT")
 	select {
 	case <-conn.tx.Context().Ctx.Done():
 		err = conn.tx.Context().Err()
@@ -1097,7 +1108,6 @@ func (conn *BaseConn) Commit() (err error) {
 // Rollback rolls back a connection wide transaction
 func (conn *BaseConn) Rollback() (err error) {
 	if tx := conn.tx; tx != nil {
-		conn.AddLog("ROLLBACK")
 		conn.tx = nil
 		err = tx.Rollback()
 		// conn.tx.Connection().Close()
@@ -1164,11 +1174,8 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
 	} else {
-		if strings.Contains(q, noDebugKey) {
-			g.Trace(q)
-		} else {
-			g.DebugLow(CleanSQL(conn, q), args...)
-		}
+
+		conn.LogSQL(q, args...)
 		result, err = conn.db.ExecContext(ctx, q, args...)
 	}
 	if err != nil {
@@ -1444,15 +1451,7 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 }
 
 // GetSQLColumns return columns from a sql query result
-func (conn *BaseConn) GetSQLColumns(tables ...Table) (columns iop.Columns, err error) {
-	var table Table
-	if len(tables) > 0 {
-		table = tables[0]
-	} else {
-		err = g.Error("no query provided")
-		return
-	}
-
+func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
 	if !table.IsQuery() {
 		return conn.GetColumns(table.FullName())
 	}
@@ -2109,7 +2108,6 @@ func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []strin
 	}
 
 	g.Trace("insert target fields: " + strings.Join(newColNames, ", "))
-	g.LogError(err)
 
 	return
 }
