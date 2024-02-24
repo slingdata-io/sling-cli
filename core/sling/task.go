@@ -468,6 +468,10 @@ func applyColumnCasing(name string, toSnake bool, connType dbio.Type) string {
 	return strings.ToLower(name)
 }
 
+const (
+	raiseIssueNotice = "Feel free to open an issue @ https://github.com/slingdata-io/sling-cli"
+)
+
 func ErrorHelper(err error) (helpString string) {
 	if err != nil {
 		errString := strings.ToLower(err.Error())
@@ -476,8 +480,14 @@ func ErrorHelper(err error) (helpString string) {
 			errString = strings.ToLower(E.Full())
 		}
 
-		contains := func(text string) bool {
-			return strings.Contains(errString, strings.ToLower(text))
+		contains := func(text ...string) bool {
+			met := true
+			for _, t := range text {
+				if !strings.Contains(errString, strings.ToLower(t)) {
+					met = false
+				}
+			}
+			return met
 		}
 
 		switch {
@@ -487,7 +497,7 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case contains("ssl is not enabled on the server"):
 			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
-		case contains("invalid input syntax for type") || (contains(" value ") && contains("is not recognized")) || contains("invalid character value") || contains(" exceeds ") || contains(`could not convert string "nan"`) || contains("provided schema does not match"):
+		case contains("invalid input syntax for type") || (contains(" value ") && contains("is not recognized")) || contains("invalid character value") || contains(" exceeds ") || contains(`could not convert`) || contains("provided schema does not match") || contains("Number out of representable range") || contains("Numeric value", " is not recognized") || contains("out of range") || contains("value too long") || contains("converting", "to", "is unsupported"):
 			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/run/configuration#source"
 		case contains("bcp import"):
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/sling-cli/run/configuration#target"
