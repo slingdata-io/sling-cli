@@ -573,8 +573,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
 	)
 
-	m["source_type"] = cfg.SrcConn.Type
-	m["target_type"] = cfg.TgtConn.Type
+	if cfg.SrcConn.Type.String() != "" {
+		m["source_type"] = cfg.SrcConn.Type
+	}
+	if cfg.TgtConn.Type.String() != "" {
+		m["target_type"] = cfg.TgtConn.Type
+	}
 
 	if cfg.Source.Conn != "" {
 		m["source_name"] = strings.ToLower(cfg.Source.Conn)
