@@ -774,7 +774,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("%s, csv stream provided is empty", ds.ID)
+		g.Debug("csv stream provided is empty")
 		ds.SetReady()
 		ds.Close()
 		return nil
