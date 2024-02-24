@@ -772,10 +772,12 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	if conn.GetProp("GC_BUCKET") == "" {
 		g.Warn("No GCS Bucket was provided, pulling from cursor (which may be slower for big datasets). ")
 		return conn.BaseConn.BulkExportFlow(tables...)
+	} else if len(tables) == 0 {
+		return df, g.Error("no table/query provided")
 	}
 
 	// get columns
-	columns, err := conn.GetSQLColumns(tables...)
+	columns, err := conn.GetSQLColumns(tables[0])
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return

@@ -97,7 +97,7 @@ type Connection interface {
 	GetProp(string) string
 	GetSchemas() (iop.Dataset, error)
 	GetSchemata(schemaName string, tableNames ...string) (Schemata, error)
-	GetSQLColumns(tables ...Table) (columns iop.Columns, err error)
+	GetSQLColumns(table Table) (columns iop.Columns, err error)
 	GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error)
 	GetTables(string) (iop.Dataset, error)
 	GetTemplateValue(path string) (value string)
@@ -2488,8 +2488,11 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 
 // BulkExportFlowCSV creates a dataflow from a sql query, using CSVs
 func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err error) {
+	if len(tables) == 0 {
+		return df, g.Error("no table/query provided")
+	}
 
-	columns, err := conn.Self().GetSQLColumns(tables...)
+	columns, err := conn.Self().GetSQLColumns(tables[0])
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return

@@ -382,7 +382,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 			if adjustColumnType {
 
-				targetTable.Columns, err = pullTargetTableColumns(t.Config, tgtConn, false)
+				targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable)
 				if err != nil {
 					return cnt, g.Error(err, "could not get table columns for optimization")
 				}

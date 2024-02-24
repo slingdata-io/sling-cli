@@ -365,12 +365,8 @@ func (conn *BigTableConn) GetColumnsFull(tableFName string) (iop.Dataset, error)
 }
 
 // GetTables returns tables for given schema
-func (conn *BigTableConn) GetSQLColumns(tables ...Table) (columns iop.Columns, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
-	return conn.GetColumns(tables[0].FullName())
+func (conn *BigTableConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
+	return conn.GetColumns(table.FullName())
 }
 
 func (conn *BigTableConn) GetColumns(tableFName string, fields ...string) (columns iop.Columns, err error) {
