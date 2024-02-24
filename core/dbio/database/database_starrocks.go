@@ -254,11 +254,14 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 func (conn *StarRocksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
-	if feURL := conn.GetProp("fe_url"); feURL != "" {
+	useBulk := cast.ToBool(conn.GetProp("use_bulk"))
+	if feURL := conn.GetProp("fe_url"); feURL != "" && useBulk {
 		return conn.StreamLoad(feURL, tableFName, df)
 	}
 
-	g.Debug("WARN: Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
+	if useBulk {
+		g.Debug("WARN: Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
+	}
 
 	return conn.BaseConn.BulkImportFlow(tableFName, df)
 }
