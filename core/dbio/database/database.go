@@ -1171,12 +1171,10 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		return
 	}
 
-	// conn.AddLog(q)
 	if conn.tx != nil {
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
 	} else {
-
 		conn.LogSQL(q, args...)
 		result, err = conn.db.ExecContext(ctx, q, args...)
 	}
@@ -1197,7 +1195,6 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 
 	eG := g.ErrorGroup{}
 	for _, sql := range ParseSQLMultiStatements(q) {
-		// conn.AddLog(sql)
 		res, err := conn.Self().ExecContext(ctx, sql, args...)
 		if err != nil {
 			eG.Capture(g.Error(err, "Error executing query"))
@@ -3347,7 +3344,7 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 		// detect end
 		if char == ";" && !inQuote && !inComment() {
 			if strings.TrimSpace(currState) != "" {
-				sqls = append(sqls, currState)
+				sqls = append(sqls, strings.TrimSuffix(currState, ";"))
 			}
 			currState = ""
 		}
@@ -3355,7 +3352,7 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 
 	if len(currState) > 0 {
 		if strings.TrimSpace(currState) != "" {
-			sqls = append(sqls, currState)
+			sqls = append(sqls, strings.TrimSuffix(currState, ";"))
 		}
 	}
 
