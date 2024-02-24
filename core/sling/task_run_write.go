@@ -244,7 +244,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// df.Context.Lock()
 			// defer df.Context.Unlock()
 
-			ok, err := database.AddMissingColumns(tgtConn, tableTmp, iop.Columns{col})
+			ok, err := tgtConn.AddMissingColumns(tableTmp, iop.Columns{col})
 			if err != nil {
 				return g.Error(err, "could not add missing columns")
 			} else if ok {
@@ -369,7 +369,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 		if !created && cfg.Mode != FullRefreshMode {
 			if *cfg.Target.Options.AddNewColumns {
-				ok, err := database.AddMissingColumns(tgtConn, targetTable, sample.Columns)
+				ok, err := tgtConn.AddMissingColumns(targetTable, sample.Columns)
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
 				} else if ok {

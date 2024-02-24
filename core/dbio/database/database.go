@@ -138,6 +138,7 @@ type Connection interface {
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
 	ValidateColumnNames(tgtColName []string, colNames []string, quote bool) (newColNames []string, err error)
+	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
 type ConnInfo struct {
@@ -2481,7 +2482,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	// columns need to be populated
 	err = df.WaitReady()
 	if err != nil {
-		return df, err
+		return df, g.Error(err)
 	}
 
 	return df, nil
@@ -3027,7 +3028,7 @@ func settingMppBulkImportFlow(conn Connection, compressor iop.CompressorType) {
 	conn.SetProp("PARALLEL", "true")
 }
 
-func AddMissingColumns(conn Connection, table Table, newCols iop.Columns) (ok bool, err error) {
+func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error) {
 	cols, err := conn.GetColumns(table.FullName())
 	if err != nil {
 		err = g.Error(err, "could not obtain table columns for adding %s", g.Marshal(newCols.Names()))
@@ -3418,7 +3419,7 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 		return
 	}
 
-	_, err = AddMissingColumns(conn, table, iop.Columns{newCol})
+	_, err = conn.AddMissingColumns(table, iop.Columns{newCol})
 	if err != nil {
 		err = g.Error(err, "could not add new column")
 		return
