@@ -564,7 +564,6 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
 
 		if err != nil {
-			g.LogError(err, "error writing dataflow to local storage: "+localPath)
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
 			df.Context.Cancel()
 			return

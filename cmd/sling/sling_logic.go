@@ -411,7 +411,6 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		err = runTask(&cfg, &replication)
 		if err != nil {
 			err = g.Error(err, "error for stream %s", name)
-			g.LogError(err)
 			eG.Capture(err)
 		}
 		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map

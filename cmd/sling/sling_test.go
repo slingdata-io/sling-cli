@@ -286,8 +286,7 @@ func TestCfgPath(t *testing.T) {
 
 	testCfg := func(path string) (err error) {
 		cfg, err := sling.NewConfig(path)
-		if g.LogError(err) {
-			g.AssertNoError(t, err)
+		if !g.AssertNoError(t, err) {
 			return
 		}
 

@@ -70,15 +70,15 @@ func NewDataflow(limit ...int) (df *Dataflow) {
 func (df *Dataflow) Err() (err error) {
 	eG := g.ErrorGroup{}
 	for _, ds := range df.Streams {
-		eG.Capture(ds.Err())
+		if ds.Err() != nil {
+			eG.Add(ds.Context.ErrGroup.Errors...)
+		}
 	}
 
 	if err = df.Context.Err(); err != nil {
-		if err.Error() == "context canceled" {
-			return eG.Err()
-		}
-		return err
+		eG.Add(df.Context.ErrGroup.Errors...)
 	}
+
 	return eG.Err()
 }
 
@@ -243,7 +243,6 @@ func (df *Dataflow) AddColumns(newCols Columns, overwrite bool, exceptDs ...stri
 
 		for _, addedCol := range added {
 			if err := df.OnColumnAdded(addedCol); err != nil {
-				g.LogError(err)
 				df.Context.CaptureErr(err)
 			} else {
 				df.incrementVersion()
@@ -524,6 +523,9 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 		case <-df.Context.Ctx.Done():
 			return
 		case <-ds.Context.Ctx.Done():
+			if err := ds.Err(); err != nil {
+				df.Context.CaptureErr(g.Error(err, "datastream error"))
+			}
 			return
 		case <-ds.readyChn:
 			// wait for first ds to start streaming.
@@ -589,7 +591,10 @@ func (df *Dataflow) WaitReady() error {
 	case <-df.readyChn:
 		return df.Err()
 	case <-df.Context.Ctx.Done():
-		return df.Err()
+		if err := df.Err(); err != nil {
+			return g.Error(df.Err(), "dataflow error while waiting for ready state")
+		}
+		return nil
 	}
 }
 
@@ -663,7 +668,7 @@ func MakeDataFlow(dss ...*Datastream) (df *Dataflow, err error) {
 	// columns need to be populated
 	err = df.WaitReady()
 	if err != nil {
-		return df, err
+		return df, g.Error(err)
 	}
 
 	return df, nil
@@ -697,7 +702,7 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 
 				shaper, err := batch.Columns.MakeShaper(dsN.Columns)
 				if err != nil {
-					g.LogError(g.Error(err, "could not MakeShaper"))
+					dsN.Context.CaptureErr(g.Error(err, "could not MakeShaper"))
 				}
 				if shaper == nil {
 					shaper = &Shaper{

@@ -82,7 +82,6 @@ func (fs *HTTPFileSysClient) doGet(url string) (resp *http.Response, err error) 
 // Delete :
 func (fs *HTTPFileSysClient) delete(path string) (err error) {
 	err = g.Error("cannot delete a HTTP file")
-	g.LogError(g.Error(err))
 	return
 }
 
@@ -196,6 +195,5 @@ func (fs *HTTPFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, e
 	}
 
 	err = g.Error("cannot write a HTTP file (yet)")
-	g.LogError(g.Error(err))
 	return
 }

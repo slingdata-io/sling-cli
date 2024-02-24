@@ -37,7 +37,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				return t.df, err
 			} else {
 				err = nil // don't return error in case the table full name ends with .sql
-				g.LogError(err)
 			}
 		} else {
 			cfg.Source.Stream = sqlFromFile

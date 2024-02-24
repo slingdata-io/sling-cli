@@ -138,9 +138,7 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 		}
 
 		if err != nil {
-			fs.Context().CaptureErr(g.Error(err, "Error consuming reader"))
-			fs.Context().Cancel()
-			g.LogError(fs.Context().Err())
+			ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
 		}
 
 	}()

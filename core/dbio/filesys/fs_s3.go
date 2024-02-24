@@ -250,8 +250,6 @@ func (fs *S3FileSysClient) GetReader(path string) (reader io.Reader, err error) 
 			})
 		if err != nil {
 			fs.Context().CaptureErr(g.Error(err, "Error downloading S3 File -> "+key))
-			// g.LogError(fs.Context().Err())
-			fs.Context().Cancel()
 			return
 		}
 	}()
@@ -301,8 +299,6 @@ func (fs *S3FileSysClient) GetWriter(path string) (writer io.Writer, err error) 
 		})
 		if err != nil {
 			fs.Context().CaptureErr(g.Error(err, "Error uploading S3 File -> "+key))
-			g.LogError(fs.Context().Err())
-			fs.Context().Cancel()
 		}
 	}()
 

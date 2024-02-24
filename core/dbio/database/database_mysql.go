@@ -172,6 +172,7 @@ func (conn *MySQLConn) LoadDataOutFile(sql string) (stdOutReader io.Reader, err 
 					cmdStr, stderr.String(),
 				),
 			)
+			// FIXME: avoid using conn.Context().CaptureErr since it cancels all child contexts
 			conn.Context().CaptureErr(err)
 			g.LogError(err, "could not export from MySQL")
 		}

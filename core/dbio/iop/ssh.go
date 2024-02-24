@@ -242,7 +242,6 @@ func (s *SSHClient) RunAsProcess() (localPort int, err error) {
 		)
 		g.Trace("SSH Command: %s", cmdStr)
 		s.Err = s.cmd.Run()
-		// g.LogError(s.Err)
 	}()
 
 	// wait until it connects

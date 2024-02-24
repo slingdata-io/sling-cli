@@ -795,7 +795,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 			c.File.Close()
 			return false
 		} else if err != nil {
-			it.Context.CaptureErr(g.Error(err, "Error reading file"))
+			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
 			return false
 		}
 

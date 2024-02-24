@@ -345,9 +345,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	go func() {
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
 		if err != nil {
-			g.LogError(err, "error writing dataflow to local storage: "+localPath)
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
-			df.Context.Cancel()
 			return
 		}
 	}()
