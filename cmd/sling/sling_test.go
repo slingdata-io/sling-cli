@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
@@ -23,95 +22,37 @@ import (
 )
 
 type testDB struct {
-	name     string
-	URL      string
-	table    string
-	conn     d.Connection
-	propStrs []string
+	name string
+	conn d.Connection
 }
 
-var (
-	testFile1Bytes []byte
-)
+type testConn struct {
+	name   string
+	schema string
+	noBulk bool
+}
 
-var DBs = []*testDB{
-	// {
-	// 	// https://github.com/mattn/go-sqlite3
-	// 	name:  "SQLite",
-	// 	URL:   "file:./test.db",
-	// 	table: "main.test1",
-	// },
-
-	{
-		// https://github.com/lib/pq
-		name:  "Postgres",
-		URL:   "$POSTGRES_URL",
-		table: "public.test1",
-	},
-
-	{
-		// https://github.com/godror/godror
-		name:  "Oracle",
-		URL:   "$ORACLE_URL",
-		table: "system.test1",
-	},
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "MySQL",
-	// 	URL:   "$MYSQL_URL",
-	// 	table: "mysql.test1",
-	// },
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "SQLServer",
-	// 	URL:   "$MSSQL_URL",
-	// 	table: "dbo.test1",
-	// },
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "AzureSQL",
-	// 	URL:   "$AZURESQL_URL",
-	// 	table: "dbo.test1",
-	// },
-
-	// {
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "Snowflake",
-	// 	URL:   "$SNOWFLAKE_URL",
-	// 	table: "sling.test1",
-	// },
-
-	// {
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "BigQuery",
-	// 	URL:   "$BIGQUERY_URL",
-	// 	table: "public.test1",
-	// },
-
-	// {
-	// 	// https://github.com/lib/pq
-	// 	name:  "Redshift",
-	// 	URL:   "$REDSHIFT_URL",
-	// 	table: "public.test1",
-	// },
+var dbConnMap = map[dbio.Type]testConn{
+	dbio.TypeDbPostgres:   {name: "postgres"},
+	dbio.TypeDbRedshift:   {name: "redshift"},
+	dbio.TypeDbStarRocks:  {name: "starrocks", noBulk: true},
+	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
+	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
+	dbio.TypeDbBigTable:   {name: "bigtable"},
+	dbio.TypeDbBigQuery:   {name: "bigquery"},
+	dbio.TypeDbSnowflake:  {name: "snowflake"},
+	dbio.TypeDbSQLite:     {name: "sqlite"},
+	dbio.TypeDbDuckDb:     {name: "duckdb"},
+	dbio.TypeDbMotherDuck: {name: "motherduck"},
+	dbio.TypeDbSQLServer:  {name: "sqlserver"},
+	dbio.TypeDbAzure:      {name: "azuresql"},
+	dbio.TypeDbAzureDWH:   {name: "azuredwh"},
+	dbio.TypeDbClickhouse: {name: "clickhouse"},
 }
 
 func init() {
 	env.InitLogger()
-	// iop.RemoveTrailingDecZeros = true
-	for _, db := range DBs {
-		if db.URL == "" {
-			log.Fatal("No Env Var URL for " + db.name)
-		} else if db.name == "SQLite" {
-			os.Remove(strings.ReplaceAll(db.URL, "file:", ""))
-		}
-		if db.name == "Redshift" {
-			os.Setenv("SLING_PARALLEL", "FALSE")
-		}
-	}
 }
 
 func TestOne(t *testing.T) {
@@ -183,11 +124,8 @@ func TestTasks(t *testing.T) {
 	files, _ := g.ListDir(folderPath)
 	for i, file := range files {
 		_ = i
-		if g.In(i+1, 12, 26, 27) {
-			continue // broken ssh connection, skip oracle
-		}
-		// if !g.In(i+1, 12) {
-		// 	continue
+		// if g.In(i+1, 12) {
+		// 	continue // broken ssh connection, skip oracle
 		// }
 		// if i+1 < 13 {
 		// 	continue
@@ -240,7 +178,7 @@ func runOneTask(t *testing.T, file g.FileItem) {
 
 	// validate count
 	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
-		g.Debug("getting count")
+		g.Debug("getting count for test validation")
 		conn, err := task.Config.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
 			count, err := conn.GetCount(task.Config.Target.Object)
@@ -285,207 +223,6 @@ func runOneTask(t *testing.T, file g.FileItem) {
 						}
 					}
 				}
-			}
-		}
-	}
-}
-
-func TestInToDb(t *testing.T) {
-	csvFile := "tests/files/test1.csv"
-	csvFileUpsert := "tests/files/test1.upsert.csv"
-	testFile1, err := os.Open(csvFile)
-	if err != nil {
-		g.LogError(err)
-		g.AssertNoError(t, err)
-		return
-	}
-
-	tReader, err := iop.AutoDecompress(bufio.NewReader(testFile1))
-	g.AssertNoError(t, err)
-	testFile1Bytes, err = io.ReadAll(tReader)
-	testFile1.Close()
-
-	for _, tgtDB := range DBs {
-		println()
-		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
-
-		cfgMap := g.M(
-			"source", g.M(
-				"conn", "file://"+csvFile,
-				"stream", "file://"+csvFile,
-			),
-			"target", g.M(
-				"conn", tgtDB.URL,
-				"object", tgtDB.table,
-			),
-			"mode", sling.FullRefreshMode,
-		)
-		config, err := sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		task := sling.NewTask(0, config)
-		err = task.Execute()
-		if err != nil {
-			g.LogError(err)
-			g.AssertNoError(t, err)
-			return
-		}
-
-		cfgMap = g.M(
-			"source", g.M(
-				"conn", "file://"+csvFileUpsert,
-				"stream", "file://"+csvFileUpsert,
-			),
-			"target", g.M(
-				"conn", tgtDB.URL,
-				"object", tgtDB.table+"_incremental",
-			),
-			"mode", sling.TruncateMode,
-		)
-		config, err = sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		taskUpsert := sling.NewTask(0, config)
-		err = taskUpsert.Execute()
-		g.LogError(err)
-		if err != nil {
-			g.AssertNoError(t, err)
-			return
-		}
-	}
-}
-
-func TestDbToDb(t *testing.T) {
-	for _, srcDB := range DBs {
-		for _, tgtDB := range DBs {
-			if srcDB.name == "SQLite" && tgtDB.name == "SQLite" {
-				continue
-			} else if srcDB.name == "Postgres" || tgtDB.name == "Postgres" {
-				// OK
-			} else {
-				continue
-			}
-
-			println()
-			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
-
-			cfgMap := g.M(
-				"source", g.M(
-					"conn", srcDB.URL,
-					"stream", srcDB.table,
-				),
-				"target", g.M(
-					"conn", tgtDB.URL,
-					"object", tgtDB.table+"_copy",
-				),
-				"mode", sling.FullRefreshMode,
-			)
-			config, err := sling.NewConfig(g.Marshal(cfgMap))
-			g.AssertNoError(t, err)
-
-			task := sling.NewTask(0, config)
-			err = task.Execute()
-			if g.LogError(err) {
-				g.AssertNoError(t, err)
-				return
-			}
-
-			cfgMap = g.M(
-				"source", g.M(
-					"conn", srcDB.URL,
-					"stream", srcDB.table+"_incremental",
-				),
-				"target", g.M(
-					"conn", tgtDB.URL,
-					"object", tgtDB.table+"_copy",
-					"primary_key", []string{"id"},
-					"update_key", "create_dt",
-				),
-				"mode", sling.IncrementalMode,
-			)
-			config, err = sling.NewConfig(g.Marshal(cfgMap))
-			g.AssertNoError(t, err)
-
-			taskUpsert := sling.NewTask(0, config)
-			err = taskUpsert.Execute()
-			if err != nil {
-				g.AssertNoError(t, err)
-				return
-			}
-		}
-	}
-}
-
-func TestDbToOut(t *testing.T) {
-
-	for _, srcDB := range DBs {
-		filePath2 := fmt.Sprintf("tests/files/%s.out.csv", srcDB.name)
-		println()
-		g.Debug(">>>>>> Tranferring from %s to CSV (%s)", srcDB.name, filePath2)
-
-		srcTable := srcDB.table
-		srcTableCopy := srcDB.table + "_copy"
-
-		cfgMap := g.M(
-			"source", g.M(
-				"conn", srcDB.URL,
-				"stream", g.F("select * from %s order by id", srcTableCopy),
-			),
-			"target", g.M(
-				"object", "file://"+filePath2,
-			),
-		)
-		config, err := sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		task := sling.NewTask(0, config)
-		err = task.Execute()
-		if !g.AssertNoError(t, err) {
-			g.LogError(err)
-			return
-		}
-
-		testFile1, err := os.Open("tests/files/test1.result.csv")
-		g.AssertNoError(t, err)
-		testFile1Bytes, err = io.ReadAll(testFile1)
-
-		testFile2, err := os.Open(filePath2)
-		g.AssertNoError(t, err)
-		testFile2Bytes, err := io.ReadAll(testFile2)
-
-		if srcDB.name != "SQLite" {
-			// SQLite uses int for bool, so it will not match
-			equal := assert.Equal(t, string(testFile1Bytes), string(testFile2Bytes))
-
-			if equal {
-				err = os.RemoveAll(filePath2)
-				g.AssertNoError(t, err)
-
-				conn, err := d.NewConn(srcDB.URL)
-				g.AssertNoError(t, err)
-
-				err = conn.Connect()
-				g.AssertNoError(t, err)
-
-				err = conn.DropTable(srcTable)
-				g.AssertNoError(t, err)
-
-				err = conn.DropTable(srcTableCopy)
-				g.AssertNoError(t, err)
-
-				err = conn.Close()
-				g.AssertNoError(t, err)
-			}
-		} else {
-			testFile1Lines := len(strings.Split(string(testFile1Bytes), "\n"))
-			testFile2Lines := len(strings.Split(string(testFile2Bytes), "\n"))
-			equal := assert.Equal(t, testFile1Lines, testFile2Lines)
-
-			if equal {
-				err = os.RemoveAll(filePath2)
-				os.Remove(strings.ReplaceAll(srcDB.URL, "file:", ""))
-			} else {
-				g.Debug("Not equal for " + srcDB.name)
 			}
 		}
 	}
@@ -625,4 +362,164 @@ func TestExtract(t *testing.T) {
 
 	err := ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
 	g.AssertNoError(t, err)
+}
+
+func testSuite(dbType dbio.Type, t *testing.T) {
+	conn, ok := dbConnMap[dbType]
+	if !assert.True(t, ok) {
+		return
+	}
+
+	templateFilePath := "tests/suite.template.tsv"
+	tempFilePath := g.F("/tmp/tests.%s.tsv", dbType.String())
+	folderPath := g.F("tests/suite/%s", dbType.String())
+	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
+	testTable := g.F("%s_test1k", dbType.String())
+
+	// generate files
+	os.RemoveAll(folderPath) // clean up
+	os.MkdirAll(folderPath, 0777)
+
+	// replace vars
+	filebytes, err := os.ReadFile(templateFilePath)
+	g.LogFatal(err)
+
+	fileContent := string(filebytes)
+	fileContent = strings.ReplaceAll(fileContent, "[conn]", conn.name)
+	fileContent = strings.ReplaceAll(fileContent, "[schema]", testSchema)
+	fileContent = strings.ReplaceAll(fileContent, "[table]", testTable)
+
+	err = os.WriteFile(tempFilePath, []byte(fileContent), 0777)
+	g.LogFatal(err)
+
+	data, err := iop.ReadCsv(tempFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	for i, rec := range data.Records() {
+		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
+		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
+		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
+		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
+		primaryKey := []string{}
+		if val := cast.ToString(rec["source_primary_key"]); val != "" {
+			primaryKey = strings.Split(val, ",")
+		}
+
+		if conn.noBulk {
+			targetOptions["use_bulk"] = false
+		}
+
+		task := g.M(
+			"source", g.M(
+				"conn", cast.ToString(rec["source_conn"]),
+				"stream", cast.ToString(rec["source_stream"]),
+				"primary_key", primaryKey,
+				"update_key", cast.ToString(rec["source_update_key"]),
+				"options", sourceOptions,
+			),
+			"target", g.M(
+				"conn", cast.ToString(rec["target_conn"]),
+				"object", cast.ToString(rec["target_object"]),
+				"options", targetOptions,
+			),
+			"mode", cast.ToString(rec["mode"]),
+			"options", options,
+			"env", env,
+		)
+		taskPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
+		taskBytes := []byte(g.Pretty(task))
+		err = os.WriteFile(taskPath, taskBytes, 0777)
+		g.AssertNoError(t, err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	files, _ := g.ListDir(folderPath)
+	for _, file := range files {
+		if t.Failed() {
+			break
+		}
+		runOneTask(t, file)
+	}
+}
+
+func TestSuitePostgres(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbPostgres, t)
+}
+
+// func TestSuiteRedshift(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbRedshift, t)
+// }
+
+func TestSuiteStarRocks(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbStarRocks, t)
+}
+
+func TestSuiteMySQL(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbMySQL, t)
+}
+
+func TestSuiteMariaDB(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbMariaDB, t)
+}
+
+func TestSuiteOracle(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbOracle, t)
+}
+
+// func TestSuiteBigTable(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbBigTable, t)
+// }
+
+func TestSuiteBigQuery(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbBigQuery, t)
+}
+
+func TestSuiteSnowflake(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSnowflake, t)
+}
+
+func TestSuiteSQLite(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSQLite, t)
+}
+
+func TestSuiteDuckDb(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbDuckDb, t)
+}
+
+func TestSuiteMotherDuck(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbMotherDuck, t)
+}
+
+func TestSuiteSQLServer(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSQLServer, t)
+}
+
+// func TestSuiteAzure(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbAzure, t)
+// }
+
+// func TestSuiteAzureDWH(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbAzureDWH, t)
+// }
+
+func TestSuiteClickhouse(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbClickhouse, t)
 }
