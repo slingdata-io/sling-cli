@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -3165,6 +3166,10 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
 
+	if len(sql) > 3000 {
+		sql = sql[0:3000]
+	}
+
 	if os.Getenv("DEBUG") != "" {
 		return sql
 	}
@@ -3172,7 +3177,7 @@ func CleanSQL(conn Connection, sql string) string {
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema") {
+		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")
