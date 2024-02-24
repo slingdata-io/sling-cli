@@ -608,7 +608,7 @@ func (conn *BigTableConn) StreamRowsContext(ctx context.Context, table string, o
 
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *BigTableConn) InsertBatchStream(table string, ds *iop.Datastream) (count uint64, err error) {
-	context := conn.Context()
+	context := ds.Context
 	tbl := conn.Client.Open(table)
 
 	keyI := int32(0)

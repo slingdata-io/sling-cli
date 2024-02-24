@@ -74,7 +74,7 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 	batchSize := cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(ds.Columns)
-	context := conn.Context()
+	context := ds.Context
 
 	// in case schema change is needed, cannot alter while inserting
 	mux := ds.Context.Mux
@@ -153,11 +153,6 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 				return
 			}
 			mux.Unlock()
-
-			// err = batch.Shape(columns)
-			// if err != nil {
-			// 	return count, g.Error(err, "could not shape batch stream")
-			// }
 		}
 
 		for row := range batch.Rows {
@@ -190,6 +185,8 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 			return count - cast.ToUint64(len(batchRows)), g.Error(err, "insertBatch")
 		}
 	}
+
+	context.Wg.Write.Wait()
 
 	return
 }

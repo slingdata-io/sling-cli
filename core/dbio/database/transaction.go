@@ -283,10 +283,7 @@ func InsertStream(conn Connection, tx *BaseTransaction, tableFName string, ds *i
 func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 
-	context := conn.Context()
-	if tx != nil {
-		context = tx.Context()
-	}
+	context := ds.Context
 
 	// in case schema change is needed, cannot alter while inserting
 	mux := ds.Context.Mux
