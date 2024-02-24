@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
@@ -15,6 +16,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -68,6 +70,70 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 	u.Query().Add("parseTime", "true")
 
 	return u.DSN
+}
+
+func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {
+	sql := g.R(conn.GetTemplateValue("core.show_alter_table"),
+		"schema", table.Schema,
+		"table", table.Name,
+	)
+
+	g.Debug("waiting for schema change to finish")
+	for {
+		time.Sleep(2 * time.Second)
+		data, err := conn.Query(sql + noDebugKey)
+		if err != nil {
+			return g.Error(err, "could not fetch 'SHOW ALTER TABLE' to get schema change status.")
+		} else if len(data.Rows) == 0 {
+			return g.Error("did not get results from 'SHOW ALTER TABLE' to get schema change status.")
+		}
+
+		env.Print(".")
+
+		if g.In(cast.ToString(data.Records()[0]["state"]), "FINISHED", "CANCELLED") {
+			break
+		}
+	}
+	return
+}
+
+func (conn *StarRocksConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error) {
+	ok, err = conn.BaseConn.AddMissingColumns(table, newCols)
+	if err != nil {
+		return
+	}
+
+	err = conn.WaitAlterTable(table)
+	if err != nil {
+		return ok, g.Error(err, "error while waiting for schema change")
+	}
+
+	return
+}
+
+func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+	if err != nil {
+		return
+	}
+
+	for _, ddlPart := range ddlParts {
+		for _, sql := range ParseSQLMultiStatements(ddlPart) {
+			_, err := conn.ExecMulti(sql)
+			if err != nil {
+				return ok, g.Error(err)
+			}
+
+			if strings.Contains(strings.ToLower(sql), "alter table") {
+				err = conn.WaitAlterTable(*table)
+				if err != nil {
+					return ok, g.Error(err, "error while waiting for schema change")
+				}
+			}
+		}
+	}
+
+	return
 }
 
 // InsertBatchStream inserts a stream into a table in batch

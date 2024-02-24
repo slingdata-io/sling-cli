@@ -2733,17 +2733,17 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 
 }
 
-// OptimizeTable analyzes the table and alters the table with
+// GetOptimizeTableStatements analyzes the table and alters the table with
 // the columns data type based on its analysis result
 // if table is missing, it is created with a new DDl
 // Hole in this: will truncate data points, since it is based
 // only on new data being inserted... would need a complete
 // stats of the target table to properly optimize.
-func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns) (ok bool, ddlParts []string, err error) {
 	if len(table.Columns) != len(newColumns) {
-		return false, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.Type, dbio.TypeDbSQLite) {
-		return false, nil
+		return false, ddlParts, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
+	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
+		return false, ddlParts, nil
 	}
 
 	newColumnsMap := lo.KeyBy(newColumns, func(c iop.Column) string {
@@ -2754,9 +2754,9 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
-			return false, g.Error("column not found in table: %s", col.Name)
+			return false, ddlParts, g.Error("column not found in table: %s", col.Name)
 		} else if !strings.EqualFold(col.Name, newCol.Name) {
-			return false, g.Error("column name mismatch, %s != %s", col.Name, newCol.Name)
+			return false, ddlParts, g.Error("column name mismatch, %s != %s", col.Name, newCol.Name)
 		} else if col.Type == newCol.Type {
 			continue
 		}
@@ -2792,12 +2792,12 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 
 		oldNativeType, err := conn.GetNativeType(col)
 		if err != nil {
-			return false, g.Error(err, "no native mapping for `%s`", newCol.Type)
+			return false, ddlParts, g.Error(err, "no native mapping for `%s`", newCol.Type)
 		}
 
 		newNativeType, err := conn.GetNativeType(newCol)
 		if err != nil {
-			return false, g.Error(err, "no native mapping for `%s`", newCol.Type)
+			return false, ddlParts, g.Error(err, "no native mapping for `%s`", newCol.Type)
 		}
 
 		if oldNativeType == newNativeType {
@@ -2810,14 +2810,25 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 	}
 
 	if len(colsChanging) == 0 {
-		return false, nil
+		return false, ddlParts, nil
 	}
-
-	ddlParts := []string{}
 
 	for _, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
+
+		// for starrocks update
+		pKey := table.Columns.GetKeys(iop.PrimaryKey).Names()
+		if len(pKey) == 0 {
+			pKey = table.Columns.GetKeys(iop.UniqueKey).Names()
+		}
+		if len(pKey) == 0 && g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+			err = g.Error("unable to modify starrocks schema without primary key or unique key")
+			return
+		}
+		for i, key := range pKey {
+			pKey[i] = conn.Self().Quote(key)
+		}
 
 		// add new column with new type
 		ddlParts = append(ddlParts, g.R(
@@ -2833,6 +2844,10 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 			"field", conn.Self().Quote(col.Name),
 			"type", col.DbType,
 		)
+		// for starrocks
+		fields := append(pKey, conn.Self().Quote(colNameTemp))
+		updatedFields := append(pKey, oldColCasted)
+
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.update"),
 			"table", table.FullName(),
@@ -2841,6 +2856,8 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 				"temp_column", conn.Self().Quote(colNameTemp),
 				"old_column_casted", oldColCasted,
 			),
+			"fields", strings.Join(fields, ", "),
+			"updated_fields", strings.Join(updatedFields, ", "),
 			"pk_fields_equal", "1=1",
 		))
 
@@ -2856,18 +2873,34 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if g.In(conn.Type, dbio.TypeDbSQLServer) {
+		if g.In(conn.GetType(), dbio.TypeDbSQLServer) {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
 		}
+
+		// for starrocks
+		fields = append(pKey, conn.Self().Quote(col.Name))
+		updatedFields = append(pKey, conn.Self().Quote(colNameTemp))
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
 			"table", tableName,
 			"column", oldColName,
 			"new_column", newColName,
+			"new_type", col.DbType,
+			"fields", strings.Join(fields, ", "),
+			"updated_fields", strings.Join(updatedFields, ", "),
 		))
+	}
+
+	return true, ddlParts, nil
+}
+
+func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+	if err != nil {
+		return ok, err
 	}
 
 	_, err = conn.ExecMulti(strings.Join(ddlParts, ";\n"))
@@ -2875,9 +2908,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
 
-	println()
-
-	return true, nil
+	return ok, nil
 }
 
 // CompareChecksums compares the checksum values from the database side

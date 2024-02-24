@@ -6,11 +6,18 @@ core:
   update: update {table} set {set_fields} where {pk_fields_equal}
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
+  update: insert into {table} ({fields}) select {updated_fields} from {table}
   upsert: |
     INSERT INTO {tgt_table}
       ({insert_fields})
     SELECT {src_fields}
     FROM {src_table} src
+  rename_column: |
+    alter table {table} add column {new_column} {new_type} ;
+    insert into {table} ({fields}) select {updated_fields} from {table} ;
+    alter table {table} drop column {column} ;
+
+  show_alter_table: show alter table column from `{schema}` where tablename = "{table}" order by createtime desc limit 1
     
 
 metadata:

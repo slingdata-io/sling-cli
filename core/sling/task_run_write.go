@@ -113,7 +113,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, g.Error(err, "could not parse object table name")
 	}
 	targetTable.DDL = cfg.Target.Options.TableDDL
-	targetTable.Keys = cfg.Target.Options.TableKeys
+	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 	var tableTmp database.Table
 	if cfg.Target.Options.TableTmp == "" {
@@ -148,7 +148,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// set DDL
 	tableTmp.DDL = strings.Replace(cfg.Target.Options.TableDDL, targetTable.Raw, tableTmp.FullName(), 1)
-	tableTmp.Keys = targetTable.Keys
+	tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 	// create schema if not exist
 	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
@@ -198,8 +198,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	t.AddCleanupTaskFirst(func() {
 		conn, err := t.getTgtDBConn(context.Background())
 		if err == nil {
-			err = conn.DropTable(tableTmp.FullName())
-			g.LogError(err)
+			g.LogError(conn.DropTable(tableTmp.FullName()))
 		}
 	})
 
@@ -214,10 +213,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set OnColumnChanged
 	if adjustColumnType {
 		df.OnColumnChanged = func(col iop.Column) error {
-			tableTmp.Columns, err = tgtConn.GetColumns(tableTmp.FullName())
+			tableTmp.Columns, err = tgtConn.GetSQLColumns(tableTmp)
 			if err != nil {
 				return g.Error(err, "could not get table columns for schema change")
 			}
+
+			// preseve keys
+			tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 			df.Columns[col.Position-1].Type = col.Type
 			ok, err := tgtConn.OptimizeTable(&tableTmp, df.Columns)
@@ -373,7 +375,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				if err != nil {
 					return cnt, g.Error(err, "could not add missing columns")
 				} else if ok {
-					_, err = pullTargetTableColumns(t.Config, tgtConn, true)
+					targetTable.Columns, err = pullTargetTableColumns(t.Config, tgtConn, true)
 					if err != nil {
 						return cnt, g.Error(err, "could not get table columns")
 					}
@@ -386,6 +388,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				if err != nil {
 					return cnt, g.Error(err, "could not get table columns for optimization")
 				}
+
+				// preseve keys
+				targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns)
 				if err != nil {
