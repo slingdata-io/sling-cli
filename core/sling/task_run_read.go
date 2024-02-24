@@ -122,7 +122,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]
 
-			if !updateCol.IsNumber() {
+			if updateCol.IsDatetime() {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.IsString() {
 				startValue = `'` + startValue + `'`
 				endValue = `'` + endValue + `'`
 			}
