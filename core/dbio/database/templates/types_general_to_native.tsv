@@ -8,7 +8,7 @@ decimal	number(,)	numeric	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)
 integer	number(10)	integer	integer	integer	integer	integer	integer	integer	integer	integer	int64	Nullable(Int64)	integer	integer	bigint
 json	clob	jsonb	json	json	nvarchar(max)	nvarchar(65535)	nvarchar(max)	varchar(65535)	variant	text	json	Nullable(String)	json	json	json
 smallint	number(5)	smallint	smallint	smallint	smallint	smallint	smallint	smallint	smallint	integer	int64	Nullable(Int32)	smallint	smallint	smallint
-string	varchar(65500)	varchar(65500)	text	text	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	varchar	text	string	Nullable(String)	string	string	varchar(65533)
+string	varchar(4000)	varchar(65500)	text	text	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	varchar	text	string	Nullable(String)	string	string	varchar(65533)
 text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)
 timestamp	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp_ntz	text	timestamp	Nullable(DateTime64(6))	timestamp	timestamp	datetime
 timestampz	timestamp(9)	timestamptz	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime
