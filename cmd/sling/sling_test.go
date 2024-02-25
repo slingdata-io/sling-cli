@@ -38,22 +38,22 @@ type testConn struct {
 }
 
 var dbConnMap = map[dbio.Type]testConn{
-	dbio.TypeDbPostgres:   {name: "postgres"},
-	dbio.TypeDbRedshift:   {name: "redshift"},
-	dbio.TypeDbStarRocks:  {name: "starrocks", useBulk: g.Bool(false)},
-	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
-	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
-	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
-	dbio.TypeDbBigTable:   {name: "bigtable"},
-	dbio.TypeDbBigQuery:   {name: "bigquery"},
-	dbio.TypeDbSnowflake:  {name: "snowflake"},
-	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
-	dbio.TypeDbDuckDb:     {name: "duckdb"},
-	dbio.TypeDbMotherDuck: {name: "motherduck"},
-	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbAzure:      {name: "azuresql"},
 	dbio.TypeDbAzureDWH:   {name: "azuredwh"},
+	dbio.TypeDbBigQuery:   {name: "bigquery"},
+	dbio.TypeDbBigTable:   {name: "bigtable"},
 	dbio.TypeDbClickhouse: {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbDuckDb:     {name: "duckdb"},
+	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbMotherDuck: {name: "motherduck"},
+	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
+	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
+	dbio.TypeDbPostgres:   {name: "postgres"},
+	dbio.TypeDbRedshift:   {name: "redshift"},
+	dbio.TypeDbSnowflake:  {name: "snowflake"},
+	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
+	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
+	dbio.TypeDbStarRocks:  {name: "starrocks", useBulk: g.Bool(false)},
 }
 
 func init() {

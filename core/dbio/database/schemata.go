@@ -613,3 +613,12 @@ func HasVariedCase(text string) bool {
 
 	return hasUpper && hasLower
 }
+
+func QuoteNames(dialect dbio.Type, names ...string) (newNames []string) {
+	q := GetQualifierQuote(dialect)
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = q + strings.ReplaceAll(names[i], q, "") + q
+	}
+	return newNames
+}

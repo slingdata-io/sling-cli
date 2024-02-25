@@ -80,7 +80,7 @@ func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {
 
 	g.Debug("waiting for schema change to finish")
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second)
 		data, err := conn.Query(sql + noDebugKey)
 		if err != nil {
 			return g.Error(err, "could not fetch 'SHOW ALTER TABLE' to get schema change status.")
@@ -94,6 +94,9 @@ func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {
 			break
 		}
 	}
+
+	env.Println("")
+
 	return
 }
 
@@ -103,9 +106,11 @@ func (conn *StarRocksConn) AddMissingColumns(table Table, newCols iop.Columns) (
 		return
 	}
 
-	err = conn.WaitAlterTable(table)
-	if err != nil {
-		return ok, g.Error(err, "error while waiting for schema change")
+	if ok {
+		err = conn.WaitAlterTable(table)
+		if err != nil {
+			return ok, g.Error(err, "error while waiting for schema change")
+		}
 	}
 
 	return
@@ -170,7 +175,8 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 				case ds.Columns[i].Type.IsNumber():
 					return newVal
 				case ds.Columns[i].Type.IsBool():
-					return newVal
+					// return newVal
+					return `"` + newVal + `"` // since we're storing bools as string
 				case ds.Columns[i].Type == iop.BinaryType:
 					return `X'` + hex.EncodeToString([]byte(newVal)) + `'`
 				default:

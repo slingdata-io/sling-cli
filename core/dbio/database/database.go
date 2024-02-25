@@ -2835,8 +2835,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			"type", col.DbType,
 		)
 		// for starrocks
-		fields := append(pKey, conn.Self().Quote(colNameTemp))
-		updatedFields := append(pKey, oldColCasted)
+		fields := append(table.Columns.Names(), colNameTemp)
+		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		updatedFields := append(
+			QuoteNames(conn.GetType(), table.Columns.Names()...), // add quotes
+			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.update"),
@@ -2870,8 +2873,13 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		}
 
 		// for starrocks
-		fields = append(pKey, conn.Self().Quote(col.Name))
-		updatedFields = append(pKey, conn.Self().Quote(colNameTemp))
+		otherNames := lo.Filter(table.Columns.Names(), func(name string, i int) bool {
+			return !strings.EqualFold(name, col.Name)
+		})
+		fields = append(otherNames, col.Name)
+		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		updatedFields = append(otherNames, colNameTemp)
+		updatedFields = QuoteNames(conn.GetType(), updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
@@ -3070,6 +3078,8 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 			"column", conn.Self().Quote(col.Name),
 			"type", nativeType,
 		)
+
+		g.Debug("adding new column: %s", col.Name)
 		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "could not add column %s to table %s", col.Name, table.FullName())
