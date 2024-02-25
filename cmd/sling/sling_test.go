@@ -403,8 +403,12 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	}
 
 	// rewrite correctly for displaying in Github
+	dataT, err := iop.ReadCsv(templateFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
 	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
-	c.WriteStream(data.Stream())
+	c.WriteStream(dataT.Stream())
 
 	for i, rec := range data.Records() {
 		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
