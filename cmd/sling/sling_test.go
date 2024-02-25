@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var testMux sync.Mutex
+
 type testDB struct {
 	name string
 	conn d.Connection
@@ -403,12 +405,14 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	}
 
 	// rewrite correctly for displaying in Github
+	testMux.Lock()
 	dataT, err := iop.ReadCsv(templateFilePath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
 	c.WriteStream(dataT.Stream())
+	testMux.Unlock()
 
 	for i, rec := range data.Records() {
 		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
@@ -537,12 +541,10 @@ func TestSuiteClickhouse(t *testing.T) {
 	testSuite(dbio.TypeDbClickhouse, t)
 }
 
-var mux sync.Mutex
-
 // generate large dataset or use cache
 func generateLargeDataset(numCols, numRows int, force bool) (path string, err error) {
-	mux.Lock()
-	defer mux.Unlock()
+	testMux.Lock()
+	defer testMux.Unlock()
 
 	var data iop.Dataset
 
