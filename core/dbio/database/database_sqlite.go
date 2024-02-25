@@ -234,7 +234,7 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
 	indexSQL := g.R(
 		conn.GetTemplateValue("core.create_unique_index"),
-		"index", strings.Join(pkFields, "_")+"_idx",
+		"index", strings.Join(pkFields, "_")+g.RandSuffix("_", 3)+"_idx",
 		"table", indexTable,
 		"cols", strings.Join(pkFieldsQ, ", "),
 	)
