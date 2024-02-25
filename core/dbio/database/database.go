@@ -2732,8 +2732,8 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 // only on new data being inserted... would need a complete
 // stats of the target table to properly optimize.
 func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns) (ok bool, ddlParts []string, err error) {
-	if len(table.Columns) != len(newColumns) {
-		return false, ddlParts, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
+	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
+		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
 	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
 		return false, ddlParts, nil
 	}
@@ -2746,9 +2746,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
-			return false, ddlParts, g.Error("column not found in table: %s", col.Name)
-		} else if !strings.EqualFold(col.Name, newCol.Name) {
-			return false, ddlParts, g.Error("column name mismatch, %s != %s", col.Name, newCol.Name)
+			continue
 		} else if col.Type == newCol.Type {
 			continue
 		}
@@ -3058,16 +3056,7 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 		return
 	}
 
-	colsMap := lo.KeyBy(cols, func(c iop.Column) string {
-		return strings.ToLower(c.Name)
-	})
-
-	missing := iop.Columns{}
-	for _, col := range newCols {
-		if _, ok := colsMap[strings.ToLower(col.Name)]; !ok {
-			missing = append(missing, col)
-		}
-	}
+	missing := cols.GetMissing(newCols...)
 
 	// generate alter commands
 	for _, col := range missing {

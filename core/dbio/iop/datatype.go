@@ -197,6 +197,17 @@ func (cols Columns) Sourced() (sourced bool) {
 	return sourced
 }
 
+// GetMissing returns the missing columns from newCols
+func (cols Columns) GetMissing(newCols ...Column) (missing Columns) {
+	fm := cols.FieldMap(true)
+	for _, col := range newCols {
+		if _, ok := fm[strings.ToLower(col.Name)]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	return missing
+}
+
 // IsDummy returns true if the columns are injected by CreateDummyFields
 func (cols Columns) IsDummy() bool {
 	for _, col := range cols {
