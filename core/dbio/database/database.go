@@ -1510,7 +1510,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = iop.Columns{}
-	colData, err := conn.SumbitTemplate(
+	colData, err := conn.Self().SumbitTemplate(
 		"single", conn.template.Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1586,7 +1586,7 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns i
 		return columns, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	return conn.GetTableColumns(&table, fields...)
+	return conn.Self().GetTableColumns(&table, fields...)
 }
 
 // GetColumnsFull returns columns for given table. `tableName` should

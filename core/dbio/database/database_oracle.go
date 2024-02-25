@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
@@ -76,6 +77,24 @@ func (conn *OracleConn) ExecMultiContext(ctx context.Context, q string, args ...
 	result = Res
 
 	return
+}
+
+func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+	if err != nil {
+		// try synomym
+		conn.SetProp("get_synonym", "true")
+		columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+		conn.SetProp("get_synonym", "false")
+	}
+	return
+}
+
+func (conn *OracleConn) SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
+		name = "columns_synonym"
+	}
+	return conn.BaseConn.SumbitTemplate(level, templateMap, name, values)
 }
 
 // BulkImportStream bulk import stream
