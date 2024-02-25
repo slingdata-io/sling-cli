@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -491,20 +492,38 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		opt := connection.DiscoverOptions{
 			Schema:    cast.ToString(c.Vals["schema"]),
+			Stream:    cast.ToString(c.Vals["stream"]),
 			Folder:    cast.ToString(c.Vals["folder"]),
 			Filter:    cast.ToString(c.Vals["filter"]),
 			Recursive: cast.ToBool(c.Vals["recursive"]),
 		}
 
 		var streamNames []string
-		streamNames, err = ec.Discover(name, opt)
+		var schemata database.Schemata
+		streamNames, schemata, err = ec.Discover(name, opt)
 		if err != nil {
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 
-		g.Info("Found %d streams:", len(streamNames))
-		for _, sn := range streamNames {
-			println(g.F(" - %s", sn))
+		if tables := lo.Values(schemata.Tables()); len(tables) > 0 {
+			if opt.Stream != "" {
+				println(tables[0].Columns.PrettyTable())
+			} else {
+				header := []string{"ID", "Schema", "Name", "Type", "Columns"}
+				rows := lo.Map(tables, func(table database.Table, i int) []any {
+					tableType := lo.Ternary(table.IsView, "view", "table")
+					if table.Dialect.DBNameUpperCase() {
+						tableType = strings.ToUpper(tableType)
+					}
+					return []any{i + 1, table.Schema, table.Name, tableType, len(table.Columns)}
+				})
+				println(g.PrettyTable(header, rows))
+			}
+		} else {
+			g.Info("Found %d streams:", len(streamNames))
+			for _, sn := range streamNames {
+				println(g.F(" - %s", sn))
+			}
 		}
 
 	case "":

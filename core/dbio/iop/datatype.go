@@ -155,6 +155,15 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 	return
 }
 
+// PrettyTable returns a text pretty table
+func (cols Columns) PrettyTable() (output string) {
+	header := []string{"ID", "Column Name", "Native Type", "General Type"}
+	rows := lo.Map(cols, func(col Column, i int) []any {
+		return []any{col.Position, col.Name, col.DbType, col.Type}
+	})
+	return g.PrettyTable(header, rows)
+}
+
 // GetKeys gets key columns
 func (cols Columns) GetKeys(keyType KeyType) Columns {
 	keys := Columns{}

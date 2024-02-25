@@ -173,6 +173,10 @@ func (data *Dataset) Print(limit int) {
 	}
 }
 
+func (data *Dataset) PrettyTable() (output string) {
+	return g.PrettyTable(data.Columns.Names(), data.Rows)
+}
+
 // WriteCsv writes to a writer
 func (data *Dataset) WriteCsv(dest io.Writer) (tbw int, err error) {
 	w := csv.NewWriter(dest)

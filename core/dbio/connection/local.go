@@ -13,6 +13,7 @@ import (
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -261,6 +262,7 @@ func (ec *EnvConns) List() string {
 }
 
 type DiscoverOptions struct {
+	Stream    string
 	Filter    string
 	Schema    string
 	Folder    string
@@ -268,14 +270,14 @@ type DiscoverOptions struct {
 	discover  bool
 }
 
-func (ec *EnvConns) Discover(name string, opt DiscoverOptions) (streamNames []string, err error) {
+func (ec *EnvConns) Discover(name string, opt DiscoverOptions) (streamNames []string, schemata database.Schemata, err error) {
 	opt.discover = true
-	_, streamNames, err = ec.testDiscover(name, opt)
+	_, streamNames, schemata, err = ec.testDiscover(name, opt)
 	return
 }
 
 func (ec *EnvConns) Test(name string) (ok bool, err error) {
-	ok, _, err = ec.testDiscover(name, DiscoverOptions{})
+	ok, _, _, err = ec.testDiscover(name, DiscoverOptions{})
 	return
 }
 
@@ -289,8 +291,9 @@ func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 	return
 }
 
-func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, streamNames []string, err error) {
+func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, streamNames []string, schemata database.Schemata, err error) {
 	discover := opt.discover
+	stream := opt.Stream
 	schema := opt.Schema
 	folder := opt.Folder
 	filter := opt.Filter
@@ -298,7 +301,7 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 
 	conn, ok1 := ec.GetConnEntry(name)
 	if !ok1 || name == "" {
-		return ok, streamNames, g.Error("Invalid Connection name: %s", name)
+		return ok, streamNames, schemata, g.Error("Invalid Connection name: %s", name)
 	}
 
 	switch {
@@ -306,16 +309,24 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 	case conn.Connection.Type.IsDb():
 		dbConn, err := conn.Connection.AsDatabase()
 		if err != nil {
-			return ok, streamNames, g.Error(err, "could not initiate %s", name)
+			return ok, streamNames, schemata, g.Error(err, "could not initiate %s", name)
 		}
 		err = dbConn.Connect()
 		if err != nil {
-			return ok, streamNames, g.Error(err, "could not connect to %s", name)
+			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
 		}
 		if discover {
-			schemata, err := dbConn.GetSchemata(schema, "")
+			if stream != "" {
+				table, err := database.ParseTableName(stream, dbConn.GetType())
+				if err != nil {
+					return ok, streamNames, schemata, g.Error(err, "could not parse table name %s", stream)
+				}
+				schema = table.Schema
+				stream = table.Name
+			}
+			schemata, err = dbConn.GetSchemata(schema, stream)
 			if err != nil {
-				return ok, streamNames, g.Error(err, "could not discover %s", name)
+				return ok, streamNames, schemata, g.Error(err, "could not discover %s", name)
 			}
 			for _, table := range schemata.Tables() {
 				streamNames = append(streamNames, table.FullName())
@@ -325,17 +336,17 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 	case conn.Connection.Type.IsFile():
 		fileClient, err := conn.Connection.AsFile()
 		if err != nil {
-			return ok, streamNames, g.Error(err, "could not initiate %s", name)
+			return ok, streamNames, schemata, g.Error(err, "could not initiate %s", name)
 		}
 		err = fileClient.Init(context.Background())
 		if err != nil {
-			return ok, streamNames, g.Error(err, "could not connect to %s", name)
+			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
 		url := conn.Connection.URL()
 		if folder != "" {
 			if !strings.HasPrefix(folder, string(fileClient.FsType())+"://") {
-				return ok, streamNames, g.Error("need to use proper URL for folder path. Example -> %s/my-folder", url)
+				return ok, streamNames, schemata, g.Error("need to use proper URL for folder path. Example -> %s/my-folder", url)
 			}
 			url = folder
 		}
@@ -346,11 +357,11 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 			streamNames, err = fileClient.List(url)
 		}
 		if err != nil {
-			return ok, streamNames, g.Error(err, "could not connect to %s", name)
+			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
 	default:
-		return ok, streamNames, g.Error("Unhandled connection type: %s", conn.Connection.Type)
+		return ok, streamNames, schemata, g.Error("Unhandled connection type: %s", conn.Connection.Type)
 	}
 
 	if discover {

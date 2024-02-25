@@ -223,6 +223,11 @@ var cliConns = &g.CliSC{
 					Description: "discover streams in a specific schema (for database connections)",
 				},
 				{
+					Name:        "stream",
+					Type:        "string",
+					Description: "discover columns in a specific stream",
+				},
+				{
 					Name:        "recursive",
 					ShortName:   "",
 					Type:        "bool",
