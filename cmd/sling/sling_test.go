@@ -19,6 +19,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	d "github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
@@ -171,7 +172,23 @@ func runOneTask(t *testing.T, file g.FileItem) {
 		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
 	}
 
-	// g.PP(task)
+	// process PostSQL for different drop_view syntax
+	dbConn, err := task.Config.TgtConn.AsDatabase()
+	if err == nil {
+		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+		if dbConn.GetType().DBNameUpperCase() {
+			table.Name = strings.ToUpper(table.Name)
+		}
+		viewName := table.FullName()
+		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
+		dropViewSQL = strings.TrimSpace(dropViewSQL)
+		task.Config.Target.Options.PostSQL = g.R(
+			task.Config.Target.Options.PostSQL,
+			"drop_view", dropViewSQL,
+		)
+	}
+
 	if g.AssertNoError(t, task.Err) {
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {

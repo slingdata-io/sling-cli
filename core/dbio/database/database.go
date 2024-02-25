@@ -3338,7 +3338,7 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 		// detect end
 		if char == ";" && !inQuote && !inComment() {
 			if strings.TrimSpace(currState) != "" {
-				sqls = append(sqls, strings.TrimSuffix(currState, ";"))
+				sqls = append(sqls, currState)
 			}
 			currState = ""
 		}
@@ -3346,7 +3346,7 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 
 	if len(currState) > 0 {
 		if strings.TrimSpace(currState) != "" {
-			sqls = append(sqls, strings.TrimSuffix(currState, ";"))
+			sqls = append(sqls, currState)
 		}
 	}
 

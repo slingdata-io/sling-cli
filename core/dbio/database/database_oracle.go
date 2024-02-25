@@ -62,7 +62,7 @@ func (conn *OracleConn) ExecMultiContext(ctx context.Context, q string, args ...
 
 	eG := g.ErrorGroup{}
 	for _, sql := range ParseSQLMultiStatements(q) {
-		// conn.AddLog(sql)
+		sql := strings.TrimSuffix(sql, ";")
 		res, err := conn.Self().ExecContext(ctx, sql, args...)
 		if err != nil {
 			eG.Capture(g.Error(err, "Error executing query"))
