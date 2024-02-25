@@ -37,7 +37,7 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "0.10.0"
+var DuckDbVersion = "0.9.2"
 var DuckDbUseTempFile = false
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
 var duckDbReadOnlyHint = "/* -readonly */"
@@ -111,6 +111,10 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	// init extensions
 	conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
+
+	if conn.GetType() == dbio.TypeDbMotherDuck {
+		conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)
+	}
 
 	return nil
 }
@@ -466,6 +470,9 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		errText := g.F("could not exec SQL for duckdb: %s\n%s\n%s", string(out), stderr.String(), sql)
 		if strings.Contains(errText, "version number") {
 			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.6.0\n" + errText
+		}
+		if conn.GetType() == dbio.TypeDbMotherDuck && string(out)+stderr.String() == "" && cmd.ProcessState.ExitCode() == 1 {
+			errText = "Perhaps your Motherduck token needs to be renewed?"
 		}
 		err = g.Error("exit code is %d", cmd.ProcessState.ExitCode())
 		return result, g.Error(err, errText)

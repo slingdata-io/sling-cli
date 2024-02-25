@@ -544,10 +544,10 @@ func TestSuiteDuckDb(t *testing.T) {
 	testSuite(dbio.TypeDbDuckDb, t)
 }
 
-func TestSuiteMotherDuck(t *testing.T) {
-	t.Parallel()
-	testSuite(dbio.TypeDbMotherDuck, t)
-}
+// func TestSuiteMotherDuck(t *testing.T) {
+// 	t.Parallel()
+// 	testSuite(dbio.TypeDbMotherDuck, t)
+// }
 
 func TestSuiteSQLServer(t *testing.T) {
 	t.Parallel()
