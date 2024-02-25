@@ -421,15 +421,6 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 		return
 	}
 
-	testNumbers := []int{}
-	if tns := os.Getenv("TEST_NUMS"); tns != "" {
-		for _, tn := range strings.Split(tns, ",") {
-			if testNumber := cast.ToInt(tn); testNumber > 0 {
-				testNumbers = append(testNumbers, testNumber)
-			}
-		}
-	}
-
 	// rewrite correctly for displaying in Github
 	testMux.Lock()
 	dataT, err := iop.ReadCsv(templateFilePath)
@@ -479,6 +470,25 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
+
+	testNumbers := []int{}
+	if tns := os.Getenv("TESTS"); tns != "" {
+		for _, tn := range strings.Split(tns, ",") {
+			if strings.HasSuffix(tn, "+") {
+				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
+
+				for i := range files {
+					if i+1 < start {
+						continue
+					}
+					testNumbers = append(testNumbers, i+1)
+				}
+			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
+				testNumbers = append(testNumbers, testNumber)
+			}
+		}
+	}
+
 	for i, file := range files {
 		if t.Failed() {
 			break
