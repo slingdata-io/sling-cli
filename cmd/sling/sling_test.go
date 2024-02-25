@@ -404,6 +404,15 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 		return
 	}
 
+	testNumbers := []int{}
+	if tns := os.Getenv("TEST_NUMS"); tns != "" {
+		for _, tn := range strings.Split(tns, ",") {
+			if testNumber := cast.ToInt(tn); testNumber > 0 {
+				testNumbers = append(testNumbers, testNumber)
+			}
+		}
+	}
+
 	// rewrite correctly for displaying in Github
 	testMux.Lock()
 	dataT, err := iop.ReadCsv(templateFilePath)
@@ -453,9 +462,11 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
-	for _, file := range files {
+	for i, file := range files {
 		if t.Failed() {
 			break
+		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
+			continue
 		}
 		runOneTask(t, file)
 	}
@@ -657,6 +668,6 @@ func generateLargeDataset(numCols, numRows int, force bool) (path string, err er
 }
 
 func TestGenerateWideFile(t *testing.T) {
-	_, err := generateLargeDataset(300, 10000, true)
+	_, err := generateLargeDataset(300, 100, true)
 	g.LogFatal(err)
 }
