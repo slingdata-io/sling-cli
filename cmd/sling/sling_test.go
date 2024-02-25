@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,10 +13,12 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	"syreclabs.com/go/faker"
 
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/csv"
 	d "github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
@@ -27,28 +30,28 @@ type testDB struct {
 }
 
 type testConn struct {
-	name   string
-	schema string
-	noBulk bool
+	name    string
+	schema  string
+	useBulk *bool
 }
 
 var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbPostgres:   {name: "postgres"},
 	dbio.TypeDbRedshift:   {name: "redshift"},
-	dbio.TypeDbStarRocks:  {name: "starrocks", noBulk: true},
+	dbio.TypeDbStarRocks:  {name: "starrocks", useBulk: g.Bool(false)},
 	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
 	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
 	dbio.TypeDbBigTable:   {name: "bigtable"},
 	dbio.TypeDbBigQuery:   {name: "bigquery"},
 	dbio.TypeDbSnowflake:  {name: "snowflake"},
-	dbio.TypeDbSQLite:     {name: "sqlite"},
+	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
 	dbio.TypeDbDuckDb:     {name: "duckdb"},
 	dbio.TypeDbMotherDuck: {name: "motherduck"},
-	dbio.TypeDbSQLServer:  {name: "sqlserver"},
+	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbAzure:      {name: "azuresql"},
 	dbio.TypeDbAzureDWH:   {name: "azuredwh"},
-	dbio.TypeDbClickhouse: {name: "clickhouse"},
+	dbio.TypeDbClickhouse: {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 }
 
 func init() {
@@ -373,7 +376,9 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	tempFilePath := g.F("/tmp/tests.%s.tsv", dbType.String())
 	folderPath := g.F("tests/suite/%s", dbType.String())
 	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
-	testTable := g.F("%s_test1k", dbType.String())
+	testTable := g.F("test1k_%s", dbType.String())
+	testWideFilePath, err := generateLargeDataset(300, 100, false)
+	g.LogFatal(err)
 
 	// generate files
 	os.RemoveAll(folderPath) // clean up
@@ -387,6 +392,7 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	fileContent = strings.ReplaceAll(fileContent, "[conn]", conn.name)
 	fileContent = strings.ReplaceAll(fileContent, "[schema]", testSchema)
 	fileContent = strings.ReplaceAll(fileContent, "[table]", testTable)
+	fileContent = strings.ReplaceAll(fileContent, "[wide_file_path]", testWideFilePath)
 
 	err = os.WriteFile(tempFilePath, []byte(fileContent), 0777)
 	g.LogFatal(err)
@@ -395,6 +401,10 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	if !g.AssertNoError(t, err) {
 		return
 	}
+
+	// rewrite correctly for displaying in Github
+	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
+	c.WriteStream(data.Stream())
 
 	for i, rec := range data.Records() {
 		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
@@ -406,8 +416,8 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 			primaryKey = strings.Split(val, ",")
 		}
 
-		if conn.noBulk {
-			targetOptions["use_bulk"] = false
+		if conn.useBulk != nil {
+			targetOptions["use_bulk"] = *conn.useBulk
 		}
 
 		task := g.M(
@@ -521,4 +531,126 @@ func TestSuiteSQLServer(t *testing.T) {
 func TestSuiteClickhouse(t *testing.T) {
 	t.Parallel()
 	testSuite(dbio.TypeDbClickhouse, t)
+}
+
+var mux sync.Mutex
+
+// generate large dataset or use cache
+func generateLargeDataset(numCols, numRows int, force bool) (path string, err error) {
+	mux.Lock()
+	defer mux.Unlock()
+
+	var data iop.Dataset
+
+	path = g.F("/tmp/dataset_%dx%d.csv", numRows, numCols)
+	if _, err = os.Stat(path); err == nil && !force {
+		return
+	}
+
+	g.Info("generating %s", path)
+
+	type FakeField struct {
+		name string
+		gen  func() interface{}
+	}
+
+	words := make([]string, 100)
+	for i := range words {
+		words[i] = g.RandString(g.AlphaRunes, g.RandInt(15))
+		if len(words[i]) == 10 {
+			words[i] = words[i] + "\n"
+		}
+	}
+
+	fieldsFuncTemplate := []*FakeField{
+		{"name", func() interface{} { return faker.Name().Name() }},
+		{"url", func() interface{} { return faker.Internet().Url() }},
+		{"date_time", func() interface{} { return faker.Date().Forward(100 * time.Minute).Format("2006-01-02 15:04:05") }},
+		{"address", func() interface{} { return faker.Address().SecondaryAddress() }},
+		{"price", func() interface{} { return faker.Commerce().Price() }},
+		{"my_int", func() interface{} { return faker.Number().NumberInt64(5) }},
+		{"email", func() interface{} { return faker.Internet().Email() }},
+		{"creditcardexpirydate", func() interface{} { return faker.Date().Forward(1000000 * time.Minute).Format("2006-01-02") }},
+		{"latitude", func() interface{} { return faker.Address().Latitude() }},
+		{"longitude", func() interface{} { return faker.Address().Longitude() }},
+		{"interested", func() interface{} { return g.RandInt(2) == 1 }},
+		{"paragraph", func() interface{} { return strings.Join(words[:g.RandInt(100)], " ") }},
+	}
+
+	fieldsFunc := make([]*FakeField, numCols)
+	for i := range fieldsFunc {
+		fieldsFunc[i] = fieldsFuncTemplate[i%len(fieldsFuncTemplate)]
+	}
+
+	makeRow := func() (row []interface{}) {
+		row = make([]interface{}, len(fieldsFunc))
+		c := 0
+		for _, ff := range fieldsFunc {
+			row[c] = ff.gen()
+			c++
+		}
+
+		return row
+	}
+
+	getFields := func() (fields []string) {
+		fields = make([]string, len(fieldsFunc))
+		for j, ff := range fieldsFunc {
+			fields[j] = g.F("%s_%03d", (*ff).name, j+1)
+		}
+		return
+	}
+
+	data = iop.NewDataset(nil)
+	data.Rows = make([][]interface{}, numRows)
+	data.SetFields(getFields())
+
+	for i := 0; i < 50; i++ {
+		data.Rows[i] = makeRow()
+	}
+
+	file, _ := os.Create(path)
+
+	w := csv.NewWriter(file)
+	defer w.Flush()
+
+	tbw, err := w.Write(append([]string{"id"}, data.GetFields()...))
+	if err != nil {
+		return path, g.Error(err, "error write row to csv file")
+	}
+
+	nullCycle := 0
+	for i := 0; i < numRows; i++ {
+		rec := make([]string, numCols+1)
+		rec[0] = cast.ToString(i + 1) // id
+		for j := 1; j < numCols+1; j++ {
+			nullCycle++
+			if nullCycle%100 == 0 {
+				rec[j] = ""
+			} else {
+				val := data.Rows[i%50][j-1]
+				rec[j] = data.Sp.CastToString(j, val, data.Columns[j].Type)
+			}
+		}
+
+		bw, err := w.Write(rec)
+		if err != nil {
+			return path, g.Error(err, "error write row to csv file")
+		}
+		tbw = tbw + bw
+
+		if i%100000 == 0 {
+			print(g.F("%d ", i))
+		}
+	}
+
+	println()
+
+	return path, nil
+
+}
+
+func TestGenerateWideFile(t *testing.T) {
+	_, err := generateLargeDataset(300, 10000, true)
+	g.LogFatal(err)
 }
