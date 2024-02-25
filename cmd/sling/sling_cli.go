@@ -320,7 +320,7 @@ func Track(event string, props ...map[string]interface{}) {
 		"application", "sling-cli",
 		"version", core.Version,
 		"package", getSlingPackage(),
-		"os", runtime.GOOS,
+		"os", runtime.GOOS+"/"+runtime.GOARCH,
 		"emit_time", time.Now().UnixMicro(),
 		"user_id", machineID,
 	)
@@ -380,6 +380,7 @@ func main() {
 	}()
 
 	exit := func() {
+		time.Sleep(50 * time.Millisecond) // so logger can flush
 		os.Exit(exitCode)
 	}
 
@@ -453,7 +454,9 @@ func cliInit() int {
 
 			// set transaction
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
-			evt.Transaction = cast.ToString(taskMap["type"])
+			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
+			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
+			evt.Transaction = g.F("%s (%s => %s)", taskMap["type"], sourceType, targetType)
 
 			E, ok := err.(*g.ErrType)
 			if ok {
@@ -476,10 +479,6 @@ func cliInit() int {
 
 			sentry.ConfigureScope(func(scope *sentry.Scope) {
 				scope.SetUser(sentry.User{ID: machineID})
-
-				sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
-				targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-
 				scope.SetTag("source_type", sourceType)
 				scope.SetTag("target_type", targetType)
 				scope.SetTag("mode", cast.ToString(taskMap["mode"]))
