@@ -54,7 +54,7 @@ var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbSnowflake:  {name: "snowflake"},
 	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
 	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
-	dbio.TypeDbStarRocks:  {name: "starrocks", useBulk: g.Bool(false)},
+	dbio.TypeDbStarRocks:  {name: "starrocks"},
 }
 
 func init() {

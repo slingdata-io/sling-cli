@@ -26,7 +26,8 @@ import (
 // StarRocksConn is a StarRocks connection
 type StarRocksConn struct {
 	BaseConn
-	URL string
+	URL    string
+	fePort string
 }
 
 // Init initiates the object
@@ -396,11 +397,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// set format to JSON
 	fs.SetProp("format", "json")
-	// fs.SetProp("file_max_rows", "50000")
+	fs.SetProp("file_max_rows", "50000")
 	if val := conn.GetProp("file_max_rows"); val != "" {
 		fs.SetProp("file_max_rows", val)
 	}
-	// fs.SetProp("file_max_bytes", "10000000")
+	fs.SetProp("file_max_bytes", "10000000")
 	if val := conn.GetProp("file_max_bytes"); val != "" {
 		fs.SetProp("file_max_bytes", val)
 	}
@@ -467,6 +468,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 		timeout := 300
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
+		if conn.fePort != "" {
+			// this is the fix to not freeze, call the redirected port directly
+			apiURL = strings.ReplaceAll(apiURL, fu.U.Port(), conn.fePort)
+		}
+
 		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, timeout)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
@@ -474,6 +480,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				// g.Debug("FE url redirected to %s://%s", redirectUrl.Scheme, redirectUrl.Host)
 				redirectUrlStr := strings.ReplaceAll(redirectUrl.String(), "127.0.0.1", fu.U.Hostname())
 				redirectUrl, _ = url.Parse(redirectUrlStr)
+				g.Warn("StarRocks redirected the API call to '%s://%s'. Please use that as your FE url.", redirectUrl.Scheme, redirectUrl.Host)
+				conn.fePort = redirectUrl.Port()
 				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
 				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
