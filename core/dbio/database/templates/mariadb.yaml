@@ -1,6 +1,6 @@
 core:
   drop_table: drop table if exists {table}
-  drop_view: drop table if exists {view}
+  drop_view: drop view if exists {view}
   create_table: create table if not exists {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
