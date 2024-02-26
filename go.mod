@@ -20,7 +20,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.15.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.74
+	github.com/flarco/g v0.1.75
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/godror/godror v0.31.0
