@@ -6,7 +6,7 @@ set -e  # exit on error
 # export _DEBUG_CALLER_LEVEL=2
 export SLING_LOADED_AT_COLUMN=TRUE
 cd cmd/sling
-go test -run TestSuite
+go test -parallel 5 -run TestSuite
 
 cd -
 
