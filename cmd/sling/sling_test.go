@@ -443,11 +443,7 @@ func TestSuiteMariaDB(t *testing.T) {
 
 func TestSuiteOracle(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("CI") == "TESTING" {
-		t.Skip("Skipping testing in CI environment")
-	} else {
-		testSuite(dbio.TypeDbOracle, t)
-	}
+	testSuite(dbio.TypeDbOracle, t)
 }
 
 // func TestSuiteBigTable(t *testing.T) {
