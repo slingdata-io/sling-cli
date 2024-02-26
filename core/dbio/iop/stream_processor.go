@@ -47,7 +47,7 @@ type streamConfig struct {
 	SkipBlankLines bool            `json:"skip_blank_lines"`
 	Delimiter      string          `json:"delimiter"`
 	FileMaxRows    int64           `json:"file_max_rows"`
-	MaxDecimals    float64         `json:"max_decimals"`
+	MaxDecimals    int             `json:"max_decimals"`
 	Flatten        bool            `json:"flatten"`
 	FieldsPerRec   int             `json:"fields_per_rec"`
 	Jmespath       string          `json:"jmespath"`
@@ -73,7 +73,7 @@ func NewStreamProcessor() *StreamProcessor {
 		accentTransformer: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
 	}
 	if val := os.Getenv("MAX_DECIMALS"); val != "" && val != "-1" {
-		sp.config.MaxDecimals = cast.ToFloat64(math.Pow10(cast.ToInt(os.Getenv("MAX_DECIMALS"))))
+		sp.config.MaxDecimals = cast.ToInt(os.Getenv("MAX_DECIMALS"))
 	}
 
 	// if val is '0400', '0401'. Such as codes.
@@ -185,7 +185,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["max_decimals"] != "" && configMap["max_decimals"] != "-1" {
 		var err error
-		sp.config.MaxDecimals, err = cast.ToFloat64E(math.Pow10(cast.ToInt(configMap["max_decimals"])))
+		sp.config.MaxDecimals, err = cast.ToIntE(configMap["max_decimals"])
 		if err != nil {
 			sp.config.MaxDecimals = -1
 		}
@@ -559,15 +559,16 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(fVal)
 		}
 
-		if float64(intVal) == fVal {
+		isInt := float64(intVal) == fVal
+		if isInt {
 			cs.IntCnt++ // is an integer
 		} else {
 			cs.DecCnt++
 		}
 
-		// max 9 decimals for bigquery compatibility
-		if sp.config.MaxDecimals > -1 {
-			nVal = cast.ToString(math.Round(fVal*sp.config.MaxDecimals) / sp.config.MaxDecimals)
+		if sp.config.MaxDecimals > -1 && !isInt {
+			format := "%." + cast.ToString(sp.config.MaxDecimals) + "f"
+			nVal = g.F(format, fVal)
 		} else {
 			nVal = cast.ToString(val) // use string to keep accuracy
 		}
@@ -645,7 +646,8 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
 		} else if sp.config.MaxDecimals > -1 {
 			fVal, _ := sp.toFloat64E(val)
-			val = math.Round(fVal*sp.config.MaxDecimals) / sp.config.MaxDecimals
+			format := "%." + cast.ToString(sp.config.MaxDecimals) + "f"
+			val = g.F(format, fVal)
 		}
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)

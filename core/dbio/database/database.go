@@ -2976,7 +2976,6 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	if err != nil {
 		return g.Error(err, "error running CompareChecksums query")
 	}
-	// g.P(data.Rows[0])
 
 	eg := g.ErrorGroup{}
 	for i, col := range data.Columns {
@@ -2995,7 +2994,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
-				eg.Add(g.Error("checksum failure for %s (sling-side vs db-side): %d != %d -- (%s)", col.Name, checksum1, checksum2, exprMap[strings.ToLower(col.Name)]))
+				eg.Add(g.Error("checksum failure for %s (sling-side vs db-side): %d != %d -- (%s)\n%#v", col.Name, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], data.Rows[0]))
 			}
 		}
 	}
