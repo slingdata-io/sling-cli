@@ -105,11 +105,8 @@ func (t *BaseTransaction) Exec(sql string, args ...interface{}) (result sql.Resu
 // QueryContext queries rows
 func (t *BaseTransaction) QueryContext(ctx context.Context, q string, args ...interface{}) (result *sqlx.Rows, err error) {
 	t.log = append(t.log, q)
-	if strings.Contains(q, noDebugKey) {
-		g.Trace(q)
-	} else {
-		g.Debug(q)
-	}
+
+	t.Conn.Base().LogSQL(q, args...)
 	result, err = t.Tx.QueryxContext(ctx, q, args...)
 	if err != nil {
 		err = g.Error(err, "Error executing query")
@@ -124,11 +121,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		return
 	}
 
-	if strings.Contains(q, noDebugKey) {
-		g.Trace(q)
-	} else {
-		g.Debug(CleanSQL(t.Conn, q), args...)
-	}
+	t.Conn.Base().LogSQL(q, args...)
 
 	t.log = append(t.log, q)
 	result, err = t.Tx.ExecContext(ctx, q, args...)
@@ -136,7 +129,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		if strings.Contains(q, noDebugKey) && !g.IsDebugLow() {
 			err = g.Error(err, "Error executing query")
 		} else {
-			err = g.Error(err, "Error executing "+CleanSQL(t.Conn, q))
+			err = g.Error(err, "Error executing: "+CleanSQL(t.Conn, q))
 		}
 	}
 
@@ -283,10 +276,7 @@ func InsertStream(conn Connection, tx *BaseTransaction, tableFName string, ds *i
 func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 
-	context := conn.Context()
-	if tx != nil {
-		context = tx.Context()
-	}
+	context := ds.Context
 
 	// in case schema change is needed, cannot alter while inserting
 	mux := ds.Context.Mux
@@ -295,7 +285,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	}
 	_ = mux
 
-	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) error {
+	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) {
 		var err error
 		defer context.Wg.Write.Done()
 
@@ -304,7 +294,9 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 
 		insFields, err := conn.ValidateColumnNames(columns.Names(), bColumns.Names(), true)
 		if err != nil {
-			return g.Error(err, "columns mismatch")
+			err = g.Error(err, "columns mismatch")
+			context.CaptureErr(err)
+			return
 		}
 
 		insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insFields, len(rows))
@@ -319,8 +311,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		if err != nil {
 			err = g.Error(err, "Error in PrepareContext")
 			context.CaptureErr(err)
-			context.Cancel()
-			return context.Err()
+			return
 		}
 
 		vals := []interface{}{}
@@ -347,8 +338,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				})),
 			))
 			context.CaptureErr(err)
-			context.Cancel()
-			return context.Err()
+			return
 		}
 
 		// close statement
@@ -359,9 +349,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				fmt.Sprintf("stmt.Close: %s", insertTemplate),
 			)
 			context.CaptureErr(err)
-			context.Cancel()
 		}
-		return context.Err()
 	}
 
 	g.Trace("batchRows")
@@ -426,10 +414,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	if len(batchRows) > 0 {
 		g.Trace("remaining batchSize %d", len(batchRows))
 		context.Wg.Write.Add()
-		err = insertBatch(batch.Columns, batchRows)
-		if err != nil {
-			return count - cast.ToUint64(len(batchRows)), g.Error(err, "insertBatch")
-		}
+		insertBatch(batch.Columns, batchRows)
 	}
 
 	context.Wg.Write.Wait()

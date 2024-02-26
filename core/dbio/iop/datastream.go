@@ -774,7 +774,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("%s, csv stream provided is empty", ds.ID)
+		g.Debug("csv stream provided is empty")
 		ds.SetReady()
 		ds.Close()
 		return nil
@@ -795,7 +795,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 			c.File.Close()
 			return false
 		} else if err != nil {
-			it.Context.CaptureErr(g.Error(err, "Error reading file"))
+			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
 			return false
 		}
 

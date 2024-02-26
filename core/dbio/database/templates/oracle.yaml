@@ -98,6 +98,20 @@ metadata:
       and table_name = '{table}'
     order by column_id
 
+  # since joining in above in 'columns` slows things down
+  columns_synonym: |
+    select
+      col.column_name,
+      col.data_type,
+      coalesce(col.data_precision, col.data_length) as precision,
+      col.data_scale as scale
+    from sys.all_tab_columns col
+    inner join sys.all_synonyms syn
+      on syn.table_owner = col.owner
+      and syn.table_name = col.table_name
+    where syn.owner = '{schema}' and syn.synonym_name = '{table}'
+    order by col.column_id
+
   primary_keys: |
     SELECT
       cons.constraint_name as pk_name,
@@ -143,24 +157,44 @@ metadata:
     order by col.owner, col.table_name, col.column_id
 
   schemata: |
-    select
-      col.owner as schema_name,
-      col.table_name as table_name,
-      case
-        when views.view_name is null then 'false'
-        else 'true'
-      end as is_view,
-      col.column_name as column_name,
-      col.data_type as data_type,
-      col.column_id as position
-    from sys.all_tab_columns col 
-    left join sys.all_views views
-      on views.owner = col.owner
-      and views.view_name = col.table_name
-    where 1=1
-      {{if .schema -}} and col.owner = '{schema}' {{- end}}
-      {{if .tables -}} and table_name in ({tables}) {{- end}}
-    order by col.owner, col.table_name, col.column_id
+    select * from (
+      (select
+        col.owner as schema_name,
+        col.table_name as table_name,
+        case
+          when views.view_name is null then 'false'
+          else 'true'
+        end as is_view,
+        col.column_name as column_name,
+        col.data_type as data_type,
+        col.column_id as position
+      from sys.all_tab_columns col 
+      left join sys.all_views views
+        on views.owner = col.owner
+        and views.view_name = col.table_name
+      where 1=1
+        {{if .schema -}} and col.owner = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+      )
+
+      union all
+
+      (select
+        syn.owner as schema_name,
+        syn.synonym_name as table_name,
+        'false' as is_view,
+        col.column_name as column_name,
+        col.data_type as data_type,
+        col.column_id as position
+      from sys.all_tab_columns col
+      inner join sys.all_synonyms syn
+        on syn.table_owner = col.owner
+        and syn.table_name = col.table_name
+      where 1=1
+        {{if .schema -}} and syn.owner = '{schema}' {{- end}}
+        {{if .tables -}} and syn.synonym_name in ({tables}) {{- end}})
+    )
+    order by 1, 2, position
   
   sessions:
     select s.sid, s.serial# as serial,

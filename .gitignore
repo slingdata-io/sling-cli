@@ -26,3 +26,4 @@ demo/sling.demo.2023.10.screenstudio
 ./sling
 core/dbio/filesys/test/dataset1M.csv
 core/dbio/filesys/test/dataset100k.csv
+cmd/sling/tests/suite/

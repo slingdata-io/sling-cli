@@ -158,7 +158,16 @@ func (pw *ParquetWriter) WriteRow(row []any) error {
 			switch valT := row[i].(type) {
 			case time.Time:
 				if row[i] != nil {
-					row[i] = valT.UnixNano()
+					switch col.DbPrecision {
+					case 1, 2, 3:
+						row[i] = valT.UnixMilli()
+					case 4, 5, 6:
+						row[i] = valT.UnixMicro()
+					case 7, 8, 9:
+						row[i] = valT.UnixNano()
+					default:
+						row[i] = valT.UnixNano()
+					}
 				}
 			}
 		}
@@ -346,7 +355,16 @@ func nodeOf(col Column, tag []string) parquet.Node {
 	case reflect.TypeOf(uuid.UUID{}):
 		return parquet.UUID()
 	case reflect.TypeOf(time.Time{}):
-		return parquet.Timestamp(parquet.Nanosecond)
+		newType := parquet.Timestamp(parquet.Nanosecond)
+		switch col.DbPrecision {
+		case 1, 2, 3:
+			newType = parquet.Timestamp(parquet.Millisecond)
+		case 4, 5, 6:
+			newType = parquet.Timestamp(parquet.Microsecond)
+		case 7, 8, 9:
+			newType = parquet.Timestamp(parquet.Nanosecond)
+		}
+		return newType
 	}
 
 	var n parquet.Node

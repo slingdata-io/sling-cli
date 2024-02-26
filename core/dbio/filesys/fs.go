@@ -439,9 +439,7 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		g.Debug("reading datastream from %s [format=%s]", urlStr, fileFormat)
 		reader, err := fs.Self().GetReader(urlStr)
 		if err != nil {
-			fs.Context().CaptureErr(g.Error(err, "Error getting reader"))
-			g.LogError(fs.Context().Err())
-			fs.Context().Cancel()
+			ds.Context.CaptureErr(g.Error(err, "error getting reader"))
 			return
 		}
 
@@ -479,10 +477,6 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 
 		if err != nil {
 			ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", urlStr))
-			ds.Context.Cancel()
-			fs.Context().CaptureErr(g.Error(err, "Error consuming reader"))
-			// fs.Context().Cancel()
-			// g.LogError(fs.Context().Err())
 		}
 
 	}()
@@ -545,7 +539,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 	}
 	df, err = GetDataflow(fs.Self(), paths, Cfg)
 	if err != nil {
-		err = g.Error(err, "Error getting dataflow")
+		err = g.Error(err, "error getting dataflow")
 		return
 	}
 
@@ -575,7 +569,7 @@ func (fs *BaseFileSysClient) WriteDataflow(df *iop.Dataflow, url string) (bw int
 			defer pw.Close()
 			err = xls.WriteToWriter(pw)
 			if err != nil {
-				g.LogError(err, "error writing to excel file")
+				df.Context.CaptureErr(g.Error(err, "error writing to excel file"))
 			}
 		}()
 
@@ -993,7 +987,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 	// columns need to be populated
 	err = df.WaitReady()
 	if err != nil {
-		return df, err
+		return df, g.Error(err)
 	}
 
 	return df, nil

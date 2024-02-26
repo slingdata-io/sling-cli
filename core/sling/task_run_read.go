@@ -27,6 +27,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
+	// expand variables for custom SQL
+	fMap, err := t.Config.GetFormatMap()
+	if err != nil {
+		err = g.Error(err, "could not get format map for pre-sql")
+		return t.df, err
+	}
+	sTable.SQL = g.Rm(sTable.SQL, fMap)
+
 	// check if referring to a SQL file
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
@@ -37,7 +45,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				return t.df, err
 			} else {
 				err = nil // don't return error in case the table full name ends with .sql
-				g.LogError(err)
 			}
 		} else {
 			cfg.Source.Stream = sqlFromFile
@@ -123,7 +130,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]
 
-			if !updateCol.IsNumber() {
+			if updateCol.IsDatetime() {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.IsString() {
 				startValue = `'` + startValue + `'`
 				endValue = `'` + endValue + `'`
 			}
@@ -194,13 +205,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		srcConn.SetProp("start_time", t.Config.IncrementalVal)
 	}
 
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for pre-sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 
 	// construct SELECT statement for selected fields

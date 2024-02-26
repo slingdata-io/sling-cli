@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -830,32 +829,11 @@ func (ggs *GoogleSheet) WriteSheet(shtName string, ds *iop.Datastream, mode stri
 
 	err = ggs.RefreshSheets()
 	if err != nil {
-		err = nil
 		g.LogError(err, "could not refresh sheets data")
+		err = nil
 	}
 
 	return
-}
-
-// Retrieve a token, saves the token, then returns the generated client.
-func (ggs *GoogleSheet) getGoogleClient(config *oauth2.Config) *http.Client {
-	// The file token.json stores the user's access and refresh tokens, and is
-	// created automatically when the authorization flow completes for the first
-	// time.
-	if ggs.Props["GOOGLE_USER"] != "" && ggs.Props["GOOGLE_PASSWORD"] != "" {
-		tok, err := config.PasswordCredentialsToken(
-			ggs.context.Ctx,
-			ggs.Props["GOOGLE_USER"],
-			ggs.Props["GOOGLE_PASSWORD"],
-		)
-		if err == nil {
-			return config.Client(ggs.context.Ctx, tok)
-		}
-		// g.LogError(err, "unable to login using user/password (%s)", ggs.Props["GOOGLE_USER"])
-	}
-
-	tok, _ := ggs.getToken(config)
-	return config.Client(ggs.context.Ctx, tok)
 }
 
 func (ggs *GoogleSheet) getToken(config *oauth2.Config) (*oauth2.Token, error) {

@@ -365,12 +365,8 @@ func (conn *BigTableConn) GetColumnsFull(tableFName string) (iop.Dataset, error)
 }
 
 // GetTables returns tables for given schema
-func (conn *BigTableConn) GetSQLColumns(tables ...Table) (columns iop.Columns, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
-	return conn.GetColumns(tables[0].FullName())
+func (conn *BigTableConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
+	return conn.GetColumns(table.FullName())
 }
 
 func (conn *BigTableConn) GetColumns(tableFName string, fields ...string) (columns iop.Columns, err error) {
@@ -608,7 +604,7 @@ func (conn *BigTableConn) StreamRowsContext(ctx context.Context, table string, o
 
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *BigTableConn) InsertBatchStream(table string, ds *iop.Datastream) (count uint64, err error) {
-	context := conn.Context()
+	context := ds.Context
 	tbl := conn.Client.Open(table)
 
 	keyI := int32(0)

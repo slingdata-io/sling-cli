@@ -63,6 +63,7 @@ func (conn *PostgresConn) CopyToStdout(sql string) (stdOutReader io.Reader, err 
 					cmdStr, stderr.String(),
 				),
 			)
+			// FIXME: avoid using conn.Context().CaptureErr since it cancels all child contexts
 			conn.Context().CaptureErr(err)
 			g.LogError(err, "could not PG copy")
 		}
@@ -228,6 +229,8 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 	qName := conn.Self().Quote(srcCol.Name)
 
 	switch {
+	case srcCol.IsString() && srcCol.Type != iop.JsonType && tgtCol.Type == iop.JsonType:
+		selectStr = g.F("%s::jsonb as %s", qName, qName)
 	case srcCol.IsString() && !tgtCol.IsString():
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case !srcCol.IsString() && tgtCol.IsString():

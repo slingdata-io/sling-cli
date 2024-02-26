@@ -227,12 +227,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	}
 
 	res := bqResult{}
-	noDebug := strings.Contains(sql, noDebugKey)
-	if noDebug {
-		g.Trace(sql)
-	} else {
-		g.Debug(CleanSQL(conn, sql))
-	}
+	conn.LogSQL(sql)
 
 	q := conn.Client.Query(sql)
 	q.QueryConfig = bigquery.QueryConfig{
@@ -381,12 +376,8 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 		return ds, nil
 	}
 
-	noDebug := strings.Contains(sql, noDebugKey)
-	if noDebug {
-		g.Trace(sql)
-	} else {
-		g.Debug(sql)
-	}
+	conn.LogSQL(sql)
+
 	queryContext := g.NewContext(ctx)
 	q := conn.Client.Query(sql)
 	q.QueryConfig = bigquery.QueryConfig{
@@ -564,7 +555,6 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
 
 		if err != nil {
-			g.LogError(err, "error writing dataflow to local storage: "+localPath)
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
 			df.Context.Cancel()
 			return
@@ -782,10 +772,12 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	if conn.GetProp("GC_BUCKET") == "" {
 		g.Warn("No GCS Bucket was provided, pulling from cursor (which may be slower for big datasets). ")
 		return conn.BaseConn.BulkExportFlow(tables...)
+	} else if len(tables) == 0 {
+		return df, g.Error("no table/query provided")
 	}
 
 	// get columns
-	columns, err := conn.GetSQLColumns(tables...)
+	columns, err := conn.GetSQLColumns(tables[0])
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -882,7 +874,10 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if table.IsQuery() {
+	if table.IsQuery() || table.IsView {
+		if table.IsView && table.SQL == "" {
+			table.SQL = table.Select()
+		}
 		return conn.ExportToGCS(table.SQL, gcsURI)
 	}
 
@@ -919,6 +914,10 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 		return g.Error(err, "Error in task.Wait")
 	}
 	if err := status.Err(); err != nil {
+		if strings.Contains(err.Error(), "it is currently a VIEW") {
+			table.IsView = true
+			return conn.CopyToGCS(table, gcsURI)
+		}
 		conn.Context().CaptureErr(err)
 		for _, e := range status.Errors {
 			conn.Context().CaptureErr(*e)

@@ -162,8 +162,10 @@ func getSlingPackage() string {
 	slingPackage := strings.ToLower(os.Getenv("SLING_PACKAGE"))
 	execFileName, _ := osext.Executable()
 	switch {
-	case g.In(slingPackage, "docker", "dagster", "airflow", "temporal", "orkes"):
+	case slingPackage != "":
 		_ = slingPackage
+	case os.Getenv("SLING_SOURCE") != "" && os.Getenv("SLING_TARGET") != "":
+		slingPackage = "dagster"
 	case strings.Contains(execFileName, "homebrew"):
 		slingPackage = "homebrew"
 	case strings.Contains(execFileName, "scoop"):

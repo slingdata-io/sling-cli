@@ -3,10 +3,6 @@ set -e  # exit on error
 
 export DEBUG=''
 
-cd connection
-go test
-cd -
-
 cd iop
 go test -run 'TestParseDate|TestDetectDelimiter'
 cd -

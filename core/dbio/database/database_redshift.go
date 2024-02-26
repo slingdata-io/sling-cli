@@ -157,8 +157,11 @@ func (conn *RedshiftConn) BulkExportStream(sql string) (ds *iop.Datastream, err 
 
 // BulkExportFlow reads in bulk
 func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+	if len(tables) == 0 {
+		return df, g.Error("no table/query provided")
+	}
 
-	columns, err := conn.GetSQLColumns(tables...)
+	columns, err := conn.GetSQLColumns(tables[0])
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return

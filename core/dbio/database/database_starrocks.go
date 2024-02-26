@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
@@ -15,6 +16,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -24,7 +26,8 @@ import (
 // StarRocksConn is a StarRocks connection
 type StarRocksConn struct {
 	BaseConn
-	URL string
+	URL    string
+	fePort string
 }
 
 // Init initiates the object
@@ -70,11 +73,80 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 	return u.DSN
 }
 
+func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {
+	sql := g.R(conn.GetTemplateValue("core.show_alter_table"),
+		"schema", table.Schema,
+		"table", table.Name,
+	)
+
+	g.Debug("waiting for schema change to finish")
+	for {
+		time.Sleep(1 * time.Second)
+		data, err := conn.Query(sql + noDebugKey)
+		if err != nil {
+			return g.Error(err, "could not fetch 'SHOW ALTER TABLE' to get schema change status.")
+		} else if len(data.Rows) == 0 {
+			return g.Error("did not get results from 'SHOW ALTER TABLE' to get schema change status.")
+		}
+
+		env.Print(".")
+
+		if g.In(cast.ToString(data.Records()[0]["state"]), "FINISHED", "CANCELLED") {
+			break
+		}
+	}
+
+	env.Println("")
+
+	return
+}
+
+func (conn *StarRocksConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error) {
+	ok, err = conn.BaseConn.AddMissingColumns(table, newCols)
+	if err != nil {
+		return
+	}
+
+	if ok {
+		err = conn.WaitAlterTable(table)
+		if err != nil {
+			return ok, g.Error(err, "error while waiting for schema change")
+		}
+	}
+
+	return
+}
+
+func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+	if err != nil {
+		return
+	}
+
+	for _, ddlPart := range ddlParts {
+		for _, sql := range ParseSQLMultiStatements(ddlPart) {
+			_, err := conn.ExecMulti(sql)
+			if err != nil {
+				return ok, g.Error(err)
+			}
+
+			if strings.Contains(strings.ToLower(sql), "alter table") {
+				err = conn.WaitAlterTable(*table)
+				if err != nil {
+					return ok, g.Error(err, "error while waiting for schema change")
+				}
+			}
+		}
+	}
+
+	return
+}
+
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 	batchSize := cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(ds.Columns)
-	context := conn.Context()
+	context := ds.Context
 
 	// in case schema change is needed, cannot alter while inserting
 	mux := ds.Context.Mux
@@ -99,10 +171,13 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 				valCount++
 				newVal := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
 				switch {
+				case val == nil:
+					return "NULL"
 				case ds.Columns[i].Type.IsNumber():
 					return newVal
 				case ds.Columns[i].Type.IsBool():
-					return newVal
+					// return newVal
+					return `"` + newVal + `"` // since we're storing bools as string
 				case ds.Columns[i].Type == iop.BinaryType:
 					return `X'` + hex.EncodeToString([]byte(newVal)) + `'`
 				default:
@@ -153,11 +228,6 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 				return
 			}
 			mux.Unlock()
-
-			// err = batch.Shape(columns)
-			// if err != nil {
-			// 	return count, g.Error(err, "could not shape batch stream")
-			// }
 		}
 
 		for row := range batch.Rows {
@@ -190,6 +260,8 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 			return count - cast.ToUint64(len(batchRows)), g.Error(err, "insertBatch")
 		}
 	}
+
+	context.Wg.Write.Wait()
 
 	return
 }
@@ -257,11 +329,14 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 func (conn *StarRocksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
-	if feURL := conn.GetProp("fe_url"); feURL != "" {
+	useBulk := cast.ToBool(conn.GetProp("use_bulk"))
+	if feURL := conn.GetProp("fe_url"); feURL != "" && useBulk {
 		return conn.StreamLoad(feURL, tableFName, df)
 	}
 
-	g.Debug("WARN: Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
+	if useBulk {
+		g.Debug("WARN: Using INSERT mode which is meant for small datasets. Please set the `fe_url` for loading large datasets via Stream Load mode. See https://docs.slingdata.io/connections/database-connections/starrocks")
+	}
 
 	return conn.BaseConn.BulkImportFlow(tableFName, df)
 }
@@ -341,13 +416,19 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
 
+	// TODO: use reader to fead HTTP directly. Need to get proper redirected URL first.
+	// for ds := range df.StreamCh {
+	// 	readerChn := ds.NewJsonReaderChnl(0, 0)
+	// 	for reader := range readerChn {
+
+	// 	}
+	// }
+
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
 		if err != nil {
-			g.LogError(err, "error writing dataflow to local storage: "+localPath)
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
-			df.Context.Cancel()
 			return
 		}
 	}()
@@ -372,8 +453,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		"strip_outer_array": "true",
 	}
 
+	// seems to not work well with parallel loading, 1 at a time
+	loadCtx := g.NewContext(conn.context.Ctx, 1)
+
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
-		defer conn.Context().Wg.Write.Done()
+		defer loadCtx.Wg.Write.Done()
 		g.Debug("loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
 		defer os.Remove(localFile.URI)
@@ -384,6 +468,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 		timeout := 300
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
+		if conn.fePort != "" {
+			// this is the fix to not freeze, call the redirected port directly
+			apiURL = strings.ReplaceAll(apiURL, fu.U.Port(), conn.fePort)
+		}
+
 		resp, respBytes, err := net.ClientDo(http.MethodPut, apiURL, reader, headers, timeout)
 		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
 			redirectUrl, _ := resp.Location()
@@ -391,6 +480,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				// g.Debug("FE url redirected to %s://%s", redirectUrl.Scheme, redirectUrl.Host)
 				redirectUrlStr := strings.ReplaceAll(redirectUrl.String(), "127.0.0.1", fu.U.Hostname())
 				redirectUrl, _ = url.Parse(redirectUrlStr)
+				g.Warn("StarRocks redirected the API call to '%s://%s'. Please use that as your FE url.", redirectUrl.Scheme, redirectUrl.Host)
+				conn.fePort = redirectUrl.Port()
 				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
 				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
@@ -411,15 +502,15 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	}
 
 	for localFile := range fileReadyChn {
-		conn.Context().Wg.Write.Add()
+		loadCtx.Wg.Write.Add()
 		go loadFromLocal(localFile, tableFName)
 		if df.Err() != nil {
 			return df.Count(), df.Err()
 		}
 	}
 
-	g.Debug("Done submitting data. Waiting load completion.")
-	conn.Context().Wg.Write.Wait()
+	g.Debug("Done submitting data. Waiting for load completion.")
+	loadCtx.Wg.Write.Wait()
 	if df.Err() != nil {
 		return df.Count(), g.Error(df.Err(), "Error importing to StarRocks")
 	}

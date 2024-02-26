@@ -29,6 +29,22 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
+func (t *Table) SetKeys(pkCols []string, updateCol string, otherKeys TableKeys) error {
+	eG := g.ErrorGroup{}
+
+	eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, pkCols...))
+
+	eG.Capture(t.Columns.SetKeys(iop.UpdateKey, updateCol))
+
+	if tkMap := otherKeys; tkMap != nil {
+		for tableKey, keys := range tkMap {
+			eG.Capture(t.Columns.SetKeys(tableKey, keys...))
+		}
+	}
+
+	return eG.Err()
+}
+
 func (t *Table) FullName() string {
 	q := GetQualifierQuote(t.Dialect)
 
@@ -596,4 +612,13 @@ func HasVariedCase(text string) bool {
 	}
 
 	return hasUpper && hasLower
+}
+
+func QuoteNames(dialect dbio.Type, names ...string) (newNames []string) {
+	q := GetQualifierQuote(dialect)
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = q + strings.ReplaceAll(names[i], q, "") + q
+	}
+	return newNames
 }

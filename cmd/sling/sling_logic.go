@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -40,7 +41,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
 	cfg := &sling.Config{}
 	replicationCfgPath := ""
-	cfgStr := ""
+	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
 	iterate := 1
@@ -63,9 +64,11 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	for k, v := range c.Vals {
 		switch k {
 		case "replication":
+			telemetryMap["run_mode"] = "replication"
 			replicationCfgPath = cast.ToString(v)
 		case "config":
-			cfgStr = cast.ToString(v)
+			telemetryMap["run_mode"] = "task"
+			taskCfgStr = cast.ToString(v)
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "src-stream", "src-table", "src-sql", "src-file":
@@ -169,6 +172,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
+	if replicationCfgPath != "" && taskCfgStr != "" {
+		return ok, g.Error("cannot provide replication and task configuration. Choose one.")
+	}
+
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
@@ -185,8 +192,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		} else {
 			// run task
-			if cfgStr != "" {
-				err = cfg.Unmarshal(cfgStr)
+			if taskCfgStr != "" {
+				err = cfg.Unmarshal(taskCfgStr)
 				if err != nil {
 					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
 				}
@@ -343,9 +350,13 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 
+	streamsOrdered := replication.StreamsOrdered()
 	eG := g.ErrorGroup{}
+	succcess := 0
+	errors := make([]error, len(streamsOrdered))
+
 	counter := 0
-	for _, name := range replication.StreamsOrdered() {
+	for i, name := range streamsOrdered {
 		if interrupted {
 			break
 		}
@@ -395,26 +406,35 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		println()
 
 		if stream.Disabled {
-			g.Info("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
+			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
 			continue
 		} else {
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
-		telemetryMap["run_mode"] = "replication"
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
-			err = g.Error(err, "error for stream %s", name)
-			g.LogError(err)
-			eG.Capture(err)
+			errors[i] = g.Error(err, "error for stream %s", name)
+			eG.Capture(err, streamsOrdered[i])
+		} else {
+			succcess++
 		}
 		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
 	}
 
 	println()
 	delta := time.Since(startTime)
-	g.Info("Sling Replication Completed in %s | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
+
+	successStr := env.GreenString(g.F("%d Successes", succcess))
+	failureStr := g.F("%d Failures", len(eG.Errors))
+	if len(eG.Errors) > 0 {
+		failureStr = env.RedString(failureStr)
+	} else {
+		failureStr = env.GreenString(failureStr)
+	}
+
+	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 
 	return eG.Err()
 }
@@ -487,20 +507,38 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		opt := connection.DiscoverOptions{
 			Schema:    cast.ToString(c.Vals["schema"]),
+			Stream:    cast.ToString(c.Vals["stream"]),
 			Folder:    cast.ToString(c.Vals["folder"]),
 			Filter:    cast.ToString(c.Vals["filter"]),
 			Recursive: cast.ToBool(c.Vals["recursive"]),
 		}
 
 		var streamNames []string
-		streamNames, err = ec.Discover(name, opt)
+		var schemata database.Schemata
+		streamNames, schemata, err = ec.Discover(name, opt)
 		if err != nil {
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 
-		g.Info("Found %d streams:", len(streamNames))
-		for _, sn := range streamNames {
-			println(g.F(" - %s", sn))
+		if tables := lo.Values(schemata.Tables()); len(tables) > 0 {
+			if opt.Stream != "" {
+				println(tables[0].Columns.PrettyTable())
+			} else {
+				header := []string{"ID", "Schema", "Name", "Type", "Columns"}
+				rows := lo.Map(tables, func(table database.Table, i int) []any {
+					tableType := lo.Ternary(table.IsView, "view", "table")
+					if table.Dialect.DBNameUpperCase() {
+						tableType = strings.ToUpper(tableType)
+					}
+					return []any{i + 1, table.Schema, table.Name, tableType, len(table.Columns)}
+				})
+				println(g.PrettyTable(header, rows))
+			}
+		} else {
+			g.Info("Found %d streams:", len(streamNames))
+			for _, sn := range streamNames {
+				println(g.F(" - %s", sn))
+			}
 		}
 
 	case "":

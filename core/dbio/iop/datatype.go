@@ -155,6 +155,15 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 	return
 }
 
+// PrettyTable returns a text pretty table
+func (cols Columns) PrettyTable() (output string) {
+	header := []string{"ID", "Column Name", "Native Type", "General Type"}
+	rows := lo.Map(cols, func(col Column, i int) []any {
+		return []any{col.Position, col.Name, col.DbType, col.Type}
+	})
+	return g.PrettyTable(header, rows)
+}
+
 // GetKeys gets key columns
 func (cols Columns) GetKeys(keyType KeyType) Columns {
 	keys := Columns{}
@@ -195,6 +204,17 @@ func (cols Columns) Sourced() (sourced bool) {
 		}
 	}
 	return sourced
+}
+
+// GetMissing returns the missing columns from newCols
+func (cols Columns) GetMissing(newCols ...Column) (missing Columns) {
+	fm := cols.FieldMap(true)
+	for _, col := range newCols {
+		if _, ok := fm[strings.ToLower(col.Name)]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	return missing
 }
 
 // IsDummy returns true if the columns are injected by CreateDummyFields
@@ -629,7 +649,7 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
 			if colStats.Min*10 < -2147483648 || colStats.Max*10 > 2147483647 {
 				col.Type = BigIntType
 			} else {
@@ -692,7 +712,7 @@ func (col *Column) SetLengthPrecisionScale() {
 			// grab length or precision
 			if col.Type.IsString() {
 				col.Stats.MaxLen = cast.ToInt(vals[0])
-			} else if col.Type.IsNumber() {
+			} else if col.IsNumber() || col.IsDatetime() {
 				col.DbPrecision = cast.ToInt(vals[0])
 			}
 		}
@@ -836,6 +856,15 @@ func (ct ColumnType) IsNumber() bool {
 // IsBool returns whether the column is a boolean
 func (ct ColumnType) IsBool() bool {
 	return ct == BoolType
+}
+
+// IsDatetime returns whether the column is a datetime object
+func (ct ColumnType) IsDate() bool {
+	switch ct {
+	case DateType:
+		return true
+	}
+	return false
 }
 
 // IsDatetime returns whether the column is a datetime object

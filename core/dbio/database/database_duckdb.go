@@ -37,7 +37,7 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "0.9.1"
+var DuckDbVersion = "0.10.0"
 var DuckDbUseTempFile = false
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
 var duckDbReadOnlyHint = "/* -readonly */"
@@ -106,7 +106,16 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.DuckDbs[connURL] = conn
 		connPool.Mux.Unlock()
 	}
+
 	conn.SetProp("connected", "true")
+
+	// init extensions
+	conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
+
+	if conn.GetType() == dbio.TypeDbMotherDuck {
+		conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)
+	}
+
 	return nil
 }
 
@@ -424,11 +433,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		return result, g.Error(err, "could not get cmd duckdb")
 	}
 
-	if strings.Contains(sql, noDebugKey) {
-		g.Trace(sql)
-	} else {
-		g.DebugLow(CleanSQL(conn, sql), args...)
-	}
+	conn.LogSQL(sql, args...)
 
 	var out []byte
 	fileContext := DuckDbFileContext[conn.URL]
@@ -466,6 +471,9 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		if strings.Contains(errText, "version number") {
 			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.6.0\n" + errText
 		}
+		if conn.GetType() == dbio.TypeDbMotherDuck && string(out)+stderr.String() == "" && cmd.ProcessState.ExitCode() == 1 {
+			errText = "Perhaps your Motherduck token needs to be renewed?"
+		}
 		err = g.Error("exit code is %d", cmd.ProcessState.ExitCode())
 		return result, g.Error(err, errText)
 
@@ -493,11 +501,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	}
 	defer func() { os.Remove(sqlPath) }()
 
-	if strings.Contains(sql, noDebugKey) {
-		g.Trace(sql)
-	} else {
-		g.DebugLow(sql)
-	}
+	conn.LogSQL(sql)
 
 	cmd.Args = append(cmd.Args, "-csv")
 
@@ -675,11 +679,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		stderrBuf := bytes.NewBuffer([]byte{})
 		sql := strings.Join(sqlLines, ";\n")
 
-		if strings.Contains(sql, noDebugKey) {
-			g.Trace(sql)
-		} else {
-			g.DebugLow(sql)
-		}
+		conn.LogSQL(sql)
 
 		cmd, sqlPath, err := conn.getCmd(sql, cast.ToBool(conn.GetProp("read_only")))
 		if err != nil {

@@ -30,12 +30,13 @@ func InitDB() {
 		return
 	}
 
-	g.LogError(err, "Could not initialize sqlite connection: %s", dbURL)
-
 	Db, err = Conn.GetGormConn(&gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
-	g.LogError(err, "Could not connect to sqlite database: %s", dbURL)
+	if err != nil {
+		g.Debug("could not connect to local .sling.db. %s", err.Error())
+		return
+	}
 
 	allTables := []interface{}{
 		&Execution{},
@@ -51,6 +52,9 @@ func InitDB() {
 		}
 		g.Trace("Creating table: " + tableName)
 		err = Db.AutoMigrate(table)
-		g.LogError(err, "error AutoMigrating table: "+tableName)
+		if err != nil {
+			g.Debug("error AutoMigrating table for local .sling.db. => %s\n%s", tableName, err.Error())
+			return
+		}
 	}
 }

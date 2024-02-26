@@ -109,7 +109,7 @@ func TestNewParquetReader(t *testing.T) {
 			for i, scanner := range scanners {
 				if val, ok := scanner.Next(); ok {
 					switch columns[i].Type {
-					case DatetimeType:
+					case DatetimeType, TimestampType, TimestampzType:
 						val, _ = convertTimestamp(columns[i], val)
 					}
 

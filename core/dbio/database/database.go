@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -97,7 +98,7 @@ type Connection interface {
 	GetProp(string) string
 	GetSchemas() (iop.Dataset, error)
 	GetSchemata(schemaName string, tableNames ...string) (Schemata, error)
-	GetSQLColumns(tables ...Table) (columns iop.Columns, err error)
+	GetSQLColumns(table Table) (columns iop.Columns, err error)
 	GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error)
 	GetTables(string) (iop.Dataset, error)
 	GetTemplateValue(path string) (value string)
@@ -137,6 +138,7 @@ type Connection interface {
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
 	ValidateColumnNames(tgtColName []string, colNames []string, quote bool) (newColNames []string, err error)
+	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
 type ConnInfo struct {
@@ -198,7 +200,7 @@ var (
 	ddlMaxDecScale  = 24
 
 	ddlMaxDecLength = 38
-	ddlMinDecScale  = 9
+	ddlMinDecScale  = 6
 
 	filePathStorageSlug = "temp"
 
@@ -666,6 +668,19 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
+func reconnectIfClosed(conn Connection) (err error) {
+	// g.Warn("connected => %s", conn.GetProp("connected"))
+	if conn.GetProp("connected") != "true" {
+		g.Debug("connection was closed, reconnecting")
+		err = conn.Self().Connect()
+		if err != nil {
+			err = g.Error(err, "Could not connect")
+			return
+		}
+	}
+	return
+}
+
 // Close closes the connection
 func (conn *BaseConn) Close() error {
 	var err error
@@ -681,11 +696,28 @@ func (conn *BaseConn) Close() error {
 	return err
 }
 
-// AddLog logs a text for debugging
-func (conn *BaseConn) AddLog(text string) {
-	conn.Log = append(conn.Log, text)
+// LogSQL logs a query for debugging
+func (conn *BaseConn) LogSQL(query string, args ...any) {
+	noColor := g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+
+	query = strings.TrimSpace(query)
+	query = strings.TrimSuffix(query, ";")
+
+	conn.Log = append(conn.Log, query)
 	if len(conn.Log) > 300 {
 		conn.Log = conn.Log[1:]
+	}
+
+	if strings.Contains(query, noDebugKey) {
+		if !noColor {
+			query = color.CyanString(query)
+		}
+		g.Trace(query, args...)
+	} else {
+		if !noColor {
+			query = color.CyanString(query)
+		}
+		g.Debug(CleanSQL(conn, query), args...)
 	}
 }
 
@@ -861,6 +893,12 @@ func (conn *BaseConn) StreamRows(sql string, options ...map[string]interface{}) 
 
 // StreamRowsContext streams the rows of a sql query with context, returns `result`, `error`
 func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
+	}
+
 	Limit := uint64(0) // infinite
 	if val := cast.ToUint64(getQueryOptions(options)["limit"]); val > 0 {
 		Limit = val
@@ -873,16 +911,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	queryContext := g.NewContext(ctx)
 
-	// conn.AddLog(query)
+	conn.LogSQL(query)
 	var result *sqlx.Rows
 	if conn.tx != nil {
 		result, err = conn.tx.QueryContext(queryContext.Ctx, query)
 	} else {
-		if strings.Contains(query, noDebugKey) {
-			g.Trace(query)
-		} else {
-			g.Debug(query)
-		}
 		result, err = conn.db.QueryxContext(queryContext.Ctx, query)
 	}
 
@@ -1057,7 +1090,6 @@ func (conn *BaseConn) Commit() (err error) {
 	}
 
 	tx := conn.tx
-	conn.AddLog("COMMIT")
 	select {
 	case <-conn.tx.Context().Ctx.Done():
 		err = conn.tx.Context().Err()
@@ -1078,7 +1110,6 @@ func (conn *BaseConn) Commit() (err error) {
 // Rollback rolls back a connection wide transaction
 func (conn *BaseConn) Rollback() (err error) {
 	if tx := conn.tx; tx != nil {
-		conn.AddLog("ROLLBACK")
 		conn.tx = nil
 		err = tx.Rollback()
 		// conn.tx.Connection().Close()
@@ -1104,14 +1135,12 @@ func (conn *BaseConn) Prepare(query string) (stmt *sql.Stmt, err error) {
 
 // Exec runs a sql query, returns `error`
 func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
-	if !cast.ToBool(conn.GetProp("connected")) {
-		g.Debug("connection was closed, reconnecting")
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
+
 	result, err = conn.Self().ExecContext(conn.Context().Ctx, sql, args...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
@@ -1121,13 +1150,12 @@ func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, 
 
 // ExecMulti runs mutiple sql queries, returns `error`
 func (conn *BaseConn) ExecMulti(sql string, args ...interface{}) (result sql.Result, err error) {
-	if conn.GetProp("connected") != "true" {
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
+
 	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sql, args...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
@@ -1143,16 +1171,11 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		return
 	}
 
-	// conn.AddLog(q)
 	if conn.tx != nil {
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
 	} else {
-		if strings.Contains(q, noDebugKey) {
-			g.Trace(q)
-		} else {
-			g.DebugLow(CleanSQL(conn, q), args...)
-		}
+		conn.LogSQL(q, args...)
 		result, err = conn.db.ExecContext(ctx, q, args...)
 	}
 	if err != nil {
@@ -1172,7 +1195,6 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 
 	eG := g.ErrorGroup{}
 	for _, sql := range ParseSQLMultiStatements(q) {
-		// conn.AddLog(sql)
 		res, err := conn.Self().ExecContext(ctx, sql, args...)
 		if err != nil {
 			eG.Capture(g.Error(err, "Error executing query"))
@@ -1203,12 +1225,10 @@ func (conn *BaseConn) MustExec(sql string, args ...interface{}) (result sql.Resu
 
 // Query runs a sql query, returns `result`, `error`
 func (conn *BaseConn) Query(sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
-	if conn.GetProp("connected") != "true" {
-		err = conn.Self().Connect()
-		if err != nil {
-			err = g.Error(err, "Could not connect")
-			return
-		}
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
 	}
 
 	ds, err := conn.Self().StreamRows(sql, options...)
@@ -1430,15 +1450,7 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 }
 
 // GetSQLColumns return columns from a sql query result
-func (conn *BaseConn) GetSQLColumns(tables ...Table) (columns iop.Columns, err error) {
-	var table Table
-	if len(tables) > 0 {
-		table = tables[0]
-	} else {
-		err = g.Error("no query provided")
-		return
-	}
-
+func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
 	if !table.IsQuery() {
 		return conn.GetColumns(table.FullName())
 	}
@@ -1454,12 +1466,7 @@ func (conn *BaseConn) GetSQLColumns(tables ...Table) (columns iop.Columns, err e
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
 	ds, err := conn.Self().StreamRows(limitSQL)
 	if err != nil {
-		if g.IsDebugLow() {
-			err = g.Error(err, "GetSQLColumns Error for:\n"+limitSQL)
-		} else {
-			err = g.Error(err, "GetSQLColumns Error")
-		}
-		return columns, err
+		return columns, g.Error(err, "GetSQLColumns Error")
 	}
 
 	err = ds.WaitReady()
@@ -1503,7 +1510,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = iop.Columns{}
-	colData, err := conn.SumbitTemplate(
+	colData, err := conn.Self().SumbitTemplate(
 		"single", conn.template.Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1579,7 +1586,7 @@ func (conn *BaseConn) GetColumns(tableFName string, fields ...string) (columns i
 		return columns, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	return conn.GetTableColumns(&table, fields...)
+	return conn.Self().GetTableColumns(&table, fields...)
 }
 
 // GetColumnsFull returns columns for given table. `tableName` should
@@ -2095,7 +2102,6 @@ func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []strin
 	}
 
 	g.Trace("insert target fields: " + strings.Join(newColNames, ", "))
-	g.LogError(err)
 
 	return
 }
@@ -2291,7 +2297,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	if strings.HasSuffix(nativeType, "()") {
 		length := col.Stats.MaxLen
 		if col.IsString() {
-			if !col.Sourced || length == 0 {
+			if !col.Sourced || length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
 					length = 255
@@ -2468,7 +2474,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	// columns need to be populated
 	err = df.WaitReady()
 	if err != nil {
-		return df, err
+		return df, g.Error(err)
 	}
 
 	return df, nil
@@ -2476,8 +2482,11 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 
 // BulkExportFlowCSV creates a dataflow from a sql query, using CSVs
 func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err error) {
+	if len(tables) == 0 {
+		return df, g.Error("no table/query provided")
+	}
 
-	columns, err := conn.Self().GetSQLColumns(tables...)
+	columns, err := conn.Self().GetSQLColumns(tables[0])
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -2716,17 +2725,17 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 
 }
 
-// OptimizeTable analyzes the table and alters the table with
+// GetOptimizeTableStatements analyzes the table and alters the table with
 // the columns data type based on its analysis result
 // if table is missing, it is created with a new DDl
 // Hole in this: will truncate data points, since it is based
 // only on new data being inserted... would need a complete
 // stats of the target table to properly optimize.
-func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
-	if len(table.Columns) != len(newColumns) {
-		return false, g.Error("different column length %d != %d\ntable.Columns: %#v\nnewColumns: %#v", len(table.Columns), len(newColumns), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.Type, dbio.TypeDbSQLite) {
-		return false, nil
+func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns) (ok bool, ddlParts []string, err error) {
+	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
+		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
+	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
+		return false, ddlParts, nil
 	}
 
 	newColumnsMap := lo.KeyBy(newColumns, func(c iop.Column) string {
@@ -2737,9 +2746,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
-			return false, g.Error("column not found in table: %s", col.Name)
-		} else if !strings.EqualFold(col.Name, newCol.Name) {
-			return false, g.Error("column name mismatch, %s != %s", col.Name, newCol.Name)
+			continue
 		} else if col.Type == newCol.Type {
 			continue
 		}
@@ -2775,12 +2782,12 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 
 		oldNativeType, err := conn.GetNativeType(col)
 		if err != nil {
-			return false, g.Error(err, "no native mapping for `%s`", newCol.Type)
+			return false, ddlParts, g.Error(err, "no native mapping for `%s`", newCol.Type)
 		}
 
 		newNativeType, err := conn.GetNativeType(newCol)
 		if err != nil {
-			return false, g.Error(err, "no native mapping for `%s`", newCol.Type)
+			return false, ddlParts, g.Error(err, "no native mapping for `%s`", newCol.Type)
 		}
 
 		if oldNativeType == newNativeType {
@@ -2793,14 +2800,25 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 	}
 
 	if len(colsChanging) == 0 {
-		return false, nil
+		return false, ddlParts, nil
 	}
-
-	ddlParts := []string{}
 
 	for _, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
+
+		// for starrocks update
+		pKey := table.Columns.GetKeys(iop.PrimaryKey).Names()
+		if len(pKey) == 0 {
+			pKey = table.Columns.GetKeys(iop.UniqueKey).Names()
+		}
+		if len(pKey) == 0 && g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+			err = g.Error("unable to modify starrocks schema without primary key or unique key")
+			return
+		}
+		for i, key := range pKey {
+			pKey[i] = conn.Self().Quote(key)
+		}
 
 		// add new column with new type
 		ddlParts = append(ddlParts, g.R(
@@ -2816,6 +2834,13 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 			"field", conn.Self().Quote(col.Name),
 			"type", col.DbType,
 		)
+		// for starrocks
+		fields := append(table.Columns.Names(), colNameTemp)
+		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		updatedFields := append(
+			QuoteNames(conn.GetType(), table.Columns.Names()...), // add quotes
+			oldColCasted)
+
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.update"),
 			"table", table.FullName(),
@@ -2824,6 +2849,8 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 				"temp_column", conn.Self().Quote(colNameTemp),
 				"old_column_casted", oldColCasted,
 			),
+			"fields", strings.Join(fields, ", "),
+			"updated_fields", strings.Join(updatedFields, ", "),
 			"pk_fields_equal", "1=1",
 		))
 
@@ -2839,18 +2866,39 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if g.In(conn.Type, dbio.TypeDbSQLServer) {
+		if g.In(conn.GetType(), dbio.TypeDbSQLServer) {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
 		}
+
+		// for starrocks
+		otherNames := lo.Filter(table.Columns.Names(), func(name string, i int) bool {
+			return !strings.EqualFold(name, col.Name)
+		})
+		fields = append(otherNames, col.Name)
+		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		updatedFields = append(otherNames, colNameTemp)
+		updatedFields = QuoteNames(conn.GetType(), updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
 			"table", tableName,
 			"column", oldColName,
 			"new_column", newColName,
+			"new_type", col.DbType,
+			"fields", strings.Join(fields, ", "),
+			"updated_fields", strings.Join(updatedFields, ", "),
 		))
+	}
+
+	return true, ddlParts, nil
+}
+
+func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+	if err != nil {
+		return ok, err
 	}
 
 	_, err = conn.ExecMulti(strings.Join(ddlParts, ";\n"))
@@ -2858,9 +2906,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bo
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
 
-	println()
-
-	return true, nil
+	return ok, nil
 }
 
 // CompareChecksums compares the checksum values from the database side
@@ -2930,7 +2976,6 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	if err != nil {
 		return g.Error(err, "error running CompareChecksums query")
 	}
-	// g.P(data.Rows[0])
 
 	eg := g.ErrorGroup{}
 	for i, col := range data.Columns {
@@ -2949,7 +2994,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
-				eg.Add(g.Error("checksum failure for %s (sling-side vs db-side): %d != %d -- (%s)", col.Name, checksum1, checksum2, exprMap[strings.ToLower(col.Name)]))
+				eg.Add(g.Error("checksum failure for %s (sling-side vs db-side): %d != %d -- (%s)\n%#v", col.Name, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], data.Rows[0]))
 			}
 		}
 	}
@@ -3011,23 +3056,14 @@ func settingMppBulkImportFlow(conn Connection, compressor iop.CompressorType) {
 	conn.SetProp("PARALLEL", "true")
 }
 
-func AddMissingColumns(conn Connection, table Table, newCols iop.Columns) (ok bool, err error) {
+func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error) {
 	cols, err := conn.GetColumns(table.FullName())
 	if err != nil {
 		err = g.Error(err, "could not obtain table columns for adding %s", g.Marshal(newCols.Names()))
 		return
 	}
 
-	colsMap := lo.KeyBy(cols, func(c iop.Column) string {
-		return strings.ToLower(c.Name)
-	})
-
-	missing := iop.Columns{}
-	for _, col := range newCols {
-		if _, ok := colsMap[strings.ToLower(col.Name)]; !ok {
-			missing = append(missing, col)
-		}
-	}
+	missing := cols.GetMissing(newCols...)
 
 	// generate alter commands
 	for _, col := range missing {
@@ -3041,6 +3077,8 @@ func AddMissingColumns(conn Connection, table Table, newCols iop.Columns) (ok bo
 			"column", conn.Self().Quote(col.Name),
 			"type", nativeType,
 		)
+
+		g.Debug("adding new column: %s", col.Name)
 		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "could not add column %s to table %s", col.Name, table.FullName())
@@ -3150,6 +3188,10 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
 
+	if len(sql) > 3000 {
+		sql = sql[0:3000]
+	}
+
 	if os.Getenv("DEBUG") != "" {
 		return sql
 	}
@@ -3157,7 +3199,7 @@ func CleanSQL(conn Connection, sql string) string {
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema") {
+		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")
@@ -3398,7 +3440,7 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 		return
 	}
 
-	_, err = AddMissingColumns(conn, table, iop.Columns{newCol})
+	_, err = conn.AddMissingColumns(table, iop.Columns{newCol})
 	if err != nil {
 		err = g.Error(err, "could not add new column")
 		return

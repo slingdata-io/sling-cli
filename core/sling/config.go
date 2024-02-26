@@ -573,6 +573,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
 	)
 
+	if cfg.SrcConn.Type.String() != "" {
+		m["source_type"] = cfg.SrcConn.Type
+	}
+	if cfg.TgtConn.Type.String() != "" {
+		m["target_type"] = cfg.TgtConn.Type
+	}
+
 	if cfg.Source.Conn != "" {
 		m["source_name"] = strings.ToLower(cfg.Source.Conn)
 	}
@@ -637,7 +644,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		filePath := strings.TrimPrefix(url.Path(), "/")
 		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
 		fileName := pathArr[len(pathArr)-1]
-		fileFolder := lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
+		fileFolder := ""
+		if len(pathArr) > 1 {
+			fileFolder = pathArr[len(pathArr)-2]
+		}
 
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3, dbio.TypeFileGoogle:

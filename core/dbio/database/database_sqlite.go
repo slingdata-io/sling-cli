@@ -234,7 +234,7 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
 	indexSQL := g.R(
 		conn.GetTemplateValue("core.create_unique_index"),
-		"index", strings.Join(pkFields, "_")+"_idx",
+		"index", strings.Join(pkFields, "_")+g.RandSuffix("_", 3)+"_idx",
 		"table", indexTable,
 		"cols", strings.Join(pkFieldsQ, ", "),
 	)
@@ -496,7 +496,7 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	ctx := g.NewContext(conn.context.Ctx, 5)
 	currDatabase := "main"
 
-	getOneSchemata := func(values map[string]interface{}) error {
+	getOneSchemata := func(values map[string]interface{}) {
 		defer ctx.Wg.Read.Done()
 
 		schemaData, err := conn.SumbitTemplate(
@@ -504,8 +504,7 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 			values,
 		)
 		if err != nil {
-			g.LogError(err, "Could not GetSchemata for "+schemaName)
-			return g.Error(err, "Could not GetSchemata for "+schemaName)
+			ctx.CaptureErr(g.Error(err, "Could not GetSchemata for "+schemaName))
 		}
 
 		defer ctx.Unlock()
@@ -578,7 +577,6 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 			Name:    currDatabase,
 			Schemas: schemas,
 		}
-		return nil
 	}
 
 	for _, schemaName := range schemaNames {
@@ -603,6 +601,10 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	}
 
 	ctx.Wg.Read.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return schemata, g.Error(err)
+	}
 
 	return schemata, nil
 }

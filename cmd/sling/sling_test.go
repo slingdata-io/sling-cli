@@ -1,494 +1,64 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	"syreclabs.com/go/faker"
 
 	"github.com/slingdata-io/sling-cli/core/sling"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/csv"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	d "github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 )
 
+var testMux sync.Mutex
+
 type testDB struct {
-	name     string
-	URL      string
-	table    string
-	conn     d.Connection
-	propStrs []string
+	name string
+	conn d.Connection
 }
 
-var (
-	testFile1Bytes []byte
-)
+type testConn struct {
+	name    string
+	schema  string
+	useBulk *bool
+}
 
-var DBs = []*testDB{
-	// {
-	// 	// https://github.com/mattn/go-sqlite3
-	// 	name:  "SQLite",
-	// 	URL:   "file:./test.db",
-	// 	table: "main.test1",
-	// },
-
-	{
-		// https://github.com/lib/pq
-		name:  "Postgres",
-		URL:   "$POSTGRES_URL",
-		table: "public.test1",
-	},
-
-	{
-		// https://github.com/godror/godror
-		name:  "Oracle",
-		URL:   "$ORACLE_URL",
-		table: "system.test1",
-	},
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "MySQL",
-	// 	URL:   "$MYSQL_URL",
-	// 	table: "mysql.test1",
-	// },
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "SQLServer",
-	// 	URL:   "$MSSQL_URL",
-	// 	table: "dbo.test1",
-	// },
-
-	// {
-	// 	// https://github.com/denisenkom/go-mssqldb
-	// 	name:  "AzureSQL",
-	// 	URL:   "$AZURESQL_URL",
-	// 	table: "dbo.test1",
-	// },
-
-	// {
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "Snowflake",
-	// 	URL:   "$SNOWFLAKE_URL",
-	// 	table: "sling.test1",
-	// },
-
-	// {
-	// 	// https://github.com/snowflakedb/gosnowflake
-	// 	name:  "BigQuery",
-	// 	URL:   "$BIGQUERY_URL",
-	// 	table: "public.test1",
-	// },
-
-	// {
-	// 	// https://github.com/lib/pq
-	// 	name:  "Redshift",
-	// 	URL:   "$REDSHIFT_URL",
-	// 	table: "public.test1",
-	// },
+var dbConnMap = map[dbio.Type]testConn{
+	dbio.TypeDbAzure:      {name: "azuresql"},
+	dbio.TypeDbAzureDWH:   {name: "azuredwh"},
+	dbio.TypeDbBigQuery:   {name: "bigquery"},
+	dbio.TypeDbBigTable:   {name: "bigtable"},
+	dbio.TypeDbClickhouse: {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbDuckDb:     {name: "duckdb"},
+	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbMotherDuck: {name: "motherduck"},
+	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
+	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
+	dbio.TypeDbPostgres:   {name: "postgres"},
+	dbio.TypeDbRedshift:   {name: "redshift"},
+	dbio.TypeDbSnowflake:  {name: "snowflake"},
+	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
+	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
+	dbio.TypeDbStarRocks:  {name: "starrocks"},
 }
 
 func init() {
 	env.InitLogger()
-	// iop.RemoveTrailingDecZeros = true
-	for _, db := range DBs {
-		if db.URL == "" {
-			log.Fatal("No Env Var URL for " + db.name)
-		} else if db.name == "SQLite" {
-			os.Remove(strings.ReplaceAll(db.URL, "file:", ""))
-		}
-		if db.name == "Redshift" {
-			os.Setenv("SLING_PARALLEL", "FALSE")
-		}
-	}
-}
-
-func TestOne(t *testing.T) {
-	// return
-	path := "tests/tasks/task.06.json"
-	pathArr := strings.Split(path, "/")
-	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
-	runOneTask(t, file)
-	if t.Failed() {
-		return
-	}
-
-	// path = "/tmp/temp.json"
-	// file = g.FileItem{FullPath: path, RelPath: path}
-	// runOneTask(t, file)
-}
-
-func TestTasks(t *testing.T) {
-	defFilePath := "tests/tasks.tsv"
-	folderPath := "tests/tasks"
-
-	// generate files
-	os.RemoveAll(folderPath) // clean up
-	os.MkdirAll(folderPath, 0777)
-
-	data, err := iop.ReadCsv(defFilePath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-
-	for i, rec := range data.Records() {
-		if g.In(rec["source_conn"], "GITHUB_DBIO", "NOTION") {
-			g.Warn("skipping since source_conn is %s", rec["source_conn"])
-			continue
-		}
-
-		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
-		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
-		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
-		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
-		primaryKey := []string{}
-		if val := cast.ToString(rec["source_primary_key"]); val != "" {
-			primaryKey = strings.Split(val, ",")
-		}
-
-		task := g.M(
-			"source", g.M(
-				"conn", cast.ToString(rec["source_conn"]),
-				"stream", cast.ToString(rec["source_stream"]),
-				"primary_key", primaryKey,
-				"update_key", cast.ToString(rec["source_update_key"]),
-				"options", sourceOptions,
-			),
-			"target", g.M(
-				"conn", cast.ToString(rec["target_conn"]),
-				"object", cast.ToString(rec["target_object"]),
-				"options", targetOptions,
-			),
-			"mode", cast.ToString(rec["mode"]),
-			"options", options,
-			"env", env,
-		)
-		taskPath := filepath.Join(folderPath, g.F("task.%02d.json", i+1))
-		taskBytes := []byte(g.Marshal(task))
-		err = os.WriteFile(taskPath, taskBytes, 0777)
-		g.AssertNoError(t, err)
-	}
-
-	files, _ := g.ListDir(folderPath)
-	for i, file := range files {
-		_ = i
-		if g.In(i+1, 12, 26, 27) {
-			continue // broken ssh connection, skip oracle
-		}
-		// if !g.In(i+1, 12) {
-		// 	continue
-		// }
-		// if i+1 < 13 {
-		// 	continue
-		// }
-		runOneTask(t, file)
-
-		if t.Failed() {
-			break
-		}
-	}
-}
-
-func runOneTask(t *testing.T, file g.FileItem) {
-	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
-	println()
-
-	bars := "---------------------------"
-	g.Info("%s Testing %s %s", bars, file.RelPath, bars)
-	cfg := &sling.Config{}
-	err := cfg.Unmarshal(file.FullPath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-
-	task := sling.NewTask(0, cfg)
-	if !g.AssertNoError(t, task.Err) {
-		return
-	}
-
-	// validate object name
-	if name, ok := task.Config.Env["validation_object"]; ok {
-		if !assert.Equal(t, name, task.Config.Target.Object) {
-			return
-		}
-	}
-
-	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
-		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
-	}
-
-	// g.PP(task)
-	if g.AssertNoError(t, task.Err) {
-		err = task.Execute()
-		if !g.AssertNoError(t, err) {
-			return
-		}
-	} else {
-		return
-	}
-
-	// validate count
-	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
-		g.Debug("getting count")
-		conn, err := task.Config.TgtConn.AsDatabase()
-		if g.AssertNoError(t, err) {
-			count, err := conn.GetCount(task.Config.Target.Object)
-			g.AssertNoError(t, err)
-			assert.EqualValues(t, task.GetCount(), count)
-			conn.Close()
-		}
-	}
-
-	// validate file
-	if val, ok := task.Config.Env["validation_file"]; ok {
-		valFile := strings.TrimPrefix(val, "file://")
-		dataFile, err := iop.ReadCsv(valFile)
-		if !g.AssertNoError(t, err) {
-			return
-		}
-		orderByStr := "1"
-		if len(task.Config.Source.PrimaryKey()) > 0 {
-			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
-		}
-		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
-		conn, _ := task.Config.TgtConn.AsDatabase()
-		dataDB, err := conn.Query(sql)
-		g.AssertNoError(t, err)
-		conn.Close()
-		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
-
-		if g.AssertNoError(t, err) {
-			for _, valColS := range valCols {
-				valCol := cast.ToInt(valColS)
-				valuesFile := dataFile.ColValues(valCol)
-				valuesDb := dataDB.ColValues(valCol)
-				// g.P(dataDB.ColValues(0))
-				// g.P(dataDB.ColValues(1))
-				// g.P(valuesDb)
-				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
-					for i := range valuesDb {
-						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
-						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
-						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s", i+1, valCol, dataDB.Columns[valCol].Name, file.Name)) {
-							return
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
-func TestInToDb(t *testing.T) {
-	csvFile := "tests/files/test1.csv"
-	csvFileUpsert := "tests/files/test1.upsert.csv"
-	testFile1, err := os.Open(csvFile)
-	if err != nil {
-		g.LogError(err)
-		g.AssertNoError(t, err)
-		return
-	}
-
-	tReader, err := iop.AutoDecompress(bufio.NewReader(testFile1))
-	g.AssertNoError(t, err)
-	testFile1Bytes, err = io.ReadAll(tReader)
-	testFile1.Close()
-
-	for _, tgtDB := range DBs {
-		println()
-		g.Debug(">>>>>> Tranferring from CSV(%s) to %s", csvFile, tgtDB.name)
-
-		cfgMap := g.M(
-			"source", g.M(
-				"conn", "file://"+csvFile,
-				"stream", "file://"+csvFile,
-			),
-			"target", g.M(
-				"conn", tgtDB.URL,
-				"object", tgtDB.table,
-			),
-			"mode", sling.FullRefreshMode,
-		)
-		config, err := sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		task := sling.NewTask(0, config)
-		err = task.Execute()
-		if err != nil {
-			g.LogError(err)
-			g.AssertNoError(t, err)
-			return
-		}
-
-		cfgMap = g.M(
-			"source", g.M(
-				"conn", "file://"+csvFileUpsert,
-				"stream", "file://"+csvFileUpsert,
-			),
-			"target", g.M(
-				"conn", tgtDB.URL,
-				"object", tgtDB.table+"_incremental",
-			),
-			"mode", sling.TruncateMode,
-		)
-		config, err = sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		taskUpsert := sling.NewTask(0, config)
-		err = taskUpsert.Execute()
-		g.LogError(err)
-		if err != nil {
-			g.AssertNoError(t, err)
-			return
-		}
-	}
-}
-
-func TestDbToDb(t *testing.T) {
-	for _, srcDB := range DBs {
-		for _, tgtDB := range DBs {
-			if srcDB.name == "SQLite" && tgtDB.name == "SQLite" {
-				continue
-			} else if srcDB.name == "Postgres" || tgtDB.name == "Postgres" {
-				// OK
-			} else {
-				continue
-			}
-
-			println()
-			g.Debug(">>>>>> Tranferring from %s to %s", srcDB.name, tgtDB.name)
-
-			cfgMap := g.M(
-				"source", g.M(
-					"conn", srcDB.URL,
-					"stream", srcDB.table,
-				),
-				"target", g.M(
-					"conn", tgtDB.URL,
-					"object", tgtDB.table+"_copy",
-				),
-				"mode", sling.FullRefreshMode,
-			)
-			config, err := sling.NewConfig(g.Marshal(cfgMap))
-			g.AssertNoError(t, err)
-
-			task := sling.NewTask(0, config)
-			err = task.Execute()
-			if g.LogError(err) {
-				g.AssertNoError(t, err)
-				return
-			}
-
-			cfgMap = g.M(
-				"source", g.M(
-					"conn", srcDB.URL,
-					"stream", srcDB.table+"_incremental",
-				),
-				"target", g.M(
-					"conn", tgtDB.URL,
-					"object", tgtDB.table+"_copy",
-					"primary_key", []string{"id"},
-					"update_key", "create_dt",
-				),
-				"mode", sling.IncrementalMode,
-			)
-			config, err = sling.NewConfig(g.Marshal(cfgMap))
-			g.AssertNoError(t, err)
-
-			taskUpsert := sling.NewTask(0, config)
-			err = taskUpsert.Execute()
-			if err != nil {
-				g.AssertNoError(t, err)
-				return
-			}
-		}
-	}
-}
-
-func TestDbToOut(t *testing.T) {
-
-	for _, srcDB := range DBs {
-		filePath2 := fmt.Sprintf("tests/files/%s.out.csv", srcDB.name)
-		println()
-		g.Debug(">>>>>> Tranferring from %s to CSV (%s)", srcDB.name, filePath2)
-
-		srcTable := srcDB.table
-		srcTableCopy := srcDB.table + "_copy"
-
-		cfgMap := g.M(
-			"source", g.M(
-				"conn", srcDB.URL,
-				"stream", g.F("select * from %s order by id", srcTableCopy),
-			),
-			"target", g.M(
-				"object", "file://"+filePath2,
-			),
-		)
-		config, err := sling.NewConfig(g.Marshal(cfgMap))
-		g.AssertNoError(t, err)
-
-		task := sling.NewTask(0, config)
-		err = task.Execute()
-		if !g.AssertNoError(t, err) {
-			g.LogError(err)
-			return
-		}
-
-		testFile1, err := os.Open("tests/files/test1.result.csv")
-		g.AssertNoError(t, err)
-		testFile1Bytes, err = io.ReadAll(testFile1)
-
-		testFile2, err := os.Open(filePath2)
-		g.AssertNoError(t, err)
-		testFile2Bytes, err := io.ReadAll(testFile2)
-
-		if srcDB.name != "SQLite" {
-			// SQLite uses int for bool, so it will not match
-			equal := assert.Equal(t, string(testFile1Bytes), string(testFile2Bytes))
-
-			if equal {
-				err = os.RemoveAll(filePath2)
-				g.AssertNoError(t, err)
-
-				conn, err := d.NewConn(srcDB.URL)
-				g.AssertNoError(t, err)
-
-				err = conn.Connect()
-				g.AssertNoError(t, err)
-
-				err = conn.DropTable(srcTable)
-				g.AssertNoError(t, err)
-
-				err = conn.DropTable(srcTableCopy)
-				g.AssertNoError(t, err)
-
-				err = conn.Close()
-				g.AssertNoError(t, err)
-			}
-		} else {
-			testFile1Lines := len(strings.Split(string(testFile1Bytes), "\n"))
-			testFile2Lines := len(strings.Split(string(testFile2Bytes), "\n"))
-			equal := assert.Equal(t, testFile1Lines, testFile2Lines)
-
-			if equal {
-				err = os.RemoveAll(filePath2)
-				os.Remove(strings.ReplaceAll(srcDB.URL, "file:", ""))
-			} else {
-				g.Debug("Not equal for " + srcDB.name)
-			}
-		}
-	}
 }
 
 func TestOptions(t *testing.T) {
@@ -549,8 +119,7 @@ func TestCfgPath(t *testing.T) {
 
 	testCfg := func(path string) (err error) {
 		cfg, err := sling.NewConfig(path)
-		if g.LogError(err) {
-			g.AssertNoError(t, err)
+		if !g.AssertNoError(t, err) {
 			return
 		}
 
@@ -625,4 +194,424 @@ func TestExtract(t *testing.T) {
 
 	err := ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
 	g.AssertNoError(t, err)
+}
+
+func testSuite(dbType dbio.Type, t *testing.T) {
+	conn, ok := dbConnMap[dbType]
+	if !assert.True(t, ok) {
+		return
+	}
+
+	templateFilePath := "tests/suite.template.tsv"
+	tempFilePath := g.F("/tmp/tests.%s.tsv", dbType.String())
+	folderPath := g.F("tests/suite/%s", dbType.String())
+	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
+	testTable := g.F("test1k_%s", dbType.String())
+	testWideFilePath, err := generateLargeDataset(300, 100, false)
+	g.LogFatal(err)
+
+	// generate files
+	os.RemoveAll(folderPath) // clean up
+	os.MkdirAll(folderPath, 0777)
+
+	// replace vars
+	filebytes, err := os.ReadFile(templateFilePath)
+	g.LogFatal(err)
+
+	fileContent := string(filebytes)
+	fileContent = strings.ReplaceAll(fileContent, "[conn]", conn.name)
+	fileContent = strings.ReplaceAll(fileContent, "[schema]", testSchema)
+	fileContent = strings.ReplaceAll(fileContent, "[table]", testTable)
+	fileContent = strings.ReplaceAll(fileContent, "[wide_file_path]", testWideFilePath)
+
+	err = os.WriteFile(tempFilePath, []byte(fileContent), 0777)
+	g.LogFatal(err)
+
+	data, err := iop.ReadCsv(tempFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	// rewrite correctly for displaying in Github
+	testMux.Lock()
+	dataT, err := iop.ReadCsv(templateFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
+	c.WriteStream(dataT.Stream())
+	testMux.Unlock()
+
+	for i, rec := range data.Records() {
+		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
+		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
+		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
+		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
+		primaryKey := []string{}
+		if val := cast.ToString(rec["source_primary_key"]); val != "" {
+			primaryKey = strings.Split(val, ",")
+		}
+
+		if conn.useBulk != nil {
+			targetOptions["use_bulk"] = *conn.useBulk
+		}
+
+		task := g.M(
+			"source", g.M(
+				"conn", cast.ToString(rec["source_conn"]),
+				"stream", cast.ToString(rec["source_stream"]),
+				"primary_key", primaryKey,
+				"update_key", cast.ToString(rec["source_update_key"]),
+				"options", sourceOptions,
+			),
+			"target", g.M(
+				"conn", cast.ToString(rec["target_conn"]),
+				"object", cast.ToString(rec["target_object"]),
+				"options", targetOptions,
+			),
+			"mode", cast.ToString(rec["mode"]),
+			"options", options,
+			"env", env,
+		)
+		taskPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
+		taskBytes := []byte(g.Pretty(task))
+		err = os.WriteFile(taskPath, taskBytes, 0777)
+		g.AssertNoError(t, err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	files, _ := g.ListDir(folderPath)
+
+	testNumbers := []int{}
+	if tns := os.Getenv("TESTS"); tns != "" {
+		for _, tn := range strings.Split(tns, ",") {
+			if strings.HasSuffix(tn, "+") {
+				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
+
+				for i := range files {
+					if i+1 < start {
+						continue
+					}
+					testNumbers = append(testNumbers, i+1)
+				}
+			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
+				testNumbers = append(testNumbers, testNumber)
+			}
+		}
+	}
+
+	for i, file := range files {
+		if t.Failed() {
+			g.LogFatal(g.Error("Failed"))
+		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
+			continue
+		}
+		runOneTask(t, file, dbType)
+	}
+}
+func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
+	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
+	println()
+
+	bars := "---------------------------"
+	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, dbType, bars)
+
+	cfg := &sling.Config{}
+	err := cfg.Unmarshal(file.FullPath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	task := sling.NewTask(0, cfg)
+	if !g.AssertNoError(t, task.Err) {
+		return
+	}
+
+	// validate object name
+	if name, ok := task.Config.Env["validation_object"]; ok {
+		if !assert.Equal(t, name, task.Config.Target.Object) {
+			return
+		}
+	}
+
+	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
+		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
+	}
+
+	// process PostSQL for different drop_view syntax
+	dbConn, err := task.Config.TgtConn.AsDatabase()
+	if err == nil {
+		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+		if dbConn.GetType().DBNameUpperCase() {
+			table.Name = strings.ToUpper(table.Name)
+		}
+		viewName := table.FullName()
+		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
+		dropViewSQL = strings.TrimSpace(dropViewSQL)
+		task.Config.Target.Options.PostSQL = g.R(
+			task.Config.Target.Options.PostSQL,
+			"drop_view", dropViewSQL,
+		)
+	}
+
+	if g.AssertNoError(t, task.Err) {
+		err = task.Execute()
+		if !g.AssertNoError(t, err) {
+			return
+		}
+	} else {
+		return
+	}
+
+	// validate count
+	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
+		g.Debug("getting count for test validation")
+		conn, err := task.Config.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			count, err := conn.GetCount(task.Config.Target.Object)
+			g.AssertNoError(t, err)
+			assert.EqualValues(t, task.GetCount(), count)
+			conn.Close()
+		}
+	}
+
+	// validate file
+	if val, ok := task.Config.Env["validation_file"]; ok {
+		valFile := strings.TrimPrefix(val, "file://")
+		dataFile, err := iop.ReadCsv(valFile)
+		if !g.AssertNoError(t, err) {
+			return
+		}
+		orderByStr := "1"
+		if len(task.Config.Source.PrimaryKey()) > 0 {
+			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
+		}
+		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
+		conn, _ := task.Config.TgtConn.AsDatabase()
+		dataDB, err := conn.Query(sql)
+		g.AssertNoError(t, err)
+		conn.Close()
+		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
+
+		if g.AssertNoError(t, err) {
+			for _, valColS := range valCols {
+				valCol := cast.ToInt(valColS)
+				valuesFile := dataFile.ColValues(valCol)
+				valuesDb := dataDB.ColValues(valCol)
+				// g.P(dataDB.ColValues(0))
+				// g.P(dataDB.ColValues(1))
+				// g.P(valuesDb)
+				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+					for i := range valuesDb {
+						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
+						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
+						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s => %#v vs %#v", i+1, valCol, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)) {
+							return
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSuitePostgres(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbPostgres, t)
+}
+
+// func TestSuiteRedshift(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbRedshift, t)
+// }
+
+func TestSuiteStarRocks(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbStarRocks, t)
+}
+
+func TestSuiteMySQL(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbMySQL, t)
+}
+
+func TestSuiteMariaDB(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbMariaDB, t)
+}
+
+func TestSuiteOracle(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbOracle, t)
+}
+
+// func TestSuiteBigTable(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbBigTable, t)
+// }
+
+func TestSuiteBigQuery(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbBigQuery, t)
+}
+
+func TestSuiteSnowflake(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSnowflake, t)
+}
+
+func TestSuiteSQLite(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSQLite, t)
+}
+
+func TestSuiteDuckDb(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbDuckDb, t)
+}
+
+// func TestSuiteMotherDuck(t *testing.T) {
+// 	t.Parallel()
+// 	testSuite(dbio.TypeDbMotherDuck, t)
+// }
+
+func TestSuiteSQLServer(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbSQLServer, t)
+}
+
+// func TestSuiteAzure(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbAzure, t)
+// }
+
+// func TestSuiteAzureDWH(t *testing.T) {
+// 	t.Parallel()
+// 	testSeries(dbio.TypeDbAzureDWH, t)
+// }
+
+func TestSuiteClickhouse(t *testing.T) {
+	t.Parallel()
+	testSuite(dbio.TypeDbClickhouse, t)
+}
+
+// generate large dataset or use cache
+func generateLargeDataset(numCols, numRows int, force bool) (path string, err error) {
+	testMux.Lock()
+	defer testMux.Unlock()
+
+	var data iop.Dataset
+
+	path = g.F("/tmp/dataset_%dx%d.csv", numRows, numCols)
+	if _, err = os.Stat(path); err == nil && !force {
+		return
+	}
+
+	g.Info("generating %s", path)
+
+	type FakeField struct {
+		name string
+		gen  func() interface{}
+	}
+
+	words := make([]string, 100)
+	for i := range words {
+		words[i] = g.RandString(g.AlphaRunes, g.RandInt(15))
+		if len(words[i]) == 10 {
+			words[i] = words[i] + "\n"
+		}
+	}
+
+	fieldsFuncTemplate := []*FakeField{
+		{"name", func() interface{} { return faker.Name().Name() }},
+		{"url", func() interface{} { return faker.Internet().Url() }},
+		{"date_time", func() interface{} { return faker.Date().Forward(100 * time.Minute).Format("2006-01-02 15:04:05") }},
+		{"address", func() interface{} { return faker.Address().SecondaryAddress() }},
+		{"price", func() interface{} { return faker.Commerce().Price() }},
+		{"my_int", func() interface{} { return faker.Number().NumberInt64(5) }},
+		{"email", func() interface{} { return faker.Internet().Email() }},
+		{"creditcardexpirydate", func() interface{} { return faker.Date().Forward(1000000 * time.Minute).Format("2006-01-02") }},
+		{"latitude", func() interface{} { return faker.Address().Latitude() }},
+		{"longitude", func() interface{} { return faker.Address().Longitude() }},
+		{"interested", func() interface{} { return g.RandInt(2) == 1 }},
+		{"paragraph", func() interface{} { return strings.Join(words[:g.RandInt(100)], " ") }},
+	}
+
+	fieldsFunc := make([]*FakeField, numCols)
+	for i := range fieldsFunc {
+		fieldsFunc[i] = fieldsFuncTemplate[i%len(fieldsFuncTemplate)]
+	}
+
+	makeRow := func() (row []interface{}) {
+		row = make([]interface{}, len(fieldsFunc))
+		c := 0
+		for _, ff := range fieldsFunc {
+			row[c] = ff.gen()
+			c++
+		}
+
+		return row
+	}
+
+	getFields := func() (fields []string) {
+		fields = make([]string, len(fieldsFunc))
+		for j, ff := range fieldsFunc {
+			fields[j] = g.F("%s_%03d", (*ff).name, j+1)
+		}
+		return
+	}
+
+	data = iop.NewDataset(nil)
+	data.Rows = make([][]interface{}, numRows)
+	data.SetFields(getFields())
+
+	for i := 0; i < 50; i++ {
+		data.Rows[i] = makeRow()
+	}
+
+	file, _ := os.Create(path)
+
+	w := csv.NewWriter(file)
+	defer w.Flush()
+
+	tbw, err := w.Write(append([]string{"id"}, data.GetFields()...))
+	if err != nil {
+		return path, g.Error(err, "error write row to csv file")
+	}
+
+	nullCycle := 0
+	for i := 0; i < numRows; i++ {
+		rec := make([]string, numCols+1)
+		rec[0] = cast.ToString(i + 1) // id
+		for j := 1; j < numCols+1; j++ {
+			nullCycle++
+			if nullCycle%100 == 0 {
+				rec[j] = ""
+			} else {
+				val := data.Rows[i%50][j-1]
+				rec[j] = data.Sp.CastToString(j, val, data.Columns[j].Type)
+			}
+		}
+
+		bw, err := w.Write(rec)
+		if err != nil {
+			return path, g.Error(err, "error write row to csv file")
+		}
+		tbw = tbw + bw
+
+		if i%100000 == 0 {
+			print(g.F("%d ", i))
+		}
+	}
+
+	println()
+
+	return path, nil
+
+}
+
+func TestGenerateWideFile(t *testing.T) {
+	_, err := generateLargeDataset(300, 100, true)
+	g.LogFatal(err)
 }

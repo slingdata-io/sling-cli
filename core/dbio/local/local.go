@@ -259,7 +259,6 @@ func (p *Profile) ListConnections(includeEnv bool) (cArr []connection.Connection
 		for name, val := range g.KVArrToMap(os.Environ()...) {
 			conn, err := connection.NewConnectionFromURL(strings.ToUpper(name), val)
 			if err != nil {
-				// g.LogError(err, "could not create data conn %s", conn.Name)
 				continue
 			}
 

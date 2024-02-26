@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -66,6 +67,13 @@ func (t *TaskExecution) Execute() error {
 	go func() {
 		defer close(done)
 		defer t.PBar.Finish()
+
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				t.Err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			}
+		}()
 
 		t.Status = ExecStatusRunning
 
@@ -326,7 +334,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		t.AddCleanupTask(func() { tgtConn.Close() })
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
 	if t.usingCheckpoint() {
@@ -469,8 +477,8 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	if !t.isUsingPool() {
-		t.AddCleanupTask(func() { srcConn.Close() })
-		t.AddCleanupTask(func() { tgtConn.Close() })
+		t.AddCleanupTaskLast(func() { srcConn.Close() })
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
 	// set schema if needed
