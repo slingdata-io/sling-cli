@@ -574,7 +574,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
+		g.Debug("Loading %s [%s]", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
 		err := conn.CopyFromLocal(localFile.URI, table, localFile.Columns)
 		if err != nil {
@@ -656,7 +656,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 
 	copyFromGCS := func(gcsFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s] %s", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)), gcsFile.BatchID)
+		g.Debug("Loading %s [%s]", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
 
 		err := conn.CopyFromGCS(gcsFile.URI, table, gcsFile.Columns)
 		if err != nil {
