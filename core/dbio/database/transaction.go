@@ -285,7 +285,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	}
 	_ = mux
 
-	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) error {
+	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) {
 		var err error
 		defer context.Wg.Write.Done()
 
@@ -294,7 +294,9 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 
 		insFields, err := conn.ValidateColumnNames(columns.Names(), bColumns.Names(), true)
 		if err != nil {
-			return g.Error(err, "columns mismatch")
+			err = g.Error(err, "columns mismatch")
+			context.CaptureErr(err)
+			return
 		}
 
 		insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insFields, len(rows))
@@ -309,8 +311,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		if err != nil {
 			err = g.Error(err, "Error in PrepareContext")
 			context.CaptureErr(err)
-			context.Cancel()
-			return context.Err()
+			return
 		}
 
 		vals := []interface{}{}
@@ -337,8 +338,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				})),
 			))
 			context.CaptureErr(err)
-			context.Cancel()
-			return context.Err()
+			return
 		}
 
 		// close statement
@@ -349,9 +349,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				fmt.Sprintf("stmt.Close: %s", insertTemplate),
 			)
 			context.CaptureErr(err)
-			context.Cancel()
 		}
-		return context.Err()
 	}
 
 	g.Trace("batchRows")
@@ -416,10 +414,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	if len(batchRows) > 0 {
 		g.Trace("remaining batchSize %d", len(batchRows))
 		context.Wg.Write.Add()
-		err = insertBatch(batch.Columns, batchRows)
-		if err != nil {
-			return count - cast.ToUint64(len(batchRows)), g.Error(err, "insertBatch")
-		}
+		insertBatch(batch.Columns, batchRows)
 	}
 
 	context.Wg.Write.Wait()
