@@ -73,6 +73,11 @@ jobs:
       - name: Run Go Tests
         run: |
           export DEBUG=''
+
+          # Oracle env
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+          export PATH="$PATH:$ORACLE_HOME/bin"
+
           bash scripts/prep.gomod.sh
           
           bash scripts/test.sh
