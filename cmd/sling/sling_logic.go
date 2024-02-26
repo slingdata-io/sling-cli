@@ -416,7 +416,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		err = runTask(&cfg, &replication)
 		if err != nil {
 			errors[i] = g.Error(err, "error for stream %s", name)
-			eG.Capture(err)
+			eG.Capture(err, streamsOrdered[i])
 		} else {
 			succcess++
 		}
@@ -436,30 +436,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 
-	if eG.Err() != nil {
-		bars := "---------------------------"
-
-		// construct err
-		errString := g.F("Sling encountered %d Errors", len(eG.Errors))
-
-		for i, err := range errors {
-			if err == nil {
-				continue
-			}
-
-			et := err.(*g.ErrType)
-			prefix := g.F("%s %s %s", bars, streamsOrdered[i], bars)
-			details := et.Full()
-			if g.IsDebug() {
-				details = et.Debug()
-			}
-			errString = g.F("%s\n\n%s\n%s", errString, prefix, details)
-		}
-
-		err = g.Error(errString)
-	}
-
-	return err
+	return eG.Err()
 }
 
 func processConns(c *g.CliSC) (ok bool, err error) {
