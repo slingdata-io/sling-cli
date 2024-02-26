@@ -704,7 +704,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 	query = strings.TrimSuffix(query, ";")
 
 	conn.Log = append(conn.Log, query)
-	if len(conn.Log) > 300 {
+	if len(conn.Log) > 3000 {
 		conn.Log = conn.Log[1:]
 	}
 
