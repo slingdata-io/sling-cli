@@ -196,6 +196,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	df.Columns = sampleData.Columns
 
 	t.AddCleanupTaskFirst(func() {
+		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			return
+		}
+
 		conn, err := t.getTgtDBConn(context.Background())
 		if err == nil {
 			g.LogError(conn.DropTable(tableTmp.FullName()))
