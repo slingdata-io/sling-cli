@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
 	env "github.com/slingdata-io/sling-cli/core/dbio/env"
@@ -18,11 +19,11 @@ var (
 	HomeDirEnvFile = ""
 	Env            = &env.EnvFile{}
 	PlausibleURL   = ""
-
-	OsStdErr  *os.File
-	StderrR   io.ReadCloser
-	StdErrW   *os.File
-	StdErrChn chan string
+	NoColor        = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+	OsStdErr       *os.File
+	StderrR        io.ReadCloser
+	StdErrW        *os.File
+	StdErrChn      chan string
 )
 
 //go:embed *
@@ -77,11 +78,13 @@ func SetLogger() {
 	}
 
 	if os.Getenv("SLING_LOGGING") == "NO_COLOR" {
+		NoColor = true
 		outputOut.NoColor = true
 		outputErr.NoColor = true
 		g.ZLogOut = zerolog.New(outputOut).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	} else if os.Getenv("SLING_LOGGING") == "JSON" {
+		NoColor = true
 		zerolog.LevelFieldName = "lvl"
 		zerolog.MessageFieldName = "msg"
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
@@ -135,4 +138,25 @@ func LoadSlingEnvFile() (ef env.EnvFile) {
 	Env = &ef
 	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"
 	return
+}
+
+func GreenString(text string) string {
+	if NoColor {
+		return text
+	}
+	return color.GreenString(text)
+}
+
+func RedString(text string) string {
+	if NoColor {
+		return text
+	}
+	return color.RedString(text)
+}
+
+func BlueString(text string) string {
+	if NoColor {
+		return text
+	}
+	return color.BlueString(text)
 }

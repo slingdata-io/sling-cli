@@ -146,6 +146,9 @@ func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	t.ProgressHist = append(t.ProgressHist, progressText)
 	t.Progress = progressText
 	if !t.PBar.started || t.PBar.finished {
+		if strings.HasSuffix(progressText, "failed") {
+			progressText = env.RedString(progressText)
+		}
 		g.Info(progressText)
 	} else {
 		t.PBar.SetStatus(progressText)

@@ -350,9 +350,13 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 
+	streamsOrdered := replication.StreamsOrdered()
 	eG := g.ErrorGroup{}
+	succcess := 0
+	errors := make([]error, len(streamsOrdered))
+
 	counter := 0
-	for _, name := range replication.StreamsOrdered() {
+	for i, name := range streamsOrdered {
 		if interrupted {
 			break
 		}
@@ -402,7 +406,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		println()
 
 		if stream.Disabled {
-			g.Info("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
+			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
 			continue
 		} else {
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
@@ -411,17 +415,51 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
-			err = g.Error(err, "error for stream %s", name)
+			errors[i] = g.Error(err, "error for stream %s", name)
 			eG.Capture(err)
+		} else {
+			succcess++
 		}
 		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
 	}
 
 	println()
 	delta := time.Since(startTime)
-	g.Info("Sling Replication Completed in %s | %s -> %s", g.DurationString(delta), replication.Source, replication.Target)
 
-	return eG.Err()
+	successStr := env.GreenString(g.F("%d Successes", succcess))
+	failureStr := g.F("%d Failures", len(eG.Errors))
+	if len(eG.Errors) > 0 {
+		failureStr = env.RedString(failureStr)
+	} else {
+		failureStr = env.GreenString(failureStr)
+	}
+
+	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+
+	if eG.Err() != nil {
+		bars := "---------------------------"
+
+		// construct err
+		errString := g.F("Sling encountered %d Errors", len(eG.Errors))
+
+		for i, err := range errors {
+			if err == nil {
+				continue
+			}
+
+			et := err.(*g.ErrType)
+			prefix := g.F("%s %s %s", bars, streamsOrdered[i], bars)
+			details := et.Full()
+			if g.IsDebug() {
+				details = et.Debug()
+			}
+			errString = g.F("%s\n\n%s\n%s", errString, prefix, details)
+		}
+
+		err = g.Error(errString)
+	}
+
+	return err
 }
 
 func processConns(c *g.CliSC) (ok bool, err error) {
