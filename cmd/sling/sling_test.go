@@ -61,195 +61,6 @@ func init() {
 	env.InitLogger()
 }
 
-func TestOne(t *testing.T) {
-	// return
-	path := "tests/tasks/task.06.json"
-	pathArr := strings.Split(path, "/")
-	file := g.FileItem{FullPath: path, RelPath: path, Name: pathArr[len(pathArr)-1]}
-	runOneTask(t, file)
-	if t.Failed() {
-		return
-	}
-
-	// path = "/tmp/temp.json"
-	// file = g.FileItem{FullPath: path, RelPath: path}
-	// runOneTask(t, file)
-}
-
-func TestTasks(t *testing.T) {
-	defFilePath := "tests/tasks.tsv"
-	folderPath := "tests/tasks"
-
-	// generate files
-	os.RemoveAll(folderPath) // clean up
-	os.MkdirAll(folderPath, 0777)
-
-	data, err := iop.ReadCsv(defFilePath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-
-	for i, rec := range data.Records() {
-		if g.In(rec["source_conn"], "GITHUB_DBIO", "NOTION") {
-			g.Warn("skipping since source_conn is %s", rec["source_conn"])
-			continue
-		}
-
-		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
-		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
-		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
-		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
-		primaryKey := []string{}
-		if val := cast.ToString(rec["source_primary_key"]); val != "" {
-			primaryKey = strings.Split(val, ",")
-		}
-
-		task := g.M(
-			"source", g.M(
-				"conn", cast.ToString(rec["source_conn"]),
-				"stream", cast.ToString(rec["source_stream"]),
-				"primary_key", primaryKey,
-				"update_key", cast.ToString(rec["source_update_key"]),
-				"options", sourceOptions,
-			),
-			"target", g.M(
-				"conn", cast.ToString(rec["target_conn"]),
-				"object", cast.ToString(rec["target_object"]),
-				"options", targetOptions,
-			),
-			"mode", cast.ToString(rec["mode"]),
-			"options", options,
-			"env", env,
-		)
-		taskPath := filepath.Join(folderPath, g.F("task.%02d.json", i+1))
-		taskBytes := []byte(g.Marshal(task))
-		err = os.WriteFile(taskPath, taskBytes, 0777)
-		g.AssertNoError(t, err)
-	}
-
-	files, _ := g.ListDir(folderPath)
-	for i, file := range files {
-		_ = i
-		// if g.In(i+1, 12) {
-		// 	continue // broken ssh connection, skip oracle
-		// }
-		// if i+1 < 13 {
-		// 	continue
-		// }
-		runOneTask(t, file)
-
-		if t.Failed() {
-			break
-		}
-	}
-}
-
-func runOneTask(t *testing.T, file g.FileItem) {
-	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
-	println()
-
-	bars := "---------------------------"
-	g.Info("%s Testing %s %s", bars, file.RelPath, bars)
-	cfg := &sling.Config{}
-	err := cfg.Unmarshal(file.FullPath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-
-	task := sling.NewTask(0, cfg)
-	if !g.AssertNoError(t, task.Err) {
-		return
-	}
-
-	// validate object name
-	if name, ok := task.Config.Env["validation_object"]; ok {
-		if !assert.Equal(t, name, task.Config.Target.Object) {
-			return
-		}
-	}
-
-	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
-		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
-	}
-
-	// process PostSQL for different drop_view syntax
-	dbConn, err := task.Config.TgtConn.AsDatabase()
-	if err == nil {
-		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
-		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
-		if dbConn.GetType().DBNameUpperCase() {
-			table.Name = strings.ToUpper(table.Name)
-		}
-		viewName := table.FullName()
-		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
-		dropViewSQL = strings.TrimSpace(dropViewSQL)
-		task.Config.Target.Options.PostSQL = g.R(
-			task.Config.Target.Options.PostSQL,
-			"drop_view", dropViewSQL,
-		)
-	}
-
-	if g.AssertNoError(t, task.Err) {
-		err = task.Execute()
-		if !g.AssertNoError(t, err) {
-			return
-		}
-	} else {
-		return
-	}
-
-	// validate count
-	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
-		g.Debug("getting count for test validation")
-		conn, err := task.Config.TgtConn.AsDatabase()
-		if g.AssertNoError(t, err) {
-			count, err := conn.GetCount(task.Config.Target.Object)
-			g.AssertNoError(t, err)
-			assert.EqualValues(t, task.GetCount(), count)
-			conn.Close()
-		}
-	}
-
-	// validate file
-	if val, ok := task.Config.Env["validation_file"]; ok {
-		valFile := strings.TrimPrefix(val, "file://")
-		dataFile, err := iop.ReadCsv(valFile)
-		if !g.AssertNoError(t, err) {
-			return
-		}
-		orderByStr := "1"
-		if len(task.Config.Source.PrimaryKey()) > 0 {
-			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
-		}
-		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
-		conn, _ := task.Config.TgtConn.AsDatabase()
-		dataDB, err := conn.Query(sql)
-		g.AssertNoError(t, err)
-		conn.Close()
-		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
-
-		if g.AssertNoError(t, err) {
-			for _, valColS := range valCols {
-				valCol := cast.ToInt(valColS)
-				valuesFile := dataFile.ColValues(valCol)
-				valuesDb := dataDB.ColValues(valCol)
-				// g.P(dataDB.ColValues(0))
-				// g.P(dataDB.ColValues(1))
-				// g.P(valuesDb)
-				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
-					for i := range valuesDb {
-						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
-						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
-						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s => %#v vs %#v", i+1, valCol, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)) {
-							return
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
 func TestOptions(t *testing.T) {
 	testCases := []struct {
 		input       string
@@ -495,7 +306,113 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
-		runOneTask(t, file)
+		runOneTask(t, file, dbType)
+	}
+}
+func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
+	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
+	println()
+
+	bars := "---------------------------"
+	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, dbType, bars)
+
+	cfg := &sling.Config{}
+	err := cfg.Unmarshal(file.FullPath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	task := sling.NewTask(0, cfg)
+	if !g.AssertNoError(t, task.Err) {
+		return
+	}
+
+	// validate object name
+	if name, ok := task.Config.Env["validation_object"]; ok {
+		if !assert.Equal(t, name, task.Config.Target.Object) {
+			return
+		}
+	}
+
+	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
+		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
+	}
+
+	// process PostSQL for different drop_view syntax
+	dbConn, err := task.Config.TgtConn.AsDatabase()
+	if err == nil {
+		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+		if dbConn.GetType().DBNameUpperCase() {
+			table.Name = strings.ToUpper(table.Name)
+		}
+		viewName := table.FullName()
+		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
+		dropViewSQL = strings.TrimSpace(dropViewSQL)
+		task.Config.Target.Options.PostSQL = g.R(
+			task.Config.Target.Options.PostSQL,
+			"drop_view", dropViewSQL,
+		)
+	}
+
+	if g.AssertNoError(t, task.Err) {
+		err = task.Execute()
+		if !g.AssertNoError(t, err) {
+			return
+		}
+	} else {
+		return
+	}
+
+	// validate count
+	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
+		g.Debug("getting count for test validation")
+		conn, err := task.Config.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			count, err := conn.GetCount(task.Config.Target.Object)
+			g.AssertNoError(t, err)
+			assert.EqualValues(t, task.GetCount(), count)
+			conn.Close()
+		}
+	}
+
+	// validate file
+	if val, ok := task.Config.Env["validation_file"]; ok {
+		valFile := strings.TrimPrefix(val, "file://")
+		dataFile, err := iop.ReadCsv(valFile)
+		if !g.AssertNoError(t, err) {
+			return
+		}
+		orderByStr := "1"
+		if len(task.Config.Source.PrimaryKey()) > 0 {
+			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
+		}
+		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
+		conn, _ := task.Config.TgtConn.AsDatabase()
+		dataDB, err := conn.Query(sql)
+		g.AssertNoError(t, err)
+		conn.Close()
+		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
+
+		if g.AssertNoError(t, err) {
+			for _, valColS := range valCols {
+				valCol := cast.ToInt(valColS)
+				valuesFile := dataFile.ColValues(valCol)
+				valuesDb := dataDB.ColValues(valCol)
+				// g.P(dataDB.ColValues(0))
+				// g.P(dataDB.ColValues(1))
+				// g.P(valuesDb)
+				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+					for i := range valuesDb {
+						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
+						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
+						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s => %#v vs %#v", i+1, valCol, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)) {
+							return
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
