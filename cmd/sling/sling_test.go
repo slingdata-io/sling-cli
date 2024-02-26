@@ -302,7 +302,7 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 
 	for i, file := range files {
 		if t.Failed() {
-			break
+			t.Fatal()
 		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
