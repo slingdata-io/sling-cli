@@ -874,7 +874,10 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if table.IsQuery() {
+	if table.IsQuery() || table.IsView {
+		if table.IsView && table.SQL == "" {
+			table.SQL = table.Select()
+		}
 		return conn.ExportToGCS(table.SQL, gcsURI)
 	}
 
@@ -911,6 +914,10 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 		return g.Error(err, "Error in task.Wait")
 	}
 	if err := status.Err(); err != nil {
+		if strings.Contains(err.Error(), "it is currently a VIEW") {
+			table.IsView = true
+			return conn.CopyToGCS(table, gcsURI)
+		}
 		conn.Context().CaptureErr(err)
 		for _, e := range status.Errors {
 			conn.Context().CaptureErr(*e)
