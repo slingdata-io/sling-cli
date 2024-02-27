@@ -506,7 +506,7 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/sling-cli/run/configuration#target"
 		case contains("[AppendRow]: converting"):
 			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/sling-cli/run/configuration#target"
-		case contains("permission denied"):
+		case contains("mkdir", "permission denied"):
 			helpString = "Perhaps setting the SLING_TEMP_DIR environment variable to a writable folder will help."
 		}
 	}
