@@ -461,13 +461,14 @@ func cliInit() int {
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			evt.Transaction = g.F("%s (%s => %s)", taskMap["type"], sourceType, targetType)
+			evt.Transaction = g.F("%s => %s", sourceType, targetType)
 
+			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
 			E, ok := err.(*g.ErrType)
 			if ok {
 				lastCaller := E.LastCaller()
-				evt.Exception[0].Type = lastCaller
-				evt.Exception[0].Value = lastCaller
+				evt.Exception[0].Type = lastCaller                            // the title
+				evt.Exception[0].Value = g.F("%s (%s)", lastCaller, taskType) // the subtitle
 
 				if arr := strings.Split(lastCaller, " "); len(arr) > 1 {
 					evt.Exception[0].Type = strings.TrimPrefix(lastCaller, arr[0]+" ")
@@ -486,8 +487,13 @@ func cliInit() int {
 				scope.SetUser(sentry.User{ID: machineID})
 				scope.SetTag("source_type", sourceType)
 				scope.SetTag("target_type", targetType)
-				scope.SetTag("mode", cast.ToString(taskMap["mode"]))
-				scope.SetTag("type", cast.ToString(taskMap["type"]))
+				scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
+				if val := cast.ToString(taskMap["mode"]); val != "" {
+					scope.SetTag("mode", val)
+				}
+				if val := cast.ToString(taskMap["type"]); val != "" {
+					scope.SetTag("type", val)
+				}
 				scope.SetTag("package", getSlingPackage())
 				if projectID != "" {
 					scope.SetTag("project_id", projectID)

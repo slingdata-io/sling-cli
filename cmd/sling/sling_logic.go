@@ -420,7 +420,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		} else {
 			succcess++
 		}
-		telemetryMap = g.M("begin_time", time.Now().UnixMicro()) // reset map
+		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 	}
 
 	println()
