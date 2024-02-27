@@ -461,7 +461,7 @@ func cliInit() int {
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			evt.Transaction = g.F("%s => %s", sourceType, targetType)
+			evt.Transaction = g.F("%s - %s", sourceType, targetType)
 
 			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
 			E, ok := err.(*g.ErrType)
