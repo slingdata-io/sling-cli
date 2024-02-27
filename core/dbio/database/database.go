@@ -704,7 +704,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 	query = strings.TrimSuffix(query, ";")
 
 	conn.Log = append(conn.Log, query)
-	if len(conn.Log) > 3000 {
+	if len(conn.Log) > 9000 {
 		conn.Log = conn.Log[1:]
 	}
 
@@ -1441,7 +1441,7 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 	if matchedType, ok := conn.Template().NativeTypeMap[dbType]; ok {
 		colType = iop.ColumnType(matchedType)
 	} else {
-		if dbType != "" {
+		if dbType != "" && g.IsDebug() {
 			g.Warn("using text since type '%s' not mapped for col '%s'", dbType, name)
 		}
 		colType = iop.TextType // default as text
