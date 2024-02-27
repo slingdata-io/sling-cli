@@ -1441,8 +1441,8 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 	if matchedType, ok := conn.Template().NativeTypeMap[dbType]; ok {
 		colType = iop.ColumnType(matchedType)
 	} else {
-		if dbType != "" && g.IsDebug() {
-			g.Warn("using text since type '%s' not mapped for col '%s'", dbType, name)
+		if dbType != "" {
+			g.Debug("using text since type '%s' not mapped for col '%s'", dbType, name)
 		}
 		colType = iop.TextType // default as text
 	}
