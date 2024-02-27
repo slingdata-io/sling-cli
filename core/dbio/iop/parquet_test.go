@@ -7,6 +7,7 @@ import (
 
 	"github.com/flarco/g"
 	parquet "github.com/parquet-go/parquet-go"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 )
 
 func TestParquetRead1(t *testing.T) {
@@ -43,7 +44,7 @@ func TestParquetWrite1(t *testing.T) {
 	config.Schema = parquet.NewSchema("test", NewRecNode(cols))
 	// config.Compression = &snappy.Codec{}
 
-	file, err := os.CreateTemp(os.TempDir(), "")
+	file, err := os.CreateTemp(env.GetTempFolder(), "")
 	g.Info(file.Name())
 	g.LogFatal(err)
 
@@ -70,7 +71,7 @@ func TestParquetWrite2(t *testing.T) {
 	// parquet.Node
 	// parquet.NewSchema("test", node)
 
-	file, err := os.CreateTemp(os.TempDir(), "")
+	file, err := os.CreateTemp(env.GetTempFolder(), "")
 	g.Info(file.Name())
 	g.LogFatal(err)
 

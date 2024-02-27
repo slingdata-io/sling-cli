@@ -17,6 +17,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/xo/dburl"
 )
@@ -143,7 +144,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		return
 	}
 
-	file, err := os.CreateTemp(getTempFolder(), "oracle."+tableFName+".*.sqlldr.ctl")
+	file, err := os.CreateTemp(env.GetTempFolder(), "oracle."+tableFName+".*.sqlldr.ctl")
 	if err != nil {
 		err = g.Error(err, "Error opening temp file")
 		return

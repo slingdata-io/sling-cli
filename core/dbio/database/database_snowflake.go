@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
 
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/snowflakedb/gosnowflake"
 
@@ -564,7 +565,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	context := g.NewContext(conn.Context().Ctx)
 
 	// Write the each stage file to temp file, read to ds
-	folderPath := path.Join(getTempFolder(), "snowflake", "get", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
 	unload := func(sql string, stagePartPath string) {
 
 		defer context.Wg.Write.Done()
@@ -652,7 +653,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	// Write the ds to a temp file
-	folderPath := path.Join(getTempFolder(), "snowflake", "put", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", g.NowFileStr())
 
 	// delete folder when done
 	df.Defer(func() { os.RemoveAll(folderPath) })

@@ -13,6 +13,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 
 	"github.com/dustin/go-humanize"
@@ -233,7 +234,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		// Write the ds to a temp file
 
-		filePath := path.Join(getTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
+		filePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
 		if err != nil {
 			os.Remove(filePath)
@@ -343,7 +344,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 	errPath := "/dev/stderr"
 	if runtime.GOOS == "windows" || true {
-		errPath = path.Join(getTempFolder(), g.NewTsID("sqlserver")+".error")
+		errPath = path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+".error")
 		defer os.Remove(errPath)
 	}
 

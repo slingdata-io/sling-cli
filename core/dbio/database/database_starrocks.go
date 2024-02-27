@@ -14,9 +14,9 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -89,14 +89,14 @@ func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {
 			return g.Error("did not get results from 'SHOW ALTER TABLE' to get schema change status.")
 		}
 
-		env.Print(".")
+		print(".")
 
 		if g.In(cast.ToString(data.Records()[0]["state"]), "FINISHED", "CANCELLED") {
 			break
 		}
 	}
 
-	env.Println("")
+	println("")
 
 	return
 }
@@ -397,11 +397,10 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// set format to JSON
 	fs.SetProp("format", "json")
-	fs.SetProp("file_max_rows", "50000")
+	fs.SetProp("file_max_rows", "250000")
 	if val := conn.GetProp("file_max_rows"); val != "" {
 		fs.SetProp("file_max_rows", val)
 	}
-	fs.SetProp("file_max_bytes", "10000000")
 	if val := conn.GetProp("file_max_bytes"); val != "" {
 		fs.SetProp("file_max_bytes", val)
 	}
@@ -410,7 +409,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	// fs.SetProp("format", "csv")
 	// fs.SetProp("header", "false")
 
-	localPath := path.Join(getTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
+	localPath := path.Join(env.GetTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
 	if err != nil {
 		return count, g.Error(err, "Could not Delete: "+localPath)
@@ -453,8 +452,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		"strip_outer_array": "true",
 	}
 
-	// seems to not work well with parallel loading, 1 at a time
-	loadCtx := g.NewContext(conn.context.Ctx, 1)
+	loadCtx := g.NewContext(conn.context.Ctx, 5)
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
 		defer loadCtx.Wg.Write.Done()

@@ -16,6 +16,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"golang.org/x/oauth2/google"
 
@@ -538,7 +539,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return
 	}
 
-	localPath := path.Join(getTempFolder(), "bigquery", tableFName, g.NowFileStr())
+	localPath := path.Join(env.GetTempFolder(), "bigquery", tableFName, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
 	if err != nil {
 		return count, g.Error(err, "Could not Delete: "+localPath)

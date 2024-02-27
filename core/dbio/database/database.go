@@ -2543,7 +2543,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		}
 	}
 
-	folderPath := path.Join(getTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
 
 	go func() {
 		defer df.Close()
