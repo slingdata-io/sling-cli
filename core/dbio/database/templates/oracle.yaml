@@ -10,7 +10,7 @@ core:
     END;
   drop_table: |
     BEGIN
-      EXECUTE IMMEDIATE 'DROP TABLE {table} cascade constraints purge';
+      EXECUTE IMMEDIATE 'DROP TABLE {table} purge';
     EXCEPTION
       WHEN OTHERS THEN
         IF SQLCODE != -942 THEN
