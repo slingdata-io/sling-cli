@@ -27,7 +27,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	}
 
 	schemas := schemasData.ColValuesStr(0)
-	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
+	schemas = lo.Map(schemas, func(v string, i int) string { return v })
 	schemaName = strings.ToLower(schemaName)
 	if schemaName == "" {
 		schemaName = strings.ToLower(conn.GetProp("schema"))
