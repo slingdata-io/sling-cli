@@ -3196,18 +3196,29 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 // CleanSQL removes creds from the query
 func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
+	sqlLower := strings.ToLower(sql)
 
 	if len(sql) > 3000 {
 		sql = sql[0:3000]
 	}
 
+	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
+
+	switch {
+	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
+		return sql
+	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
+		return sql
+	case startsWith("select *"):
+		return sql
+	}
+
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset", "object", "object_name", "table_tmp", "stream_name") {
-			continue
+		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
+			sql = strings.ReplaceAll(sql, v, "***")
 		}
-		sql = strings.ReplaceAll(sql, v, "***")
 	}
 	return sql
 }
