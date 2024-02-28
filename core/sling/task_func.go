@@ -27,13 +27,15 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	}
 
 	schemas := schemasData.ColValuesStr(0)
-	schemas = lo.Map(schemas, func(v string, i int) string { return v })
-	schemaName = strings.ToLower(schemaName)
 	if schemaName == "" {
-		schemaName = strings.ToLower(conn.GetProp("schema"))
+		schemaName = conn.GetProp("schema")
 		if schemaName == "" {
 			return false, g.Error("did not specify schema. Please specify schema in object name.")
 		}
+
+		// qualify
+		dummy, _ := database.ParseTableName(schemaName+".dummy", conn.GetType())
+		schemaName = dummy.Schema
 	}
 
 	if !lo.Contains(schemas, schemaName) {
