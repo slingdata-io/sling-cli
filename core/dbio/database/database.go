@@ -715,9 +715,9 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		g.Trace(query, args...)
 	} else {
 		if !noColor {
-			query = color.CyanString(query)
+			query = color.CyanString(CleanSQL(conn, query))
 		}
-		g.Debug(CleanSQL(conn, query), args...)
+		g.Debug(query, args...)
 	}
 }
 
@@ -3196,14 +3196,10 @@ func CleanSQL(conn Connection, sql string) string {
 		sql = sql[0:3000]
 	}
 
-	if os.Getenv("DEBUG") != "" {
-		return sql
-	}
-
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset") {
+		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset", "object", "stream_name") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")
