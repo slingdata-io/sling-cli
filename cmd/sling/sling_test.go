@@ -301,12 +301,13 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	}
 
 	for i, file := range files {
-		if t.Failed() {
-			g.LogFatal(g.Error("Test Failed for => %s", dbType))
-		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
+		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
 		runOneTask(t, file, dbType)
+		if t.Failed() {
+			g.LogFatal(g.Error("Test `%s` Failed for => %s", file.Name, dbType))
+		}
 	}
 }
 func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
