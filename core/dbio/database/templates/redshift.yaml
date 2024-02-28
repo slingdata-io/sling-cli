@@ -19,6 +19,16 @@ core:
   sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   set_schema: ALTER TABLE {table} SET SCHEMA {new_schema}
+  
+  # TODO: need to drop the table and recreate it
+  # optimize_column: |
+  #   alter table {table} rename to {table_old};
+  #   create table {table} ( {col_ddl} );
+  #   insert into {table} ({cols})
+  #   select {cols}
+  #   from {table_old};
+  #   drop table {table_old};
+  
   copy_from_s3: |
     COPY {tgt_table} ({tgt_columns})
     FROM '{s3_path}'
