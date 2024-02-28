@@ -63,11 +63,9 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table da
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	if table.DDL == "" {
-		table.DDL, err = conn.GenerateDDL(table, data, false)
-		if err != nil {
-			return false, g.Error(err, "Could not generate DDL for "+table.FullName())
-		}
+	table.DDL, err = conn.GenerateDDL(table, data, false)
+	if err != nil {
+		return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 	}
 
 	_, err = conn.ExecMulti(table.DDL)

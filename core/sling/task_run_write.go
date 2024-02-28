@@ -113,7 +113,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, g.Error(err, "could not parse object table name")
 	}
 	targetTable.DDL = cfg.Target.Options.TableDDL
+	targetTable.DDL = g.R(targetTable.DDL, "object_name", targetTable.Raw, "table", targetTable.Raw)
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+
+	// check table ddl
+	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
+		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
+		return
+	}
 
 	var tableTmp database.Table
 	if cfg.Target.Options.TableTmp == "" {
@@ -147,7 +154,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// set DDL
-	tableTmp.DDL = strings.Replace(cfg.Target.Options.TableDDL, targetTable.Raw, tableTmp.FullName(), 1)
+	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
+	tableTmp.Raw = tableTmp.FullName()
 	tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 	// create schema if not exist
@@ -179,12 +187,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sampleData.SafeInference = true
 		sampleData.InferColumnTypes()
 		df.Columns = sampleData.Columns
-	}
-
-	// check table ddl
-	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
-		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s", targetTable.Raw)
-		return
 	}
 
 	_, err = createTableIfNotExists(tgtConn, sampleData, tableTmp)

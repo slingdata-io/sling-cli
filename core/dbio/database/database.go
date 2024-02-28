@@ -2382,6 +2382,10 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		createTemplate = conn.template.Core["create_temporary_table"]
 	}
 
+	if table.DDL != "" {
+		createTemplate = table.DDL
+	}
+
 	ddl := g.R(
 		createTemplate,
 		"table", table.FullName(),
