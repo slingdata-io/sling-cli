@@ -504,7 +504,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 			return df, g.Error(err, "could not get zip reader")
 		}
 
-		folderPath := path.Join(os.TempDir(), "dbio_temp_")
+		folderPath := path.Join(env.GetTempFolder(), "dbio_temp_")
 
 		zipPath := folderPath + ".zip"
 		_, err = localFs.Write(zipPath, reader)
@@ -1213,7 +1213,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err error) {
 	// temp file
-	tempDir := strings.TrimRight(strings.TrimRight(os.TempDir(), "/"), "\\")
+	tempDir := env.GetTempFolder()
 	filePath := path.Join(tempDir, g.NewTsID("sling.temp")+".csv")
 
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)

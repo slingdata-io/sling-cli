@@ -16,6 +16,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"golang.org/x/oauth2/google"
 
@@ -425,7 +426,6 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 			return false
 		} else if err != nil {
 			ds.Context.CaptureErr(g.Error(err, "Failed to scan"))
-			ds.Context.Cancel()
 			return false
 		}
 
@@ -539,7 +539,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return
 	}
 
-	localPath := path.Join(getTempFolder(), "bigquery", tableFName, g.NowFileStr())
+	localPath := path.Join(env.GetTempFolder(), "bigquery", tableFName, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
 	if err != nil {
 		return count, g.Error(err, "Could not Delete: "+localPath)
@@ -556,27 +556,40 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
-			df.Context.Cancel()
 			return
 		}
 
 	}()
 
-	copyFromLocal := func(localFile filesys.FileReady, tableFName string) {
-		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
+	table, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		err = g.Error(err, "could not parse table name: "+tableFName)
+		return
+	}
 
-		err := conn.CopyFromLocal(localFile.URI, tableFName, localFile.Columns)
+	table.Columns, err = conn.GetSQLColumns(table)
+	if err != nil {
+		err = g.Error(err, "could not get table columns: "+tableFName)
+		return
+	}
+
+	copyFromLocal := func(localFile filesys.FileReady, table Table) {
+		defer conn.Context().Wg.Write.Done()
+		g.Debug("Loading %s [%s]", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)))
+
+		err := conn.CopyFromLocal(localFile.URI, table, localFile.Columns)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.URI, tableFName))
-			df.Context.Cancel()
 		}
 	}
 
 	for localFile := range fileReadyChn {
+		if df.Err() != nil {
+			break
+		}
 		time.Sleep(2 * time.Second) // max 5 load jobs per 10 secs
 		conn.Context().Wg.Write.Add()
-		go copyFromLocal(localFile, tableFName)
+		go copyFromLocal(localFile, table)
 	}
 
 	conn.Context().Wg.Write.Wait()
@@ -625,27 +638,40 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		if err != nil {
 			g.LogError(err, "error writing dataflow to google storage: "+gcsPath)
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to google storage: "+gcsPath))
-			df.Context.Cancel()
 			return
 		}
 
 	}()
 
-	copyFromGCS := func(gcsFile filesys.FileReady, tableFName string) {
-		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s] %s", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)), gcsFile.BatchID)
+	table, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		err = g.Error(err, "could not parse table name: "+tableFName)
+		return
+	}
 
-		err := conn.CopyFromGCS(gcsFile.URI, tableFName, gcsFile.Columns)
+	table.Columns, err = conn.GetSQLColumns(table)
+	if err != nil {
+		err = g.Error(err, "could not get table columns: "+tableFName)
+		return
+	}
+
+	copyFromGCS := func(gcsFile filesys.FileReady, table Table) {
+		defer conn.Context().Wg.Write.Done()
+		g.Debug("Loading %s [%s]", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
+
+		err := conn.CopyFromGCS(gcsFile.URI, table, gcsFile.Columns)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.URI, tableFName))
-			df.Context.Cancel()
 		}
 	}
 
 	for gcsFile := range fileReadyChn {
+		if df.Err() != nil {
+			break
+		}
 		time.Sleep(2 * time.Second) // max 5 load jobs per 10 secs
 		conn.Context().Wg.Write.Add()
-		go copyFromGCS(gcsFile, tableFName)
+		go copyFromGCS(gcsFile, table)
 	}
 
 	conn.Context().Wg.Write.Wait()
@@ -657,28 +683,23 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 }
 
 // CopyFromGCS into bigquery from google storage
-func (conn *BigQueryConn) CopyFromLocal(localURI string, tableFName string, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) CopyFromLocal(localURI string, table Table, dsColumns []iop.Column) error {
 
 	file, err := os.Open(localURI)
 	if err != nil {
 		return g.Error(err, "Failed to open temp file")
 	}
-	return conn.LoadCSVFromReader(tableFName, file, dsColumns)
+	return conn.LoadCSVFromReader(table, file, dsColumns)
 }
 
 // LoadCSVFromReader demonstrates loading data into a BigQuery table using a file on the local filesystem.
 // https://cloud.google.com/bigquery/docs/batch-loading-data#loading_data_from_local_files
-func (conn *BigQueryConn) LoadCSVFromReader(tableFName string, reader io.Reader, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsColumns []iop.Column) error {
 	client, err := conn.getNewClient()
 	if err != nil {
 		return g.Error(err, "Failed to connect to client")
 	}
 	defer client.Close()
-
-	table, err := ParseTableName(tableFName, conn.Type)
-	if err != nil {
-		return g.Error(err, "could not parse table name: "+tableFName)
-	}
 
 	source := bigquery.NewReaderSource(reader)
 	source.FieldDelimiter = ","
@@ -722,17 +743,12 @@ func (conn *BigQueryConn) BulkImportStream(tableFName string, ds *iop.Datastream
 	return conn.BulkImportFlow(tableFName, df)
 }
 
-func (conn *BigQueryConn) CopyFromGCS(gcsURI string, tableFName string, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []iop.Column) error {
 	client, err := conn.getNewClient()
 	if err != nil {
 		return g.Error(err, "Failed to connect to client")
 	}
 	defer client.Close()
-
-	table, err := ParseTableName(tableFName, conn.Type)
-	if err != nil {
-		return g.Error(err, "could not parse table name: "+tableFName)
-	}
 
 	gcsRef := bigquery.NewGCSReference(gcsURI)
 	gcsRef.FieldDelimiter = ","

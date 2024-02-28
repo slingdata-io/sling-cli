@@ -704,7 +704,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 	query = strings.TrimSuffix(query, ";")
 
 	conn.Log = append(conn.Log, query)
-	if len(conn.Log) > 300 {
+	if len(conn.Log) > 9000 {
 		conn.Log = conn.Log[1:]
 	}
 
@@ -715,9 +715,9 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		g.Trace(query, args...)
 	} else {
 		if !noColor {
-			query = color.CyanString(query)
+			query = color.CyanString(CleanSQL(conn, query))
 		}
-		g.Debug(CleanSQL(conn, query), args...)
+		g.Debug(query, args...)
 	}
 }
 
@@ -1442,7 +1442,7 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 		colType = iop.ColumnType(matchedType)
 	} else {
 		if dbType != "" {
-			g.Warn("using text since type '%s' not mapped for col '%s'", dbType, name)
+			g.Debug("using text since type '%s' not mapped for col '%s'", dbType, name)
 		}
 		colType = iop.TextType // default as text
 	}
@@ -2326,19 +2326,24 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 		}
 	} else if strings.Contains(nativeType, "(,)") {
 
-		scale := lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
-		scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-		scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
-		if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-			scale = maxDecimals
+		precision := col.DbPrecision
+		scale := col.DbScale
+
+		if !col.Sourced || col.DbPrecision == 0 {
+			scale = lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
+			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
+			scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
+			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
+				scale = maxDecimals
+			}
+
+			precision = lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
+			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+			precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
+
+			minPrecision := col.Stats.MaxLen + scale
+			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 		}
-
-		precision := lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
-		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-		precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
-
-		minPrecision := col.Stats.MaxLen + scale
-		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 
 		nativeType = strings.ReplaceAll(
 			nativeType,
@@ -2380,6 +2385,10 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	createTemplate := conn.template.Core["create_table"]
 	if temporary {
 		createTemplate = conn.template.Core["create_temporary_table"]
+	}
+
+	if table.DDL != "" {
+		createTemplate = table.DDL
 	}
 
 	ddl := g.R(
@@ -2543,7 +2552,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		}
 	}
 
-	folderPath := path.Join(getTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
 
 	go func() {
 		defer df.Close()
@@ -2981,8 +2990,8 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	for i, col := range data.Columns {
 		refCol := colMap[strings.ToLower(col.Name)]
 		checksum1 := colChecksum[strings.ToLower(col.Name)]
-		checksum2 := cast.ToUint64(data.Rows[0][i])
-		if refCol.Stats.TotalCnt == 0 {
+		checksum2, err2 := cast.ToUint64E(data.Rows[0][i])
+		if refCol.Stats.TotalCnt == 0 || err2 != nil {
 			// skip
 		} else if checksum1 != checksum2 {
 			if refCol.Type != col.Type {
@@ -3187,22 +3196,29 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 // CleanSQL removes creds from the query
 func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
+	sqlLower := strings.ToLower(sql)
 
 	if len(sql) > 3000 {
 		sql = sql[0:3000]
 	}
 
-	if os.Getenv("DEBUG") != "" {
+	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
+
+	switch {
+	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
+		return sql
+	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
+		return sql
+	case startsWith("select *"):
 		return sql
 	}
 
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset") {
-			continue
+		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
+			sql = strings.ReplaceAll(sql, v, "***")
 		}
-		sql = strings.ReplaceAll(sql, v, "***")
 	}
 	return sql
 }

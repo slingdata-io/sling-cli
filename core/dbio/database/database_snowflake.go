@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
 
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/snowflakedb/gosnowflake"
 
@@ -251,9 +252,10 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 		return
 	}
 
+	context := g.NewContext(conn.Context().Ctx)
 	unload := func(table Table, s3PathPart string) {
 
-		defer conn.Context().Wg.Write.Done()
+		defer context.Wg.Write.Done()
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],
@@ -265,7 +267,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 		_, err = conn.Exec(unloadSQL)
 		if err != nil {
 			err = g.Error(err, fmt.Sprintf("SQL Error for %s", s3PathPart))
-			conn.Context().CaptureErr(err)
+			context.CaptureErr(err)
 		}
 
 	}
@@ -281,13 +283,16 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
+		if context.Err() != nil {
+			break
+		}
 		s3PathPart := fmt.Sprintf("%s/u%02d-", s3Path, i+1)
-		conn.Context().Wg.Write.Add()
+		context.Wg.Write.Add()
 		go unload(table, s3PathPart)
 	}
 
-	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	context.Wg.Write.Wait()
+	err = context.Err()
 
 	if err == nil {
 		g.Debug("Unloaded to %s", s3Path)
@@ -308,9 +313,10 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 		return "", g.Error(err)
 	}
 
+	context := g.NewContext(conn.Context().Ctx)
 	unload := func(table Table, azPathPart string) {
 
-		defer conn.Context().Wg.Write.Done()
+		defer context.Wg.Write.Done()
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_azure"],
@@ -323,7 +329,7 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 		_, err = conn.Exec(unloadSQL)
 		if err != nil {
 			err = g.Error(err, fmt.Sprintf("SQL Error for %s", azPathPart))
-			conn.Context().CaptureErr(err)
+			context.CaptureErr(err)
 		}
 
 	}
@@ -344,13 +350,16 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 
 	filesys.Delete(azFs, azPath)
 	for i, table := range tables {
+		if context.Err() != nil {
+			break
+		}
 		azPathPart := fmt.Sprintf("%s/u%02d-", azPath, i+1)
-		conn.Context().Wg.Write.Add()
+		context.Wg.Write.Add()
 		go unload(table, azPathPart)
 	}
 
-	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	context.Wg.Write.Wait()
+	err = context.Err()
 
 	if err == nil {
 		g.Debug("Unloaded to %s", azPath)
@@ -553,11 +562,13 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		cast.ToString(g.Now()),
 	)
 
+	context := g.NewContext(conn.Context().Ctx)
+
 	// Write the each stage file to temp file, read to ds
-	folderPath := path.Join(getTempFolder(), "snowflake", "get", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
 	unload := func(sql string, stagePartPath string) {
 
-		defer conn.Context().Wg.Write.Done()
+		defer context.Wg.Write.Done()
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_stage"],
@@ -568,7 +579,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		_, err = conn.Exec(unloadSQL)
 		if err != nil {
 			err = g.Error(err, "SQL Error for %s", stagePartPath)
-			conn.Context().CaptureErr(err)
+			context.CaptureErr(err)
 		}
 	}
 
@@ -576,12 +587,12 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	defer conn.Exec("REMOVE " + stageFolderPath)
 	for i, table := range tables {
 		stagePathPart := fmt.Sprintf("%s/u%02d-", stageFolderPath, i+1)
-		conn.Context().Wg.Write.Add()
+		context.Wg.Write.Add()
 		go unload(table.Select(), stagePathPart)
 	}
 
-	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	context.Wg.Write.Wait()
+	err = context.Err()
 	if err != nil {
 		err = g.Error(err, "Could not unload to stage files")
 		return
@@ -591,26 +602,29 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	data, err := conn.Query("LIST " + stageFolderPath)
 	if err != nil {
 		err = g.Error(err, "Could not LIST for %s", stageFolderPath)
-		conn.Context().CaptureErr(err)
+		context.CaptureErr(err)
 		return
 	}
 
 	process := func(index int, stagePath string) {
-		defer conn.Context().Wg.Write.Done()
+		defer context.Wg.Write.Done()
 		filePath := path.Join(folderPath, cast.ToString(index))
 		err := conn.GetFile(stagePath, filePath)
-		if conn.Context().CaptureErr(err) {
+		if context.CaptureErr(err) {
 			return
 		}
 	}
 
 	// this continues to read with 2 concurrent streams at most
 	for i, rec := range data.Records() {
+		if context.Err() != nil {
+			break
+		}
 		name := cast.ToString(rec["name"])
-		conn.Context().Wg.Write.Add()
+		context.Wg.Write.Add()
 		go process(i, "@"+name)
 	}
-	conn.Context().Wg.Write.Wait()
+	context.Wg.Write.Wait()
 
 	g.Debug("Unloaded to %s", stageFolderPath)
 
@@ -620,6 +634,8 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 // CopyViaStage uses the Snowflake COPY INTO Table command
 // https://docs.snowflake.com/en/sql-reference/sql/copy-into-table.html
 func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (count uint64, err error) {
+
+	context := g.NewContext(conn.Context().Ctx)
 
 	if conn.GetProp("internalStage") == "" {
 		return 0, g.Error("Prop internalStage is required")
@@ -637,7 +653,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	// Write the ds to a temp file
-	folderPath := path.Join(getTempFolder(), "snowflake", "put", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", g.NowFileStr())
 
 	// delete folder when done
 	df.Defer(func() { os.RemoveAll(folderPath) })
@@ -685,7 +701,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	doCopy := func(file filesys.FileReady) {
-		defer conn.Context().Wg.Write.Done()
+		defer context.Wg.Write.Done()
 		stageFilePath := doPut(file)
 
 		if df.Err() != nil {
@@ -718,11 +734,18 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	for file := range fileReadyChn {
-		conn.Context().Wg.Write.Add()
+		if df.Err() != nil || context.Err() != nil {
+			break
+		}
+		context.Wg.Write.Add()
 		go doCopy(file)
 	}
 
-	conn.Context().Wg.Write.Wait()
+	context.Wg.Write.Wait()
+
+	if context.Err() != nil {
+		return 0, context.Err()
+	}
 
 	if df.Err() != nil {
 		return 0, g.Error(df.Err())

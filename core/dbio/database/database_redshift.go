@@ -228,7 +228,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	}
 	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
-	_, err = conn.CopyFromS3(tableFName, s3Path)
+	_, err = conn.CopyFromS3(tableFName, s3Path, df.Columns)
 	if err != nil {
 		return df.Count(), g.Error(err, "error copying into redshift from s3")
 	}
@@ -288,7 +288,7 @@ func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 }
 
 // CopyFromS3 uses the COPY INTO Table command from AWS S3
-func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string) (count uint64, err error) {
+func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
 	if AwsID == "" || AwsAccessKey == "" {
@@ -296,19 +296,46 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string) (count uint64, e
 		return
 	}
 
-	g.Info("copying into redshift from s3")
+	tgtColumns := quoteColNames(conn, columns.Names())
+
+	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)
 	sql := g.R(
 		conn.template.Core["copy_from_s3"],
 		"tgt_table", tableFName,
+		"tgt_columns", strings.Join(tgtColumns, ", "),
 		"s3_path", s3Path,
 		"aws_access_key_id", AwsID,
 		"aws_secret_access_key", AwsAccessKey,
 	)
 	_, err = conn.Exec(sql)
 	if err != nil {
-		return 0, g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		conn.WarnStlLoadErrors(err)
+		return 0, g.Error(err)
 	}
 
 	return 0, nil
+}
+
+func (conn *RedshiftConn) WarnStlLoadErrors(err error) {
+	if strings.Contains(err.Error(), "stl_load_errors") {
+		conn.Rollback()
+		sql := conn.GetTemplateValue("core.stl_load_errors_check")
+		data, _ := conn.Query(sql)
+		if recs := data.Records(true); len(recs) == 1 {
+			rec := g.M()
+			for k, v := range recs[0] {
+				rec[strings.TrimSpace(k)] = strings.TrimSpace(cast.ToString(v))
+			}
+			g.Warn("stl_load_errors => " + g.Marshal(rec))
+		}
+	}
+}
+
+func (conn *RedshiftConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+	// not supported.
+	// when we attempt to create a temporary column and renaming,/
+	// the COPY statement does not work.
+	// need to drop the table and recreate it. TODO:
+	return false, nil
 }

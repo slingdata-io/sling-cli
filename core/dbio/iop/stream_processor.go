@@ -436,7 +436,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			cs.MaxLen = len(sVal)
 		}
 
-		if col.Type == JsonType && looksLikeJson(sVal) {
+		if looksLikeJson(sVal) {
 			cs.JsonCnt++
 			sp.rowChecksum[i] = uint64(len(strings.ReplaceAll(sVal, " ", "")))
 			cs.TotalCnt++
@@ -461,7 +461,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			nVal = sVal
 		} else {
 			if col.Type == JsonType {
-				sp.ds.ChangeColumn(i, StringType)
+				sp.ds.ChangeColumn(i, StringType) // change to string, since it's not really json
 			}
 			cs.StringCnt++
 			sp.rowChecksum[i] = uint64(len(sVal))

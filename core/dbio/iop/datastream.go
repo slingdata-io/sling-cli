@@ -20,6 +20,7 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -853,7 +854,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 // ConsumeParquetReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := strings.TrimRight(strings.TrimRight(os.TempDir(), "/"), "\\")
+	tempDir := env.GetTempFolder()
 	parquetPath := path.Join(tempDir, g.NewTsID("parquet.temp")+".parquet")
 	ds.Defer(func() { os.Remove(parquetPath) })
 
@@ -899,7 +900,7 @@ func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) 
 // ConsumeAvroReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeAvroReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := strings.TrimRight(strings.TrimRight(os.TempDir(), "/"), "\\")
+	tempDir := env.GetTempFolder()
 	avroPath := path.Join(tempDir, g.NewTsID("avro.temp")+".avro")
 	ds.Defer(func() { os.Remove(avroPath) })
 
@@ -945,7 +946,7 @@ func (ds *Datastream) ConsumeSASReaderSeeker(reader io.ReadSeeker) (err error) {
 // ConsumeSASReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := strings.TrimRight(strings.TrimRight(os.TempDir(), "/"), "\\")
+	tempDir := env.GetTempFolder()
 	sasPath := path.Join(tempDir, g.NewTsID("sas.temp")+".sas7bdat")
 	ds.Defer(func() { os.Remove(sasPath) })
 

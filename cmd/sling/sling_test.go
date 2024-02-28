@@ -301,12 +301,13 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 	}
 
 	for i, file := range files {
-		if t.Failed() {
-			g.LogFatal(g.Error("Failed"))
-		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
+		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
 		runOneTask(t, file, dbType)
+		if t.Failed() {
+			g.LogFatal(g.Error("Test `%s` Failed for => %s", file.Name, dbType))
+		}
 	}
 }
 func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
@@ -349,6 +350,10 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 		viewName := table.FullName()
 		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 		dropViewSQL = strings.TrimSpace(dropViewSQL)
+		task.Config.Target.Options.PreSQL = g.R(
+			task.Config.Target.Options.PreSQL,
+			"drop_view", dropViewSQL,
+		)
 		task.Config.Target.Options.PostSQL = g.R(
 			task.Config.Target.Options.PostSQL,
 			"drop_view", dropViewSQL,
@@ -423,7 +428,7 @@ func TestSuitePostgres(t *testing.T) {
 
 // func TestSuiteRedshift(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbRedshift, t)
+// 	testSuite(dbio.TypeDbRedshift, t)
 // }
 
 func TestSuiteStarRocks(t *testing.T) {
@@ -448,7 +453,7 @@ func TestSuiteOracle(t *testing.T) {
 
 // func TestSuiteBigTable(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbBigTable, t)
+// 	testSuite(dbio.TypeDbBigTable, t)
 // }
 
 func TestSuiteBigQuery(t *testing.T) {
@@ -483,12 +488,12 @@ func TestSuiteSQLServer(t *testing.T) {
 
 // func TestSuiteAzure(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbAzure, t)
+// 	testSuite(dbio.TypeDbAzure, t)
 // }
 
 // func TestSuiteAzureDWH(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbAzureDWH, t)
+// 	testSuite(dbio.TypeDbAzureDWH, t)
 // }
 
 func TestSuiteClickhouse(t *testing.T) {

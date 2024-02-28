@@ -27,13 +27,15 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	}
 
 	schemas := schemasData.ColValuesStr(0)
-	schemas = lo.Map(schemas, func(v string, i int) string { return strings.ToLower(v) })
-	schemaName = strings.ToLower(schemaName)
 	if schemaName == "" {
-		schemaName = strings.ToLower(conn.GetProp("schema"))
+		schemaName = conn.GetProp("schema")
 		if schemaName == "" {
 			return false, g.Error("did not specify schema. Please specify schema in object name.")
 		}
+
+		// qualify
+		dummy, _ := database.ParseTableName(schemaName+".dummy", conn.GetType())
+		schemaName = dummy.Schema
 	}
 
 	if !lo.Contains(schemas, schemaName) {
@@ -63,11 +65,9 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table da
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	if table.DDL == "" {
-		table.DDL, err = conn.GenerateDDL(table, data, false)
-		if err != nil {
-			return false, g.Error(err, "Could not generate DDL for "+table.FullName())
-		}
+	table.DDL, err = conn.GenerateDDL(table, data, false)
+	if err != nil {
+		return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 	}
 
 	_, err = conn.ExecMulti(table.DDL)

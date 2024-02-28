@@ -15,6 +15,7 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
@@ -128,8 +129,8 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		sameCols := g.Marshal(ds.Columns.Names(true, true)) == g.Marshal(columns.Names(true, true))
 
 		// write to temp CSV
-		csvPath := path.Join(getTempFolder(), g.NewTsID("sqlite.temp")+".csv")
-		sqlPath := path.Join(getTempFolder(), g.NewTsID("sqlite.temp")+".sql")
+		csvPath := path.Join(env.GetTempFolder(), g.NewTsID("sqlite.temp")+".csv")
+		sqlPath := path.Join(env.GetTempFolder(), g.NewTsID("sqlite.temp")+".sql")
 
 		// set header. not needed if not creating a temp table
 		cfgMap := ds.GetConfig()
@@ -272,7 +273,7 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 }
 
 func writeTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
-	sqlPath = path.Join(getTempFolder(), g.NewTsID(filePrefix...)+".sql")
+	sqlPath = path.Join(env.GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
 
 	err = os.WriteFile(sqlPath, []byte(sql), 0777)
 	if err != nil {
@@ -607,12 +608,4 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	}
 
 	return schemata, nil
-}
-
-func getTempFolder() string {
-	return cleanWindowsPath(strings.TrimRight(strings.TrimRight(os.TempDir(), "/"), "\\"))
-}
-
-func cleanWindowsPath(path string) string {
-	return strings.ReplaceAll(path, `\`, `/`)
 }

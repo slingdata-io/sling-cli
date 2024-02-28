@@ -1,6 +1,6 @@
 core:
   create_table: create table {table} ({col_types}) {dist_key} {sort_key}
-  drop_table: drop table if exists {table} cascade
+  drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
@@ -19,8 +19,18 @@ core:
   sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   set_schema: ALTER TABLE {table} SET SCHEMA {new_schema}
+  
+  # TODO: need to drop the table and recreate it
+  # optimize_column: |
+  #   alter table {table} rename to {table_old};
+  #   create table {table} ( {col_ddl} );
+  #   insert into {table} ({cols})
+  #   select {cols}
+  #   from {table_old};
+  #   drop table {table_old};
+  
   copy_from_s3: |
-    COPY {tgt_table}
+    COPY {tgt_table} ({tgt_columns})
     FROM '{s3_path}'
     credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key}'
     CSV delimiter ',' EMPTYASNULL BLANKSASNULL GZIP IGNOREHEADER 1 DATEFORMAT 'auto' TIMEFORMAT 'auto'
@@ -31,6 +41,7 @@ core:
     HEADER gzip allowoverwrite CSV PARALLEL {parallel}
   alter_columns: |
     alter table {table} {col_ddl}
+  stl_load_errors_check: select colname, line_number, err_reason  from stl_load_errors order by starttime desc limit 1
  
 metadata:
 
@@ -544,6 +555,6 @@ function:
   number_to_int: round({field}, 0)
   checksum_datetime: date_part('epoch', {field})::bigint
   checksum_string: length({field}::text)
-  checksum_boolean: length({field}::text)
+  checksum_boolean: length(case when {field} = true then 'true' when {field} = false then 'false' end)
   checksum_json: length(replace({field}::text, ' ', ''))
   # checksum_datetime: (date_part('epoch', {field}) * 1000000)::bigint

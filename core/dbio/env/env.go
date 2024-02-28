@@ -210,3 +210,16 @@ func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string
 	}
 	return
 }
+
+func GetTempFolder() string {
+	tempDir := os.TempDir()
+	if val := os.Getenv("SLING_TEMP_DIR"); val != "" {
+		tempDir = val
+	}
+	tempDir = strings.TrimRight(strings.TrimRight(tempDir, "/"), "\\")
+	return cleanWindowsPath(tempDir)
+}
+
+func cleanWindowsPath(path string) string {
+	return strings.ReplaceAll(path, `\`, `/`)
+}

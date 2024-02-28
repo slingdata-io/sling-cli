@@ -15,6 +15,7 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/kardianos/osext"
 	"github.com/slingdata-io/sling-cli/core"
+	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/spf13/cast"
 )
 
@@ -69,7 +70,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	fileStat, _ := os.Stat(execFileName)
 	fileMode := fileStat.Mode()
 
-	folderPath := path.Join(os.TempDir(), "sling.new")
+	folderPath := path.Join(env.GetTempFolder(), "sling.new")
 	err = os.MkdirAll(folderPath, 0777)
 	if err != nil {
 		return ok, g.Error(err, "could not create temp folder")

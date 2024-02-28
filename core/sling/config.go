@@ -131,6 +131,8 @@ func (cfg *Config) SetDefault() {
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
 		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
+		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
 
 	// set vars

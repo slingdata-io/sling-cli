@@ -55,6 +55,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// get source columns
 	st := sTable
 	st.SQL = g.R(st.SQL, "incremental_where_cond", "1=1") // so we get the columns, and not change the orig SQL
+	st.SQL = g.R(st.SQL, "incremental_value", "null")     // so we get the columns, and not change the orig SQL
 	sTable.Columns, err = srcConn.GetSQLColumns(st)
 	if err != nil {
 		err = g.Error(err, "Could not get source columns")
@@ -206,6 +207,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
+	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
 	// construct SELECT statement for selected fields
 	if sTable.SQL == "" && selectFieldsStr != "*" {

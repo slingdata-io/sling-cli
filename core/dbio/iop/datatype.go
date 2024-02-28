@@ -724,6 +724,10 @@ func (col *Column) SetLengthPrecisionScale() {
 				col.DbScale = cast.ToInt(vals[1])
 			}
 		}
+
+		if col.DbPrecision > 0 || col.Stats.MaxLen > 0 {
+			col.Sourced = true
+		}
 	}
 }
 
