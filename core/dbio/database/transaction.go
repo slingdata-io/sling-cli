@@ -65,6 +65,9 @@ func (t *BaseTransaction) Commit() (err error) {
 		g.Trace("commiting")
 		err = t.Tx.Commit()
 		if err != nil {
+			if strings.Contains(err.Error(), "idle") {
+				return nil
+			}
 			err = g.Error(err, "could not commit Tx")
 		}
 	}
