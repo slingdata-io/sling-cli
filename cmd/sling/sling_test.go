@@ -423,7 +423,7 @@ func TestSuitePostgres(t *testing.T) {
 
 // func TestSuiteRedshift(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbRedshift, t)
+// 	testSuite(dbio.TypeDbRedshift, t)
 // }
 
 func TestSuiteStarRocks(t *testing.T) {
@@ -448,7 +448,7 @@ func TestSuiteOracle(t *testing.T) {
 
 // func TestSuiteBigTable(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbBigTable, t)
+// 	testSuite(dbio.TypeDbBigTable, t)
 // }
 
 func TestSuiteBigQuery(t *testing.T) {
@@ -483,12 +483,12 @@ func TestSuiteSQLServer(t *testing.T) {
 
 // func TestSuiteAzure(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbAzure, t)
+// 	testSuite(dbio.TypeDbAzure, t)
 // }
 
 // func TestSuiteAzureDWH(t *testing.T) {
 // 	t.Parallel()
-// 	testSeries(dbio.TypeDbAzureDWH, t)
+// 	testSuite(dbio.TypeDbAzureDWH, t)
 // }
 
 func TestSuiteClickhouse(t *testing.T) {
