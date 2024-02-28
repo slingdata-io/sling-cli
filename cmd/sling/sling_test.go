@@ -302,7 +302,7 @@ func testSuite(dbType dbio.Type, t *testing.T) {
 
 	for i, file := range files {
 		if t.Failed() {
-			g.LogFatal(g.Error("Failed"))
+			g.LogFatal(g.Error("Test Failed for => %s", dbType))
 		} else if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
@@ -349,6 +349,10 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 		viewName := table.FullName()
 		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 		dropViewSQL = strings.TrimSpace(dropViewSQL)
+		task.Config.Target.Options.PreSQL = g.R(
+			task.Config.Target.Options.PreSQL,
+			"drop_view", dropViewSQL,
+		)
 		task.Config.Target.Options.PostSQL = g.R(
 			task.Config.Target.Options.PostSQL,
 			"drop_view", dropViewSQL,
