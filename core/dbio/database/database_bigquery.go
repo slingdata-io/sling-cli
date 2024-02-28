@@ -706,7 +706,7 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 	source.AllowQuotedNewlines = true
 	source.Quote = `"`
 	source.SkipLeadingRows = 1
-	source.Schema = getBqSchema(table.Columns)
+	source.Schema = getBqSchema(dsColumns)
 	source.SourceFormat = bigquery.CSV
 
 	loader := client.Dataset(table.Schema).Table(table.Name).LoaderFrom(source)
@@ -755,7 +755,7 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
 	gcsRef.SkipLeadingRows = 1
-	gcsRef.Schema = getBqSchema(table.Columns)
+	gcsRef.Schema = getBqSchema(dsColumns)
 	if strings.HasSuffix(strings.ToLower(gcsURI), ".gz") {
 		gcsRef.Compression = bigquery.Gzip
 	}
