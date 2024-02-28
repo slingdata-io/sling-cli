@@ -6,6 +6,8 @@ on:
       build_only:
         description: 'build_only: "true" or empty'     
         required: false
+  repository_dispatch:
+    types: [build-release]
 
 env:
   GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
