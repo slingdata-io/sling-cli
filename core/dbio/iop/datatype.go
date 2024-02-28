@@ -725,7 +725,9 @@ func (col *Column) SetLengthPrecisionScale() {
 			}
 		}
 
-		col.Sourced = true
+		if col.DbPrecision > 0 || col.Stats.MaxLen > 0 {
+			col.Sourced = true
+		}
 	}
 }
 
