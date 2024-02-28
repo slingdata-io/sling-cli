@@ -3204,7 +3204,7 @@ func CleanSQL(conn Connection, sql string) string {
 	for k, v := range conn.Props() {
 		if strings.TrimSpace(v) == "" {
 			continue
-		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset", "object", "stream_name") {
+		} else if g.In(k, "database", "schema", "user", "username", "type", "bucket", "account", "project", "dataset", "object", "object_name", "table_tmp", "stream_name") {
 			continue
 		}
 		sql = strings.ReplaceAll(sql, v, "***")
