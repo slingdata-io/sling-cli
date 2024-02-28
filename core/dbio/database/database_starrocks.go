@@ -515,3 +515,15 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	return df.Count(), nil
 }
+
+// GetDatabases returns the list of databases
+func (conn *StarRocksConn) GetDatabases() (data iop.Dataset, err error) {
+	data1, err := conn.BaseConn.GetDatabases()
+	if err != nil {
+		return data1, err
+	}
+
+	data1.Columns[0].Name = "name" // rename
+
+	return data1, nil
+}
