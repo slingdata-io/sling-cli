@@ -40,6 +40,7 @@ checksum:
 dockers:
   - dockerfile: 'cmd/sling/Dockerfile'
     image_templates:
+    - "slingdata/sling:{{ .Tag }}"
     - "slingdata/sling:{{ .Tag }}-amd64"
     - "slingdata/sling:latest-amd64"
     - "slingdata/sling:latest"
