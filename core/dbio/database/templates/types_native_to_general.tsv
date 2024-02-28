@@ -337,7 +337,7 @@ clickhouse	string	text	col_string string	TRUE	TRUE
 clickhouse	tuple	string	col_tuple tuple	TRUE	TRUE	
 clickhouse	uint16	integer	col_uint16 uint16	TRUE	TRUE	
 clickhouse	uint32	bigint	col_uint32 uint32	TRUE	TRUE	
-clickhouse	uint64	decimal(38,9)	col_uint64 uint64	TRUE	TRUE	
+clickhouse	uint64	decimal(28,0)	col_uint64 uint64	TRUE	TRUE	
 clickhouse	uint8	integer	col_uint8 uint8	TRUE	TRUE	
 clickhouse	json	json	col_json json	FALSE	FALSE	
 clickhouse	map	json	col_map json	FALSE	FALSE	

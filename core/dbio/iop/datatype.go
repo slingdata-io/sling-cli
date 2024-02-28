@@ -724,6 +724,8 @@ func (col *Column) SetLengthPrecisionScale() {
 				col.DbScale = cast.ToInt(vals[1])
 			}
 		}
+
+		col.Sourced = true
 	}
 }
 

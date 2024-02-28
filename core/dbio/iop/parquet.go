@@ -114,8 +114,10 @@ func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *Pa
 	// make scale big.Rat numbers
 	decNumScale := make([]*big.Rat, len(columns))
 	for i, col := range columns {
-		col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, lo.Ternary(col.DbPrecision > 36, 36, col.DbPrecision))
-		col.DbScale = lo.Ternary(col.DbScale == 0, 9, lo.Ternary(col.DbScale > 16, 16, col.DbScale))
+		if !col.Sourced {
+			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, lo.Ternary(col.DbPrecision > 36, 36, col.DbPrecision))
+			col.DbScale = lo.Ternary(col.DbScale == 0, 9, lo.Ternary(col.DbScale > 16, 16, col.DbScale))
+		}
 		columns[i] = col
 
 		if col.DbScale > 0 {

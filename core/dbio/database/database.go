@@ -2326,19 +2326,24 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 		}
 	} else if strings.Contains(nativeType, "(,)") {
 
-		scale := lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
-		scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-		scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
-		if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-			scale = maxDecimals
+		precision := col.DbPrecision
+		scale := col.DbScale
+
+		if !col.Sourced {
+			scale = lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
+			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
+			scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
+			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
+				scale = maxDecimals
+			}
+
+			precision = lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
+			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+			precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
+
+			minPrecision := col.Stats.MaxLen + scale
+			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 		}
-
-		precision := lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
-		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-		precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
-
-		minPrecision := col.Stats.MaxLen + scale
-		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 
 		nativeType = strings.ReplaceAll(
 			nativeType,
@@ -2985,8 +2990,8 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	for i, col := range data.Columns {
 		refCol := colMap[strings.ToLower(col.Name)]
 		checksum1 := colChecksum[strings.ToLower(col.Name)]
-		checksum2 := cast.ToUint64(data.Rows[0][i])
-		if refCol.Stats.TotalCnt == 0 {
+		checksum2, err2 := cast.ToUint64E(data.Rows[0][i])
+		if refCol.Stats.TotalCnt == 0 || err2 != nil {
 			// skip
 		} else if checksum1 != checksum2 {
 			if refCol.Type != col.Type {
