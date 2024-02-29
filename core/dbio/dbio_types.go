@@ -29,6 +29,7 @@ const (
 	TypeFileS3     Type = "s3"
 	TypeFileAzure  Type = "azure"
 	TypeFileGoogle Type = "gs"
+	TypeFileFtp    Type = "ftp"
 	TypeFileSftp   Type = "sftp"
 	TypeFileHTTP   Type = "http"
 
@@ -65,7 +66,7 @@ func ValidateType(tStr string) (Type, bool) {
 
 	switch t {
 	case
-		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp,
+		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
 		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse:
 		return t, true
 	}
@@ -90,6 +91,7 @@ func (t Type) DefPort() int {
 		TypeDbSQLServer:  1433,
 		TypeDbAzure:      1433,
 		TypeDbClickhouse: 9000,
+		TypeFileFtp:      21,
 		TypeFileSftp:     22,
 	}
 	return connTypesDefPort[t]
@@ -106,7 +108,7 @@ func (t Type) Kind() Kind {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
 		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbDuckDb, TypeDbMotherDuck:
 		return KindDatabase
-	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileHTTP, Type("https"):
+	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
 	}
 	return KindUnknown
@@ -141,6 +143,7 @@ func (t Type) NameLong() string {
 		TypeFileAzure:    "FileSys - Azure",
 		TypeFileGoogle:   "FileSys - Google",
 		TypeFileSftp:     "FileSys - Sftp",
+		TypeFileFtp:      "FileSys - Ftp",
 		TypeFileHTTP:     "FileSys - HTTP",
 		Type("https"):    "FileSys - HTTP",
 		TypeDbPostgres:   "DB - PostgreSQL",
@@ -172,6 +175,7 @@ func (t Type) Name() string {
 		TypeFileAzure:    "Azure",
 		TypeFileGoogle:   "Google",
 		TypeFileSftp:     "Sftp",
+		TypeFileFtp:      "Ftp",
 		TypeFileHTTP:     "HTTP",
 		Type("https"):    "HTTP",
 		TypeDbPostgres:   "PostgreSQL",

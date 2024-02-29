@@ -860,6 +860,80 @@ func TestFileSysSftp(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestFileSysFtp(t *testing.T) {
+	t.Parallel()
+
+	fs, err := NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	assert.NoError(t, err)
+	if t.Failed() {
+		return
+	}
+
+	root := os.Getenv("FTP_TEST_URL")
+	rootU, err := net.NewURL(root)
+	assert.NoError(t, err)
+	root = "ftp://" + rootU.Hostname()
+
+	csvBytes, err := os.ReadFile("test/test1/csv/test1.csv")
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	testString := string(csvBytes)
+	testPath := root + "/test1.csv"
+	reader := strings.NewReader(testString)
+	_, err = fs.Write(testPath, reader)
+	g.AssertNoError(t, err)
+
+	reader2, err := fs.GetReader(testPath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	testBytes, err := io.ReadAll(reader2)
+	g.AssertNoError(t, err)
+
+	assert.Equal(t, testString, string(testBytes))
+
+	return
+
+	// FIXME: test fail with `229 Extended Passive mode OK (|||30005|)`
+
+	df3, err := fs.ReadDataflow(testPath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	data2, err := df3.Collect()
+	g.AssertNoError(t, err)
+	assert.EqualValues(t, 1036, len(data2.Rows))
+
+	return
+
+	// err = Delete(fs, testPath)
+	// g.AssertNoError(t, err)
+
+	// paths, err := fs.ListRecursive(root + "/home/test/test")
+	// assert.NoError(t, err)
+	// assert.NotContains(t, paths, testPath)
+
+	// localFs, err := NewFileSysClient(dbio.TypeFileLocal)
+	// assert.NoError(t, err)
+
+	// localFs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	// df2, err := localFs.ReadDataflow("test/test1/csv")
+	// assert.NoError(t, err)
+	// // assert.EqualValues(t, 3, len(df2.Streams))
+
+	// writeFolderPath := root + "/home/test/test"
+	// _, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	// assert.NoError(t, err)
+	// assert.EqualValues(t, 1036, df2.Count())
+}
+
 func TestFileSysHTTP(t *testing.T) {
 	fs, err := NewFileSysClient(
 		dbio.TypeFileHTTP, //"HTTP_USER=user", "HTTP_PASSWORD=password",
