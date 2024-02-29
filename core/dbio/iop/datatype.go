@@ -168,8 +168,7 @@ func (cols Columns) PrettyTable() (output string) {
 func (cols Columns) GetKeys(keyType KeyType) Columns {
 	keys := Columns{}
 	for _, col := range cols {
-		key := string(keyType) + "_key"
-		if cast.ToBool(col.Metadata[key]) {
+		if col.IsKeyType(keyType) {
 			keys = append(keys, col)
 		}
 	}
@@ -736,6 +735,14 @@ func (col *Column) SetMetadata(key string, value string) {
 		col.Metadata = map[string]string{}
 	}
 	col.Metadata[key] = value
+}
+
+func (col *Column) IsKeyType(keyType KeyType) bool {
+	if col.Metadata == nil {
+		return false
+	}
+	key := string(keyType) + "_key"
+	return cast.ToBool(col.Metadata[key])
 }
 
 func (col *Column) Key() string {

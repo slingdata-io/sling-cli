@@ -2365,8 +2365,28 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		data.InferColumnTypes()
 	}
 	columnsDDL := []string{}
+	columns := data.Columns
 
-	for _, col := range data.Columns {
+	// re-order columns for starrocks (keys first)
+	if g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+		orderedColumns := iop.Columns{}
+
+		for _, col := range columns {
+			if col.IsKeyType(iop.PrimaryKey) || col.IsKeyType(iop.DuplicateKey) || col.IsKeyType(iop.HashKey) || col.IsKeyType(iop.AggregateKey) || col.IsKeyType(iop.UniqueKey) {
+				orderedColumns = append(orderedColumns, col)
+			}
+		}
+
+		for _, col := range columns {
+			if !g.In(col.Name, orderedColumns.Names()...) {
+				orderedColumns = append(orderedColumns, col)
+			}
+		}
+
+		columns = orderedColumns
+	}
+
+	for _, col := range columns {
 		// convert from general type to native type
 		nativeType, err := conn.GetNativeType(col)
 		if err != nil {
