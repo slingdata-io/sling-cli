@@ -640,7 +640,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 						}
 					}
 				}
-				return g.Error(err, "could not connect to database"+msg)
+				return g.Error(err, "could not connect to database"+CleanSQL(conn, msg))
 			}
 		}
 
