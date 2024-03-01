@@ -880,9 +880,7 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	sp.rowChecksum = make([]uint64, len(row))
 	for i, val := range row {
 		// fmt.Printf("| (%s) %#v", columns[i].Type, val)
-		if !columns[i].Sourced {
-			row[i] = sp.CastVal(i, val, &columns[i])
-		}
+		row[i] = sp.CastVal(i, val, &columns[i])
 	}
 
 	for len(row) < len(columns) {
