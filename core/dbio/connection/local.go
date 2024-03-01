@@ -377,7 +377,6 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 		if len(streamNames) > 0 && conn.Connection.Type.IsFile() &&
 			folder == "" {
 			g.Warn("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders")
-			println()
 		}
 	} else {
 		ok = true
