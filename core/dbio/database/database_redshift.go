@@ -332,7 +332,7 @@ func (conn *RedshiftConn) WarnStlLoadErrors(err error) {
 	}
 }
 
-func (conn *RedshiftConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
+func (conn *RedshiftConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp ...bool) (ok bool, err error) {
 	// not supported.
 	// when we attempt to create a temporary column and renaming,/
 	// the COPY statement does not work.

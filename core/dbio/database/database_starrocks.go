@@ -117,8 +117,13 @@ func (conn *StarRocksConn) AddMissingColumns(table Table, newCols iop.Columns) (
 	return
 }
 
-func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
-	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp ...bool) (ok bool, err error) {
+	IsTemp := false
+	if len(isTemp) > 0 {
+		IsTemp = isTemp[0]
+	}
+
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns, IsTemp)
 	if err != nil {
 		return
 	}

@@ -227,16 +227,16 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			// preseve keys
 			tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
-			df.Columns[col.Position-1].Type = col.Type
-			ok, err := tgtConn.OptimizeTable(&tableTmp, df.Columns)
+			ok, err := tgtConn.OptimizeTable(&tableTmp, iop.Columns{col}, true)
 			if err != nil {
 				return g.Error(err, "could not change table schema")
 			} else if ok {
 				cfg.Target.columns = tableTmp.Columns
-				for i := range df.Columns {
-					df.Columns[i].Type = tableTmp.Columns[i].Type
-				}
+			} else {
+				// revert to old type
+				col.Type = df.Columns[col.Position-1].Type
 			}
+			df.Columns.Add(iop.Columns{col}, true)
 
 			return nil
 		}
@@ -398,7 +398,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				// preseve keys
 				targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
-				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns)
+				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns, false)
 				if err != nil {
 					return cnt, g.Error(err, "could not optimize table schema")
 				} else if ok {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -38,6 +39,7 @@ type BigQueryConn struct {
 	DatasetID string
 	Location  string
 	Datasets  []string
+	Mux       sync.Mutex
 }
 
 // Init initiates the object
@@ -523,6 +525,28 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 func (conn *BigQueryConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
+	// set OnSchemaChange
+	if df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
+		oldOnColumnChanged := df.OnColumnChanged
+		df.OnColumnChanged = func(col iop.Column) error {
+			// prevent any new writers
+			conn.Mux.Lock()
+			defer conn.Mux.Unlock()
+
+			// wait till all current writers are done
+			if qs := conn.Context().Wg.Write.GetQueueSize(); qs > 0 {
+				conn.Context().Wg.Write.Wait()
+			}
+
+			// use pre-defined function
+			err = oldOnColumnChanged(col)
+			if err != nil {
+				return g.Error(err, "could not process ColumnChange for BigQuery")
+			}
+			return nil
+		}
+	}
+
 	if gcBucket := conn.GetProp("GC_BUCKET"); gcBucket == "" {
 		return conn.importViaLocalStorage(tableFName, df)
 	}
@@ -588,8 +612,11 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 			break
 		}
 		time.Sleep(2 * time.Second) // max 5 load jobs per 10 secs
+
+		conn.Mux.Lock() // to not collide with schema change
 		conn.Context().Wg.Write.Add()
 		go copyFromLocal(localFile, table)
+		conn.Mux.Unlock()
 	}
 
 	conn.Context().Wg.Write.Wait()
@@ -670,8 +697,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 			break
 		}
 		time.Sleep(2 * time.Second) // max 5 load jobs per 10 secs
+
+		conn.Mux.Lock() // to not collide with schema change
 		conn.Context().Wg.Write.Add()
 		go copyFromGCS(gcsFile, table)
+		conn.Mux.Unlock()
 	}
 
 	conn.Context().Wg.Write.Wait()
