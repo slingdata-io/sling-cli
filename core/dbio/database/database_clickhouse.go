@@ -108,6 +108,9 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 		return
 	}
 
+	// set default schema
+	conn.Exec(g.F("use `%s`", table.Schema))
+
 	// set OnSchemaChange
 	if df := ds.Df(); df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
 		oldOnColumnChanged := df.OnColumnChanged
@@ -239,6 +242,11 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []s
 		valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
 	}
 
+	if conn.GetProp("http_url") != "" {
+		table, _ := ParseTableName(tableName, conn.GetType())
+		tableName = table.NameQ()
+	}
+
 	statement := g.R(
 		"INSERT INTO {table} ({fields}) VALUES {values}",
 		"table", tableName,
@@ -281,4 +289,19 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	)
 
 	return
+}
+
+func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
+	for i := range row {
+		if columns[i].Type == iop.DecimalType {
+			sVal := cast.ToString(row[i])
+			val, err := decimal.NewFromString(sVal)
+			if !g.LogError(err, "could not convert value `%s` for clickhouse decimal", sVal) {
+				row[i] = val
+			}
+		} else if columns[i].Type == iop.FloatType {
+			row[i] = cast.ToFloat64(row[i])
+		}
+	}
+	return row
 }
