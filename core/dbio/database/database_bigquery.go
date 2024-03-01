@@ -298,7 +298,7 @@ func processBQTypeCols(row []interface{}, bqTC *bQTypeCols, ds *iop.Datastream) 
 		var vBR *big.Rat
 		vBR, ok := row[j].(*big.Rat)
 		if ok {
-			row[j], _ = vBR.Float64()
+			row[j] = vBR.FloatString(9)
 		}
 	}
 	for _, j := range bqTC.datetimeCols {
