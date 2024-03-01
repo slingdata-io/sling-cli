@@ -351,7 +351,12 @@ func (conn *BigQueryConn) getItColumns(itSchema bigquery.Schema) (cols iop.Colum
 		}
 		cols[i].SetLengthPrecisionScale()
 
-		if g.In(field.Type, bigquery.NumericFieldType, bigquery.FloatFieldType) {
+		if g.In(field.Type, bigquery.NumericFieldType) {
+			bQTC.numericCols = append(bQTC.numericCols, i)
+			// https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types
+			cols[i].DbPrecision = 38
+			cols[i].DbScale = 9
+		} else if g.In(field.Type, bigquery.FloatFieldType) {
 			bQTC.numericCols = append(bQTC.numericCols, i)
 			cols[i].Sourced = false // need to infer the decimal lengths
 		} else if field.Type == "DATETIME" || field.Type == bigquery.TimestampFieldType {
