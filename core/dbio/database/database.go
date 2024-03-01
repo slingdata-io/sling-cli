@@ -1515,9 +1515,9 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 		g.M("schema", table.Schema, "table", table.Name),
 	)
 	if err != nil {
-		return columns, g.Error(err, "could not get list of columns for table: "+table.FullName())
+		return columns, g.Error(err, "could not get list of columns for %s", table.FullName())
 	} else if len(colData.Rows) == 0 {
-		return columns, g.Error("did not find any columns for table: " + table.FullName())
+		return columns, g.Error("did not find any columns for %s. Does user have read permission?", table.FullName())
 	}
 
 	// if fields provided, check if exists in table
