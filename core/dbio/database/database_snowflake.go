@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
@@ -28,6 +29,7 @@ type SnowflakeConn struct {
 	URL        string
 	Warehouse  string
 	CopyMethod string
+	Mux        sync.Mutex
 }
 
 // Init initiates the object
@@ -371,6 +373,28 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 // BulkImportFlow bulk import flow
 func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
+
+	// set OnSchemaChange
+	if df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
+		oldOnColumnChanged := df.OnColumnChanged
+		df.OnColumnChanged = func(col iop.Column) error {
+			// prevent any new writers
+			conn.Mux.Lock()
+			defer conn.Mux.Unlock()
+
+			// wait till all current writers are done
+			if qs := conn.Context().Wg.Write.GetQueueSize(); qs > 0 {
+				conn.Context().Wg.Write.Wait()
+			}
+
+			// use pre-defined function
+			err = oldOnColumnChanged(col)
+			if err != nil {
+				return g.Error(err, "could not process ColumnChange for Snowflake")
+			}
+			return nil
+		}
+	}
 
 	settingMppBulkImportFlow(conn, iop.ZStandardCompressorType)
 
@@ -737,8 +761,11 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		if df.Err() != nil || context.Err() != nil {
 			break
 		}
+
+		conn.Mux.Lock() // to not collide with schema change
 		context.Wg.Write.Add()
 		go doCopy(file)
+		conn.Mux.Unlock()
 	}
 
 	context.Wg.Write.Wait()

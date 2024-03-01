@@ -113,7 +113,7 @@ type Connection interface {
 	LoadTemplates() error
 	MustExec(sql string, args ...interface{}) (result sql.Result)
 	NewTransaction(ctx context.Context, options ...*sql.TxOptions) (Transaction, error)
-	OptimizeTable(table *Table, columns iop.Columns) (ok bool, err error)
+	OptimizeTable(table *Table, columns iop.Columns, isTemp ...bool) (ok bool, err error)
 	Prepare(query string) (stmt *sql.Stmt, err error)
 	ProcessTemplate(level, text string, values map[string]interface{}) (sql string, err error)
 	Props() map[string]string
@@ -640,7 +640,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 						}
 					}
 				}
-				return g.Error(err, "could not connect to database"+msg)
+				return g.Error(err, "could not connect to database"+CleanSQL(conn, msg))
 			}
 		}
 
@@ -1515,9 +1515,9 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 		g.M("schema", table.Schema, "table", table.Name),
 	)
 	if err != nil {
-		return columns, g.Error(err, "could not get list of columns for table: "+table.FullName())
+		return columns, g.Error(err, "could not get list of columns for %s", table.FullName())
 	} else if len(colData.Rows) == 0 {
-		return columns, g.Error("did not find any columns for table: " + table.FullName())
+		return columns, g.Error("did not find any columns for %s. Perhaps it does not exists, or user does not have read permission.", table.FullName())
 	}
 
 	// if fields provided, check if exists in table
@@ -2365,8 +2365,28 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		data.InferColumnTypes()
 	}
 	columnsDDL := []string{}
+	columns := data.Columns
 
-	for _, col := range data.Columns {
+	// re-order columns for starrocks (keys first)
+	if g.In(conn.GetType(), dbio.TypeDbStarRocks) {
+		orderedColumns := iop.Columns{}
+
+		for _, col := range columns {
+			if col.IsKeyType(iop.PrimaryKey) || col.IsKeyType(iop.DuplicateKey) || col.IsKeyType(iop.HashKey) || col.IsKeyType(iop.AggregateKey) || col.IsKeyType(iop.UniqueKey) {
+				orderedColumns = append(orderedColumns, col)
+			}
+		}
+
+		for _, col := range columns {
+			if !g.In(col.Name, orderedColumns.Names()...) {
+				orderedColumns = append(orderedColumns, col)
+			}
+		}
+
+		columns = orderedColumns
+	}
+
+	for _, col := range columns {
 		// convert from general type to native type
 		nativeType, err := conn.GetNativeType(col)
 		if err != nil {
@@ -2740,7 +2760,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 // Hole in this: will truncate data points, since it is based
 // only on new data being inserted... would need a complete
 // stats of the target table to properly optimize.
-func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns) (ok bool, ddlParts []string, err error) {
+func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns, isTemp bool) (ok bool, ddlParts []string, err error) {
 	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
 		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
 	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
@@ -2777,6 +2797,8 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.IntegerType
 		case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
 			newCol.Type = iop.IntegerType
+		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsNumber() || newCol.IsBool()):
+			// use new type
 		case col.Type == iop.TextType || newCol.Type == iop.TextType:
 			newCol.Type = iop.TextType
 		default:
@@ -2904,8 +2926,12 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 	return true, ddlParts, nil
 }
 
-func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns) (ok bool, err error) {
-	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns)
+func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp ...bool) (ok bool, err error) {
+	IsTemp := false
+	if len(isTemp) > 0 {
+		IsTemp = isTemp[0]
+	}
+	ok, ddlParts, err := GetOptimizeTableStatements(conn, table, newColumns, IsTemp)
 	if err != nil {
 		return ok, err
 	}

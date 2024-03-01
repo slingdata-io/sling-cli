@@ -329,6 +329,8 @@ func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
 	oldType := ds.Columns[i].Type
 
 	switch {
+	// case ds.Columns[i].Sourced:
+	// 	return
 	case oldType == newType:
 		return
 	case oldType == TextType && newType == StringType:

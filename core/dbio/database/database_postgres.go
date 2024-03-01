@@ -126,6 +126,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 	// set OnSchemaChange
 	if df := ds.Df(); df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
+		oldOnColumnChanged := df.OnColumnChanged
 		df.OnColumnChanged = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -134,19 +135,10 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 			mux.Lock()
 			defer mux.Unlock()
 
-			table.Columns, err = conn.GetColumns(tableFName)
+			// use pre-defined function
+			err = oldOnColumnChanged(col)
 			if err != nil {
-				return g.Error(err, "could not get table columns for schema change")
-			}
-
-			df.Columns[col.Position-1].Type = col.Type
-			ok, err := conn.OptimizeTable(&table, df.Columns)
-			if err != nil {
-				return g.Error(err, "could not change table schema")
-			} else if ok {
-				for i := range df.Columns {
-					df.Columns[i].Type = table.Columns[i].Type
-				}
+				return g.Error(err, "could not process ColumnChange for Postgres")
 			}
 
 			return nil

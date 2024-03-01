@@ -537,7 +537,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		} else {
 			g.Info("Found %d streams:", len(streamNames))
 			for _, sn := range streamNames {
-				println(g.F(" - %s", sn))
+				env.Println(g.F(" - %s", sn))
 			}
 		}
 

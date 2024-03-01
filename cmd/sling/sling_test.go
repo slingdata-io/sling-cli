@@ -39,22 +39,23 @@ type testConn struct {
 }
 
 var dbConnMap = map[dbio.Type]testConn{
-	dbio.TypeDbAzure:      {name: "azuresql"},
-	dbio.TypeDbAzureDWH:   {name: "azuredwh"},
-	dbio.TypeDbBigQuery:   {name: "bigquery"},
-	dbio.TypeDbBigTable:   {name: "bigtable"},
-	dbio.TypeDbClickhouse: {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
-	dbio.TypeDbDuckDb:     {name: "duckdb"},
-	dbio.TypeDbMariaDB:    {name: "mariadb", schema: "mariadb"},
-	dbio.TypeDbMotherDuck: {name: "motherduck"},
-	dbio.TypeDbMySQL:      {name: "mysql", schema: "mysql"},
-	dbio.TypeDbOracle:     {name: "oracle", schema: "system"},
-	dbio.TypeDbPostgres:   {name: "postgres"},
-	dbio.TypeDbRedshift:   {name: "redshift"},
-	dbio.TypeDbSnowflake:  {name: "snowflake"},
-	dbio.TypeDbSQLite:     {name: "sqlite", schema: "main"},
-	dbio.TypeDbSQLServer:  {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
-	dbio.TypeDbStarRocks:  {name: "starrocks"},
+	dbio.TypeDbAzure:             {name: "azuresql"},
+	dbio.TypeDbAzureDWH:          {name: "azuredwh"},
+	dbio.TypeDbBigQuery:          {name: "bigquery"},
+	dbio.TypeDbBigTable:          {name: "bigtable"},
+	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
+	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbDuckDb:            {name: "duckdb"},
+	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbMotherDuck:        {name: "motherduck"},
+	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
+	dbio.TypeDbOracle:            {name: "oracle", schema: "system"},
+	dbio.TypeDbPostgres:          {name: "postgres"},
+	dbio.TypeDbRedshift:          {name: "redshift"},
+	dbio.TypeDbSnowflake:         {name: "snowflake"},
+	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
+	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
+	dbio.TypeDbStarRocks:         {name: "starrocks"},
 }
 
 func init() {
@@ -196,7 +197,7 @@ func TestExtract(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testSuite(dbType dbio.Type, t *testing.T) {
+func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
 	conn, ok := dbConnMap[dbType]
 	if !assert.True(t, ok) {
 		return
@@ -423,82 +424,83 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 
 func TestSuitePostgres(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbPostgres, t)
+	testSuite(t, dbio.TypeDbPostgres)
 }
 
 // func TestSuiteRedshift(t *testing.T) {
 // 	t.Parallel()
-// 	testSuite(dbio.TypeDbRedshift, t)
+// 	testSuite(t, dbio.TypeDbRedshift)
 // }
 
 func TestSuiteStarRocks(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbStarRocks, t)
+	testSuite(t, dbio.TypeDbStarRocks)
 }
 
 func TestSuiteMySQL(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbMySQL, t)
+	testSuite(t, dbio.TypeDbMySQL)
 }
 
 func TestSuiteMariaDB(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbMariaDB, t)
+	testSuite(t, dbio.TypeDbMariaDB)
 }
 
 func TestSuiteOracle(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbOracle, t)
+	testSuite(t, dbio.TypeDbOracle)
 }
 
 // func TestSuiteBigTable(t *testing.T) {
 // 	t.Parallel()
-// 	testSuite(dbio.TypeDbBigTable, t)
+// 	testSuite(t, dbio.TypeDbBigTable)
 // }
 
 func TestSuiteBigQuery(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbBigQuery, t)
+	testSuite(t, dbio.TypeDbBigQuery)
 }
 
 func TestSuiteSnowflake(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbSnowflake, t)
+	testSuite(t, dbio.TypeDbSnowflake)
 }
 
 func TestSuiteSQLite(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbSQLite, t)
+	testSuite(t, dbio.TypeDbSQLite)
 }
 
 func TestSuiteDuckDb(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbDuckDb, t)
+	testSuite(t, dbio.TypeDbDuckDb)
 }
 
 // func TestSuiteMotherDuck(t *testing.T) {
 // 	t.Parallel()
-// 	testSuite(dbio.TypeDbMotherDuck, t)
+// 	testSuite(t, dbio.TypeDbMotherDuck)
 // }
 
 func TestSuiteSQLServer(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbSQLServer, t)
+	testSuite(t, dbio.TypeDbSQLServer)
 }
 
 // func TestSuiteAzure(t *testing.T) {
 // 	t.Parallel()
-// 	testSuite(dbio.TypeDbAzure, t)
+// 	testSuite(t, dbio.TypeDbAzure)
 // }
 
 // func TestSuiteAzureDWH(t *testing.T) {
 // 	t.Parallel()
-// 	testSuite(dbio.TypeDbAzureDWH, t)
+// 	testSuite(t, dbio.TypeDbAzureDWH)
 // }
 
 func TestSuiteClickhouse(t *testing.T) {
 	t.Parallel()
-	testSuite(dbio.TypeDbClickhouse, t)
+	testSuite(t, dbio.TypeDbClickhouse)
+	testSuite(t, dbio.Type("clickhouse_http"))
 }
 
 // generate large dataset or use cache

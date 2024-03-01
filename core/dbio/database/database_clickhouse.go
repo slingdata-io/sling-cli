@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -31,6 +32,18 @@ func (conn *ClickhouseConn) Init() error {
 	instance = conn
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
+}
+
+func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
+
+	err = conn.BaseConn.Connect(timeOut...)
+	if err != nil {
+		if strings.Contains(err.Error(), "unexpected packet [72] from server") {
+			g.Info(color.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+		}
+	}
+
+	return err
 }
 
 func (conn *ClickhouseConn) ConnString() string {
@@ -95,9 +108,12 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 		return
 	}
 
+	// set default schema
+	conn.Exec(g.F("use `%s`", table.Schema))
+
 	// set OnSchemaChange
 	if df := ds.Df(); df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
-
+		oldOnColumnChanged := df.OnColumnChanged
 		df.OnColumnChanged = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -106,19 +122,10 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 			ds.Context.Lock()
 			defer ds.Context.Unlock()
 
-			table.Columns, err = conn.GetColumns(tableFName)
+			// use pre-defined function
+			err = oldOnColumnChanged(col)
 			if err != nil {
-				return g.Error(err, "could not get table columns for schema change")
-			}
-
-			df.Columns[col.Position-1].Type = col.Type
-			ok, err := conn.OptimizeTable(&table, df.Columns)
-			if err != nil {
-				return g.Error(err, "could not change table schema")
-			} else if ok {
-				for i := range df.Columns {
-					df.Columns[i].Type = table.Columns[i].Type
-				}
+				return g.Error(err, "could not process ColumnChange for Postgres")
 			}
 
 			return nil
@@ -235,6 +242,11 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []s
 		valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
 	}
 
+	if conn.GetProp("http_url") != "" {
+		table, _ := ParseTableName(tableName, conn.GetType())
+		tableName = table.NameQ()
+	}
+
 	statement := g.R(
 		"INSERT INTO {table} ({fields}) VALUES {values}",
 		"table", tableName,
@@ -277,4 +289,19 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	)
 
 	return
+}
+
+func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
+	for i := range row {
+		if columns[i].Type == iop.DecimalType {
+			sVal := cast.ToString(row[i])
+			val, err := decimal.NewFromString(sVal)
+			if !g.LogError(err, "could not convert value `%s` for clickhouse decimal", sVal) {
+				row[i] = val
+			}
+		} else if columns[i].Type == iop.FloatType {
+			row[i] = cast.ToFloat64(row[i])
+		}
+	}
+	return row
 }

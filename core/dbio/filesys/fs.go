@@ -76,6 +76,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &S3FileSysClient{}
 		//fsClient = &S3cFileSysClient{}
 		//fsClient.Client().fsType = S3cFileSys
+	case dbio.TypeFileFtp:
+		fsClient = &FtpFileSysClient{}
 	case dbio.TypeFileSftp:
 		fsClient = &SftpFileSysClient{}
 	// case HDFSFileSys:
@@ -138,6 +140,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 			return NewFileSysClientContext(ctx, dbio.TypeFileS3, props...)
 		}
 		return NewFileSysClientContext(ctx, dbio.TypeFileS3, props...)
+	case strings.HasPrefix(url, "ftp://"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileFtp, props...)
 	case strings.HasPrefix(url, "sftp://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileSftp, props...)
@@ -788,7 +793,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		return
 	}
 
-	if !singleFile && (fsClient.FsType() == dbio.TypeFileLocal || fsClient.FsType() == dbio.TypeFileSftp) {
+	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
 		err = fsClient.MkdirAll(url)
 		if err != nil {
 			err = g.Error(err, "could not create directory")
@@ -859,6 +864,10 @@ func Delete(fs FileSysClient, path string) (err error) {
 			return g.Error("will not delete root level %s", path)
 		}
 	case dbio.TypeFileSftp:
+		if len(p) == 0 {
+			return g.Error("will not delete root level %s", path)
+		}
+	case dbio.TypeFileFtp:
 		if len(p) == 0 {
 			return g.Error("will not delete root level %s", path)
 		}

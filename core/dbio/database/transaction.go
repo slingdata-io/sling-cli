@@ -319,6 +319,9 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 
 		vals := []interface{}{}
 		for _, row := range rows {
+			if conn.GetType() == dbio.TypeDbClickhouse {
+				row = processClickhouseInsertRow(bColumns, row)
+			}
 			vals = append(vals, row...)
 		}
 
