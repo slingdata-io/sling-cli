@@ -462,6 +462,10 @@ func cliInit() int {
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
 			evt.Transaction = g.F("%s - %s", sourceType, targetType)
+			if g.CliObj.Name == "conns" {
+				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
+				evt.Transaction = g.F(targetType)
+			}
 
 			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
 			E, ok := err.(*g.ErrType)
@@ -485,18 +489,22 @@ func cliInit() int {
 
 			sentry.ConfigureScope(func(scope *sentry.Scope) {
 				scope.SetUser(sentry.User{ID: machineID})
-				scope.SetTag("source_type", sourceType)
-				scope.SetTag("target_type", targetType)
-				scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
-				if val := cast.ToString(taskMap["mode"]); val != "" {
-					scope.SetTag("mode", val)
-				}
-				if val := cast.ToString(taskMap["type"]); val != "" {
-					scope.SetTag("type", val)
-				}
-				scope.SetTag("package", getSlingPackage())
-				if projectID != "" {
-					scope.SetTag("project_id", projectID)
+				if g.CliObj.Name == "conns" {
+					scope.SetTag("target_type", targetType)
+				} else {
+					scope.SetTag("source_type", sourceType)
+					scope.SetTag("target_type", targetType)
+					scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
+					if val := cast.ToString(taskMap["mode"]); val != "" {
+						scope.SetTag("mode", val)
+					}
+					if val := cast.ToString(taskMap["type"]); val != "" {
+						scope.SetTag("type", val)
+					}
+					scope.SetTag("package", getSlingPackage())
+					if projectID != "" {
+						scope.SetTag("project_id", projectID)
+					}
 				}
 			})
 
