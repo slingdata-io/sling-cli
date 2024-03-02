@@ -125,6 +125,8 @@ func (cfg *Config) SetDefault() {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
 		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+	case dbio.TypeDbSQLServer:
+		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_uuid")
 	}
 
 	// set default metadata
