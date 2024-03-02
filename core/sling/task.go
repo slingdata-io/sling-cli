@@ -509,7 +509,7 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("mkdir", "permission denied"):
 			helpString = "Perhaps setting the SLING_TEMP_DIR environment variable to a writable folder will help."
 		case contains("canceling statement due to conflict with recovery"):
-			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the PG Database server could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
+			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the source PG Database could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
 		}
 	}
 	return
