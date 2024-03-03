@@ -4,6 +4,25 @@
 <p align="center" style="margin-bottom: 0px">Slings from a data source to a data target.</p>
 <p align="center">See <a href="https://docs.slingdata.io/">docs.slingdata.io</a> for more details.</p>
 
+
+<p align="center">
+  <a href="https://github.com/slingdata-io/sling-cli/blob/master/LICENSE">
+    <img alt="GitHub" src="https://img.shields.io/github/license/slingdata-io/sling-cli"/>
+  </a>
+  <a href="https://goreportcard.com/report/github.com/slingdata-io/sling-cli">
+    <img src="https://goreportcard.com/badge/github.com/slingdata-io/sling-cli" />
+  </a>
+  <a href="https://pkg.go.dev/github.com/slingdata-io/sling-cli">
+    <img src="https://pkg.go.dev/badge/github.com/slingdata-io/sling-cli.svg" alt="Go Reference"/>
+  </a>
+  <a href="https://discord.gg/VSqqcR4Y">
+    <img alt="Discord" src="https://dcbadge.vercel.app/api/server/VSqqcR4Y?style=flat"/>
+  </a>
+  <a href="https://github.com/slingdata-io/sling-cli/tags" rel="nofollow">
+    <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/slingdata-io/sling-cli?include_prereleases&label=version"/>
+  </a>
+</p>
+
 Sling is a passion project turned into a free CLI Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
 
 * Database to Database
