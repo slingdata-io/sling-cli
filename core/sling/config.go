@@ -792,12 +792,12 @@ func (cfg Config) Value() (driver.Value, error) {
 }
 
 func (cfg *Config) MD5() string {
-	payload := g.Marshal(g.M(
-		"source", cfg.Source.MD5(),
-		"target", cfg.Target.MD5(),
-		"mode", cfg.Mode,
-		"options", cfg.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("source", cfg.Source.MD5()),
+		g.M("target", cfg.Target.MD5()),
+		g.M("mode", cfg.Mode),
+		g.M("options", cfg.Options),
+	})
 
 	// clean up
 	if strings.Contains(cfg.Source.Conn, "://") {
@@ -855,13 +855,13 @@ func (s *Source) PrimaryKey() []string {
 }
 
 func (s *Source) MD5() string {
-	payload := g.Marshal(g.M(
-		"conn", s.Conn,
-		"stream", s.Stream,
-		"primary_key", s.PrimaryKeyI,
-		"update_key", s.UpdateKey,
-		"options", s.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("conn", s.Conn),
+		g.M("stream", s.Stream),
+		g.M("primary_key", s.PrimaryKeyI),
+		g.M("update_key", s.UpdateKey),
+		g.M("options", s.Options),
+	})
 
 	if strings.Contains(s.Conn, "://") {
 		payload = cleanConnURL(payload, s.Conn)
@@ -882,11 +882,11 @@ type Target struct {
 }
 
 func (t *Target) MD5() string {
-	payload := g.Marshal(g.M(
-		"conn", t.Conn,
-		"object", t.Object,
-		"options", t.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("conn", t.Conn),
+		g.M("object", t.Object),
+		g.M("options", t.Options),
+	})
 
 	if strings.Contains(t.Conn, "://") {
 		payload = cleanConnURL(payload, t.Conn)
