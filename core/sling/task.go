@@ -9,6 +9,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
+	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -21,7 +22,7 @@ var StoreInsert, StoreUpdate func(t *TaskExecution)
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
-	ExecID    int64      `json:"exec_id"`
+	ExecID    string     `json:"exec_id"`
 	Config    *Config    `json:"config"`
 	Type      JobType    `json:"type"`
 	Status    ExecStatus `json:"status"`
@@ -59,8 +60,22 @@ type ExecutionStatus struct {
 	AvgDuration int        `json:"avg_duration,omitempty"`
 }
 
+func NewExecID() string {
+	uid, err := ksuid.NewRandom()
+	execID := g.NewTsID("exec")
+	if err == nil {
+		execID = uid.String()
+	}
+
+	return execID
+}
+
 // NewTask creates a Sling task with given configuration
-func NewTask(execID int64, cfg *Config) (t *TaskExecution) {
+func NewTask(execID string, cfg *Config) (t *TaskExecution) {
+	if execID == "" {
+		execID = NewExecID()
+	}
+
 	t = &TaskExecution{
 		ExecID:       execID,
 		Config:       cfg,
