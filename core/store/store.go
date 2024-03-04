@@ -1,6 +1,7 @@
 package store
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -236,11 +237,14 @@ func StoreUpdate(t *sling.TaskExecution) {
 }
 
 func sendStatus(exec *Execution) {
-	if os.Getenv("SLING_SERVER_URL") == "" {
+	if os.Getenv("SLING_STATUS_URL") == "" {
 		return
 	}
 
-	headers := map[string]string{}
+	headers := map[string]string{"Content-Type": "application/json"}
 	payload := g.Marshal(exec)
-	net.ClientDo("POST", os.Getenv("SLING_SERVER_URL"), strings.NewReader(payload), headers, 3)
+	net.ClientDo(
+		http.MethodPost, os.Getenv("SLING_STATUS_URL"),
+		strings.NewReader(payload), headers, 3,
+	)
 }
