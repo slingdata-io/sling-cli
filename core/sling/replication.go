@@ -401,6 +401,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		}
 	}
 
+	// set originalCfg
+	config.originalCfg = g.Marshal(config)
+
 	return
 }
 
@@ -436,7 +439,6 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	config.originalCfg = g.Marshal(config)
 	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return
