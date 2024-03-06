@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/flarco/g"
@@ -113,6 +114,14 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 	}
 
 	go func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				ds.Context.CaptureErr(err)
+			}
+		}()
+
 		// manage concurrency
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
