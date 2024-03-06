@@ -299,6 +299,7 @@ azuredwh	binary	binary	col_binary binary(100)	TRUE	FALSE
 azuredwh	bit	smallint	col_bit bit	FALSE	FALSE	
 azuredwh	char	string	col_char char	TRUE	TRUE	
 azuredwh	date	date	col_date date	TRUE	TRUE	
+azuredwh	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 azuredwh	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 azuredwh	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
 azuredwh	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	
