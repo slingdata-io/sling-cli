@@ -803,6 +803,10 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 			return false
 		}
 
+		if len(row) > len(it.ds.Columns) {
+			it.addNewColumns(len(row))
+		}
+
 		it.Row = make([]any, len(row))
 		var val any
 		for i, val0 := range row {
@@ -1780,6 +1784,24 @@ func (it *Iterator) Ds() *Datastream {
 
 func (it *Iterator) close() {
 	it.Closed = true
+}
+
+func (it *Iterator) addNewColumns(newRowLen int) {
+	mux := it.ds.Context.Mux
+	if df := it.ds.Df(); df != nil {
+		mux = df.Context.Mux
+	}
+
+	mux.Lock()
+	for j := len(it.ds.Columns); j < newRowLen; j++ {
+		newColName := g.RandSuffix("col_", 3)
+		it.ds.AddColumns(Columns{Column{
+			Name:     newColName,
+			Type:     StringType,
+			Position: len(it.ds.Columns) + 1,
+		}}, false)
+	}
+	mux.Unlock()
 }
 
 func (it *Iterator) next() bool {

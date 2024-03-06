@@ -899,6 +899,7 @@ type SourceOptions struct {
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
+	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Format         *filesys.FileType   `json:"format,omitempty" yaml:"format,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
@@ -1022,6 +1023,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.NullIf == nil {
 		o.NullIf = sourceOptions.NullIf
+	}
+	if o.FieldsPerRec == nil {
+		o.FieldsPerRec = sourceOptions.FieldsPerRec
 	}
 	if o.JmesPath == nil {
 		o.JmesPath = sourceOptions.JmesPath
