@@ -3,7 +3,6 @@ package sling
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/google/uuid"
@@ -69,8 +68,9 @@ func Replace0x00(sp *iop.StreamProcessor, val string) (string, error) {
 	return strings.ReplaceAll(val, "\x00", ""), nil // replace the NUL character
 }
 
+/*
+https://web.itu.edu.tr/sgunduz/courses/mikroisl/ascii.html
+*/
 func ReplaceNonPrint(sp *iop.StreamProcessor, val string) (string, error) {
-	return strings.TrimFunc(val, func(r rune) bool {
-		return !unicode.IsGraphic(r)
-	}), nil
+	return iop.TrimNonPrintable(val), nil
 }
