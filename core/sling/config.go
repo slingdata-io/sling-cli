@@ -124,15 +124,13 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
-		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
-	case dbio.TypeDbSQLServer:
-		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_uuid")
+		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	}
 
 	// set default metadata
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
@@ -913,7 +911,9 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+
+	extraTransforms []string `json:"-" yaml:"-"`
 }
 
 // TargetOptions are target connection and stream processing options
@@ -1047,7 +1047,7 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.Columns == nil {
 		o.Columns = sourceOptions.Columns
 	}
-	if o.Transforms == nil || len(o.Transforms) == 0 {
+	if o.Transforms == nil {
 		o.Transforms = sourceOptions.Transforms
 	}
 

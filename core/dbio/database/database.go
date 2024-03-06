@@ -1011,6 +1011,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	if !ds.NoDebug {
 		// don't set metadata for internal queries
 		ds.SetMetadata(conn.GetProp("METADATA"))
+		conn.setTransforms(ds.Columns)
 		ds.SetConfig(conn.Props())
 	}
 
@@ -1020,6 +1021,40 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		return ds, g.Error(err, "could start datastream")
 	}
 	return
+}
+
+func (conn *BaseConn) setTransforms(columns iop.Columns) {
+	colTransforms := map[string][]string{}
+
+	// merge from existing
+	if transforms := conn.GetProp("transforms"); transforms != "" {
+		colTransformsExisting := map[string][]string{}
+		g.Unmarshal(transforms, &colTransformsExisting)
+		for k, v := range colTransformsExisting {
+			if _, ok := colTransforms[k]; !ok {
+				colTransforms[k] = v
+			}
+		}
+	}
+
+	// add new
+	for _, col := range columns {
+		key := strings.ToLower(col.Name)
+		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer) {
+			if strings.ToLower(col.DbType) == "uniqueidentifier" {
+
+				if vals, ok := colTransforms[key]; ok {
+					colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+				} else {
+					colTransforms[key] = []string{"parse_uuid"}
+				}
+			}
+		}
+	}
+
+	if len(colTransforms) > 0 {
+		conn.SetProp("transforms", g.Marshal(colTransforms))
+	}
 }
 
 // NewTransaction creates a new transaction

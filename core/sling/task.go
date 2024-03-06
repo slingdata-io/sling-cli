@@ -437,9 +437,67 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 		// set as string so that StreamProcessor parses it
 		options["columns"] = g.Marshal(iop.NewColumns(columns...))
 	}
-	if t.Config.Source.Options.Transforms != nil && len(t.Config.Source.Options.Transforms) > 0 {
+
+	if transforms := t.Config.Source.Options.Transforms; transforms != nil {
+		colTransforms := map[string][]string{}
+
+		makeTransformArray := func(val any) []string {
+			switch tVal := val.(type) {
+			case []any:
+				transformsArray := make([]string, len(tVal))
+				for i := range tVal {
+					transformsArray[i] = cast.ToString(tVal[i])
+				}
+				return transformsArray
+			case []string:
+				return tVal
+			default:
+				g.Warn("did not handle transforms value input: %#v", val)
+			}
+			return nil
+		}
+
+		switch tVal := transforms.(type) {
+		case []any, []string:
+			colTransforms["*"] = makeTransformArray(tVal)
+		case map[string]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[string][]string:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[string][]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any][]string:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[any][]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		default:
+			g.Warn("did not handle transforms input: %#v", transforms)
+		}
+
+		for _, transf := range t.Config.Source.Options.extraTransforms {
+			if _, ok := colTransforms["*"]; !ok {
+				colTransforms["*"] = []string{transf}
+			} else {
+				colTransforms["*"] = append(colTransforms["*"], transf)
+			}
+		}
+
 		// set as string so that StreamProcessor parses it
-		options["transforms"] = g.Marshal(t.Config.Source.Options.Transforms)
+		options["transforms"] = g.Marshal(colTransforms)
 	}
 	return
 }
