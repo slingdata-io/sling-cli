@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
@@ -891,40 +890,4 @@ func (ct ColumnType) IsDatetime() bool {
 // IsValid returns whether the column has a valid type
 func (ct ColumnType) IsValid() bool {
 	return ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDatetime()
-}
-
-// https://stackoverflow.com/a/46637343/2295355
-// https://web.itu.edu.tr/sgunduz/courses/mikroisl/ascii.html
-func TrimNonPrintable(val string) string {
-
-	var newVal strings.Builder
-
-	for _, r := range val {
-		if r < 9 || (r > 13 && r < 32) {
-			continue // remove those
-		}
-
-		if r < 127 {
-			// add these
-			newVal.WriteRune(r)
-			continue
-		}
-
-		switch r {
-		case 127: //
-			continue // remove those
-		case 160: // NO-BREAK SPACE
-			newVal.WriteRune(' ') // replace with space
-			continue
-		}
-
-		if !unicode.IsGraphic(r) {
-			continue
-		}
-
-		// add any other
-		newVal.WriteRune(r)
-	}
-
-	return newVal.String()
 }
