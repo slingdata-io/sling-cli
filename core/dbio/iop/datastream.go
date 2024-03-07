@@ -90,16 +90,17 @@ func (m *Metadata) AsMap() map[string]any {
 
 // Iterator is the row provider for a datastream
 type Iterator struct {
-	Row       []any
-	Reprocess chan []any
-	IsCasted  bool
-	Counter   uint64
-	Context   *g.Context
-	Closed    bool
-	ds        *Datastream
-	dsBufferI int // -1 means ds is not buffered
-	nextFunc  func(it *Iterator) bool
-	limitCnt  uint64 // to not check for df limit each cycle
+	Row         []any
+	Reprocess   chan []any
+	IsCasted    bool
+	RowIsCasted bool
+	Counter     uint64
+	Context     *g.Context
+	Closed      bool
+	ds          *Datastream
+	dsBufferI   int // -1 means ds is not buffered
+	nextFunc    func(it *Iterator) bool
+	limitCnt    uint64 // to not check for df limit each cycle
 }
 
 // NewDatastream return a new datastream
@@ -614,7 +615,7 @@ loop:
 			for {
 				// reprocess row if needed (to expand it as needed)
 				ds.it.Row = setMetaValues(ds.it)
-				if ds.it.IsCasted {
+				if ds.it.IsCasted || ds.it.RowIsCasted {
 					row = ds.it.Row
 				} else {
 					row = ds.Sp.CastRow(ds.it.Row, ds.Columns)
@@ -800,6 +801,10 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		} else if err != nil {
 			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
 			return false
+		}
+
+		if len(row) > len(it.ds.Columns) {
+			it.addNewColumns(len(row))
 		}
 
 		it.Row = make([]any, len(row))
@@ -1781,12 +1786,33 @@ func (it *Iterator) close() {
 	it.Closed = true
 }
 
+func (it *Iterator) addNewColumns(newRowLen int) {
+	mux := it.ds.Context.Mux
+	if df := it.ds.Df(); df != nil {
+		mux = df.Context.Mux
+	}
+
+	mux.Lock()
+	for j := len(it.ds.Columns); j < newRowLen; j++ {
+		newColName := g.RandSuffix("col_", 3)
+		it.ds.AddColumns(Columns{Column{
+			Name:     newColName,
+			Type:     StringType,
+			Position: len(it.ds.Columns) + 1,
+		}}, false)
+	}
+	mux.Unlock()
+}
+
 func (it *Iterator) next() bool {
+	it.RowIsCasted = false // reset RowIsCasted
+
 	select {
 	case <-it.Context.Ctx.Done():
 		return false
 	case it.Row = <-it.Reprocess:
 		// g.DebugLow("Reprocess %s > %d", it.ds.ID, it.Counter)
+		it.RowIsCasted = true // skip re-casting of single row
 		return true
 	default:
 		if it.Closed {

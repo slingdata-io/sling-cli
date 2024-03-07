@@ -1,11 +1,13 @@
 package store
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
@@ -20,6 +22,8 @@ func init() {
 type Execution struct {
 	// ID auto-increments
 	ID int64 `json:"id" gorm:"primaryKey"`
+
+	ExecID string `json:"exec_id" gorm:"uniqueIndex"`
 
 	// StreamID represents the stream inside the replication that is running.
 	// Is an MD5 construct:`md5(Source, Target, Stream)`.
@@ -83,7 +87,7 @@ type Replication struct {
 func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	exec := Execution{
-		ID:        t.ExecID,
+		ExecID:    t.ExecID,
 		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.Source.Stream),
 		Status:    t.Status,
 		StartTime: t.StartTime,
@@ -194,7 +198,10 @@ func StoreInsert(t *sling.TaskExecution) {
 		return
 	}
 
-	t.ExecID = exec.ID
+	t.ExecID = exec.ExecID
+
+	// send status
+	sendStatus(exec)
 }
 
 // Store saves the task into the local sqlite
@@ -203,8 +210,8 @@ func StoreUpdate(t *sling.TaskExecution) {
 		return
 	}
 
-	exec := &Execution{ID: t.ExecID}
-	err := Db.First(exec).Error
+	exec := &Execution{ExecID: t.ExecID}
+	err := Db.Where("exec_id = ?", t.ExecID).First(exec).Error
 	if err != nil {
 		g.Debug("could not select execution from local .sling.db. %s", err.Error())
 		return
@@ -225,4 +232,19 @@ func StoreUpdate(t *sling.TaskExecution) {
 		return
 	}
 
+	// send status
+	sendStatus(exec)
+}
+
+func sendStatus(exec *Execution) {
+	if os.Getenv("SLING_STATUS_URL") == "" {
+		return
+	}
+
+	headers := map[string]string{"Content-Type": "application/json"}
+	payload := g.Marshal(exec)
+	net.ClientDo(
+		http.MethodPost, os.Getenv("SLING_STATUS_URL"),
+		strings.NewReader(payload), headers, 3,
+	)
 }

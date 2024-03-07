@@ -33,12 +33,12 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 
 // MD5 returns a md5 hash of the config
 func (rd *ReplicationConfig) MD5() string {
-	payload := g.Marshal(g.M(
-		"source", rd.Source,
-		"target", rd.Target,
-		"defaults", rd.Defaults,
-		"streams", rd.Streams,
-	))
+	payload := g.Marshal([]any{
+		g.M("source", rd.Source),
+		g.M("target", rd.Target),
+		g.M("defaults", rd.Defaults),
+		g.M("streams", rd.Streams),
+	})
 
 	// clean up
 	if strings.Contains(rd.Source, "://") {
@@ -401,6 +401,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		}
 	}
 
+	// set originalCfg
+	config.originalCfg = g.Marshal(config)
+
 	return
 }
 
@@ -436,7 +439,6 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	config.originalCfg = g.Marshal(config)
 	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return

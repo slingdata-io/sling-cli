@@ -400,8 +400,14 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		return
 	}
 
-	// set format to JSON
-	fs.SetProp("format", "json")
+	// set default format to csv
+	if val := conn.GetProp("format"); val != "" {
+		fs.SetProp("format", val)
+	} else {
+		fs.SetProp("format", "csv")
+	}
+	fs.SetProp("header", "false") // no header needed for csv mode
+
 	fs.SetProp("file_max_rows", "250000")
 	if val := conn.GetProp("file_max_rows"); val != "" {
 		fs.SetProp("file_max_rows", val)
@@ -409,10 +415,6 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	if val := conn.GetProp("file_max_bytes"); val != "" {
 		fs.SetProp("file_max_bytes", val)
 	}
-
-	// set format to CSV
-	// fs.SetProp("format", "csv")
-	// fs.SetProp("header", "false")
 
 	localPath := path.Join(env.GetTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
@@ -443,18 +445,24 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		return strings.ReplaceAll(conn.Quote(name), q, "")
 	})
 
+	// default is JSON
 	headers := map[string]string{
 		"Expect":  "100-continue",
 		"columns": strings.Join(colNames, ", "),
 
-		// CSV doesn't work well for multi-line values
-		// "format":           "CSV",
-		// "column_separator": ",",
-		// "enclose":          `"`,
-		// "escape":           `"`,
+		"format":           "CSV",
+		"column_separator": ",",
+		"enclose":          `"`,
+	}
 
-		"format":            "JSON",
-		"strip_outer_array": "true",
+	if conn.GetProp("format") == "json" {
+		headers = map[string]string{
+			"Expect":  "100-continue",
+			"columns": strings.Join(colNames, ", "),
+
+			"format":            "JSON",
+			"strip_outer_array": "true",
+		}
 	}
 
 	loadCtx := g.NewContext(conn.context.Ctx, 5)

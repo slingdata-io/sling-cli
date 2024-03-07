@@ -359,7 +359,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				err = g.Error(err, "could not drop table "+targetTable.FullName())
 				return cnt, err
 			}
-			t.SetProgress("dropped table " + targetTable.FullName())
 		}
 
 		// create table if not exists

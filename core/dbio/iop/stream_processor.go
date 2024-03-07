@@ -38,22 +38,22 @@ type StreamProcessor struct {
 }
 
 type streamConfig struct {
-	TrimSpace      bool            `json:"trim_space"`
-	EmptyAsNull    bool            `json:"empty_as_null"`
-	Header         bool            `json:"header"`
-	Compression    string          `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf         string          `json:"null_if"`
-	DatetimeFormat string          `json:"datetime_format"`
-	SkipBlankLines bool            `json:"skip_blank_lines"`
-	Delimiter      string          `json:"delimiter"`
-	FileMaxRows    int64           `json:"file_max_rows"`
-	MaxDecimals    int             `json:"max_decimals"`
-	Flatten        bool            `json:"flatten"`
-	FieldsPerRec   int             `json:"fields_per_rec"`
-	Jmespath       string          `json:"jmespath"`
-	BoolAsInt      bool            `json:"-"`
-	Columns        Columns         `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms     []TransformFunc // array of transform functions to apply
+	TrimSpace      bool                       `json:"trim_space"`
+	EmptyAsNull    bool                       `json:"empty_as_null"`
+	Header         bool                       `json:"header"`
+	Compression    string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf         string                     `json:"null_if"`
+	DatetimeFormat string                     `json:"datetime_format"`
+	SkipBlankLines bool                       `json:"skip_blank_lines"`
+	Delimiter      string                     `json:"delimiter"`
+	FileMaxRows    int64                      `json:"file_max_rows"`
+	MaxDecimals    int                        `json:"max_decimals"`
+	Flatten        bool                       `json:"flatten"`
+	FieldsPerRec   int                        `json:"fields_per_rec"`
+	Jmespath       string                     `json:"jmespath"`
+	BoolAsInt      bool                       `json:"-"`
+	Columns        Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms     map[string][]TransformFunc // array of transform functions to apply
 }
 
 type TransformFunc func(*StreamProcessor, string) (string, error)
@@ -68,7 +68,7 @@ func NewStreamProcessor() *StreamProcessor {
 			EmptyAsNull: true,
 			MaxDecimals: -1,
 			Columns:     Columns{},
-			transforms:  []TransformFunc{},
+			transforms:  map[string][]TransformFunc{},
 		},
 		accentTransformer: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
 	}
@@ -213,15 +213,19 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		g.Unmarshal(configMap["columns"], &sp.config.Columns)
 	}
 	if configMap["transforms"] != "" {
-		transformsNames := []string{}
-		g.Unmarshal(configMap["transforms"], &transformsNames)
-		sp.config.transforms = []TransformFunc{}
-		for _, name := range transformsNames {
-			f, ok := Transforms[name]
-			if ok {
-				sp.config.transforms = append(sp.config.transforms, f)
-			} else {
-				g.Warn("did find find tranform named: '%s'", name)
+		columnTransforms := map[string][]string{}
+		g.Unmarshal(configMap["transforms"], &columnTransforms)
+		sp.config.transforms = map[string][]TransformFunc{}
+		for key, names := range columnTransforms {
+			key = strings.ToLower(key)
+			sp.config.transforms[key] = []TransformFunc{}
+			for _, name := range names {
+				f, ok := Transforms[name]
+				if ok {
+					sp.config.transforms[key] = append(sp.config.transforms[key], f)
+				} else {
+					g.Warn("did find find tranform named: '%s'", name)
+				}
 			}
 		}
 	}
@@ -428,8 +432,16 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		// apply transforms
-		for _, t := range sp.config.transforms {
-			sVal, _ = t(sp, sVal)
+		key := strings.ToLower(col.Name)
+		if transforms, ok := sp.config.transforms[key]; ok {
+			for _, t := range transforms {
+				sVal, _ = t(sp, sVal)
+			}
+		}
+		if transforms, ok := sp.config.transforms["*"]; ok {
+			for _, t := range transforms {
+				sVal, _ = t(sp, sVal)
+			}
 		}
 
 		if len(sVal) > cs.MaxLen {

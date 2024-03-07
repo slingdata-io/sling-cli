@@ -269,7 +269,7 @@ sqlite	boolean	bool	col_boolean boolean	TRUE	TRUE
 sqlite	float	float	col_float float	TRUE	TRUE	
 sqlserver	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 sqlserver	binary	binary	col_binary binary(100)	TRUE	FALSE	
-sqlserver	uniqueidentifier	binary	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
+sqlserver	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 sqlserver	bit	smallint	col_bit bit	FALSE	FALSE	
 sqlserver	char	string	col_char char(17)	TRUE	TRUE	
 sqlserver	date	date	col_date date	TRUE	TRUE	
@@ -299,6 +299,7 @@ azuredwh	binary	binary	col_binary binary(100)	TRUE	FALSE
 azuredwh	bit	smallint	col_bit bit	FALSE	FALSE	
 azuredwh	char	string	col_char char	TRUE	TRUE	
 azuredwh	date	date	col_date date	TRUE	TRUE	
+azuredwh	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 azuredwh	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 azuredwh	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
 azuredwh	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	

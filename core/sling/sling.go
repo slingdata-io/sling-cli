@@ -1,15 +1,14 @@
 package sling
 
 import (
-	"time"
+	"os"
 
 	"github.com/flarco/g"
 )
 
 // Sling accepts a configuration and runs an Extract-Load task
 func Sling(cfg *Config) (err error) {
-
-	task := NewTask(time.Now().Unix(), cfg)
+	task := NewTask(os.Getenv("SLING_EXEC_ID"), cfg)
 	if task.Err != nil {
 		return g.Error(task.Err, "error creating Sling task")
 	}

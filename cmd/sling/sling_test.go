@@ -162,7 +162,7 @@ options:
 		err = config.Prepare()
 		if g.AssertNoError(t, err) {
 
-			task := sling.NewTask(0, config)
+			task := sling.NewTask("", config)
 			g.AssertNoError(t, task.Err)
 
 			// run task
@@ -324,7 +324,7 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 		return
 	}
 
-	task := sling.NewTask(0, cfg)
+	task := sling.NewTask("", cfg)
 	if !g.AssertNoError(t, task.Err) {
 		return
 	}

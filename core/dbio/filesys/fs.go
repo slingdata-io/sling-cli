@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -437,6 +438,14 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 
 	// CSV, JSON or XML files
 	go func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				ds.Context.CaptureErr(err)
+			}
+		}()
+
 		// manage concurrency
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()

@@ -124,13 +124,13 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
-		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	}
 
 	// set default metadata
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.Source.Options.Transforms = append(cfg.Source.Options.Transforms, "parse_bit")
+		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
@@ -790,12 +790,12 @@ func (cfg Config) Value() (driver.Value, error) {
 }
 
 func (cfg *Config) MD5() string {
-	payload := g.Marshal(g.M(
-		"source", cfg.Source.MD5(),
-		"target", cfg.Target.MD5(),
-		"mode", cfg.Mode,
-		"options", cfg.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("source", cfg.Source.MD5()),
+		g.M("target", cfg.Target.MD5()),
+		g.M("mode", cfg.Mode),
+		g.M("options", cfg.Options),
+	})
 
 	// clean up
 	if strings.Contains(cfg.Source.Conn, "://") {
@@ -853,13 +853,13 @@ func (s *Source) PrimaryKey() []string {
 }
 
 func (s *Source) MD5() string {
-	payload := g.Marshal(g.M(
-		"conn", s.Conn,
-		"stream", s.Stream,
-		"primary_key", s.PrimaryKeyI,
-		"update_key", s.UpdateKey,
-		"options", s.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("conn", s.Conn),
+		g.M("stream", s.Stream),
+		g.M("primary_key", s.PrimaryKeyI),
+		g.M("update_key", s.UpdateKey),
+		g.M("options", s.Options),
+	})
 
 	if strings.Contains(s.Conn, "://") {
 		payload = cleanConnURL(payload, s.Conn)
@@ -880,11 +880,11 @@ type Target struct {
 }
 
 func (t *Target) MD5() string {
-	payload := g.Marshal(g.M(
-		"conn", t.Conn,
-		"object", t.Object,
-		"options", t.Options,
-	))
+	payload := g.Marshal([]any{
+		g.M("conn", t.Conn),
+		g.M("object", t.Object),
+		g.M("options", t.Options),
+	})
 
 	if strings.Contains(t.Conn, "://") {
 		payload = cleanConnURL(payload, t.Conn)
@@ -899,6 +899,7 @@ type SourceOptions struct {
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
+	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Format         *filesys.FileType   `json:"format,omitempty" yaml:"format,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
@@ -911,7 +912,9 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Transforms     []string            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+
+	extraTransforms []string `json:"-" yaml:"-"`
 }
 
 // TargetOptions are target connection and stream processing options
@@ -1021,6 +1024,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.NullIf == nil {
 		o.NullIf = sourceOptions.NullIf
 	}
+	if o.FieldsPerRec == nil {
+		o.FieldsPerRec = sourceOptions.FieldsPerRec
+	}
 	if o.JmesPath == nil {
 		o.JmesPath = sourceOptions.JmesPath
 	}
@@ -1045,7 +1051,7 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.Columns == nil {
 		o.Columns = sourceOptions.Columns
 	}
-	if o.Transforms == nil || len(o.Transforms) == 0 {
+	if o.Transforms == nil {
 		o.Transforms = sourceOptions.Transforms
 	}
 
