@@ -23,6 +23,7 @@ var transforms = map[string]iop.TransformFunc{
 	"replace_non_printable": func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
 	"trim_space":            func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
 	"parse_uuid":            func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	"parse_fix":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
 	"parse_bit":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
 	"decode_latin1":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
 	"decode_latin5":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
@@ -72,5 +73,14 @@ func Replace0x00(sp *iop.StreamProcessor, val string) (string, error) {
 https://web.itu.edu.tr/sgunduz/courses/mikroisl/ascii.html
 */
 func ReplaceNonPrint(sp *iop.StreamProcessor, val string) (string, error) {
-	return iop.TrimNonPrintable(val), nil
+	return iop.ReplaceNonPrintable(val), nil
+}
+
+// ParseFIX converts a FIX message into a json format
+func ParseFIX(sp *iop.StreamProcessor, message string) (string, error) {
+	fixMap, err := iop.ParseFIX(message)
+	if err != nil {
+		return message, err
+	}
+	return g.Marshal(fixMap), nil
 }

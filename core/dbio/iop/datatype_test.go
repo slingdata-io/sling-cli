@@ -338,14 +338,3 @@ func TestParseString(t *testing.T) {
 	val := sp.ParseString("1697104406")
 	assert.Equal(t, int64(1697104406), val)
 }
-
-func TestNonPrintable(t *testing.T) {
-	chars := []string{"\x00", "\u00A0", " ", "\t", "\n"}
-	for _, char := range chars {
-		g.Info("%#v => %d => %#v => %#v", char, char[0], char[0], TrimNonPrintable(char))
-	}
-	uints := []uint8{0, 1, 2, 3, 49, 127, 160}
-	for _, uintVal := range uints {
-		g.Warn("%#v => %d => %#v", string(uintVal), uintVal, TrimNonPrintable(string(uintVal)))
-	}
-}
