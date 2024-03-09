@@ -38,7 +38,7 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
-		if strings.Contains(err.Error(), "unexpected packet [72] from server") {
+		if strings.Contains(err.Error(), "unexpected packet") {
 			g.Info(color.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 		}
 	}
