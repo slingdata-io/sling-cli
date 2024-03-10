@@ -98,7 +98,9 @@ oracle	nvarchar2	text	col_nvarchar2 nvarchar2(100)	TRUE	TRUE	Variable-length cha
 oracle	raw	binary	col_raw raw(100)	TRUE	FALSE	Variable-length raw binary data.
 oracle	rowid	bigint	col_rowid rowid	FALSE	FALSE	Binary data representing row addresses.
 oracle	timestamp	timestamp	col_ timestamp timestamp	TRUE	TRUE	
+oracle	timestampdty	timestamp	 	FALSE	FALSE	
 oracle	varchar2	text	col_varchar2 varchar2(100)	TRUE	TRUE	Variable-length character data.
+oracle	longvarchar	string	 	FALSE	FALSE	
 postgres	bigint	bigint	col_bigint bigint	TRUE	TRUE	signed eight-byte integer
 postgres	bigserial	bigint	col_bigserial bigserial	TRUE	TRUE	autoincrementing eight-byte integer
 postgres	bit	bool	col_bit bit	FALSE	FALSE	fixed-length bit string

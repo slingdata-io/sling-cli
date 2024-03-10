@@ -344,6 +344,8 @@ func (c *Connection) setURL() (err error) {
 			} else if c.Type == dbio.TypeDbSQLServer {
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
+			} else if c.Type == dbio.TypeDbOracle {
+				setIfMissing("sid", pathValue)
 			}
 
 			// set database
@@ -384,15 +386,21 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeDbOracle:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
-		setIfMissing("sid", c.Data["database"])
+		setIfMissing("database", c.Data["sid"])
+		setIfMissing("database", c.Data["service_name"])
 		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("client_charset", "UTF8")
 		if tns, ok := c.Data["tns"]; ok && cast.ToString(tns) != "" {
 			if !strings.HasPrefix(cast.ToString(tns), "(") {
 				c.Data["tns"] = "(" + cast.ToString(tns) + ")"
 			}
 			template = "oracle://{username}:{password}@{tns}"
 		} else {
-			template = "oracle://{username}:{password}@{host}:{port}/{sid}"
+			template = "oracle://{username}:{password}@{host}:{port}/{database}"
+		}
+
+		if _, ok := c.Data["jdbc_str"]; ok {
+			template = "oracle://"
 		}
 	case dbio.TypeDbPostgres:
 		setIfMissing("username", c.Data["user"])

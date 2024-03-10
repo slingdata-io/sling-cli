@@ -12,7 +12,6 @@ import (
 	"unicode"
 
 	"github.com/flarco/g"
-	"github.com/godror/godror"
 	"github.com/spf13/cast"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
@@ -384,8 +383,6 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	}
 
 	switch v := val.(type) {
-	case godror.Number:
-		val = sp.ParseString(cast.ToString(val), i)
 	case big.Int:
 		val = v.Int64()
 	case *big.Int:
@@ -684,8 +681,6 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 	}
 
 	switch v := val.(type) {
-	case godror.Number:
-		val = sp.ParseString(cast.ToString(val), i)
 	case []uint8:
 		val = cast.ToString(val)
 	default:
@@ -835,8 +830,6 @@ func (sp *StreamProcessor) ParseString(s string, jj ...int) interface{} {
 func (sp *StreamProcessor) ProcessVal(val interface{}) interface{} {
 	var nVal interface{}
 	switch v := val.(type) {
-	case godror.Number:
-		nVal = sp.ParseString(cast.ToString(val))
 	case []uint8:
 		nVal = cast.ToString(val)
 	default:
@@ -869,8 +862,6 @@ func (sp *StreamProcessor) ParseVal(val interface{}) interface{} {
 		nVal = cast.ToFloat32(val)
 	case float64:
 		nVal = cast.ToFloat64(val)
-	case godror.Number:
-		nVal = sp.ParseString(cast.ToString(val))
 	case bool:
 		nVal = cast.ToBool(val)
 	case []uint8:

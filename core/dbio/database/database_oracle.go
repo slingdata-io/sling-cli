@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 
@@ -47,6 +48,51 @@ func (conn *OracleConn) Init() error {
 	conn.SetProp("MAX_DECIMALS", "9")
 
 	return conn.BaseConn.Init()
+}
+
+func (conn *OracleConn) ConnString() string {
+
+	propMapping := map[string]string{
+		"sid":               "SID",
+		"jdbc_str":          "connStr",
+		"ssl":               "ssl",
+		"ssl_verify":        "ssl verify",
+		"wallet":            "wallet",
+		"auth_type":         "AUTH TYPE",
+		"os_user":           "OS USER",
+		"os_password":       "OS PASS",
+		"domain":            "DOMAIN",
+		"encryption":        "encryption",
+		"data_integrity":    "data integrity",
+		"unix_socket":       "unix socket",
+		"timeout":           "TIMEOUT",
+		"proxy_client_name": "proxy client name",
+		"dba_privilege":     "dba privilege",
+		"lob_fetch":         "lob fetch",
+		"client_charset":    "client charset",
+		"language":          "language",
+		"territory":         "territory",
+		"trace_file":        "trace file",
+	}
+
+	options := map[string]string{}
+
+	for key, new_key := range propMapping {
+		if val := conn.GetProp(key); val != "" {
+			options[new_key] = val
+		}
+	}
+
+	connStr := go_ora.BuildUrl(
+		conn.GetProp("host"),
+		cast.ToInt(conn.GetProp("port")),
+		conn.GetProp("service_name"),
+		conn.GetProp("username"),
+		conn.GetProp("password"),
+		options,
+	)
+
+	return connStr
 }
 
 // ExecMultiContext runs multiple sql queries with context, returns `error`

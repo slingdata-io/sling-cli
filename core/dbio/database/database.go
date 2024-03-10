@@ -329,7 +329,7 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		driverName = "mysql"
 	case dbio.TypeDbOracle:
-		driverName = "godror"
+		driverName = "oracle"
 	case dbio.TypeDbBigQuery:
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:

@@ -340,7 +340,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	switch tgtConn.GetType() {
 	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		txOptions = sql.TxOptions{}
-	case dbio.TypeDbClickhouse:
+	case dbio.TypeDbClickhouse, dbio.TypeDbOracle:
 		txOptions = sql.TxOptions{Isolation: sql.LevelDefault}
 	}
 	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)

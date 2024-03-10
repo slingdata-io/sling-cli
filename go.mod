@@ -25,7 +25,6 @@ require (
 	github.com/flarco/g v0.1.75
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.7.1
-	github.com/godror/godror v0.31.0
 	github.com/google/uuid v1.6.0
 	github.com/integrii/flaggy v1.5.2
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
@@ -49,6 +48,7 @@ require (
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/shopspring/decimal v1.3.1
+	github.com/sijms/go-ora/v2 v2.8.10-0.20240228213529-2ce633cb669f
 	github.com/snowflakedb/gosnowflake v1.6.25
 	github.com/spf13/cast v1.5.0
 	github.com/stretchr/testify v1.8.4
