@@ -260,7 +260,7 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 		}
 		if conn.adjustCol != nil {
 			targetOptions["adjust_column_type"] = *conn.adjustCol
-			sourceOptions["columns"] = g.M("code", "string")
+			sourceOptions["columns"] = g.M("code", "decimal")
 		}
 
 		task := g.M(
