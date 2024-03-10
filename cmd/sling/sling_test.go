@@ -58,6 +58,7 @@ var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
+	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
 }
 
 func init() {
@@ -511,6 +512,11 @@ func TestSuiteClickhouse(t *testing.T) {
 func TestSuiteTrino(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbTrino, 1, 6, 12)
+}
+
+func TestSuiteMongo(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbMongoDB, 6)
 }
 
 // generate large dataset or use cache

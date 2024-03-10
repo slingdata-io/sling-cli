@@ -443,6 +443,11 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["keyfile"]; ok {
 			template = template + "&credentialsFile={keyfile}"
 		}
+	case dbio.TypeDbMongoDB:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		template = "mongodb://{username}:{password}@{host}:{port}"
 	case dbio.TypeDbBigTable:
 		template = "bigtable://{project}/{instance}?"
 		if _, ok := c.Data["keyfile"]; ok {
