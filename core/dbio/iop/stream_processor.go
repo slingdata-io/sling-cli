@@ -90,7 +90,7 @@ func NewStreamProcessor() *StreamProcessor {
 			if hasZeroPrefix(s) {
 				return s, g.Error("number has zero prefix, treat as string")
 			}
-			return strconv.ParseFloat(s, 64)
+			return strconv.ParseFloat(strings.Replace(",", ".", s, 1), 64)
 		},
 		"time": func(s string) (interface{}, error) {
 			return sp.ParseTime(s)
