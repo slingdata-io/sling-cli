@@ -92,12 +92,16 @@ func (conn *TrinoConn) ExecContext(ctx context.Context, q string, args ...interf
 
 func processTrinoInsertRow(columns iop.Columns, row []any) []any {
 	for i := range row {
+		if row[i] == nil {
+			continue
+		}
+
 		if columns[i].Type == iop.DecimalType {
-			row[i] = cast.ToString(row[i])
+			row[i] = trino.Numeric(cast.ToString(row[i]))
 		} else if columns[i].Type == iop.BoolType {
 			row[i] = cast.ToBool(row[i])
 		} else if columns[i].Type == iop.FloatType {
-			row[i] = cast.ToString(row[i])
+			row[i] = trino.Numeric(cast.ToString(row[i]))
 		}
 	}
 	return row

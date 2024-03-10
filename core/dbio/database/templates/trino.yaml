@@ -347,7 +347,8 @@ function:
   truncate_datef: trunc({field})
   string_type: text
   checksum_boolean: length(cast({field} as varchar))
-  checksum_decimal: 'length({field})' # since it's string in db
+  checksum_decimal: ABS(truncate({field}))
+  checksum_datetime: to_unixtime({field}) * 1000000
 
 variable:
   tmp_folder: /tmp
