@@ -48,6 +48,7 @@ const (
 	TypeDbSQLServer  Type = "sqlserver"
 	TypeDbAzure      Type = "azuresql"
 	TypeDbAzureDWH   Type = "azuredwh"
+	TypeDbTrino      Type = "trino"
 	TypeDbClickhouse Type = "clickhouse"
 )
 
@@ -67,7 +68,7 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino:
 		return t, true
 	}
 
@@ -90,6 +91,7 @@ func (t Type) DefPort() int {
 		TypeDbOracle:     1521,
 		TypeDbSQLServer:  1433,
 		TypeDbAzure:      1433,
+		TypeDbTrino:      8080,
 		TypeDbClickhouse: 9000,
 		TypeFileFtp:      21,
 		TypeFileSftp:     22,
@@ -106,7 +108,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbDuckDb, TypeDbMotherDuck:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -160,6 +162,7 @@ func (t Type) NameLong() string {
 		TypeDbMotherDuck: "DB - MotherDuck",
 		TypeDbSQLServer:  "DB - SQLServer",
 		TypeDbAzure:      "DB - Azure",
+		TypeDbTrino:      "DB - Trino",
 		TypeDbClickhouse: "DB - Clickhouse",
 	}
 
@@ -191,6 +194,7 @@ func (t Type) Name() string {
 		TypeDbDuckDb:     "DuckDB",
 		TypeDbMotherDuck: "MotherDuck",
 		TypeDbSQLServer:  "SQLServer",
+		TypeDbTrino:      "Trino",
 		TypeDbClickhouse: "Clickhouse",
 		TypeDbAzure:      "Azure",
 	}

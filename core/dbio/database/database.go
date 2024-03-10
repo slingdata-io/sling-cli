@@ -272,6 +272,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		}
 	} else if strings.HasPrefix(URL, "redshift") {
 		conn = &RedshiftConn{URL: URL}
+	} else if strings.HasPrefix(URL, "trino") {
+		conn = &TrinoConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
 		conn = &MsSQLServerConn{URL: URL}
 	} else if strings.HasPrefix(URL, "starrocks:") {
@@ -340,6 +342,8 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
 		driverName = "sqlserver"
+	case dbio.TypeDbTrino:
+		driverName = "trino"
 	default:
 		driverName = dbType.String()
 	}

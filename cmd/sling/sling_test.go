@@ -33,9 +33,10 @@ type testDB struct {
 }
 
 type testConn struct {
-	name    string
-	schema  string
-	useBulk *bool
+	name      string
+	schema    string
+	useBulk   *bool
+	adjustCol *bool
 }
 
 var dbConnMap = map[dbio.Type]testConn{
@@ -56,6 +57,7 @@ var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
+	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 }
 
 func init() {
@@ -197,7 +199,7 @@ func TestExtract(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
+func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 	conn, ok := dbConnMap[dbType]
 	if !assert.True(t, ok) {
 		return
@@ -256,6 +258,10 @@ func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
 		if conn.useBulk != nil {
 			targetOptions["use_bulk"] = *conn.useBulk
 		}
+		if conn.adjustCol != nil {
+			targetOptions["adjust_column_type"] = *conn.adjustCol
+			sourceOptions["columns"] = g.M("code", "string")
+		}
 
 		task := g.M(
 			"source", g.M(
@@ -283,7 +289,6 @@ func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
 
-	testNumbers := []int{}
 	if tns := os.Getenv("TESTS"); tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
@@ -501,6 +506,11 @@ func TestSuiteClickhouse(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
+}
+
+func TestSuiteTrino(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbTrino, 1, 6, 12)
 }
 
 // generate large dataset or use cache

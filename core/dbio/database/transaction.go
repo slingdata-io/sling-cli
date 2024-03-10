@@ -321,6 +321,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		for _, row := range rows {
 			if conn.GetType() == dbio.TypeDbClickhouse {
 				row = processClickhouseInsertRow(bColumns, row)
+			} else if conn.GetType() == dbio.TypeDbTrino {
+				row = processTrinoInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}

@@ -534,6 +534,27 @@ func (c *Connection) setURL() (err error) {
 			template = template + "&app name=sling"
 		}
 
+	case dbio.TypeDbTrino:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := net.NewURL(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+			setIfMissing("catalog", u.GetParam("catalog"))
+			setIfMissing("schema", u.GetParam("schema"))
+		}
+
+		template = "trino://{username}:{password}@{host}:{port}?catalog={catalog}"
+		if _, ok := c.Data["schema"]; ok {
+			template = template + "&schema={schema}"
+		}
 	case dbio.TypeDbClickhouse:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("username", "") // clickhouse can work without a user

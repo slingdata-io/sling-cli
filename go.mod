@@ -52,6 +52,7 @@ require (
 	github.com/snowflakedb/gosnowflake v1.6.25
 	github.com/spf13/cast v1.5.0
 	github.com/stretchr/testify v1.8.4
+	github.com/trinodb/trino-go-client v0.313.0
 	github.com/xo/dburl v0.3.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	golang.org/x/crypto v0.19.0
