@@ -90,7 +90,7 @@ func NewStreamProcessor() *StreamProcessor {
 			if hasZeroPrefix(s) {
 				return s, g.Error("number has zero prefix, treat as string")
 			}
-			return strconv.ParseFloat(strings.Replace(",", ".", s, 1), 64)
+			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		},
 		"time": func(s string) (interface{}, error) {
 			return sp.ParseTime(s)
@@ -268,13 +268,13 @@ func (sp *StreamProcessor) toFloat64E(i interface{}) (float64, error) {
 	case float32:
 		return float64(s), nil
 	case string:
-		v, err := strconv.ParseFloat(s, 64)
+		v, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		if err == nil {
 			return v, nil
 		}
 		return 0, g.Error("unable to cast %#v of type %T to float64", i, i)
 	case []uint8:
-		v, err := strconv.ParseFloat(string(s), 64)
+		v, err := strconv.ParseFloat(strings.Replace(string(s), ",", ".", 1), 64)
 		if err == nil {
 			return v, nil
 		}
