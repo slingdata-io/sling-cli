@@ -488,5 +488,5 @@ func (data *Dataset) InferColumnTypes() {
 }
 
 func looksLikeJson(s string) bool {
-	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"))
+	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
 }
