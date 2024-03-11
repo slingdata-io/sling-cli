@@ -310,6 +310,7 @@ function:
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: len({field})
   checksum_json: datalength(replace(CONVERT(VARCHAR(MAX), {field}), ' ', ''))
+  checksum_date: (CAST(DATEDIFF(ss, '01-01-1970 00:00:00', {field}) as bigint) * 1000000)
   checksum_datetime: (CAST(DATEDIFF(ss, '01-01-1970 00:00:00', {field}) as bigint) * 1000000) + DATEPART(microsecond, {field})
   checksum_decimal: ABS(CAST({field} as bigint))
 

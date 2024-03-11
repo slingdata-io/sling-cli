@@ -87,7 +87,7 @@ oracle	bfile	binary	col_bfile bfile	FALSE	FALSE	Binary data stored in an externa
 oracle	blob	text	col_blob blob	FALSE	FALSE	Unstructured binary data.
 oracle	char	string	col_char char(17)	TRUE	TRUE	Fixed-length character data of length size bytes.
 oracle	clob	text	col_clob clob	TRUE	TRUE	Single-byte character data.
-oracle	date	datetime	col_date date	TRUE	TRUE	Fixed-length date and time data, ranging from Jan. 1, 4712 B.C.E. to Dec. 31, 4712 C.E.
+oracle	date	date	col_date date	TRUE	TRUE	Fixed-length date and time data, ranging from Jan. 1, 4712 B.C.E. to Dec. 31, 4712 C.E.
 oracle	float	float	col_float float	TRUE	TRUE	
 oracle	long	string	col_long long	TRUE	FALSE	Variable-length raw binary data.
 oracle	mlslabel	string	col_mlslabel mlslabel	FALSE	FALSE	Trusted Oracle datatype.
@@ -262,7 +262,7 @@ sqlite	numeric	decimal	col_numeric numeric	TRUE	TRUE
 sqlite	decimal	decimal	col_decimal decimal	TRUE	TRUE	
 sqlite	int	integer	col_int int	TRUE	TRUE	
 sqlite	num	integer	col_num num	TRUE	TRUE	
-sqlite	date	datetime	col_date date	TRUE	TRUE	
+sqlite	date	date	col_date date	TRUE	TRUE	
 sqlite	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 sqlite	text	text	col_text text	TRUE	TRUE	
 sqlite	json	json	col_json json	TRUE	TRUE	

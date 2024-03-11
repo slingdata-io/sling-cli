@@ -288,6 +288,7 @@ function:
   str_utf8: convert({field},'US7ASCII','WE8ISO8859P1')
   date_to_int: to_number(to_char({field}, 'j'))
   number_to_int: round({field}, 0)
+  checksum_date: cast(((CAST({field} as DATE) - to_date('01-JAN-1970','DD-MON-YYYY')) * 86400 * 1000000) as number(25,6))
   checksum_datetime: cast(((CAST({field} as DATE) - to_date('01-JAN-1970','DD-MON-YYYY')) * 86400 * 1000000) + cast(TO_CHAR({field}, 'FF6') as int) as number(25,6))
   sleep: |
     BEGIN

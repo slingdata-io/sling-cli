@@ -6,7 +6,7 @@ date	date	date	date	date	date	date	date	date	date	text	date	Nullable(Date)	date	
 datetime	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp	text	timestamp	Nullable(DateTime64(6))	datetime	datetime	datetime	timestamp
 decimal	number(,)	numeric	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	real	numeric	Nullable(Decimal(,))	decimal(,)	decimal(,)	decimal(,)	decimal(,)
 integer	number(10)	integer	integer	integer	integer	integer	integer	integer	integer	integer	int64	Nullable(Int64)	integer	integer	bigint	integer
-json	json	jsonb	json	json	nvarchar(max)	nvarchar(65535)	nvarchar(max)	varchar(65535)	variant	json	json	Nullable(String)	json	json	json	json
+json	clob	jsonb	json	json	nvarchar(max)	nvarchar(65535)	nvarchar(max)	varchar(65535)	variant	json	json	Nullable(String)	json	json	json	json
 smallint	number(5)	smallint	smallint	smallint	smallint	smallint	smallint	smallint	smallint	integer	int64	Nullable(Int32)	smallint	smallint	smallint	smallint
 string	varchar(4000)	varchar(65500)	text	text	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	varchar	text	string	Nullable(String)	string	string	varchar(65533)	varchar
 text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)	varchar
