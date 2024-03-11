@@ -272,6 +272,12 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 	if stream.Object == "" {
 		stream.Object = replicationCfg.Defaults.Object
 	}
+	if stream.SQL == "" {
+		stream.SQL = replicationCfg.Defaults.SQL
+	}
+	if len(stream.Select) == 0 {
+		stream.Select = replicationCfg.Defaults.Select
+	}
 	if stream.SourceOptions == nil {
 		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
 	} else if replicationCfg.Defaults.SourceOptions != nil {
