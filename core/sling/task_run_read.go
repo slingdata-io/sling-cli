@@ -38,7 +38,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// check if referring to a SQL file
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
-		sqlFromFile, err := getSQLText(cfg.Source.Stream)
+		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
 		if err != nil {
 			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
 			if sTable.Name == "" {

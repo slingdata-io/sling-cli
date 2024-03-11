@@ -366,7 +366,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		}
 
 		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
-			g.Debug("skipping stream %s since it is not selected", name)
+			g.Trace("skipping stream %s since it is not selected", name)
 			continue
 		}
 		counter++
