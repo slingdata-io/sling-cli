@@ -487,6 +487,47 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
+	case "exec":
+		name := cast.ToString(c.Vals["name"])
+		conn, ok := ec.GetConnEntry(name)
+		if !ok {
+			return ok, g.Error("did not find connection %s", name)
+		}
+
+		telemetryMap["conn_type"] = conn.Connection.Type.String()
+
+		if !conn.Connection.Type.IsDb() {
+			return ok, g.Error("cannot execute SQL query on a non-database connection (%s)", conn.Connection.Type)
+		}
+
+		start := time.Now()
+		dbConn, err := conn.Connection.AsDatabase()
+		if err != nil {
+			return ok, g.Error(err, "cannot create database connection (%s)", conn.Connection.Type)
+		}
+
+		err = dbConn.Connect()
+		if err != nil {
+			return ok, g.Error(err, "cannot connect to database (%s)", conn.Connection.Type)
+		}
+
+		query, err := sling.GetSQLText(cast.ToString(c.Vals["query"]))
+		if err != nil {
+			return ok, g.Error(err, "cannot get query")
+		}
+
+		result, err := dbConn.ExecMulti(query)
+		if err != nil {
+			return ok, g.Error(err, "cannot execute query")
+		}
+		end := time.Now()
+
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+		} else {
+			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+		}
 
 	case "list":
 		println(ec.List())

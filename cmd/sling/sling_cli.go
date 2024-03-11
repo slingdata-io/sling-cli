@@ -281,6 +281,24 @@ var cliConns = &g.CliSC{
 				},
 			},
 		},
+		{
+			Name:        "exec",
+			Description: "execute a SQL query on a Database connection",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to set",
+				},
+				{
+					Name:        "query",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The SQL query to execute. Can be in-line text or a file",
+				},
+			},
+		},
 	},
 	ExecProcess: processConns,
 }
