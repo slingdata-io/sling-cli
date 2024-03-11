@@ -382,6 +382,10 @@ func (ds *Datastream) GetFields(args ...bool) []string {
 	return fields
 }
 
+func (ds *Datastream) SetIterator(it *Iterator) {
+	ds.it = it
+}
+
 // SetFields sets the fields/columns of the Datastream
 func (ds *Datastream) SetFields(fields []string) {
 	if ds.Columns == nil || len(ds.Columns) != len(fields) {
@@ -733,7 +737,7 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 
 	decoder := json.NewDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
-	ds.it = ds.NewIterator(ds.Columns, js.nextFunc)
+	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
 	if err != nil {
@@ -753,7 +757,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 
 	decoder := xml.NewDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
-	ds.it = ds.NewIterator(ds.Columns, js.nextFunc)
+	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
 	if err != nil {

@@ -18,7 +18,8 @@ type decoderLike interface {
 }
 
 type jsonStream struct {
-	ColumnMap map[string]*Column
+	ColumnMap     map[string]*Column
+	HasMapPayload bool // if we expect a map record
 
 	ds       *Datastream
 	sp       *StreamProcessor
@@ -48,8 +49,9 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten bool, jmespath s
 	return js
 }
 
-func (js *jsonStream) nextFunc(it *Iterator) bool {
+func (js *jsonStream) NextFunc(it *Iterator) bool {
 	var recordsInterf []map[string]interface{}
+	var err error
 	if it.Closed {
 		return false
 	}
@@ -62,7 +64,14 @@ func (js *jsonStream) nextFunc(it *Iterator) bool {
 	}
 
 	var payload interface{}
-	err := js.decoder.Decode(&payload)
+	if js.HasMapPayload {
+		m := g.M()
+		err = js.decoder.Decode(&m)
+		payload = m
+	} else {
+		err = js.decoder.Decode(&payload)
+	}
+
 	if err == io.EOF {
 		return false
 	} else if err != nil {
@@ -99,7 +108,7 @@ func (js *jsonStream) nextFunc(it *Iterator) bool {
 		recordsInterf = []map[string]interface{}{}
 		recList := payloadV
 		if len(recList) == 0 {
-			return js.nextFunc(it)
+			return js.NextFunc(it)
 		}
 
 		switch recList[0].(type) {
