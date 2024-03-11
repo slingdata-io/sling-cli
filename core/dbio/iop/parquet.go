@@ -156,7 +156,7 @@ func (pw *ParquetWriter) WriteRow(row []any) error {
 		case col.Type == DecimalType:
 			// row[i] = cast.ToString(row[i])
 			row[i] = StringToDecimalByteArray(cast.ToString(row[i]), pw.decNumScale[i], arrowParquet.Types.FixedLenByteArray, 16)
-		case col.IsDatetime():
+		case col.IsDatetime() || col.IsDate():
 			switch valT := row[i].(type) {
 			case time.Time:
 				if row[i] != nil {

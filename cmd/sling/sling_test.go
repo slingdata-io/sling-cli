@@ -418,7 +418,9 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 					for i := range valuesDb {
 						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
 						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
-						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s => %#v vs %#v", i+1, valCol, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)) {
+						msg := g.F("row %d, col %d (%s vs %s), in test %s => %#v vs %#v", i+1, valCol, dataFile.Columns[valCol].Name, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)
+						if !assert.EqualValues(t, valFile, valDb, msg) {
+							g.Warn(msg)
 							return
 						}
 					}

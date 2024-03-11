@@ -427,9 +427,13 @@ func (data *Dataset) InferColumnTypes() {
 				}
 			}
 
-			switch val.(type) {
+			switch v := val.(type) {
 			case time.Time:
-				columns[j].Stats.DateCnt++
+				if isDate(&v) {
+					columns[j].Stats.DateCnt++
+				} else {
+					columns[j].Stats.DateTimeCnt++
+				}
 			case nil:
 				columns[j].Stats.NullCnt++
 			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:

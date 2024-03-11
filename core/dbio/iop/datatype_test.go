@@ -259,6 +259,14 @@ func BenchmarkCastToStringString(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkIsDate(b *testing.B) {
+	t := time.Now()
+	for n := 0; n < b.N; n++ {
+		isDate(&t)
+	}
+}
+
 func TestInterfVal(t *testing.T) {
 	row := make([]interface{}, 3)
 	g.P(row[0])

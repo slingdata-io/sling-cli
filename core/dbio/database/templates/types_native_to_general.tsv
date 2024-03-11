@@ -487,7 +487,7 @@ starrocks	year	string	col_year year	FALSE	FALSE	A year value in CCYY or YY forma
 trino	bigint	bigint				
 trino	varbinary	binary				
 trino	boolean	bool				
-trino	timestamp	date				
+trino	date	date				
 trino	timestamp	datetime				
 trino	decimal	decimal				
 trino	integer	integer				

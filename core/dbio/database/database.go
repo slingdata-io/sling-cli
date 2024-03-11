@@ -2838,7 +2838,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.IntegerType
 		case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
 			newCol.Type = iop.IntegerType
-		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsNumber() || newCol.IsBool()):
+		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsDate() || newCol.IsNumber() || newCol.IsBool()):
 			// use new type
 		case col.Type == iop.TextType || newCol.Type == iop.TextType:
 			newCol.Type = iop.TextType
@@ -3029,6 +3029,11 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			expr = conn.GetTemplateValue("function.checksum_integer")
 		case col.IsDecimal():
 			expr = conn.GetTemplateValue("function.checksum_decimal")
+		case col.IsDate():
+			expr = conn.GetTemplateValue("function.checksum_date")
+			if expr == "" {
+				expr = conn.GetTemplateValue("function.checksum_datetime")
+			}
 		case col.IsDatetime():
 			expr = conn.GetTemplateValue("function.checksum_datetime")
 		case col.IsBool():

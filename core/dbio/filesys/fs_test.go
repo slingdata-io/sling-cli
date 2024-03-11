@@ -293,7 +293,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 					case col.IsDecimal():
 						row[i] = cast.ToString(row[i])
 						row[i] = iop.StringToDecimalByteArray(cast.ToString(row[i]), numScale, arrowParquet.Types.FixedLenByteArray, 16) // works for decimals with precision <= 16, very limited
-					case col.IsDatetime():
+					case col.IsDatetime() || col.IsDate():
 						switch valT := row[i].(type) {
 						case time.Time:
 							if row[i] != nil {

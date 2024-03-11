@@ -992,6 +992,8 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("cast(%s as string) as %s", qName, qName)
 	case srcCol.IsString() && tgtCol.IsDatetime():
 		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
+	case srcCol.IsString() && tgtCol.IsDate():
+		selectStr = g.F("cast(%s as date) as %s", qName, qName)
 	default:
 		selectStr = qName
 	}

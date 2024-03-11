@@ -223,7 +223,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 				if ok {
 					sp.config.transforms[key] = append(sp.config.transforms[key], f)
 				} else {
-					g.Warn("did find find tranform named: '%s'", name)
+					g.Warn("did find find transform named: '%s'", name)
 				}
 			}
 		}
@@ -599,7 +599,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		cs.BoolCnt++
-	case col.Type.IsDatetime():
+	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
 			// sp.unrecognizedDate = g.F(
@@ -617,7 +617,11 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowBlankValCnt++
 		} else {
 			nVal = dVal
-			cs.DateCnt++
+			if isDate(&dVal) {
+				cs.DateCnt++
+			} else {
+				cs.DateTimeCnt++
+			}
 			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
 		}
 	}
@@ -750,12 +754,18 @@ func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
 		if sp.dateLayoutCache != "" {
 			t, err = time.Parse(sp.dateLayoutCache, s)
 			if err == nil {
+				if isDate(&t) {
+					t = t.UTC() // convert to utc for dates
+				}
 				return
 			}
 		}
 		t, err = time.Parse(layout, s)
 		if err == nil {
 			sp.dateLayoutCache = layout
+			if isDate(&t) {
+				t = t.UTC() // convert to utc for dates
+			}
 			return
 		}
 	}

@@ -117,14 +117,14 @@ type StatFieldSQL struct {
 func getOrderCol(table Table) (orderCol iop.Column) {
 	for _, col := range table.Columns {
 		key := strings.ToLower(col.Name)
-		if (col.IsDatetime() || col.IsNumber()) && strings.Contains(key, "create") {
+		if (col.IsDatetime() || col.IsDate() || col.IsNumber()) && strings.Contains(key, "create") {
 			return col
 		}
 	}
 
 	for _, col := range table.Columns {
 		key := strings.ToLower(col.Name)
-		if (col.IsDatetime() || col.IsNumber()) &&
+		if (col.IsDatetime() || col.IsDate() || col.IsNumber()) &&
 			(strings.Contains(key, "update") || strings.Contains(key, "modified")) {
 			return col
 		}
