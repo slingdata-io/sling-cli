@@ -54,7 +54,8 @@ func (conn *MongoDBConn) getNewClient(timeOut ...int) (client *mongo.Client, err
 	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, time.Duration(to)*time.Second)
 	defer cancel()
 
-	return mongo.Connect(ctx, options.Client().ApplyURI(conn.URL))
+	opts := options.Client().SetCompressors([]string{"zstd", "snappy", "zlib"})
+	return mongo.Connect(ctx, options.Client().ApplyURI(conn.URL), opts)
 }
 
 // Connect connects to the database
