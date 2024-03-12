@@ -2397,7 +2397,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 		dss := []*iop.Datastream{}
 
 		for _, table := range tables {
-			ds, err := conn.Self().BulkExportStream(table.Select())
+			ds, err := conn.Self().BulkExportStream(table.Select(0))
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
 				return
@@ -2443,7 +2443,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		defer df.Context.Wg.Read.Done()
 		defer close(dsCh)
 		fileReadyChn := make(chan filesys.FileReady, 10000)
-		ds, err := conn.Self().BulkExportStream(table.Select())
+		ds, err := conn.Self().BulkExportStream(table.Select(0))
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error running query"))
 			df.Context.Cancel()

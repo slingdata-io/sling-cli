@@ -922,7 +922,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if table.IsQuery() || table.IsView {
 		if table.IsView && table.SQL == "" {
-			table.SQL = table.Select()
+			table.SQL = table.Select(0)
 		}
 		return conn.ExportToGCS(table.SQL, gcsURI)
 	}

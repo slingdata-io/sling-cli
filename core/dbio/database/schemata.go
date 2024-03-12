@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 // Table represents a schemata table
@@ -106,7 +107,7 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(fields ...string) string {
+func (t *Table) Select(limit int, fields ...string) (sql string) {
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
 		f = strings.TrimSpace(f)
@@ -116,16 +117,30 @@ func (t *Table) Select(fields ...string) string {
 	if t.IsQuery() {
 		if len(fields) > 0 {
 			fieldsStr := strings.Join(fields, ", ")
-			return g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
+			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
+		} else {
+			sql = t.SQL
 		}
-		return t.SQL
+	} else {
+		fieldsStr := "*"
+		if len(fields) > 0 {
+			fieldsStr = strings.Join(fields, ", ")
+		}
+		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
-	fieldsStr := "*"
-	if len(fields) > 0 {
-		fieldsStr = strings.Join(fields, ", ")
+	if limit > 0 {
+		template, err := t.Dialect.Template()
+		g.LogError(err)
+
+		sql = g.R(
+			template.Core["limit"],
+			"sql", sql,
+			"limit", cast.ToString(limit),
+		)
 	}
-	return g.F("select %s from %s", fieldsStr, t.FDQN())
+
+	return
 }
 
 type TableKeys map[iop.KeyType][]string

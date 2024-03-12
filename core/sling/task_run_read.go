@@ -193,17 +193,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				)
 			}
 		}
-	} else if cfg.Source.Limit() > 0 {
-		if sTable.SQL == "" {
-			sTable.SQL = "select * from " + sTable.FDQN()
-		}
-		sTable.SQL = g.R(
-			srcConn.Template().Core["limit"],
-			"fields", selectFieldsStr,
-			"table", sTable.FDQN(),
-			"sql", sTable.SQL,
-			"limit", cast.ToString(cfg.Source.Limit()),
-		)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
@@ -214,13 +203,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
 	// construct SELECT statement for selected fields
-	if sTable.SQL == "" && selectFieldsStr != "*" {
-		sTable.SQL = sTable.Select(strings.Split(selectFieldsStr, ",")...)
+	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
+		sTable.SQL = sTable.Select(cfg.Source.Limit(), strings.Split(selectFieldsStr, ",")...)
 	}
 
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
-		err = g.Error(err, "Could not BulkExportFlow: "+sTable.Select())
+		err = g.Error(err, "Could not BulkExportFlow")
 		return t.df, err
 	}
 
