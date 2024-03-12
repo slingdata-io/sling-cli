@@ -1,6 +1,8 @@
 package sling
 
 import (
+	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	"strings"
 
@@ -31,6 +33,8 @@ var transforms = map[string]iop.TransformFunc{
 	"decode_windows1250":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
 	"decode_windows1252":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
 	"md5":                   func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
+	"sha256":                func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
+	"sha512":                func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
 }
 
 func init() {
@@ -84,4 +88,16 @@ func ParseFIX(sp *iop.StreamProcessor, message string) (string, error) {
 		return message, err
 	}
 	return g.Marshal(fixMap), nil
+}
+
+func SHA256(val string) string {
+	h := sha256.New()
+	h.Write([]byte(val))
+	return string(h.Sum(nil))
+}
+
+func SHA512(val string) string {
+	h := sha512.New()
+	h.Write([]byte(val))
+	return string(h.Sum(nil))
 }
