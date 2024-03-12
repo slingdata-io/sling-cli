@@ -175,19 +175,6 @@ options:
 	}
 }
 
-func Test1Replication(t *testing.T) {
-	sling.ShowProgress = false
-	os.Setenv("DEBUG", "LOW")
-	os.Setenv("SLING_CLI", "TRUE")
-	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
-	os.Setenv("CONCURENCY_LIMIT", "2")
-	replicationCfgPath := g.UserHomeDir() + "/Downloads/mlops.slack.replication.local.yml"
-	err := runReplication(replicationCfgPath)
-	if g.AssertNoError(t, err) {
-		return
-	}
-}
-
 func TestExtract(t *testing.T) {
 	core.Version = "v1.0.43"
 

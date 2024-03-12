@@ -190,7 +190,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	for {
 		if replicationCfgPath != "" {
 			//  run replication
-			err = runReplication(replicationCfgPath, selectStreams...)
+			err = runReplication(replicationCfgPath, cfg, selectStreams...)
 			if err != nil {
 				return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
 			}
@@ -333,7 +333,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	return nil
 }
 
-func runReplication(cfgPath string, selectStreams ...string) (err error) {
+func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
 	replication, err := sling.LoadReplicationConfig(cfgPath)
@@ -379,6 +379,22 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 		if stream.Object == "" {
 			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
+		}
+
+		// config overwrite
+		if cfgOverwrite != nil {
+			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
+				g.Debug("stream mode overwritten: %s => %s", stream.Mode, cfgOverwrite.Mode)
+				stream.Mode = cfgOverwrite.Mode
+			}
+			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				g.Debug("stream update_key overwritten: %s => %s", stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
+			}
+			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
+				g.Debug("stream primary_key overwritten: %#v => %#v", stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
 		}
 
 		cfg := sling.Config{
