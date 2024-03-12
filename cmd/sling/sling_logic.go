@@ -432,6 +432,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
+		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
@@ -440,7 +441,6 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		} else {
 			succcess++
 		}
-		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 	}
 
 	println()
