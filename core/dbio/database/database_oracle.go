@@ -92,6 +92,10 @@ func (conn *OracleConn) ConnString() string {
 		options,
 	)
 
+	if tns := conn.GetProp("tns"); tns != "" {
+		connStr = go_ora.BuildJDBC(conn.GetProp("username"), conn.GetProp("password"), tns, options)
+	}
+
 	return connStr
 }
 
