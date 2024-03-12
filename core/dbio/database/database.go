@@ -2881,7 +2881,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		return
 	}
 	fieldsMap := g.ArrMapString(fields, true)
-	g.Debug("comparing checksums %#v vs %#v: %#v", tColumns.Names(), columns.Names(), fields)
+	g.Debug("comparing checksums %#v", tColumns.Types())
 
 	exprs := []string{}
 	colMap := lo.KeyBy(columns, func(c iop.Column) string { return strings.ToLower(c.Name) })

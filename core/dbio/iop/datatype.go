@@ -308,7 +308,10 @@ func (cols Columns) Types(args ...bool) []string {
 			field = CleanName(field) // clean up
 		}
 
-		fields[j] = g.F("%s [%s | %s]", field, column.Type, column.DbType)
+		fields[j] = g.F("%s [%s]", field, column.Type)
+		if column.DbType != "" {
+			fields[j] = g.F("%s [%s | %s]", field, column.Type, column.DbType)
+		}
 	}
 	return fields
 }
