@@ -32,9 +32,9 @@ var transforms = map[string]iop.TransformFunc{
 	"decode_latin9":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
 	"decode_windows1250":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
 	"decode_windows1252":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
-	"md5":                   func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
-	"sha256":                func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
-	"sha512":                func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
+	"hash_md5":              func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
+	"hash_sha256":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
+	"hash_sha512":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
 }
 
 func init() {
