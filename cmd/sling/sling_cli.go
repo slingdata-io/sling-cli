@@ -446,6 +446,11 @@ func cliInit() int {
 	flaggy.Parse()
 
 	ok, err := g.CliProcess()
+
+	if time.Now().Second()%10 == 0 {
+		defer SlingMedia.PrintFollowUs()
+	}
+
 	if err != nil || telemetryMap["error"] != nil {
 		if err == nil && telemetryMap["error"] != nil {
 			err = g.Error(cast.ToString(telemetryMap["error"]))
@@ -538,7 +543,7 @@ func cliInit() int {
 	}
 
 	switch {
-	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover"):
+	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover", "exec"):
 		Track("conns_" + g.CliObj.UsedSC())
 	case g.CliObj.Name == "update":
 		Track("update")
