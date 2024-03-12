@@ -664,6 +664,12 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		}
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)
+	case typ.IsDate():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.Format("2006-01-02")
 	case typ.IsDatetime():
 		tVal, _ := sp.CastToTime(val)
 		if tVal.IsZero() {

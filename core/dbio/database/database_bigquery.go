@@ -495,7 +495,7 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 		iop.JsonType:       bigquery.JSONFieldType,
 		iop.BoolType:       bigquery.BooleanFieldType,
 		iop.BinaryType:     bigquery.BytesFieldType,
-		iop.DateType:       bigquery.TimestampFieldType,
+		iop.DateType:       bigquery.DateFieldType,
 		iop.DatetimeType:   bigquery.TimestampFieldType,
 		// iop.FloatType:      bigquery.FloatFieldType,
 		iop.FloatType:    bigquery.NumericFieldType,
