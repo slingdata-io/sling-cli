@@ -627,3 +627,16 @@ func TestGenerateWideFile(t *testing.T) {
 	_, err := generateLargeDataset(300, 100, true)
 	g.LogFatal(err)
 }
+
+func Test1Replication(t *testing.T) {
+	sling.ShowProgress = false
+	os.Setenv("DEBUG", "LOW")
+	os.Setenv("SLING_CLI", "TRUE")
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
+	os.Setenv("CONCURENCY_LIMIT", "2")
+	replicationCfgPath := "tests/replications/r.14.yaml"
+	err := runReplication(replicationCfgPath, nil)
+	if g.AssertNoError(t, err) {
+		return
+	}
+}
