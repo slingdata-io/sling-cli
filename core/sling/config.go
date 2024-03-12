@@ -270,11 +270,17 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
+				err = g.Error("must specify value for '--update-key' and/or '--primary-key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			}
 			return
 		}
 	} else if cfg.Mode == BackfillMode {
 		if cfg.Source.UpdateKey == "" || len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
+				err = g.Error("must specify value for '--update-key' and '--primary-key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			}
 			return
 		}
 		if cfg.Source.Options == nil || cfg.Source.Options.Range == nil {
