@@ -1,7 +1,6 @@
 package database
 
 import (
-	"bufio"
 	"context"
 	"io"
 	"log"
@@ -1071,122 +1070,6 @@ func testOracleClob(t *testing.T) {
 	data, err := conn.Query(sql)
 	g.AssertNoError(t, err)
 	g.P(data.Rows[0])
-}
-
-func TestDatatypes(t *testing.T) {
-
-	now := time.Now()
-	now = time.Date(now.Year(), now.Month(), now.Day(), 10, 11, 13, 0, now.Location())
-	testValsMap := map[string]interface{}{
-		"bigint":     741868284,
-		"binary":     []byte(`{"key":{"subkey":[1,2]}, "another":"value"}`),
-		"bit":        1,
-		"bool":       true,
-		"date":       time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
-		"datetime":   now,
-		"decimal":    14876.411,
-		"integer":    716274,
-		"json":       `{"key":{"subkey":[1,2]}, "another":"value"}`,
-		"smallint":   112,
-		"string":     "this is my string",
-		"text":       "this is my string",
-		"timestamp":  now,
-		"timestampz": now,
-		"float":      4414.11,
-		"time":       time.Date(0, 1, 1, 10, 11, 13, 0, now.Location()),
-	}
-
-	dbs := []*testDB{
-		// DBs["postgres"], // OK
-		// DBs["mysql"], // OK
-		// DBs["oracle"], // OK
-		DBs["redshift"],
-		// DBs["sqlserver"], // OK
-		// // DBs["azuresql"],
-		// // DBs["azuredwh"],
-		// DBs["snowflake"], // OK, bool returns 1 for true
-		// DBs["bigquery"], // Almost OK, date/time require proper format, Bool fails to insert as go typed
-	}
-
-	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
-	g.AssertNoError(t, err)
-
-	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
-
-	data, err := TypesNativeCSV.Read()
-	g.AssertNoError(t, err)
-
-	for _, db := range dbs {
-		conn, err := NewConn(db.URL, db.propStrs...)
-		g.AssertNoError(t, err)
-
-		err = conn.Connect()
-		if !g.AssertNoError(t, err) {
-			continue
-		}
-
-		colsDDL := []string{}
-		insertCols := []string{}
-		testVals := []interface{}{}
-		for _, rec := range data.Records() {
-			if rec["database"] == conn.GetType() {
-				colDDL := cast.ToString(rec["ddl_string"])
-				if strings.TrimSpace(colDDL) != "" {
-					colsDDL = append(colsDDL, colDDL)
-				}
-				testVal, ok := testValsMap[cast.ToString(rec["general_type"])]
-				if !ok {
-					g.LogFatal(g.Error(cast.ToString(rec["general_type"]) + " not found"))
-				}
-
-				colNameArr := strings.Split(colDDL, " ")
-				if cast.ToString(rec["test"]) == "TRUE" && len(colNameArr) > 0 {
-					testVals = append(testVals, testVal)
-					insertCols = append(insertCols, colNameArr[0])
-				}
-			}
-		}
-
-		tableName := db.schema + ".test1"
-		conn.DropTable(tableName)
-		ddl := g.F(
-			"create table %s (%s)",
-			tableName, strings.Join(colsDDL, ", "),
-		)
-		_, err = conn.Exec(ddl)
-		if !g.AssertNoError(t, err) {
-			return
-		}
-
-		columns, err := conn.GetColumns(tableName)
-		g.AssertNoError(t, err)
-
-		insertCols, err = conn.ValidateColumnNames(columns.Names(), insertCols, true)
-		g.AssertNoError(t, err)
-		insertStatement := conn.GenerateInsertStatement(
-			tableName,
-			insertCols,
-			1,
-		)
-		conn.MustExec(insertStatement, testVals...)
-
-		columns, err = conn.GetColumnStats(tableName)
-		g.AssertNoError(t, err)
-		assert.Greater(t, len(columns), 0)
-		for _, col := range columns {
-			g.Debug("%s - %#v", col.Name, col.Stats)
-		}
-
-		data, err = conn.Query(g.F(
-			`select %s from %s`,
-			strings.Join(insertCols, ", "),
-			tableName,
-		))
-		for i, val := range data.Rows[0] {
-			assert.EqualValues(t, testVals[i], val, insertCols[i])
-		}
-		conn.DropTable(tableName)
-	}
 }
 
 func TestCastColumnsForSelect(t *testing.T) {

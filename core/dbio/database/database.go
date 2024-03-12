@@ -1,10 +1,8 @@
 package database
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
-	"embed"
 	"fmt"
 	"math"
 	"net/url"
@@ -36,7 +34,6 @@ import (
 	_ "github.com/flarco/bigquery"
 	// _ "github.com/solcates/go-sql-bigquery"
 	"github.com/spf13/cast"
-	"gopkg.in/yaml.v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -133,7 +130,7 @@ type Connection interface {
 	StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error)
 	SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
 	SwapTable(srcTable string, tgtTable string) (err error)
-	Template() Template
+	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
@@ -164,23 +161,11 @@ type BaseConn struct {
 	defaultPort int
 	instance    *Connection
 	context     g.Context
-	template    Template
+	template    dbio.Template
 	schemata    Schemata
 	properties  map[string]string
 	sshClient   *iop.SSHClient
 	Log         []string
-}
-
-// Template is a database YAML template
-type Template struct {
-	Core           map[string]string
-	Metadata       map[string]string
-	Analysis       map[string]string
-	Function       map[string]string `yaml:"function"`
-	GeneralTypeMap map[string]string `yaml:"general_type_map"`
-	NativeTypeMap  map[string]string `yaml:"native_type_map"`
-	NativeStatsMap map[string]bool   `yaml:"native_stat_map"`
-	Variable       map[string]string
 }
 
 // Pool is a pool of connections
@@ -209,9 +194,6 @@ var (
 	connPool = Pool{Dbs: map[string]*sqlx.DB{}, DuckDbs: map[string]*DuckDbConn{}}
 	usePool  = os.Getenv("USE_POOL") == "TRUE"
 )
-
-//go:embed templates/*
-var templatesFolder embed.FS
 
 func init() {
 	if os.Getenv("FILEPATH_SLUG") != "" {
@@ -479,7 +461,7 @@ func (conn *BaseConn) Schemata() Schemata {
 }
 
 // Template returns the Template object
-func (conn *BaseConn) Template() Template {
+func (conn *BaseConn) Template() dbio.Template {
 	return conn.template
 }
 
@@ -756,118 +738,10 @@ func (conn *BaseConn) GetTemplateValue(path string) (value string) {
 	return value
 }
 
-// ToData convert is dataset
-func (template Template) ToData() (data iop.Dataset) {
-	columns := []string{"key", "value"}
-	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
-	data.Rows = append(data.Rows, []interface{}{"core", template.Core})
-	data.Rows = append(data.Rows, []interface{}{"analysis", template.Analysis})
-	data.Rows = append(data.Rows, []interface{}{"function", template.Function})
-	data.Rows = append(data.Rows, []interface{}{"metadata", template.Metadata})
-	data.Rows = append(data.Rows, []interface{}{"general_type_map", template.GeneralTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"native_type_map", template.NativeTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"variable", template.Variable})
-
-	return
-}
-
 // LoadTemplates loads the appropriate yaml template
-func (conn *BaseConn) LoadTemplates() error {
-	conn.template = Template{
-		Core:           map[string]string{},
-		Metadata:       map[string]string{},
-		Analysis:       map[string]string{},
-		Function:       map[string]string{},
-		GeneralTypeMap: map[string]string{},
-		NativeTypeMap:  map[string]string{},
-		NativeStatsMap: map[string]bool{},
-		Variable:       map[string]string{},
-	}
-
-	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
-	if err != nil {
-		return g.Error(err, "io.ReadAll(baseTemplateFile)")
-	}
-
-	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &conn.template); err != nil {
-		return g.Error(err, "yaml.Unmarshal")
-	}
-
-	templateBytes, err := templatesFolder.ReadFile("templates/" + conn.Type.String() + ".yaml")
-	if err != nil {
-		return g.Error(err, "io.ReadAll(templateFile) for "+conn.Type)
-	}
-
-	template := Template{}
-	err = yaml.Unmarshal([]byte(templateBytes), &template)
-	if err != nil {
-		return g.Error(err, "yaml.Unmarshal")
-	}
-
-	for key, val := range template.Core {
-		conn.template.Core[key] = val
-	}
-
-	for key, val := range template.Analysis {
-		conn.template.Analysis[key] = val
-	}
-
-	for key, val := range template.Function {
-		conn.template.Function[key] = val
-	}
-
-	for key, val := range template.Metadata {
-		conn.template.Metadata[key] = val
-	}
-
-	for key, val := range template.Variable {
-		conn.template.Variable[key] = val
-	}
-
-	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
-	if err != nil {
-		return g.Error(err, `cannot open types_native_to_general`)
-	}
-
-	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
-	TypesNativeCSV.Delimiter = '\t'
-	TypesNativeCSV.NoDebug = true
-
-	data, err := TypesNativeCSV.Read()
-	if err != nil {
-		return g.Error(err, `TypesNativeCSV.Read()`)
-	}
-
-	for _, rec := range data.Records() {
-		if rec["database"] == conn.Type.String() {
-			nt := strings.TrimSpace(cast.ToString(rec["native_type"]))
-			gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-			s := strings.TrimSpace(cast.ToString(rec["stats_allowed"]))
-			conn.template.NativeTypeMap[nt] = cast.ToString(gt)
-			conn.template.NativeStatsMap[nt] = cast.ToBool(s)
-		}
-	}
-
-	TypesGeneralFile, err := templatesFolder.Open("templates/types_general_to_native.tsv")
-	if err != nil {
-		return g.Error(err, `cannot open types_general_to_native`)
-	}
-
-	TypesGeneralCSV := iop.CSV{Reader: bufio.NewReader(TypesGeneralFile)}
-	TypesGeneralCSV.Delimiter = '\t'
-	TypesGeneralCSV.NoDebug = true
-
-	data, err = TypesGeneralCSV.Read()
-	if err != nil {
-		return g.Error(err, `TypesGeneralCSV.Read()`)
-	}
-
-	for _, rec := range data.Records() {
-		gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-		conn.template.GeneralTypeMap[gt] = cast.ToString(rec[conn.Type.String()])
-	}
-
-	return nil
+func (conn *BaseConn) LoadTemplates() (err error) {
+	conn.template, err = conn.Type.Template()
+	return
 }
 
 // StreamRecords the records of a sql query, returns `result`, `error`
@@ -877,7 +751,7 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 	if err != nil {
 		err = g.Error(err, "error in StreamRowsContext")
 	}
-	return ds.Records(), nil
+	return ds.Records(), err
 }
 
 // BulkExportStream streams the rows in bulk
