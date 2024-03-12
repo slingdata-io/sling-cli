@@ -465,7 +465,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		}
 	}
 
-	loadCtx := g.NewContext(conn.context.Ctx, 5)
+	loadCtx := g.NewContext(conn.context.Ctx, 3)
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
 		defer loadCtx.Wg.Write.Done()
@@ -477,7 +477,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.URI))
 		}
 
-		timeout := 300
+		timeout := 600
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
 		if conn.fePort != "" {
 			// this is the fix to not freeze, call the redirected port directly
