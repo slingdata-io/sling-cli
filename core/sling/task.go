@@ -583,6 +583,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps setting the SLING_TEMP_DIR environment variable to a writable folder will help."
 		case contains("canceling statement due to conflict with recovery"):
 			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the source PG Database could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
+		case contains("wrong number of fields"):
+			helpString = "Perhaps setting the delimiter (source.options.delimiter) would help? See https://docs.slingdata.io/sling-cli/run/configuration#source"
 		}
 	}
 	return
