@@ -23,7 +23,7 @@ type Execution struct {
 	// ID auto-increments
 	ID int64 `json:"id" gorm:"primaryKey"`
 
-	ExecID string `json:"exec_id" gorm:"uniqueIndex"`
+	ExecID string `json:"exec_id" gorm:"index"`
 
 	// StreamID represents the stream inside the replication that is running.
 	// Is an MD5 construct:`md5(Source, Target, Stream)`.
@@ -176,7 +176,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 		Create(task).Error
 	if err != nil {
-		g.Debug("could not insert task config into local .sling.db. %s", err.Error())
+		g.Trace("could not insert task config into local .sling.db. %s", err.Error())
 		return
 	}
 	exec.TaskMD5 = task.MD5
@@ -185,7 +185,7 @@ func StoreInsert(t *sling.TaskExecution) {
 		err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 			Create(replication).Error
 		if err != nil {
-			g.Debug("could not insert replication config into local .sling.db. %s", err.Error())
+			g.Trace("could not insert replication config into local .sling.db. %s", err.Error())
 			return
 		}
 		exec.ReplicationMD5 = replication.MD5
@@ -194,7 +194,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	// insert execution
 	err = Db.Create(exec).Error
 	if err != nil {
-		g.Debug("could not insert execution into local .sling.db. %s", err.Error())
+		g.Trace("could not insert execution into local .sling.db. %s", err.Error())
 		return
 	}
 
@@ -213,7 +213,7 @@ func StoreUpdate(t *sling.TaskExecution) {
 	exec := &Execution{ExecID: t.ExecID}
 	err := Db.Where("exec_id = ?", t.ExecID).First(exec).Error
 	if err != nil {
-		g.Debug("could not select execution from local .sling.db. %s", err.Error())
+		g.Trace("could not select execution from local .sling.db. %s", err.Error())
 		return
 	}
 	execNew := ToExecutionObject(t)
@@ -228,7 +228,7 @@ func StoreUpdate(t *sling.TaskExecution) {
 
 	err = Db.Updates(exec).Error
 	if err != nil {
-		g.Debug("could not update execution into local .sling.db. %s", err.Error())
+		g.Trace("could not update execution into local .sling.db. %s", err.Error())
 		return
 	}
 
