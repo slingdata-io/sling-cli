@@ -661,11 +661,10 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(int64(0))
 
-			// if safe {
-			// 	// cast as decimal for safety
-			// 	col.Type = DecimalType
-			// 	col.goType = reflect.TypeOf(float64(0.0))
-			// }
+			if safe {
+				// cast as bigint for safety
+				col.Type = BigIntType
+			}
 		} else if colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())

@@ -558,6 +558,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
 
 	ds = iop.NewDatastream(iop.Columns{})
+	ds.SafeInference = true
 	ds.SetConfig(conn.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
 	ds.Defer(func() { fileContext.Mux.Unlock() })
