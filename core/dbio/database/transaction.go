@@ -334,6 +334,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			if len(insertTemplate) > 3000 {
 				insertTemplate = insertTemplate[:3000]
 			}
+			// g.Warn("\n\n%s\n\n", g.Marshal(rows))
 			if len(rows) > 10 {
 				rows = rows[:10]
 			}
