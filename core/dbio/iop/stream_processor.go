@@ -321,8 +321,9 @@ func (sp *StreamProcessor) CastType(val interface{}, typ ColumnType) interface{}
 		nVal = cast.ToInt(val)
 	case typ.IsInteger():
 		nVal = cast.ToInt64(val)
+	case typ.IsFloat():
+		nVal = val
 	case typ.IsDecimal():
-		// nVal = cast.ToFloat64(val)
 		nVal = val
 	case typ.IsBool():
 		// nVal = cast.ToBool(val)
@@ -538,6 +539,30 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(iVal)
 		}
 		nVal = iVal
+	case col.Type == FloatType:
+		fVal, err := sp.toFloat64E(val)
+		if err == nil && math.IsNaN(fVal) {
+			// set as null
+			cs.NullCnt++
+			return nil
+		} else if err != nil {
+			// is string
+			sp.ds.ChangeColumn(i, StringType)
+			cs.StringCnt++
+			cs.TotalCnt++
+			sVal = cast.ToString(val)
+			sp.rowChecksum[i] = uint64(len(sVal))
+			return sVal
+		}
+
+		cs.DecCnt++
+		if fVal < 0 {
+			sp.rowChecksum[i] = uint64(-fVal)
+		} else {
+			sp.rowChecksum[i] = uint64(fVal)
+		}
+		nVal = fVal
+
 	case col.Type.IsNumber():
 		fVal, err := sp.toFloat64E(val)
 		if err == nil && math.IsNaN(fVal) {
@@ -653,7 +678,7 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return "1"
 		}
 		return "0"
-	case typ.IsDecimal():
+	case typ.IsDecimal() || typ.IsFloat():
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")

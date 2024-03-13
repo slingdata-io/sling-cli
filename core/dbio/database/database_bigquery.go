@@ -497,11 +497,10 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 		iop.BinaryType:     bigquery.BytesFieldType,
 		iop.DateType:       bigquery.DateFieldType,
 		iop.DatetimeType:   bigquery.TimestampFieldType,
-		// iop.FloatType:      bigquery.FloatFieldType,
-		iop.FloatType:    bigquery.NumericFieldType,
-		iop.SmallIntType: bigquery.IntegerFieldType,
-		iop.IntegerType:  bigquery.IntegerFieldType,
-		iop.BigIntType:   bigquery.IntegerFieldType,
+		iop.FloatType:      bigquery.FloatFieldType,
+		iop.SmallIntType:   bigquery.IntegerFieldType,
+		iop.IntegerType:    bigquery.IntegerFieldType,
+		iop.BigIntType:     bigquery.IntegerFieldType,
 		// https://stackoverflow.com/questions/55904464/big-query-does-now-cast-automatically-long-decimal-values-to-numeric-when-runni
 		iop.DecimalType: bigquery.NumericFieldType,
 		// "decimal":   bigquery.FloatFieldType,
@@ -982,6 +981,8 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 	switch {
 	case srcCol.IsString() && !srcCol.Type.IsJSON() && tgtCol.Type.IsJSON():
 		selectStr = g.F("to_json(%s) as %s", qName, qName)
+	case !srcCol.IsFloat() && tgtCol.IsFloat():
+		selectStr = g.F("cast(%s as float64) as %s", qName, qName)
 	case srcCol.IsString() && tgtCol.IsDecimal():
 		selectStr = g.F("parse_numeric(%s) as %s", qName, qName)
 	case !srcCol.IsDecimal() && tgtCol.IsDecimal():

@@ -2702,6 +2702,8 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.TimestampType
 		case col.Type.IsInteger() && newCol.Type.IsDecimal():
 			newCol.Type = iop.DecimalType
+		case col.Type.IsInteger() && newCol.Type.IsFloat():
+			newCol.Type = iop.FloatType
 		case col.Type.IsDecimal() && newCol.Type.IsInteger():
 			newCol.Type = iop.DecimalType
 		case col.Type.IsInteger() && newCol.Type == iop.BigIntType:
@@ -2901,6 +2903,8 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			expr = conn.GetTemplateValue("function.checksum_string")
 		case col.IsInteger():
 			expr = conn.GetTemplateValue("function.checksum_integer")
+		case col.IsFloat():
+			expr = conn.GetTemplateValue("function.checksum_decimal")
 		case col.IsDecimal():
 			expr = conn.GetTemplateValue("function.checksum_decimal")
 		case col.IsDate():

@@ -784,6 +784,8 @@ func (col *Column) GoType() reflect.Type {
 		return reflect.TypeOf(time.Now())
 	case col.IsDecimal():
 		return reflect.TypeOf(float64(6.6))
+	case col.IsFloat():
+		return reflect.TypeOf(float64(6.6))
 	}
 
 	return reflect.TypeOf("string")
@@ -813,6 +815,11 @@ func (col *Column) IsString() bool {
 // IsInteger returns whether the column is an integer
 func (col *Column) IsInteger() bool {
 	return col.Type.IsInteger()
+}
+
+// IsFloat returns whether the column is a float
+func (col *Column) IsFloat() bool {
+	return col.Type.IsFloat()
 }
 
 // IsDecimal returns whether the column is a decimal
@@ -867,14 +874,19 @@ func (ct ColumnType) IsInteger() bool {
 	return false
 }
 
+// IsFloat returns whether the column is a float
+func (ct ColumnType) IsFloat() bool {
+	return ct == FloatType
+}
+
 // IsDecimal returns whether the column is a decimal
 func (ct ColumnType) IsDecimal() bool {
-	return ct == FloatType || ct == DecimalType
+	return ct == DecimalType
 }
 
 // IsNumber returns whether the column is a decimal or an integer
 func (ct ColumnType) IsNumber() bool {
-	return ct.IsInteger() || ct.IsDecimal()
+	return ct.IsInteger() || ct.IsDecimal() || ct.IsFloat()
 }
 
 // IsBool returns whether the column is a boolean

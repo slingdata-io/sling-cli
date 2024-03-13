@@ -175,7 +175,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 			decimalCols := []int{}
 			for i, col := range batch.Columns {
-				if col.Type.IsDecimal() {
+				if col.Type == iop.DecimalType {
 					decimalCols = append(decimalCols, i)
 				}
 			}
