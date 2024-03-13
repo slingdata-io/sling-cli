@@ -88,8 +88,26 @@ func (conn *DuckDbConn) GetURL(newURL ...string) string {
 	return URL
 }
 
+func (conn *DuckDbConn) dbPath() (string, error) {
+	dbPathU, err := net.NewURL(conn.GetURL())
+	if err != nil {
+		err = g.Error(err, "could not get duckdb file path")
+		return "", err
+	}
+	dbPath := strings.ReplaceAll(conn.GetURL(), "?"+dbPathU.U.RawQuery, "")
+	return dbPath, nil
+}
+
 func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 	connURL := conn.GetURL()
+
+	dbPath, err := conn.dbPath()
+	if err != nil {
+		return g.Error(err, "could not get db path")
+	} else if conn.GetType() != dbio.TypeDbMotherDuck && !g.PathExists(dbPath) {
+		g.Warn("The file %s does not exist, however it will be created if needed.", dbPath)
+	}
+
 	connPool.Mux.Lock()
 	dbConn, poolOk := connPool.DuckDbs[connURL]
 	connPool.Mux.Unlock()
@@ -276,13 +294,12 @@ func (conn *DuckDbConn) getCmd(sql string, readOnly bool) (cmd *exec.Cmd, sqlPat
 		return cmd, "", g.Error(err, "could not create temp sql file for duckdb")
 	}
 
-	dbPathU, err := net.NewURL(conn.BaseConn.URL)
+	dbPath, err := conn.dbPath()
 	if err != nil {
 		os.Remove(sqlPath)
 		err = g.Error(err, "could not get duckdb file path")
 		return
 	}
-	dbPath := strings.ReplaceAll(conn.GetURL(), "?"+dbPathU.U.RawQuery, "")
 
 	cmd = exec.Command(bin)
 	if readOnly {
@@ -510,6 +527,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	fileContext.Mux.Lock()
 
 	var stdOutReader, stdErrReader io.ReadCloser
+	var stdErrReaderB *bufio.Reader
 	var stderrBuf *bytes.Buffer
 	if conn.isInteractive {
 		stdOutReader, stderrBuf, err = conn.submitToCmdStdin(ctx, sql)
@@ -526,6 +544,8 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 		if err != nil {
 			return ds, g.Error(err, "could not get stderr for duckdb")
 		}
+
+		stdErrReaderB = bufio.NewReader(stdErrReader)
 
 		err = cmd.Start()
 		if err != nil {
@@ -551,7 +571,9 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	if conn.isInteractive {
 		errOut = stderrBuf.Bytes()
 	} else {
-		errOut, err = io.ReadAll(stdErrReader)
+		if size := stdErrReaderB.Buffered(); size > 0 {
+			errOut, err = io.ReadAll(stdErrReader)
+		}
 	}
 
 	if err != nil {
