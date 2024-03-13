@@ -149,32 +149,6 @@ func TestCfgPath(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func Test1Task(t *testing.T) {
-	os.Setenv("SLING_CLI", "TRUE")
-	config := &sling.Config{}
-	cfgStr := `
-source:
-  conn: do_spaces
-  stream: 's3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/02-17-2022'
-  options:
-    flatten: true
-options:
-  stdout: true`
-	err := config.Unmarshal(cfgStr)
-	if g.AssertNoError(t, err) {
-		err = config.Prepare()
-		if g.AssertNoError(t, err) {
-
-			task := sling.NewTask("", config)
-			g.AssertNoError(t, task.Err)
-
-			// run task
-			err = task.Execute()
-			g.AssertNoError(t, err)
-		}
-	}
-}
-
 func TestExtract(t *testing.T) {
 	core.Version = "v1.0.43"
 
@@ -638,5 +612,32 @@ func Test1Replication(t *testing.T) {
 	err := runReplication(replicationCfgPath, nil)
 	if g.AssertNoError(t, err) {
 		return
+	}
+}
+
+func Test1Task(t *testing.T) {
+	os.Setenv("SLING_CLI", "TRUE")
+	config := &sling.Config{}
+	cfgStr := `
+source:
+  conn: duckdb
+  stream: main.call_center
+target:
+  conn: starrocks
+  object: public.call_center
+mode: full-refresh
+`
+	err := config.Unmarshal(cfgStr)
+	if g.AssertNoError(t, err) {
+		err = config.Prepare()
+		if g.AssertNoError(t, err) {
+
+			task := sling.NewTask("", config)
+			g.AssertNoError(t, task.Err)
+
+			// run task
+			err = task.Execute()
+			g.AssertNoError(t, err)
+		}
 	}
 }

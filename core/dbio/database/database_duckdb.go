@@ -41,6 +41,7 @@ type DuckDbConn struct {
 var DuckDbVersion = "0.10.0"
 var DuckDbUseTempFile = false
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
+var DuckDbFileCmd = map[string]*exec.Cmd{}
 var duckDbReadOnlyHint = "/* -readonly */"
 
 // Init initiates the object
@@ -454,6 +455,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	conn.LogSQL(sql, args...)
 
 	var out []byte
+	DuckDbFileCmd[conn.URL] = cmd
 	fileContext := DuckDbFileContext[conn.URL]
 	fileContext.Mux.Lock()
 	if conn.isInteractive {
@@ -523,6 +525,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	cmd.Args = append(cmd.Args, "-csv")
 
+	DuckDbFileCmd[conn.URL] = cmd
 	fileContext := DuckDbFileContext[conn.URL]
 	fileContext.Mux.Lock()
 
@@ -551,6 +554,8 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 		if err != nil {
 			return ds, g.Error(err, "could not exec SQL for duckdb")
 		}
+
+		DuckDbFileCmd[conn.URL] = cmd
 	}
 
 	// so that lists are treated as TEXT and not JSON
@@ -593,6 +598,11 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 // Close closes the connection
 func (conn *DuckDbConn) Close() error {
 	fileContext := DuckDbFileContext[conn.URL]
+	if cmd, ok := DuckDbFileCmd[conn.URL]; ok {
+		cmd.Process.Kill()
+		fileContext.Unlock()
+	}
+
 	fileContext.Lock()
 
 	// submit quit command
@@ -715,6 +725,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			return count, g.Error(err, "could not get cmd duckdb")
 		}
 
+		DuckDbFileCmd[conn.URL] = cmd
 		fileContext := DuckDbFileContext[conn.URL]
 		fileContext.Mux.Lock()
 		if conn.isInteractive {
