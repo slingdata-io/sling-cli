@@ -499,18 +499,15 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 	if delimiter != "" {
 		bestDeli = []rune(delimiter)[0]
 		deliSuggested = true
-	} else if val := os.Getenv("DELIMITER"); val != "" {
-		bestDeli = []rune(val)[0]
-		deliSuggested = true
 	}
 
 	deliList := []rune{',', '\t', '|', ';'}
+	if deliSuggested {
+		deliList = append([]rune{bestDeli}, deliList...)
+	}
+
 	testCsvRowNumCols := make([][]int, len(deliList))
 	eG := g.ErrorGroup{}
-
-	if deliSuggested {
-		deliList = []rune{bestDeli}
-	}
 
 	// remove last line
 	testString := string(testBytes)
@@ -543,20 +540,6 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 			}
 			RowNumCols = append(RowNumCols, len(row))
 			prevRow = row
-		}
-
-		if deliSuggested && d == bestDeli {
-			numCols = len(row)
-			err = csvErr
-
-			if err != nil && len(prevRow) > 0 {
-				numCols = len(prevRow)
-			}
-
-			// set err to nil since we are cutting the string, which may intentionally error
-			err = nil
-
-			return
 		}
 
 		testCsvRowNumCols[i] = RowNumCols
