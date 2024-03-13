@@ -111,6 +111,9 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
 		f = strings.TrimSpace(f)
+		if f == "*" {
+			return f
+		}
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
