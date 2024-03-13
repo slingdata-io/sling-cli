@@ -350,6 +350,9 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
 		return replication.HasStream(v)
 	})
+	selectStreams = lo.Map(selectStreams, func(name string, i int) string {
+		return replication.Normalize(name)
+	})
 
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
@@ -365,7 +368,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			break
 		}
 
-		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
+		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, replication.Normalize(name)) {
 			g.Trace("skipping stream %s since it is not selected", name)
 			continue
 		}

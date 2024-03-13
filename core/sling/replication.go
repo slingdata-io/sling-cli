@@ -81,19 +81,20 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 // HasStream returns true if the stream name exists
 func (rd ReplicationConfig) HasStream(name string) bool {
 
-	normalize := func(n string) string {
-		n = strings.ReplaceAll(n, "`", "")
-		n = strings.ReplaceAll(n, `"`, "")
-		n = strings.ToLower(n)
-		return n
-	}
-
 	for streamName := range rd.Streams {
-		if normalize(streamName) == normalize(name) {
+		if rd.Normalize(streamName) == rd.Normalize(name) {
 			return true
 		}
 	}
 	return false
+}
+
+// Normalize normalized the name
+func (rd ReplicationConfig) Normalize(n string) string {
+	n = strings.ReplaceAll(n, "`", "")
+	n = strings.ReplaceAll(n, `"`, "")
+	n = strings.ToLower(n)
+	return n
 }
 
 // ProcessWildcards process the streams using wildcards
