@@ -35,6 +35,7 @@ var transforms = map[string]iop.TransformFunc{
 	"hash_md5":              func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
 	"hash_sha256":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
 	"hash_sha512":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
+	"duckdb_list_to_text":   func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsTest(val), nil },
 }
 
 func init() {
@@ -100,4 +101,16 @@ func SHA512(val string) string {
 	h := sha512.New()
 	h.Write([]byte(val))
 	return string(h.Sum(nil))
+}
+
+// duckDbListAsTest adds a space suffix to lists. This is used as
+// a workaround to not cast these values as JSON.
+// Lists / Arrays do not conform to JSON spec and can error out
+// In a case, [0121] is valid in DuckDB as VARCHAR[], but not JSON (zero prefix)
+// since we have to manually infer the stdout output from the duckdb binary
+func duckDbListAsTest(val string) string {
+	if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+		return val + " "
+	}
+	return val
 }

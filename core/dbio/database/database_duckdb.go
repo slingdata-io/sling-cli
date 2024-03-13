@@ -553,9 +553,13 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 		}
 	}
 
+	// so that lists are treated as TEXT and not JSON
+	// lists / arrays do not conform to JSON spec and can error out
+	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
+
 	ds = iop.NewDatastream(iop.Columns{})
 	ds.SetConfig(conn.Props())
-	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true"})
+	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
 	ds.Defer(func() { fileContext.Mux.Unlock() })
 
 	// ds.SetConfig(map[string]string{"flatten": "true"})

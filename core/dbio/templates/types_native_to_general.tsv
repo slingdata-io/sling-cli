@@ -367,7 +367,7 @@ duckdb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary l
 duckdb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
 duckdb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
 duckdb	boolean	bool	col_boolean boolean	TRUE	TRUE	
-duckdb	list	json	col_list list	TRUE	TRUE	
+duckdb	list	text	col_list list	TRUE	TRUE	
 duckdb	struct	json	col_struct struct	TRUE	TRUE	
 duckdb	map	json	col_map map	TRUE	TRUE	
 duckdb	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
@@ -397,7 +397,7 @@ motherduck	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (bina
 motherduck	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
 motherduck	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
 motherduck	boolean	bool	col_boolean boolean	TRUE	TRUE	
-motherduck	list	json	col_list list	TRUE	TRUE	
+motherduck	list	text	col_list list	TRUE	TRUE	
 motherduck	struct	json	col_struct struct	TRUE	TRUE	
 motherduck	map	json	col_map map	TRUE	TRUE	
 motherduck	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
