@@ -187,7 +187,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	err := yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
-		if errStat != nil {
+		if errStat != nil && !strings.Contains(cfgStr, "\n") && !strings.Contains(cfgStr, ": ") {
 			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
 		} else if strings.Contains(string(cfgBytes), "streams:") || strings.Contains(string(cfgBytes), `"streams"`) {
 			return g.Error("Error parsing config. Is your config file a replication? If so, please use the -r flag instead of -c")
