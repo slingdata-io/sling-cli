@@ -27,14 +27,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for pre-sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
-
 	// check if referring to a SQL file
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
@@ -51,6 +43,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = sqlFromFile
 		}
 	}
+
+	// expand variables for custom SQL
+	fMap, err := t.Config.GetFormatMap()
+	if err != nil {
+		err = g.Error(err, "could not get format map for pre-sql")
+		return t.df, err
+	}
+	sTable.SQL = g.Rm(sTable.SQL, fMap)
 
 	// get source columns
 	st := sTable
