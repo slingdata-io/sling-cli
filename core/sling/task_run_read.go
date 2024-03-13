@@ -47,7 +47,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// expand variables for custom SQL
 	fMap, err := t.Config.GetFormatMap()
 	if err != nil {
-		err = g.Error(err, "could not get format map for pre-sql")
+		err = g.Error(err, "could not get format map for sql")
 		return t.df, err
 	}
 	sTable.SQL = g.Rm(sTable.SQL, fMap)
