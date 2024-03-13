@@ -604,7 +604,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			format := "%." + cast.ToString(sp.config.MaxDecimals) + "f"
 			nVal = g.F(format, fVal)
 		} else {
-			nVal = cast.ToString(val) // use string to keep accuracy
+			nVal = strings.Replace(cast.ToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
 		}
 
 	case col.Type.IsBool():
