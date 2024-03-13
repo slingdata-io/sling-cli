@@ -285,7 +285,7 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 	return
 }
 
-func (t *TaskExecution) getMetadata() (metadata iop.Metadata) {
+func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 	// need to loaded_at column for file incremental
 	if t.Config.MetadataLoadedAt || t.Type == FileToDB {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
@@ -390,7 +390,6 @@ func (t *TaskExecution) usingCheckpoint() bool {
 func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
-	options["METADATA"] = g.Marshal(t.getMetadata())
 
 	if t.Config.Source.Options.Columns != nil {
 		columns := iop.Columns{}

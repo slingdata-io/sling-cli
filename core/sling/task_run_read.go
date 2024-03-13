@@ -226,9 +226,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 // ReadFromFile reads from a source file
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+	// sets metadata
+	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
 	options := t.sourceOptionsMap()
+	options["METADATA"] = g.Marshal(metadata)
 
 	if cfg.SrcConn.URL() != "" {
 		// construct props by merging with options
