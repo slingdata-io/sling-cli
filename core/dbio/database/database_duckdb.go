@@ -600,10 +600,11 @@ func (conn *DuckDbConn) Close() error {
 	fileContext := DuckDbFileContext[conn.URL]
 	if cmd, ok := DuckDbFileCmd[conn.URL]; ok {
 		cmd.Process.Kill()
-		fileContext.Unlock()
+		fileContext.Mux.TryLock() // in case it is already unlocked
+		fileContext.Mux.Unlock()
 	}
 
-	fileContext.Lock()
+	fileContext.Mux.Lock()
 
 	// submit quit command
 	if conn.isInteractive && conn.cmdInteractive != nil {
