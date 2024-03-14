@@ -521,6 +521,17 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	}
 	defer func() { os.Remove(sqlPath) }()
 
+	opts := getQueryOptions(options)
+	fetchedColumns := iop.Columns{}
+	if val, ok := opts["columns"].(iop.Columns); ok {
+		fetchedColumns = val
+
+		// set as sourced
+		for i := range fetchedColumns {
+			fetchedColumns[i].Sourced = true
+		}
+	}
+
 	conn.LogSQL(sql)
 
 	cmd.Args = append(cmd.Args, "-csv")
@@ -562,7 +573,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
 
-	ds = iop.NewDatastream(iop.Columns{})
+	ds = iop.NewDatastream(fetchedColumns)
 	ds.SafeInference = true
 	ds.SetConfig(conn.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})

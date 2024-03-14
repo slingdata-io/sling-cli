@@ -56,7 +56,7 @@ type Connection interface {
 	Begin(options ...*sql.TxOptions) error
 	BeginContext(ctx context.Context, options ...*sql.TxOptions) error
 	BulkExportFlow(tables ...Table) (*iop.Dataflow, error)
-	BulkExportStream(sql string) (*iop.Datastream, error)
+	BulkExportStream(table Table) (*iop.Datastream, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
 	CastColumnForSelect(srcColumn iop.Column, tgtColumn iop.Column) string
@@ -755,9 +755,9 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 }
 
 // BulkExportStream streams the rows in bulk
-func (conn *BaseConn) BulkExportStream(sql string) (ds *iop.Datastream, err error) {
+func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(sql)
+	return conn.Self().StreamRows(table.Select(0), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -779,9 +779,16 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		return
 	}
 
+	opts := getQueryOptions(options)
+
 	Limit := uint64(0) // infinite
-	if val := cast.ToUint64(getQueryOptions(options)["limit"]); val > 0 {
+	if val := cast.ToUint64(opts["limit"]); val > 0 {
 		Limit = val
+	}
+
+	fetchedColumns := iop.Columns{}
+	if val, ok := opts["columns"].(iop.Columns); ok {
+		fetchedColumns = val
 	}
 
 	start := time.Now()
@@ -838,6 +845,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 			return ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
+				FetchedType:      fetchedColumns.GetColumn(ct.Name()).Type,
 				Length:           cast.ToInt(length),
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
@@ -851,7 +859,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	conn.Data.SQL = query
 	conn.Data.Duration = time.Since(start).Seconds()
 	conn.Data.Rows = [][]interface{}{}
-	conn.Data.Columns = SQLColumns(colTypes, conn)
+	conn.Data.Columns = SQLColumns(colTypes, conn) // type mapping logic !
 	conn.Data.NoDebug = !strings.Contains(query, noDebugKey)
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
@@ -1294,6 +1302,12 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			Position: i + 1,
 			Type:     NativeTypeToGeneral(colType.Name, colType.DatabaseTypeName, conn),
 			DbType:   colType.DatabaseTypeName,
+		}
+
+		// use pre-fetched column types for embedded databases since they rely
+		// on output of external processes
+		if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && colType.FetchedType != "" {
+			col.Type = colType.FetchedType
 		}
 
 		col.Stats.MaxLen = colType.Length
@@ -2402,7 +2416,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 		dss := []*iop.Datastream{}
 
 		for _, table := range tables {
-			ds, err := conn.Self().BulkExportStream(table.Select(0))
+			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
 				return
@@ -2448,7 +2462,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		defer df.Context.Wg.Read.Done()
 		defer close(dsCh)
 		fileReadyChn := make(chan filesys.FileReady, 10000)
-		ds, err := conn.Self().BulkExportStream(table.Select(0))
+		ds, err := conn.Self().BulkExportStream(table)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error running query"))
 			df.Context.Cancel()

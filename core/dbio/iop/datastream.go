@@ -792,7 +792,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		return err
 	}
 
-	if c.FieldsPerRecord == 0 || len(ds.Columns) == 0 {
+	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 

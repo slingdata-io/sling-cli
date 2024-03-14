@@ -309,6 +309,7 @@ func (s *Schemata) Columns() map[string]iop.Column {
 type ColumnType struct {
 	Name             string
 	DatabaseTypeName string
+	FetchedType      iop.ColumnType
 	Length           int
 	Precision        int
 	Scale            int

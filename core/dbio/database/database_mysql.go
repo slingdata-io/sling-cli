@@ -75,20 +75,20 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 // mysql --local-infile=1 -h {host} -P {port} -u {user} -p{password} mysql -e "LOAD DATA LOCAL INFILE '/dev/stdin' INTO TABLE {table} FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"' IGNORE 1 LINES;"
 
 // BulkExportStream bulk Export
-func (conn *MySQLConn) BulkExportStream(sql string) (ds *iop.Datastream, err error) {
+func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	_, err = exec.LookPath("mysql")
 	if err != nil {
 		g.Trace("mysql not found in path. Using cursor...")
-		return conn.BaseConn.StreamRows(sql)
+		return conn.BaseConn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	} else if runtime.GOOS == "windows" {
-		return conn.BaseConn.StreamRows(sql)
+		return conn.BaseConn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
 	if conn.BaseConn.GetProp("allow_bulk_export") != "true" {
-		return conn.BaseConn.StreamRows(sql)
+		return conn.BaseConn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
-	stdOutReader, err := conn.LoadDataOutFile(sql)
+	stdOutReader, err := conn.LoadDataOutFile(table.Select(0))
 	if err != nil {
 		return ds, err
 	}

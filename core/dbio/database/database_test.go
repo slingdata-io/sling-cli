@@ -747,7 +747,7 @@ func ELTest(t *testing.T, db *testDB, srcTable string) {
 	_, err = tgtConn.Query("delete from " + tgtTable)
 	g.AssertNoError(t, err)
 
-	stream, err = srcConn.BulkExportStream(`select * from ` + srcTable)
+	stream, err = srcConn.BulkExportStream(Table{SQL: `select * from ` + srcTable, Dialect: srcConn.GetType()})
 	g.AssertNoError(t, err)
 
 	if err == nil {
@@ -1338,7 +1338,8 @@ func TestBigTable(t *testing.T) {
 
 	// read table
 	g.Debug("Reading data")
-	ds, err := conn.BulkExportStream(tableName)
+	table, _ := ParseTableName(tableName, conn.GetType())
+	ds, err := conn.BulkExportStream(table)
 	if !g.AssertNoError(t, err) {
 		return
 	}
