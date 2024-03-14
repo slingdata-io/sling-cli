@@ -8,6 +8,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
@@ -42,6 +43,7 @@ type Execution struct {
 	Output    string           `json:"output" sql:"default ''"`
 	Rows      uint64           `json:"rows"`
 	Pid       int              `json:"pid"`
+	Version   string           `json:"version"`
 
 	// ProjectID represents the project or the repository.
 	// If .git exists, grab first commit with `git rev-list --max-parents=0 HEAD`.
@@ -98,6 +100,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
 		Pid:       os.Getpid(),
+		Version:   core.Version,
 	}
 
 	if t.Err != nil {
