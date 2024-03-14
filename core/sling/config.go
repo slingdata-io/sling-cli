@@ -133,6 +133,10 @@ func (cfg *Config) SetDefault() {
 		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
+
+	case !g.In(cfg.TgtConn.Type, dbio.TypeDbTrino, dbio.TypeDbRedshift, dbio.TypeDbBigQuery, dbio.TypeDbSnowflake) && cfg.Target.Options.AdjustColumnType == nil:
+		// set AdjustColumnType to true for all others
+		cfg.Target.Options.AdjustColumnType = g.Bool(true)
 	}
 
 	// set vars
@@ -183,8 +187,10 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	err := yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
-		if errStat != nil {
+		if errStat != nil && !strings.Contains(cfgStr, "\n") && !strings.Contains(cfgStr, ": ") {
 			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
+		} else if strings.Contains(string(cfgBytes), "streams:") || strings.Contains(string(cfgBytes), `"streams"`) {
+			return g.Error("Error parsing config. Is your config file a replication? If so, please use the -r flag instead of -c")
 		}
 		return g.Error(err, "Error parsing config")
 	}
@@ -268,11 +274,17 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			cfg.MetadataLoadedAt = true
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
+				err = g.Error("must specify value for '--update-key' and/or '--primary-key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			}
 			return
 		}
 	} else if cfg.Mode == BackfillMode {
 		if cfg.Source.UpdateKey == "" || len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and 'primary_key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
+				err = g.Error("must specify value for '--update-key' and '--primary-key' for backfill mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
+			}
 			return
 		}
 		if cfg.Source.Options == nil || cfg.Source.Options.Range == nil {
@@ -331,6 +343,39 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		err = g.Error("invalid Task Configuration. Must specify valid source conn / file or target connection / output.\n  %s", strings.Join(output, "\n  "))
 	}
 	return Type, err
+}
+
+func (cfg *Config) HasWildcard() bool {
+	if strings.HasSuffix(cfg.Source.Stream, ".*") {
+		return true
+	}
+
+	if strings.Contains(cfg.Source.Stream, `/*.`) || strings.Contains(cfg.Source.Stream, `\*.`) {
+		return true
+	}
+
+	return false
+}
+
+func (cfg *Config) AsReplication() (rc ReplicationConfig) {
+	rc = ReplicationConfig{
+		Source: cfg.Source.Conn,
+		Target: cfg.Target.Conn,
+		Defaults: ReplicationStreamConfig{
+			SourceOptions: cfg.Source.Options,
+			TargetOptions: cfg.Target.Options,
+			Select:        cfg.Source.Select,
+			Object:        cfg.Target.Object,
+			Mode:          cfg.Mode,
+			PrimaryKeyI:   cfg.Source.PrimaryKeyI,
+			UpdateKey:     cfg.Source.UpdateKey,
+		},
+		Streams: map[string]*ReplicationStreamConfig{
+			cfg.Source.Stream: {},
+		},
+	}
+
+	return rc
 }
 
 // Prepare prepares the config

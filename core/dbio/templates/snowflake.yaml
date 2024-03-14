@@ -1,29 +1,183 @@
 core:
-  drop_table: drop table {table}
-  drop_view: drop view {view}
-  drop_schema: drop schema {schema}
-  create_schema: create schema {schema}
-  create_table: create table {table} ({col_types})
-  create_temporary_table: create temporary table {table} ({col_types})
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  create_table: create table {table} ({col_types}) {cluster_by}
   create_index: create index {index} on {table} ({cols})
-  create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
-  limit: |
-    select * from (
-      {sql}
-    ) as t limit {limit}
-  insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from {src_table}
-  truncate_table: truncate table {table}
-  alter_columns: alter table {table} {col_ddl}
-  drop_column: alter table {table} drop column {column}
-  rename_column: alter table {table} rename column {column} to {new_column}
-  modify_column: '{column} {type}'
-  add_column: alter table {table} add column {column} {type}
-  # column_names: select * from ({sql}) as t where 1=0
-  column_names: '{sql}'
-  enable_trigger: ALTER TABLE {table} ENABLE TRIGGER {trigger}
-  disable_trigger: ALTER TABLE {table} DISABLE TRIGGER {trigger}
+  alter_columns: alter table {table} alter {col_ddl}
+  modify_column: '{column} set data type {type}'
+  enable_trigger: ""
+  disable_trigger: ""
+  copy_from_stage: |
+    COPY INTO {table} ({tgt_columns})
+    FROM ( 
+      SELECT {src_columns}
+      FROM {stage_path} as T
+    )
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+      EMPTY_FIELD_AS_NULL=TRUE
+      NULL_IF = ''
+      SKIP_HEADER=1
+      REPLACE_INVALID_CHARACTERS=TRUE
+    )
+    ON_ERROR = ABORT_STATEMENT
+  copy_from_s3: |
+    COPY INTO {table} 
+    FROM '{s3_path}'
+    CREDENTIALS = (
+      AWS_KEY_ID = '{aws_access_key_id}'
+      AWS_SECRET_KEY = '{aws_secret_access_key}'
+    )
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+      EMPTY_FIELD_AS_NULL=TRUE
+      NULL_IF = ''
+      SKIP_HEADER=1
+      REPLACE_INVALID_CHARACTERS=TRUE
+    )
+    ON_ERROR = ABORT_STATEMENT
+  copy_from_azure: |
+    COPY INTO {table} 
+    FROM '{azure_path}'
+    CREDENTIALS = (
+      AZURE_SAS_TOKEN = '{azure_sas_token}'
+    )
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+      EMPTY_FIELD_AS_NULL=TRUE
+      NULL_IF = ''
+      SKIP_HEADER=1
+      REPLACE_INVALID_CHARACTERS=TRUE
+    )
+    ON_ERROR = ABORT_STATEMENT
+  copy_to_stage: |
+    COPY INTO '{stage_path}'
+    FROM ({sql})
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      EMPTY_FIELD_AS_NULL = TRUE
+      NULL_IF = ''
+      COMPRESSION = GZIP
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+    )
+    HEADER = TRUE
+  copy_to_s3: |
+    COPY INTO '{s3_path}'
+    FROM ({sql})
+    CREDENTIALS = (
+      AWS_KEY_ID = '{aws_access_key_id}'
+      AWS_SECRET_KEY = '{aws_secret_access_key}'
+    )
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      EMPTY_FIELD_AS_NULL = TRUE
+      NULL_IF = ''
+      COMPRESSION = GZIP
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+    )
+    HEADER = TRUE
+  copy_to_azure: |
+    COPY INTO '{azure_path}/'
+    FROM ({sql})
+    CREDENTIALS = (
+      AZURE_SAS_TOKEN = '{azure_sas_token}'
+    )
+    FILE_FORMAT = (
+      TYPE = CSV
+      RECORD_DELIMITER = '\n'
+      EMPTY_FIELD_AS_NULL = TRUE
+      NULL_IF = ''
+      COMPRESSION = GZIP
+      ESCAPE_UNENCLOSED_FIELD = NONE
+      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+    )
+    HEADER = TRUE
+
+metadata:
+
+  current_database:
+    select current_database()
+
+  databases: |
+    show databases
+
+  schemas: |
+    show schemas
+
+  tables: |
+    show tables in "{schema}"
+
+  views: |
+    show views in "{schema}"
+
+  columns: |
+    show columns in table "{schema}"."{table}"
+
+  primary_keys: |
+    select tco.constraint_name as pk_name,
+           1 as position,
+           kcu.column_name as column_name
+    from information_schema.table_constraints tco
+    join information_schema.key_column_usage kcu 
+         on kcu.constraint_name = tco.constraint_name
+         and kcu.constraint_schema = tco.constraint_schema
+         and kcu.constraint_name = tco.constraint_name
+    where kcu.table_schema = '{schema}'
+      and kcu.table_name = '{table}'
+    order by kcu.table_schema,
+             kcu.table_name,
+             position
+
+  columns_full: show columns in table "{schema}"."{table}"
+
+  schemata: |
+    with tables as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then true
+          else false
+        end as is_view
+      from information_schema.tables
+      where 1=1
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      tables.is_view as is_view,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables
+      on tables.table_catalog = cols.table_catalog
+      and tables.table_schema = cols.table_schema
+      and tables.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+
+  ddl_table: select get_ddl('table', '{schema}.{table}')
+
+  ddl_view: |
+    select get_ddl('view', '{schema}.{table}')
 
 analysis:
   # table level
@@ -37,7 +191,7 @@ analysis:
 
   table_join_match: |
     -- table_join_match "{t1}" vs "{t2}"
-    with t1 as (
+    with T1 as (
       select
         {t1_field},
         count(*) cnt
@@ -45,7 +199,7 @@ analysis:
       where {t1_filter}
       group by {t1_field}
     )
-    , t2 as (
+    , T2 as (
       select
         {t2_field},
         count(*) cnt
@@ -124,7 +278,7 @@ analysis:
     from "{schema}"."{table}"
 
   field_stat_group: |
-    -- field_stat_group {field}
+    -- field_stat_group {field} grouped by `{group_expr}`
     select
       '{schema}' as schema_nm,
       '{table}' as table_nm,
@@ -139,18 +293,6 @@ analysis:
       count(*) - count(distinct {field}) as f_dup_cnt
     from "{schema}"."{table}"
     group by {group_expr}
-
-  field_stat_len: |
-    -- field_stat_len {field}
-    select
-      '{schema}' as schema_nm,
-      '{table}' as table_nm,
-      '{field}' as field,
-      '{type}' as type,
-      count(*) as tot_cnt,
-      min(length({field})) as f_min_len,
-      max(length({field})) as f_max_len
-    from "{schema}"."{table}"
 
   field_stat_deep: |
     -- field_stat_deep {field}
@@ -253,12 +395,11 @@ analysis:
     with t1 as (
         select
           '{field}' as field,
-          year({field}) as year,
-          month({field}) as month,
+          date_trunc(day, {field}) as date,
           count(*) cnt
         from "{schema}"."{table}"
-        group by year({field}), month({field})
-        order by year({field}), month({field})
+        group by 2
+        order by 2
       )
       , t2 as (
         select '{field}' as field, count(*) ttl_cnt
@@ -268,26 +409,23 @@ analysis:
         '{schema}' as schema_nm,
         '{table}' as table_nm,
         t1.field,
-        t1.year,
-        t1.month,
+        t1.date,
         cnt,
         round(100.0 * cnt / ttl_cnt, 2) as prct
       from t1
       join t2
         on t1.field = t2.field
-      order by t1.year, t1.month
+      order by t1.date
 
   distro_field_date_wide: |
     -- distro_field_date {table}
     select
-      '{date_field}' as date_field,
-      year({date_field}) as year,
-      month({date_field}) as month,
+      date_trunc(day, {date_field}) as {date_field}_day,
       {columns_sql}
     from "{schema}"."{table}"
     {where_clause}
-    group by year({date_field}), month({date_field})
-    order by year({date_field}), month({date_field})
+    group by 1
+    order by 1
 
   test_pk: |
     select
@@ -308,12 +446,12 @@ routine:
       count({field}) as field_cnt,
       min({field}) as min_val,
       max({field}) as max_val
-    from "{schema}"."{table}"
+    from {table}
 
   number_trunc_min_max: |
     select
       {fields}
-    from "{schema}"."{table}"
+    from {table}
     where {where}
       (({partition_col_trunc} >= '{min_val}'
       and {partition_col_trunc} <= '{max_val}')
@@ -323,7 +461,7 @@ routine:
     select
       {partition_col_trunc} as day_field,
       count(*) cnt
-    from "{schema}"."{table}"
+    from {table}
     {where}
     group by {partition_col_trunc}
     order by {partition_col_trunc}
@@ -332,39 +470,29 @@ routine:
     select
       {partition_col_trunc} as trunc_field,
       count(*) cnt
-    from "{schema}"."{table}"
+    from {table}
     {where}
     group by {partition_col_trunc}
     order by {partition_col_trunc}
 
 function:
   replace: replace({string_expr}, {to_replace}, {replacement})
-  str_utf8: '{ field }'
-  string_type: varchar
-  cast_as: cast({field} as {type})
-  cast_to_string: cast({field} as varchar)
+  str_utf8: "{ field }"
+  string_type: string
+  cast_to_string: '{field}::string'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
-  checksum_string: length({field})
-  checksum_json: length(replace({field}, ' ', ''))
-  checksum_integer: 'abs({field})'
-  checksum_decimal: 'abs(trunc({field}))'
-  checksum_datetime: '0'
-  checksum_boolean: 'length({field})'
+  sleep: call SYSTEM$WAIT({seconds})
+  checksum_date: DATE_PART('epoch_second', {field}) * 1000000
+  checksum_datetime: DATE_PART('epoch_microsecond', {field})
+  checksum_string: length({field}::string)
+  checksum_boolean: length({field}::string)
+  checksum_json: length(replace({field}::string, ' ', ''))
 
 variable:
+  bind_string: "?"
   tmp_folder: /tmp
-  quote_char: '"'
-  bind_string: ${i}
-  ddl_col: 0
-  batch_rows: 2000
-  batch_values: 2000
-  date_layout_str: "'{value}'"
-  date_layout: '2006-01-02 15:04:05'
-  timestamp_layout_str: "'{value}'"
-  timestamp_layout: '2006-01-02 15:04:05.000'
-  error_filter_table_exists: already
-  bool_as: bool
+  column_upper: true
 
 error_filter:
   table_not_exist: exist

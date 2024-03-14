@@ -38,7 +38,7 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
-		if strings.Contains(err.Error(), "unexpected packet [72] from server") {
+		if strings.Contains(err.Error(), "unexpected packet") {
 			g.Info(color.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 		}
 	}
@@ -175,7 +175,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 			decimalCols := []int{}
 			for i, col := range batch.Columns {
-				if col.Type.IsDecimal() {
+				if col.Type == iop.DecimalType {
 					decimalCols = append(decimalCols, i)
 				}
 			}

@@ -1,4 +1,30 @@
 database	native_type	general_type	ddl_string	test	stats_allowed	Comment
+azuredwh	bigint	bigint	col_bigint bigint	TRUE	TRUE	
+azuredwh	binary	binary	col_binary binary(100)	TRUE	FALSE	
+azuredwh	bit	smallint	col_bit bit	FALSE	FALSE	
+azuredwh	char	string	col_char char	TRUE	TRUE	
+azuredwh	date	date	col_date date	TRUE	TRUE	
+azuredwh	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
+azuredwh	datetime	datetime	col_datetime datetime	TRUE	TRUE	
+azuredwh	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
+azuredwh	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	
+azuredwh	decimal	decimal	col_decimal decimal	TRUE	TRUE	
+azuredwh	float	float	col_float float	TRUE	TRUE	
+azuredwh	image	binary	col_image image	FALSE	FALSE	
+azuredwh	int	integer	col_int int	TRUE	TRUE	
+azuredwh	money	decimal	col_money money	TRUE	TRUE	
+azuredwh	nchar	text	col_nchar nchar	TRUE	TRUE	
+azuredwh	ntext	text	col_ntext ntext	TRUE	TRUE	
+azuredwh	numeric	decimal	col_numeric numeric	TRUE	TRUE	
+azuredwh	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
+azuredwh	real	decimal	col_real real	TRUE	TRUE	
+azuredwh	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
+azuredwh	smallint	smallint	col_smallint smallint	TRUE	TRUE	
+azuredwh	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
+azuredwh	time	time	col_time time	TRUE	TRUE	
+azuredwh	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
+azuredwh	varbinary	binary	col_varbinary varbinary(100)	FALSE	FALSE	
+azuredwh	varchar	text	col_varchar varchar	TRUE	TRUE	
 azuresql	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 azuresql	binary	binary	col_binary binary(100)	TRUE	TRUE	
 azuresql	bit	smallint	col_bit bit	TRUE	TRUE	
@@ -45,6 +71,129 @@ bigquery	json	json		FALSE	FALSE
 bigquery	struct	json		FALSE	FALSE	
 bigquery	time	time	col_time time	FALSE	FALSE	
 bigquery	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	
+clickhouse	array	json	col_array array	FALSE	FALSE	
+clickhouse	uuid	string	col_uuid array	FALSE	FALSE	
+clickhouse	date	date	col_date date	TRUE	TRUE	
+clickhouse	datetime	datetime	col_datetime datetime	TRUE	TRUE	
+clickhouse	datetime64	datetime	col_datetime64 datetime64	TRUE	TRUE	
+clickhouse	decimal	decimal	col_decimal decimal	TRUE	TRUE	
+clickhouse	enum	string	col_enum enum	FALSE	FALSE	
+clickhouse	fixedstring	text	col_fixedstring fixedstring	TRUE	TRUE	
+clickhouse	float32	float	col_float32 float32	TRUE	TRUE	
+clickhouse	float64	float	col_float64 float64	TRUE	TRUE	
+clickhouse	int16	smallint	col_int16 int16	TRUE	TRUE	
+clickhouse	int32	bigint	col_int32 int32	TRUE	TRUE	
+clickhouse	int64	bigint	col_int64 int64	TRUE	TRUE	
+clickhouse	int8	integer	col_int8 int8	TRUE	TRUE	
+clickhouse	string	text	col_string string	TRUE	TRUE	
+clickhouse	tuple	string	col_tuple tuple	TRUE	TRUE	
+clickhouse	uint16	integer	col_uint16 uint16	TRUE	TRUE	
+clickhouse	uint32	bigint	col_uint32 uint32	TRUE	TRUE	
+clickhouse	uint64	decimal(28,0)	col_uint64 uint64	TRUE	TRUE	
+clickhouse	uint8	integer	col_uint8 uint8	TRUE	TRUE	
+clickhouse	json	json	col_json json	FALSE	FALSE	
+clickhouse	map	json	col_map json	FALSE	FALSE	
+clickhouse	lowcardinality	string	col_lowcardinality json	FALSE	FALSE	
+clickhouse	enum8	string	col_enum8 json	FALSE	FALSE	
+clickhouse	ipv6	string	col_enum8 json	FALSE	FALSE	
+duckdb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
+duckdb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
+duckdb	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB
+duckdb	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
+duckdb	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
+duckdb	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
+duckdb	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
+duckdb	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
+duckdb	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
+duckdb	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
+duckdb	integer	integer	col_int int	TRUE	TRUE	A standard integer
+duckdb	json	json	col_json json	TRUE	TRUE	JSON Data Type
+duckdb	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
+duckdb	text	text	col_text text	TRUE	TRUE	A small non-binary string
+duckdb	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
+duckdb	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+duckdb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
+duckdb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
+duckdb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
+duckdb	boolean	bool	col_boolean boolean	TRUE	TRUE	
+duckdb	list	text	col_list list	TRUE	TRUE	
+duckdb	struct	json	col_struct struct	TRUE	TRUE	
+duckdb	map	json	col_map map	TRUE	TRUE	
+duckdb	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
+duckdb	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
+duckdb	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
+duckdb	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
+duckdb	uuid	string	col_uuid uuid	TRUE	TRUE	
+duckdb	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
+duckdb	interval	string	col_interval interval	TRUE	TRUE	
+mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
+mariadb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
+mariadb	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
+mariadb	blob	text	col_blob blob	TRUE	TRUE	A small BLOB
+mariadb	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
+mariadb	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
+mariadb	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
+mariadb	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
+mariadb	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
+mariadb	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
+mariadb	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
+mariadb	geometry	string	col_geometry geometry	FALSE	FALSE	A spatial value of any type
+mariadb	geometrycollection	string	col_geometrycollection geometrycollection	FALSE	FALSE	A collection of GEOMETRYvalues
+mariadb	geomcollection	string		FALSE	FALSE	
+mariadb	int	integer	col_int int	TRUE	TRUE	A standard integer
+mariadb	json	json	col_json json	TRUE	TRUE	JSON Data Type
+mariadb	linestring	string	col_linestring linestring	FALSE	FALSE	A curve (one or more POINT values)
+mariadb	longblob	text	col_longblob longblob	TRUE	TRUE	A large BLOB
+mariadb	longtext	text	col_longtext longtext	TRUE	TRUE	A large non-binary string
+mariadb	mediumblob	text	col_mediumblob mediumblob	TRUE	TRUE	A medium-sized BLOB
+mariadb	mediumint	integer	col_mediumint mediumint	TRUE	TRUE	A medium-sized integer
+mariadb	mediumtext	text	col_mediumtext mediumtext	TRUE	TRUE	A medium-sized non-binary string
+mariadb	multilinestring	string	col_multilinestring multilinestring	FALSE	FALSE	A collection of LINESTRINGvalues
+mariadb	multipoint	string	col_multipoint multipoint	FALSE	FALSE	A collection of POINTvalues
+mariadb	multipolygon	string	col_multipolygon multipolygon	FALSE	FALSE	A collection of POLYGONvalues
+mariadb	point	string	col_point point	FALSE	FALSE	A point (a pair of X-Y coordinates)
+mariadb	polygon	string	col_polygon polygon	FALSE	FALSE	A polygon
+mariadb	set	string	col_set set('one', 'two')	FALSE	FALSE	A set; each column value may be assigned zero or more SET members
+mariadb	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
+mariadb	text	text	col_text text	TRUE	TRUE	A small non-binary string
+mariadb	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
+mariadb	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+mariadb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
+mariadb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
+mariadb	tinytext	text	col_tinytext tinytext	TRUE	TRUE	A very small non-binary string
+mariadb	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	A variable-length binary string
+mariadb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
+mariadb	year	string	col_year year	FALSE	FALSE	A year value in CCYY or YY format
+motherduck	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
+motherduck	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
+motherduck	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB
+motherduck	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
+motherduck	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
+motherduck	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
+motherduck	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
+motherduck	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
+motherduck	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
+motherduck	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
+motherduck	integer	integer	col_int int	TRUE	TRUE	A standard integer
+motherduck	json	json	col_json json	TRUE	TRUE	JSON Data Type
+motherduck	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
+motherduck	text	text	col_text text	TRUE	TRUE	A small non-binary string
+motherduck	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
+motherduck	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+motherduck	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
+motherduck	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
+motherduck	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
+motherduck	boolean	bool	col_boolean boolean	TRUE	TRUE	
+motherduck	list	text	col_list list	TRUE	TRUE	
+motherduck	struct	json	col_struct struct	TRUE	TRUE	
+motherduck	map	json	col_map map	TRUE	TRUE	
+motherduck	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
+motherduck	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
+motherduck	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
+motherduck	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
+motherduck	uuid	string	col_uuid uuid	TRUE	TRUE	
+motherduck	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
+motherduck	interval	string	col_interval interval	TRUE	TRUE	
 mysql	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 mysql	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
 mysql	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
@@ -87,18 +236,21 @@ oracle	bfile	binary	col_bfile bfile	FALSE	FALSE	Binary data stored in an externa
 oracle	blob	text	col_blob blob	FALSE	FALSE	Unstructured binary data.
 oracle	char	string	col_char char(17)	TRUE	TRUE	Fixed-length character data of length size bytes.
 oracle	clob	text	col_clob clob	TRUE	TRUE	Single-byte character data.
-oracle	date	datetime	col_date date	TRUE	TRUE	Fixed-length date and time data, ranging from Jan. 1, 4712 B.C.E. to Dec. 31, 4712 C.E.
+oracle	date	date	col_date date	TRUE	TRUE	Fixed-length date and time data, ranging from Jan. 1, 4712 B.C.E. to Dec. 31, 4712 C.E.
 oracle	float	float	col_float float	TRUE	TRUE	
+oracle	json	json	col_json json			
 oracle	long	string	col_long long	TRUE	FALSE	Variable-length raw binary data.
 oracle	mlslabel	string	col_mlslabel mlslabel	FALSE	FALSE	Trusted Oracle datatype.
 oracle	nchar	string	col_nchar nchar(17)	TRUE	TRUE	Fixed-length character data of length size characters or bytes, depending on the national character set.
 oracle	nclob	text	col_nclob nclob	TRUE	TRUE	Single-byte or fixed-length multibyte national character set (NCHAR) data.
 oracle	number	decimal	col_number number	TRUE	TRUE	Variable-length numeric data. Maximum precision p and/or scale s is 38.
-oracle	nvarchar2	text	col_nvarchar2 nvarchar2(100)	TRUE	TRUE	Variable-length character data of length size characters or bytes, depending on national character set. A maximum size must be specified.
+oracle	nvarchar2	string	col_nvarchar2 nvarchar2(100)	TRUE	TRUE	Variable-length character data of length size characters or bytes, depending on national character set. A maximum size must be specified.
 oracle	raw	binary	col_raw raw(100)	TRUE	FALSE	Variable-length raw binary data.
 oracle	rowid	bigint	col_rowid rowid	FALSE	FALSE	Binary data representing row addresses.
 oracle	timestamp	timestamp	col_ timestamp timestamp	TRUE	TRUE	
-oracle	varchar2	text	col_varchar2 varchar2(100)	TRUE	TRUE	Variable-length character data.
+oracle	timestampdty	timestamp	" "	FALSE	FALSE	
+oracle	varchar2	string	col_varchar2 varchar2(100)	TRUE	TRUE	Variable-length character data.
+oracle	longvarchar	string	" "	FALSE	FALSE	
 postgres	bigint	bigint	col_bigint bigint	TRUE	TRUE	signed eight-byte integer
 postgres	bigserial	bigint	col_bigserial bigserial	TRUE	TRUE	autoincrementing eight-byte integer
 postgres	bit	bool	col_bit bit	FALSE	FALSE	fixed-length bit string
@@ -166,7 +318,7 @@ postgres	information_schema.character_data	string		FALSE	FALSE	Steampipe Data Ty
 postgres	information_schema.yes_or_no	string		FALSE	FALSE	Steampipe Data Type
 postgres	information_schema.cardinal_number	integer		FALSE	FALSE	Steampipe Data Type
 postgres	information_schema.time_stamp	string		FALSE	FALSE	Steampipe Data Type
-postgres	"char"	string		FALSE	FALSE	Steampipe Data Type
+postgres	"""char"""	string		FALSE	FALSE	Steampipe Data Type
 postgres	oid	string		FALSE	FALSE	Steampipe Data Type
 postgres	xid	string		FALSE	FALSE	Steampipe Data Type
 postgres	regproc	string		FALSE	FALSE	Steampipe Data Type
@@ -260,7 +412,7 @@ sqlite	numeric	decimal	col_numeric numeric	TRUE	TRUE
 sqlite	decimal	decimal	col_decimal decimal	TRUE	TRUE	
 sqlite	int	integer	col_int int	TRUE	TRUE	
 sqlite	num	integer	col_num num	TRUE	TRUE	
-sqlite	date	datetime	col_date date	TRUE	TRUE	
+sqlite	date	date	col_date date	TRUE	TRUE	
 sqlite	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 sqlite	text	text	col_text text	TRUE	TRUE	
 sqlite	json	json	col_json json	TRUE	TRUE	
@@ -294,155 +446,6 @@ sqlserver	time	time	col_time time	TRUE	TRUE
 sqlserver	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
 sqlserver	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	
 sqlserver	varchar	text	col_varchar varchar(100)	TRUE	TRUE	
-azuredwh	bigint	bigint	col_bigint bigint	TRUE	TRUE	
-azuredwh	binary	binary	col_binary binary(100)	TRUE	FALSE	
-azuredwh	bit	smallint	col_bit bit	FALSE	FALSE	
-azuredwh	char	string	col_char char	TRUE	TRUE	
-azuredwh	date	date	col_date date	TRUE	TRUE	
-azuredwh	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
-azuredwh	datetime	datetime	col_datetime datetime	TRUE	TRUE	
-azuredwh	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
-azuredwh	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	
-azuredwh	decimal	decimal	col_decimal decimal	TRUE	TRUE	
-azuredwh	float	float	col_float float	TRUE	TRUE	
-azuredwh	image	binary	col_image image	FALSE	FALSE	
-azuredwh	int	integer	col_int int	TRUE	TRUE	
-azuredwh	money	decimal	col_money money	TRUE	TRUE	
-azuredwh	nchar	text	col_nchar nchar	TRUE	TRUE	
-azuredwh	ntext	text	col_ntext ntext	TRUE	TRUE	
-azuredwh	numeric	decimal	col_numeric numeric	TRUE	TRUE	
-azuredwh	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
-azuredwh	real	decimal	col_real real	TRUE	TRUE	
-azuredwh	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
-azuredwh	smallint	smallint	col_smallint smallint	TRUE	TRUE	
-azuredwh	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
-azuredwh	time	time	col_time time	TRUE	TRUE	
-azuredwh	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
-azuredwh	varbinary	binary	col_varbinary varbinary(100)	FALSE	FALSE	
-azuredwh	varchar	text	col_varchar varchar	TRUE	TRUE	
-clickhouse	array	json	col_array array	FALSE	FALSE	
-clickhouse	uuid	string	col_uuid array	FALSE	FALSE	
-clickhouse	date	date	col_date date	TRUE	TRUE	
-clickhouse	datetime	datetime	col_datetime datetime	TRUE	TRUE	
-clickhouse	datetime64	datetime	col_datetime64 datetime64	TRUE	TRUE	
-clickhouse	decimal	decimal	col_decimal decimal	TRUE	TRUE	
-clickhouse	enum	string	col_enum enum	FALSE	FALSE	
-clickhouse	fixedstring	text	col_fixedstring fixedstring	TRUE	TRUE	
-clickhouse	float32	float	col_float32 float32	TRUE	TRUE	
-clickhouse	float64	float	col_float64 float64	TRUE	TRUE	
-clickhouse	int16	smallint	col_int16 int16	TRUE	TRUE	
-clickhouse	int32	bigint	col_int32 int32	TRUE	TRUE	
-clickhouse	int64	bigint	col_int64 int64	TRUE	TRUE	
-clickhouse	int8	integer	col_int8 int8	TRUE	TRUE	
-clickhouse	string	text	col_string string	TRUE	TRUE	
-clickhouse	tuple	string	col_tuple tuple	TRUE	TRUE	
-clickhouse	uint16	integer	col_uint16 uint16	TRUE	TRUE	
-clickhouse	uint32	bigint	col_uint32 uint32	TRUE	TRUE	
-clickhouse	uint64	decimal(28,0)	col_uint64 uint64	TRUE	TRUE	
-clickhouse	uint8	integer	col_uint8 uint8	TRUE	TRUE	
-clickhouse	json	json	col_json json	FALSE	FALSE	
-clickhouse	map	json	col_map json	FALSE	FALSE	
-clickhouse	lowcardinality	string	col_lowcardinality json	FALSE	FALSE	
-clickhouse	enum8	string	col_enum8 json	FALSE	FALSE	
-clickhouse	ipv6	string	col_enum8 json	FALSE	FALSE	
-duckdb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
-duckdb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
-duckdb	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB
-duckdb	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
-duckdb	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
-duckdb	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
-duckdb	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
-duckdb	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
-duckdb	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
-duckdb	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
-duckdb	integer	integer	col_int int	TRUE	TRUE	A standard integer
-duckdb	json	json	col_json json	TRUE	TRUE	JSON Data Type
-duckdb	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
-duckdb	text	text	col_text text	TRUE	TRUE	A small non-binary string
-duckdb	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
-duckdb	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
-duckdb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
-duckdb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
-duckdb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
-duckdb	boolean	bool	col_boolean boolean	TRUE	TRUE	
-duckdb	list	json	col_list list	TRUE	TRUE	
-duckdb	struct	json	col_struct struct	TRUE	TRUE	
-duckdb	map	json	col_map map	TRUE	TRUE	
-duckdb	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
-duckdb	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
-duckdb	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
-duckdb	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
-duckdb	uuid	string	col_uuid uuid	TRUE	TRUE	
-duckdb	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
-duckdb	interval	string	col_interval interval	TRUE	TRUE	
-motherduck	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
-motherduck	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
-motherduck	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB
-motherduck	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
-motherduck	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
-motherduck	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
-motherduck	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
-motherduck	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
-motherduck	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
-motherduck	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
-motherduck	integer	integer	col_int int	TRUE	TRUE	A standard integer
-motherduck	json	json	col_json json	TRUE	TRUE	JSON Data Type
-motherduck	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
-motherduck	text	text	col_text text	TRUE	TRUE	A small non-binary string
-motherduck	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
-motherduck	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
-motherduck	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
-motherduck	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
-motherduck	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
-motherduck	boolean	bool	col_boolean boolean	TRUE	TRUE	
-motherduck	list	json	col_list list	TRUE	TRUE	
-motherduck	struct	json	col_struct struct	TRUE	TRUE	
-motherduck	map	json	col_map map	TRUE	TRUE	
-motherduck	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	
-motherduck	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
-motherduck	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
-motherduck	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
-motherduck	uuid	string	col_uuid uuid	TRUE	TRUE	
-motherduck	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
-motherduck	interval	string	col_interval interval	TRUE	TRUE	
-mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
-mariadb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
-mariadb	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
-mariadb	blob	text	col_blob blob	TRUE	TRUE	A small BLOB
-mariadb	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
-mariadb	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
-mariadb	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat
-mariadb	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
-mariadb	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
-mariadb	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member
-mariadb	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
-mariadb	geometry	string	col_geometry geometry	FALSE	FALSE	A spatial value of any type
-mariadb	geometrycollection	string	col_geometrycollection geometrycollection	FALSE	FALSE	A collection of GEOMETRYvalues
-mariadb	geomcollection	string		FALSE	FALSE	
-mariadb	int	integer	col_int int	TRUE	TRUE	A standard integer
-mariadb	json	json	col_json json	TRUE	TRUE	JSON Data Type
-mariadb	linestring	string	col_linestring linestring	FALSE	FALSE	A curve (one or more POINT values)
-mariadb	longblob	text	col_longblob longblob	TRUE	TRUE	A large BLOB
-mariadb	longtext	text	col_longtext longtext	TRUE	TRUE	A large non-binary string
-mariadb	mediumblob	text	col_mediumblob mediumblob	TRUE	TRUE	A medium-sized BLOB
-mariadb	mediumint	integer	col_mediumint mediumint	TRUE	TRUE	A medium-sized integer
-mariadb	mediumtext	text	col_mediumtext mediumtext	TRUE	TRUE	A medium-sized non-binary string
-mariadb	multilinestring	string	col_multilinestring multilinestring	FALSE	FALSE	A collection of LINESTRINGvalues
-mariadb	multipoint	string	col_multipoint multipoint	FALSE	FALSE	A collection of POINTvalues
-mariadb	multipolygon	string	col_multipolygon multipolygon	FALSE	FALSE	A collection of POLYGONvalues
-mariadb	point	string	col_point point	FALSE	FALSE	A point (a pair of X-Y coordinates)
-mariadb	polygon	string	col_polygon polygon	FALSE	FALSE	A polygon
-mariadb	set	string	col_set set('one', 'two')	FALSE	FALSE	A set; each column value may be assigned zero or more SET members
-mariadb	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
-mariadb	text	text	col_text text	TRUE	TRUE	A small non-binary string
-mariadb	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
-mariadb	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
-mariadb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
-mariadb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
-mariadb	tinytext	text	col_tinytext tinytext	TRUE	TRUE	A very small non-binary string
-mariadb	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	A variable-length binary string
-mariadb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
-mariadb	year	string	col_year year	FALSE	FALSE	A year value in CCYY or YY format
 starrocks	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 starrocks	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
 starrocks	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
@@ -482,3 +485,20 @@ starrocks	tinytext	text	col_tinytext tinytext	TRUE	TRUE	A very small non-binary 
 starrocks	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	A variable-length binary string
 starrocks	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
 starrocks	year	string	col_year year	FALSE	FALSE	A year value in CCYY or YY format
+trino	bigint	bigint				
+trino	varbinary	binary				
+trino	boolean	bool				
+trino	date	date				
+trino	timestamp	datetime				
+trino	decimal	decimal				
+trino	integer	integer				
+trino	json	json				
+trino	smallint	smallint				
+trino	varchar	string				
+trino	text	text				
+trino	unknown	text				
+trino	timestamp	timestamp				
+trino	timestamp with time zone	timestampz				
+trino	double	float				
+trino	varchar	time				
+trino	varchar	timez				

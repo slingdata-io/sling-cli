@@ -293,7 +293,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// pre SQL
 	if preSQL := cfg.Target.Options.PreSQL; preSQL != "" {
 		t.SetProgress("executing pre-sql")
-		preSQL, err = getSQLText(preSQL)
+		preSQL, err = GetSQLText(preSQL)
 		if err != nil {
 			err = g.Error(err, "could not get pre-sql body")
 			return cnt, err
@@ -340,7 +340,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	switch tgtConn.GetType() {
 	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		txOptions = sql.TxOptions{}
-	case dbio.TypeDbClickhouse:
+	case dbio.TypeDbClickhouse, dbio.TypeDbOracle:
 		txOptions = sql.TxOptions{Isolation: sql.LevelDefault}
 	}
 	err = tgtConn.BeginContext(df.Context.Ctx, &txOptions)
@@ -477,7 +477,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if postSQL := cfg.Target.Options.PostSQL; postSQL != "" {
 		t.SetProgress("executing post-sql")
 
-		postSQL, err = getSQLText(postSQL)
+		postSQL, err = GetSQLText(postSQL)
 		if err != nil {
 			err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
 			return cnt, err

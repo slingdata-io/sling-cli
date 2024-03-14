@@ -22,6 +22,7 @@ metadata:
     select table_name
     from information_schema.tables
     where table_type = 'BASE TABLE'
+      and table_schema = '{schema}'
     order by table_name
 
 
@@ -29,6 +30,7 @@ metadata:
     select table_name
     from information_schema.tables
     where table_type in ('VIEW')
+      and table_schema = '{schema}'
 
   columns: |
     select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale

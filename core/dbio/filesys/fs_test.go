@@ -158,6 +158,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 
 		// folder
 		fs2, err = NewFileSysClient(dbio.TypeFileLocal, "FORMAT="+formatS, "FILE_MAX_ROWS=5")
+		fs2.SetProp("header", "true")
 		assert.NoError(t, err, formatS)
 		fs.SetProp("header", "false")
 		df2, _ = fs.ReadDataflow("test/test2/test2.1.noheader.csv")
@@ -167,7 +168,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		_, err = df3.Collect()
 		assert.NoError(t, err, formatS)
-		assert.Equal(t, cast.ToInt(df2.Count()), cast.ToInt(df3.Count()))
+		assert.Equal(t, cast.ToInt(df2.Count()), cast.ToInt(df3.Count()), formatS)
 
 		// all data types
 		fs3, err := NewFileSysClient(dbio.TypeFileLocal, "FORMAT="+formatS)
@@ -200,7 +201,7 @@ func TestFileSysLocalJson(t *testing.T) {
 
 	data1, err := df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 1019, len(data1.Rows))
+	assert.EqualValues(t, 2019, len(data1.Rows))
 
 	fs.SetProp("flatten", "true")
 	df1, err = fs.ReadDataflow("test/test1/json")
@@ -208,7 +209,7 @@ func TestFileSysLocalJson(t *testing.T) {
 
 	data1, err = df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 1036, len(data1.Rows))
+	assert.EqualValues(t, 2036, len(data1.Rows))
 
 	fs.SetProp("flatten", "false")
 	df2, err := fs.ReadDataflow("test/test2/json")
@@ -293,7 +294,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 					case col.IsDecimal():
 						row[i] = cast.ToString(row[i])
 						row[i] = iop.StringToDecimalByteArray(cast.ToString(row[i]), numScale, arrowParquet.Types.FixedLenByteArray, 16) // works for decimals with precision <= 16, very limited
-					case col.IsDatetime():
+					case col.IsDatetime() || col.IsDate():
 						switch valT := row[i].(type) {
 						case time.Time:
 							if row[i] != nil {

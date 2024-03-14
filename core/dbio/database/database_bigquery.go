@@ -195,11 +195,6 @@ func (r bqResult) RowsAffected() (int64, error) {
 	return cast.ToInt64(r.TotalRows), nil
 }
 
-// // ExecContext runs a sql query with context, returns `error`
-// func (conn *BigQueryConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-// 	return conn.ExecContext(ctx, sql, args...)
-// }
-
 func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 
 	if len(args) > 0 {
@@ -500,13 +495,12 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 		iop.JsonType:       bigquery.JSONFieldType,
 		iop.BoolType:       bigquery.BooleanFieldType,
 		iop.BinaryType:     bigquery.BytesFieldType,
-		iop.DateType:       bigquery.TimestampFieldType,
+		iop.DateType:       bigquery.DateFieldType,
 		iop.DatetimeType:   bigquery.TimestampFieldType,
-		// iop.FloatType:      bigquery.FloatFieldType,
-		iop.FloatType:    bigquery.NumericFieldType,
-		iop.SmallIntType: bigquery.IntegerFieldType,
-		iop.IntegerType:  bigquery.IntegerFieldType,
-		iop.BigIntType:   bigquery.IntegerFieldType,
+		iop.FloatType:      bigquery.FloatFieldType,
+		iop.SmallIntType:   bigquery.IntegerFieldType,
+		iop.IntegerType:    bigquery.IntegerFieldType,
+		iop.BigIntType:     bigquery.IntegerFieldType,
 		// https://stackoverflow.com/questions/55904464/big-query-does-now-cast-automatically-long-decimal-values-to-numeric-when-runni
 		iop.DecimalType: bigquery.NumericFieldType,
 		// "decimal":   bigquery.FloatFieldType,
@@ -927,7 +921,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if table.IsQuery() || table.IsView {
 		if table.IsView && table.SQL == "" {
-			table.SQL = table.Select()
+			table.SQL = table.Select(0)
 		}
 		return conn.ExportToGCS(table.SQL, gcsURI)
 	}
@@ -987,6 +981,8 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 	switch {
 	case srcCol.IsString() && !srcCol.Type.IsJSON() && tgtCol.Type.IsJSON():
 		selectStr = g.F("to_json(%s) as %s", qName, qName)
+	case !srcCol.IsFloat() && tgtCol.IsFloat():
+		selectStr = g.F("cast(%s as float64) as %s", qName, qName)
 	case srcCol.IsString() && tgtCol.IsDecimal():
 		selectStr = g.F("parse_numeric(%s) as %s", qName, qName)
 	case !srcCol.IsDecimal() && tgtCol.IsDecimal():
@@ -997,6 +993,8 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("cast(%s as string) as %s", qName, qName)
 	case srcCol.IsString() && tgtCol.IsDatetime():
 		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
+	case srcCol.IsString() && tgtCol.IsDate():
+		selectStr = g.F("cast(%s as date) as %s", qName, qName)
 	default:
 		selectStr = qName
 	}

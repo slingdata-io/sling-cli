@@ -1,9 +1,14 @@
 package dbio
 
 import (
+	"bufio"
+	"embed"
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
+	"gopkg.in/yaml.v2"
 )
 
 // Kind is the connection kind
@@ -48,7 +53,9 @@ const (
 	TypeDbSQLServer  Type = "sqlserver"
 	TypeDbAzure      Type = "azuresql"
 	TypeDbAzureDWH   Type = "azuredwh"
+	TypeDbTrino      Type = "trino"
 	TypeDbClickhouse Type = "clickhouse"
+	TypeDbMongoDB    Type = "mongodb"
 )
 
 // ValidateType returns true is type is valid
@@ -67,7 +74,7 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB:
 		return t, true
 	}
 
@@ -90,7 +97,9 @@ func (t Type) DefPort() int {
 		TypeDbOracle:     1521,
 		TypeDbSQLServer:  1433,
 		TypeDbAzure:      1433,
+		TypeDbTrino:      8080,
 		TypeDbClickhouse: 9000,
+		TypeDbMongoDB:    27017,
 		TypeFileFtp:      21,
 		TypeFileSftp:     22,
 	}
@@ -106,7 +115,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbDuckDb, TypeDbMotherDuck:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -160,7 +169,9 @@ func (t Type) NameLong() string {
 		TypeDbMotherDuck: "DB - MotherDuck",
 		TypeDbSQLServer:  "DB - SQLServer",
 		TypeDbAzure:      "DB - Azure",
+		TypeDbTrino:      "DB - Trino",
 		TypeDbClickhouse: "DB - Clickhouse",
+		TypeDbMongoDB:    "DB - MongoDB",
 	}
 
 	return mapping[t]
@@ -191,9 +202,149 @@ func (t Type) Name() string {
 		TypeDbDuckDb:     "DuckDB",
 		TypeDbMotherDuck: "MotherDuck",
 		TypeDbSQLServer:  "SQLServer",
+		TypeDbTrino:      "Trino",
 		TypeDbClickhouse: "Clickhouse",
+		TypeDbMongoDB:    "MongoDB",
 		TypeDbAzure:      "Azure",
 	}
 
 	return mapping[t]
+}
+
+//go:embed templates/*
+var templatesFolder embed.FS
+
+// Template is a database YAML template
+type Template struct {
+	Core           map[string]string `yaml:"core"`
+	Metadata       map[string]string `yaml:"metadata"`
+	Analysis       map[string]string `yaml:"analysis"`
+	Function       map[string]string `yaml:"function"`
+	GeneralTypeMap map[string]string `yaml:"general_type_map"`
+	NativeTypeMap  map[string]string `yaml:"native_type_map"`
+	NativeStatsMap map[string]bool   `yaml:"native_stat_map"`
+	Variable       map[string]string `yaml:"variable"`
+}
+
+// ToData convert is dataset
+func (template Template) ToData() (data iop.Dataset) {
+	columns := []string{"key", "value"}
+	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
+	data.Rows = append(data.Rows, []interface{}{"core", template.Core})
+	data.Rows = append(data.Rows, []interface{}{"analysis", template.Analysis})
+	data.Rows = append(data.Rows, []interface{}{"function", template.Function})
+	data.Rows = append(data.Rows, []interface{}{"metadata", template.Metadata})
+	data.Rows = append(data.Rows, []interface{}{"general_type_map", template.GeneralTypeMap})
+	data.Rows = append(data.Rows, []interface{}{"native_type_map", template.NativeTypeMap})
+	data.Rows = append(data.Rows, []interface{}{"variable", template.Variable})
+
+	return
+}
+
+var typeTemplate = map[Type]Template{}
+
+func (t Type) Template() (template Template, err error) {
+	if val, ok := typeTemplate[t]; ok {
+		return val, nil
+	}
+
+	template = Template{
+		Core:           map[string]string{},
+		Metadata:       map[string]string{},
+		Analysis:       map[string]string{},
+		Function:       map[string]string{},
+		GeneralTypeMap: map[string]string{},
+		NativeTypeMap:  map[string]string{},
+		NativeStatsMap: map[string]bool{},
+		Variable:       map[string]string{},
+	}
+
+	connTemplate := Template{}
+
+	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
+	if err != nil {
+		return template, g.Error(err, "io.ReadAll(baseTemplateFile)")
+	}
+
+	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
+		return template, g.Error(err, "yaml.Unmarshal")
+	}
+
+	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
+	if err != nil {
+		return template, g.Error(err, "io.ReadAll(templateFile) for "+t.String())
+	}
+
+	err = yaml.Unmarshal([]byte(templateBytes), &connTemplate)
+	if err != nil {
+		return template, g.Error(err, "yaml.Unmarshal")
+	}
+
+	for key, val := range connTemplate.Core {
+		template.Core[key] = val
+	}
+
+	for key, val := range connTemplate.Analysis {
+		template.Analysis[key] = val
+	}
+
+	for key, val := range connTemplate.Function {
+		template.Function[key] = val
+	}
+
+	for key, val := range connTemplate.Metadata {
+		template.Metadata[key] = val
+	}
+
+	for key, val := range connTemplate.Variable {
+		template.Variable[key] = val
+	}
+
+	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
+	if err != nil {
+		return template, g.Error(err, `cannot open types_native_to_general`)
+	}
+
+	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
+	TypesNativeCSV.Delimiter = '\t'
+	TypesNativeCSV.NoDebug = true
+
+	data, err := TypesNativeCSV.Read()
+	if err != nil {
+		return template, g.Error(err, `TypesNativeCSV.Read()`)
+	}
+
+	for _, rec := range data.Records() {
+		if rec["database"] == t.String() {
+			nt := strings.TrimSpace(cast.ToString(rec["native_type"]))
+			gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
+			s := strings.TrimSpace(cast.ToString(rec["stats_allowed"]))
+			template.NativeTypeMap[nt] = cast.ToString(gt)
+			template.NativeStatsMap[nt] = cast.ToBool(s)
+		}
+	}
+
+	TypesGeneralFile, err := templatesFolder.Open("templates/types_general_to_native.tsv")
+	if err != nil {
+		return template, g.Error(err, `cannot open types_general_to_native`)
+	}
+
+	TypesGeneralCSV := iop.CSV{Reader: bufio.NewReader(TypesGeneralFile)}
+	TypesGeneralCSV.Delimiter = '\t'
+	TypesGeneralCSV.NoDebug = true
+
+	data, err = TypesGeneralCSV.Read()
+	if err != nil {
+		return template, g.Error(err, `TypesGeneralCSV.Read()`)
+	}
+
+	for _, rec := range data.Records() {
+		gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
+		template.GeneralTypeMap[gt] = cast.ToString(rec[t.String()])
+	}
+
+	// cache
+	typeTemplate[t] = template
+
+	return template, nil
 }

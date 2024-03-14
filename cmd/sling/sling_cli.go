@@ -281,6 +281,24 @@ var cliConns = &g.CliSC{
 				},
 			},
 		},
+		{
+			Name:        "exec",
+			Description: "execute a SQL query on a Database connection",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to set",
+				},
+				{
+					Name:        "query",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The SQL query to execute. Can be in-line text or a file",
+				},
+			},
+		},
 	},
 	ExecProcess: processConns,
 }
@@ -428,6 +446,11 @@ func cliInit() int {
 	flaggy.Parse()
 
 	ok, err := g.CliProcess()
+
+	if time.Now().Second()%15 == 0 {
+		defer SlingMedia.PrintFollowUs()
+	}
+
 	if err != nil || telemetryMap["error"] != nil {
 		if err == nil && telemetryMap["error"] != nil {
 			err = g.Error(cast.ToString(telemetryMap["error"]))
@@ -520,7 +543,7 @@ func cliInit() int {
 	}
 
 	switch {
-	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover"):
+	case g.CliObj.Name == "conns" && g.In(g.CliObj.UsedSC(), "test", "discover", "exec"):
 		Track("conns_" + g.CliObj.UsedSC())
 	case g.CliObj.Name == "update":
 		Track("update")

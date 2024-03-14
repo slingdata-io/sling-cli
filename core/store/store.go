@@ -8,6 +8,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
@@ -23,7 +24,7 @@ type Execution struct {
 	// ID auto-increments
 	ID int64 `json:"id" gorm:"primaryKey"`
 
-	ExecID string `json:"exec_id" gorm:"uniqueIndex"`
+	ExecID string `json:"exec_id" gorm:"index"`
 
 	// StreamID represents the stream inside the replication that is running.
 	// Is an MD5 construct:`md5(Source, Target, Stream)`.
@@ -42,6 +43,7 @@ type Execution struct {
 	Output    string           `json:"output" sql:"default ''"`
 	Rows      uint64           `json:"rows"`
 	Pid       int              `json:"pid"`
+	Version   string           `json:"version"`
 
 	// ProjectID represents the project or the repository.
 	// If .git exists, grab first commit with `git rev-list --max-parents=0 HEAD`.
@@ -98,6 +100,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
 		Pid:       os.Getpid(),
+		Version:   core.Version,
 	}
 
 	if t.Err != nil {
@@ -176,7 +179,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 		Create(task).Error
 	if err != nil {
-		g.Debug("could not insert task config into local .sling.db. %s", err.Error())
+		g.DebugLow("could not insert task config into local .sling.db. %s", err.Error())
 		return
 	}
 	exec.TaskMD5 = task.MD5
@@ -185,7 +188,7 @@ func StoreInsert(t *sling.TaskExecution) {
 		err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 			Create(replication).Error
 		if err != nil {
-			g.Debug("could not insert replication config into local .sling.db. %s", err.Error())
+			g.DebugLow("could not insert replication config into local .sling.db. %s", err.Error())
 			return
 		}
 		exec.ReplicationMD5 = replication.MD5
@@ -194,7 +197,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	// insert execution
 	err = Db.Create(exec).Error
 	if err != nil {
-		g.Debug("could not insert execution into local .sling.db. %s", err.Error())
+		g.DebugLow("could not insert execution into local .sling.db. %s", err.Error())
 		return
 	}
 
@@ -209,26 +212,26 @@ func StoreUpdate(t *sling.TaskExecution) {
 	if Db == nil {
 		return
 	}
+	e := ToExecutionObject(t)
 
-	exec := &Execution{ExecID: t.ExecID}
-	err := Db.Where("exec_id = ?", t.ExecID).First(exec).Error
+	exec := &Execution{ExecID: t.ExecID, StreamID: e.StreamID}
+	err := Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
 	if err != nil {
-		g.Debug("could not select execution from local .sling.db. %s", err.Error())
+		g.DebugLow("could not select execution from local .sling.db. %s", err.Error())
 		return
 	}
-	execNew := ToExecutionObject(t)
 
-	exec.StartTime = execNew.StartTime
-	exec.EndTime = execNew.EndTime
-	exec.Status = execNew.Status
-	exec.Err = execNew.Err
-	exec.Bytes = execNew.Bytes
-	exec.Rows = execNew.Rows
-	exec.Output = execNew.Output
+	exec.StartTime = e.StartTime
+	exec.EndTime = e.EndTime
+	exec.Status = e.Status
+	exec.Err = e.Err
+	exec.Bytes = e.Bytes
+	exec.Rows = e.Rows
+	exec.Output = e.Output
 
 	err = Db.Updates(exec).Error
 	if err != nil {
-		g.Debug("could not update execution into local .sling.db. %s", err.Error())
+		g.DebugLow("could not update execution into local .sling.db. %s", err.Error())
 		return
 	}
 

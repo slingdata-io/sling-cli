@@ -27,18 +27,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for pre-sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
-
 	// check if referring to a SQL file
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
 		// for incremental, need to put `{incremental_where_cond}` for proper selecting
-		sqlFromFile, err := getSQLText(cfg.Source.Stream)
+		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
 		if err != nil {
 			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
 			if sTable.Name == "" {
@@ -51,6 +43,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = sqlFromFile
 		}
 	}
+
+	// expand variables for custom SQL
+	fMap, err := t.Config.GetFormatMap()
+	if err != nil {
+		err = g.Error(err, "could not get format map for sql")
+		return t.df, err
+	}
+	sTable.SQL = g.Rm(sTable.SQL, fMap)
 
 	// get source columns
 	st := sTable
@@ -135,6 +135,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.IsDate() {
+				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
 			} else if updateCol.IsString() {
 				startValue = `'` + startValue + `'`
 				endValue = `'` + endValue + `'`
@@ -189,17 +193,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				)
 			}
 		}
-	} else if cfg.Source.Limit() > 0 {
-		if sTable.SQL == "" {
-			sTable.SQL = "select * from " + sTable.FDQN()
-		}
-		sTable.SQL = g.R(
-			srcConn.Template().Core["limit"],
-			"fields", selectFieldsStr,
-			"table", sTable.FDQN(),
-			"sql", sTable.SQL,
-			"limit", cast.ToString(cfg.Source.Limit()),
-		)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
@@ -210,13 +203,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
 	// construct SELECT statement for selected fields
-	if sTable.SQL == "" && selectFieldsStr != "*" {
-		sTable.SQL = sTable.Select(strings.Split(selectFieldsStr, ",")...)
+	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
+		sTable.SQL = sTable.Select(cfg.Source.Limit(), strings.Split(selectFieldsStr, ",")...)
 	}
 
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
-		err = g.Error(err, "Could not BulkExportFlow: "+sTable.Select())
+		err = g.Error(err, "Could not BulkExportFlow")
 		return t.df, err
 	}
 
@@ -233,9 +226,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 // ReadFromFile reads from a source file
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+	// sets metadata
+	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
 	options := t.sourceOptionsMap()
+	options["METADATA"] = g.Marshal(metadata)
 
 	if cfg.SrcConn.URL() != "" {
 		// construct props by merging with options

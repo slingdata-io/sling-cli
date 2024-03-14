@@ -158,16 +158,22 @@ func (t *TaskExecution) Execute() error {
 }
 
 func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
-	// look for conn in cache
-	if conn, ok := connPool[t.Config.SrcConn.Hash()]; ok {
-		return conn, nil
-	}
+
+	// sets metadata
+	metadata := t.setGetMetadata()
 
 	options := t.sourceOptionsMap()
+	options["METADATA"] = g.Marshal(metadata)
+
 	srcProps := append(
 		g.MapToKVArr(t.Config.SrcConn.DataS()),
 		g.MapToKVArr(g.ToMapString(options))...,
 	)
+
+	// look for conn in cache
+	if conn, ok := connPool[t.Config.SrcConn.Hash()]; ok {
+		return conn, nil
+	}
 
 	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {

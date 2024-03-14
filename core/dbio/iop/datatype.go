@@ -84,21 +84,22 @@ var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, Partit
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
-	MinLen    int    `json:"min_len,omitempty"`
-	MaxLen    int    `json:"max_len,omitempty"`
-	MaxDecLen int    `json:"max_dec_len,omitempty"`
-	Min       int64  `json:"min"`
-	Max       int64  `json:"max"`
-	NullCnt   int64  `json:"null_cnt"`
-	IntCnt    int64  `json:"int_cnt,omitempty"`
-	DecCnt    int64  `json:"dec_cnt,omitempty"`
-	BoolCnt   int64  `json:"bool_cnt,omitempty"`
-	JsonCnt   int64  `json:"json_cnt,omitempty"`
-	StringCnt int64  `json:"string_cnt,omitempty"`
-	DateCnt   int64  `json:"date_cnt,omitempty"`
-	TotalCnt  int64  `json:"total_cnt"`
-	UniqCnt   int64  `json:"uniq_cnt"`
-	Checksum  uint64 `json:"checksum"`
+	MinLen      int    `json:"min_len,omitempty"`
+	MaxLen      int    `json:"max_len,omitempty"`
+	MaxDecLen   int    `json:"max_dec_len,omitempty"`
+	Min         int64  `json:"min"`
+	Max         int64  `json:"max"`
+	NullCnt     int64  `json:"null_cnt"`
+	IntCnt      int64  `json:"int_cnt,omitempty"`
+	DecCnt      int64  `json:"dec_cnt,omitempty"`
+	BoolCnt     int64  `json:"bool_cnt,omitempty"`
+	JsonCnt     int64  `json:"json_cnt,omitempty"`
+	StringCnt   int64  `json:"string_cnt,omitempty"`
+	DateCnt     int64  `json:"date_cnt,omitempty"`
+	DateTimeCnt int64  `json:"datetime_cnt,omitempty"`
+	TotalCnt    int64  `json:"total_cnt"`
+	UniqCnt     int64  `json:"uniq_cnt"`
+	Checksum    uint64 `json:"checksum"`
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -307,7 +308,10 @@ func (cols Columns) Types(args ...bool) []string {
 			field = CleanName(field) // clean up
 		}
 
-		fields[j] = g.F("%s [%s | %s]", field, column.Type, column.DbType)
+		fields[j] = g.F("%s [%s]", field, column.Type)
+		if column.DbType != "" {
+			fields[j] = g.F("%s [%s | %s]", field, column.Type, column.DbType)
+		}
 	}
 	return fields
 }
@@ -517,6 +521,7 @@ func (cols Columns) Add(newCols Columns, overwrite bool) (col2 Columns, added Co
 				case newCol.Type.IsString() && !cols[i].Type.IsString():
 				case newCol.Type.IsNumber() && !cols[i].Type.IsNumber():
 				case newCol.Type.IsBool() && !cols[i].Type.IsBool():
+				case newCol.Type.IsDate() && !cols[i].Type.IsDate():
 				case newCol.Type.IsDatetime() && !cols[i].Type.IsDatetime():
 				default:
 					warn = false
@@ -656,12 +661,15 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(int64(0))
 
-			// if safe {
-			// 	// cast as decimal for safety
-			// 	col.Type = DecimalType
-			// 	col.goType = reflect.TypeOf(float64(0.0))
-			// }
+			if safe {
+				// cast as bigint for safety
+				col.Type = BigIntType
+			}
 		} else if colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+			col.Type = DateType
+			col.goType = reflect.TypeOf(time.Now())
+			colStats.Min = 0
+		} else if colStats.DateTimeCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DatetimeType
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
@@ -772,9 +780,11 @@ func (col *Column) GoType() reflect.Type {
 		return reflect.TypeOf(true)
 	case col.IsInteger():
 		return reflect.TypeOf(int64(0))
-	case col.IsDatetime():
+	case col.IsDatetime() || col.IsDate():
 		return reflect.TypeOf(time.Now())
 	case col.IsDecimal():
+		return reflect.TypeOf(float64(6.6))
+	case col.IsFloat():
 		return reflect.TypeOf(float64(6.6))
 	}
 
@@ -807,6 +817,11 @@ func (col *Column) IsInteger() bool {
 	return col.Type.IsInteger()
 }
 
+// IsFloat returns whether the column is a float
+func (col *Column) IsFloat() bool {
+	return col.Type.IsFloat()
+}
+
 // IsDecimal returns whether the column is a decimal
 func (col *Column) IsDecimal() bool {
 	return col.Type.IsDecimal()
@@ -820,6 +835,11 @@ func (col *Column) IsNumber() bool {
 // IsBool returns whether the column is a boolean
 func (col *Column) IsBool() bool {
 	return col.Type.IsBool()
+}
+
+// IsDate returns whether the column is a datet object
+func (col *Column) IsDate() bool {
+	return col.Type.IsDate()
 }
 
 // IsDatetime returns whether the column is a datetime object
@@ -854,14 +874,19 @@ func (ct ColumnType) IsInteger() bool {
 	return false
 }
 
+// IsFloat returns whether the column is a float
+func (ct ColumnType) IsFloat() bool {
+	return ct == FloatType
+}
+
 // IsDecimal returns whether the column is a decimal
 func (ct ColumnType) IsDecimal() bool {
-	return ct == FloatType || ct == DecimalType
+	return ct == DecimalType
 }
 
 // IsNumber returns whether the column is a decimal or an integer
 func (ct ColumnType) IsNumber() bool {
-	return ct.IsInteger() || ct.IsDecimal()
+	return ct.IsInteger() || ct.IsDecimal() || ct.IsFloat()
 }
 
 // IsBool returns whether the column is a boolean
@@ -881,7 +906,7 @@ func (ct ColumnType) IsDate() bool {
 // IsDatetime returns whether the column is a datetime object
 func (ct ColumnType) IsDatetime() bool {
 	switch ct {
-	case DatetimeType, DateType, TimestampType, TimestampzType:
+	case DatetimeType, TimestampType, TimestampzType:
 		return true
 	}
 	return false
@@ -889,5 +914,10 @@ func (ct ColumnType) IsDatetime() bool {
 
 // IsValid returns whether the column has a valid type
 func (ct ColumnType) IsValid() bool {
-	return ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDatetime()
+	return ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime()
+}
+
+func isDate(t *time.Time) bool {
+	return t.Unix()%(24*60*60) == 0
+	// return t.Format("15:04:05.000") == "00:00:00.000" // much slower
 }

@@ -1,125 +1,30 @@
 core:
-  drop_table: drop table if exists {table}
-  drop_view: drop view if exists {view}
-  create_schema: create schema if not exists {schema}
-  create_table: create table {table} ({col_types}) {partition_by} {cluster_by}
+  drop_table: drop table {table}
+  drop_view: drop view {view}
+  drop_schema: drop schema {schema}
+  create_schema: create schema {schema}
+  create_table: create table {table} ({col_types})
+  create_temporary_table: create temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
-  # alter_columns: alter table {table} alter column {col_ddl}
-  # modify_column: '{column} set data type {type}'
-  alter_columns: |
-    create or replace table {table} as
-    select * replace({col_ddl})
-    from {table}
-  modify_column: 'cast({column} as {type}) as {column}'
-  # column_names: select * from ({sql}) as t limit 1
-  copy_to_gcs: |
-      EXPORT DATA OPTIONS(
-        uri = '{gcs_path}',
-        format = 'CSV',
-        overwrite = true,
-        header = true,
-        field_delimiter = ',',
-        compression = 'GZIP'
-      ) AS (
-        {sql}
-      )
+  limit: |
+    select * from (
+      {sql}
+    ) as t limit {limit}
+  insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from {src_table}
+  truncate_table: truncate table {table}
+  alter_columns: alter table {table} {col_ddl}
+  drop_column: alter table {table} drop column {column}
+  rename_column: alter table {table} rename column {column} to {new_column}
+  modify_column: '{column} {type}'
+  add_column: alter table {table} add column {column} {type}
+  # column_names: select * from ({sql}) as t where 1=0
+  column_names: '{sql}'
+  enable_trigger: ALTER TABLE {table} ENABLE TRIGGER {trigger}
+  disable_trigger: ALTER TABLE {table} DISABLE TRIGGER {trigger}
 
-metadata:
-
-  current_database:
-    select current_database()
-  
-  databases:
-    show projects
-  
-  schemas: |
-    select schema_name
-    from INFORMATION_SCHEMA.SCHEMATA
-    order by schema_name
-    
-  tables: |
-    select table_name
-    from `{schema}`.INFORMATION_SCHEMA.TABLES
-    where table_type = 'BASE TABLE'
-    order by table_name
-    
-  views: |
-    select table_name
-    from `{schema}`.INFORMATION_SCHEMA.TABLES
-    where table_type = 'VIEW'
-    order by table_name
-
-  columns: |
-    select column_name, data_type
-    from `{schema}`.INFORMATION_SCHEMA.COLUMNS
-    where table_name = '{table}'
-    order by ordinal_position  
-  
-  columns_full: |
-    with tables as (
-      select
-        table_catalog,
-        table_schema,
-        table_name,
-        case table_type
-          when 'VIEW' then true
-          else false
-        end as is_view
-      from `{schema}`.INFORMATION_SCHEMA.TABLES
-      where table_name = '{table}'
-    )
-    select
-      cols.table_schema as schema_name,
-      cols.table_name as table_name,
-      cols.column_name as column_name,
-      cols.data_type as data_type,
-      cols.ordinal_position as position
-    from `{schema}`.INFORMATION_SCHEMA.COLUMNS cols
-    join tables
-      on tables.table_catalog = cols.table_catalog
-      and tables.table_schema = cols.table_schema
-      and tables.table_name = cols.table_name
-    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
-
-  schemata: |
-    with tables as (
-      select
-        table_catalog,
-        table_schema,
-        table_name,
-        case table_type
-          when 'VIEW' then true
-          else false
-        end as is_view
-      from `{schema}`.INFORMATION_SCHEMA.TABLES
-      where 1=1
-        {{if .schema -}} and table_schema = '{schema}' {{- end}}
-        {{if .tables -}} and table_name in ({tables}) {{- end}}
-    )
-    select
-      cols.table_schema as schema_name,
-      cols.table_name as table_name,
-      tables.is_view as is_view,
-      cols.column_name as column_name,
-      cols.data_type as data_type,
-      cols.ordinal_position as position
-    from `{schema}`.INFORMATION_SCHEMA.COLUMNS cols
-    join tables
-      on tables.table_catalog = cols.table_catalog
-      and tables.table_schema = cols.table_schema
-      and tables.table_name = cols.table_name
-    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
-  
-  sessions:
-    select *
-    from pg_stat_activity
-    where state = 'active'
-
-  session_terminate:
-    select pg_terminate_backend({pid})
-  
 analysis:
   # table level
   table_count: |
@@ -128,7 +33,59 @@ analysis:
       '{schema}' as schema_nm,
       '{table}' as table_nm,
       count(*) cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
+
+  table_join_match: |
+    -- table_join_match "{t1}" vs "{t2}"
+    with t1 as (
+      select
+        {t1_field},
+        count(*) cnt
+      from {t1}
+      where {t1_filter}
+      group by {t1_field}
+    )
+    , t2 as (
+      select
+        {t2_field},
+        count(*) cnt
+      from {t2}
+      where {t2_filter}
+      group by {t2_field}
+    )
+    select
+      '{t1}' as table_1,
+      '{t2}' as table_2,
+      count(t1.{t1_field}) t1_cnt,
+      count(t2.{t2_field}) t2_cnt,
+      round(100.0 * count(t2.{t2_field}) / count(t1.{t1_field}), 1) match_rate,
+      sum(t1.cnt) t1_sum_cnt,
+      sum(t2.cnt) t2_sum_cnt,
+      round(100.0 * sum(t2.cnt) / sum(t1.cnt), 1) sum_match_rate,
+      sum(case when t1.{t1_field} is null then 0 else t1.cnt end) - count(t1.{t1_field}) t1_dup_cnt,
+      sum(case when t2.{t2_field} is null then 0 else t2.cnt end) - count(t2.{t2_field}) t2_dup_cnt,
+      sum(case when t1.{t1_field} is null then t1.cnt else 0 end) t1_null_cnt,
+      sum(case when t2.{t2_field} is null then t2.cnt else 0 end) t2_null_cnt
+    from t1
+    left join t2 on {conds}
+
+    union all
+
+    select
+      '{t2}' as table_1,
+      '{t1}' as table_2,
+      count(t2.{t2_field}) t1_cnt,
+      count(t1.{t1_field}) t2_cnt,
+      round(100.0 * count(t1.{t1_field}) / count(t2.{t2_field}), 1) match_rate,
+      sum(t1.cnt) t1_sum_cnt,
+      sum(t2.cnt) t2_sum_cnt,
+      round(100.0 * sum(t2.cnt) / sum(t1.cnt), 1) sum_match_rate,
+      sum(case when t2.{t2_field} is null then 0 else t1.cnt end) - count(t2.{t2_field}) t1_dup_cnt,
+      sum(case when t1.{t1_field} is null then 0 else t2.cnt end) - count(t1.{t1_field}) t2_dup_cnt,
+      sum(case when t2.{t2_field} is null then t1.cnt else 0 end) t1_null_cnt,
+      sum(case when t1.{t1_field} is null then t2.cnt else 0 end) t2_null_cnt
+    from t2
+    left join t1 on {conds}
 
   field_chars: |
     -- field_chars {field}
@@ -140,16 +97,16 @@ analysis:
       sum(case when regexp_like({field}, '\\t') then 1 else 0 end) as cnt_tab,
       sum(case when regexp_like({field}, ',') then 1 else 0 end) as cnt_comma,
       sum(case when regexp_like({field}, '"') then 1 else 0 end) as cnt_dquote
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
 
   field_pk_test: |
-    -- field_pk_test {field}
+    -- field_pk_test {table}
     select
-      '`{schema}`.`{table}`' as table_nm,
+      '{schema}.{table}' as table_nm,
       case when count(*) = count(distinct {field}) then 'PASS' else 'FAIL' end as result,
       count(*) as tot_cnt,
       count(distinct {field}) as dstct_cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
 
   field_stat: |
     -- field_stat {field}
@@ -164,7 +121,7 @@ analysis:
       count(distinct {field}) as f_dstct_cnt,
       round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
       count(*) - count(distinct {field}) as f_dup_cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
 
   field_stat_group: |
     -- field_stat_group {field}
@@ -180,7 +137,7 @@ analysis:
       count(distinct {field}) as f_dstct_cnt,
       round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
       count(*) - count(distinct {field}) as f_dup_cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     group by {group_expr}
 
   field_stat_len: |
@@ -191,11 +148,10 @@ analysis:
       '{field}' as field,
       '{type}' as type,
       count(*) as tot_cnt,
-      min(length(cast({field} as string))) as f_min_len,
-      max(length(cast({field} as string))) as f_max_len
-    from `{schema}`.`{table}`
+      min(length({field})) as f_min_len,
+      max(length({field})) as f_max_len
+    from "{schema}"."{table}"
 
-  
   field_stat_deep: |
     -- field_stat_deep {field}
     select
@@ -214,14 +170,14 @@ analysis:
       cast(max({field}) as string) as f_max,
       min(length({field})) as f_min_len,
       max(length({field})) as f_max_len
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
 
   fill_cnt_group_field: |
     -- fill_cnt_group_field {field}
     select
       {field},
       {columns_sql}
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     group by {field}
     order by {field}
 
@@ -230,7 +186,7 @@ analysis:
     select
       {field},
       {fill_rate_fields_sql}
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     group by {field}
     order by {field}
 
@@ -241,7 +197,7 @@ analysis:
         '{field}' as field,
         {field},
         count(*) cnt
-      from `{schema}`.`{table}`
+      from "{schema}"."{table}"
       group by {field}
       order by count(*) desc
     )
@@ -249,7 +205,7 @@ analysis:
       select
         '{field}' as field,
         count(*) ttl_cnt
-      from `{schema}`.`{table}`
+      from "{schema}"."{table}"
     )
     select
       '{table}' as table_nm,
@@ -270,7 +226,7 @@ analysis:
         {group_expr} as group_exp,
         {field},        
         count(*) cnt
-      from `{schema}`.`{table}`
+      from "{schema}"."{table}"
       group by {field}, {group_expr}
       order by count(*) desc
     )
@@ -278,7 +234,7 @@ analysis:
       select
         '{field}' as field,
         count(*) ttl_cnt
-      from `{schema}`.`{table}`
+      from "{schema}"."{table}"
     )
     select
       '{table}' as table_nm,
@@ -297,17 +253,16 @@ analysis:
     with t1 as (
         select
           '{field}' as field,
-          extract(year from {field}) as year,
-          extract(month from {field}) as month,
-          extract(day from {field}) as day,
+          year({field}) as year,
+          month({field}) as month,
           count(*) cnt
-        from `{schema}`.`{table}`
-        group by 2, 3, 4
-        order by 2, 3, 4
+        from "{schema}"."{table}"
+        group by year({field}), month({field})
+        order by year({field}), month({field})
       )
       , t2 as (
         select '{field}' as field, count(*) ttl_cnt
-        from `{schema}`.`{table}`
+        from "{schema}"."{table}"
       )
       select 
         '{schema}' as schema_nm,
@@ -315,13 +270,12 @@ analysis:
         t1.field,
         t1.year,
         t1.month,
-        t1.day,
         cnt,
         round(100.0 * cnt / ttl_cnt, 2) as prct
       from t1
       join t2
         on t1.field = t2.field
-      order by t1.year, t1.month, t1.day
+      order by t1.year, t1.month
 
   distro_field_date_wide: |
     -- distro_field_date {table}
@@ -330,21 +284,21 @@ analysis:
       year({date_field}) as year,
       month({date_field}) as month,
       {columns_sql}
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     {where_clause}
     group by year({date_field}), month({date_field})
     order by year({date_field}), month({date_field})
 
   test_pk: |
     select
-      '`{schema}`.`{table}`' as table_nm,
+      '{schema}.{table}' as table_nm,
       '{fields_exp}' as expression,
       case when count(*) = count(distinct {fields_exp}) then 'PASS' else 'FAIL' end as pk_result,
       count(*) as tot_cnt,
       count(distinct {fields_exp}) as expression_cnt,
       count(*) - count(distinct {fields_exp}) as delta_cnt,
       sum(case when {fields_exp} is null then 1 else 0 end) as null_cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     {where_clause}
 
 routine:
@@ -354,12 +308,12 @@ routine:
       count({field}) as field_cnt,
       min({field}) as min_val,
       max({field}) as max_val
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
 
   number_trunc_min_max: |
     select
       {fields}
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     where {where}
       (({partition_col_trunc} >= '{min_val}'
       and {partition_col_trunc} <= '{max_val}')
@@ -369,7 +323,7 @@ routine:
     select
       {partition_col_trunc} as day_field,
       count(*) cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     {where}
     group by {partition_col_trunc}
     order by {partition_col_trunc}
@@ -378,7 +332,7 @@ routine:
     select
       {partition_col_trunc} as trunc_field,
       count(*) cnt
-    from `{schema}`.`{table}`
+    from "{schema}"."{table}"
     {where}
     group by {partition_col_trunc}
     order by {partition_col_trunc}
@@ -386,20 +340,31 @@ routine:
 function:
   replace: replace({string_expr}, {to_replace}, {replacement})
   str_utf8: '{ field }'
-  string_type: string
-  cast_to_string: cast({field} as string)
+  string_type: varchar
+  cast_as: cast({field} as {type})
+  cast_to_string: cast({field} as varchar)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
-  checksum_datetime: cast(unix_micros({field}) as numeric)
-  checksum_boolean: 'length(cast({field} as string))'
-  checksum_json: "length(replace(nullif(to_json_string({field}), 'null'), ' ', ''))"
+  checksum_string: length({field})
+  checksum_json: length(replace({field}, ' ', ''))
+  checksum_integer: 'abs({field})'
+  checksum_decimal: 'abs(trunc({field}))'
+  checksum_datetime: '0'
+  checksum_boolean: 'length({field})'
 
 variable:
   tmp_folder: /tmp
-  bind_string: "?"
-  quote_char: '`'
-  error_filter_table_exists: duplicate
-  multi_exec_delay: 2 # https://cloud.google.com/bigquery/quotas#data-manipulation-language-statements
+  quote_char: '"'
+  bind_string: ${i}
+  ddl_col: 0
+  batch_rows: 2000
+  batch_values: 2000
+  date_layout_str: "'{value}'"
+  date_layout: '2006-01-02'
+  timestamp_layout_str: "'{value}'"
+  timestamp_layout: '2006-01-02 15:04:05.000'
+  error_filter_table_exists: already
+  bool_as: bool
 
 error_filter:
   table_not_exist: exist

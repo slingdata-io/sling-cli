@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	dbioEnv "github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -190,7 +192,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	for {
 		if replicationCfgPath != "" {
 			//  run replication
-			err = runReplication(replicationCfgPath, selectStreams...)
+			err = runReplication(replicationCfgPath, cfg, selectStreams...)
 			if err != nil {
 				return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
 			}
@@ -201,6 +203,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				if err != nil {
 					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
 				}
+			}
+
+			// run as replication is stream is wildcard
+			if cfg.HasWildcard() {
+				rc := cfg.AsReplication()
+				replicationCfgPath = path.Join(dbioEnv.GetTempFolder(), g.NewTsID("replication.temp")+".json")
+				err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
+				if err != nil {
+					return ok, g.Error(err, "could not write temp replication: %s", replicationCfgPath)
+				}
+				defer os.Remove(replicationCfgPath)
+				continue // run replication
 			}
 
 			err = runTask(cfg, nil)
@@ -333,7 +347,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	return nil
 }
 
-func runReplication(cfgPath string, selectStreams ...string) (err error) {
+func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
 	replication, err := sling.LoadReplicationConfig(cfgPath)
@@ -350,6 +364,9 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
 		return replication.HasStream(v)
 	})
+	selectStreams = lo.Map(selectStreams, func(name string, i int) string {
+		return replication.Normalize(name)
+	})
 
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
@@ -365,8 +382,8 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			break
 		}
 
-		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, name) {
-			g.Debug("skipping stream %s since it is not selected", name)
+		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, replication.Normalize(name)) {
+			g.Trace("skipping stream %s since it is not selected", name)
 			continue
 		}
 		counter++
@@ -379,6 +396,22 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 
 		if stream.Object == "" {
 			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
+		}
+
+		// config overwrite
+		if cfgOverwrite != nil {
+			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
+				g.Debug("stream mode overwritten: %s => %s", stream.Mode, cfgOverwrite.Mode)
+				stream.Mode = cfgOverwrite.Mode
+			}
+			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				g.Debug("stream update_key overwritten: %s => %s", stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
+			}
+			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
+				g.Debug("stream primary_key overwritten: %#v => %#v", stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
 		}
 
 		cfg := sling.Config{
@@ -416,6 +449,7 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
+		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
@@ -424,7 +458,6 @@ func runReplication(cfgPath string, selectStreams ...string) (err error) {
 		} else {
 			succcess++
 		}
-		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 	}
 
 	println()
@@ -487,6 +520,47 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
+	case "exec":
+		name := cast.ToString(c.Vals["name"])
+		conn, ok := ec.GetConnEntry(name)
+		if !ok {
+			return ok, g.Error("did not find connection %s", name)
+		}
+
+		telemetryMap["conn_type"] = conn.Connection.Type.String()
+
+		if !conn.Connection.Type.IsDb() {
+			return ok, g.Error("cannot execute SQL query on a non-database connection (%s)", conn.Connection.Type)
+		}
+
+		start := time.Now()
+		dbConn, err := conn.Connection.AsDatabase()
+		if err != nil {
+			return ok, g.Error(err, "cannot create database connection (%s)", conn.Connection.Type)
+		}
+
+		err = dbConn.Connect()
+		if err != nil {
+			return ok, g.Error(err, "cannot connect to database (%s)", conn.Connection.Type)
+		}
+
+		query, err := sling.GetSQLText(cast.ToString(c.Vals["query"]))
+		if err != nil {
+			return ok, g.Error(err, "cannot get query")
+		}
+
+		result, err := dbConn.ExecMulti(query)
+		if err != nil {
+			return ok, g.Error(err, "cannot execute query")
+		}
+		end := time.Now()
+
+		affected, _ := result.RowsAffected()
+		if affected > 0 {
+			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+		} else {
+			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+		}
 
 	case "list":
 		println(ec.List())

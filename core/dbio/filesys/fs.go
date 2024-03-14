@@ -97,10 +97,6 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 	fsClient.Client().fsType = fst
 	fsClient.Client().context = g.NewContext(ctx)
 
-	// set default properties
-	fsClient.SetProp("header", "true")
-	fsClient.SetProp("delimiter", ",")
-
 	// set properties
 	for k, v := range g.KVArrToMap(props...) {
 		fsClient.SetProp(k, v)

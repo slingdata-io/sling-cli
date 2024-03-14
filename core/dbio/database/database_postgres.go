@@ -90,18 +90,18 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 }
 
 // BulkExportStream uses the bulk dumping (COPY)
-func (conn *PostgresConn) BulkExportStream(sql string) (ds *iop.Datastream, err error) {
+func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	_, err = exec.LookPath("psql")
 	if err != nil {
 		g.Trace("psql not found in path. Using cursor...")
-		return conn.StreamRows(sql)
+		return conn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
 	if conn.BaseConn.GetProp("allow_bulk_export") != "true" {
-		return conn.StreamRows(sql)
+		return conn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
-	stdOutReader, err := conn.CopyToStdout(sql)
+	stdOutReader, err := conn.CopyToStdout(table.Select(0))
 	if err != nil {
 		return ds, err
 	}

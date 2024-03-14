@@ -12,7 +12,6 @@ import (
 	"unicode"
 
 	"github.com/flarco/g"
-	"github.com/godror/godror"
 	"github.com/spf13/cast"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
@@ -91,7 +90,7 @@ func NewStreamProcessor() *StreamProcessor {
 			if hasZeroPrefix(s) {
 				return s, g.Error("number has zero prefix, treat as string")
 			}
-			return strconv.ParseFloat(s, 64)
+			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		},
 		"time": func(s string) (interface{}, error) {
 			return sp.ParseTime(s)
@@ -224,7 +223,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 				if ok {
 					sp.config.transforms[key] = append(sp.config.transforms[key], f)
 				} else {
-					g.Warn("did find find tranform named: '%s'", name)
+					g.Warn("did find find transform named: '%s'", name)
 				}
 			}
 		}
@@ -269,13 +268,13 @@ func (sp *StreamProcessor) toFloat64E(i interface{}) (float64, error) {
 	case float32:
 		return float64(s), nil
 	case string:
-		v, err := strconv.ParseFloat(s, 64)
+		v, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		if err == nil {
 			return v, nil
 		}
 		return 0, g.Error("unable to cast %#v of type %T to float64", i, i)
 	case []uint8:
-		v, err := strconv.ParseFloat(string(s), 64)
+		v, err := strconv.ParseFloat(strings.Replace(string(s), ",", ".", 1), 64)
 		if err == nil {
 			return v, nil
 		}
@@ -322,8 +321,9 @@ func (sp *StreamProcessor) CastType(val interface{}, typ ColumnType) interface{}
 		nVal = cast.ToInt(val)
 	case typ.IsInteger():
 		nVal = cast.ToInt64(val)
+	case typ.IsFloat():
+		nVal = val
 	case typ.IsDecimal():
-		// nVal = cast.ToFloat64(val)
 		nVal = val
 	case typ.IsBool():
 		// nVal = cast.ToBool(val)
@@ -384,8 +384,6 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	}
 
 	switch v := val.(type) {
-	case godror.Number:
-		val = sp.ParseString(cast.ToString(val), i)
 	case big.Int:
 		val = v.Int64()
 	case *big.Int:
@@ -444,8 +442,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			}
 		}
 
-		if len(sVal) > cs.MaxLen {
-			cs.MaxLen = len(sVal)
+		l := len(sVal)
+		if l > cs.MaxLen {
+			cs.MaxLen = l
 		}
 
 		if looksLikeJson(sVal) {
@@ -453,6 +452,11 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(strings.ReplaceAll(sVal, " ", "")))
 			cs.TotalCnt++
 			return sVal
+		}
+
+		// above 4000 is considered text
+		if l > 4000 && col.Type != TextType {
+			sp.ds.ChangeColumn(i, TextType) // change to text
 		}
 
 		cond1 := cs.TotalCnt > 0 && cs.NullCnt == cs.TotalCnt
@@ -541,6 +545,30 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(iVal)
 		}
 		nVal = iVal
+	case col.Type == FloatType:
+		fVal, err := sp.toFloat64E(val)
+		if err == nil && math.IsNaN(fVal) {
+			// set as null
+			cs.NullCnt++
+			return nil
+		} else if err != nil {
+			// is string
+			sp.ds.ChangeColumn(i, StringType)
+			cs.StringCnt++
+			cs.TotalCnt++
+			sVal = cast.ToString(val)
+			sp.rowChecksum[i] = uint64(len(sVal))
+			return sVal
+		}
+
+		cs.DecCnt++
+		if fVal < 0 {
+			sp.rowChecksum[i] = uint64(-fVal)
+		} else {
+			sp.rowChecksum[i] = uint64(fVal)
+		}
+		nVal = fVal
+
 	case col.Type.IsNumber():
 		fVal, err := sp.toFloat64E(val)
 		if err == nil && math.IsNaN(fVal) {
@@ -582,7 +610,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			format := "%." + cast.ToString(sp.config.MaxDecimals) + "f"
 			nVal = g.F(format, fVal)
 		} else {
-			nVal = cast.ToString(val) // use string to keep accuracy
+			nVal = strings.Replace(cast.ToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
 		}
 
 	case col.Type.IsBool():
@@ -602,7 +630,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		cs.BoolCnt++
-	case col.Type.IsDatetime():
+	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
 			// sp.unrecognizedDate = g.F(
@@ -620,7 +648,11 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowBlankValCnt++
 		} else {
 			nVal = dVal
-			cs.DateCnt++
+			if isDate(&dVal) {
+				cs.DateCnt++
+			} else {
+				cs.DateTimeCnt++
+			}
 			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
 		}
 	}
@@ -652,7 +684,7 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return "1"
 		}
 		return "0"
-	case typ.IsDecimal():
+	case typ.IsDecimal() || typ.IsFloat():
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
@@ -663,6 +695,12 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		}
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)
+	case typ.IsDate():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.Format("2006-01-02")
 	case typ.IsDatetime():
 		tVal, _ := sp.CastToTime(val)
 		if tVal.IsZero() {
@@ -684,8 +722,6 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 	}
 
 	switch v := val.(type) {
-	case godror.Number:
-		val = sp.ParseString(cast.ToString(val), i)
 	case []uint8:
 		val = cast.ToString(val)
 	default:
@@ -755,12 +791,18 @@ func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
 		if sp.dateLayoutCache != "" {
 			t, err = time.Parse(sp.dateLayoutCache, s)
 			if err == nil {
+				if isDate(&t) {
+					t = t.UTC() // convert to utc for dates
+				}
 				return
 			}
 		}
 		t, err = time.Parse(layout, s)
 		if err == nil {
 			sp.dateLayoutCache = layout
+			if isDate(&t) {
+				t = t.UTC() // convert to utc for dates
+			}
 			return
 		}
 	}
@@ -835,8 +877,6 @@ func (sp *StreamProcessor) ParseString(s string, jj ...int) interface{} {
 func (sp *StreamProcessor) ProcessVal(val interface{}) interface{} {
 	var nVal interface{}
 	switch v := val.(type) {
-	case godror.Number:
-		nVal = sp.ParseString(cast.ToString(val))
 	case []uint8:
 		nVal = cast.ToString(val)
 	default:
@@ -869,8 +909,6 @@ func (sp *StreamProcessor) ParseVal(val interface{}) interface{} {
 		nVal = cast.ToFloat32(val)
 	case float64:
 		nVal = cast.ToFloat64(val)
-	case godror.Number:
-		nVal = sp.ParseString(cast.ToString(val))
 	case bool:
 		nVal = cast.ToBool(val)
 	case []uint8:

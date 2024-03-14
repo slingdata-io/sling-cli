@@ -598,7 +598,7 @@ func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
 			}
 		case col.IsInteger():
 			node, err = schema.NewPrimitiveNode(col.Name, rep, pType, -1, -1)
-		case col.IsDatetime():
+		case col.IsDatetime() || col.IsDate():
 			lType := schema.NewTimestampLogicalType(true, schema.TimeUnitNanos)
 			node, err = schema.NewPrimitiveNodeLogical(col.Name, rep, lType, pType, -1, fieldID)
 		case col.IsBool():
@@ -675,7 +675,7 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 	case *file.Int64ColumnChunkWriter:
 		values := make([]int64, len(colValuesBatch))
 		for i, val := range colValuesBatch {
-			if col.IsDatetime() {
+			if col.IsDatetime() || col.IsDate() {
 				tVal, _ := cast.ToTimeE(val)
 				values[i] = cast.ToInt64(tVal.UnixNano())
 			} else {

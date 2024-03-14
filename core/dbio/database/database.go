@@ -1,10 +1,8 @@
 package database
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
-	"embed"
 	"fmt"
 	"math"
 	"net/url"
@@ -36,7 +34,6 @@ import (
 	_ "github.com/flarco/bigquery"
 	// _ "github.com/solcates/go-sql-bigquery"
 	"github.com/spf13/cast"
-	"gopkg.in/yaml.v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -59,7 +56,7 @@ type Connection interface {
 	Begin(options ...*sql.TxOptions) error
 	BeginContext(ctx context.Context, options ...*sql.TxOptions) error
 	BulkExportFlow(tables ...Table) (*iop.Dataflow, error)
-	BulkExportStream(sql string) (*iop.Datastream, error)
+	BulkExportStream(table Table) (*iop.Datastream, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
 	CastColumnForSelect(srcColumn iop.Column, tgtColumn iop.Column) string
@@ -133,7 +130,7 @@ type Connection interface {
 	StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error)
 	SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
 	SwapTable(srcTable string, tgtTable string) (err error)
-	Template() Template
+	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
@@ -164,23 +161,11 @@ type BaseConn struct {
 	defaultPort int
 	instance    *Connection
 	context     g.Context
-	template    Template
+	template    dbio.Template
 	schemata    Schemata
 	properties  map[string]string
 	sshClient   *iop.SSHClient
 	Log         []string
-}
-
-// Template is a database YAML template
-type Template struct {
-	Core           map[string]string
-	Metadata       map[string]string
-	Analysis       map[string]string
-	Function       map[string]string `yaml:"function"`
-	GeneralTypeMap map[string]string `yaml:"general_type_map"`
-	NativeTypeMap  map[string]string `yaml:"native_type_map"`
-	NativeStatsMap map[string]bool   `yaml:"native_stat_map"`
-	Variable       map[string]string
 }
 
 // Pool is a pool of connections
@@ -209,9 +194,6 @@ var (
 	connPool = Pool{Dbs: map[string]*sqlx.DB{}, DuckDbs: map[string]*DuckDbConn{}}
 	usePool  = os.Getenv("USE_POOL") == "TRUE"
 )
-
-//go:embed templates/*
-var templatesFolder embed.FS
 
 func init() {
 	if os.Getenv("FILEPATH_SLUG") != "" {
@@ -272,12 +254,16 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		}
 	} else if strings.HasPrefix(URL, "redshift") {
 		conn = &RedshiftConn{URL: URL}
+	} else if strings.HasPrefix(URL, "trino") {
+		conn = &TrinoConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
 		conn = &MsSQLServerConn{URL: URL}
 	} else if strings.HasPrefix(URL, "starrocks:") {
 		conn = &StarRocksConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mysql:") {
 		conn = &MySQLConn{URL: URL}
+	} else if strings.HasPrefix(URL, "mongo") {
+		conn = &MongoDBConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {
 		conn = &MySQLConn{URL: URL}
 	} else if strings.HasPrefix(URL, "oracle:") {
@@ -329,7 +315,7 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		driverName = "mysql"
 	case dbio.TypeDbOracle:
-		driverName = "godror"
+		driverName = "oracle"
 	case dbio.TypeDbBigQuery:
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:
@@ -340,6 +326,8 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
 		driverName = "sqlserver"
+	case dbio.TypeDbTrino:
+		driverName = "trino"
 	default:
 		driverName = dbType.String()
 	}
@@ -473,7 +461,7 @@ func (conn *BaseConn) Schemata() Schemata {
 }
 
 // Template returns the Template object
-func (conn *BaseConn) Template() Template {
+func (conn *BaseConn) Template() dbio.Template {
 	return conn.template
 }
 
@@ -750,118 +738,10 @@ func (conn *BaseConn) GetTemplateValue(path string) (value string) {
 	return value
 }
 
-// ToData convert is dataset
-func (template Template) ToData() (data iop.Dataset) {
-	columns := []string{"key", "value"}
-	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
-	data.Rows = append(data.Rows, []interface{}{"core", template.Core})
-	data.Rows = append(data.Rows, []interface{}{"analysis", template.Analysis})
-	data.Rows = append(data.Rows, []interface{}{"function", template.Function})
-	data.Rows = append(data.Rows, []interface{}{"metadata", template.Metadata})
-	data.Rows = append(data.Rows, []interface{}{"general_type_map", template.GeneralTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"native_type_map", template.NativeTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"variable", template.Variable})
-
-	return
-}
-
 // LoadTemplates loads the appropriate yaml template
-func (conn *BaseConn) LoadTemplates() error {
-	conn.template = Template{
-		Core:           map[string]string{},
-		Metadata:       map[string]string{},
-		Analysis:       map[string]string{},
-		Function:       map[string]string{},
-		GeneralTypeMap: map[string]string{},
-		NativeTypeMap:  map[string]string{},
-		NativeStatsMap: map[string]bool{},
-		Variable:       map[string]string{},
-	}
-
-	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
-	if err != nil {
-		return g.Error(err, "io.ReadAll(baseTemplateFile)")
-	}
-
-	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &conn.template); err != nil {
-		return g.Error(err, "yaml.Unmarshal")
-	}
-
-	templateBytes, err := templatesFolder.ReadFile("templates/" + conn.Type.String() + ".yaml")
-	if err != nil {
-		return g.Error(err, "io.ReadAll(templateFile) for "+conn.Type)
-	}
-
-	template := Template{}
-	err = yaml.Unmarshal([]byte(templateBytes), &template)
-	if err != nil {
-		return g.Error(err, "yaml.Unmarshal")
-	}
-
-	for key, val := range template.Core {
-		conn.template.Core[key] = val
-	}
-
-	for key, val := range template.Analysis {
-		conn.template.Analysis[key] = val
-	}
-
-	for key, val := range template.Function {
-		conn.template.Function[key] = val
-	}
-
-	for key, val := range template.Metadata {
-		conn.template.Metadata[key] = val
-	}
-
-	for key, val := range template.Variable {
-		conn.template.Variable[key] = val
-	}
-
-	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
-	if err != nil {
-		return g.Error(err, `cannot open types_native_to_general`)
-	}
-
-	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
-	TypesNativeCSV.Delimiter = '\t'
-	TypesNativeCSV.NoDebug = true
-
-	data, err := TypesNativeCSV.Read()
-	if err != nil {
-		return g.Error(err, `TypesNativeCSV.Read()`)
-	}
-
-	for _, rec := range data.Records() {
-		if rec["database"] == conn.Type.String() {
-			nt := strings.TrimSpace(cast.ToString(rec["native_type"]))
-			gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-			s := strings.TrimSpace(cast.ToString(rec["stats_allowed"]))
-			conn.template.NativeTypeMap[nt] = cast.ToString(gt)
-			conn.template.NativeStatsMap[nt] = cast.ToBool(s)
-		}
-	}
-
-	TypesGeneralFile, err := templatesFolder.Open("templates/types_general_to_native.tsv")
-	if err != nil {
-		return g.Error(err, `cannot open types_general_to_native`)
-	}
-
-	TypesGeneralCSV := iop.CSV{Reader: bufio.NewReader(TypesGeneralFile)}
-	TypesGeneralCSV.Delimiter = '\t'
-	TypesGeneralCSV.NoDebug = true
-
-	data, err = TypesGeneralCSV.Read()
-	if err != nil {
-		return g.Error(err, `TypesGeneralCSV.Read()`)
-	}
-
-	for _, rec := range data.Records() {
-		gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-		conn.template.GeneralTypeMap[gt] = cast.ToString(rec[conn.Type.String()])
-	}
-
-	return nil
+func (conn *BaseConn) LoadTemplates() (err error) {
+	conn.template, err = conn.Type.Template()
+	return
 }
 
 // StreamRecords the records of a sql query, returns `result`, `error`
@@ -871,13 +751,13 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 	if err != nil {
 		err = g.Error(err, "error in StreamRowsContext")
 	}
-	return ds.Records(), nil
+	return ds.Records(), err
 }
 
 // BulkExportStream streams the rows in bulk
-func (conn *BaseConn) BulkExportStream(sql string) (ds *iop.Datastream, err error) {
+func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(sql)
+	return conn.Self().StreamRows(table.Select(0), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -899,9 +779,16 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		return
 	}
 
+	opts := getQueryOptions(options)
+
 	Limit := uint64(0) // infinite
-	if val := cast.ToUint64(getQueryOptions(options)["limit"]); val > 0 {
+	if val := cast.ToUint64(opts["limit"]); val > 0 {
 		Limit = val
+	}
+
+	fetchedColumns := iop.Columns{}
+	if val, ok := opts["columns"].(iop.Columns); ok {
+		fetchedColumns = val
 	}
 
 	start := time.Now()
@@ -958,6 +845,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 			return ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
+				FetchedType:      fetchedColumns.GetColumn(ct.Name()).Type,
 				Length:           cast.ToInt(length),
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
@@ -971,7 +859,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	conn.Data.SQL = query
 	conn.Data.Duration = time.Since(start).Seconds()
 	conn.Data.Rows = [][]interface{}{}
-	conn.Data.Columns = SQLColumns(colTypes, conn)
+	conn.Data.Columns = SQLColumns(colTypes, conn) // type mapping logic !
 	conn.Data.NoDebug = !strings.Contains(query, noDebugKey)
 
 	g.Trace("query responded in %f secs", conn.Data.Duration)
@@ -1416,8 +1304,19 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			DbType:   colType.DatabaseTypeName,
 		}
 
+		// use pre-fetched column types for embedded databases since they rely
+		// on output of external processes
+		if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && colType.FetchedType != "" {
+			col.Type = colType.FetchedType
+		}
+
 		col.Stats.MaxLen = colType.Length
 		col.Stats.MaxDecLen = 0
+
+		// if length is provided, set as string if less than 4000
+		if col.Type == iop.TextType && colType.Length > 0 && colType.Length <= 4000 {
+			col.Type = iop.StringType // set as string
+		}
 
 		// mark types that don't depend on length, precision or scale as sourced (inferred)
 		if !g.In(col.Type, iop.DecimalType) {
@@ -2517,7 +2416,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 		dss := []*iop.Datastream{}
 
 		for _, table := range tables {
-			ds, err := conn.Self().BulkExportStream(table.Select())
+			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
 				return
@@ -2563,7 +2462,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		defer df.Context.Wg.Read.Done()
 		defer close(dsCh)
 		fileReadyChn := make(chan filesys.FileReady, 10000)
-		ds, err := conn.Self().BulkExportStream(table.Select())
+		ds, err := conn.Self().BulkExportStream(table)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error running query"))
 			df.Context.Cancel()
@@ -2822,6 +2721,8 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.TimestampType
 		case col.Type.IsInteger() && newCol.Type.IsDecimal():
 			newCol.Type = iop.DecimalType
+		case col.Type.IsInteger() && newCol.Type.IsFloat():
+			newCol.Type = iop.FloatType
 		case col.Type.IsDecimal() && newCol.Type.IsInteger():
 			newCol.Type = iop.DecimalType
 		case col.Type.IsInteger() && newCol.Type == iop.BigIntType:
@@ -2832,7 +2733,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			newCol.Type = iop.IntegerType
 		case col.Type == iop.IntegerType && newCol.Type == iop.SmallIntType:
 			newCol.Type = iop.IntegerType
-		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsNumber() || newCol.IsBool()):
+		case isTemp && col.IsString() && newCol.HasNulls() && (newCol.IsDatetime() || newCol.IsDate() || newCol.IsNumber() || newCol.IsBool()):
 			// use new type
 		case col.Type == iop.TextType || newCol.Type == iop.TextType:
 			newCol.Type = iop.TextType
@@ -3001,7 +2902,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		return
 	}
 	fieldsMap := g.ArrMapString(fields, true)
-	g.Debug("comparing checksums %#v vs %#v: %#v", tColumns.Names(), columns.Names(), fields)
+	g.Debug("comparing checksums %#v", tColumns.Types())
 
 	exprs := []string{}
 	colMap := lo.KeyBy(columns, func(c iop.Column) string { return strings.ToLower(c.Name) })
@@ -3021,8 +2922,15 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			expr = conn.GetTemplateValue("function.checksum_string")
 		case col.IsInteger():
 			expr = conn.GetTemplateValue("function.checksum_integer")
+		case col.IsFloat():
+			expr = conn.GetTemplateValue("function.checksum_decimal")
 		case col.IsDecimal():
 			expr = conn.GetTemplateValue("function.checksum_decimal")
+		case col.IsDate():
+			expr = conn.GetTemplateValue("function.checksum_date")
+			if expr == "" {
+				expr = conn.GetTemplateValue("function.checksum_datetime")
+			}
 		case col.IsDatetime():
 			expr = conn.GetTemplateValue("function.checksum_datetime")
 		case col.IsBool():

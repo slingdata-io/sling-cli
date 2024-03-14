@@ -252,8 +252,8 @@ func getRate(cnt uint64) string {
 	return humanize.Commaf(math.Round(cast.ToFloat64(cnt) / time.Since(start).Seconds()))
 }
 
-// getSQLText process source sql file / text
-func getSQLText(sqlStringPath string) (string, error) {
+// GetSQLText process source sql file / text
+func GetSQLText(sqlStringPath string) (string, error) {
 	if g.PathExists(sqlStringPath) || strings.HasPrefix(sqlStringPath, "file://") {
 		sqlStringPath = strings.TrimPrefix(sqlStringPath, "file://")
 		bytes, err := os.ReadFile(sqlStringPath)

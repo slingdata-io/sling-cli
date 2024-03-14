@@ -33,9 +33,10 @@ type testDB struct {
 }
 
 type testConn struct {
-	name    string
-	schema  string
-	useBulk *bool
+	name      string
+	schema    string
+	useBulk   *bool
+	adjustCol *bool
 }
 
 var dbConnMap = map[dbio.Type]testConn{
@@ -56,6 +57,8 @@ var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
+	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
+	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
 }
 
 func init() {
@@ -146,45 +149,6 @@ func TestCfgPath(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func Test1Task(t *testing.T) {
-	os.Setenv("SLING_CLI", "TRUE")
-	config := &sling.Config{}
-	cfgStr := `
-source:
-  conn: do_spaces
-  stream: 's3://ocral/rudderstack/rudder-logs/1uXKxCrhN2WGAt2fojy6k2fqDSb/02-17-2022'
-  options:
-    flatten: true
-options:
-  stdout: true`
-	err := config.Unmarshal(cfgStr)
-	if g.AssertNoError(t, err) {
-		err = config.Prepare()
-		if g.AssertNoError(t, err) {
-
-			task := sling.NewTask("", config)
-			g.AssertNoError(t, task.Err)
-
-			// run task
-			err = task.Execute()
-			g.AssertNoError(t, err)
-		}
-	}
-}
-
-func Test1Replication(t *testing.T) {
-	sling.ShowProgress = false
-	os.Setenv("DEBUG", "LOW")
-	os.Setenv("SLING_CLI", "TRUE")
-	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
-	os.Setenv("CONCURENCY_LIMIT", "2")
-	replicationCfgPath := g.UserHomeDir() + "/Downloads/mlops.slack.replication.local.yml"
-	err := runReplication(replicationCfgPath)
-	if g.AssertNoError(t, err) {
-		return
-	}
-}
-
 func TestExtract(t *testing.T) {
 	core.Version = "v1.0.43"
 
@@ -197,7 +161,7 @@ func TestExtract(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
+func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 	conn, ok := dbConnMap[dbType]
 	if !assert.True(t, ok) {
 		return
@@ -256,6 +220,10 @@ func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
 		if conn.useBulk != nil {
 			targetOptions["use_bulk"] = *conn.useBulk
 		}
+		if conn.adjustCol != nil {
+			targetOptions["adjust_column_type"] = *conn.adjustCol
+			sourceOptions["columns"] = g.M("code", "decimal")
+		}
 
 		task := g.M(
 			"source", g.M(
@@ -283,7 +251,6 @@ func testSuite(t *testing.T, dbType dbio.Type, connName ...string) {
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
 
-	testNumbers := []int{}
 	if tns := os.Getenv("TESTS"); tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
@@ -412,7 +379,9 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 					for i := range valuesDb {
 						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
 						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
-						if !assert.EqualValues(t, valFile, valDb, g.F("row %d, col %d (%s), in test %s => %#v vs %#v", i+1, valCol, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)) {
+						msg := g.F("row %d, col %d (%s vs %s), in test %s => %#v vs %#v", i+1, valCol, dataFile.Columns[valCol].Name, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)
+						if !assert.EqualValues(t, valFile, valDb, msg) {
+							g.Warn(msg)
 							return
 						}
 					}
@@ -501,6 +470,16 @@ func TestSuiteClickhouse(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
+}
+
+func TestSuiteTrino(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbTrino, 1, 6, 12)
+}
+
+func TestSuiteMongo(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbMongoDB, 6)
 }
 
 // generate large dataset or use cache
@@ -621,4 +600,44 @@ func generateLargeDataset(numCols, numRows int, force bool) (path string, err er
 func TestGenerateWideFile(t *testing.T) {
 	_, err := generateLargeDataset(300, 100, true)
 	g.LogFatal(err)
+}
+
+func Test1Replication(t *testing.T) {
+	sling.ShowProgress = false
+	os.Setenv("DEBUG", "LOW")
+	os.Setenv("SLING_CLI", "TRUE")
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
+	os.Setenv("CONCURENCY_LIMIT", "2")
+	replicationCfgPath := "tests/replications/r.14.yaml"
+	err := runReplication(replicationCfgPath, nil)
+	if g.AssertNoError(t, err) {
+		return
+	}
+}
+
+func Test1Task(t *testing.T) {
+	os.Setenv("SLING_CLI", "TRUE")
+	config := &sling.Config{}
+	cfgStr := `
+source:
+  conn: duckdb
+  stream: main.call_center
+target:
+  conn: starrocks
+  object: public.call_center
+mode: full-refresh
+`
+	err := config.Unmarshal(cfgStr)
+	if g.AssertNoError(t, err) {
+		err = config.Prepare()
+		if g.AssertNoError(t, err) {
+
+			task := sling.NewTask("", config)
+			g.AssertNoError(t, task.Err)
+
+			// run task
+			err = task.Execute()
+			g.AssertNoError(t, err)
+		}
+	}
 }
