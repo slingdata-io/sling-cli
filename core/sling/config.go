@@ -345,6 +345,39 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	return Type, err
 }
 
+func (cfg *Config) HasWildcard() bool {
+	if strings.HasSuffix(cfg.Source.Stream, ".*") {
+		return true
+	}
+
+	if strings.Contains(cfg.Source.Stream, `/*.`) || strings.Contains(cfg.Source.Stream, `\*.`) {
+		return true
+	}
+
+	return false
+}
+
+func (cfg *Config) AsReplication() (rc ReplicationConfig) {
+	rc = ReplicationConfig{
+		Source: cfg.Source.Conn,
+		Target: cfg.Target.Conn,
+		Defaults: ReplicationStreamConfig{
+			SourceOptions: cfg.Source.Options,
+			TargetOptions: cfg.Target.Options,
+			Select:        cfg.Source.Select,
+			Object:        cfg.Target.Object,
+			Mode:          cfg.Mode,
+			PrimaryKeyI:   cfg.Source.PrimaryKeyI,
+			UpdateKey:     cfg.Source.UpdateKey,
+		},
+		Streams: map[string]*ReplicationStreamConfig{
+			cfg.Source.Stream: {},
+		},
+	}
+
+	return rc
+}
+
 // Prepare prepares the config
 func (cfg *Config) Prepare() (err error) {
 	if cfg.Prepared {

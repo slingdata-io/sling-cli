@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	dbioEnv "github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -201,6 +203,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				if err != nil {
 					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
 				}
+			}
+
+			// run as replication is stream is wildcard
+			if cfg.HasWildcard() {
+				rc := cfg.AsReplication()
+				replicationCfgPath = path.Join(dbioEnv.GetTempFolder(), g.NewTsID("replication.temp")+".json")
+				err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
+				if err != nil {
+					return ok, g.Error(err, "could not write temp replication: %s", replicationCfgPath)
+				}
+				defer os.Remove(replicationCfgPath)
+				continue // run replication
 			}
 
 			err = runTask(cfg, nil)
