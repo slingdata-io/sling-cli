@@ -12,6 +12,6 @@ string	varchar(4000)	varchar(65500)	mediumtext	mediumtext	nvarchar(max)	nvarchar
 text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)	varchar
 timestamp	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp_ntz	text	timestamp	Nullable(DateTime64(6))	timestamp	timestamp	datetime	timestamp
 timestampz	timestamp(9)	timestamptz	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime	timestamp with time zone
-float	float	double precision	double	double	float	float	float	double precision	float	real	numeric	Nullable(Float64)	float	float	double	double
+float	float	double precision	double	double	float	float	float	double precision	float	real	float64	Nullable(Float64)	float	float	double	double
 time	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar
 timez	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar
