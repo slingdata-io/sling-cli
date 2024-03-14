@@ -578,7 +578,10 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 	if len(eG.Errors) == len(deliList) {
 		err = g.Error(eG.Err(), "could not auto-detect delimiter")
 	} else if err := errMap[maxRowNumColDeli]; err != nil && maxRowNumCol > numCols {
-		err = g.Error(err, "could not use delimiter %#v. Try specifying a delimiter.", maxRowNumColDeli)
+		if delimiter != "" {
+			return []rune(delimiter)[0], 0, nil
+		}
+		err = g.Error(err, "could not use delimiter %#v. Try specifying a delimiter.", string(maxRowNumColDeli))
 		return maxRowNumColDeli, maxRowNumCol, err
 	}
 
