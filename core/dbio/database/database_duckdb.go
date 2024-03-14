@@ -132,6 +132,14 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		}
 	}
 
+	// use specified path to duckdb binary
+	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
+		if !g.PathExists(envPath) {
+			return "", g.Error("duckdb binary not found")
+		}
+		return envPath, nil
+	}
+
 	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
 		DuckDbUseTempFile = cast.ToBool(useTempFile)
 	} else if g.In(version, "0.8.0", "0.8.1") {
