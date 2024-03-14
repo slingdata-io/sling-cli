@@ -179,7 +179,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 		Create(task).Error
 	if err != nil {
-		g.Trace("could not insert task config into local .sling.db. %s", err.Error())
+		g.DebugLow("could not insert task config into local .sling.db. %s", err.Error())
 		return
 	}
 	exec.TaskMD5 = task.MD5
@@ -188,7 +188,7 @@ func StoreInsert(t *sling.TaskExecution) {
 		err := Db.Clauses(clause.OnConflict{DoNothing: true}).
 			Create(replication).Error
 		if err != nil {
-			g.Trace("could not insert replication config into local .sling.db. %s", err.Error())
+			g.DebugLow("could not insert replication config into local .sling.db. %s", err.Error())
 			return
 		}
 		exec.ReplicationMD5 = replication.MD5
@@ -197,7 +197,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	// insert execution
 	err = Db.Create(exec).Error
 	if err != nil {
-		g.Trace("could not insert execution into local .sling.db. %s", err.Error())
+		g.DebugLow("could not insert execution into local .sling.db. %s", err.Error())
 		return
 	}
 
@@ -212,26 +212,26 @@ func StoreUpdate(t *sling.TaskExecution) {
 	if Db == nil {
 		return
 	}
+	e := ToExecutionObject(t)
 
-	exec := &Execution{ExecID: t.ExecID}
-	err := Db.Where("exec_id = ?", t.ExecID).First(exec).Error
+	exec := &Execution{ExecID: t.ExecID, StreamID: e.StreamID}
+	err := Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
 	if err != nil {
-		g.Trace("could not select execution from local .sling.db. %s", err.Error())
+		g.DebugLow("could not select execution from local .sling.db. %s", err.Error())
 		return
 	}
-	execNew := ToExecutionObject(t)
 
-	exec.StartTime = execNew.StartTime
-	exec.EndTime = execNew.EndTime
-	exec.Status = execNew.Status
-	exec.Err = execNew.Err
-	exec.Bytes = execNew.Bytes
-	exec.Rows = execNew.Rows
-	exec.Output = execNew.Output
+	exec.StartTime = e.StartTime
+	exec.EndTime = e.EndTime
+	exec.Status = e.Status
+	exec.Err = e.Err
+	exec.Bytes = e.Bytes
+	exec.Rows = e.Rows
+	exec.Output = e.Output
 
 	err = Db.Updates(exec).Error
 	if err != nil {
-		g.Trace("could not update execution into local .sling.db. %s", err.Error())
+		g.DebugLow("could not update execution into local .sling.db. %s", err.Error())
 		return
 	}
 
