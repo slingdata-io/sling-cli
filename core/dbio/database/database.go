@@ -1299,6 +1299,11 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		col.Stats.MaxLen = colType.Length
 		col.Stats.MaxDecLen = 0
 
+		// if length is provided, set as string if less than 4000
+		if col.Type == iop.TextType && colType.Length > 0 && colType.Length <= 4000 {
+			col.Type = iop.StringType // set as string
+		}
+
 		// mark types that don't depend on length, precision or scale as sourced (inferred)
 		if !g.In(col.Type, iop.DecimalType) {
 			col.Sourced = true

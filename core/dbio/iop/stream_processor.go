@@ -442,8 +442,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			}
 		}
 
-		if len(sVal) > cs.MaxLen {
-			cs.MaxLen = len(sVal)
+		l := len(sVal)
+		if l > cs.MaxLen {
+			cs.MaxLen = l
 		}
 
 		if looksLikeJson(sVal) {
@@ -451,6 +452,11 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(strings.ReplaceAll(sVal, " ", "")))
 			cs.TotalCnt++
 			return sVal
+		}
+
+		// above 4000 is considered text
+		if l > 4000 && col.Type != TextType {
+			sp.ds.ChangeColumn(i, TextType) // change to text
 		}
 
 		cond1 := cs.TotalCnt > 0 && cs.NullCnt == cs.TotalCnt
