@@ -26,8 +26,19 @@ import (
 // OracleConn is a Postgres connection
 type OracleConn struct {
 	BaseConn
-	URL string
+	URL     string
+	version string
 }
+
+/*
+Version	Initial Release	Date
+11.2 (11g Release 2)	11.2.0.1	2009
+12.1 (12c Release 1)	12.1.0.1	2013
+12.2 (12c Release 2)	12.2.01	2016
+18 (18c)	18.3.0	2018
+19 (19c)	19.3.0	2019
+21 (21c)	21.3.0	2021
+*/
 
 // Init initiates the object
 func (conn *OracleConn) Init() error {
@@ -35,6 +46,7 @@ func (conn *OracleConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbOracle
 	conn.BaseConn.defaultPort = 1521
+	conn.version = "11"
 
 	if conn.BaseConn.GetProp("allow_bulk_import") == "" {
 		conn.SetProp("allow_bulk_import", "true")
@@ -48,6 +60,44 @@ func (conn *OracleConn) Init() error {
 	conn.SetProp("MAX_DECIMALS", "9")
 
 	return conn.BaseConn.Init()
+}
+
+func (conn *OracleConn) Version() int {
+	parts := strings.Split(conn.version, ".")
+	if len(parts) > 0 {
+		v := cast.ToInt(parts[0])
+		if v == 0 {
+			v = 11
+		}
+		return v
+	}
+	return 11
+}
+
+// setTypeMap adjusts the type map depending on the version
+func (conn *OracleConn) setTypeMap() {
+	if conn.Version() >= 20 {
+		conn.template.GeneralTypeMap["json"] = "json"
+	}
+}
+
+func (conn *OracleConn) Connect(timeOut ...int) (err error) {
+	err = conn.BaseConn.Connect(timeOut...)
+	if err != nil {
+		return err
+	}
+
+	// get version
+	data, err := conn.Query(`select version from product_component_version` + noDebugKey)
+	if err != nil {
+		conn.version = "11.0"
+	} else if len(data.Rows) > 0 {
+		conn.version = cast.ToString(data.Rows[0][0])
+	}
+
+	conn.setTypeMap()
+
+	return nil
 }
 
 func (conn *OracleConn) ConnString() string {
