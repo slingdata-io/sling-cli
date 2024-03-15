@@ -134,9 +134,9 @@ func (cfg *Config) SetDefault() {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 
-	case !g.In(cfg.TgtConn.Type, dbio.TypeDbTrino, dbio.TypeDbRedshift, dbio.TypeDbBigQuery, dbio.TypeDbSnowflake) && cfg.Target.Options.AdjustColumnType == nil:
-		// set AdjustColumnType to true for all others
-		cfg.Target.Options.AdjustColumnType = g.Bool(true)
+		// case !g.In(cfg.TgtConn.Type, dbio.TypeDbTrino, dbio.TypeDbRedshift, dbio.TypeDbBigQuery, dbio.TypeDbSnowflake) && cfg.Target.Options.AdjustColumnType == nil:
+		// 	// set AdjustColumnType to true for all others
+		// 	cfg.Target.Options.AdjustColumnType = g.Bool(true)
 	}
 
 	// set vars
@@ -1042,11 +1042,12 @@ var TargetDBOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
-	UseBulk:        g.Bool(true),
-	AddNewColumns:  g.Bool(true),
-	DatetimeFormat: "auto",
-	MaxDecimals:    g.Int(-1),
-	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
+	UseBulk:          g.Bool(true),
+	AddNewColumns:    g.Bool(true),
+	AdjustColumnType: g.Bool(false),
+	DatetimeFormat:   "auto",
+	MaxDecimals:      g.Int(-1),
+	ColumnCasing:     (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
