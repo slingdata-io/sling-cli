@@ -447,7 +447,7 @@ func cliInit() int {
 
 	ok, err := g.CliProcess()
 
-	if time.Now().Second()%15 == 0 {
+	if time.Now().UnixMicro()%20 == 0 {
 		defer SlingMedia.PrintFollowUs()
 	}
 
