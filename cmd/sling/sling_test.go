@@ -167,7 +167,7 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 		return
 	}
 
-	templateFilePath := "tests/suite.template.tsv"
+	templateFilePath := "tests/suite.db.template.tsv"
 	tempFilePath := g.F("/tmp/tests.%s.tsv", dbType.String())
 	folderPath := g.F("tests/suite/%s", dbType.String())
 	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
