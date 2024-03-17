@@ -78,18 +78,36 @@ func (fn *FileNode) Path() string {
 type FileNodes []FileNode
 
 // Add adds a new node to list
-func (fns *FileNodes) Add(fn ...FileNode) {
+func (fns *FileNodes) Add(ns ...FileNode) {
 	nodes := *fns
-	nodes = append(nodes, fn...)
+	for i, n := range ns {
+		if strings.HasSuffix(n.URI, "/") {
+			ns[i].IsDir = true
+		} else if ns[i].IsDir && !strings.HasSuffix(n.URI, "/") {
+			ns[i].URI = n.URI + "/"
+		}
+	}
+	nodes = append(nodes, ns...)
 	*fns = nodes
 }
 
-// URIs give a list of recursive paths
-func (fns FileNodes) URIs() (paths []string) {
+// URIs give a list of recursive uris
+func (fns FileNodes) URIs() (uris []string) {
 	for _, p := range fns {
-		paths = append(paths, p.URI)
+		uris = append(uris, p.URI)
 		if p.IsDir {
-			paths = append(paths, p.Children.URIs()...)
+			uris = append(uris, p.Children.URIs()...)
+		}
+	}
+	return uris
+}
+
+// Paths give a list of recursive paths
+func (fns FileNodes) Paths() (paths []string) {
+	for _, p := range fns {
+		paths = append(paths, p.Path())
+		if p.IsDir {
+			paths = append(paths, p.Children.Paths()...)
 		}
 	}
 	return paths
