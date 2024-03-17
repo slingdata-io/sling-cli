@@ -113,12 +113,6 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	return nil
 }
 
-func clean_KeyGoogle(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = strings.TrimSuffix(key, "/")
-	return key
-}
-
 func (fs *GoogleFileSysClient) Write(path string, reader io.Reader) (bw int64, err error) {
 	key, err := fs.GetPath(path)
 	if err != nil {
@@ -173,16 +167,21 @@ func (fs *GoogleFileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List returns the list of objects
-func (fs *GoogleFileSysClient) List(path string) (nodes dbio.FileNodes, err error) {
-	key, err := fs.GetPath(path)
+func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+	key, err := fs.GetPath(uri)
 	if err != nil {
 		return
 	}
-	keyArr := strings.Split(key, "/")
 
+	var keyArr []string
+	keyArr = strings.Split(key, "/")
+
+	baseKeys := map[string]int{}
 	query := &gcstorage.Query{Prefix: key}
 	query.SetAttrSelection([]string{"Name"})
 	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
+	counter := 0
+
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -191,16 +190,36 @@ func (fs *GoogleFileSysClient) List(path string) (nodes dbio.FileNodes, err erro
 		} else if err != nil {
 			err = g.Error(err, "Error Iterating")
 			return nodes, err
-		} else if attrs.Name == "" {
+		}
+
+		counter++
+		if attrs.Name == "" {
+			continue
+		} else if counter >= 5000 {
+			g.Warn("Google storage returns results recursively by default. Limiting results at 5000 items.")
+			break
+		} else if !strings.HasPrefix(attrs.Name, key) {
+			// needs to have correct key, since it's recursive
 			continue
 		}
-		if len(strings.Split(attrs.Name, "/")) == len(keyArr)+1 {
+
+		parts := strings.Split(strings.TrimSuffix(attrs.Name, "/"), "/")
+		baseKey := strings.Join(parts[:len(keyArr)], "/")
+		baseKeys[baseKey]++
+
+		if baseKeys[baseKey] == 1 {
+			// g.P([]any{attrs.Name, parts, baseKey, keyArr, len(parts), len(keyArr)})
 			node := dbio.FileNode{
-				URI:     g.F("%s/%s", fs.Prefix(), attrs.Name),
-				Size:    cast.ToUint64(attrs.Size),
-				Created: attrs.Created.Unix(),
-				Updated: attrs.Updated.Unix(),
-				Owner:   attrs.Owner,
+				URI:   g.F("%s%s", fs.Prefix("/"), baseKey),
+				IsDir: len(parts) >= len(keyArr)+1,
+			}
+
+			if baseKey == strings.TrimSuffix(attrs.Name, "/") {
+				node.Size = cast.ToUint64(attrs.Size)
+				node.Created = attrs.Created.Unix()
+				node.Updated = attrs.Updated.Unix()
+				node.Owner = attrs.Owner
+				node.IsDir = strings.HasSuffix(attrs.Name, "/")
 			}
 			nodes.Add(node)
 		}
@@ -209,8 +228,8 @@ func (fs *GoogleFileSysClient) List(path string) (nodes dbio.FileNodes, err erro
 }
 
 // ListRecursive returns the list of objects recursively
-func (fs *GoogleFileSysClient) ListRecursive(path string) (nodes dbio.FileNodes, err error) {
-	key, err := fs.GetPath(path)
+func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	key, err := fs.GetPath(uri)
 	if err != nil {
 		return
 	}

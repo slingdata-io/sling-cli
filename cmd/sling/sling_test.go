@@ -786,7 +786,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsFile() {
-
+		// g.Warn("%#v", files.Paths())
 		// basic tests
 		assert.Greater(t, len(files), 0)
 		for _, uri := range files.URIs() {
@@ -865,4 +865,9 @@ func TestSuiteSftp(t *testing.T) {
 func TestSuiteS3(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileS3)
+}
+
+func TestSuiteGCS(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileGoogle)
 }
