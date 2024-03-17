@@ -73,6 +73,8 @@ core:
 
 metadata:
   current_database: select name from V$database
+  
+  databases: select name from V$database
 
   schemas: |
     select username as schema_name
