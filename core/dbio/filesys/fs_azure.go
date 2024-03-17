@@ -10,15 +10,18 @@ import (
 	azstorage "github.com/Azure/azure-sdk-for-go/storage"
 	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/spf13/cast"
 )
 
 // AzureFileSysClient is a file system client to write file to Microsoft's Azure file sys.
 type AzureFileSysClient struct {
 	BaseFileSysClient
-	client  azstorage.Client
-	context g.Context
-	account string
-	key     string
+	client    azstorage.Client
+	context   g.Context
+	account   string
+	container string
+	key       string
 }
 
 // Init initializes the fs client
@@ -32,7 +35,39 @@ func (fs *AzureFileSysClient) Init(ctx context.Context) (err error) {
 			fs.SetProp(key, fs.GetProp("AZURE_"+key))
 		}
 	}
+
+	fs.account = fs.GetProp("account")
+	fs.container = fs.GetProp("container")
+
 	return fs.Connect()
+}
+
+// Prefix returns the url prefix
+func (fs *AzureFileSysClient) Prefix(suffix ...string) string {
+	return g.F("https://%s.blob.core.windows.net/%s", fs.account, fs.container) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *AzureFileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	pathContainer := strings.Split(path, "/")[0]
+	if !strings.HasPrefix(host, fs.account) {
+		err = g.Error("URL account differs from connection account. %s != %s.blob.core.windows.net", host, fs.account)
+	} else if pathContainer != fs.container {
+		err = g.Error("URL container differs from connection container. %s != %s", pathContainer, fs.container)
+	}
+
+	// remove container
+	path = strings.TrimPrefix(path, pathContainer+"/")
+
+	return path, err
 }
 
 // Connect initiates the fs client connection
@@ -54,8 +89,6 @@ func (fs *AzureFileSysClient) Connect() (err error) {
 			return
 		}
 
-		host, _, _ := ParseURL(cs)
-		fs.account = strings.TrimRight(host, ".blob.core.windows.net")
 		fs.client, err = azstorage.NewAccountSASClientFromEndpointToken(csArr[0], csArr[1])
 		if err != nil {
 			err = g.Error(err, "Could not connect to Azure using provided SAS_SVC_URL")
@@ -129,23 +162,15 @@ func (fs *AzureFileSysClient) Buckets() (paths []string, err error) {
 	return
 }
 
-func cleanKeyAzure(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = strings.TrimSuffix(key, "/")
-	return key
-}
-
 // List list objects in path
-func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
-	host, path, err := ParseURL(url)
+func (fs *AzureFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
 
-	path = cleanKeyAzure(path)
 	ts := fs.GetRefTs()
-
 	svc := fs.client.GetBlobService()
 
 	pathArr := strings.Split(path, "/")
@@ -154,13 +179,13 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 		containers, err := fs.getContainers()
 		if err != nil {
 			err = g.Error(err, "Could not getContainers for: "+url)
-			return paths, err
+			return nodes, err
 		}
 		for _, container := range containers {
-			paths = append(
-				paths,
-				g.F("https://%s/%s", host, container.Name),
-			)
+			nodes.Add(dbio.FileNode{
+				URI:   g.F("https://%s.blob.core.windows.net/%s", fs.account, container.Name),
+				IsDir: true,
+			})
 		}
 	} else if len(pathArr) == 1 {
 		// list blobs
@@ -168,16 +193,17 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 		blobs, err := fs.getBlobs(container, azstorage.ListBlobsParameters{Delimiter: "/"})
 		if err != nil {
 			err = g.Error(err, "Could not ListBlobs for: "+url)
-			return paths, err
+			return nodes, err
 		}
-		g.P(blobs)
 		for _, blob := range blobs {
 			lastModified := time.Time(blob.Properties.LastModified)
 			if ts.IsZero() || lastModified.IsZero() || lastModified.After(ts) {
-				paths = append(
-					paths,
-					g.F("https://%s/%s/%s", host, container.Name, blob.Name),
-				)
+				file := dbio.FileNode{
+					URI:     g.F("%s/%s", fs.Prefix(), blob.Name),
+					Updated: lastModified.Unix(),
+					Size:    cast.ToUint64(blob.Properties.ContentLength),
+				}
+				nodes.Add(file)
 			}
 		}
 	} else if len(pathArr) > 1 {
@@ -189,15 +215,17 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 		)
 		if err != nil {
 			err = g.Error(err, "Could not ListBlobs for: "+url)
-			return paths, err
+			return nodes, err
 		}
 		for _, blob := range blobs {
 			lastModified := time.Time(blob.Properties.LastModified)
 			if ts.IsZero() || lastModified.IsZero() || lastModified.After(ts) {
-				paths = append(
-					paths,
-					g.F("https://%s/%s/%s", host, container.Name, blob.Name),
-				)
+				file := dbio.FileNode{
+					URI:     g.F("%s/%s", fs.Prefix(), blob.Name),
+					Updated: lastModified.Unix(),
+					Size:    cast.ToUint64(blob.Properties.ContentLength),
+				}
+				nodes.Add(file)
 			}
 		}
 
@@ -215,16 +243,17 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 
 			if err != nil {
 				err = g.Error(err, "Could not ListBlobs for: "+url)
-				return paths, err
+				return nodes, err
 			}
 			for _, blob := range blobs {
 				// blob.Properties.LastModified
-				blobFile := g.F("https://%s/%s/%s", host, container.Name, blob.Name)
-				if blobFile == url {
-					paths = append(
-						paths,
-						blobFile,
-					)
+				lastModified := time.Time(blob.Properties.LastModified)
+				file := dbio.FileNode{
+					URI:     g.F("%s/%s", fs.Prefix(), blob.Name),
+					Updated: lastModified.Unix(),
+				}
+				if file.URI == url {
+					nodes.Add(file)
 				}
 			}
 		}
@@ -238,14 +267,13 @@ func (fs *AzureFileSysClient) List(url string) (paths []string, err error) {
 }
 
 // ListRecursive list objects in path
-func (fs *AzureFileSysClient) ListRecursive(url string) (paths []string, err error) {
-	_, path, err := ParseURL(url)
+func (fs *AzureFileSysClient) ListRecursive(url string) (paths dbio.FileNodes, err error) {
+	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
 
-	path = cleanKeyAzure(path)
 	g.Trace("listing recursively => %s", path)
 
 	if path != "" {
@@ -280,13 +308,12 @@ func (fs *AzureFileSysClient) delete(urlStr string) (err error) {
 		suffixWildcard = true
 	}
 
-	host, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return
 	}
 
-	path = cleanKeyAzure(path)
 	svc := fs.client.GetBlobService()
 
 	pathArr := strings.Split(path, "/")
@@ -370,7 +397,7 @@ func (fs *AzureFileSysClient) delete(urlStr string) (err error) {
 			}
 
 			for _, blob := range blobs {
-				blobFile := g.F("https://%s/%s/%s", host, container.Name, blob.Name)
+				blobFile := g.F("%s/%s", fs.Prefix(), blob.Name)
 				if blobFile == urlStr {
 					options := azstorage.DeleteBlobOptions{}
 					err = blob.Delete(&options)
@@ -394,13 +421,10 @@ func (fs *AzureFileSysClient) delete(urlStr string) (err error) {
 }
 
 func (fs *AzureFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, err error) {
-	host, path, err := ParseURL(urlStr)
-	if err != nil || host == "" {
-		err = g.Error(err, "Error Parsing url: "+urlStr)
+	path, err := fs.GetPath(urlStr)
+	if err != nil {
 		return
 	}
-
-	path = cleanKeyAzure(path)
 
 	pathArr := strings.Split(path, "/")
 
@@ -462,13 +486,10 @@ func (fs *AzureFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, 
 
 // GetReader returns an Azure FS reader
 func (fs *AzureFileSysClient) GetReader(urlStr string) (reader io.Reader, err error) {
-	host, path, err := ParseURL(urlStr)
-	if err != nil || host == "" {
-		err = g.Error(err, "Error Parsing url: "+urlStr)
+	path, err := fs.GetPath(urlStr)
+	if err != nil {
 		return
 	}
-
-	path = cleanKeyAzure(path)
 
 	pathArr := strings.Split(path, "/")
 

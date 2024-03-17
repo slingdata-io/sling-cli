@@ -971,7 +971,7 @@ func TestFileSysHTTP(t *testing.T) {
 
 func testManyCSV(t *testing.T) {
 	fs, err := NewFileSysClient(dbio.TypeFileHTTP, "concurencyLimit=5")
-	paths, err := fs.List("https://people.sc.fsu.edu/~jburkardt/data/csv/csv.html")
+	nodes, err := fs.List("https://people.sc.fsu.edu/~jburkardt/data/csv/csv.html")
 	// paths, err := fs.List("https://www.stats.govt.nz/large-datasets/csv-files-for-download/")
 	assert.NoError(t, err)
 
@@ -979,7 +979,7 @@ func testManyCSV(t *testing.T) {
 
 	csvPaths := []string{}
 	dss := []*iop.Datastream{}
-	for _, path := range paths {
+	for _, path := range nodes.URIs() {
 		if strings.HasSuffix(path, ".csv") {
 			csvPaths = append(csvPaths, path)
 			g.Debug("added csvPath %s", path)

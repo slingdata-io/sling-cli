@@ -5,12 +5,12 @@ import (
 	"context"
 	"io"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/flarco/g"
 	"github.com/jlaffaye/ftp"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 )
 
@@ -27,6 +27,28 @@ func (fs *FtpFileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 	return fs.Connect()
+}
+
+// Prefix returns the url prefix
+func (fs *FtpFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://%s", fs.fsType.String(), fs.GetProp("host")) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *FtpFileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	if fs.GetProp("host") != host {
+		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.GetProp("host"))
+	}
+
+	return path, err
 }
 
 // Connect initiates the Google Cloud Storage client
@@ -90,29 +112,13 @@ func (fs *FtpFileSysClient) Close() error {
 	return nil
 }
 
-func (fs *FtpFileSysClient) getPrefix() string {
-	return g.F(
-		"ftp://%s@%s:%s",
-		fs.GetProp("USER"),
-		fs.GetProp("HOST"),
-		fs.GetProp("PORT"),
-	)
-}
-
-func (fs *FtpFileSysClient) cleanKey(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = strings.TrimSuffix(key, "/")
-	return key
-}
-
 // List list objects in path
-func (fs *FtpFileSysClient) List(url string) (paths []string, err error) {
-	_, path, err := ParseURL(url)
+func (fs *FtpFileSysClient) List(url string) (paths dbio.FileNodes, err error) {
+	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
-	path = "/" + fs.cleanKey(path)
 
 	entries, err := fs.client.List(path)
 	if err != nil {
@@ -120,28 +126,29 @@ func (fs *FtpFileSysClient) List(url string) (paths []string, err error) {
 	}
 
 	for _, entry := range entries {
-		path := g.F("%s%s%s", fs.getPrefix(), path, entry.Name)
+		file := dbio.FileNode{
+			URI:     g.F("%s/%s%s", fs.Prefix(), path, entry.Name),
+			Size:    entry.Size,
+			Updated: entry.Time.Unix(),
+		}
 		if entry.Type == ftp.EntryTypeFolder {
 			path = path + "/"
 		}
-		paths = append(paths, path)
+		paths = append(paths, file)
 	}
-
-	sort.Strings(paths)
 
 	return
 }
 
 // ListRecursive list objects in path recursively
-func (fs *FtpFileSysClient) ListRecursive(url string) (paths []string, err error) {
-	return []string{url}, nil
+func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
+	return dbio.FileNodes{{URI: url}}, nil
 
-	_, path, err := ParseURL(url)
+	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
-	path = "/" + fs.cleanKey(path)
 	ts := fs.GetRefTs()
 
 	entries, err := fs.client.List(path)
@@ -151,21 +158,26 @@ func (fs *FtpFileSysClient) ListRecursive(url string) (paths []string, err error
 	}
 
 	for _, file := range entries {
+		node := dbio.FileNode{
+			URI:     g.F("%s/%s%s", fs.Prefix(), path, file.Name),
+			Size:    file.Size,
+			Updated: file.Time.Unix(),
+		}
+
 		if ts.IsZero() || file.Time.IsZero() || file.Time.After(ts) {
-			path := g.F("%s%s%s", fs.getPrefix(), path, file.Name)
+			path := g.F("%s%s%s", fs.Prefix(), path, file.Name)
 			if file.Type == ftp.EntryTypeFolder {
-				subPaths, err := fs.ListRecursive(path)
+				subNodes, err := fs.ListRecursive(path)
 				// g.P(subPaths)
 				if err != nil {
-					return []string{}, g.Error(err, "error listing sub path")
+					return nil, g.Error(err, "error listing sub path")
 				}
-				paths = append(paths, subPaths...)
+				nodes.Add(subNodes...)
 			} else {
-				paths = append(paths, path)
+				nodes.Add(node)
 			}
 		}
 	}
-	sort.Strings(paths)
 
 	return
 }
@@ -193,7 +205,7 @@ func (fs *FtpFileSysClient) MkdirAll(path string) (err error) {
 }
 
 func (fs *FtpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return
@@ -224,7 +236,7 @@ func (fs *FtpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, er
 
 // GetReader return a reader for the given path
 func (fs *FtpFileSysClient) GetReader(urlStr string) (reader io.Reader, err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return

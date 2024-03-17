@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -29,6 +29,16 @@ func (fs *LocalFileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 	return
+}
+
+// Prefix returns the url prefix
+func (fs *LocalFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://", fs.fsType.String()) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *LocalFileSysClient) GetPath(uri string) (path string, err error) {
+	return strings.TrimPrefix(uri, fs.Prefix()), nil
 }
 
 func cleanLocalFilePath(path string) string {
@@ -110,7 +120,6 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
 	if string(fileFormat) == "" {
 		fileFormat = InferFileFormat(path)
-		fs.SetProp("FORMAT", string(fileFormat))
 	}
 
 	go func() {
@@ -207,29 +216,41 @@ func (fs *LocalFileSysClient) Write(filePath string, reader io.Reader) (bw int64
 }
 
 // List lists the file in given directory path
-func (fs *LocalFileSysClient) List(path string) (paths []string, err error) {
+func (fs *LocalFileSysClient) List(path string) (nodes dbio.FileNodes, err error) {
 	path = cleanLocalFilePath(path)
 
 	s, err := os.Stat(path)
 	if err == nil && !s.IsDir() {
-		return []string{path}, nil
+		node := dbio.FileNode{
+			URI:     "file://" + path,
+			Updated: s.ModTime().Unix(),
+			Size:    cast.ToUint64(s.Size()),
+		}
+		nodes.Add(node)
+		return
 	}
 
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if err != nil {
 		err = g.Error(err, "Error listing "+path)
 		return
 	}
 
 	for _, file := range files {
-		// file.ModTime()
-		paths = append(paths, "file://"+path+"/"+file.Name())
+		fInfo, _ := file.Info()
+		node := dbio.FileNode{
+			URI:     "file://" + path + "/" + file.Name(),
+			Updated: fInfo.ModTime().Unix(),
+			Size:    cast.ToUint64(fInfo.Size()),
+			IsDir:   file.IsDir(),
+		}
+		nodes.Add(node)
 	}
 	return
 }
 
 // ListRecursive lists the file in given directory path recursively
-func (fs *LocalFileSysClient) ListRecursive(path string) (paths []string, err error) {
+func (fs *LocalFileSysClient) ListRecursive(path string) (nodes dbio.FileNodes, err error) {
 	path = cleanLocalFilePath(path)
 	ts := fs.GetRefTs()
 
@@ -237,8 +258,14 @@ func (fs *LocalFileSysClient) ListRecursive(path string) (paths []string, err er
 		if err != nil {
 			return err
 		}
+		node := dbio.FileNode{
+			URI:     "file://" + subPath,
+			Updated: info.ModTime().Unix(),
+			Size:    cast.ToUint64(info.Size()),
+			IsDir:   info.IsDir(),
+		}
 		if !info.IsDir() && (ts.IsZero() || info.ModTime().IsZero() || info.ModTime().After(ts)) {
-			paths = append(paths, "file://"+subPath)
+			nodes.Add(node)
 		}
 		return nil
 	}

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 )
 
@@ -51,6 +52,28 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 	return fs.Connect()
 }
 
+// Prefix returns the url prefix
+func (fs *S3FileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://%s", fs.fsType.String(), fs.bucket) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *S3FileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	if fs.bucket != host {
+		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.bucket)
+	}
+
+	return path, err
+}
+
 const defaultRegion = "us-east-1"
 
 type fakeWriterAt struct {
@@ -60,11 +83,6 @@ type fakeWriterAt struct {
 func (fw fakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
 	// ignore 'offset' because we forced sequential downloads
 	return fw.w.Write(p)
-}
-
-func cleanKeyS3(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	return key
 }
 
 // Connect initiates the Google Cloud Storage client
@@ -144,32 +162,29 @@ func (fs *S3FileSysClient) getSession() (sess *session.Session) {
 // Delete deletes the given path (file or directory)
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/file.txt`
-func (fs *S3FileSysClient) delete(path string) (err error) {
-	bucket, key, err := ParseURL(path)
+func (fs *S3FileSysClient) delete(uri string) (err error) {
+	key, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+path)
+		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	paths, err := fs.ListRecursive(path)
+	nodes, err := fs.ListRecursive(uri)
 	if err != nil {
 		return
 	}
 
 	objects := []*s3.ObjectIdentifier{}
-	for _, subPath := range paths {
-		_, subPath, err = ParseURL(subPath)
+	for _, subNode := range nodes {
+		subNode.URI, err = fs.GetPath(subNode.URI)
 		if err != nil {
-			err = g.Error(err, "Error Parsing url: "+path)
+			err = g.Error(err, "Error Parsing url: "+uri)
 			return
 		}
-		subPath = cleanKeyS3(subPath)
-		objects = append(objects, &s3.ObjectIdentifier{Key: aws.String(subPath)})
+		objects = append(objects, &s3.ObjectIdentifier{Key: aws.String(subNode.URI)})
 	}
 
 	if len(objects) == 0 {
@@ -177,7 +192,7 @@ func (fs *S3FileSysClient) delete(path string) (err error) {
 	}
 
 	input := &s3.DeleteObjectsInput{
-		Bucket: aws.String(bucket),
+		Bucket: aws.String(fs.bucket),
 		Delete: &s3.Delete{
 			Objects: objects,
 			Quiet:   aws.Bool(true),
@@ -190,7 +205,7 @@ func (fs *S3FileSysClient) delete(path string) (err error) {
 	}
 
 	err = svc.WaitUntilObjectNotExists(&s3.HeadObjectInput{
-		Bucket: aws.String(bucket),
+		Bucket: aws.String(fs.bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
@@ -211,14 +226,11 @@ func (fs *S3FileSysClient) getConcurrency() int {
 // GetReader return a reader for the given path
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/file.txt` or `s3://my_bucket/key/to/directory`
-func (fs *S3FileSysClient) GetReader(path string) (reader io.Reader, err error) {
-	bucket, key, err := ParseURL(path)
+func (fs *S3FileSysClient) GetReader(uri string) (reader io.Reader, err error) {
+	key, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+path)
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
 	// https://github.com/chanzuckerberg/s3parcp
 	PartSize := int64(os.Getpagesize()) * 1024 * 10
@@ -245,7 +257,7 @@ func (fs *S3FileSysClient) GetReader(path string) (reader io.Reader, err error) 
 			fs.Context().Ctx,
 			fakeWriterAt{pipeW},
 			&s3.GetObjectInput{
-				Bucket: aws.String(bucket),
+				Bucket: aws.String(fs.bucket),
 				Key:    aws.String(key),
 			})
 		if err != nil {
@@ -260,14 +272,12 @@ func (fs *S3FileSysClient) GetReader(path string) (reader io.Reader, err error) 
 // GetWriter creates the file if non-existent and return a writer
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/file.txt`
-func (fs *S3FileSysClient) GetWriter(path string) (writer io.Writer, err error) {
-	bucket, key, err := ParseURL(path)
+func (fs *S3FileSysClient) GetWriter(uri string) (writer io.Writer, err error) {
+	key, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+path)
+		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
 	// https://github.com/chanzuckerberg/s3parcp
 	PartSize := int64(os.Getpagesize()) * 1024 * 10
@@ -293,7 +303,7 @@ func (fs *S3FileSysClient) GetWriter(path string) (writer io.Writer, err error) 
 
 		// Upload the file to S3.
 		_, err := uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-			Bucket: aws.String(bucket),
+			Bucket: aws.String(fs.bucket),
 			Key:    aws.String(key),
 			Body:   pipeR,
 		})
@@ -307,14 +317,11 @@ func (fs *S3FileSysClient) GetWriter(path string) (writer io.Writer, err error) 
 	return
 }
 
-func (fs *S3FileSysClient) Write(path string, reader io.Reader) (bw int64, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err error) {
+	key, err := fs.GetPath(uri)
+	if err != nil {
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
 	uploader := s3manager.NewUploader(fs.getSession())
 	uploader.Concurrency = fs.Context().Wg.Limit
@@ -333,7 +340,7 @@ func (fs *S3FileSysClient) Write(path string, reader io.Reader) (bw int64, err e
 
 	// Upload the file to S3.
 	_, err = uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-		Bucket: aws.String(bucket),
+		Bucket: aws.String(fs.bucket),
 		Key:    aws.String(key),
 		Body:   pr,
 	})
@@ -363,99 +370,117 @@ func (fs *S3FileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List lists the file in given directory path
-// path should specify the full path with scheme:
-// `s3://my_bucket/key/to/directory`
-func (fs *S3FileSysClient) List(path string) (paths []string, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
-	urlPrefix := fmt.Sprintf("s3://%s/", bucket)
+	g.Trace("path = %s", path)
+
 	input := &s3.ListObjectsV2Input{
-		Bucket:    aws.String(bucket),
-		Prefix:    aws.String(key),
+		Bucket:    aws.String(fs.bucket),
+		Prefix:    aws.String(path),
 		Delimiter: aws.String("/"),
 	}
 
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	paths, err = fs.doList(svc, input, urlPrefix)
+	nodes, err = fs.doList(svc, input, fs.Prefix("/"))
+	if err != nil {
+		return
+	} else if path == "" {
+		// root level
+		return
+	}
 
 	// s3.List return all objects matching the path
 	// need to match exactly the parent folder to not
 	// return whatever objects partially match the beginning
-	for _, p := range paths {
-		if !strings.HasSuffix(p, "/") && path == p {
-			return []string{p}, err
+	for _, n := range nodes {
+		if !strings.HasSuffix(n.URI, "/") && path == n.Path() {
+			return dbio.FileNodes{n}, err
 		}
 	}
+
 	prefix := strings.TrimSuffix(path, "/") + "/"
-	path2 := []string{}
-	for _, p := range paths {
-		if strings.HasPrefix(p, prefix) {
-			path2 = append(path2, p)
+	nodes2 := dbio.FileNodes{}
+	for _, p := range nodes {
+		if strings.HasPrefix(p.Path(), prefix) {
+			nodes2 = append(nodes2, p)
 		}
 	}
 
 	// if path is folder, need to read inside
-	if len(path2) == 1 {
-		nPath := path2[0]
-		if strings.HasSuffix(nPath, "/") && strings.TrimSuffix(nPath, "/") == strings.TrimSuffix(path, "/") {
-			return fs.List(nPath)
+	if len(nodes2) == 1 {
+		nPath := nodes2[0]
+		if strings.HasSuffix(nPath.URI, "/") && strings.TrimSuffix(nPath.URI, "/") == strings.TrimSuffix(path, "/") {
+			return fs.List(nPath.URI)
 		}
+	} else {
+		// exclude the input path if folder and is part of result (happens for digital-ocean
+		nodes2 = lo.Filter(nodes2, func(n dbio.FileNode, i int) bool { return !(n.IsDir && n.Path() == path) })
 	}
-	return path2, err
+	return nodes2, err
 }
 
 // ListRecursive lists the file in given directory path recusively
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/directory`
-func (fs *S3FileSysClient) ListRecursive(path string) (paths []string, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
 		return
 	}
-	fs.bucket = bucket
-	key = cleanKeyS3(key)
 
-	urlPrefix := fmt.Sprintf("s3://%s/", bucket)
 	input := &s3.ListObjectsV2Input{
-		Bucket: aws.String(bucket),
-		Prefix: aws.String(key),
+		Bucket: aws.String(fs.bucket),
+		Prefix: aws.String(path),
 	}
 
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	return fs.doList(svc, input, urlPrefix)
+	return fs.doList(svc, input, fs.Prefix("/"))
 }
 
-func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string) (paths []string, err error) {
-
+func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string) (nodes dbio.FileNodes, err error) {
 	result, err := svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 	if err != nil {
 		err = g.Error(err, "Error with ListObjectsV2 for: %#v", input)
-		return paths, err
+		return nodes, err
 	}
+
+	g.Trace("%#v", result)
 
 	ts := fs.GetRefTs()
 
-	prefixes := []string{}
 	for {
 
 		for _, cp := range result.CommonPrefixes {
-			prefixes = append(prefixes, urlPrefix+*cp.Prefix)
+			nodes.Add(dbio.FileNode{URI: urlPrefix + *cp.Prefix, IsDir: true})
 		}
 
 		for _, obj := range result.Contents {
+			if obj == nil {
+				continue
+			}
+
+			node := dbio.FileNode{
+				URI:     urlPrefix + *obj.Key,
+				Updated: obj.LastModified.Unix(),
+				Size:    cast.ToUint64(*obj.Size),
+			}
+			if obj.Owner != nil {
+				node.Owner = *obj.Owner.DisplayName
+			}
+			if strings.HasSuffix(node.URI, "/") {
+				node.IsDir = true
+			}
+
 			if obj.LastModified == nil || obj.LastModified.IsZero() || ts.IsZero() || obj.LastModified.After(ts) {
-				paths = append(paths, urlPrefix+*obj.Key)
+				nodes.Add(node)
 			}
 		}
 
@@ -464,16 +489,13 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 			result, err = svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 			if err != nil {
 				err = g.Error(err, "Error with ListObjectsV2 for: %#v", input)
-				return paths, err
+				return nodes, err
 			}
 		} else {
 			break
 		}
 	}
 
-	sort.Strings(prefixes)
-	sort.Strings(paths)
-	paths = append(prefixes, paths...)
 	return
 }
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Column struct {
 	Schema      string `json:"schema,omitempty"`
 	Database    string `json:"database,omitempty"`
 	Description string `json:"description,omitempty"`
+	FileURI     string `json:"file_uri,omitempty"`
 
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
@@ -157,11 +159,44 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 }
 
 // PrettyTable returns a text pretty table
-func (cols Columns) PrettyTable() (output string) {
+func (cols Columns) PrettyTable(includeParent bool) (output string) {
 	header := []string{"ID", "Column Name", "Native Type", "General Type"}
+	parentIsDB := false
+	parentIsFile := false
 	rows := lo.Map(cols, func(col Column, i int) []any {
+		if includeParent {
+			if col.Table != "" {
+				parentIsDB = true
+				return []any{col.Database, col.Schema, col.Table, col.Position, col.Name, col.DbType, col.Type}
+			} else if col.FileURI != "" {
+				parentIsFile = true
+				return []any{col.FileURI, col.Position, col.Name, col.Type}
+			}
+		}
 		return []any{col.Position, col.Name, col.DbType, col.Type}
 	})
+
+	sort.Slice(rows, func(i, j int) bool {
+		val := func(r []any) string {
+			if parentIsDB {
+				return g.F("%s-%s-%s-%04d", r[0], r[1], r[2], r[3])
+			}
+			if parentIsFile {
+				return g.F("%s-%04d", r[0], r[1])
+			}
+			return g.F("%04d", r[0])
+		}
+		return val(rows[i]) < val(rows[j])
+	})
+
+	if includeParent {
+		if parentIsDB {
+			header = []string{"Database", "Schema", "Table", "ID", "Column", "Native Type", "General Type"}
+		}
+		if parentIsFile {
+			header = []string{"File", "ID", "Column", "General Type"}
+		}
+	}
 	return g.PrettyTable(header, rows)
 }
 

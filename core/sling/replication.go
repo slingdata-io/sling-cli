@@ -214,17 +214,17 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 		if strings.Contains(lastPart, "*") {
 			parent := strings.TrimSuffix(wildcardName, lastPart)
 
-			paths, err := fs.ListRecursive(parent)
+			nodes, err := fs.ListRecursive(parent)
 			if err != nil {
 				return g.Error(err, "could not list %s", parent)
 			}
 
-			for _, path := range paths {
-				if g.WildCardMatch(path, []string{lastPart}) && !rd.HasStream(path) {
+			for _, node := range nodes {
+				if g.WildCardMatch(node.URI, []string{lastPart}) && !rd.HasStream(node.URI) {
 					newCfg := ReplicationStreamConfig{}
 					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-					rd.Streams[path] = &newCfg
-					rd.streamsOrdered = append(rd.streamsOrdered, path)
+					rd.Streams[node.URI] = &newCfg
+					rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
 				}
 			}
 

@@ -6,16 +6,20 @@ import (
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/integrii/flaggy"
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	dbioEnv "github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
@@ -579,30 +583,38 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 	case "discover":
 		name := cast.ToString(c.Vals["name"])
-		if conn, ok := ec.GetConnEntry(name); ok {
+		conn, ok := ec.GetConnEntry(name)
+		if ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
 
 		opt := connection.DiscoverOptions{
-			Schema:    cast.ToString(c.Vals["schema"]),
-			Stream:    cast.ToString(c.Vals["stream"]),
-			Folder:    cast.ToString(c.Vals["folder"]),
-			Filter:    cast.ToString(c.Vals["filter"]),
-			Recursive: cast.ToBool(c.Vals["recursive"]),
+			Schema:      cast.ToString(c.Vals["schema"]),
+			Stream:      cast.ToString(c.Vals["stream"]),
+			Folder:      cast.ToString(c.Vals["folder"]),
+			Filter:      cast.ToString(c.Vals["filter"]),
+			ColumnLevel: cast.ToBool(c.Vals["columns"]),
+			Recursive:   cast.ToBool(c.Vals["recursive"]),
 		}
 
-		var streamNames []string
-		var schemata database.Schemata
-		streamNames, schemata, err = ec.Discover(name, opt)
+		files, schemata, err := ec.Discover(name, opt)
 		if err != nil {
 			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 
 		if tables := lo.Values(schemata.Tables()); len(tables) > 0 {
-			if opt.Stream != "" {
-				println(tables[0].Columns.PrettyTable())
+
+			sort.Slice(tables, func(i, j int) bool {
+				val := func(t database.Table) string {
+					return t.FDQN()
+				}
+				return val(tables[i]) < val(tables[j])
+			})
+
+			if opt.ColumnLevel {
+				println(iop.Columns(lo.Values(schemata.Columns())).PrettyTable(true))
 			} else {
-				header := []string{"ID", "Schema", "Name", "Type", "Columns"}
+				header := []string{"#", "Schema", "Name", "Type", "Columns"}
 				rows := lo.Map(tables, func(table database.Table, i int) []any {
 					tableType := lo.Ternary(table.IsView, "view", "table")
 					if table.Dialect.DBNameUpperCase() {
@@ -612,10 +624,37 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				})
 				println(g.PrettyTable(header, rows))
 			}
-		} else {
-			g.Info("Found %d streams:", len(streamNames))
-			for _, sn := range streamNames {
-				env.Println(g.F(" - %s", sn))
+		} else if len(files) > 0 {
+			if opt.ColumnLevel {
+				println(iop.Columns(lo.Values(files.Columns())).PrettyTable(true))
+			} else {
+
+				files.Sort()
+
+				header := []string{"#", "URI", "Type", "Size", "Last Updated (UTC)"}
+				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
+					fileType := lo.Ternary(file.IsDir, "directory", "file")
+
+					lastUpdated := "-"
+					if file.Updated > 100 {
+						updated := time.Unix(file.Updated, 0)
+						delta := strings.Split(g.DurationString(time.Since(updated)), " ")[0]
+						lastUpdated = g.F("%s (%s ago)", updated.UTC().Format("2006-01-02 15:04:05"), delta)
+					}
+
+					size := "-"
+					if file.Size > 0 {
+						size = humanize.Bytes(file.Size)
+					}
+
+					return []any{i + 1, file.URI, fileType, size, lastUpdated}
+				})
+
+				println(g.PrettyTable(header, rows))
+
+				if len(files) > 0 && opt.Folder == "" {
+					g.Info("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders, or --recursive")
+				}
 			}
 		}
 

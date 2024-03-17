@@ -233,6 +233,12 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "List all files recursively.",
 				},
+				{
+					Name:        "columns",
+					ShortName:   "",
+					Type:        "bool",
+					Description: "Show column level metadata.",
+				},
 			},
 		},
 		{

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path"
 	"runtime"
@@ -39,18 +38,19 @@ type FileSysClient interface {
 	GetDatastream(path string) (ds *iop.Datastream, err error)
 	GetWriter(path string) (writer io.Writer, err error)
 	Buckets() (paths []string, err error)
-	List(path string) (paths []string, err error)
-	ListRecursive(path string) (paths []string, err error)
+	List(path string) (paths dbio.FileNodes, err error)
+	ListRecursive(path string) (paths dbio.FileNodes, err error)
 	Write(path string, reader io.Reader) (bw int64, err error)
-	delete(path string) (err error)
-	setDf(df *iop.Dataflow)
-
+	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
 	WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error)
 	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
+
+	delete(path string) (err error)
+	setDf(df *iop.Dataflow)
 }
 
 // NewFileSysClient create a file system client
@@ -133,9 +133,7 @@ func NewFileSysClientFromURL(url string, props ...string) (fsClient FileSysClien
 func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...string) (fsClient FileSysClient, err error) {
 	switch {
 	case strings.HasPrefix(url, "s3://"):
-		if v, ok := g.KVArrToMap(props...)["ENDPOINT"]; ok && v != "" {
-			return NewFileSysClientContext(ctx, dbio.TypeFileS3, props...)
-		}
+		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileS3, props...)
 	case strings.HasPrefix(url, "ftp://"):
 		props = append(props, "URL="+url)
@@ -144,6 +142,7 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileSftp, props...)
 	case strings.HasPrefix(url, "gs://"):
+		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileGoogle, props...)
 	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
@@ -153,45 +152,12 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 		props = append(props, g.F("concurencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	case strings.Contains(url, "://"):
-		err = g.Error(
-			g.Error("Unable to determine FileSysClient for "+url),
-			"",
-		)
+		err = g.Error("Unable to determine FileSysClient for " + url)
 		return
 	default:
 		props = append(props, g.F("concurencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	}
-}
-
-// PathNode represents a file node
-type PathNode struct {
-	Name         string    `json:"name"`
-	IsDir        bool      `json:"is_dir"`
-	Size         int64     `json:"size,omitempty"`
-	LastModified time.Time `json:"last_modified,omitempty"`
-	Children     PathNodes `json:"children,omitempty"`
-}
-
-// PathNodes represent file nodes
-type PathNodes []PathNode
-
-// Add adds a new node to list
-func (pn *PathNodes) Add(p PathNode) {
-	nodes := *pn
-	nodes = append(nodes, p)
-	pn = &nodes
-}
-
-// List give a list of recursive paths
-func (pn PathNodes) List() (paths []string) {
-	for _, p := range pn {
-		paths = append(paths, p.Name)
-		if p.IsDir {
-			paths = append(paths, p.Children.List()...)
-		}
-	}
-	return paths
 }
 
 type FileType string
@@ -245,22 +211,8 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 }
 
 // ParseURL parses a URL
-func ParseURL(urlStr string) (host string, path string, err error) {
-
-	u, err := url.Parse(urlStr)
-	if err != nil {
-		err = g.Error(err, "Unable to parse URL "+urlStr)
-		return
-	}
-
-	scheme := u.Scheme
-	host = u.Hostname()
-	path = u.Path
-
-	if scheme == "" || host == "" {
-		err = g.Error("Invalid URL: " + urlStr)
-	}
-
+func ParseURL(uri string) (host string, path string, err error) {
+	_, host, path, err = dbio.ParseURL(uri)
 	return
 }
 
@@ -338,6 +290,11 @@ func (fs *BaseFileSysClient) FsType() dbio.Type {
 // Buckets returns the buckets found in the account
 func (fs *BaseFileSysClient) Buckets() (paths []string, err error) {
 	return
+}
+
+// Prefix returns the url prefix
+func (fs *BaseFileSysClient) Prefix(suffix ...string) string {
+	return "" + strings.Join(suffix, "")
 }
 
 // GetProp returns the value of a property
@@ -429,7 +386,6 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
 	if string(fileFormat) == "" {
 		fileFormat = InferFileFormat(urlStr)
-		fs.SetProp("FORMAT", string(fileFormat))
 	}
 
 	// CSV, JSON or XML files
@@ -542,12 +498,12 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 	}
 
 	g.Trace("listing path: %s", url)
-	paths, err := fs.Self().ListRecursive(url)
+	nodes, err := fs.Self().ListRecursive(url)
 	if err != nil {
 		err = g.Error(err, "Error getting paths")
 		return
 	}
-	df, err = GetDataflow(fs.Self(), paths, Cfg)
+	df, err = GetDataflow(fs.Self(), nodes.URIs(), Cfg)
 	if err != nil {
 		err = g.Error(err, "error getting dataflow")
 		return
@@ -893,7 +849,6 @@ type FileStreamConfig struct {
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
 func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
-
 	if len(paths) == 0 {
 		err = g.Error("Provided 0 files for: %#v", paths)
 		return

@@ -275,35 +275,130 @@ func (s *Schemata) Database() Database {
 	return Database{}
 }
 
-func (s *Schemata) Tables() map[string]Table {
+func (s *Schemata) Tables(filters ...string) map[string]Table {
 	tables := map[string]Table{}
 	for _, db := range s.Databases {
 		for _, schema := range db.Schemas {
 			for _, table := range schema.Tables {
-				key := strings.ToLower(g.F("%s.%s.%s", db.Name, schema.Name, table.Name))
-				tables[key] = table
+				if len(filters) == 0 || g.IsMatched(filters, table.Name) {
+					key := strings.ToLower(g.F("%s.%s.%s", db.Name, schema.Name, table.Name))
+					tables[key] = table
+				}
 			}
 		}
 	}
 	return tables
 }
 
-func (s *Schemata) Columns() map[string]iop.Column {
+func (s *Schemata) Columns(filters ...string) map[string]iop.Column {
 	columns := map[string]iop.Column{}
 	for _, db := range s.Databases {
 		for _, schema := range db.Schemas {
 			for _, table := range schema.Tables {
 				for _, column := range table.Columns {
-					// get general type
-					column.Type = NativeTypeToGeneral(column.Name, column.DbType, s.conn)
-					column.SetLengthPrecisionScale()
-					key := strings.ToLower(g.F("%s.%s.%s.%s", db.Name, schema.Name, table.Name, column.Name))
-					columns[key] = column
+					if len(filters) == 0 || g.IsMatched(filters, column.Name) {
+						// get general type
+						column.Type = NativeTypeToGeneral(column.Name, column.DbType, s.conn)
+						column.SetLengthPrecisionScale()
+						key := strings.ToLower(g.F("%s.%s.%s.%s", db.Name, schema.Name, table.Name, column.Name))
+						columns[key] = column
+					}
 				}
 			}
 		}
 	}
 	return columns
+}
+
+func (s *Schemata) Filtered(columnLevel bool, filters ...string) (ns Schemata) {
+	if columnLevel {
+		return s.filterColumns(filters...)
+	}
+	return s.filterTables(filters...)
+}
+
+func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
+	ns = Schemata{Databases: map[string]Database{}, conn: s.conn}
+
+	matchedTables := lo.Filter(lo.Values(s.Tables()), func(t Table, i int) bool {
+		return len(filters) == 0 || g.IsMatched(filters, t.Name)
+	})
+
+	if len(matchedTables) == 0 {
+		return
+	}
+
+	for _, table := range matchedTables {
+		db, ok := ns.Databases[strings.ToLower(table.Database)]
+		if !ok {
+			db = Database{
+				Name:    table.Database,
+				Schemas: map[string]Schema{},
+			}
+		}
+
+		schema, ok := db.Schemas[strings.ToLower(table.Schema)]
+		if !ok {
+			schema = Schema{
+				Name:   table.Schema,
+				Tables: map[string]Table{},
+			}
+		}
+
+		if _, ok := schema.Tables[strings.ToLower(table.Name)]; !ok {
+			schema.Tables[strings.ToLower(table.Name)] = table
+		}
+
+		db.Schemas[strings.ToLower(table.Schema)] = schema
+		ns.Databases[strings.ToLower(table.Database)] = db
+	}
+
+	return ns
+}
+
+func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
+	ns = Schemata{Databases: map[string]Database{}, conn: s.conn}
+
+	matchedColumns := lo.Filter(lo.Values(s.Columns()), func(col iop.Column, i int) bool {
+		return len(filters) == 0 || g.IsMatched(filters, col.Name)
+	})
+
+	if len(matchedColumns) == 0 {
+		return
+	}
+
+	for _, col := range matchedColumns {
+		db, ok := ns.Databases[strings.ToLower(col.Database)]
+		if !ok {
+			db = Database{
+				Name:    col.Database,
+				Schemas: map[string]Schema{},
+			}
+		}
+
+		schema, ok := db.Schemas[strings.ToLower(col.Schema)]
+		if !ok {
+			schema = Schema{
+				Name:   col.Schema,
+				Tables: map[string]Table{},
+			}
+		}
+
+		table, ok := schema.Tables[strings.ToLower(col.Table)]
+		if !ok {
+			table = Table{
+				Name: col.Table,
+			}
+		}
+
+		table.Columns = append(table.Columns, col)
+
+		schema.Tables[strings.ToLower(col.Schema)] = table
+		db.Schemas[strings.ToLower(col.Schema)] = schema
+		ns.Databases[strings.ToLower(col.Database)] = db
+	}
+
+	return ns
 }
 
 type ColumnType struct {
