@@ -170,7 +170,7 @@ func (cols Columns) PrettyTable(includeParent bool) (output string) {
 				return []any{col.Database, col.Schema, col.Table, col.Position, col.Name, col.DbType, col.Type}
 			} else if col.FileURI != "" {
 				parentIsFile = true
-				return []any{col.FileURI, col.Position, col.Name, col.Type}
+				return []any{col.FileURI, col.Position, col.Name, col.DbType, col.Type}
 			}
 		}
 		return []any{col.Position, col.Name, col.DbType, col.Type}
@@ -194,7 +194,7 @@ func (cols Columns) PrettyTable(includeParent bool) (output string) {
 			header = []string{"Database", "Schema", "Table", "ID", "Column", "Native Type", "General Type"}
 		}
 		if parentIsFile {
-			header = []string{"File", "ID", "Column", "General Type"}
+			header = []string{"File", "ID", "Column", "Native Type", "General Type"}
 		}
 	}
 	return g.PrettyTable(header, rows)
