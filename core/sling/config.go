@@ -216,7 +216,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	// add config path
-	if _, err := os.Stat(cfgStr); err == nil && !cfg.ReplicationMode {
+	if g.PathExists(cfgStr) && !cfg.ReplicationMode {
 		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
@@ -250,7 +250,11 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		cfg.Mode = FullRefreshMode
+		if cfg.Source.PrimaryKeyI != nil || cfg.Source.UpdateKey != "" {
+			cfg.Mode = IncrementalMode
+		} else {
+			cfg.Mode = FullRefreshMode
+		}
 	}
 
 	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode)
