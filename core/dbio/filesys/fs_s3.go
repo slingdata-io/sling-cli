@@ -475,9 +475,6 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 			if obj.Owner != nil {
 				node.Owner = *obj.Owner.DisplayName
 			}
-			if strings.HasSuffix(node.URI, "/") {
-				node.IsDir = true
-			}
 
 			if obj.LastModified == nil || obj.LastModified.IsZero() || ts.IsZero() || obj.LastModified.After(ts) {
 				nodes.Add(node)
