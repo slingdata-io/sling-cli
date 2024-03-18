@@ -190,7 +190,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	// check for update, and print note
-	go checkUpdate()
+	go checkUpdate(false)
 	defer printUpdateAvailable()
 
 	for {

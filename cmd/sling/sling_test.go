@@ -165,7 +165,7 @@ func TestCfgPath(t *testing.T) {
 func TestExtract(t *testing.T) {
 	core.Version = "v1.0.43"
 
-	checkUpdate()
+	checkUpdate(true)
 	assert.NotEmpty(t, updateVersion)
 
 	printUpdateAvailable()
@@ -751,7 +751,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 			}
 		}
 
-		if len(valContains) > 0 {
+		if len(containsMap) > 0 {
 			resultType := "tables"
 
 			if opt.ColumnLevel {
@@ -786,7 +786,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsFile() {
-		// g.Warn("%#v", files.Paths())
+		g.Warn(g.Marshal(files.Paths()))
 		// basic tests
 		assert.Greater(t, len(files), 0)
 		for _, uri := range files.URIs() {
@@ -822,7 +822,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 			}
 		}
 
-		if len(valContains) > 0 {
+		if len(containsMap) > 0 {
 			resultType := "files"
 
 			if opt.ColumnLevel {
@@ -855,6 +855,10 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 			}
 		}
 	}
+
+	g.Info("valContains = %#v", valContains)
+	g.Info("valNotContains = %#v", valNotContains)
+	g.Info("containsMap = %#v", containsMap)
 }
 
 func TestSuiteSftp(t *testing.T) {
@@ -862,12 +866,17 @@ func TestSuiteSftp(t *testing.T) {
 	testDiscover(t, nil, dbio.TypeFileSftp)
 }
 
-func TestSuiteS3(t *testing.T) {
+func TestSuiteFileS3(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileS3)
 }
 
-func TestSuiteGCS(t *testing.T) {
+func TestSuiteFileGoogle(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileGoogle)
+}
+
+func TestSuiteFileAzure(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileAzure)
 }
