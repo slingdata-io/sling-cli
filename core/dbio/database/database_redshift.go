@@ -85,7 +85,7 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 }
 
 // Unload unloads a query to S3
-func (conn *RedshiftConn) Unload(tables ...Table) (s3Path string, err error) {
+func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, err error) {
 
 	if conn.GetProp("AWS_BUCKET") == "" {
 		return "", g.Error("need to set AWS_BUCKET")
@@ -114,7 +114,7 @@ func (conn *RedshiftConn) Unload(tables ...Table) (s3Path string, err error) {
 			cleanSQL := strings.ReplaceAll(unloadSQL, AwsID, "*****")
 			cleanSQL = strings.ReplaceAll(cleanSQL, AwsAccessKey, "*****")
 			err = g.Error(err, fmt.Sprintf("SQL Error for %s:\n%s", s3PathPart, cleanSQL))
-			conn.Context().CaptureErr(err)
+			ctx.CaptureErr(err)
 		}
 
 	}
@@ -167,13 +167,14 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	s3Path, err := conn.Unload(tables...)
+	unloadCtx := g.NewContext(conn.Context().Ctx)
+	s3Path, err := conn.Unload(&unloadCtx, tables...)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
 	}
 
-	fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	fs, err := filesys.NewFileSysClientContext(unloadCtx.Ctx, dbio.TypeFileS3, conn.PropArr()...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return

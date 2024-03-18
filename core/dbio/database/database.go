@@ -2405,9 +2405,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 		return conn.BulkExportFlowCSV(tables...)
 	}
 
-	ctx := g.NewContext(conn.Context().Ctx)
-	df = iop.NewDataflow()
-	df.Context = &ctx
+	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	dsCh := make(chan *iop.Datastream)
 
@@ -2455,7 +2453,8 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		return
 	}
 
-	df = iop.NewDataflow()
+	exportCtx := g.NewContext(conn.Context().Ctx)
+	df = iop.NewDataflowContext(exportCtx.Ctx)
 	dsCh := make(chan *iop.Datastream)
 
 	unload := func(table Table, pathPart string) {
@@ -2471,14 +2470,14 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArr()...)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Unable to create Local file sys Client"))
+			exportCtx.CaptureErr(g.Error(err, "Unable to create Local file sys Client"))
 			ds.Context.Cancel()
 			return
 		}
 
 		sqlDf, err := iop.MakeDataFlow(ds)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Unable to create data flow"))
+			exportCtx.CaptureErr(g.Error(err, "Unable to create data flow"))
 			ds.Context.Cancel()
 			return
 		}
@@ -2486,7 +2485,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		go func() {
 			_, err := fs.Self().WriteDataflowReady(sqlDf, pathPart, fileReadyChn)
 			if err != nil {
-				conn.Context().CaptureErr(g.Error(err, "Unable to write to file: "+pathPart))
+				exportCtx.CaptureErr(g.Error(err, "Unable to write to file: "+pathPart))
 				ds.Context.Cancel()
 				return
 			}
@@ -2496,7 +2495,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 			// when the file is ready, push to dataflow
 			nDs, err := iop.ReadCsvStream(file.URI)
 			if err != nil {
-				conn.Context().CaptureErr(g.Error(err, "Unable to read stream: "+file.URI))
+				exportCtx.CaptureErr(g.Error(err, "Unable to read stream: "+file.URI))
 				ds.Context.Cancel()
 				df.Context.Cancel()
 				return

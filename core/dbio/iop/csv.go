@@ -294,8 +294,13 @@ func CreateDummyFields(numCols int) (cols []string) {
 
 // ReadStream returns the read CSV stream with Line 1 as header
 func (c *CSV) ReadStream() (ds *Datastream, err error) {
+	return c.ReadStreamContext(context.Background())
+}
 
-	ds = NewDatastream(c.Columns)
+// ReadStream returns the read CSV stream with Line 1 as header
+func (c *CSV) ReadStreamContext(ctx context.Context) (ds *Datastream, err error) {
+
+	ds = NewDatastreamContext(ctx, c.Columns)
 
 	r, err := c.getReader("")
 	if err != nil {

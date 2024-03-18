@@ -188,7 +188,7 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		return df, g.Error("no table/query provided")
 	}
 
-	df = iop.NewDataflow()
+	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	columns, err := conn.GetSQLColumns(tables[0])
 	if err != nil {

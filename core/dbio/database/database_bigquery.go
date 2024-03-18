@@ -750,12 +750,8 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 		return g.Error(err, "Error in task.Wait")
 	}
 
-	if status.Err() != nil {
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Import Task")
+	if err := status.Err(); err != nil {
+		return g.Error(err, "Error in Import Task")
 	}
 
 	return nil
@@ -801,12 +797,8 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 		return g.Error(err, "Error in task.Wait")
 	}
 
-	if status.Err() != nil {
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Import Task")
+	if err := status.Err(); err != nil {
+		return g.Error(err, "Error in Import Task")
 	}
 
 	return nil
@@ -863,6 +855,8 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
+	unloadCtx := g.NewContext(conn.Context().Ctx)
+
 	doExport := func(table Table, gsPartURL string) {
 		defer conn.Context().Wg.Write.Done()
 
@@ -874,13 +868,14 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 
 		err = conn.CopyToGCS(table, gsPartURL)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Could not Copy to GS"))
+			unloadCtx.CaptureErr(g.Error(err, "Could not Copy to GS"))
 		}
 	}
 
 	gsFs, err := filesys.NewFileSysClient(dbio.TypeFileGoogle, conn.PropArr()...)
 	if err != nil {
-		conn.Context().CaptureErr(g.Error(err, "Unable to create GCS Client"))
+		err = g.Error(err, "Unable to create GCS Client")
+		return
 	}
 
 	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, filePathStorageSlug, cast.ToString(g.Now()))
@@ -894,7 +889,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 	}
 
 	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	err = unloadCtx.Err()
 
 	if err == nil {
 		g.Debug("Unloaded to %s", gsPath)
@@ -963,11 +958,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 			table.IsView = true
 			return conn.CopyToGCS(table, gcsURI)
 		}
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Export Task")
+		return g.Error(err, "Error in Export Task")
 	}
 
 	g.Info("wrote to %s", gcsURI)

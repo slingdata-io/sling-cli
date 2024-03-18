@@ -37,17 +37,21 @@ type Dataflow struct {
 
 // NewDataflow creates a new dataflow
 func NewDataflow(limit ...int) (df *Dataflow) {
+	return NewDataflowContext(context.Background(), limit...)
+}
+
+func NewDataflowContext(ctx context.Context, limit ...int) (df *Dataflow) {
 
 	Limit := uint64(0) // infinite
 	if len(limit) > 0 && limit[0] != 0 {
 		Limit = cast.ToUint64(limit[0])
 	}
-	ctx := g.NewContext(context.Background())
+	ctxDf := g.NewContext(ctx)
 
 	df = &Dataflow{
 		StreamCh:      make(chan *Datastream, 1),
 		Streams:       []*Datastream{},
-		Context:       &ctx,
+		Context:       &ctxDf,
 		Limit:         Limit,
 		StreamMap:     map[string]*Datastream{},
 		deferFuncs:    []func(){},

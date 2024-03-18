@@ -88,13 +88,14 @@ func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err er
 		return conn.BaseConn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
-	stdOutReader, err := conn.LoadDataOutFile(table.Select(0))
+	copyCtx := g.NewContext(conn.Context().Ctx)
+	stdOutReader, err := conn.LoadDataOutFile(&copyCtx, table.Select(0))
 	if err != nil {
 		return ds, err
 	}
 
 	csv := iop.CSV{Reader: stdOutReader}
-	ds, err = csv.ReadStream()
+	ds, err = csv.ReadStreamContext(copyCtx.Ctx)
 
 	return ds, err
 }
@@ -130,7 +131,7 @@ func (conn *MySQLConn) BulkImportStream(tableFName string, ds *iop.Datastream) (
 // File privilege needs to be granted to user
 // also the --secure-file-priv option needs to be set properly for it to work.
 // https://stackoverflow.com/questions/9819271/why-is-mysql-innodb-insert-so-slow to improve innodb insert speed
-func (conn *MySQLConn) LoadDataOutFile(sql string) (stdOutReader io.Reader, err error) {
+func (conn *MySQLConn) LoadDataOutFile(ctx *g.Context, sql string) (stdOutReader io.Reader, err error) {
 	var stderr bytes.Buffer
 	url, err := dburl.Parse(conn.URL)
 	if err != nil {
@@ -172,8 +173,7 @@ func (conn *MySQLConn) LoadDataOutFile(sql string) (stdOutReader io.Reader, err 
 					cmdStr, stderr.String(),
 				),
 			)
-			// FIXME: avoid using conn.Context().CaptureErr since it cancels all child contexts
-			conn.Context().CaptureErr(err)
+			ctx.CaptureErr(err)
 			g.LogError(err, "could not export from MySQL")
 		}
 	}()

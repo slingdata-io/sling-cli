@@ -291,7 +291,7 @@ func (b *duckDbBuffer) Bytes() []byte {
 	return b.buf.Bytes()
 }
 
-func (conn *DuckDbConn) getCmd(sql string, readOnly bool) (cmd *exec.Cmd, sqlPath string, err error) {
+func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *exec.Cmd, sqlPath string, err error) {
 
 	bin, err := EnsureBinDuckDB(conn.GetProp("duckdb_version"))
 	if err != nil {
@@ -342,9 +342,9 @@ func (conn *DuckDbConn) getCmd(sql string, readOnly bool) (cmd *exec.Cmd, sqlPat
 				conn.cmdInteractive = nil
 				if err != nil {
 					if stdErr := conn.stdErrInteractive.String(); stdErr != "" {
-						conn.Context().CaptureErr(g.Error(stdErr))
+						ctx.CaptureErr(g.Error(stdErr))
 					} else {
-						conn.Context().CaptureErr(g.Error(err, "error running duckdb interactive command"))
+						ctx.CaptureErr(g.Error(err, "error running duckdb interactive command"))
 					}
 				}
 			}()
@@ -455,7 +455,9 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	if strings.Contains(sql, duckDbReadOnlyHint) {
 		readOnly = true
 	}
-	cmd, sqlPath, err := conn.getCmd(sql, readOnly)
+
+	queryCtx := g.NewContext(conn.Context().Ctx)
+	cmd, sqlPath, err := conn.getCmd(&queryCtx, sql, readOnly)
 	if err != nil {
 		return result, g.Error(err, "could not get cmd duckdb")
 	}
@@ -485,6 +487,10 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	}
 	// time.Sleep(400 * time.Millisecond) // so that cmd releases process
 	fileContext.Mux.Unlock()
+
+	if err == nil && queryCtx.Err() != nil {
+		err = queryCtx.Err()
+	}
 
 	if err != nil || strings.Contains(stderr.String(), "Error: ") {
 		errText := g.F("could not exec SQL for duckdb: %s\n%s\n%s", string(out), stderr.String(), sql)
@@ -523,7 +529,9 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	if strings.Contains(sql, duckDbReadOnlyHint) {
 		readOnly = true
 	}
-	cmd, sqlPath, err := conn.getCmd(copySQL, readOnly)
+
+	queryCtx := g.NewContext(conn.Context().Ctx)
+	cmd, sqlPath, err := conn.getCmd(&queryCtx, copySQL, readOnly)
 	if err != nil {
 		return ds, g.Error(err, "could not get cmd duckdb")
 	}
@@ -581,7 +589,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
 
-	ds = iop.NewDatastream(fetchedColumns)
+	ds = iop.NewDatastreamContext(queryCtx.Ctx, fetchedColumns)
 	ds.SafeInference = true
 	ds.SetConfig(conn.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
@@ -739,7 +747,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 		conn.LogSQL(sql)
 
-		cmd, sqlPath, err := conn.getCmd(sql, cast.ToBool(conn.GetProp("read_only")))
+		cmd, sqlPath, err := conn.getCmd(ds.Context, sql, cast.ToBool(conn.GetProp("read_only")))
 		if err != nil {
 			os.Remove(csvPath)
 			return count, g.Error(err, "could not get cmd duckdb")

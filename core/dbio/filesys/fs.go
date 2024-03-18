@@ -854,9 +854,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 		return
 	}
 
-	ctx := g.NewContext(fs.Context().Ctx)
-	df = iop.NewDataflow(cfg.Limit)
-	df.Context = &ctx
+	df = iop.NewDataflowContext(fs.Context().Ctx, cfg.Limit)
 	dsCh := make(chan *iop.Datastream)
 	fs.setDf(df)
 	fs.SetProp("selectFields", g.Marshal(cfg.Columns))
