@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
@@ -488,5 +489,5 @@ func (data *Dataset) InferColumnTypes() {
 }
 
 func looksLikeJson(s string) bool {
-	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
+	return s == "" || (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`)) || unicode.IsDigit(rune(s[0]))
 }
