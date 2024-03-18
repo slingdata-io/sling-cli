@@ -58,11 +58,6 @@ func (conn *DuckDbConn) Init() error {
 		DuckDbFileContext[conn.URL] = &c
 	}
 
-	conn.isInteractive = cast.ToBool(conn.GetProp("interactive"))
-	if conn.BaseConn.Type == dbio.TypeDbMotherDuck && conn.GetProp("interactive") == "" {
-		conn.isInteractive = true // default interactive true for motherduck
-	}
-
 	var instance Connection
 	instance = conn
 	conn.BaseConn.instance = &instance
@@ -129,11 +124,31 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	conn.SetProp("connected", "true")
 
+	_, err = conn.Exec("select 1" + noDebugKey)
+	if err != nil {
+		if strings.Contains(err.Error(), " version") {
+			g.Warn("To having sling use a different DuckDB version, set DUCKDB_VERSION=<version>")
+		}
+		return g.Error(err, "could not init connection")
+	}
+
 	// init extensions
-	conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
+	_, err = conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
+	if err != nil {
+		return g.Error(err, "could not init extensions")
+	}
 
 	if conn.GetType() == dbio.TypeDbMotherDuck {
-		conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)
+		_, err = conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)
+		if err != nil {
+			return g.Error(err, "could not init extensions")
+		}
+	}
+
+	// set as interactive
+	conn.isInteractive = cast.ToBool(conn.GetProp("interactive"))
+	if conn.BaseConn.Type == dbio.TypeDbMotherDuck && conn.GetProp("interactive") == "" {
+		conn.isInteractive = true // default interactive true for motherduck
 	}
 
 	return nil
@@ -346,6 +361,7 @@ func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *
 					} else {
 						ctx.CaptureErr(g.Error(err, "error running duckdb interactive command"))
 					}
+					g.LogError(ctx.Err())
 				}
 			}()
 		} else {
@@ -476,9 +492,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		out, _ = io.ReadAll(stdOutReader)
 		outE := stderrBuf.Bytes()
 		stderr = *bytes.NewBuffer(outE)
-
 	} else {
-
 		cmd.Stderr = &stderr
 
 		out, err = cmd.Output()
@@ -490,6 +504,8 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 
 	if err == nil && queryCtx.Err() != nil {
 		err = queryCtx.Err()
+	} else if err == nil && conn.Context().Err() != nil {
+		err = conn.Context().Err()
 	}
 
 	if err != nil || strings.Contains(stderr.String(), "Error: ") {
@@ -530,7 +546,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 		readOnly = true
 	}
 
-	queryCtx := g.NewContext(conn.Context().Ctx)
+	queryCtx := g.NewContext(ctx)
 	cmd, sqlPath, err := conn.getCmd(&queryCtx, copySQL, readOnly)
 	if err != nil {
 		return ds, g.Error(err, "could not get cmd duckdb")
@@ -560,7 +576,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	var stdErrReaderB *bufio.Reader
 	var stderrBuf *bytes.Buffer
 	if conn.isInteractive {
-		stdOutReader, stderrBuf, err = conn.submitToCmdStdin(ctx, sql)
+		stdOutReader, stderrBuf, err = conn.submitToCmdStdin(queryCtx.Ctx, sql)
 		if err != nil {
 			return ds, g.Error(err, "could not exec SQL for duckdb via stdin")
 		}
