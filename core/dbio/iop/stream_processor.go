@@ -476,7 +476,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(sVal))
 			nVal = sVal
 		} else {
-			if col.Type == JsonType {
+			if col.Type == JsonType && !col.Sourced {
 				sp.ds.ChangeColumn(i, StringType) // change to string, since it's not really json
 			}
 			cs.StringCnt++
