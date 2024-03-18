@@ -380,7 +380,6 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
-		g.P(nodes.URIs())
 
 		// apply filter
 		if discover {
