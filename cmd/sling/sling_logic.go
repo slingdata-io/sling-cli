@@ -553,17 +553,33 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "cannot get query")
 		}
 
-		result, err := dbConn.ExecMulti(query)
+		sQuery, err := database.ParseTableName(query, conn.Connection.Type)
 		if err != nil {
-			return ok, g.Error(err, "cannot execute query")
+			return ok, g.Error(err, "cannot parse query")
 		}
-		end := time.Now()
 
-		affected, _ := result.RowsAffected()
-		if affected > 0 {
-			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+		if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select")) {
+
+			data, err := dbConn.Query(sQuery.Select(100))
+			if err != nil {
+				return ok, g.Error(err, "cannot execute query")
+			}
+
+			println(g.PrettyTable(data.GetFields(), data.Rows))
+
 		} else {
-			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+			result, err := dbConn.ExecMulti(query)
+			if err != nil {
+				return ok, g.Error(err, "cannot execute query")
+			}
+			end := time.Now()
+
+			affected, _ := result.RowsAffected()
+			if affected > 0 {
+				g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+			} else {
+				g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+			}
 		}
 
 	case "list":
@@ -631,7 +647,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 				files.Sort()
 
-				header := []string{"#", "URI", "Type", "Size", "Last Updated (UTC)"}
+				header := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
 				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
 					fileType := lo.Ternary(file.IsDir, "directory", "file")
 
@@ -644,10 +660,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 					size := "-"
 					if file.Size > 0 {
-						size = humanize.Bytes(file.Size)
+						size = humanize.IBytes(file.Size)
 					}
 
-					return []any{i + 1, file.URI, fileType, size, lastUpdated}
+					return []any{i + 1, file.Path(), fileType, size, lastUpdated}
 				})
 
 				println(g.PrettyTable(header, rows))
