@@ -71,7 +71,9 @@ func NewDatasetFromMap(m map[string]interface{}) (data Dataset) {
 
 // SetColumns sets the columns
 func (data *Dataset) AddColumns(newCols Columns, overwrite bool) (added Columns) {
-	data.Columns, added = data.Columns.Add(newCols, overwrite)
+	mergedCols, colsAdded, _ := data.Columns.Merge(newCols, overwrite)
+	data.Columns = mergedCols
+	added = colsAdded.AddedCols
 	return added
 }
 

@@ -170,6 +170,9 @@ func (cols Columns) PrettyTable(includeParent bool) (output string) {
 				return []any{col.Database, col.Schema, col.Table, col.Position, col.Name, col.DbType, col.Type}
 			} else if col.FileURI != "" {
 				parentIsFile = true
+				if col.DbType == "" {
+					col.DbType = "-"
+				}
 				return []any{col.FileURI, col.Position, col.Name, col.DbType, col.Type}
 			}
 		}
@@ -542,37 +545,48 @@ func (cols Columns) GetColumn(name string) Column {
 	return colsMap[strings.ToLower(name)]
 }
 
-func (cols Columns) Add(newCols Columns, overwrite bool) (col2 Columns, added Columns) {
+func (cols Columns) Merge(newCols Columns, overwrite bool) (col2 Columns, added schemaChg, changed []schemaChg) {
+	added = schemaChg{Added: true}
+
 	existingIndexMap := cols.FieldMap(true)
 	for _, newCol := range newCols {
 		key := strings.ToLower(newCol.Name)
 		if i, ok := existingIndexMap[key]; ok {
+			col := cols[i]
 			if overwrite {
 				newCol.Position = i + 1
 				cols[i] = newCol
-			} else if cols[i].Type != newCol.Type && newCol.Stats.TotalCnt > newCol.Stats.NullCnt {
-				warn := true
+			} else if col.Type != newCol.Type && newCol.Stats.TotalCnt > newCol.Stats.NullCnt {
+				doChange := true
 				switch {
-				case newCol.Type.IsString() && !cols[i].Type.IsString():
-				case newCol.Type.IsNumber() && !cols[i].Type.IsNumber():
-				case newCol.Type.IsBool() && !cols[i].Type.IsBool():
-				case newCol.Type.IsDate() && !cols[i].Type.IsDate():
-				case newCol.Type.IsDatetime() && !cols[i].Type.IsDatetime():
+				case col.Type.IsString() && newCol.Stats.TotalCnt > newCol.Stats.NullCnt:
+					// leave as is
+					doChange = false
+				case col.Type == JsonType && g.In(newCol.Type, StringType, TextType):
+				case col.Type != DecimalType && newCol.Type == DecimalType:
+				case !g.In(col.Type, DecimalType, FloatType) && g.In(newCol.Type, DecimalType, FloatType):
+				case !col.Type.IsNumber() && newCol.Type.IsInteger():
+				case !col.Type.IsBool() && newCol.Type.IsBool():
+				case !col.Type.IsDate() && newCol.Type.IsDate():
+				case !col.Type.IsDatetime() && newCol.Type.IsDatetime():
 				default:
-					warn = false
+					doChange = false
 				}
 
-				if warn && g.IsDebugLow() {
-					g.Warn("Columns.Add Type mismatch for %s > %s != %s", newCol.Name, cols[i].Type, newCol.Type)
+				if doChange {
+					// g.Debug("Columns.Add Type mismatch for %s => %s != %s", newCol.Name, cols[i].Type, newCol.Type)
+					change := schemaChg{Added: false, ChangedIndex: i, ChangedType: newCol.Type}
+					changed = append(changed, change)
 				}
 			}
 		} else {
 			newCol.Position = len(cols)
 			cols = append(cols, newCol)
-			added = append(added, newCol)
+			added.AddedCols = append(added.AddedCols, newCol)
 		}
 	}
-	return cols, added
+
+	return cols, added, changed
 }
 
 // IsSimilarTo returns true if has same number of columns

@@ -237,8 +237,7 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		err = g.Error(err, "Could not read "+filePath)
 		return
 	}
-	df.AddColumns(columns, true) // overwrite types so we don't need to infer
-	df.Inferred = true
+	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
 	df.Defer(func() { filesys.Delete(fs, filePath) })
 
 	return

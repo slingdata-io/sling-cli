@@ -185,8 +185,7 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		err = g.Error(err, "Could not read S3 Path for UNLOAD: "+s3Path)
 		return
 	}
-	df.AddColumns(columns, true) // overwrite types so we don't need to infer
-	df.Inferred = true
+	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
 	df.Defer(func() { filesys.Delete(fs, s3Path) })
 
 	return

@@ -239,18 +239,36 @@ func (df *Dataflow) IsEmpty() bool {
 }
 
 // SetColumns sets the columns
-func (df *Dataflow) SetColumns(columns []Column) {
-	df.Columns = columns
-	// for i := range df.Streams {
-	// 	df.Streams[i].Columns = columns
-	// 	df.Streams[i].Inferred = true
-	// }
+func (df *Dataflow) MergeColumns(columns []Column, inferred bool) (processOk bool) {
+	df.mux.Lock()
+	mergedCols, colsAdded, colsChanged := df.Columns.Merge(columns, false)
+
+	df.Columns = mergedCols
+	df.Inferred = inferred
+	df.mux.Unlock()
+
+	if len(colsAdded.AddedCols) > 0 {
+		_, ok := df.AddColumns(colsAdded.AddedCols, false)
+		if !ok {
+			return false
+		}
+	}
+
+	for _, changed := range colsChanged {
+		if !df.ChangeColumn(changed.ChangedIndex, changed.ChangedType) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetColumns sets the columns
 func (df *Dataflow) AddColumns(newCols Columns, overwrite bool, exceptDs ...string) (added Columns, processOk bool) {
 	df.mux.Lock()
-	df.Columns, added = df.Columns.Add(newCols, overwrite)
+	mergedCols, colsAdded, _ := df.Columns.Merge(newCols, overwrite)
+
+	df.Columns = mergedCols
+	added = colsAdded.AddedCols
 	df.mux.Unlock()
 
 	if len(added) > 0 {
@@ -379,7 +397,9 @@ func (df *Dataflow) SyncColumns() {
 			maxLen := ds.Columns[i].Stats.MaxLen // old max length
 
 			// sync stats
-			ds.Columns[i].Stats = *ds.Sp.colStats[i]
+			if cs, ok := ds.Sp.colStats[i]; ok {
+				ds.Columns[i].Stats = *cs
+			}
 
 			// keep max len if greater (from manual column length spec)
 			if maxLen > ds.Columns[i].Stats.MaxLen {
@@ -433,7 +453,11 @@ func (df *Dataflow) SyncStats() {
 				continue
 			}
 
-			colStats := ds.Sp.colStats[j]
+			colStats, ok := ds.Sp.colStats[j]
+			if !ok {
+				continue
+			}
+
 			dfCols[i].Stats.TotalCnt = dfCols[i].Stats.TotalCnt + colStats.TotalCnt
 			dfCols[i].Stats.NullCnt = dfCols[i].Stats.NullCnt + colStats.NullCnt
 			dfCols[i].Stats.StringCnt = dfCols[i].Stats.StringCnt + colStats.StringCnt
@@ -556,11 +580,11 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 			// columns/buffer need to be populated
 			if len(df.Streams) > 0 {
 				// add new columns two-way if not exist
-				g.Info("%s => %s", ds.Metadata.StreamURL.Value, g.Marshal(ds.Columns.Types()))
-				newCols, ok := df.AddColumns(ds.Columns, false)
+				g.Debug("%s => %s", ds.Metadata.StreamURL.Value, g.Marshal(ds.Columns.Types()))
+				ok := df.MergeColumns(ds.Columns, false)
 				if !ok {
-					// Could not run AddColumns process, queue for later
-					ds.schemaChgChan <- schemaChg{Added: true, Cols: newCols}
+					// Could not run MergeColumns process
+					g.Warn("could not merge columns...")
 				}
 
 				// add new columns two-way if not exist

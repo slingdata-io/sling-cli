@@ -839,8 +839,7 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	}
 
 	// need to set columns so they match the source table
-	df.AddColumns(columns, true) // overwrite types so we don't need to infer
-	df.Inferred = df.Columns.Sourced()
+	df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
