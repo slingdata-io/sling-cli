@@ -496,7 +496,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 	go func() {
 		var bw int64
-		bw, err = azFs.WriteDataflowReady(df, azPath, fileReadyChn)
+		bw, err = azFs.WriteDataflowReady(df, azPath, fileReadyChn, iop.DefaultStreamConfig())
 		g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), azPath)
 
 		if err != nil {

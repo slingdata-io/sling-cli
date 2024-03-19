@@ -575,7 +575,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
@@ -659,7 +659,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			g.LogError(err, "error writing dataflow to google storage: "+gcsPath)

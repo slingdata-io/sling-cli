@@ -690,7 +690,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			return
 		}
 
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))

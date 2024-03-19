@@ -2483,7 +2483,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		}
 
 		go func() {
-			_, err := fs.Self().WriteDataflowReady(sqlDf, pathPart, fileReadyChn)
+			_, err := fs.Self().WriteDataflowReady(sqlDf, pathPart, fileReadyChn, iop.DefaultStreamConfig())
 			if err != nil {
 				exportCtx.CaptureErr(g.Error(err, "Unable to write to file: "+pathPart))
 				ds.Context.Cancel()

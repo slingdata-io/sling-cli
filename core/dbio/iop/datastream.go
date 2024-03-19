@@ -49,7 +49,7 @@ type Datastream struct {
 	closed        bool
 	empty         bool
 	it            *Iterator
-	config        *streamConfig
+	config        *StreamConfig
 	df            *Dataflow
 	bwRows        chan []any // for correct byte written
 	readyChn      chan struct{}
@@ -137,7 +137,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		Columns:       columns,
 		Context:       &context,
 		Sp:            NewStreamProcessor(),
-		config:        &streamConfig{EmptyAsNull: true, Header: true},
+		config:        &StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
 		bwRows:        make(chan []any, 100),
@@ -192,7 +192,7 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 		configMap[strings.ToLower(k)] = configMap[k]
 	}
 	ds.Sp.SetConfig(configMap)
-	ds.config = ds.Sp.config
+	ds.config = ds.Sp.Config
 
 	// set metadata
 	if metadata, ok := configMap["metadata"]; ok {
@@ -204,7 +204,7 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 func (ds *Datastream) GetConfig() (configMap map[string]string) {
 	// lower the keys
 	configMapI := g.M()
-	g.JSONConvert(ds.Sp.config, &configMapI)
+	g.JSONConvert(ds.Sp.Config, &configMapI)
 	return g.ToMapString(configMapI)
 }
 
@@ -483,12 +483,12 @@ loop:
 		sampleData.NoDebug = ds.NoDebug
 		sampleData.SafeInference = ds.SafeInference
 		sampleData.Sp.dateLayouts = ds.Sp.dateLayouts
-		sampleData.Sp.config = ds.Sp.config
+		sampleData.Sp.Config = ds.Sp.Config
 		sampleData.InferColumnTypes()
 		ds.Columns = sampleData.Columns
 		ds.Inferred = true
-	} else if len(ds.Sp.config.Columns) > 0 {
-		ds.Columns = ds.Columns.Coerce(ds.Sp.config.Columns, true)
+	} else if len(ds.Sp.Config.Columns) > 0 {
+		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true)
 	}
 
 	// set to have it loop process
@@ -736,7 +736,7 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 	}
 
 	decoder := json.NewDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -756,7 +756,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	}
 
 	decoder := xml.NewDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -778,7 +778,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	}
 
 	// set delimiter
-	ds.config.Delimiter = string(c.Delimiter)
+	// ds.config.Delimiter = string(c.Delimiter)
 
 	row0, err := r.Read()
 	if err == io.EOF {

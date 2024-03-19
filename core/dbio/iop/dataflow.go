@@ -102,6 +102,25 @@ func (df *Dataflow) CleanUp() {
 	}
 }
 
+// SetConfig set the Sp config
+func (df *Dataflow) SetConfig(cfg *StreamConfig) {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		ds.Sp.Config = cfg
+	}
+}
+
+// ResetConfig resets the Sp config, so that, for example,
+// delimiter settings are not carried through.
+func (df *Dataflow) ResetConfig() {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		ds.Sp.ResetConfig()
+	}
+}
+
 // Defer runs a given function as close of Dataflow
 func (df *Dataflow) Defer(f func()) {
 	df.mux.Lock()
@@ -537,6 +556,7 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 			// columns/buffer need to be populated
 			if len(df.Streams) > 0 {
 				// add new columns two-way if not exist
+				g.Info("%s => %s", ds.Metadata.StreamURL.Value, g.Marshal(ds.Columns.Types()))
 				newCols, ok := df.AddColumns(ds.Columns, false)
 				if !ok {
 					// Could not run AddColumns process, queue for later

@@ -483,7 +483,7 @@ func (data *Dataset) InferColumnTypes() {
 	data.Columns = InferFromStats(columns, data.SafeInference, data.NoDebug)
 
 	// overwrite if found in config.columns
-	data.Columns = data.Columns.Coerce(data.Sp.config.Columns, data.Sp.config.Header)
+	data.Columns = data.Columns.Coerce(data.Sp.Config.Columns, data.Sp.Config.Header)
 
 	data.Inferred = true
 }
