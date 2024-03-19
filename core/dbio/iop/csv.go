@@ -309,7 +309,7 @@ func (c *CSV) ReadStreamContext(ctx context.Context) (ds *Datastream, err error)
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Warn("csv stream provided is empty")
+		g.Warn("csv stream provided is empty (%s)", c.Path)
 		ds.SetReady()
 		ds.Close()
 		return ds, nil
