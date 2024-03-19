@@ -236,7 +236,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				// revert to old type
 				col.Type = df.Columns[col.Position-1].Type
 			}
-			df.Columns.Add(iop.Columns{col}, true)
+			df.Columns.Merge(iop.Columns{col}, true)
 
 			return nil
 		}
