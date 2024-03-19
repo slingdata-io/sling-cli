@@ -377,10 +377,13 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 			g.AssertNoError(t, err)
 			assert.EqualValues(t, task.GetCount(), count)
 			conn.Close()
-			if valRowCount := cast.ToInt(cfg.Env["validation_row_count"]); valRowCount > 0 {
-				assert.EqualValues(t, valRowCount, count)
-			}
 		}
+	}
+
+	if valRowCount := cast.ToInt(cfg.Env["validation_row_count"]); valRowCount > 0 {
+		conn, _ := task.Config.TgtConn.AsDatabase()
+		count, _ := conn.GetCount(task.Config.Target.Object)
+		assert.EqualValues(t, valRowCount, count)
 	}
 
 	// validate file
@@ -508,12 +511,12 @@ func TestSuiteClickhouse(t *testing.T) {
 
 func TestSuiteTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, 1, 9, 15)
+	testSuite(t, dbio.TypeDbTrino, 1, 10, 16)
 }
 
 func TestSuiteMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, 9)
+	testSuite(t, dbio.TypeDbMongoDB, 10)
 }
 
 // generate large dataset or use cache
