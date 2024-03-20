@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -226,38 +228,41 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	}
 
 	for _, wildcardName := range wildcardNames {
-		nameParts := strings.Split(wildcardName, "/")
-		lastPart := nameParts[len(nameParts)-1]
-
-		if strings.Contains(lastPart, "*") {
-			parent := strings.TrimSuffix(wildcardName, lastPart)
-
-			nodes, err := fs.ListRecursive(parent)
-			if err != nil {
-				return g.Error(err, "could not list %s", parent)
-			}
-
-			for _, node := range nodes {
-
-				if g.WildCardMatch(node.URI, []string{lastPart}) {
-					streamName, streamConfig, found := rd.GetStream(node.URI)
-					if found {
-						// keep in step with order, delete and add again
-						rd.DeleteStream(streamName)
-						rd.AddStream(node.URI, streamConfig)
-						continue
-					}
-
-					newCfg := ReplicationStreamConfig{}
-					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-					rd.Streams[node.URI] = &newCfg
-					rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
-				}
-			}
-
-			// delete from stream map
-			rd.DeleteStream(wildcardName)
+		path, err := fs.GetPath(wildcardName)
+		if err != nil {
+			return g.Error(err, "could not parse %s", wildcardName)
 		}
+
+		parent := filesys.GetDeepestParent(path)
+		nodes, err := fs.ListRecursive(parent)
+		if err != nil {
+			return g.Error(err, "could not list %s", parent)
+		}
+
+		gc, err := glob.Compile(wildcardName)
+		if err != nil {
+			return g.Error(err, "could not parse patten: %s", wildcardName)
+		}
+
+		for _, node := range nodes {
+			if gc.Match(node.Path()) {
+				streamName, streamConfig, found := rd.GetStream(node.URI)
+				if found {
+					// keep in step with order, delete and add again
+					rd.DeleteStream(streamName)
+					rd.AddStream(node.URI, streamConfig)
+					continue
+				}
+
+				newCfg := ReplicationStreamConfig{}
+				g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
+				rd.Streams[node.URI] = &newCfg
+				rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			}
+		}
+
+		// delete from stream map
+		rd.DeleteStream(wildcardName)
 	}
 
 	return

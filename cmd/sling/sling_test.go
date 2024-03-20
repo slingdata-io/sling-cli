@@ -175,6 +175,8 @@ func TestExtract(t *testing.T) {
 }
 
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
+	defer time.Sleep(100 * time.Millisecond) // for log to flush
+
 	conn, ok := connMap[connType]
 	if !assert.True(t, ok) {
 		return
@@ -328,6 +330,7 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 		return
 	}
 
+	g.Debug("task config => %s", g.Marshal(cfg))
 	task := sling.NewTask("", cfg)
 	if !g.AssertNoError(t, task.Err) {
 		return
@@ -690,32 +693,13 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	conn := connMap[connType]
 
 	opt := connection.DiscoverOptions{
-		Filter:      cfg.Env["filter"],
+		Pattern:     cfg.Target.Object,
 		ColumnLevel: cast.ToBool(cfg.Env["column_level"]),
 		Recursive:   cast.ToBool(cfg.Env["recursive"]),
 	}
 
-	if connType.IsDb() && cfg.Target.Object != "" {
-		table, err := database.ParseTableName(cfg.Target.Object, connType)
-		if !g.AssertNoError(t, err) {
-			return
-		}
-
-		if table.Name == "*" {
-			opt.Schema = table.Schema
-		} else {
-			opt.Stream = table.FullName()
-		}
-	} else if connType.IsFile() && cfg.Target.Object != "" {
-		if strings.HasSuffix(cfg.Target.Object, "/") {
-			opt.Folder = cfg.Target.Object
-		} else {
-			opt.Stream = cfg.Target.Object
-		}
-	}
-
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, err := ec.Discover(conn.name, opt)
+	files, schemata, err := ec.Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}
@@ -743,7 +727,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		tables := lo.Values(schemata.Tables())
 		columns := iop.Columns(lo.Values(schemata.Columns()))
 		if valRowCount > 0 {
-			if opt.Stream != "" {
+			if opt.ColumnLevel {
 				assert.Equal(t, valRowCount, len(columns))
 			} else {
 				assert.Equal(t, valRowCount, len(tables))
@@ -795,7 +779,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsFile() {
-		g.Warn(g.Marshal(files.Paths()))
+		g.Warn("returned into test: " + g.Marshal(files.Paths()))
 		// basic tests
 		assert.Greater(t, len(files), 0)
 		for _, uri := range files.URIs() {
@@ -888,4 +872,14 @@ func TestSuiteFileGoogle(t *testing.T) {
 func TestSuiteFileAzure(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileAzure)
+}
+
+func TestSuiteFileLocal(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileLocal)
+}
+
+func TestSuiteFileSftp(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileSftp)
 }

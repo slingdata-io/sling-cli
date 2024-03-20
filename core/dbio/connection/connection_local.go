@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -263,23 +264,20 @@ func (ec *EnvConns) List() string {
 }
 
 type DiscoverOptions struct {
-	Stream      string `json:"stream,omitempty"`
-	Filter      string `json:"filter,omitempty"`
-	Schema      string `json:"schema,omitempty"`
-	Folder      string `json:"folder,omitempty"`
+	Pattern     string `json:"pattern,omitempty"`
 	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
 	Recursive   bool   `json:"recursive,omitempty"`
 	discover    bool
 }
 
-func (ec *EnvConns) Discover(name string, opt DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
+func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
 	opt.discover = true
 	_, nodes, schemata, err = ec.testDiscover(name, opt)
 	return
 }
 
 func (ec *EnvConns) Test(name string) (ok bool, err error) {
-	ok, _, _, err = ec.testDiscover(name, DiscoverOptions{})
+	ok, _, _, err = ec.testDiscover(name, &DiscoverOptions{})
 	return
 }
 
@@ -293,26 +291,31 @@ func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 	return
 }
 
-func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nodes dbio.FileNodes, schemata database.Schemata, err error) {
-	discover := opt.discover
-	stream := opt.Stream
-	schema := opt.Schema
-	folder := opt.Folder
-	filter := opt.Filter
-	recursive := opt.Recursive
-	columnLevel := opt.ColumnLevel
+func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, nodes dbio.FileNodes, schemata database.Schemata, err error) {
 
-	filters := []string{}
-	if filter != "" {
-		filters = strings.Split(filter, ",")
+	patterns := []string{}
+	globPatterns := []glob.Glob{}
+
+	parsePattern := func() {
+		if opt.Pattern != "" {
+			patterns = []string{}
+			globPatterns = []glob.Glob{}
+			for _, f := range strings.Split(opt.Pattern, ",") {
+				patterns = append(patterns, f)
+				gc, err := glob.Compile(f)
+				if err == nil {
+					globPatterns = append(globPatterns, gc)
+				}
+			}
+		}
 	}
 
-	// add wildcard as filter
-	streamParts := strings.Split(stream, "/")
-	lastPart := streamParts[len(streamParts)-1]
-	if strings.Contains(lastPart, "*") {
-		stream = strings.TrimSuffix(stream, lastPart)
-		filters = append(filters, lastPart)
+	parsePattern()
+
+	if opt.Pattern != "" && len(patterns) == 1 {
+		if strings.Contains(opt.Pattern, "**") || strings.Contains(opt.Pattern, "*/*") {
+			opt.Recursive = true
+		}
 	}
 
 	conn, ok1 := ec.GetConnEntry(name)
@@ -332,25 +335,27 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
-		if discover {
-			if stream != "" {
-				table, err := database.ParseTableName(stream, dbConn.GetType())
-				if err != nil {
-					return ok, nodes, schemata, g.Error(err, "could not parse table name %s", stream)
+		if opt.discover {
+			var table database.Table
+			if opt.Pattern != "" {
+				table, _ = database.ParseTableName(opt.Pattern, dbConn.GetType())
+				if strings.Contains(table.Schema, "*") {
+					table.Schema = ""
 				}
-				schema = table.Schema
-				stream = table.Name
+				if strings.Contains(table.Name, "*") {
+					table.Name = ""
+				}
 			}
-			g.Debug("database discover inputs: %s", g.Marshal(g.M("filters", filters, "stream", stream, "schema", schema, "column_level", columnLevel)))
+			g.Debug("database discover inputs: %s", g.Marshal(g.M("filter", opt.Pattern, "table", table.FullName(), "column_level", opt.ColumnLevel)))
 
-			schemata, err = dbConn.GetSchemata(schema, stream)
+			schemata, err = dbConn.GetSchemata(table.Schema, table.Name)
 			if err != nil {
 				return ok, nodes, schemata, g.Error(err, "could not discover %s", name)
 			}
 
 			// apply filter
-			if len(filters) > 0 {
-				schemata = schemata.Filtered(stream != "", filters...)
+			if len(patterns) > 0 {
+				schemata = schemata.Filtered(opt.ColumnLevel, patterns...)
 			}
 		}
 
@@ -365,14 +370,18 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 		}
 
 		url := conn.Connection.URL()
-		if folder != "" {
-			url = folder
-		} else if stream != "" {
-			url = stream
+		if opt.Pattern != "" {
+			url = opt.Pattern
 		}
 
-		g.Debug("file discover inputs: %s", g.Marshal(g.M("filters", filters, "url", url, "column_level", columnLevel, "recursive", recursive)))
-		if recursive {
+		if strings.Contains(url, "*") {
+			opt.Pattern = url
+			url = filesys.GetDeepestParent(url)
+			parsePattern()
+		}
+
+		g.Debug("file discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "url", url, "column_level", opt.ColumnLevel, "recursive", opt.Recursive)))
+		if opt.Recursive {
 			nodes, err = fileClient.ListRecursive(url)
 		} else {
 			nodes, err = fileClient.List(url)
@@ -380,18 +389,26 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
-		g.Trace("unfiltered nodes returned: " + g.Marshal(nodes.Paths()))
+		g.Debug("unfiltered nodes returned: " + g.Marshal(nodes.Paths()))
 
 		// apply filter
-		if discover {
+		if opt.discover {
 			// sort alphabetically
 			nodes.Sort()
 			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
-				return len(filters) == 0 || g.IsMatched(filters, n.Path())
+				if len(patterns) == 0 || !strings.Contains(opt.Pattern, "*") {
+					return true
+				}
+				for _, gf := range globPatterns {
+					if gf.Match(n.Path()) {
+						return true
+					}
+				}
+				return false
 			})
 
 			// if single file, get columns of file content
-			if columnLevel {
+			if opt.ColumnLevel {
 				ctx := g.NewContext(fileClient.Context().Ctx, 5)
 
 				getColumns := func(i int) {

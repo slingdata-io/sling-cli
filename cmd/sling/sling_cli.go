@@ -207,25 +207,10 @@ var cliConns = &g.CliSC{
 			},
 			Flags: []g.Flag{
 				{
-					Name:        "filter",
-					ShortName:   "f",
+					Name:        "pattern",
+					ShortName:   "p",
 					Type:        "string",
-					Description: "filter stream name by pattern (e.g. account_*)",
-				},
-				{
-					Name:        "folder",
-					Type:        "string",
-					Description: "discover streams in a specific folder (for file connections)",
-				},
-				{
-					Name:        "schema",
-					Type:        "string",
-					Description: "discover streams in a specific schema (for database connections)",
-				},
-				{
-					Name:        "stream",
-					Type:        "string",
-					Description: "discover columns in a specific stream",
+					Description: "filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet)",
 				},
 				{
 					Name:        "recursive",

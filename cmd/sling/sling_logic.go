@@ -605,11 +605,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
 		}
 
-		opt := connection.DiscoverOptions{
-			Schema:      cast.ToString(c.Vals["schema"]),
-			Stream:      cast.ToString(c.Vals["stream"]),
-			Folder:      cast.ToString(c.Vals["folder"]),
-			Filter:      cast.ToString(c.Vals["filter"]),
+		opt := &connection.DiscoverOptions{
+			Pattern:     cast.ToString(c.Vals["pattern"]),
 			ColumnLevel: cast.ToBool(c.Vals["columns"]),
 			Recursive:   cast.ToBool(c.Vals["recursive"]),
 		}
@@ -660,7 +657,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					}
 
 					size := "-"
-					if file.Size > 0 {
+					if !file.IsDir || file.Size > 0 {
 						size = humanize.IBytes(file.Size)
 					}
 
@@ -669,7 +666,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 				println(g.PrettyTable(header, rows))
 
-				if len(files) > 0 && opt.Folder == "" {
+				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
 					g.Info("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders, or --recursive")
 				}
 			}

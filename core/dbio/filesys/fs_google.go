@@ -238,7 +238,7 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 	ts := fs.GetRefTs()
 
 	query := &gcstorage.Query{Prefix: key}
-	query.SetAttrSelection([]string{"Name"})
+	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
 	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
 	for {
 		attrs, err := it.Next()

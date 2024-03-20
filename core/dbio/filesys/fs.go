@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
@@ -50,6 +49,7 @@ type FileSysClient interface {
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
+	GetPath(uri string) (path string, err error)
 
 	delete(path string) (err error)
 	setDf(df *iop.Dataflow)
@@ -230,6 +230,25 @@ func ParseURL(uri string) (host string, path string, err error) {
 	_, host, path, err = dbio.ParseURL(uri)
 	path = strings.TrimRight(path, makeFilter(path))
 	return
+}
+
+func GetDeepestParent(path string) string {
+	parts := strings.Split(path, "/")
+	parentParts := []string{}
+	for i, part := range parts {
+		if strings.Contains(part, "*") {
+			break
+		} else if i == len(parts)-1 {
+			break
+		} else if strings.TrimSpace(part) == "" {
+			continue
+		}
+		parentParts = append(parentParts, part)
+	}
+	if len(parentParts) > 0 && len(parentParts) < len(parts) {
+		parentParts = append(parentParts, "") // suffix is "/"
+	}
+	return strings.Join(parentParts, "/")
 }
 
 func getExcelStream(fs FileSysClient, reader io.Reader) (ds *iop.Datastream, err error) {
@@ -810,19 +829,18 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 // Delete deletes the provided path
 // with some safeguards so to not accidentally delete some root path
 func Delete(fs FileSysClient, uri string) (err error) {
-
 	if strings.HasPrefix(uri, "file://") {
 		// to handle windows path style
 		uri = strings.ReplaceAll(strings.ToLower(uri), `\`, `/`)
 	}
 
-	u, err := net.NewURL(uri)
+	host, path, err := ParseURL(uri)
 	if err != nil {
-		return g.Error(err, "could not parse url for deletion")
+		return g.Error("could not parse %s", uri)
 	}
 
 	// add some safeguards
-	p := strings.TrimPrefix(strings.TrimSuffix(u.Path(), "/"), "/")
+	p := strings.TrimPrefix(strings.TrimSuffix(path, "/"), "/")
 	pArr := strings.Split(p, "/")
 
 	switch fs.FsType() {
@@ -839,7 +857,7 @@ func Delete(fs FileSysClient, uri string) (err error) {
 			return g.Error("will not delete container level %s", uri)
 		}
 	case dbio.TypeFileLocal:
-		if len(u.Hostname()) == 0 && len(p) == 0 {
+		if len(host) == 0 && len(p) == 0 {
 			return g.Error("will not delete root level %s", uri)
 		}
 	case dbio.TypeFileSftp:
