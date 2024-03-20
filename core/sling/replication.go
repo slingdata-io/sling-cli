@@ -78,15 +78,15 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 	return rd.streamsOrdered
 }
 
-// HasStream returns true if the stream name exists
-func (rd ReplicationConfig) HasStream(name string) bool {
+// GetStream returns the stream if the it exists
+func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg ReplicationStreamConfig, found bool) {
 
-	for streamName := range rd.Streams {
+	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(name) {
-			return true
+			return streamName, *streamCfg, true
 		}
 	}
-	return false
+	return
 }
 
 // Normalize normalized the name
@@ -136,6 +136,20 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
 }
 
+func (rd *ReplicationConfig) AddStream(key string, cfg ReplicationStreamConfig) {
+	newCfg := ReplicationStreamConfig{}
+	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
+	rd.Streams[key] = &newCfg
+	rd.streamsOrdered = append(rd.streamsOrdered, key)
+}
+
+func (rd *ReplicationConfig) DeleteStream(key string) {
+	delete(rd.Streams, key)
+	rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
+		return v != key
+	})
+}
+
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
 
 	g.DebugLow("processing wildcards for %s", rd.Source)
@@ -170,27 +184,27 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 					Dialect: conn.GetType(),
 				}
 
-				if rd.HasStream(table.FullName()) {
-					continue
-				}
-
 				// add to stream map
 				if g.WildCardMatch(
 					strings.ToLower(table.FullName()),
 					[]string{strings.ToLower(schemaT.FullName())},
 				) {
-					newCfg := ReplicationStreamConfig{}
-					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-					rd.Streams[table.FullName()] = &newCfg
-					rd.streamsOrdered = append(rd.streamsOrdered, table.FullName())
+
+					streamName, streamConfig, found := rd.GetStream(table.FullName())
+					if found {
+						// keep in step with order, delete and add again
+						rd.DeleteStream(streamName)
+						rd.AddStream(table.FullName(), streamConfig)
+						continue
+					}
+
+					cfg := rd.Streams[wildcardName]
+					rd.AddStream(table.FullName(), *cfg)
 				}
 			}
 
 			// delete * from stream map
-			delete(rd.Streams, wildcardName)
-			rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
-				return v != wildcardName
-			})
+			rd.DeleteStream(wildcardName)
 
 		}
 	}
@@ -220,7 +234,16 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 			}
 
 			for _, node := range nodes {
-				if g.WildCardMatch(node.URI, []string{lastPart}) && !rd.HasStream(node.URI) {
+
+				if g.WildCardMatch(node.URI, []string{lastPart}) {
+					streamName, streamConfig, found := rd.GetStream(node.URI)
+					if found {
+						// keep in step with order, delete and add again
+						rd.DeleteStream(streamName)
+						rd.AddStream(node.URI, streamConfig)
+						continue
+					}
+
 					newCfg := ReplicationStreamConfig{}
 					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
 					rd.Streams[node.URI] = &newCfg
@@ -229,10 +252,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 			}
 
 			// delete from stream map
-			delete(rd.Streams, wildcardName)
-			rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
-				return v != wildcardName && v != parent
-			})
+			rd.DeleteStream(wildcardName)
 		}
 	}
 

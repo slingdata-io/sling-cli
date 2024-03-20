@@ -366,7 +366,8 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	// clean up selectStreams
 	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
-		return replication.HasStream(v)
+		_, _, found := replication.GetStream(v)
+		return found
 	})
 	selectStreams = lo.Map(selectStreams, func(name string, i int) string {
 		return replication.Normalize(name)
