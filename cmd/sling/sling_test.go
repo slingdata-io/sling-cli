@@ -174,7 +174,7 @@ func TestExtract(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testSuite(t *testing.T, connType dbio.Type, testNumbers ...int) {
+func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	conn, ok := connMap[connType]
 	if !assert.True(t, ok) {
 		return
@@ -269,7 +269,9 @@ func testSuite(t *testing.T, connType dbio.Type, testNumbers ...int) {
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
 
-	if tns := os.Getenv("TESTS"); tns != "" {
+	testNumbers := []int{}
+	tns := lo.Ternary(os.Getenv("TESTS") == "" && len(testSelect) > 0, testSelect[0], os.Getenv("TESTS"))
+	if tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
 				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
@@ -483,10 +485,10 @@ func TestSuiteDuckDb(t *testing.T) {
 	testSuite(t, dbio.TypeDbDuckDb)
 }
 
-// func TestSuiteMotherDuck(t *testing.T) {
-// 	t.Parallel()
-// 	testSuite(t, dbio.TypeDbMotherDuck)
-// }
+func TestSuiteMotherDuck(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5+")
+}
 
 func TestSuiteSQLServer(t *testing.T) {
 	t.Parallel()
@@ -511,12 +513,12 @@ func TestSuiteClickhouse(t *testing.T) {
 
 func TestSuiteTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, 1, 10, 16)
+	testSuite(t, dbio.TypeDbTrino, "1,10,16")
 }
 
 func TestSuiteMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, 10)
+	testSuite(t, dbio.TypeDbMongoDB, "10")
 }
 
 // generate large dataset or use cache
