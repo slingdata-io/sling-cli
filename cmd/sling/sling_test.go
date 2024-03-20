@@ -487,7 +487,7 @@ func TestSuiteDuckDb(t *testing.T) {
 
 func TestSuiteMotherDuck(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5+")
+	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5-10,16,22") // cannot add json type with version 0.9.2
 }
 
 func TestSuiteSQLServer(t *testing.T) {
