@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/fatih/color"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 type media struct{}
@@ -15,5 +16,5 @@ func (m media) PrintFollowUs() {
 		// g.F("%s%s", color.HiGreenString("Follow Sling's Evolution: "), color.HiBlueString("https://linkedin.com/company/slingdata-io")),
 	}
 	i := g.RandInt(len(choices))
-	println("\n" + choices[i])
+	env.Println("\n" + choices[i])
 }
