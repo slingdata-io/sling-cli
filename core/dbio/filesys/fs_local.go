@@ -58,7 +58,7 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 		// some safety measure to not delete root system folders
 		slashCount := len(path) - len(strings.ReplaceAll(path, "/", ""))
 		if slashCount <= 2 && (strings.HasPrefix(path, "/") || strings.Contains(path, ":/")) {
-			g.Warn("directory '%s' is close to root. Not deleting.", path)
+			g.Warn("directory '%s' is close too root. Not deleting.", path)
 			return
 		}
 

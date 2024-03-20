@@ -809,14 +809,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 // Delete deletes the provided path
 // with some safeguards so to not accidentally delete some root path
-func Delete(fs FileSysClient, path string) (err error) {
+func Delete(fs FileSysClient, uri string) (err error) {
 
-	if strings.HasPrefix(path, "file://") {
+	if strings.HasPrefix(uri, "file://") {
 		// to handle windows path style
-		path = strings.ReplaceAll(strings.ToLower(path), `\`, `/`)
+		uri = strings.ReplaceAll(strings.ToLower(uri), `\`, `/`)
 	}
 
-	u, err := net.NewURL(path)
+	u, err := net.NewURL(uri)
 	if err != nil {
 		return g.Error(err, "could not parse url for deletion")
 	}
@@ -828,34 +828,34 @@ func Delete(fs FileSysClient, path string) (err error) {
 	switch fs.FsType() {
 	case dbio.TypeFileS3, dbio.TypeFileGoogle:
 		if len(p) == 0 {
-			return g.Error("will not delete bucket level %s", path)
+			return g.Error("will not delete bucket level %s", uri)
 		}
 	case dbio.TypeFileAzure:
 		if len(p) == 0 {
-			return g.Error("will not delete account level %s", path)
+			return g.Error("will not delete account level %s", uri)
 		}
 		// container level
 		if len(pArr) <= 1 {
-			return g.Error("will not delete container level %s", path)
+			return g.Error("will not delete container level %s", uri)
 		}
 	case dbio.TypeFileLocal:
 		if len(u.Hostname()) == 0 && len(p) == 0 {
-			return g.Error("will not delete root level %s", path)
+			return g.Error("will not delete root level %s", uri)
 		}
 	case dbio.TypeFileSftp:
 		if len(p) == 0 {
-			return g.Error("will not delete root level %s", path)
+			return g.Error("will not delete root level %s", uri)
 		}
 	case dbio.TypeFileFtp:
 		if len(p) == 0 {
-			return g.Error("will not delete root level %s", path)
+			return g.Error("will not delete root level %s", uri)
 		}
 	}
 
-	err = fs.delete(path)
+	err = fs.delete(uri)
 	if err != nil {
 		if g.IsDebugLow() {
-			g.Warn("could not delete path %s\n%s", path, err.Error())
+			g.Warn("could not delete path %s\n%s", uri, err.Error())
 		}
 		err = nil
 	}
