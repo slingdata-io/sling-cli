@@ -239,7 +239,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 			return g.Error(err, "could not list %s", parent)
 		}
 
-		gc, err := glob.Compile(wildcardName)
+		gc, err := glob.Compile(path)
 		if err != nil {
 			return g.Error(err, "could not parse patten: %s", wildcardName)
 		}
