@@ -606,7 +606,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 		opt := &connection.DiscoverOptions{
-			Pattern:     cast.ToString(c.Vals["pattern"]),
+			Pattern:     cast.ToString(c.Vals["selector"]),
 			ColumnLevel: cast.ToBool(c.Vals["columns"]),
 			Recursive:   cast.ToBool(c.Vals["recursive"]),
 		}

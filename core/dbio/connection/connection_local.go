@@ -346,7 +346,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 					table.Name = ""
 				}
 			}
-			g.Debug("database discover inputs: %s", g.Marshal(g.M("filter", opt.Pattern, "table", table.FullName(), "column_level", opt.ColumnLevel)))
+			g.Debug("database discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "table", table.FullName(), "column_level", opt.ColumnLevel)))
 
 			schemata, err = dbConn.GetSchemata(table.Schema, table.Name)
 			if err != nil {
