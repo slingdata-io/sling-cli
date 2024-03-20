@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -320,8 +321,22 @@ func (s *Schemata) Filtered(columnLevel bool, filters ...string) (ns Schemata) {
 func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	ns = Schemata{Databases: map[string]Database{}, conn: s.conn}
 
+	var gc *glob.Glob
+	if len(filters) == 0 {
+		return *s
+	} else if len(filters) == 1 {
+		val, err := glob.Compile(strings.ToLower(filters[0]))
+		if err == nil {
+			gc = &val
+		}
+	}
+
 	matchedTables := lo.Filter(lo.Values(s.Tables()), func(t Table, i int) bool {
-		return len(filters) == 0 || g.IsMatched(filters, t.Name)
+		key := strings.ToLower(g.F("%s.%s", t.Schema, t.Name))
+		if gc != nil {
+			return (*gc).Match(key)
+		}
+		return g.IsMatched(filters, key)
 	})
 
 	if len(matchedTables) == 0 {
@@ -359,8 +374,22 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	ns = Schemata{Databases: map[string]Database{}, conn: s.conn}
 
+	var gc *glob.Glob
+	if len(filters) == 0 {
+		return *s
+	} else if len(filters) == 1 {
+		val, err := glob.Compile(strings.ToLower(filters[0]))
+		if err == nil {
+			gc = &val
+		}
+	}
+
 	matchedColumns := lo.Filter(lo.Values(s.Columns()), func(col iop.Column, i int) bool {
-		return len(filters) == 0 || g.IsMatched(filters, col.Name)
+		key := strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		if gc != nil {
+			return (*gc).Match(key)
+		}
+		return g.IsMatched(filters, key)
 	})
 
 	if len(matchedColumns) == 0 {
@@ -393,7 +422,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 
 		table.Columns = append(table.Columns, col)
 
-		schema.Tables[strings.ToLower(col.Schema)] = table
+		schema.Tables[strings.ToLower(col.Table)] = table
 		db.Schemas[strings.ToLower(col.Schema)] = schema
 		ns.Databases[strings.ToLower(col.Database)] = db
 	}
