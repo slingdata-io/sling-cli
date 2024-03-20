@@ -140,6 +140,7 @@ func (rd *ReplicationConfig) AddStream(key string, cfg ReplicationStreamConfig) 
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
 	rd.Streams[key] = &newCfg
+	rd.Streams[key].index = len(rd.streamsOrdered)
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 }
 
@@ -148,6 +149,9 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 	rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
 		return v != key
 	})
+	for i, key := range rd.streamsOrdered {
+		rd.Streams[key].index = i
+	}
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
@@ -270,6 +274,8 @@ type ReplicationStreamConfig struct {
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+
+	index int `json:"-" yaml:"-"` // index in streamsOrdered
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -407,13 +413,18 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 			for _, streamsNode := range streamsNodes {
 				key := cast.ToString(streamsNode.Key)
+				stream, found := config.Streams[key]
+				if found {
+					stream.index = len(config.streamsOrdered)
+				}
+
 				config.streamsOrdered = append(config.streamsOrdered, key)
 				if streamsNode.Value == nil {
 					continue
 				}
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
 					if cast.ToString(streamConfigNode.Key) == "source_options" {
-						if stream, ok := config.Streams[key]; ok {
+						if found {
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
