@@ -270,7 +270,11 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	files, _ := g.ListDir(folderPath)
 
 	testNumbers := []int{}
-	tns := lo.Ternary(os.Getenv("TESTS") == "" && len(testSelect) > 0, testSelect[0], os.Getenv("TESTS"))
+	tns := os.Getenv("TESTS")
+	if tns == "" && len(testSelect) > 0 {
+		tns = testSelect[0]
+	}
+
 	if tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
