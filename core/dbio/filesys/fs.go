@@ -25,6 +25,8 @@ import (
 	"github.com/spf13/cast"
 )
 
+var recursiveLimit = cast.ToInt(os.Getenv("SLING_RECURSIVE_LIMIT"))
+
 // FileSysClient is a client to a file systems
 // such as local, s3, hdfs, azure storage, google cloud storage
 type FileSysClient interface {
@@ -210,9 +212,23 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 	return
 }
 
+func makeFilter(key string) string {
+	if !strings.Contains(key, "*") {
+		return "*"
+	}
+
+	parts := strings.Split(key, "/")
+	lastPart := parts[len(parts)-1]
+	if lastPart == "" {
+		return "*"
+	}
+	return lastPart
+}
+
 // ParseURL parses a URL
 func ParseURL(uri string) (host string, path string, err error) {
 	_, host, path, err = dbio.ParseURL(uri)
+	path = strings.TrimRight(path, makeFilter(path))
 	return
 }
 
@@ -774,9 +790,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		if singleFile {
 			partURL = url
 		}
-		if fsClient.FsType() == dbio.TypeFileAzure {
-			partURL = fmt.Sprintf("%s/part.%02d", url, partCnt)
-		}
+
 		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v]", partURL, fileRowLimit, fileBytesLimit, compression, concurrency, useBufferedStream, fileFormat)
 
 		df.Context.Wg.Read.Add()

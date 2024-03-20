@@ -387,7 +387,7 @@ func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	nodes, err = fs.doList(svc, input, fs.Prefix("/"))
+	nodes, err = fs.doList(svc, input, fs.Prefix("/"), "")
 	if err != nil {
 		return
 	} else if path == "" {
@@ -433,6 +433,7 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 	if err != nil {
 		return
 	}
+	filter := makeFilter(uri)
 
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(fs.bucket),
@@ -442,10 +443,10 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	return fs.doList(svc, input, fs.Prefix("/"))
+	return fs.doList(svc, input, fs.Prefix("/"), filter)
 }
 
-func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string) (nodes dbio.FileNodes, err error) {
+func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix, pattern string) (nodes dbio.FileNodes, err error) {
 	result, err := svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 	if err != nil {
 		err = g.Error(err, "Error with ListObjectsV2 for: %#v", input)
@@ -477,7 +478,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 			}
 
 			if obj.LastModified == nil || obj.LastModified.IsZero() || ts.IsZero() || obj.LastModified.After(ts) {
-				nodes.Add(node)
+				nodes.AddPattern(pattern, node)
 			}
 		}
 

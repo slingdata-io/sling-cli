@@ -8,6 +8,7 @@ import (
 
 	gcstorage "cloud.google.com/go/storage"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"golang.org/x/oauth2/google"
@@ -151,7 +152,7 @@ func (fs *GoogleFileSysClient) GetReader(path string) (reader io.Reader, err err
 // Buckets returns the buckets found in the project
 func (fs *GoogleFileSysClient) Buckets() (paths []string, err error) {
 	// Create S3 service client
-	it := fs.client.Buckets(fs.context.Ctx, fs.projectID)
+	it := fs.client.Buckets(fs.Context().Ctx, fs.projectID)
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -173,14 +174,14 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 		return
 	}
 
-	var keyArr []string
-	keyArr = strings.Split(key, "/")
-
 	baseKeys := map[string]int{}
-	query := &gcstorage.Query{Prefix: key}
-	query.SetAttrSelection([]string{"Name"})
-	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
+	keyArr := strings.Split(key, "/")
 	counter := 0
+	maxItems := lo.Ternary(recursiveLimit == 0, 5000, recursiveLimit)
+
+	query := &gcstorage.Query{Prefix: key}
+	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
+	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
 
 	for {
 		attrs, err := it.Next()
@@ -195,8 +196,8 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 		counter++
 		if attrs.Name == "" {
 			continue
-		} else if counter >= 5000 {
-			g.Warn("Google storage returns results recursively by default. Limiting results at 5000 items.")
+		} else if counter >= maxItems {
+			g.Warn("Google storage returns results recursively by default. Limiting results at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
 			break
 		} else if !strings.HasPrefix(attrs.Name, key) {
 			// needs to have correct key, since it's recursive
@@ -208,7 +209,6 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 		baseKeys[baseKey]++
 
 		if baseKeys[baseKey] == 1 {
-			// g.P([]any{attrs.Name, parts, baseKey, keyArr, len(parts), len(keyArr)})
 			node := dbio.FileNode{
 				URI:   g.F("%s%s", fs.Prefix("/"), baseKey),
 				IsDir: len(parts) >= len(keyArr)+1,
@@ -233,6 +233,8 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 	if err != nil {
 		return
 	}
+
+	filter := makeFilter(uri)
 	ts := fs.GetRefTs()
 
 	query := &gcstorage.Query{Prefix: key}
@@ -261,7 +263,7 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 				Updated: attrs.Updated.Unix(),
 				Owner:   attrs.Owner,
 			}
-			nodes.Add(node)
+			nodes.AddPattern(filter, node)
 		}
 	}
 	return

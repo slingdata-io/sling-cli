@@ -3,6 +3,7 @@ package dbio
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -77,6 +78,22 @@ func (fn *FileNode) Path() string {
 // FileNodes represent file nodes
 type FileNodes []FileNode
 
+// AddPattern adds a new node to list if pattern matches name
+func (fns *FileNodes) AddPattern(pattern string, ns ...FileNode) {
+	nodes := *fns
+	for i, n := range ns {
+		if strings.HasSuffix(n.URI, "/") {
+			ns[i].IsDir = true
+		} else if ns[i].IsDir && !strings.HasSuffix(n.URI, "/") {
+			ns[i].URI = n.URI + "/"
+		}
+		if g.In(pattern, "", "*") || g.WildCardMatch(n.Name(), strings.Split(pattern, ",")) {
+			nodes = append(nodes, ns[i])
+		}
+	}
+	*fns = nodes
+}
+
 // Add adds a new node to list
 func (fns *FileNodes) Add(ns ...FileNode) {
 	nodes := *fns
@@ -121,6 +138,17 @@ func (fns FileNodes) Sort() {
 		}
 		return val(fns[i]) < val(fns[j])
 	})
+}
+
+// After returns the nodes modified after provided time
+func (fns FileNodes) After(ts time.Time) (nodes FileNodes) {
+	for _, fn := range fns {
+		lastModified := time.Unix(fn.Updated, 0)
+		if ts.IsZero() || lastModified.IsZero() || lastModified.After(ts) {
+			nodes = append(nodes, fn)
+		}
+	}
+	return
 }
 
 // Columns returns a column map
