@@ -247,9 +247,9 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 		res.TotalRows = it.TotalRows + res.TotalRows
 	}
 
-	if bp, cj := getBytesProcessed(it); bp > 0 {
-		g.DebugLow("BigQuery job %s (%d children) => Processed %d bytes", q.JobID, cj, bp)
-	}
+	// if bp, cj := getBytesProcessed(it); bp > 0 {
+	// 	g.DebugLow("BigQuery job %s (%d children) => Processed %d bytes", q.JobID, cj, bp)
+	// }
 
 	result = res
 
