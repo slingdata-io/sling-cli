@@ -23,7 +23,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 	var bw int64
 	defer t.PBar.Finish()
 
-	if cfg.TgtConn.URL() != "" {
+	if uri := cfg.TgtConn.URL(); uri != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
 		cfg.TgtConn.Set(g.M("url", g.Rm(cfg.TgtConn.URL(), dateMap)))
 
@@ -35,7 +35,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			g.MapToKVArr(g.ToMapString(options))...,
 		)
 
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.TgtConn.URL(), props...)
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: %s", cfg.TgtConn.Type)
 			return cnt, err
@@ -44,7 +44,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
-		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL())
+		bw, err = fs.WriteDataflow(df, uri)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err
