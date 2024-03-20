@@ -380,6 +380,7 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
+		g.Trace("unfiltered nodes returned: " + g.Marshal(nodes.Paths()))
 
 		// apply filter
 		if discover {
@@ -396,22 +397,21 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, nod
 				getColumns := func(i int) {
 					defer ctx.Wg.Read.Done()
 					node := nodes[i]
-					if !node.IsDir {
-						df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
-						if err != nil {
-							ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
-							return
-						}
 
-						// discard rows, just need columns
-						for stream := range df.StreamCh {
-							for range stream.Rows() {
-							}
-						}
-
-						// get columns
-						nodes[i].Columns = df.Columns
+					df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
+					if err != nil {
+						ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
+						return
 					}
+
+					// discard rows, just need columns
+					for stream := range df.StreamCh {
+						for range stream.Rows() {
+						}
+					}
+
+					// get columns
+					nodes[i].Columns = df.Columns
 				}
 
 				for i := range nodes {
