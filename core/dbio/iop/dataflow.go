@@ -592,7 +592,9 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 				ds.AddColumns(df.Columns, false)
 				df.mux.Unlock()
 			} else {
-				df.Columns = ds.Columns
+				if len(df.Columns) == 0 {
+					df.Columns = ds.Columns
+				}
 				df.Buffer = ds.Buffer
 			}
 

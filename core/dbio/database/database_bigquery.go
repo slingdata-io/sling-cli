@@ -832,7 +832,9 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	df, err = fs.ReadDataflow(gsURL)
+	fs.SetProp("header", "false")
+	fs.SetProp("format", "csv")
+	df, err = fs.ReadDataflow(gsURL, filesys.FileStreamConfig{Columns: columns})
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)
 		return
@@ -913,11 +915,8 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if table.IsQuery() || table.IsView {
-		if table.IsView && table.SQL == "" {
-			table.SQL = table.Select(0)
-		}
-		return conn.ExportToGCS(table.SQL, gcsURI)
+	if true || table.IsQuery() || table.IsView {
+		return conn.ExportToGCS(table.Select(0), gcsURI)
 	}
 
 	client, err := conn.getNewClient()

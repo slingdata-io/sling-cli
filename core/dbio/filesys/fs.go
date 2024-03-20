@@ -44,7 +44,7 @@ type FileSysClient interface {
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
 	WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error)
-	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady) (bw int64, err error)
+	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
@@ -552,7 +552,7 @@ func (fs *BaseFileSysClient) WriteDataflow(df *iop.Dataflow, url string) (bw int
 		}
 	}()
 
-	return fs.Self().WriteDataflowReady(df, url, fileReadyChn)
+	return fs.Self().WriteDataflowReady(df, url, fileReadyChn, nil)
 }
 
 // GetReaders returns one or more readers from specified paths in specified FileSysClient
@@ -581,7 +581,7 @@ type FileReady struct {
 }
 
 // WriteDataflowReady writes to a file sys and notifies the fileReady chan.
-func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady) (bw int64, err error) {
+func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error) {
 	fsClient := fs.Self()
 	defer close(fileReadyChn)
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
@@ -627,6 +627,10 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	// adjust fileBytesLimit due to compression
 	if g.In(compression, iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) {
 		fileBytesLimit = fileBytesLimit * 6 // compressed, multiply
+	}
+
+	if sc != nil {
+		df.SetConfig(sc)
 	}
 
 	processStream := func(ds *iop.Datastream, partURL string) {
@@ -843,7 +847,8 @@ func Delete(fs FileSysClient, path string) (err error) {
 
 type FileStreamConfig struct {
 	Limit   int
-	Columns []string
+	Columns iop.Columns
+	Select  []string
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
@@ -857,7 +862,10 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 	df = iop.NewDataflowContext(fs.Context().Ctx, cfg.Limit)
 	dsCh := make(chan *iop.Datastream)
 	fs.setDf(df)
-	fs.SetProp("selectFields", g.Marshal(cfg.Columns))
+	fs.SetProp("selectFields", g.Marshal(cfg.Select))
+	if len(cfg.Columns) > 0 {
+		df.Columns = cfg.Columns
+	}
 
 	go func() {
 		defer close(dsCh)
@@ -865,8 +873,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
 			skipSelect := g.In(fs.GetProp("FORMAT"), string(FileTypeParquet))
-			if len(cfg.Columns) > 1 && !skipSelect {
-				cols := iop.NewColumnsFromFields(cfg.Columns...)
+			if len(cfg.Select) > 1 && !skipSelect {
+				cols := iop.NewColumnsFromFields(cfg.Select...)
 				fm := ds.Columns.FieldMap(true)
 				ds.Columns.DbTypes()
 				transf := func(in []interface{}) (out []interface{}) {
@@ -881,6 +889,10 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 				}
 				dsCh <- ds.Map(cols, transf)
 			} else {
+				if len(cfg.Columns) > 0 && len(cfg.Columns) == len(ds.Columns) {
+					// set columns when provided
+					ds.Columns = cfg.Columns
+				}
 				dsCh <- ds
 			}
 		}

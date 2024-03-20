@@ -73,7 +73,7 @@ core:
       ESCAPE_UNENCLOSED_FIELD = NONE
       FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
     )
-    HEADER = TRUE
+    HEADER = FALSE
   copy_to_s3: |
     COPY INTO '{s3_path}'
     FROM ({sql})
@@ -90,7 +90,7 @@ core:
       ESCAPE_UNENCLOSED_FIELD = NONE
       FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
     )
-    HEADER = TRUE
+    HEADER = FALSE
   copy_to_azure: |
     COPY INTO '{azure_path}/'
     FROM ({sql})
@@ -106,7 +106,7 @@ core:
       ESCAPE_UNENCLOSED_FIELD = NONE
       FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
     )
-    HEADER = TRUE
+    HEADER = FALSE
 
 metadata:
 

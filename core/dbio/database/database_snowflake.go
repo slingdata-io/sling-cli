@@ -232,7 +232,9 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		return
 	}
 
-	df, err = fs.ReadDataflow(filePath)
+	fs.SetProp("header", "false")
+	fs.SetProp("format", "csv")
+	df, err = fs.ReadDataflow(filePath, filesys.FileStreamConfig{Columns: columns})
 	if err != nil {
 		err = g.Error(err, "Could not read "+filePath)
 		return
@@ -723,6 +725,11 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		return stageFilePath
 	}
 
+	doPutDone := func(file filesys.FileReady) {
+		defer context.Wg.Write.Done()
+		doPut(file)
+	}
+
 	doCopy := func(file filesys.FileReady) {
 		defer context.Wg.Write.Done()
 		stageFilePath := doPut(file)
@@ -755,6 +762,39 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			df.Context.CaptureErr(err)
 		}
 	}
+	_ = doCopy
+
+	doCopyFolder := func() {
+
+		if df.Err() != nil {
+			return
+		}
+
+		tgtColumns := make([]string, len(df.Columns))
+		for i, name := range df.Columns.Names() {
+			colName, _ := ParseColumnName(name, conn.GetType())
+			tgtColumns[i] = conn.Quote(colName)
+		}
+
+		srcColumns := make([]string, len(df.Columns))
+		for i := range df.Columns {
+			srcColumns[i] = g.F("T.$%d", i+1)
+		}
+
+		sql := g.R(
+			conn.template.Core["copy_from_stage"],
+			"table", tableFName,
+			"tgt_columns", strings.Join(tgtColumns, ", "),
+			"src_columns", strings.Join(srcColumns, ", "),
+			"stage_path", stageFolderPath,
+		)
+		_, err = conn.Exec(sql)
+		if err != nil {
+			err = g.Error(err, "Error with COPY INTO")
+			df.Context.CaptureErr(err)
+		}
+	}
+	_ = doCopyFolder
 
 	for file := range fileReadyChn {
 		if df.Err() != nil || context.Err() != nil {
@@ -763,11 +803,14 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 		conn.Mux.Lock() // to not collide with schema change
 		context.Wg.Write.Add()
-		go doCopy(file)
+		go doPutDone(file) // when using doCopyFolder
+		// go doCopy(file)
 		conn.Mux.Unlock()
 	}
 
 	context.Wg.Write.Wait()
+
+	doCopyFolder()
 
 	if context.Err() != nil {
 		return 0, context.Err()

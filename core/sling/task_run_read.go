@@ -247,7 +247,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		fsCfg := filesys.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
 		df, err = fs.ReadDataflow(uri, fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
