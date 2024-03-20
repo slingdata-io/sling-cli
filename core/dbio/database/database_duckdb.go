@@ -40,6 +40,7 @@ type DuckDbConn struct {
 
 var DuckDbVersion = "0.10.0"
 var DuckDbUseTempFile = false
+var DuckDbMux = sync.Mutex{}
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
 var DuckDbFileCmd = map[string]*exec.Cmd{}
 var duckDbReadOnlyHint = "/* -readonly */"
@@ -53,9 +54,10 @@ func (conn *DuckDbConn) Init() error {
 		conn.BaseConn.Type = dbio.TypeDbMotherDuck
 	}
 
-	if _, ok := DuckDbFileContext[conn.URL]; !ok {
+	_, ok := conn.getDuckDbFileContext()
+	if !ok {
 		c := g.NewContext(conn.Context().Ctx)
-		DuckDbFileContext[conn.URL] = &c
+		conn.setDuckDbFileContext(&c)
 	}
 
 	var instance Connection
@@ -270,6 +272,32 @@ func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sql string, args .
 	return conn.ExecContext(ctx, sql, args...)
 }
 
+func (conn *DuckDbConn) setDuckDbFileContext(ctx *g.Context) {
+	DuckDbMux.Lock()
+	DuckDbFileContext[conn.URL] = ctx
+	DuckDbMux.Unlock()
+}
+
+func (conn *DuckDbConn) getDuckDbFileContext() (ctx *g.Context, ok bool) {
+	DuckDbMux.Lock()
+	ctx, ok = DuckDbFileContext[conn.URL]
+	DuckDbMux.Unlock()
+	return
+}
+
+func (conn *DuckDbConn) setDuckDbFileCmd(cmd *exec.Cmd) {
+	DuckDbMux.Lock()
+	DuckDbFileCmd[conn.URL] = cmd
+	DuckDbMux.Unlock()
+}
+
+func (conn *DuckDbConn) getDuckDbFileCmd() (cmd *exec.Cmd, ok bool) {
+	DuckDbMux.Lock()
+	cmd, ok = DuckDbFileCmd[conn.URL]
+	DuckDbMux.Unlock()
+	return
+}
+
 type duckDbResult struct {
 	TotalRows uint64
 	res       driver.Result
@@ -358,7 +386,7 @@ func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *
 				if err != nil {
 					if stdErr := conn.stdErrInteractive.String(); stdErr != "" {
 						ctx.CaptureErr(g.Error(stdErr))
-					} else {
+					} else if !strings.Contains(err.Error(), "signal: killed") && !strings.Contains(err.Error(), "no child") {
 						ctx.CaptureErr(g.Error(err, "error running duckdb interactive command"))
 					}
 					g.LogError(ctx.Err())
@@ -481,8 +509,8 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	conn.LogSQL(sql, args...)
 
 	var out []byte
-	DuckDbFileCmd[conn.URL] = cmd
-	fileContext := DuckDbFileContext[conn.URL]
+	conn.setDuckDbFileCmd(cmd)
+	fileContext, _ := conn.getDuckDbFileContext()
 	fileContext.Mux.Lock()
 	if conn.isInteractive {
 		stdOutReader, stderrBuf, err := conn.submitToCmdStdin(ctx, sql)
@@ -568,8 +596,8 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	cmd.Args = append(cmd.Args, "-csv")
 
-	DuckDbFileCmd[conn.URL] = cmd
-	fileContext := DuckDbFileContext[conn.URL]
+	conn.setDuckDbFileCmd(cmd)
+	fileContext, _ := conn.getDuckDbFileContext()
 	fileContext.Mux.Lock()
 
 	var stdOutReader, stdErrReader io.ReadCloser
@@ -598,7 +626,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 			return ds, g.Error(err, "could not exec SQL for duckdb")
 		}
 
-		DuckDbFileCmd[conn.URL] = cmd
+		conn.setDuckDbFileCmd(cmd)
 	}
 
 	// so that lists are treated as TEXT and not JSON
@@ -640,8 +668,9 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 // Close closes the connection
 func (conn *DuckDbConn) Close() error {
-	fileContext := DuckDbFileContext[conn.URL]
-	if cmd, ok := DuckDbFileCmd[conn.URL]; ok {
+
+	fileContext, _ := conn.getDuckDbFileContext()
+	if cmd, ok := conn.getDuckDbFileCmd(); ok {
 		cmd.Process.Kill()
 		fileContext.Mux.TryLock() // in case it is already unlocked
 		fileContext.Mux.Unlock()
@@ -769,8 +798,8 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			return count, g.Error(err, "could not get cmd duckdb")
 		}
 
-		DuckDbFileCmd[conn.URL] = cmd
-		fileContext := DuckDbFileContext[conn.URL]
+		conn.setDuckDbFileCmd(cmd)
+		fileContext, _ := conn.getDuckDbFileContext()
 		fileContext.Mux.Lock()
 		if conn.isInteractive {
 			stdOutReader, stderrBuf, err = conn.submitToCmdStdin(conn.Context().Ctx, sql)
