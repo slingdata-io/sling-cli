@@ -840,8 +840,12 @@ func Delete(fs FileSysClient, path string) (err error) {
 
 	err = fs.delete(path)
 	if err != nil {
-		return g.Error(err, "could not delete path")
+		if g.IsDebugLow() {
+			g.Warn("could not delete path %s\n%s", path, err.Error())
+		}
+		err = nil
 	}
+
 	return nil
 }
 
