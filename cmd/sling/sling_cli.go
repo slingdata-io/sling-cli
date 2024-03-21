@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -421,6 +422,13 @@ func main() {
 }
 
 func cliInit() int {
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			telemetryMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+		}
+	}()
 
 	// Set your program's name and description.  These appear in help output.
 	flaggy.SetName("sling")
