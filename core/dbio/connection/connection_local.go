@@ -42,15 +42,15 @@ func GetLocalConns(force ...bool) []ConnEntry {
 
 	connsMap := map[string]ConnEntry{}
 
-	// TODO: add local disk connection
-	// conn, _ := connection.NewConnection("LOCAL_DISK", dbio.TypeFileLocal, g.M("url", "file://."))
-	// c := Conn{
-	// 	Name:        "LOCAL_DISK",
-	// 	Description: dbio.TypeFileLocal.NameLong(),
-	// 	Source:      "built-in",
-	// 	Connection:  conn,
-	// }
-	// connsMap[c.Name] = c
+	// local disk connection
+	conn, _ := NewConnection("LOCAL", dbio.TypeFileLocal, g.M("type", "file"))
+	c := ConnEntry{
+		Name:        "LOCAL",
+		Description: dbio.TypeFileLocal.NameLong(),
+		Source:      "built-in",
+		Connection:  conn,
+	}
+	connsMap[c.Name] = c
 
 	// get dbt connections
 	dbtConns, err := ReadDbtConnections()
