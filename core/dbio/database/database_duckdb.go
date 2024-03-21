@@ -60,8 +60,7 @@ func (conn *DuckDbConn) Init() error {
 		conn.setDuckDbFileContext(&c)
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

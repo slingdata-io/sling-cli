@@ -50,8 +50,7 @@ func (conn *BigTableConn) Init() error {
 		conn.InstanceID = strings.ReplaceAll(u.Path(), "/", "")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	err = conn.BaseConn.Init()

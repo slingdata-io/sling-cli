@@ -46,8 +46,7 @@ func (conn *StarRocksConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "false")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

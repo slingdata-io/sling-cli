@@ -54,8 +54,7 @@ func (conn *MsSQLServerConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "true")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

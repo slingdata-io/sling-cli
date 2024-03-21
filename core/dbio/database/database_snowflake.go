@@ -61,8 +61,7 @@ func (conn *SnowflakeConn) Init() error {
 		conn.SetProp("encoded_private_key", encPK)
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

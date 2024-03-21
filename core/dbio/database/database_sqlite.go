@@ -40,8 +40,7 @@ func (conn *SQLiteConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbSQLite
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	// handle S3 url

@@ -52,8 +52,7 @@ func (conn *OracleConn) Init() error {
 		conn.SetProp("allow_bulk_import", "true")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	// set MAX_DECIMALS to import for numeric types

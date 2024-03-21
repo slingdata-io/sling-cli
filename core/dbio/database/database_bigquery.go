@@ -62,8 +62,7 @@ func (conn *BigQueryConn) Init() error {
 		conn.DatasetID = conn.GetProp("schema")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	err = conn.BaseConn.Init()

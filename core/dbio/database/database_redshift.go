@@ -28,8 +28,7 @@ func (conn *RedshiftConn) Init() error {
 	conn.BaseConn.Type = dbio.TypeDbRedshift
 	conn.BaseConn.defaultPort = 5439
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

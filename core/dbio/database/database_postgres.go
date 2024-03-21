@@ -35,8 +35,7 @@ func (conn *PostgresConn) Init() error {
 	// also is slower than just select?
 	conn.BaseConn.SetProp("allow_bulk_export", "false")
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()

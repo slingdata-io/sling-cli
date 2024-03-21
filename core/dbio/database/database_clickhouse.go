@@ -28,8 +28,7 @@ func (conn *ClickhouseConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbClickhouse
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
 }
