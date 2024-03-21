@@ -46,7 +46,7 @@ func (fs *GoogleFileSysClient) Init(ctx context.Context) (err error) {
 
 // Prefix returns the url prefix
 func (fs *GoogleFileSysClient) Prefix(suffix ...string) string {
-	return g.F("%s://%s", fs.fsType.String(), fs.bucket) + strings.Join(suffix, "")
+	return g.F("%s://%s", fs.FsType().String(), fs.bucket) + strings.Join(suffix, "")
 }
 
 // GetPath returns the path of url

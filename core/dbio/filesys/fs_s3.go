@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
@@ -41,7 +42,7 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 
-	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT") {
+	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME") {
 		if fs.GetProp(key) == "" {
 			fs.SetProp(key, fs.GetProp("AWS_"+key))
 		}
@@ -55,7 +56,7 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 
 // Prefix returns the url prefix
 func (fs *S3FileSysClient) Prefix(suffix ...string) string {
-	return g.F("%s://%s", fs.fsType.String(), fs.bucket) + strings.Join(suffix, "")
+	return g.F("%s://%s", fs.FsType().String(), fs.bucket) + strings.Join(suffix, "")
 }
 
 // GetPath returns the path of url
@@ -116,6 +117,10 @@ func (fs *S3FileSysClient) Connect() (err error) {
 	if err != nil {
 		err = g.Error(err, "Could not create AWS session (did not provide ACCESS_KEY_ID/SECRET_ACCESS_KEY or default AWS profile).")
 		return
+	}
+
+	if role := fs.GetProp("ROLE_ARN"); role != "" {
+		fs.session.Config.Credentials = stscreds.NewCredentials(fs.session, role)
 	}
 
 	return

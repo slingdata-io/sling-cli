@@ -33,7 +33,7 @@ func (fs *LocalFileSysClient) Init(ctx context.Context) (err error) {
 
 // Prefix returns the url prefix
 func (fs *LocalFileSysClient) Prefix(suffix ...string) string {
-	return g.F("%s://", fs.fsType.String()) + strings.Join(suffix, "")
+	return g.F("%s://", fs.FsType().String()) + strings.Join(suffix, "")
 }
 
 // GetPath returns the path of url

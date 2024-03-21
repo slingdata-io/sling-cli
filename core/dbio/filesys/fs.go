@@ -346,7 +346,7 @@ func (fs *BaseFileSysClient) Buckets() (paths []string, err error) {
 
 // Prefix returns the url prefix
 func (fs *BaseFileSysClient) Prefix(suffix ...string) string {
-	return "" + strings.Join(suffix, "")
+	return fs.Self().Prefix(suffix...)
 }
 
 // GetProp returns the value of a property
@@ -659,7 +659,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		fileFormat = InferFileFormat(url)
 	}
 
-	url = strings.TrimSuffix(url, "/")
+	url = strings.TrimSuffix(NormalizeURI(fs, url), "/")
 
 	singleFile := fileRowLimit == 0 && fileBytesLimit == 0 && len(df.Streams) == 1
 
