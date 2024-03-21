@@ -24,6 +24,7 @@ require (
 	github.com/flarco/g v0.1.79
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.7.1
+	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/integrii/flaggy v1.5.2
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
@@ -117,7 +118,6 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/errors v0.21.0 // indirect
 	github.com/go-openapi/strfmt v0.22.0 // indirect
-	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-sql/civil v0.0.0-20190719163853-cb61b32ac6fe // indirect
