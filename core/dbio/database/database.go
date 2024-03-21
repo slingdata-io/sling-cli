@@ -1740,7 +1740,7 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 
 	currDbData, err := conn.SumbitTemplate("single", conn.template.Metadata, "current_database", g.M())
 	if err != nil {
-		return schemata, g.Error(err, "Could not current database")
+		return schemata, g.Error(err, "Could not get current database")
 	}
 
 	currDatabase := cast.ToString(currDbData.FirstVal())
