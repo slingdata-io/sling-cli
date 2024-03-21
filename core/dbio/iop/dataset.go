@@ -236,8 +236,8 @@ func (data *Dataset) SetFields(fields []string) {
 }
 
 // Append appends a new row
-func (data *Dataset) Append(row []interface{}) {
-	data.Rows = append(data.Rows, row)
+func (data *Dataset) Append(row ...[]any) {
+	data.Rows = append(data.Rows, row...)
 }
 
 // Stream returns a datastream of the dataset

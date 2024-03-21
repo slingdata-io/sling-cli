@@ -1148,34 +1148,42 @@ func (conn *BaseConn) MustExec(sql string, args ...interface{}) (result sql.Resu
 
 // Query runs a sql query, returns `result`, `error`
 func (conn *BaseConn) Query(sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
+	return conn.Self().QueryContext(conn.Context().Ctx, sql, options...)
+}
+
+// QueryContext runs a sql query with ctx, returns `result`, `error`
+func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		err = g.Error(err, "Could not reconnect")
 		return
 	}
 
-	ds, err := conn.Self().StreamRows(sql, options...)
-	if err != nil {
-		err = g.Error(err, "Error with StreamRows")
-		return iop.Dataset{SQL: sql}, err
+	for _, sql := range ParseSQLMultiStatements(sql) {
+
+		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
+		if err != nil {
+			err = g.Error(err, "Error with StreamRows")
+			return iop.Dataset{SQL: sql}, err
+		}
+
+		if len(data.Columns) == 0 {
+			data, err = ds.Collect(0)
+			if err != nil {
+				return iop.Dataset{SQL: sql}, err
+			}
+		} else if len(data.Columns) == len(ds.Columns) {
+			dataNew, err := ds.Collect(0)
+			if err != nil {
+				return iop.Dataset{SQL: sql}, err
+			}
+			data.Append(dataNew.Rows...)
+		} else {
+			return iop.Dataset{SQL: sql}, g.Error("Multi-statement queries returned different number of columns")
+		}
+
 	}
 
-	data, err = ds.Collect(0)
-	data.SQL = sql
-	data.Duration = conn.Data.Duration // Collect does not time duration
-
-	return data, err
-}
-
-// QueryContext runs a sql query with ctx, returns `result`, `error`
-func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (iop.Dataset, error) {
-
-	ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
-	if err != nil {
-		return iop.Dataset{SQL: sql}, err
-	}
-
-	data, err := ds.Collect(0)
 	data.SQL = sql
 	data.Duration = conn.Data.Duration // Collect does not time duration
 
@@ -3320,7 +3328,8 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 
 		// detect end
 		if char == ";" && !inQuote && !inComment() {
-			if strings.TrimSpace(currState) != "" {
+			if currState = strings.TrimSpace(currState); currState != "" {
+				currState = strings.TrimSuffix(currState, ";")
 				sqls = append(sqls, currState)
 			}
 			currState = ""
@@ -3328,7 +3337,8 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 	}
 
 	if len(currState) > 0 {
-		if strings.TrimSpace(currState) != "" {
+		if currState = strings.TrimSpace(currState); currState != "" {
+			currState = strings.TrimSuffix(currState, ";")
 			sqls = append(sqls, currState)
 		}
 	}
