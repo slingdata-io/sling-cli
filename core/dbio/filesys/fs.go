@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
@@ -212,23 +213,41 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 	return
 }
 
-func makeFilter(key string) string {
+func makePathSuffix(key string) string {
 	if !strings.Contains(key, "*") {
 		return "*"
 	}
+	return strings.TrimPrefix(key, GetDeepestParent(key))
+}
 
-	parts := strings.Split(key, "/")
-	lastPart := parts[len(parts)-1]
-	if lastPart == "" {
-		return "*"
+func NormalizeURI(fs FileSysClient, uri string) string {
+	switch fs.FsType() {
+	case dbio.TypeFileLocal:
+		return fs.Prefix("") + strings.TrimPrefix(uri, fs.Prefix())
+	default:
+		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}
-	return lastPart
+}
+
+func makeGlob(uri string) (*glob.Glob, error) {
+	_, _, path, err := dbio.ParseURL(uri)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(path, "*") {
+		return nil, nil
+	}
+	gc, err := glob.Compile("***")
+	if err != nil {
+		return nil, err
+	}
+	return &gc, nil
 }
 
 // ParseURL parses a URL
-func ParseURL(uri string) (host string, path string, err error) {
+func ParseURL(uri string) (host, path string, err error) {
 	_, host, path, err = dbio.ParseURL(uri)
-	path = strings.TrimRight(path, makeFilter(path))
+	path = strings.TrimRight(path, makePathSuffix(path))
 	return
 }
 
@@ -240,8 +259,6 @@ func GetDeepestParent(path string) string {
 			break
 		} else if i == len(parts)-1 {
 			break
-		} else if strings.TrimSpace(part) == "" {
-			continue
 		}
 		parentParts = append(parentParts, part)
 	}
@@ -836,7 +853,7 @@ func Delete(fs FileSysClient, uri string) (err error) {
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
-		return g.Error("could not parse %s", uri)
+		return g.Error(err, "could not parse %s", uri)
 	}
 
 	// add some safeguards

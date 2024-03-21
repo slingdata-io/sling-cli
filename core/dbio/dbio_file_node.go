@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -78,8 +79,8 @@ func (fn *FileNode) Path() string {
 // FileNodes represent file nodes
 type FileNodes []FileNode
 
-// AddPattern adds a new node to list if pattern matches name
-func (fns *FileNodes) AddPattern(pattern string, ns ...FileNode) {
+// AddWhere adds a new node to list if pattern matches name and after timestamp
+func (fns *FileNodes) AddWhere(pattern *glob.Glob, after int64, ns ...FileNode) {
 	nodes := *fns
 	for i, n := range ns {
 		if strings.HasSuffix(n.URI, "/") {
@@ -87,8 +88,10 @@ func (fns *FileNodes) AddPattern(pattern string, ns ...FileNode) {
 		} else if ns[i].IsDir && !strings.HasSuffix(n.URI, "/") {
 			ns[i].URI = n.URI + "/"
 		}
-		if g.In(pattern, "", "*") || g.WildCardMatch(n.Name(), strings.Split(pattern, ",")) {
-			nodes = append(nodes, ns[i])
+		if pattern == nil || (*pattern).Match(n.Path()) {
+			if after == 0 || ns[i].Updated == 0 || ns[i].Updated > after {
+				nodes = append(nodes, ns[i])
+			}
 		}
 	}
 	*fns = nodes

@@ -37,7 +37,7 @@ func (fs *FtpFileSysClient) Prefix(suffix ...string) string {
 // GetPath returns the path of url
 func (fs *FtpFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
-	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
@@ -149,7 +149,14 @@ func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
-	ts := fs.GetRefTs()
+
+	pattern, err := makeGlob(url)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+url)
+		return
+	}
+
+	ts := fs.GetRefTs().Unix()
 
 	entries, err := fs.client.List(path)
 	if err != nil {
@@ -164,18 +171,16 @@ func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err
 			Updated: file.Time.Unix(),
 		}
 
-		if ts.IsZero() || file.Time.IsZero() || file.Time.After(ts) {
-			path := g.F("%s%s%s", fs.Prefix(), path, file.Name)
-			if file.Type == ftp.EntryTypeFolder {
-				subNodes, err := fs.ListRecursive(path)
-				// g.P(subPaths)
-				if err != nil {
-					return nil, g.Error(err, "error listing sub path")
-				}
-				nodes.Add(subNodes...)
-			} else {
-				nodes.Add(node)
+		path := g.F("%s%s%s", fs.Prefix(), path, file.Name)
+		if file.Type == ftp.EntryTypeFolder {
+			subNodes, err := fs.ListRecursive(path)
+			// g.P(subPaths)
+			if err != nil {
+				return nil, g.Error(err, "error listing sub path")
 			}
+			nodes.AddWhere(pattern, ts, subNodes...)
+		} else {
+			nodes.AddWhere(pattern, ts, node)
 		}
 	}
 

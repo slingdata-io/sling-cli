@@ -25,7 +25,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 
 	if uri := cfg.TgtConn.URL(); uri != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
-		cfg.TgtConn.Set(g.M("url", g.Rm(cfg.TgtConn.URL(), dateMap)))
+		cfg.TgtConn.Set(g.M("url", g.Rm(uri, dateMap)))
 
 		// construct props by merging with options
 		options := g.M()

@@ -352,6 +352,10 @@ func (t Type) Template() (template Template, err error) {
 
 // ParseURL parses a URL
 func ParseURL(uri string) (uType Type, host string, path string, err error) {
+	if strings.HasPrefix(uri, "file://") {
+		return TypeFileLocal, "", strings.TrimPrefix(uri, "file://"), nil
+	}
+
 	u, err := net.NewURL(uri)
 	if err != nil {
 		err = g.Error(err, "Unable to parse URL "+uri)

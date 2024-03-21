@@ -52,7 +52,7 @@ func (fs *GoogleFileSysClient) Prefix(suffix ...string) string {
 // GetPath returns the path of url
 func (fs *GoogleFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
-	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
@@ -234,8 +234,12 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 		return
 	}
 
-	filter := makeFilter(uri)
-	ts := fs.GetRefTs()
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+	ts := fs.GetRefTs().Unix()
 
 	query := &gcstorage.Query{Prefix: key}
 	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
@@ -255,16 +259,14 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 			continue
 		}
 
-		if ts.IsZero() || attrs.Updated.IsZero() || attrs.Updated.After(ts) {
-			node := dbio.FileNode{
-				URI:     g.F("%s/%s", fs.Prefix(), attrs.Name),
-				Size:    cast.ToUint64(attrs.Size),
-				Created: attrs.Created.Unix(),
-				Updated: attrs.Updated.Unix(),
-				Owner:   attrs.Owner,
-			}
-			nodes.AddPattern(filter, node)
+		node := dbio.FileNode{
+			URI:     g.F("%s/%s", fs.Prefix(), attrs.Name),
+			Size:    cast.ToUint64(attrs.Size),
+			Created: attrs.Created.Unix(),
+			Updated: attrs.Updated.Unix(),
+			Owner:   attrs.Owner,
 		}
+		nodes.AddWhere(pattern, ts, node)
 	}
 	return
 }

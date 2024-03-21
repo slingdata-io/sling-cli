@@ -395,7 +395,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
-		g.Debug("unfiltered nodes returned: " + g.Marshal(nodes.Paths()))
+		g.Debug("unfiltered nodes returned: %d", len(nodes))
 
 		// apply filter
 		if opt.discover {

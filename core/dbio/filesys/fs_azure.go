@@ -51,7 +51,7 @@ func (fs *AzureFileSysClient) Prefix(suffix ...string) string {
 // GetPath returns the path of url
 func (fs *AzureFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
-	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
@@ -195,7 +195,12 @@ func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	filter := makeFilter(uri)
+
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
 
 	pagerOpts := &container.ListBlobsFlatOptions{}
 	if key != "" {
@@ -204,7 +209,7 @@ func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 
 	pager := fs.client.NewListBlobsFlatPager(fs.container, pagerOpts)
 
-	ts := fs.GetRefTs()
+	ts := fs.GetRefTs().Unix()
 	// continue fetching pages until no more remain
 	for pager.More() {
 		// advance to the next page
@@ -219,15 +224,13 @@ func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 			blobName := *blob.Name
 
 			lastModified := blob.Properties.LastModified
-			if ts.IsZero() || lastModified.IsZero() || lastModified.After(ts) {
-				file := dbio.FileNode{
-					URI:     g.F("%s/%s", fs.Prefix(), blobName),
-					Created: blob.Properties.CreationTime.Unix(),
-					Updated: lastModified.Unix(),
-					Size:    cast.ToUint64(blob.Properties.ContentLength),
-				}
-				nodes.AddPattern(filter, file)
+			file := dbio.FileNode{
+				URI:     g.F("%s/%s", fs.Prefix(), blobName),
+				Created: blob.Properties.CreationTime.Unix(),
+				Updated: lastModified.Unix(),
+				Size:    cast.ToUint64(blob.Properties.ContentLength),
 			}
+			nodes.AddWhere(pattern, ts, file)
 		}
 	}
 

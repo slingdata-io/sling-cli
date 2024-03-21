@@ -190,9 +190,14 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	tempFilePath := g.F("/tmp/tests.%s.tsv", connType.String())
 	folderPath := g.F("tests/suite/%s", connType.String())
 	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
+	testFolder := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
 	testTable := g.F("test1k_%s", connType.String())
 	testWideFilePath, err := generateLargeDataset(300, 100, false)
 	g.LogFatal(err)
+
+	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileFtp, dbio.TypeFileSftp) {
+		testFolder = "/tmp/sling_test"
+	}
 
 	// generate files
 	os.RemoveAll(folderPath) // clean up
@@ -205,7 +210,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	fileContent := string(filebytes)
 	fileContent = strings.ReplaceAll(fileContent, "[conn]", conn.name)
 	fileContent = strings.ReplaceAll(fileContent, "[schema]", testSchema)
-	fileContent = strings.ReplaceAll(fileContent, "[folder]", testSchema)
+	fileContent = strings.ReplaceAll(fileContent, "[folder]", testFolder)
 	fileContent = strings.ReplaceAll(fileContent, "[table]", testTable)
 	fileContent = strings.ReplaceAll(fileContent, "[wide_file_path]", testWideFilePath)
 
@@ -696,6 +701,10 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		Pattern:     cfg.Target.Object,
 		ColumnLevel: cast.ToBool(cfg.Env["column_level"]),
 		Recursive:   cast.ToBool(cfg.Env["recursive"]),
+	}
+
+	if g.In(connType, dbio.TypeFileLocal) && opt.Pattern == "" {
+		opt.Pattern = "/tmp/"
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))

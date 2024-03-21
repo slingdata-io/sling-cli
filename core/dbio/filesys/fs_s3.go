@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -60,7 +61,7 @@ func (fs *S3FileSysClient) Prefix(suffix ...string) string {
 // GetPath returns the path of url
 func (fs *S3FileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
-	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
@@ -387,7 +388,7 @@ func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	nodes, err = fs.doList(svc, input, fs.Prefix("/"), "")
+	nodes, err = fs.doList(svc, input, fs.Prefix("/"), nil)
 	if err != nil {
 		return
 	} else if path == "" {
@@ -433,7 +434,12 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 	if err != nil {
 		return
 	}
-	filter := makeFilter(uri)
+
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
 
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(fs.bucket),
@@ -443,10 +449,10 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	return fs.doList(svc, input, fs.Prefix("/"), filter)
+	return fs.doList(svc, input, fs.Prefix("/"), pattern)
 }
 
-func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix, pattern string) (nodes dbio.FileNodes, err error) {
+func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string, pattern *glob.Glob) (nodes dbio.FileNodes, err error) {
 	result, err := svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 	if err != nil {
 		err = g.Error(err, "Error with ListObjectsV2 for: %#v", input)
@@ -455,7 +461,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 
 	g.Trace("%#v", result)
 
-	ts := fs.GetRefTs()
+	ts := fs.GetRefTs().Unix()
 
 	for {
 
@@ -477,9 +483,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 				node.Owner = *obj.Owner.DisplayName
 			}
 
-			if obj.LastModified == nil || obj.LastModified.IsZero() || ts.IsZero() || obj.LastModified.After(ts) {
-				nodes.AddPattern(pattern, node)
-			}
+			nodes.AddWhere(pattern, ts, node)
 		}
 
 		if *result.IsTruncated {

@@ -41,7 +41,7 @@ func (fs *SftpFileSysClient) Prefix(suffix ...string) string {
 // GetPath returns the path of url
 func (fs *SftpFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
-	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
@@ -164,13 +164,20 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 }
 
 // ListRecursive list objects in path recursively
-func (fs *SftpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
-	path, err := fs.GetPath(url)
+func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+url)
+		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	ts := fs.GetRefTs()
+
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
+	ts := fs.GetRefTs().Unix()
 
 	stat, err := fs.client.Stat(path)
 	if err != nil {
@@ -201,18 +208,15 @@ func (fs *SftpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, er
 			Size:    cast.ToUint64(file.Size()),
 			IsDir:   file.IsDir(),
 		}
-		if ts.IsZero() || file.ModTime().IsZero() || file.ModTime().After(ts) {
-			path := g.F("%s%s%s", fs.Prefix(), path, file.Name())
-			if file.IsDir() {
-				subNodes, err := fs.ListRecursive(path)
-				// g.P(subPaths)
-				if err != nil {
-					return nil, g.Error(err, "error listing sub path")
-				}
-				nodes.Add(subNodes...)
-			} else {
-				nodes.Add(node)
+		path := g.F("%s%s%s", fs.Prefix(), path, file.Name())
+		if file.IsDir() {
+			subNodes, err := fs.ListRecursive(path)
+			if err != nil {
+				return nil, g.Error(err, "error listing sub path")
 			}
+			nodes.AddWhere(pattern, ts, subNodes...)
+		} else {
+			nodes.AddWhere(pattern, ts, node)
 		}
 	}
 

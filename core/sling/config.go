@@ -449,9 +449,13 @@ func (cfg *Config) Prepare() (err error) {
 			cfg.Target.Data["url"] = cfg.Target.Conn
 		} else if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
 			// object is not url, but relative path
-			prefix := strings.TrimSuffix(cfg.TgtConn.URL(), "/")
-			path := "/" + strings.TrimPrefix(cfg.Target.Object, "/")
-			cfg.Target.Data["url"] = prefix + path
+			if cfg.TgtConn.Type == dbio.TypeFileLocal {
+				cfg.Target.Data["url"] = "file://" + cfg.Target.Object
+			} else {
+				prefix := strings.TrimSuffix(cfg.TgtConn.URL(), "/")
+				path := "/" + strings.TrimPrefix(cfg.Target.Object, "/")
+				cfg.Target.Data["url"] = prefix + path
+			}
 		}
 	}
 
@@ -499,9 +503,13 @@ func (cfg *Config) Prepare() (err error) {
 			cfg.Source.Data["url"] = cfg.Source.Conn
 		} else if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			prefix := strings.TrimSuffix(cfg.SrcConn.URL(), "/")
-			path := "/" + strings.TrimPrefix(cfg.Source.Stream, "/")
-			cfg.Source.Data["url"] = prefix + path
+			if cfg.SrcConn.Type == dbio.TypeFileLocal {
+				cfg.Source.Data["url"] = "file://" + cfg.Source.Stream
+			} else {
+				prefix := strings.TrimSuffix(cfg.SrcConn.URL(), "/")
+				path := "/" + strings.TrimPrefix(cfg.Source.Stream, "/")
+				cfg.Source.Data["url"] = prefix + path
+			}
 		}
 	}
 
