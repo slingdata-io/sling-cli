@@ -324,7 +324,7 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 {
+	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -377,7 +377,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 {
+	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -385,11 +385,12 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	}
 
 	matchedColumns := lo.Filter(lo.Values(s.Columns()), func(col iop.Column, i int) bool {
-		key := strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
+		keyTable := strings.ToLower(g.F("%s.%s", col.Schema, col.Table))
+		keyCol := strings.ToLower(g.F("%s.%s.%s", col.Schema, col.Table, col.Name))
 		if gc != nil {
-			return (*gc).Match(key)
+			return (*gc).Match(keyCol)
 		}
-		return g.IsMatched(filters, key)
+		return g.IsMatched(filters, keyCol) || g.IsMatched(filters, keyTable)
 	})
 
 	if len(matchedColumns) == 0 {

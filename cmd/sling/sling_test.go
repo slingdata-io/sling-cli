@@ -737,9 +737,9 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		columns := iop.Columns(lo.Values(schemata.Columns()))
 		if valRowCount > 0 {
 			if opt.ColumnLevel {
-				assert.Equal(t, valRowCount, len(columns))
+				assert.Equal(t, valRowCount, len(columns), columns.Names())
 			} else {
-				assert.Equal(t, valRowCount, len(tables))
+				assert.Equal(t, valRowCount, len(tables), lo.Keys(schemata.Tables()))
 			}
 		} else {
 			assert.Greater(t, len(tables), 0)
