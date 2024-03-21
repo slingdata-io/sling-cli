@@ -530,7 +530,7 @@ func TestSuiteTrino(t *testing.T) {
 
 func TestSuiteMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, "10")
+	testSuite(t, dbio.TypeDbMongoDB, "10,22")
 }
 
 // generate large dataset or use cache

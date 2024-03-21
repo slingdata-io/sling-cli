@@ -132,7 +132,7 @@ func (conn *MongoDBConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err 
 		return
 	}
 
-	ds, err := conn.StreamRowsContext(conn.context.Ctx, tables[0].FullName())
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].FullName())
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}
@@ -212,7 +212,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 // GetSchemas returns schemas
 func (conn *MongoDBConn) GetSchemas() (data iop.Dataset, err error) {
-	queryContext := g.NewContext(conn.context.Ctx)
+	queryContext := g.NewContext(conn.Context().Ctx)
 	res, err := conn.Client.ListDatabases(queryContext.Ctx, bson.D{})
 	if err != nil {
 		return data, g.Error(err, "could not list mongo databases")
@@ -228,7 +228,7 @@ func (conn *MongoDBConn) GetSchemas() (data iop.Dataset, err error) {
 
 // GetSchemas returns schemas
 func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) {
-	queryContext := g.NewContext(conn.context.Ctx)
+	queryContext := g.NewContext(conn.Context().Ctx)
 
 	names, err := conn.Client.Database(schema).ListCollectionNames(queryContext.Ctx, bson.D{})
 	if err != nil {
@@ -241,4 +241,77 @@ func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) 
 	}
 
 	return data, nil
+}
+
+// GetSchemata obtain full schemata info for a schema and/or table in current database
+func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+	currDatabase := "mongo"
+	schemata := Schemata{
+		Databases: map[string]Database{},
+		conn:      conn,
+	}
+
+	schemaData, err := conn.GetSchemas()
+	if err != nil {
+		return schemata, g.Error(err, "Could not get databases")
+	}
+
+	for _, schemaRow := range schemaData.Rows {
+		schemaName := cast.ToString(schemaRow[0])
+
+		tablesData, err := conn.GetTables(schemaName)
+		if err != nil {
+			return schemata, g.Error(err, "Could not get tables")
+		}
+
+		schemas := map[string]Schema{}
+		for _, tableRow := range tablesData.Rows {
+			tableName := cast.ToString(tableRow[0])
+			columnName := "data"
+			dataType := "json"
+
+			schema := Schema{
+				Name:   schemaName,
+				Tables: map[string]Table{},
+			}
+
+			table := Table{
+				Name:     tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				IsView:   false,
+				Columns:  iop.Columns{},
+				Dialect:  conn.GetType(),
+			}
+
+			if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
+				schema = schemas[strings.ToLower(schema.Name)]
+			}
+
+			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			}
+
+			column := iop.Column{
+				Name:     columnName,
+				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+				Table:    tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				Position: 1,
+				DbType:   dataType,
+			}
+
+			table.Columns = append(table.Columns, column)
+			schema.Tables[strings.ToLower(tableName)] = table
+			schemas[strings.ToLower(schema.Name)] = schema
+		}
+
+		schemata.Databases[strings.ToLower(currDatabase)] = Database{
+			Name:    currDatabase,
+			Schemas: schemas,
+		}
+	}
+
+	return schemata, nil
 }
