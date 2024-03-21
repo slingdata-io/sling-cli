@@ -1117,7 +1117,7 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 	Res := Result{rowsAffected: 0}
 
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q) {
+	for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
 		res, err := conn.Self().ExecContext(ctx, sql, args...)
 		if err != nil {
 			eG.Capture(g.Error(err, "Error executing query"))
@@ -1159,7 +1159,7 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 		return
 	}
 
-	for _, sql := range ParseSQLMultiStatements(sql) {
+	for _, sql := range ParseSQLMultiStatements(sql, conn.Type) {
 
 		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
 		if err != nil {
@@ -3282,7 +3282,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
-func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
+func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) {
 	inQuote := false
 	inCommentLine := false
 	inCommentMulti := false
@@ -3290,6 +3290,11 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 	pChar := ""
 	nChar := ""
 	currState := ""
+
+	var dialect dbio.Type
+	if len(Dialect) > 0 {
+		dialect = Dialect[0]
+	}
 
 	inComment := func() bool {
 		return inCommentLine || inCommentMulti
@@ -3329,7 +3334,9 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 		// detect end
 		if char == ";" && !inQuote && !inComment() {
 			if currState = strings.TrimSpace(currState); currState != "" {
-				currState = strings.TrimSuffix(currState, ";")
+				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+					currState = strings.TrimSuffix(currState, ";")
+				}
 				sqls = append(sqls, currState)
 			}
 			currState = ""
@@ -3338,7 +3345,9 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 
 	if len(currState) > 0 {
 		if currState = strings.TrimSpace(currState); currState != "" {
-			currState = strings.TrimSuffix(currState, ";")
+			if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+				currState = strings.TrimSuffix(currState, ";")
+			}
 			sqls = append(sqls, currState)
 		}
 	}
