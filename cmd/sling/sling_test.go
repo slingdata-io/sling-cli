@@ -525,7 +525,7 @@ func TestSuiteClickhouse(t *testing.T) {
 
 func TestSuiteTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, "1,10,16")
+	testSuite(t, dbio.TypeDbTrino, "1,3,10,16,22")
 }
 
 func TestSuiteMongo(t *testing.T) {
