@@ -365,16 +365,21 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	// clean up selectStreams
-	selectStreams = lo.Filter(selectStreams, func(v string, i int) bool {
-		_, _, found := replication.GetStream(v)
-		return found
-	})
-	selectStreams = lo.Map(selectStreams, func(name string, i int) string {
-		return replication.Normalize(name)
-	})
+	matchedStreams := map[string]sling.ReplicationStreamConfig{}
+	for _, selectStream := range selectStreams {
+		for key, val := range replication.MatchStreams(selectStream) {
+			key = replication.Normalize(key)
+			matchedStreams[key] = val
+		}
+	}
 
-	streamCnt := lo.Ternary(len(selectStreams) > 0, len(selectStreams), len(replication.Streams))
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
+
+	if streamCnt == 0 {
+		g.Warn("Did not match any streams. Exiting.")
+		return
+	}
 
 	streamsOrdered := replication.StreamsOrdered()
 	eG := g.ErrorGroup{}
@@ -387,7 +392,8 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			break
 		}
 
-		if len(selectStreams) > 0 && !g.IsMatched(selectStreams, replication.Normalize(name)) {
+		_, matched := matchedStreams[replication.Normalize(name)]
+		if len(selectStreams) > 0 && !matched {
 			g.Trace("skipping stream %s since it is not selected", name)
 			continue
 		}
@@ -667,7 +673,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				println(g.PrettyTable(header, rows))
 
 				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
-					g.Info("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders, or --recursive")
+					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --selector flag to list sub-folders, or --recursive")
 				}
 			}
 		}

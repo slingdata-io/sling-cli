@@ -91,6 +91,20 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg Repli
 	return
 }
 
+// GetStream returns the stream if the it exists
+func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]ReplicationStreamConfig) {
+	streams = map[string]ReplicationStreamConfig{}
+	gc, err := glob.Compile(strings.ToLower(pattern))
+	for streamName, streamCfg := range rd.Streams {
+		if rd.Normalize(streamName) == rd.Normalize(pattern) {
+			streams[streamName] = *streamCfg
+		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
+			streams[streamName] = *streamCfg
+		}
+	}
+	return
+}
+
 // Normalize normalized the name
 func (rd ReplicationConfig) Normalize(n string) string {
 	n = strings.ReplaceAll(n, "`", "")
