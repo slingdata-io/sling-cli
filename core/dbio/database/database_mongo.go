@@ -245,7 +245,7 @@ func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) 
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
 func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
-	currDatabase := "mongo"
+	currDatabase := conn.Type.String()
 	schemata := Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,

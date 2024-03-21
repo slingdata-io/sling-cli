@@ -1738,7 +1738,7 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		}
 	}
 
-	var currDatabase string
+	currDatabase := conn.Type.String()
 	currDbData, err := conn.SumbitTemplate("single", conn.template.Metadata, "current_database", g.M())
 	if err == nil {
 		currDatabase = cast.ToString(currDbData.FirstVal())
