@@ -509,7 +509,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 
 	doCopy := func(file filesys.FileReady) {
 		defer df.Context.Wg.Write.Done()
-		cnt, err := conn.CopyFromAzure(tableFName, file.URI)
+		cnt, err := conn.CopyFromAzure(tableFName, file.Node.URI)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "could not copy to azure dwh"))
 		} else {

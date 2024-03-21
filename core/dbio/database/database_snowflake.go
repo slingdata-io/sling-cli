@@ -712,14 +712,14 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 	doPut := func(file filesys.FileReady) (stageFilePath string) {
 		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-			defer os.Remove(file.URI)
+			defer os.Remove(file.Node.Path())
 		}
-		os.Chmod(file.URI, 0777) // make file readeable everywhere
-		err = conn.PutFile(file.URI, stageFolderPath)
+		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
+		err = conn.PutFile(file.Node.URI, stageFolderPath)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internalStage")))
 		}
-		pathArr := strings.Split(file.URI, "/")
+		pathArr := strings.Split(file.Node.Path(), "/")
 		fileName := pathArr[len(pathArr)-1]
 		stageFilePath = g.F("%s/%s", stageFolderPath, fileName)
 		return stageFilePath
@@ -840,15 +840,15 @@ func (conn *SnowflakeConn) GetFile(internalStagePath, fPath string) (err error) 
 }
 
 // PutFile Copies a local file or folder into a staging location
-func (conn *SnowflakeConn) PutFile(fPath string, internalStagePath string) (err error) {
+func (conn *SnowflakeConn) PutFile(fileURI string, internalStagePath string) (err error) {
 	query := g.F(
-		"PUT 'file://%s' %s PARALLEL=1 AUTO_COMPRESS=FALSE",
-		fPath, internalStagePath,
+		"PUT '%s' %s PARALLEL=1 AUTO_COMPRESS=FALSE",
+		fileURI, internalStagePath,
 	)
 
 	_, err = conn.Exec(query)
 	if err != nil {
-		err = g.Error(err, "could not PUT file %s", fPath)
+		err = g.Error(err, "could not PUT file %s", fileURI)
 		return
 	}
 

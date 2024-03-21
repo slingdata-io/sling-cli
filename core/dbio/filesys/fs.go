@@ -627,7 +627,7 @@ func (fs *BaseFileSysClient) GetReaders(paths ...string) (readers []io.Reader, e
 
 type FileReady struct {
 	Columns iop.Columns
-	URI     string
+	Node    dbio.FileNode
 	BytesW  int64
 	BatchID string
 }
@@ -695,7 +695,8 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			bw0, err := fsClient.Write(partURL, reader)
 			if batchR.Counter != 0 {
 				bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
-				fileReadyChn <- FileReady{batchR.Columns, partURL, bw0, bID}
+				node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+				fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
 			} else {
 				g.DebugLow("no data, did not write to %s", partURL)
 			}

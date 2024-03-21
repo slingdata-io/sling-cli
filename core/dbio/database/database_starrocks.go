@@ -469,12 +469,12 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
 		defer loadCtx.Wg.Write.Done()
-		g.Debug("loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
+		g.Debug("loading %s [%s] %s", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
-		defer os.Remove(localFile.URI)
-		reader, err := os.Open(localFile.URI)
+		defer os.Remove(localFile.Node.Path())
+		reader, err := os.Open(localFile.Node.Path())
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.URI))
+			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.Node.Path()))
 		}
 
 		timeout := 600
@@ -493,20 +493,20 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				redirectUrl, _ = url.Parse(redirectUrlStr)
 				g.Warn("StarRocks redirected the API call to '%s://%s'. Please use that as your FE url.", redirectUrl.Scheme, redirectUrl.Host)
 				conn.fePort = redirectUrl.Port()
-				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
+				reader, _ = os.Open(localFile.Node.Path()) // re-open file since it would be closed
 				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
 		}
 
 		respString := strings.ReplaceAll(string(respBytes), "127.0.0.1", fu.U.Hostname())
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.URI, tableFName, respString))
+			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 			df.Context.Cancel()
 		} else {
 			respMap, _ := g.UnmarshalMap(respString)
-			g.Debug("stream-load completed for %s => %s", localFile.URI, respString)
+			g.Debug("stream-load completed for %s => %s", localFile.Node.Path(), respString)
 			if cast.ToString(respMap["Status"]) == "Fail" {
-				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.URI, tableFName, respString))
+				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 				df.Context.Cancel()
 			}
 		}

@@ -2500,14 +2500,14 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 		for file := range fileReadyChn {
 			// when the file is ready, push to dataflow
-			nDs, err := iop.ReadCsvStream(file.URI)
+			nDs, err := iop.ReadCsvStream(file.Node.Path())
 			if err != nil {
-				exportCtx.CaptureErr(g.Error(err, "Unable to read stream: "+file.URI))
+				exportCtx.CaptureErr(g.Error(err, "Unable to read stream: "+file.Node.Path()))
 				ds.Context.Cancel()
 				df.Context.Cancel()
 				return
 			}
-			nDs.Defer(func() { os.RemoveAll(file.URI) })
+			nDs.Defer(func() { os.RemoveAll(file.Node.Path()) })
 			dsCh <- nDs
 		}
 	}

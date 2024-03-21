@@ -598,11 +598,11 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s]", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)))
+		g.Debug("Loading %s [%s]", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
-		err := conn.CopyFromLocal(localFile.URI, table, localFile.Columns)
+		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.URI, tableFName))
+			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.Node.Path(), tableFName))
 		}
 	}
 
@@ -683,11 +683,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 
 	copyFromGCS := func(gcsFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s]", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
+		g.Debug("Loading %s [%s]", gcsFile.Node.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
 
-		err := conn.CopyFromGCS(gcsFile.URI, table, gcsFile.Columns)
+		err := conn.CopyFromGCS(gcsFile.Node.URI, table, gcsFile.Columns)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.URI, tableFName))
+			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.Node.URI, tableFName))
 		}
 	}
 
