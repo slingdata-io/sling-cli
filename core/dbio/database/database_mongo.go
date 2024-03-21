@@ -256,6 +256,7 @@ func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (S
 		return schemata, g.Error(err, "Could not get databases")
 	}
 
+	schemas := map[string]Schema{}
 	for _, schemaRow := range schemaData.Rows {
 		schemaName := cast.ToString(schemaRow[0])
 
@@ -264,7 +265,6 @@ func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (S
 			return schemata, g.Error(err, "Could not get tables")
 		}
 
-		schemas := map[string]Schema{}
 		for _, tableRow := range tablesData.Rows {
 			tableName := cast.ToString(tableRow[0])
 			columnName := "data"
