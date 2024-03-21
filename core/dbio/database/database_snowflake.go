@@ -866,12 +866,12 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 
 	sqlTempl := `
 	MERGE INTO {tgt_table} tgt
-	USING (SELECT *	FROM {src_table}) src
+	USING (SELECT {src_fields} FROM {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields})
+		INSERT ({insert_fields}) VALUES ({src_fields_values})
 	`
 
 	sql = g.R(
@@ -881,7 +881,8 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields", upsertMap["src_fields"],
+		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
 	)
 
 	return
@@ -953,6 +954,26 @@ func (conn *SnowflakeConn) GetViews(schema string) (data iop.Dataset, err error)
 	}
 
 	return data1.Pick("table_name"), nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+	srcDbType := strings.ToUpper(string(srcCol.DbType))
+	tgtDbType := strings.ToUpper(string(tgtCol.DbType))
+
+	switch {
+	case srcCol.IsString() && srcDbType != "VARIANT" && tgtDbType == "VARIANT":
+		selectStr = g.F("parse_json(%s::string) as %s", qName, qName)
+	case srcCol.IsString() && !tgtCol.IsString():
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case !srcCol.IsString() && tgtCol.IsString():
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
 
 func parseSnowflakeDataType(rec map[string]any) (dataType string, precision, scale int) {
