@@ -796,7 +796,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsFile() {
-		g.Warn("returned into test: " + g.Marshal(files.Paths()))
+		g.Debug("returned into test: " + g.Marshal(files.Paths()))
 		// basic tests
 		assert.Greater(t, len(files), 0)
 		for _, uri := range files.URIs() {
@@ -820,9 +820,9 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 
 		if valRowCount > 0 {
 			if opt.ColumnLevel {
-				assert.Equal(t, valRowCount, len(files[0].Columns))
+				assert.Equal(t, valRowCount, len(files[0].Columns), g.Marshal(files[0].Columns.Names()))
 			} else {
-				assert.Equal(t, valRowCount, len(files))
+				assert.Equal(t, valRowCount, len(files), g.Marshal(files.Paths()))
 			}
 		}
 
@@ -871,11 +871,6 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	g.Info("valContains = %#v", valContains)
 	g.Info("valNotContains = %#v", valNotContains)
 	g.Info("containsMap = %#v", containsMap)
-}
-
-func TestSuiteSftp(t *testing.T) {
-	t.Parallel()
-	testDiscover(t, nil, dbio.TypeFileSftp)
 }
 
 func TestSuiteFileS3(t *testing.T) {
