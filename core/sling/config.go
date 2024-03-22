@@ -133,10 +133,6 @@ func (cfg *Config) SetDefault() {
 		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
-
-		// case !g.In(cfg.TgtConn.Type, dbio.TypeDbTrino, dbio.TypeDbRedshift, dbio.TypeDbBigQuery, dbio.TypeDbSnowflake) && cfg.Target.Options.AdjustColumnType == nil:
-		// 	// set AdjustColumnType to true for all others
-		// 	cfg.Target.Options.AdjustColumnType = g.Bool(true)
 	}
 
 	// set vars
