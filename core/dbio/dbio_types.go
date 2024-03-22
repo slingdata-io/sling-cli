@@ -364,7 +364,9 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 
 	scheme := u.U.Scheme
 	host = u.Hostname()
-	path = strings.TrimLeft(u.U.Path, "/")
+
+	path = strings.TrimPrefix(u.U.Path, "/")
+	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
 
 	if scheme == "" || host == "" {
 		err = g.Error("Invalid URL: " + uri)
