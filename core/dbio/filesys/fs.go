@@ -259,14 +259,18 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	_, _, path, err := dbio.ParseURL(uri)
+	connType, _, path, err := dbio.ParseURL(uri)
 	if err != nil {
 		return nil, err
 	}
 	if !strings.Contains(path, "*") {
 		return nil, nil
 	}
-	gc, err := glob.Compile("***")
+	if connType == dbio.TypeFileLocal {
+		path = strings.TrimPrefix(path, "./")
+	}
+
+	gc, err := glob.Compile(path)
 	if err != nil {
 		return nil, err
 	}
