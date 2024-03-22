@@ -2,7 +2,6 @@ package sling
 
 import (
 	"bufio"
-	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -214,10 +213,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return
 		}
 
-		conn, err := t.getTgtDBConn(context.Background())
-		if err == nil {
-			g.LogError(conn.DropTable(tableTmp.FullName()))
-		}
+		g.LogError(tgtConn.DropTable(tableTmp.FullName()))
+		tgtConn.Close()
 	})
 
 	err = tgtConn.BeginContext(df.Context.Ctx)
