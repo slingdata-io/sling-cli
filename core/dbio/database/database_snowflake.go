@@ -53,6 +53,14 @@ func (conn *SnowflakeConn) Init() error {
 		conn.CopyMethod = conn.GetProp("CopyMethod")
 	}
 
+	if val := cast.ToInt(conn.GetProp("max_chunk_download_workers")); val > 0 {
+		gosnowflake.MaxChunkDownloadWorkers = val
+	}
+
+	if val := conn.GetProp("custom_json_decoder_enabled"); val != "" {
+		gosnowflake.CustomJSONDecoderEnabled = cast.ToBool(val)
+	}
+
 	if kp := conn.GetProp("private_key_path"); kp != "" {
 		encPK, err := getEncodedPrivateKey(kp, conn.GetProp("private_key_passphrase"))
 		if err != nil {
