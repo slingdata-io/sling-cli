@@ -199,9 +199,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	g.LogFatal(err)
 
 	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) {
-		testFolder = "/tmp/sling_test"
+		testFolder = g.F("/tmp/%s/sling_test", connType)
 	} else if g.In(connType, dbio.TypeFileFtp) {
-		testFolder = "tmp/sling_test"
+		testFolder = g.F("tmp/%s/sling_test", connType)
 	}
 
 	// generate files
@@ -715,10 +715,10 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
-		opt.Pattern = "/tmp/"
+		opt.Pattern = g.F("/tmp/%s/", connType)
 	}
 	if g.In(connType, dbio.TypeFileFtp) && opt.Pattern == "" {
-		opt.Pattern = "tmp/"
+		opt.Pattern = g.F("tmp/%s/", connType)
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))

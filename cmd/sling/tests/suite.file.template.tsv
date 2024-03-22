@@ -4,7 +4,7 @@ n	test_name	source_conn	source_stream	source_options	target_conn	target_object	m
 3	pg_file_json	postgres	[schema].[table]	{}	[conn]	[folder]/files/[table].json	full-refresh					
 4	pg_file_parquet	postgres	[schema].[table]	{}	[conn]	[folder]/files/[table].parquet	full-refresh					
 5	pg_file_csv_many	postgres	[schema].[table]	{}	[conn]	[folder]/csv/*.csv	full-refresh			"{""file_max_rows"": 100}"		
-6	discover_root				[conn]		discover					"{""validation_contains"": ""[folder]/"", ""validation_not_contains"": ""[folder]/files/[table]"", ""validation_row_count"": "">1""}"
+6	discover_root				[conn]		discover					"{""validation_contains"": ""[folder]/"", ""validation_not_contains"": ""[folder]/files/[table]"", ""validation_row_count"": "">0""}"
 7	discover_folder				[conn]	[folder]/files	discover					"{""validation_contains"": ""[folder]/files/"", ""validation_row_count"": ""1""}"
 8	discover_folder_files				[conn]	[folder]/files/	discover					"{""validation_contains"": ""[folder]/files/[table].csv,[folder]/files/[table].json,[folder]/files/[table].parquet"", ""validation_not_contains"": ""[folder]/files/[table].parquet/"", ""validation_row_count"": ""3""}"
 9	discover_folder_files_csv_wildcard				[conn]	[folder]/files/*.csv	discover					"{""validation_contains"": ""[folder]/files/[table].csv"", ""validation_row_count"": ""1""}"
