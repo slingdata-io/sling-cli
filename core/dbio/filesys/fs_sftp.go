@@ -36,6 +36,7 @@ func (fs *SftpFileSysClient) Init(ctx context.Context) (err error) {
 // Prefix returns the url prefix
 func (fs *SftpFileSysClient) Prefix(suffix ...string) string {
 	return g.F("%s://%s", fs.FsType().String(), fs.GetProp("host")) + strings.Join(suffix, "")
+
 }
 
 // GetPath returns the path of url
@@ -43,13 +44,9 @@ func (fs *SftpFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
 	uri = NormalizeURI(fs, uri)
 
-	host, path, err := ParseURL(uri)
+	_, path, err = ParseURL(uri)
 	if err != nil {
 		return
-	}
-
-	if fs.GetProp("host") != host {
-		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.GetProp("host"))
 	}
 
 	return path, err
@@ -128,31 +125,28 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 		return
 	}
 
-	stat, err := fs.client.Stat(path)
-	if err != nil {
-		return nodes, g.Error(err, "error stating path")
-	}
-
 	var files []os.FileInfo
-	if stat.IsDir() {
-		files, err = fs.client.ReadDir(path)
-		if err != nil {
-			return nodes, g.Error(err, "error listing path")
-		}
-		path = path + "/"
-	} else {
+	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
+	if err == nil && (!stat.IsDir() || !strings.HasSuffix(path, "/")) {
 		node := dbio.FileNode{
-			URI:     g.F("%s%s", fs.Prefix(), path),
+			URI:     g.F("%s%s", fs.Prefix("/"), path),
 			Updated: stat.ModTime().Unix(),
 			Size:    cast.ToUint64(stat.Size()),
+			IsDir:   stat.IsDir(),
 		}
 		nodes.Add(node)
 		return
 	}
 
+	path = strings.TrimSuffix(path, "/")
+	files, err = fs.client.ReadDir(path)
+	if err != nil {
+		return nodes, g.Error(err, "error listing path: %#v", path)
+	}
+
 	for _, file := range files {
 		node := dbio.FileNode{
-			URI:     g.F("%s%s%s", fs.Prefix(), path, file.Name()),
+			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
 			Updated: file.ModTime().Unix(),
 			Size:    cast.ToUint64(file.Size()),
 			IsDir:   file.IsDir(),
@@ -179,38 +173,37 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, er
 
 	ts := fs.GetRefTs().Unix()
 
-	stat, err := fs.client.Stat(path)
-	if err != nil {
-		return nodes, g.Error(err, "error stating path")
-	}
-
 	var files []os.FileInfo
-	if stat.IsDir() {
-		files, err = fs.client.ReadDir(path)
-		if err != nil {
-			return nodes, g.Error(err, "error listing path")
-		}
-		path = path + "/"
-	} else {
+	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
+	if err == nil {
 		node := dbio.FileNode{
-			URI:     g.F("%s%s", fs.Prefix(), path),
+			URI:     g.F("%s%s", fs.Prefix("/"), path),
 			Updated: stat.ModTime().Unix(),
 			Size:    cast.ToUint64(stat.Size()),
+			IsDir:   stat.IsDir(),
 		}
 		nodes.Add(node)
-		return
+		if !stat.IsDir() {
+			return
+		}
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	files, err = fs.client.ReadDir(path)
+	if err != nil {
+		return nodes, g.Error(err, "error listing path: %#v", path)
 	}
 
 	for _, file := range files {
 		node := dbio.FileNode{
-			URI:     g.F("%s%s%s", fs.Prefix(), path, file.Name()),
+			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
 			Updated: file.ModTime().Unix(),
 			Size:    cast.ToUint64(file.Size()),
 			IsDir:   file.IsDir(),
 		}
-		path := g.F("%s%s%s", fs.Prefix(), path, file.Name())
+
 		if file.IsDir() {
-			subNodes, err := fs.ListRecursive(path)
+			subNodes, err := fs.ListRecursive(node.Path() + "/")
 			if err != nil {
 				return nil, g.Error(err, "error listing sub path")
 			}

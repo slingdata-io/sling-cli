@@ -76,6 +76,7 @@ var connMap = map[dbio.Type]connTest{
 
 func init() {
 	env.InitLogger()
+	core.Version = "test"
 }
 
 func TestOptions(t *testing.T) {
@@ -195,9 +196,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	testWideFilePath, err := generateLargeDataset(300, 100, false)
 	g.LogFatal(err)
 
-	if g.In(connType, dbio.TypeFileLocal) {
+	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) {
 		testFolder = "/tmp/sling_test"
-	} else if g.In(connType, dbio.TypeFileFtp, dbio.TypeFileSftp) {
+	} else if g.In(connType, dbio.TypeFileFtp) {
 		testFolder = "tmp/sling_test"
 	}
 
@@ -707,8 +708,11 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		Recursive:   cast.ToBool(cfg.Env["recursive"]),
 	}
 
-	if g.In(connType, dbio.TypeFileLocal) && opt.Pattern == "" {
+	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
 		opt.Pattern = "/tmp/"
+	}
+	if g.In(connType, dbio.TypeFileFtp) && opt.Pattern == "" {
+		opt.Pattern = "tmp/"
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
@@ -801,8 +805,10 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 				break
 			}
 
-			if !assert.NotContains(t, strings.TrimPrefix(uri, u.U.Scheme+"://"), "//") {
-				break
+			if !g.In(connType, dbio.TypeFileSftp) {
+				if !assert.NotContains(t, strings.TrimPrefix(uri, u.U.Scheme+"://"), "//") {
+					break
+				}
 			}
 		}
 

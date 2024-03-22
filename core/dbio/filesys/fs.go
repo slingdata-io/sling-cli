@@ -22,6 +22,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/spf13/cast"
 )
 
@@ -224,6 +225,34 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 	switch fs.FsType() {
 	case dbio.TypeFileLocal:
 		return fs.Prefix("") + strings.TrimPrefix(uri, fs.Prefix())
+	case dbio.TypeFileSftp:
+		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
+		u, err := net.NewURL(uri)
+		if err == nil {
+			path = strings.TrimPrefix(path, u.U.User.Username())
+			path = strings.TrimPrefix(path, ":")
+			password, _ := u.U.User.Password()
+			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, "@")
+			path = strings.TrimPrefix(path, u.U.Host)
+			if strings.HasPrefix(path, "//") {
+				path = strings.TrimPrefix(path, "/")
+			}
+		}
+		return fs.Prefix("/") + path
+	case dbio.TypeFileFtp:
+		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
+		u, err := net.NewURL(uri)
+		if err == nil {
+			path = strings.TrimPrefix(path, u.U.User.Username())
+			path = strings.TrimPrefix(path, ":")
+			password, _ := u.U.User.Password()
+			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, "@")
+			path = strings.TrimPrefix(path, u.U.Host)
+			path = strings.TrimPrefix(path, "/")
+		}
+		return fs.Prefix("/") + path
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}

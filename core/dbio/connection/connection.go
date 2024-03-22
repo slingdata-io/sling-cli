@@ -359,7 +359,7 @@ func (c *Connection) setURL() (err error) {
 			// set database
 			setIfMissing("database", pathValue)
 		}
-		if c.Type == dbio.TypeFileSftp {
+		if g.In(c.Type, dbio.TypeFileSftp, dbio.TypeFileFtp) {
 			setIfMissing("user", U.Username())
 			setIfMissing("host", U.Hostname())
 			setIfMissing("password", U.Password())
@@ -587,10 +587,10 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "clickhouse://{username}:{password}@{host}:{port}/{database}"
-	case dbio.TypeFileSftp:
+	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
-		template = "sftp://{user}:{password}@{host}:{port}/"
+		template = c.Type.String() + "://{user}:{password}@{host}:{port}/"
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
