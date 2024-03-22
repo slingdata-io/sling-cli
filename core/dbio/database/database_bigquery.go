@@ -822,6 +822,7 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
+	fs.SetProp("metadata", "{}")
 	df, err = fs.ReadDataflow(gsURL, filesys.FileStreamConfig{Columns: columns})
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)

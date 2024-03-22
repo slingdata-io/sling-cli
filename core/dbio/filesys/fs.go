@@ -972,9 +972,13 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 				}
 				dsCh <- ds.Map(cols, transf)
 			} else {
-				if len(cfg.Columns) > 0 && len(cfg.Columns) == len(ds.Columns) {
-					// set columns when provided
-					ds.Columns = cfg.Columns
+				if len(cfg.Columns) > 0 {
+					if len(cfg.Columns) == len(ds.Columns) {
+						// set columns when provided
+						ds.Columns = cfg.Columns
+					} else {
+						g.Warn("provided dataflow.Columns differs from datastream.Columns:\ndf.Columns: %s\nds.Columns: %s", g.Marshal(cfg.Columns.Names()), g.Marshal(ds.Columns.Names()))
+					}
 				}
 				dsCh <- ds
 			}
