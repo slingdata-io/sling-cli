@@ -701,6 +701,7 @@ func (conn *DuckDbConn) Close() error {
 	}
 	conn.cmdInteractive = nil
 
+	fileContext.Mux.TryLock() // in case it is already unlocked
 	fileContext.Unlock()
 
 	return nil
