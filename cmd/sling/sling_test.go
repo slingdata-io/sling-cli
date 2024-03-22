@@ -195,8 +195,10 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	testWideFilePath, err := generateLargeDataset(300, 100, false)
 	g.LogFatal(err)
 
-	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileFtp, dbio.TypeFileSftp) {
+	if g.In(connType, dbio.TypeFileLocal) {
 		testFolder = "/tmp/sling_test"
+	} else if g.In(connType, dbio.TypeFileFtp, dbio.TypeFileSftp) {
+		testFolder = "tmp/sling_test"
 	}
 
 	// generate files
@@ -317,12 +319,12 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	}
 }
 
-func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
+func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
 	println()
 
 	bars := "---------------------------"
-	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, dbType, bars)
+	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, connType, bars)
 
 	cfg := &sling.Config{}
 	err := cfg.Unmarshal(file.FullPath)
@@ -331,7 +333,7 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 	}
 
 	if string(cfg.Mode) == "discover" {
-		testDiscover(t, cfg, dbType)
+		testDiscover(t, cfg, connType)
 		return
 	}
 
@@ -353,24 +355,26 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 	}
 
 	// process PostSQL for different drop_view syntax
-	dbConn, err := task.Config.TgtConn.AsDatabase()
-	if err == nil {
-		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
-		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
-		if dbConn.GetType().DBNameUpperCase() {
-			table.Name = strings.ToUpper(table.Name)
+	if task.Config.TgtConn.Type.IsDb() {
+		dbConn, err := task.Config.TgtConn.AsDatabase()
+		if err == nil {
+			table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+			if dbConn.GetType().DBNameUpperCase() {
+				table.Name = strings.ToUpper(table.Name)
+			}
+			viewName := table.FullName()
+			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
+			dropViewSQL = strings.TrimSpace(dropViewSQL)
+			task.Config.Target.Options.PreSQL = g.R(
+				task.Config.Target.Options.PreSQL,
+				"drop_view", dropViewSQL,
+			)
+			task.Config.Target.Options.PostSQL = g.R(
+				task.Config.Target.Options.PostSQL,
+				"drop_view", dropViewSQL,
+			)
 		}
-		viewName := table.FullName()
-		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
-		dropViewSQL = strings.TrimSpace(dropViewSQL)
-		task.Config.Target.Options.PreSQL = g.R(
-			task.Config.Target.Options.PreSQL,
-			"drop_view", dropViewSQL,
-		)
-		task.Config.Target.Options.PostSQL = g.R(
-			task.Config.Target.Options.PostSQL,
-			"drop_view", dropViewSQL,
-		)
 	}
 
 	if g.AssertNoError(t, task.Err) {

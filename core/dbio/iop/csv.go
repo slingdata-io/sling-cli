@@ -539,7 +539,7 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 				break
 			} else if csvErr != nil {
 				// g.Trace("failed delimiter detection for %#v: %s", string(d), csvErr.Error())
-				errMap[d] = g.Error(csvErr, "failed delimited detection for %#v", string(d))
+				errMap[d] = csvErr
 				eG.Capture(errMap[d])
 				break
 			}

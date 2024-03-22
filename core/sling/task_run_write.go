@@ -156,7 +156,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set DDL
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.Raw = tableTmp.FullName()
-	tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	err = tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	if err != nil {
+		err = g.Error(err, "could not set keys for "+tableTmp.FullName())
+		return
+	}
 
 	// create schema if not exist
 	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
@@ -187,6 +191,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sampleData.SafeInference = true
 		sampleData.InferColumnTypes()
 		df.Columns = sampleData.Columns
+	}
+
+	// set table keys
+	tableTmp.Columns = sampleData.Columns
+	err = tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	if err != nil {
+		err = g.Error(err, "could not set keys for "+tableTmp.FullName())
+		return
 	}
 
 	_, err = createTableIfNotExists(tgtConn, sampleData, tableTmp)

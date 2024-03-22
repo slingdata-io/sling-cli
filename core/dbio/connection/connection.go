@@ -239,12 +239,18 @@ func (c *Connection) URL() string {
 }
 
 func (c *Connection) AsDatabase() (database.Connection, error) {
+	if !c.Type.IsDb() {
+		return nil, g.Error("not a database type: %s", c.Type)
+	}
 	return database.NewConnContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
 func (c *Connection) AsFile() (filesys.FileSysClient, error) {
+	if !c.Type.IsFile() {
+		return nil, g.Error("not a file system type: %s", c.Type)
+	}
 	return filesys.NewFileSysClientFromURLContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)

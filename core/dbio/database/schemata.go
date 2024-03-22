@@ -34,9 +34,17 @@ func (t *Table) IsQuery() bool {
 func (t *Table) SetKeys(pkCols []string, updateCol string, otherKeys TableKeys) error {
 	eG := g.ErrorGroup{}
 
-	eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, pkCols...))
+	if len(t.Columns) == 0 {
+		return nil // columns are missing, cannot check
+	}
 
-	eG.Capture(t.Columns.SetKeys(iop.UpdateKey, updateCol))
+	if len(pkCols) > 0 {
+		eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, pkCols...))
+	}
+
+	if updateCol != "" {
+		eG.Capture(t.Columns.SetKeys(iop.UpdateKey, updateCol))
+	}
 
 	if tkMap := otherKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {

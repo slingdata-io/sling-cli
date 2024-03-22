@@ -34,17 +34,6 @@ var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "cli")
 var telemetry = true
 var interrupted = false
 var machineID = ""
-var sentryOptions = sentry.ClientOptions{
-	// Either set your DSN here or set the SENTRY_DSN environment variable.
-	Dsn: "https://abb36e36341a4a2fa7796b6f9a0b3766@o881232.ingest.sentry.io/5835484",
-	// Either set environment and release here or set the SENTRY_ENVIRONMENT
-	// and SENTRY_RELEASE environment variables.
-	Environment: lo.Ternary(core.Version == "dev", "Development", "Production"),
-	Release:     "sling@" + core.Version,
-	// Enable printing of SDK debug messages.
-	// Useful when getting started or trying to figure something out.
-	Debug: false,
-}
 
 func init() {
 	env.InitLogger()
@@ -322,7 +311,6 @@ func init() {
 		if projectID != "" {
 			machineID = g.MD5(projectID) // hashed
 		}
-		sentry.Init(sentryOptions)
 	}
 }
 
@@ -392,6 +380,7 @@ func main() {
 	go func() {
 		defer close(done)
 		exitCode = cliInit()
+		sentry.Flush(time.Second * 2)
 	}()
 
 	exit := func() {
@@ -407,6 +396,7 @@ func main() {
 		exitCode = 111
 		exit()
 	case <-interrupt:
+		go sentry.Flush(time.Second * 4)
 		if cliRun.Sc.Used {
 			env.Println("\ninterrupting...")
 			interrupted = true
@@ -444,6 +434,7 @@ func cliInit() int {
 	flaggy.ShowHelpOnUnexpectedDisable()
 	flaggy.Parse()
 
+	setSentry()
 	ok, err := g.CliProcess()
 
 	if time.Now().UnixMicro()%20 == 0 {
@@ -463,76 +454,6 @@ func cliInit() int {
 				eventName = g.CliObj.Name + "_" + g.CliObj.UsedSC()
 			}
 			Track(eventName)
-		}
-
-		// sentry details
-		if telemetry && core.Version != "dev" {
-			evt := sentry.NewEvent()
-			evt.Environment = sentryOptions.Environment
-			evt.Release = sentryOptions.Release
-			evt.Level = sentry.LevelError
-			evt.Exception = []sentry.Exception{
-				{
-					Type: err.Error(),
-					// Value:      err.Error(),
-					Stacktrace: sentry.ExtractStacktrace(err),
-				},
-			}
-
-			// set transaction
-			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
-			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
-			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			evt.Transaction = g.F("%s - %s", sourceType, targetType)
-			if g.CliObj.Name == "conns" {
-				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
-				evt.Transaction = g.F(targetType)
-			}
-
-			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
-			E, ok := err.(*g.ErrType)
-			if ok {
-				lastCaller := E.LastCaller()
-				evt.Exception[0].Type = lastCaller                            // the title
-				evt.Exception[0].Value = g.F("%s (%s)", lastCaller, taskType) // the subtitle
-
-				if arr := strings.Split(lastCaller, " "); len(arr) > 1 {
-					evt.Exception[0].Type = strings.TrimPrefix(lastCaller, arr[0]+" ")
-				}
-
-				evt.Exception[0].Stacktrace = sentry.ExtractStacktrace(err)
-
-				evt.Message = E.Debug()
-			}
-
-			if eh := sling.ErrorHelper(err); eh != "" {
-				evt.Message = evt.Message + "\n\n" + eh
-			}
-
-			sentry.ConfigureScope(func(scope *sentry.Scope) {
-				scope.SetUser(sentry.User{ID: machineID})
-				if g.CliObj.Name == "conns" {
-					scope.SetTag("target_type", targetType)
-				} else {
-					scope.SetTag("source_type", sourceType)
-					scope.SetTag("target_type", targetType)
-					scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
-					if val := cast.ToString(taskMap["mode"]); val != "" {
-						scope.SetTag("mode", val)
-					}
-					if val := cast.ToString(taskMap["type"]); val != "" {
-						scope.SetTag("type", val)
-					}
-					scope.SetTag("package", getSlingPackage())
-					if projectID != "" {
-						scope.SetTag("project_id", projectID)
-					}
-				}
-			})
-
-			sentry.CaptureEvent(evt)
-			// sentry.CaptureException(err)
-			sentry.Flush(2 * time.Second)
 		}
 
 		g.PrintFatal(err)
@@ -560,4 +481,43 @@ func getErrString(err error) (errString string) {
 		}
 	}
 	return
+}
+
+func setSentry() {
+
+	if telemetry {
+		g.SentryRelease = g.F("sling@%s", core.Version)
+		g.SentryDsn = env.SentryDsn
+		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope) {
+			// set transaction
+			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
+			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
+			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
+			event.Transaction = g.F("%s - %s", sourceType, targetType)
+			if g.CliObj.Name == "conns" {
+				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
+				event.Transaction = g.F(targetType)
+			}
+
+			scope.SetUser(sentry.User{ID: machineID})
+			if g.CliObj.Name == "conns" {
+				scope.SetTag("target_type", targetType)
+			} else {
+				scope.SetTag("source_type", sourceType)
+				scope.SetTag("target_type", targetType)
+				scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
+				if val := cast.ToString(taskMap["mode"]); val != "" {
+					scope.SetTag("mode", val)
+				}
+				if val := cast.ToString(taskMap["type"]); val != "" {
+					scope.SetTag("type", val)
+				}
+				scope.SetTag("package", getSlingPackage())
+				if projectID != "" {
+					scope.SetTag("project_id", projectID)
+				}
+			}
+		}
+		g.SentryInit()
+	}
 }

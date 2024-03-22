@@ -242,11 +242,50 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
 	var task *sling.TaskExecution
 
+	taskMap := g.M()
+	taskOptions := g.M()
+	setTM := func() {
+
+		taskOptions["src_has_primary_key"] = task.Config.Source.HasPrimaryKey()
+		taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
+		taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
+		taskOptions["src_format"] = task.Config.Source.Options.Format
+		taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
+		taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
+		taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
+		taskOptions["tgt_format"] = task.Config.Target.Options.Format
+		taskOptions["tgt_use_bulk"] = task.Config.Target.Options.UseBulk
+		taskOptions["tgt_add_new_columns"] = task.Config.Target.Options.AddNewColumns
+		taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
+		taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
+
+		taskMap["md5"] = task.Config.MD5()
+		taskMap["type"] = task.Type
+		taskMap["mode"] = task.Config.Mode
+		taskMap["status"] = task.Status
+		taskMap["source_md5"] = task.Config.Source.MD5()
+		taskMap["source_type"] = task.Config.SrcConn.Type
+		taskMap["target_md5"] = task.Config.Target.MD5()
+		taskMap["target_type"] = task.Config.TgtConn.Type
+
+		if projectID != "" {
+			telemetryMap["project_id"] = projectID
+		}
+
+		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
+			taskMap["source_type"] = "stdin"
+		}
+		if cfg.Options.StdOut {
+			taskMap["target_type"] = "stdout"
+		}
+
+		telemetryMap["task_options"] = g.Marshal(taskOptions)
+		telemetryMap["task"] = g.Marshal(taskMap)
+	}
+
 	// track usage
 	defer func() {
-		taskMap := g.M()
 		taskStats := g.M()
-		taskOptions := g.M()
 
 		if task != nil {
 			if task.Config.Source.Options == nil {
@@ -263,38 +302,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskStats["rows_in_bytes"] = inBytes
 			taskStats["rows_out_bytes"] = outBytes
 
-			taskOptions["src_has_primary_key"] = task.Config.Source.HasPrimaryKey()
-			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
-			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
-			taskOptions["src_format"] = task.Config.Source.Options.Format
-			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
-			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
-			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
-			taskOptions["tgt_format"] = task.Config.Target.Options.Format
-			taskOptions["tgt_use_bulk"] = task.Config.Target.Options.UseBulk
-			taskOptions["tgt_add_new_columns"] = task.Config.Target.Options.AddNewColumns
-			taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
-			taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
-
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
 			taskMap["status"] = task.Status
-			taskMap["source_md5"] = task.Config.Source.MD5()
-			taskMap["source_type"] = task.Config.SrcConn.Type
-			taskMap["target_md5"] = task.Config.Target.MD5()
-			taskMap["target_type"] = task.Config.TgtConn.Type
-		}
-
-		if projectID != "" {
-			telemetryMap["project_id"] = projectID
-		}
-
-		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
-			taskMap["source_type"] = "stdin"
-		}
-		if cfg.Options.StdOut {
-			taskMap["target_type"] = "stdout"
 		}
 
 		if err != nil {
@@ -343,6 +354,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = &ctx
 
 	// run task
+	setTM()
 	err = task.Execute()
 	if err != nil {
 		return g.Error(err)

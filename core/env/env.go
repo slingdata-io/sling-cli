@@ -18,6 +18,7 @@ var (
 	HomeDirEnvFile = ""
 	Env            = &env.EnvFile{}
 	PlausibleURL   = ""
+	SentryDsn      = ""
 	NoColor        = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
 	OsStdErr       *os.File
 	StderrR        io.ReadCloser

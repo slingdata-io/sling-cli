@@ -23,7 +23,7 @@ builds:
       # - windows
       - darwin
     ldflags:
-      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}'"
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}'"
 
 universal_binaries:
   - id: sling
