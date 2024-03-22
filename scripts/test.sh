@@ -41,10 +41,12 @@ sling conns discover POSTGRES -s 'public.*'
 sling conns discover local
 
 sling run -r cmd/sling/tests/replications/r.05.yaml
-sling run -r cmd/sling/tests/replications/r.06.yaml
-sling run -r cmd/sling/tests/replications/r.07.yaml
-sling run -r cmd/sling/tests/replications/r.08.yaml
-sling run -r cmd/sling/tests/replications/r.09.yaml
+SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
+SLING_STREAM_CNT=10 sling run -r cmd/sling/tests/replications/r.07.yaml
+SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml
+SLING_STREAM_CNT=">0" sling run -r cmd/sling/tests/replications/r.09.yaml
+YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
+sling run -r cmd/sling/tests/replications/r.12.yaml
 
 sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
 

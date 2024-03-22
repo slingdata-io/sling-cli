@@ -393,8 +393,13 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 	}
 
+	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(replication.Streams))
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(replication.Streams))
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
+
+	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(replication.Streams)); err != nil {
+		return err
+	}
 
 	if streamCnt == 0 {
 		g.Warn("Did not match any streams. Exiting.")
@@ -761,4 +766,22 @@ func setProjectID(cfgPath string) {
 			projectID = strings.TrimSpace(string(out))
 		}
 	}
+}
+
+func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
+	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToInt(strings.TrimPrefix(expected, ">"))
+			if streamCnt <= atLeast {
+				return g.Error("Expected at least %d streams, got %d => %s", atLeast, streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+			}
+			return nil
+		}
+
+		if streamCnt != cast.ToInt(expected) {
+			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+		}
+	}
+	return nil
 }

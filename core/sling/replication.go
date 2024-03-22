@@ -12,7 +12,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
-	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -193,6 +192,11 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 				return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
 			}
 
+			gc, err := glob.Compile(strings.ToLower(schemaT.Name))
+			if err != nil {
+				return g.Error(err, "could not parse pattern: %s", schemaT.Name)
+			}
+
 			for _, row := range data.Rows {
 				table := database.Table{
 					Schema:  schemaT.Schema,
@@ -201,10 +205,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 				}
 
 				// add to stream map
-				if g.WildCardMatch(
-					strings.ToLower(table.FullName()),
-					[]string{strings.ToLower(schemaT.FullName())},
-				) {
+				if gc.Match(strings.ToLower(table.Name)) {
 
 					streamName, streamConfig, found := rd.GetStream(table.FullName())
 					if found {
@@ -215,7 +216,11 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 					}
 
 					cfg := rd.Streams[wildcardName]
-					rd.AddStream(table.FullName(), *cfg)
+					if cfg != nil {
+						rd.AddStream(table.FullName(), *cfg)
+					} else {
+						rd.AddStream(table.FullName(), ReplicationStreamConfig{})
+					}
 				}
 			}
 
@@ -238,41 +243,34 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	}
 
 	for _, wildcardName := range wildcardNames {
-		path, err := fs.GetPath(wildcardName)
+		nodes, err := fs.ListRecursive(wildcardName)
 		if err != nil {
-			return g.Error(err, "could not parse %s", wildcardName)
+			return g.Error(err, "could not list %s", wildcardName)
 		}
 
-		parent := filesys.GetDeepestParent(path)
-		nodes, err := fs.ListRecursive(parent)
-		if err != nil {
-			return g.Error(err, "could not list %s", parent)
-		}
-
-		gc, err := glob.Compile(path)
-		if err != nil {
-			return g.Error(err, "could not parse patten: %s", wildcardName)
-		}
-
+		added := 0
 		for _, node := range nodes {
-			if gc.Match(node.Path()) {
-				streamName, streamConfig, found := rd.GetStream(node.URI)
-				if found {
-					// keep in step with order, delete and add again
-					rd.DeleteStream(streamName)
-					rd.AddStream(node.URI, streamConfig)
-					continue
-				}
-
-				newCfg := ReplicationStreamConfig{}
-				g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-				rd.Streams[node.URI] = &newCfg
-				rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			streamName, streamConfig, found := rd.GetStream(node.URI)
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(node.URI, streamConfig)
+				continue
 			}
+
+			newCfg := ReplicationStreamConfig{}
+			g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
+			rd.Streams[node.URI] = &newCfg
+			rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			added++
 		}
 
 		// delete from stream map
 		rd.DeleteStream(wildcardName)
+
+		if added == 0 {
+			g.Debug("0 streams added for %#v (nodes=%d)", wildcardName, len(nodes))
+		}
 	}
 
 	return
