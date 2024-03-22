@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
-	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -348,39 +347,4 @@ func (t Type) Template() (template Template, err error) {
 	typeTemplate[t] = template
 
 	return template, nil
-}
-
-// ParseURL parses a URL
-func ParseURL(uri string) (uType Type, host string, path string, err error) {
-	if strings.HasPrefix(uri, "file://") {
-		return TypeFileLocal, "", strings.TrimPrefix(uri, "file://"), nil
-	}
-
-	u, err := net.NewURL(uri)
-	if err != nil {
-		err = g.Error(err, "Unable to parse URL "+uri)
-		return
-	}
-
-	scheme := u.U.Scheme
-	host = u.Hostname()
-
-	path = strings.TrimPrefix(u.U.Path, "/")
-	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
-
-	if scheme == "" || host == "" {
-		err = g.Error("Invalid URL: " + uri)
-	}
-
-	// handle azure blob
-	if scheme == "https" && strings.HasSuffix(host, ".blob.core.windows.net") {
-		return TypeFileAzure, host, path, nil
-	}
-
-	uType, ok := ValidateType(scheme)
-	if !ok {
-		err = g.Error("unrecognized url type: %s", scheme)
-	}
-
-	return
 }
