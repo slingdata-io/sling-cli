@@ -355,12 +355,12 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 
 			if opt.ColumnLevel {
 				g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
-				if len(nodes) <= 10 {
+				if len(schemata.Columns()) <= 10 {
 					g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
 				}
 			} else {
 				g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
-				if len(nodes) <= 10 {
+				if len(schemata.Tables()) <= 10 {
 					g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
 				}
 			}
