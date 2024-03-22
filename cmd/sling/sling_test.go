@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,7 @@ import (
 )
 
 var testMux sync.Mutex
+var testContext = g.NewContext(context.Background())
 
 var ef = env.LoadSlingEnvFile()
 var ec = connection.EnvConns{EnvFile: &ef}
@@ -315,6 +317,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		runOneTask(t, file, connType)
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
+			testContext.Cancel()
 			return
 		}
 	}
@@ -379,6 +382,8 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 
 	if g.AssertNoError(t, task.Err) {
+		taskContext := g.NewContext(testContext.Ctx)
+		task.Context = &taskContext
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			return
