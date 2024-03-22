@@ -146,20 +146,9 @@ func (conn *BigQueryConn) Connect(timeOut ...int) error {
 	}
 
 	// get list of datasets
-	it := conn.Client.Datasets(conn.Context().Ctx)
-	for {
-		dataset, err := it.Next()
-		if err == iterator.Done {
-			err = nil
-			break
-		} else if err != nil {
-			return g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
-		}
-		conn.Datasets = append(conn.Datasets, dataset.DatasetID)
-		if conn.Location == "" {
-			md, _ := dataset.Metadata(conn.Context().Ctx)
-			conn.Location = md.Location
-		}
+	_, err = conn.GetSchemas()
+	if err != nil {
+		return g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
 	}
 
 	return conn.BaseConn.Connect()
@@ -1036,6 +1025,25 @@ func (conn *BigQueryConn) GetDatabases() (iop.Dataset, error) {
 // GetSchemas returns schemas
 func (conn *BigQueryConn) GetSchemas() (iop.Dataset, error) {
 	// fields: [schema_name]
+
+	// get list of datasets
+	it := conn.Client.Datasets(conn.Context().Ctx)
+	conn.Datasets = []string{}
+	for {
+		dataset, err := it.Next()
+		if err == iterator.Done {
+			err = nil
+			break
+		} else if err != nil {
+			return iop.Dataset{}, g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
+		}
+		conn.Datasets = append(conn.Datasets, dataset.DatasetID)
+		if conn.Location == "" {
+			md, _ := dataset.Metadata(conn.Context().Ctx)
+			conn.Location = md.Location
+		}
+	}
+
 	data := iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
 	for _, dataset := range conn.Datasets {
 		data.Append([]interface{}{dataset})
