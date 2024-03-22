@@ -49,8 +49,8 @@ func (conn *SnowflakeConn) Init() error {
 		return g.Error("did not provide property `private_key_path` with authenticator=snowflake_jwt. See https://docs.slingdata.io/connections/database-connections/snowflake")
 	}
 
-	if m := conn.GetProp("CopyMethod"); m != "" {
-		conn.CopyMethod = conn.GetProp("CopyMethod")
+	if m := conn.GetProp("copy_method"); m != "" {
+		conn.CopyMethod = conn.GetProp("copy_method")
 	}
 
 	if val := cast.ToInt(conn.GetProp("max_chunk_download_workers")); val > 0 {

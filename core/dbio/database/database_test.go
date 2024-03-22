@@ -909,12 +909,12 @@ func TestLargeDataset(t *testing.T) {
 	// test snowflake Azure and AWS
 	DBs["snowflake_aws"] = &testDB{
 		name:   "snowflake-aws",
-		URL:    os.Getenv("SNOWFLAKE_URL") + "&CopyMethod=AWS",
+		URL:    os.Getenv("SNOWFLAKE_URL") + "&copy_method=AWS",
 		schema: "PUBLIC",
 	}
 	DBs["snowflake_azure"] = &testDB{
 		name:   "snowflake-azure",
-		URL:    os.Getenv("SNOWFLAKE_URL") + "&CopyMethod=AZURE",
+		URL:    os.Getenv("SNOWFLAKE_URL") + "&copy_method=AZURE",
 		schema: "PUBLIC",
 	}
 
