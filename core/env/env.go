@@ -48,6 +48,10 @@ func init() {
 	// other sources of creds
 	env.SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
 	env.SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
+
+	if SentryDsn == "" {
+		SentryDsn = os.Getenv("SENTRY_DSN")
+	}
 }
 
 func SetLogger() {
