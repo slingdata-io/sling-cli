@@ -488,7 +488,7 @@ func setSentry() {
 	if telemetry {
 		g.SentryRelease = g.F("sling@%s", core.Version)
 		g.SentryDsn = env.SentryDsn
-		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope) {
+		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) {
 			// set transaction
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
@@ -498,6 +498,10 @@ func setSentry() {
 				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
 				event.Transaction = g.F(targetType)
 			}
+
+			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
+			event.Message = event.Exception[0].Value
+			event.Exception[0].Value = g.F("%s (%s)", exception.LastCaller(), taskType)
 
 			scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {

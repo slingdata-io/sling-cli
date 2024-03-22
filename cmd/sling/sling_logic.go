@@ -552,6 +552,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
 	case "exec":
+		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnExec))
+
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
 		if !ok {
@@ -613,6 +615,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		println(ec.List())
 
 	case "test":
+		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnTest))
 		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
@@ -625,6 +628,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("success!") // successfully connected
 		}
 	case "discover":
+		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnDiscover))
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
 		if ok {
