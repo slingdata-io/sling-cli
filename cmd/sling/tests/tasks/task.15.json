@@ -1,1 +1,0 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"CLICKHOUSE","options":{},"primary_key":[],"stream":"select * from default.test1k where 1=1","update_key":""},"target":{"conn":"POSTGRES","object":"public.test1k","options":{}}}

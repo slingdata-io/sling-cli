@@ -1,1 +1,0 @@
-{"env":{"validation_object":"\"dbo\".\"test1k\""},"mode":"backfill","options":{},"source":{"conn":"POSTGRES","options":{"range":"2001-01-01,2010-01-01"},"primary_key":["id"],"stream":"select * from public.test1k where {incremental_where_cond}","update_key":"create_date"},"target":{"conn":"MSSQL","object":"dbo.test1k","options":{}}}
