@@ -416,10 +416,6 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	}
 
 	localPath := path.Join(env.GetTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
-	err = filesys.Delete(fs, localPath)
-	if err != nil {
-		return count, g.Error(err, "Could not Delete: "+localPath)
-	}
 
 	// TODO: use reader to fead HTTP directly. Need to get proper redirected URL first.
 	// for ds := range df.StreamCh {
