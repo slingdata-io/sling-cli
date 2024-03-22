@@ -1040,8 +1040,10 @@ func (conn *BigQueryConn) GetSchemas() (iop.Dataset, error) {
 		}
 		conn.Datasets = append(conn.Datasets, dataset.DatasetID)
 		if conn.Location == "" {
-			md, _ := dataset.Metadata(conn.Context().Ctx)
-			conn.Location = md.Location
+			md, err := dataset.Metadata(conn.Context().Ctx)
+			if err == nil {
+				conn.Location = md.Location
+			}
 		}
 	}
 
