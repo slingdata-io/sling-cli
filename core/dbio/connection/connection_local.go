@@ -355,8 +355,14 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 
 			if opt.ColumnLevel {
 				g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
+				if len(nodes) <= 10 {
+					g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
+				}
 			} else {
 				g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
+				if len(nodes) <= 10 {
+					g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
+				}
 			}
 
 			// apply filter
@@ -396,6 +402,9 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
 		g.Debug("unfiltered nodes returned: %d", len(nodes))
+		if len(nodes) <= 10 {
+			g.Debug(g.Marshal(nodes.Paths()))
+		}
 
 		// apply filter
 		if opt.discover {
