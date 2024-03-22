@@ -246,27 +246,35 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	taskOptions := g.M()
 	setTM := func() {
 
-		taskOptions["src_has_primary_key"] = task.Config.Source.HasPrimaryKey()
-		taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
-		taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
-		taskOptions["src_format"] = task.Config.Source.Options.Format
-		taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
-		taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
-		taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
-		taskOptions["tgt_format"] = task.Config.Target.Options.Format
-		taskOptions["tgt_use_bulk"] = task.Config.Target.Options.UseBulk
-		taskOptions["tgt_add_new_columns"] = task.Config.Target.Options.AddNewColumns
-		taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
-		taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
+		if task != nil {
+			if task.Config.Source.Options == nil {
+				task.Config.Source.Options = &sling.SourceOptions{}
+			}
+			if task.Config.Target.Options == nil {
+				task.Config.Target.Options = &sling.TargetOptions{}
+			}
+			taskOptions["src_has_primary_key"] = task.Config.Source.HasPrimaryKey()
+			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
+			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
+			taskOptions["src_format"] = task.Config.Source.Options.Format
+			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
+			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
+			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
+			taskOptions["tgt_format"] = task.Config.Target.Options.Format
+			taskOptions["tgt_use_bulk"] = task.Config.Target.Options.UseBulk
+			taskOptions["tgt_add_new_columns"] = task.Config.Target.Options.AddNewColumns
+			taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
+			taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
 
-		taskMap["md5"] = task.Config.MD5()
-		taskMap["type"] = task.Type
-		taskMap["mode"] = task.Config.Mode
-		taskMap["status"] = task.Status
-		taskMap["source_md5"] = task.Config.Source.MD5()
-		taskMap["source_type"] = task.Config.SrcConn.Type
-		taskMap["target_md5"] = task.Config.Target.MD5()
-		taskMap["target_type"] = task.Config.TgtConn.Type
+			taskMap["md5"] = task.Config.MD5()
+			taskMap["type"] = task.Type
+			taskMap["mode"] = task.Config.Mode
+			taskMap["status"] = task.Status
+			taskMap["source_md5"] = task.Config.Source.MD5()
+			taskMap["source_type"] = task.Config.SrcConn.Type
+			taskMap["target_md5"] = task.Config.Target.MD5()
+			taskMap["target_type"] = task.Config.TgtConn.Type
+		}
 
 		if projectID != "" {
 			telemetryMap["project_id"] = projectID
