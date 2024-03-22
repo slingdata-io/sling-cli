@@ -324,6 +324,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 }
 
 func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
 	println()
 
