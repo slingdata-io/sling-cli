@@ -138,10 +138,18 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 		return
 	}
 
-	path = strings.TrimSuffix(path, "/")
+	if path == "" {
+		path = "/"
+	} else if path != "/" {
+		path = strings.TrimSuffix(path, "/")
+	}
 	files, err = fs.client.ReadDir(path)
 	if err != nil {
 		return nodes, g.Error(err, "error listing path: %#v", path)
+	}
+
+	if path == "/" {
+		path = ""
 	}
 
 	for _, file := range files {
