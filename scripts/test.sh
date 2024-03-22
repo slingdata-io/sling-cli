@@ -1,4 +1,5 @@
 set -e  # exit on error
+shopt -s expand_aliases
 
 # sling
 
