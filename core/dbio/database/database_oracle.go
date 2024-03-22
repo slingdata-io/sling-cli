@@ -15,12 +15,12 @@ import (
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
+	"github.com/xo/dburl"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/xo/dburl"
 )
 
 // OracleConn is a Postgres connection
@@ -237,7 +237,7 @@ func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 // cannot import when newline in value. Need to scan for new lines.
 func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var stderr, stdout bytes.Buffer
-	url, err := dburl.Parse(conn.URL)
+	url, err := dburl.Parse(conn.ConnString())
 	if err != nil {
 		err = g.Error(err, "Error dburl.Parse(conn.URL)")
 		return
