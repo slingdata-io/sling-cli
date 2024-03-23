@@ -26,7 +26,6 @@ jobs:
   test-mac:
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 20
-    # runs-on: macos-latest
 
     steps:
       # - name: Git Fetch (to fix (would clobber existing tag)
