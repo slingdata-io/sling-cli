@@ -273,10 +273,10 @@ var cliConns = &g.CliSC{
 					Description: "The name of the connection to set",
 				},
 				{
-					Name:        "query",
+					Name:        "queries...",
 					ShortName:   "",
 					Type:        "string",
-					Description: "The SQL query to execute. Can be in-line text or a file",
+					Description: "The SQL queries to execute. Can be in-line text or a file",
 				},
 			},
 		},
