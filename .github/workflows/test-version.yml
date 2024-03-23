@@ -22,3 +22,52 @@ jobs:
         run: |
           echo "VERSION -> $VERSION"
           echo "TAG2 -> $(git tag -l --sort=-creatordate | head -n 1)"
+
+  test-mac:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 20
+    # runs-on: macos-latest
+
+    defaults:
+      run:
+        working-directory: /tmp
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+
+  test-windows:
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+  test-linux-arm64:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+  test-linux-amd64:
+    # runs-on: ubuntu-20.04
+    runs-on: [self-hosted, Linux, X64, ubuntu-16]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+  
