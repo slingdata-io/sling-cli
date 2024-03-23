@@ -29,6 +29,9 @@ jobs:
     # runs-on: macos-latest
 
     steps:
+      - name: Git Fetch
+        run: git fetch --tags --force
+          
       - name: Checkout
         uses: actions/checkout@v1
         with:
