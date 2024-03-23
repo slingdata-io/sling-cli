@@ -224,6 +224,9 @@ func makePathSuffix(key string) string {
 func NormalizeURI(fs FileSysClient, uri string) string {
 	switch fs.FsType() {
 	case dbio.TypeFileLocal:
+		// to handle windows path style
+		uri = strings.ReplaceAll(uri, `\`, `/`)
+
 		return fs.Prefix("") + strings.TrimPrefix(uri, fs.Prefix())
 	case dbio.TypeFileSftp:
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
@@ -880,10 +883,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 // Delete deletes the provided path
 // with some safeguards so to not accidentally delete some root path
 func Delete(fs FileSysClient, uri string) (err error) {
-	if strings.HasPrefix(uri, "file://") {
-		// to handle windows path style
-		uri = strings.ReplaceAll(strings.ToLower(uri), `\`, `/`)
-	}
+	uri = NormalizeURI(fs, uri)
 
 	host, path, err := ParseURL(uri)
 	if err != nil {
