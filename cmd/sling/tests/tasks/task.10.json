@@ -1,1 +1,0 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"POSTGRES","options":{},"primary_key":[],"stream":"select * from public.test1k where 1=1","update_key":""},"target":{"conn":"SNOWFLAKE","object":"public.test1k","options":{}}}

@@ -19,7 +19,7 @@ core:
         uri = '{gcs_path}',
         format = 'CSV',
         overwrite = true,
-        header = true,
+        header = false,
         field_delimiter = ',',
         compression = 'GZIP'
       ) AS (

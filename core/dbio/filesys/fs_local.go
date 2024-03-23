@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -31,13 +31,27 @@ func (fs *LocalFileSysClient) Init(ctx context.Context) (err error) {
 	return
 }
 
-func cleanLocalFilePath(path string) string {
-	return strings.TrimPrefix(path, "file://")
+// Prefix returns the url prefix
+func (fs *LocalFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://", fs.FsType().String()) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *LocalFileSysClient) GetPath(uri string) (path string, err error) {
+	uri = NormalizeURI(fs, uri)
+	path = strings.TrimPrefix(uri, fs.Prefix())
+	path = strings.TrimRight(path, makePathSuffix(path))
+	return
 }
 
 // Delete deletes the given path (file or directory)
-func (fs *LocalFileSysClient) delete(path string) (err error) {
-	path = cleanLocalFilePath(path)
+func (fs *LocalFileSysClient) delete(uri string) (err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	file, err := os.Stat(path)
 	if err != nil {
 		return nil // likely means the path does not exist, no need to delete
@@ -48,7 +62,7 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 		// some safety measure to not delete root system folders
 		slashCount := len(path) - len(strings.ReplaceAll(path, "/", ""))
 		if slashCount <= 2 && (strings.HasPrefix(path, "/") || strings.Contains(path, ":/")) {
-			g.Warn("directory '%s' is close to root. Not deleting.", path)
+			g.Warn("directory '%s' is close too root. Not deleting.", path)
 			return
 		}
 
@@ -66,8 +80,13 @@ func (fs *LocalFileSysClient) delete(path string) (err error) {
 }
 
 // GetReader return a reader for the given path
-func (fs *LocalFileSysClient) GetReader(path string) (reader io.Reader, err error) {
-	path = cleanLocalFilePath(path)
+func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		err = g.Error(err, "Unable to open "+path)
@@ -78,8 +97,13 @@ func (fs *LocalFileSysClient) GetReader(path string) (reader io.Reader, err erro
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, err error) {
-	path = cleanLocalFilePath(path)
+func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		err = g.Error(err, "Unable to open "+path)
@@ -110,7 +134,6 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
 	if string(fileFormat) == "" {
 		fileFormat = InferFileFormat(path)
-		fs.SetProp("FORMAT", string(fileFormat))
 	}
 
 	go func() {
@@ -156,11 +179,16 @@ func (fs *LocalFileSysClient) GetDatastream(path string) (ds *iop.Datastream, er
 }
 
 // GetWriter creates the file if non-existent and return a writer
-func (fs *LocalFileSysClient) GetWriter(path string) (writer io.Writer, err error) {
-	path = cleanLocalFilePath(path)
+func (fs *LocalFileSysClient) GetWriter(uri string) (writer io.Writer, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	file, err := os.Create(path)
 	if err != nil {
-		err = g.Error(err, "Unable to open "+path)
+		err = g.Error(err, "Unable to create "+path)
 		return
 	}
 	writer = io.Writer(file)
@@ -168,14 +196,24 @@ func (fs *LocalFileSysClient) GetWriter(path string) (writer io.Writer, err erro
 }
 
 // MkdirAll creates child directories
-func (fs *LocalFileSysClient) MkdirAll(path string) (err error) {
-	path = cleanLocalFilePath(path)
+func (fs *LocalFileSysClient) MkdirAll(uri string) (err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	return os.MkdirAll(path, 0755)
 }
 
 // Write creates the file if non-existent and writes from the reader
-func (fs *LocalFileSysClient) Write(filePath string, reader io.Reader) (bw int64, err error) {
-	filePath = cleanLocalFilePath(filePath)
+func (fs *LocalFileSysClient) Write(uri string, reader io.Reader) (bw int64, err error) {
+	filePath, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
 	// manage concurrency
 	defer fs.Context().Wg.Write.Done()
 	fs.Context().Wg.Write.Add()
@@ -207,41 +245,85 @@ func (fs *LocalFileSysClient) Write(filePath string, reader io.Reader) (bw int64
 }
 
 // List lists the file in given directory path
-func (fs *LocalFileSysClient) List(path string) (paths []string, err error) {
-	path = cleanLocalFilePath(path)
-
-	s, err := os.Stat(path)
-	if err == nil && !s.IsDir() {
-		return []string{path}, nil
+func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
 	}
 
-	files, err := ioutil.ReadDir(path)
+	s, err := os.Stat(path)
+	if err == nil && (!s.IsDir() || !strings.HasSuffix(path, "/")) {
+		node := dbio.FileNode{
+			URI:     "file://" + path,
+			Updated: s.ModTime().Unix(),
+			Size:    cast.ToUint64(s.Size()),
+			IsDir:   s.IsDir(),
+		}
+		nodes.Add(node)
+		return
+	}
+
+	if path == "" {
+		path = "/"
+	}
+
+	files, err := os.ReadDir(path)
 	if err != nil {
 		err = g.Error(err, "Error listing "+path)
 		return
 	}
 
+	// path is dir
+	if path != "" {
+		path = strings.TrimSuffix(path, "/")
+	}
+
 	for _, file := range files {
-		// file.ModTime()
-		paths = append(paths, "file://"+path+"/"+file.Name())
+		fInfo, _ := file.Info()
+		node := dbio.FileNode{
+			URI:     "file://" + path + "/" + file.Name(),
+			Updated: fInfo.ModTime().Unix(),
+			Size:    cast.ToUint64(fInfo.Size()),
+			IsDir:   file.IsDir(),
+		}
+		nodes.Add(node)
 	}
 	return
 }
 
 // ListRecursive lists the file in given directory path recursively
-func (fs *LocalFileSysClient) ListRecursive(path string) (paths []string, err error) {
-	path = cleanLocalFilePath(path)
-	ts := fs.GetRefTs()
+func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
+	if err != nil {
+		err = g.Error(err, "Error Parsing url: "+uri)
+		return
+	}
+
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
+	ts := fs.GetRefTs().Unix()
 
 	walkFunc := func(subPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && (ts.IsZero() || info.ModTime().IsZero() || info.ModTime().After(ts)) {
-			paths = append(paths, "file://"+subPath)
+		node := dbio.FileNode{
+			URI:     "file://" + subPath,
+			Updated: info.ModTime().Unix(),
+			Size:    cast.ToUint64(info.Size()),
+			IsDir:   info.IsDir(),
+		}
+		if !info.IsDir() {
+			nodes.AddWhere(pattern, ts, node)
 		}
 		return nil
 	}
+
 	err = filepath.Walk(path, walkFunc)
 	if err != nil {
 		err = g.Error(err, "Error listing "+path)

@@ -218,6 +218,8 @@ func (c *Connection) URL() string {
 			url = "file://"
 		case dbio.TypeFileSftp:
 			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
+		case dbio.TypeFileFtp:
+			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
 		case dbio.TypeFileS3:
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
 		case dbio.TypeFileGoogle:
@@ -237,12 +239,18 @@ func (c *Connection) URL() string {
 }
 
 func (c *Connection) AsDatabase() (database.Connection, error) {
+	if !c.Type.IsDb() {
+		return nil, g.Error("not a database type: %s", c.Type)
+	}
 	return database.NewConnContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
 func (c *Connection) AsFile() (filesys.FileSysClient, error) {
+	if !c.Type.IsFile() {
+		return nil, g.Error("not a file system type: %s", c.Type)
+	}
 	return filesys.NewFileSysClientFromURLContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
@@ -351,7 +359,7 @@ func (c *Connection) setURL() (err error) {
 			// set database
 			setIfMissing("database", pathValue)
 		}
-		if c.Type == dbio.TypeFileSftp {
+		if g.In(c.Type, dbio.TypeFileSftp, dbio.TypeFileFtp) {
 			setIfMissing("user", U.Username())
 			setIfMissing("host", U.Hostname())
 			setIfMissing("password", U.Password())
@@ -579,10 +587,10 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "clickhouse://{username}:{password}@{host}:{port}/{database}"
-	case dbio.TypeFileSftp:
+	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
-		template = "sftp://{user}:{password}@{host}:{port}/"
+		template = c.Type.String() + "://{user}:{password}@{host}:{port}/"
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil

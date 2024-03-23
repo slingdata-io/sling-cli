@@ -23,9 +23,9 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 	var bw int64
 	defer t.PBar.Finish()
 
-	if cfg.TgtConn.URL() != "" {
+	if uri := cfg.TgtConn.URL(); uri != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
-		cfg.TgtConn.Set(g.M("url", g.Rm(cfg.TgtConn.URL(), dateMap)))
+		cfg.TgtConn.Set(g.M("url", g.Rm(uri, dateMap)))
 
 		// construct props by merging with options
 		options := g.M()
@@ -35,7 +35,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			g.MapToKVArr(g.ToMapString(options))...,
 		)
 
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.TgtConn.URL(), props...)
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for: %s", cfg.TgtConn.Type)
 			return cnt, err
@@ -44,7 +44,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
-		bw, err = fs.WriteDataflow(df, cfg.TgtConn.URL())
+		bw, err = fs.WriteDataflow(df, uri)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err
@@ -156,7 +156,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// set DDL
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.Raw = tableTmp.FullName()
-	tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	err = tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	if err != nil {
+		err = g.Error(err, "could not set keys for "+tableTmp.FullName())
+		return
+	}
 
 	// create schema if not exist
 	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
@@ -189,6 +193,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.Columns = sampleData.Columns
 	}
 
+	// set table keys
+	tableTmp.Columns = sampleData.Columns
+	err = tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+	if err != nil {
+		err = g.Error(err, "could not set keys for "+tableTmp.FullName())
+		return
+	}
+
 	_, err = createTableIfNotExists(tgtConn, sampleData, tableTmp)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
@@ -202,10 +214,15 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return
 		}
 
-		conn, err := t.getTgtDBConn(context.Background())
-		if err == nil {
-			g.LogError(conn.DropTable(tableTmp.FullName()))
+		conn := tgtConn
+		if tgtConn.Context().Err() != nil {
+			conn, err = t.getTgtDBConn(context.Background())
+			if err == nil {
+				conn.Connect()
+			}
 		}
+		g.LogError(conn.DropTable(tableTmp.FullName()))
+		conn.Close()
 	})
 
 	err = tgtConn.BeginContext(df.Context.Ctx)
@@ -236,7 +253,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				// revert to old type
 				col.Type = df.Columns[col.Position-1].Type
 			}
-			df.Columns.Add(iop.Columns{col}, true)
+			df.Columns.Merge(iop.Columns{col}, true)
 
 			return nil
 		}

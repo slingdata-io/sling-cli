@@ -8,6 +8,8 @@ import (
 
 	gcstorage "cloud.google.com/go/storage"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
@@ -40,6 +42,28 @@ func (fs *GoogleFileSysClient) Init(ctx context.Context) (err error) {
 	}
 
 	return fs.Connect()
+}
+
+// Prefix returns the url prefix
+func (fs *GoogleFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://%s", fs.FsType().String(), fs.bucket) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *GoogleFileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = NormalizeURI(fs, uri)
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	if fs.bucket != host {
+		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.bucket)
+	}
+
+	return path, err
 }
 
 // Connect initiates the Google Cloud Storage client
@@ -90,21 +114,13 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	return nil
 }
 
-func cleanKeyGoogle(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = strings.TrimSuffix(key, "/")
-	return key
-}
-
 func (fs *GoogleFileSysClient) Write(path string, reader io.Reader) (bw int64, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+	key, err := fs.GetPath(path)
+	if err != nil {
 		return
 	}
-	key = cleanKeyGoogle(key)
 
-	obj := fs.client.Bucket(bucket).Object(key)
+	obj := fs.client.Bucket(fs.bucket).Object(key)
 	wc := obj.NewWriter(fs.Context().Ctx)
 	bw, err = io.Copy(wc, reader)
 	if err != nil {
@@ -121,13 +137,11 @@ func (fs *GoogleFileSysClient) Write(path string, reader io.Reader) (bw int64, e
 
 // GetReader returns the reader for the given path
 func (fs *GoogleFileSysClient) GetReader(path string) (reader io.Reader, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+	key, err := fs.GetPath(path)
+	if err != nil {
 		return
 	}
-	key = cleanKeyGoogle(key)
-	reader, err = fs.client.Bucket(bucket).Object(key).NewReader(fs.Context().Ctx)
+	reader, err = fs.client.Bucket(fs.bucket).Object(key).NewReader(fs.Context().Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not get reader for "+path)
 		return
@@ -138,7 +152,7 @@ func (fs *GoogleFileSysClient) GetReader(path string) (reader io.Reader, err err
 // Buckets returns the buckets found in the project
 func (fs *GoogleFileSysClient) Buckets() (paths []string, err error) {
 	// Create S3 service client
-	it := fs.client.Buckets(fs.context.Ctx, fs.projectID)
+	it := fs.client.Buckets(fs.Context().Ctx, fs.projectID)
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -154,18 +168,21 @@ func (fs *GoogleFileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List returns the list of objects
-func (fs *GoogleFileSysClient) List(path string) (paths []string, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+	key, err := fs.GetPath(uri)
+	if err != nil {
 		return
 	}
-	key = cleanKeyGoogle(key)
+
+	baseKeys := map[string]int{}
 	keyArr := strings.Split(key, "/")
+	counter := 0
+	maxItems := lo.Ternary(recursiveLimit == 0, 5000, recursiveLimit)
 
 	query := &gcstorage.Query{Prefix: key}
-	query.SetAttrSelection([]string{"Name"})
-	it := fs.client.Bucket(bucket).Objects(fs.Context().Ctx, query)
+	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
+	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
+
 	for {
 		attrs, err := it.Next()
 		if err == iterator.Done {
@@ -173,31 +190,60 @@ func (fs *GoogleFileSysClient) List(path string) (paths []string, err error) {
 			break
 		} else if err != nil {
 			err = g.Error(err, "Error Iterating")
-			return paths, err
-		} else if attrs.Name == "" {
+			return nodes, err
+		}
+
+		counter++
+		if attrs.Name == "" {
+			continue
+		} else if counter >= maxItems {
+			g.Warn("Google storage returns results recursively by default. Limiting results at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
+			break
+		} else if !strings.HasPrefix(attrs.Name, key) {
+			// needs to have correct key, since it's recursive
 			continue
 		}
-		if len(strings.Split(attrs.Name, "/")) == len(keyArr)+1 {
-			// attrs.Updated
-			paths = append(paths, g.F("gs://%s/%s", bucket, attrs.Name))
+
+		parts := strings.Split(strings.TrimSuffix(attrs.Name, "/"), "/")
+		baseKey := strings.Join(parts[:len(keyArr)], "/")
+		baseKeys[baseKey]++
+
+		if baseKeys[baseKey] == 1 {
+			node := dbio.FileNode{
+				URI:   g.F("%s%s", fs.Prefix("/"), baseKey),
+				IsDir: len(parts) >= len(keyArr)+1,
+			}
+
+			if baseKey == strings.TrimSuffix(attrs.Name, "/") {
+				node.Size = cast.ToUint64(attrs.Size)
+				node.Created = attrs.Created.Unix()
+				node.Updated = attrs.Updated.Unix()
+				node.Owner = attrs.Owner
+				node.IsDir = strings.HasSuffix(attrs.Name, "/")
+			}
+			nodes.Add(node)
 		}
 	}
 	return
 }
 
 // ListRecursive returns the list of objects recursively
-func (fs *GoogleFileSysClient) ListRecursive(path string) (paths []string, err error) {
-	bucket, key, err := ParseURL(path)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+path)
+func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	key, err := fs.GetPath(uri)
+	if err != nil {
 		return
 	}
-	key = cleanKeyGoogle(key)
-	ts := fs.GetRefTs()
+
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+	ts := fs.GetRefTs().Unix()
 
 	query := &gcstorage.Query{Prefix: key}
-	query.SetAttrSelection([]string{"Name"})
-	it := fs.client.Bucket(bucket).Objects(fs.Context().Ctx, query)
+	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
+	it := fs.client.Bucket(fs.bucket).Objects(fs.Context().Ctx, query)
 	for {
 		attrs, err := it.Next()
 		// g.P(attrs)
@@ -207,27 +253,27 @@ func (fs *GoogleFileSysClient) ListRecursive(path string) (paths []string, err e
 		}
 		if err != nil {
 			err = g.Error(err, "Error Iterating")
-			return paths, err
+			return nodes, err
 		}
 		if attrs.Name == "" {
 			continue
 		}
 
-		if ts.IsZero() || attrs.Updated.IsZero() || attrs.Updated.After(ts) {
-			paths = append(paths, g.F("gs://%s/%s", bucket, attrs.Name))
+		node := dbio.FileNode{
+			URI:     g.F("%s/%s", fs.Prefix(), attrs.Name),
+			Size:    cast.ToUint64(attrs.Size),
+			Created: attrs.Created.Unix(),
+			Updated: attrs.Updated.Unix(),
+			Owner:   attrs.Owner,
 		}
+		nodes.AddWhere(pattern, ts, node)
 	}
 	return
 }
 
 // Delete list objects in path
 func (fs *GoogleFileSysClient) delete(urlStr string) (err error) {
-	bucket, key, err := ParseURL(urlStr)
-	if err != nil || bucket == "" {
-		err = g.Error(err, "Error Parsing url: "+urlStr)
-		return
-	}
-	key = cleanKeyGoogle(key)
+
 	urlStrs, err := fs.ListRecursive(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error List from url: "+urlStr)
@@ -236,7 +282,7 @@ func (fs *GoogleFileSysClient) delete(urlStr string) (err error) {
 
 	delete := func(key string) {
 		defer fs.Context().Wg.Write.Done()
-		o := fs.client.Bucket(bucket).Object(key)
+		o := fs.client.Bucket(fs.bucket).Object(key)
 		if err = o.Delete(fs.Context().Ctx); err != nil {
 			if strings.Contains(err.Error(), "doesn't exist") {
 				g.Debug("tried to delete %s\n%s", urlStr, err.Error())
@@ -249,15 +295,14 @@ func (fs *GoogleFileSysClient) delete(urlStr string) (err error) {
 	}
 
 	for _, path := range urlStrs {
-		bucket, key, err = ParseURL(path)
-		if err != nil || bucket == "" {
-			err = g.Error(err, "Error Parsing url: "+path)
-			return
+		key, err := fs.GetPath(path.URI)
+		if err != nil {
+			return err
 		}
-		key = cleanKeyGoogle(key)
 		fs.Context().Wg.Write.Add()
 		go delete(key)
 	}
+
 	fs.Context().Wg.Write.Wait()
 	if fs.Context().Err() != nil {
 		err = g.Error(fs.Context().Err(), "Could not delete "+urlStr)

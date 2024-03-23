@@ -294,8 +294,13 @@ func CreateDummyFields(numCols int) (cols []string) {
 
 // ReadStream returns the read CSV stream with Line 1 as header
 func (c *CSV) ReadStream() (ds *Datastream, err error) {
+	return c.ReadStreamContext(context.Background())
+}
 
-	ds = NewDatastream(c.Columns)
+// ReadStream returns the read CSV stream with Line 1 as header
+func (c *CSV) ReadStreamContext(ctx context.Context) (ds *Datastream, err error) {
+
+	ds = NewDatastreamContext(ctx, c.Columns)
 
 	r, err := c.getReader("")
 	if err != nil {
@@ -304,7 +309,7 @@ func (c *CSV) ReadStream() (ds *Datastream, err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Warn("csv stream provided is empty")
+		g.Warn("csv stream provided is empty (%s)", c.Path)
 		ds.SetReady()
 		ds.Close()
 		return ds, nil
@@ -534,7 +539,7 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 				break
 			} else if csvErr != nil {
 				// g.Trace("failed delimiter detection for %#v: %s", string(d), csvErr.Error())
-				errMap[d] = g.Error(csvErr, "failed delimited detection for %#v", string(d))
+				errMap[d] = csvErr
 				eG.Capture(errMap[d])
 				break
 			}

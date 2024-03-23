@@ -37,17 +37,21 @@ type Dataflow struct {
 
 // NewDataflow creates a new dataflow
 func NewDataflow(limit ...int) (df *Dataflow) {
+	return NewDataflowContext(context.Background(), limit...)
+}
+
+func NewDataflowContext(ctx context.Context, limit ...int) (df *Dataflow) {
 
 	Limit := uint64(0) // infinite
 	if len(limit) > 0 && limit[0] != 0 {
 		Limit = cast.ToUint64(limit[0])
 	}
-	ctx := g.NewContext(context.Background())
+	ctxDf := g.NewContext(ctx)
 
 	df = &Dataflow{
 		StreamCh:      make(chan *Datastream, 1),
 		Streams:       []*Datastream{},
-		Context:       &ctx,
+		Context:       &ctxDf,
 		Limit:         Limit,
 		StreamMap:     map[string]*Datastream{},
 		deferFuncs:    []func(){},
@@ -95,6 +99,25 @@ func (df *Dataflow) CleanUp() {
 	for i, f := range df.deferFuncs {
 		f()
 		df.deferFuncs[i] = func() {} // in case it gets called again
+	}
+}
+
+// SetConfig set the Sp config
+func (df *Dataflow) SetConfig(cfg *StreamConfig) {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		ds.Sp.Config = cfg
+	}
+}
+
+// ResetConfig resets the Sp config, so that, for example,
+// delimiter settings are not carried through.
+func (df *Dataflow) ResetConfig() {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		ds.Sp.ResetConfig()
 	}
 }
 
@@ -216,18 +239,36 @@ func (df *Dataflow) IsEmpty() bool {
 }
 
 // SetColumns sets the columns
-func (df *Dataflow) SetColumns(columns []Column) {
-	df.Columns = columns
-	// for i := range df.Streams {
-	// 	df.Streams[i].Columns = columns
-	// 	df.Streams[i].Inferred = true
-	// }
+func (df *Dataflow) MergeColumns(columns []Column, inferred bool) (processOk bool) {
+	df.mux.Lock()
+	mergedCols, colsAdded, colsChanged := df.Columns.Merge(columns, false)
+
+	df.Columns = mergedCols
+	df.Inferred = inferred
+	df.mux.Unlock()
+
+	if len(colsAdded.AddedCols) > 0 {
+		_, ok := df.AddColumns(colsAdded.AddedCols, false)
+		if !ok {
+			return false
+		}
+	}
+
+	for _, changed := range colsChanged {
+		if !df.ChangeColumn(changed.ChangedIndex, changed.ChangedType) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetColumns sets the columns
 func (df *Dataflow) AddColumns(newCols Columns, overwrite bool, exceptDs ...string) (added Columns, processOk bool) {
 	df.mux.Lock()
-	df.Columns, added = df.Columns.Add(newCols, overwrite)
+	mergedCols, colsAdded, _ := df.Columns.Merge(newCols, overwrite)
+
+	df.Columns = mergedCols
+	added = colsAdded.AddedCols
 	df.mux.Unlock()
 
 	if len(added) > 0 {
@@ -356,7 +397,9 @@ func (df *Dataflow) SyncColumns() {
 			maxLen := ds.Columns[i].Stats.MaxLen // old max length
 
 			// sync stats
-			ds.Columns[i].Stats = *ds.Sp.colStats[i]
+			if cs, ok := ds.Sp.colStats[i]; ok {
+				ds.Columns[i].Stats = *cs
+			}
 
 			// keep max len if greater (from manual column length spec)
 			if maxLen > ds.Columns[i].Stats.MaxLen {
@@ -410,7 +453,11 @@ func (df *Dataflow) SyncStats() {
 				continue
 			}
 
-			colStats := ds.Sp.colStats[j]
+			colStats, ok := ds.Sp.colStats[j]
+			if !ok {
+				continue
+			}
+
 			dfCols[i].Stats.TotalCnt = dfCols[i].Stats.TotalCnt + colStats.TotalCnt
 			dfCols[i].Stats.NullCnt = dfCols[i].Stats.NullCnt + colStats.NullCnt
 			dfCols[i].Stats.StringCnt = dfCols[i].Stats.StringCnt + colStats.StringCnt
@@ -533,10 +580,11 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 			// columns/buffer need to be populated
 			if len(df.Streams) > 0 {
 				// add new columns two-way if not exist
-				newCols, ok := df.AddColumns(ds.Columns, false)
+				g.Debug("%s => %s", ds.Metadata.StreamURL.Value, g.Marshal(ds.Columns.Types()))
+				ok := df.MergeColumns(ds.Columns, false)
 				if !ok {
-					// Could not run AddColumns process, queue for later
-					ds.schemaChgChan <- schemaChg{Added: true, Cols: newCols}
+					// Could not run MergeColumns process
+					g.Warn("could not merge columns...")
 				}
 
 				// add new columns two-way if not exist
@@ -544,7 +592,9 @@ func (df *Dataflow) PushStreamChan(dsCh chan *Datastream) {
 				ds.AddColumns(df.Columns, false)
 				df.mux.Unlock()
 			} else {
-				df.Columns = ds.Columns
+				if len(df.Columns) == 0 {
+					df.Columns = ds.Columns
+				}
 				df.Buffer = ds.Buffer
 			}
 

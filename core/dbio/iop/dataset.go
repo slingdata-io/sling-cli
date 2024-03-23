@@ -70,7 +70,9 @@ func NewDatasetFromMap(m map[string]interface{}) (data Dataset) {
 
 // SetColumns sets the columns
 func (data *Dataset) AddColumns(newCols Columns, overwrite bool) (added Columns) {
-	data.Columns, added = data.Columns.Add(newCols, overwrite)
+	mergedCols, colsAdded, _ := data.Columns.Merge(newCols, overwrite)
+	data.Columns = mergedCols
+	added = colsAdded.AddedCols
 	return added
 }
 
@@ -233,8 +235,8 @@ func (data *Dataset) SetFields(fields []string) {
 }
 
 // Append appends a new row
-func (data *Dataset) Append(row []interface{}) {
-	data.Rows = append(data.Rows, row)
+func (data *Dataset) Append(row ...[]any) {
+	data.Rows = append(data.Rows, row...)
 }
 
 // Stream returns a datastream of the dataset
@@ -482,11 +484,11 @@ func (data *Dataset) InferColumnTypes() {
 	data.Columns = InferFromStats(columns, data.SafeInference, data.NoDebug)
 
 	// overwrite if found in config.columns
-	data.Columns = data.Columns.Coerce(data.Sp.config.Columns, data.Sp.config.Header)
+	data.Columns = data.Columns.Coerce(data.Sp.Config.Columns, data.Sp.Config.Header)
 
 	data.Inferred = true
 }
 
 func looksLikeJson(s string) bool {
-	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
+	return s == "" || (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
 }

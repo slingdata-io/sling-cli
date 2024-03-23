@@ -1,0 +1,18 @@
+n	test_name	source_conn	source_stream	source_options	target_conn	target_object	mode	source_primary_key	source_update_key	target_options	options	env
+1	csv_pg_full_refresh		file://tests/files/test1.csv	{}	postgres	[schema].[table]	full-refresh			"{""adjust_column_type"":true, ""add_new_columns"":true, ""use_bulk"": true, ""table_keys"": { ""unique"": [ ""id"" ] }}"	{}	"{""validation_file"": ""file://tests/files/test1.csv"", ""validation_cols"": ""0,1,2,3,4,6""}"
+2	pg_file_csv	postgres	[schema].[table]	{}	[conn]	[folder]/files/[table].csv	full-refresh					
+3	pg_file_json	postgres	[schema].[table]	{}	[conn]	[folder]/files/[table].json	full-refresh					
+4	pg_file_parquet	postgres	[schema].[table]	{}	[conn]	[folder]/files/[table].parquet	full-refresh					
+5	pg_file_csv_many	postgres	[schema].[table]	{}	[conn]	[folder]/csv/*.csv	full-refresh			"{""file_max_rows"": 100}"		
+6	discover_root				[conn]		discover					"{""validation_contains"": ""[folder]/"", ""validation_not_contains"": ""[folder]/files/[table]"", ""validation_row_count"": "">0""}"
+7	discover_folder				[conn]	[folder]/files	discover					"{""validation_contains"": ""[folder]/files/"", ""validation_row_count"": ""1""}"
+8	discover_folder_files				[conn]	[folder]/files/	discover					"{""validation_contains"": ""[folder]/files/[table].csv,[folder]/files/[table].json,[folder]/files/[table].parquet"", ""validation_not_contains"": ""[folder]/files/[table].parquet/"", ""validation_row_count"": ""3""}"
+9	discover_folder_files_csv_wildcard				[conn]	[folder]/files/*.csv	discover					"{""validation_contains"": ""[folder]/files/[table].csv"", ""validation_row_count"": ""1""}"
+10	discover_filter				[conn]	[folder]/**/*[table].js*	discover					"{""recursive"": true, ""validation_contains"": ""[folder]/files/[table].json"", ""validation_row_count"": ""1""}"
+11	discover_file				[conn]	[folder]/files/[table].parquet	discover					"{""validation_contains"": ""create_dt"", ""validation_row_count"": ""11"", ""column_level"": true}"
+12	discover_csv_folder_files				[conn]	[folder]/csv/*.csv	discover					"{""validation_row_count"": "">5""}"
+13	discover_recursive				[conn]	[folder]	discover					"{""recursive"": true, ""validation_row_count"": "">5""}"
+14	csv_to_pg	[conn]	[folder]/files/[table].csv		postgres	[schema].[table]	full-refresh			"{""adjust_column_type"":true, ""add_new_columns"":true, ""use_bulk"": true, ""table_keys"": { ""unique"": [ ""id"" ] }}"		"{""validation_file"": ""file://tests/files/test1.csv"", ""validation_cols"": ""0,1,2,3,4,6""}"
+15	parquet_to_pg	[conn]	[folder]/files/[table].parquet		postgres	[schema].[table]	incremental		_sling_loaded_at			"{""validation_row_count"": ""2000""}"
+16	folder_to_pg	[conn]	[folder]/csv		postgres	[schema].[table]	full-refresh			"{""adjust_column_type"":true, ""add_new_columns"":true, ""use_bulk"": true, ""table_keys"": { ""unique"": [ ""id"" ] }}"		"{""validation_file"": ""file://tests/files/test1.csv"", ""validation_cols"": ""0,1,2,3,4,6""}"
+17	folder_files_to_pg	[conn]	[folder]/csv/		postgres	[schema].[table]	full-refresh			"{""adjust_column_type"":true, ""add_new_columns"":true, ""use_bulk"": true, ""table_keys"": { ""unique"": [ ""id"" ] }}"		"{""validation_file"": ""file://tests/files/test1.csv"", ""validation_cols"": ""0,1,2,3,4,6""}"

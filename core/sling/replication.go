@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -78,15 +79,29 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 	return rd.streamsOrdered
 }
 
-// HasStream returns true if the stream name exists
-func (rd ReplicationConfig) HasStream(name string) bool {
+// GetStream returns the stream if the it exists
+func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg ReplicationStreamConfig, found bool) {
 
-	for streamName := range rd.Streams {
+	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(name) {
-			return true
+			return streamName, *streamCfg, true
 		}
 	}
-	return false
+	return
+}
+
+// GetStream returns the stream if the it exists
+func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]ReplicationStreamConfig) {
+	streams = map[string]ReplicationStreamConfig{}
+	gc, err := glob.Compile(strings.ToLower(pattern))
+	for streamName, streamCfg := range rd.Streams {
+		if rd.Normalize(streamName) == rd.Normalize(pattern) {
+			streams[streamName] = *streamCfg
+		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
+			streams[streamName] = *streamCfg
+		}
+	}
+	return
 }
 
 // Normalize normalized the name
@@ -136,6 +151,20 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
 }
 
+func (rd *ReplicationConfig) AddStream(key string, cfg ReplicationStreamConfig) {
+	newCfg := ReplicationStreamConfig{}
+	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
+	rd.Streams[key] = &newCfg
+	rd.streamsOrdered = append(rd.streamsOrdered, key)
+}
+
+func (rd *ReplicationConfig) DeleteStream(key string) {
+	delete(rd.Streams, key)
+	rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
+		return v != key
+	})
+}
+
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
 
 	g.DebugLow("processing wildcards for %s", rd.Source)
@@ -163,6 +192,11 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 				return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
 			}
 
+			gc, err := glob.Compile(strings.ToLower(schemaT.Name))
+			if err != nil {
+				return g.Error(err, "could not parse pattern: %s", schemaT.Name)
+			}
+
 			for _, row := range data.Rows {
 				table := database.Table{
 					Schema:  schemaT.Schema,
@@ -170,27 +204,28 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 					Dialect: conn.GetType(),
 				}
 
-				if rd.HasStream(table.FullName()) {
-					continue
-				}
-
 				// add to stream map
-				if g.WildCardMatch(
-					strings.ToLower(table.FullName()),
-					[]string{strings.ToLower(schemaT.FullName())},
-				) {
-					newCfg := ReplicationStreamConfig{}
-					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-					rd.Streams[table.FullName()] = &newCfg
-					rd.streamsOrdered = append(rd.streamsOrdered, table.FullName())
+				if gc.Match(strings.ToLower(table.Name)) {
+
+					streamName, streamConfig, found := rd.GetStream(table.FullName())
+					if found {
+						// keep in step with order, delete and add again
+						rd.DeleteStream(streamName)
+						rd.AddStream(table.FullName(), streamConfig)
+						continue
+					}
+
+					cfg := rd.Streams[wildcardName]
+					if cfg != nil {
+						rd.AddStream(table.FullName(), *cfg)
+					} else {
+						rd.AddStream(table.FullName(), ReplicationStreamConfig{})
+					}
 				}
 			}
 
 			// delete * from stream map
-			delete(rd.Streams, wildcardName)
-			rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
-				return v != wildcardName
-			})
+			rd.DeleteStream(wildcardName)
 
 		}
 	}
@@ -208,31 +243,33 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	}
 
 	for _, wildcardName := range wildcardNames {
-		nameParts := strings.Split(wildcardName, "/")
-		lastPart := nameParts[len(nameParts)-1]
+		nodes, err := fs.ListRecursive(wildcardName)
+		if err != nil {
+			return g.Error(err, "could not list %s", wildcardName)
+		}
 
-		if strings.Contains(lastPart, "*") {
-			parent := strings.TrimSuffix(wildcardName, lastPart)
-
-			paths, err := fs.ListRecursive(parent)
-			if err != nil {
-				return g.Error(err, "could not list %s", parent)
+		added := 0
+		for _, node := range nodes {
+			streamName, streamConfig, found := rd.GetStream(node.URI)
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(node.URI, streamConfig)
+				continue
 			}
 
-			for _, path := range paths {
-				if g.WildCardMatch(path, []string{lastPart}) && !rd.HasStream(path) {
-					newCfg := ReplicationStreamConfig{}
-					g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-					rd.Streams[path] = &newCfg
-					rd.streamsOrdered = append(rd.streamsOrdered, path)
-				}
-			}
+			newCfg := ReplicationStreamConfig{}
+			g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
+			rd.Streams[node.URI] = &newCfg
+			rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			added++
+		}
 
-			// delete from stream map
-			delete(rd.Streams, wildcardName)
-			rd.streamsOrdered = lo.Filter(rd.streamsOrdered, func(v string, i int) bool {
-				return v != wildcardName && v != parent
-			})
+		// delete from stream map
+		rd.DeleteStream(wildcardName)
+
+		if added == 0 {
+			g.Debug("0 streams added for %#v (nodes=%d)", wildcardName, len(nodes))
 		}
 	}
 
@@ -387,13 +424,15 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 			for _, streamsNode := range streamsNodes {
 				key := cast.ToString(streamsNode.Key)
+				stream, found := config.Streams[key]
+
 				config.streamsOrdered = append(config.streamsOrdered, key)
 				if streamsNode.Value == nil {
 					continue
 				}
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
 					if cast.ToString(streamConfigNode.Key) == "source_options" {
-						if stream, ok := config.Streams[key]; ok {
+						if found {
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}

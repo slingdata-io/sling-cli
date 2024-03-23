@@ -6,6 +6,12 @@ type JobType string
 // ConnTest is for a connection test
 const ConnTest JobType = "conn-test"
 
+// ConnTest is for a connection discover
+const ConnDiscover JobType = "conn-discover"
+
+// ConnTest is for a connection exec
+const ConnExec JobType = "conn-exec"
+
 // DbToDb is from db to db
 const DbToDb JobType = "db-db"
 

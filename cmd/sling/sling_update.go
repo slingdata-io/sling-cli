@@ -26,9 +26,12 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	telemetryMap["downloaded"] = false
 
 	// get latest version number
-	checkUpdate()
+	checkUpdate(true)
 	if updateVersion == core.Version {
 		g.Info("Already up-to-date!")
+		return
+	} else if core.Version == "dev" {
+		g.Info("Using dev version!")
 		return
 	}
 
@@ -124,10 +127,10 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	return ok, nil
 }
 
-func checkUpdate() {
+func checkUpdate(force bool) {
 	if core.Version == "dev" {
 		return
-	} else if time.Now().Second()%4 != 0 {
+	} else if time.Now().Second()%4 != 0 && !force {
 		// a way to check/notify about a new version less frequently
 		return
 	}
@@ -171,7 +174,7 @@ func getSlingPackage() string {
 		slingPackage = "homebrew"
 	case strings.Contains(execFileName, "scoop"):
 		slingPackage = "scoop"
-	case strings.Contains(execFileName, "python"):
+	case strings.Contains(execFileName, "python") || strings.Contains(execFileName, "virtualenvs"):
 		slingPackage = "python"
 	default:
 		slingPackage = "binary"

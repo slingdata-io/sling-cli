@@ -25,8 +25,7 @@ func (conn *TrinoConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbTrino
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
 }

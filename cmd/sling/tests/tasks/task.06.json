@@ -1,1 +1,0 @@
-{"env":{},"mode":"full-refresh","options":{},"source":{"conn":"","options":{},"primary_key":[],"stream":"file:///tmp/ocral_test_1000.csv","update_key":""},"target":{"conn":"CLICKHOUSE","object":"default.test1k","options":{}}}

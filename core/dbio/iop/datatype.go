@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type Column struct {
 	Schema      string `json:"schema,omitempty"`
 	Database    string `json:"database,omitempty"`
 	Description string `json:"description,omitempty"`
+	FileURI     string `json:"file_uri,omitempty"`
 
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
@@ -157,11 +159,47 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 }
 
 // PrettyTable returns a text pretty table
-func (cols Columns) PrettyTable() (output string) {
+func (cols Columns) PrettyTable(includeParent bool) (output string) {
 	header := []string{"ID", "Column Name", "Native Type", "General Type"}
+	parentIsDB := false
+	parentIsFile := false
 	rows := lo.Map(cols, func(col Column, i int) []any {
+		if includeParent {
+			if col.Table != "" {
+				parentIsDB = true
+				return []any{col.Database, col.Schema, col.Table, col.Position, col.Name, col.DbType, col.Type}
+			} else if col.FileURI != "" {
+				parentIsFile = true
+				if col.DbType == "" {
+					col.DbType = "-"
+				}
+				return []any{col.FileURI, col.Position, col.Name, col.DbType, col.Type}
+			}
+		}
 		return []any{col.Position, col.Name, col.DbType, col.Type}
 	})
+
+	sort.Slice(rows, func(i, j int) bool {
+		val := func(r []any) string {
+			if parentIsDB {
+				return g.F("%s-%s-%s-%04d", r[0], r[1], r[2], r[3])
+			}
+			if parentIsFile {
+				return g.F("%s-%04d", r[0], r[1])
+			}
+			return g.F("%04d", r[0])
+		}
+		return val(rows[i]) < val(rows[j])
+	})
+
+	if includeParent {
+		if parentIsDB {
+			header = []string{"Database", "Schema", "Table", "ID", "Column", "Native Type", "General Type"}
+		}
+		if parentIsFile {
+			header = []string{"File", "ID", "Column", "Native Type", "General Type"}
+		}
+	}
 	return g.PrettyTable(header, rows)
 }
 
@@ -188,7 +226,7 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 				found = true
 			}
 		}
-		if !found {
+		if !found && !g.In(keyType, ClusterKey, PartitionKey, SortKey) {
 			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
 		}
 	}
@@ -507,37 +545,48 @@ func (cols Columns) GetColumn(name string) Column {
 	return colsMap[strings.ToLower(name)]
 }
 
-func (cols Columns) Add(newCols Columns, overwrite bool) (col2 Columns, added Columns) {
+func (cols Columns) Merge(newCols Columns, overwrite bool) (col2 Columns, added schemaChg, changed []schemaChg) {
+	added = schemaChg{Added: true}
+
 	existingIndexMap := cols.FieldMap(true)
 	for _, newCol := range newCols {
 		key := strings.ToLower(newCol.Name)
 		if i, ok := existingIndexMap[key]; ok {
+			col := cols[i]
 			if overwrite {
 				newCol.Position = i + 1
 				cols[i] = newCol
-			} else if cols[i].Type != newCol.Type && newCol.Stats.TotalCnt > newCol.Stats.NullCnt {
-				warn := true
+			} else if col.Type != newCol.Type && newCol.Stats.TotalCnt > newCol.Stats.NullCnt {
+				doChange := true
 				switch {
-				case newCol.Type.IsString() && !cols[i].Type.IsString():
-				case newCol.Type.IsNumber() && !cols[i].Type.IsNumber():
-				case newCol.Type.IsBool() && !cols[i].Type.IsBool():
-				case newCol.Type.IsDate() && !cols[i].Type.IsDate():
-				case newCol.Type.IsDatetime() && !cols[i].Type.IsDatetime():
+				case col.Type.IsString() && newCol.Stats.TotalCnt > newCol.Stats.NullCnt:
+					// leave as is
+					doChange = false
+				case col.Type == JsonType && g.In(newCol.Type, StringType, TextType):
+				case col.Type != DecimalType && newCol.Type == DecimalType:
+				case !g.In(col.Type, DecimalType, FloatType) && g.In(newCol.Type, DecimalType, FloatType):
+				case !col.Type.IsNumber() && newCol.Type.IsInteger():
+				case !col.Type.IsBool() && newCol.Type.IsBool():
+				case !col.Type.IsDate() && newCol.Type.IsDate():
+				case !col.Type.IsDatetime() && newCol.Type.IsDatetime():
 				default:
-					warn = false
+					doChange = false
 				}
 
-				if warn && g.IsDebugLow() {
-					g.Warn("Columns.Add Type mismatch for %s > %s != %s", newCol.Name, cols[i].Type, newCol.Type)
+				if doChange {
+					// g.Debug("Columns.Add Type mismatch for %s => %s != %s", newCol.Name, cols[i].Type, newCol.Type)
+					change := schemaChg{Added: false, ChangedIndex: i, ChangedType: newCol.Type}
+					changed = append(changed, change)
 				}
 			}
 		} else {
 			newCol.Position = len(cols)
 			cols = append(cols, newCol)
-			added = append(added, newCol)
+			added.AddedCols = append(added.AddedCols, newCol)
 		}
 	}
-	return cols, added
+
+	return cols, added, changed
 }
 
 // IsSimilarTo returns true if has same number of columns

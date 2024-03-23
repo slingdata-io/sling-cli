@@ -62,8 +62,7 @@ func (conn *BigQueryConn) Init() error {
 		conn.DatasetID = conn.GetProp("schema")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	err = conn.BaseConn.Init()
@@ -147,20 +146,9 @@ func (conn *BigQueryConn) Connect(timeOut ...int) error {
 	}
 
 	// get list of datasets
-	it := conn.Client.Datasets(conn.Context().Ctx)
-	for {
-		dataset, err := it.Next()
-		if err == iterator.Done {
-			err = nil
-			break
-		} else if err != nil {
-			return g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
-		}
-		conn.Datasets = append(conn.Datasets, dataset.DatasetID)
-		if conn.Location == "" {
-			md, _ := dataset.Metadata(conn.Context().Ctx)
-			conn.Location = md.Location
-		}
+	_, err = conn.GetSchemas()
+	if err != nil {
+		return g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
 	}
 
 	return conn.BaseConn.Connect()
@@ -247,9 +235,9 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 		res.TotalRows = it.TotalRows + res.TotalRows
 	}
 
-	if bp, cj := getBytesProcessed(it); bp > 0 {
-		g.DebugLow("BigQuery job %s (%d children) => Processed %d bytes", q.JobID, cj, bp)
-	}
+	// if bp, cj := getBytesProcessed(it); bp > 0 {
+	// 	g.DebugLow("BigQuery job %s (%d children) => Processed %d bytes", q.JobID, cj, bp)
+	// }
 
 	result = res
 
@@ -575,7 +563,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
@@ -598,11 +586,11 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s]", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)))
+		g.Debug("Loading %s [%s]", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
-		err := conn.CopyFromLocal(localFile.URI, table, localFile.Columns)
+		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.URI, tableFName))
+			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.Node.Path(), tableFName))
 		}
 	}
 
@@ -659,7 +647,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			g.LogError(err, "error writing dataflow to google storage: "+gcsPath)
@@ -683,11 +671,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 
 	copyFromGCS := func(gcsFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
-		g.Debug("Loading %s [%s]", gcsFile.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
+		g.Debug("Loading %s [%s]", gcsFile.Node.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
 
-		err := conn.CopyFromGCS(gcsFile.URI, table, gcsFile.Columns)
+		err := conn.CopyFromGCS(gcsFile.Node.URI, table, gcsFile.Columns)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.URI, tableFName))
+			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.Node.URI, tableFName))
 		}
 	}
 
@@ -750,12 +738,8 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 		return g.Error(err, "Error in task.Wait")
 	}
 
-	if status.Err() != nil {
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Import Task")
+	if err := status.Err(); err != nil {
+		return g.Error(err, "Error in Import Task")
 	}
 
 	return nil
@@ -801,12 +785,8 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 		return g.Error(err, "Error in task.Wait")
 	}
 
-	if status.Err() != nil {
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Import Task")
+	if err := status.Err(); err != nil {
+		return g.Error(err, "Error in Import Task")
 	}
 
 	return nil
@@ -840,15 +820,17 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	df, err = fs.ReadDataflow(gsURL)
+	fs.SetProp("header", "false")
+	fs.SetProp("format", "csv")
+	fs.SetProp("metadata", "{}")
+	df, err = fs.ReadDataflow(gsURL, filesys.FileStreamConfig{Columns: columns})
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)
 		return
 	}
 
 	// need to set columns so they match the source table
-	df.AddColumns(columns, true) // overwrite types so we don't need to infer
-	df.Inferred = df.Columns.Sourced()
+	df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
@@ -863,6 +845,8 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
+	unloadCtx := g.NewContext(conn.Context().Ctx)
+
 	doExport := func(table Table, gsPartURL string) {
 		defer conn.Context().Wg.Write.Done()
 
@@ -874,13 +858,14 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 
 		err = conn.CopyToGCS(table, gsPartURL)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Could not Copy to GS"))
+			unloadCtx.CaptureErr(g.Error(err, "Could not Copy to GS"))
 		}
 	}
 
 	gsFs, err := filesys.NewFileSysClient(dbio.TypeFileGoogle, conn.PropArr()...)
 	if err != nil {
-		conn.Context().CaptureErr(g.Error(err, "Unable to create GCS Client"))
+		err = g.Error(err, "Unable to create GCS Client")
+		return
 	}
 
 	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, filePathStorageSlug, cast.ToString(g.Now()))
@@ -894,7 +879,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 	}
 
 	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	err = unloadCtx.Err()
 
 	if err == nil {
 		g.Debug("Unloaded to %s", gsPath)
@@ -919,11 +904,8 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if table.IsQuery() || table.IsView {
-		if table.IsView && table.SQL == "" {
-			table.SQL = table.Select(0)
-		}
-		return conn.ExportToGCS(table.SQL, gcsURI)
+	if true || table.IsQuery() || table.IsView {
+		return conn.ExportToGCS(table.Select(0), gcsURI)
 	}
 
 	client, err := conn.getNewClient()
@@ -963,11 +945,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 			table.IsView = true
 			return conn.CopyToGCS(table, gcsURI)
 		}
-		conn.Context().CaptureErr(err)
-		for _, e := range status.Errors {
-			conn.Context().CaptureErr(*e)
-		}
-		return g.Error(conn.Context().Err(), "Error in Export Task")
+		return g.Error(err, "Error in Export Task")
 	}
 
 	g.Info("wrote to %s", gcsURI)
@@ -1048,6 +1026,27 @@ func (conn *BigQueryConn) GetDatabases() (iop.Dataset, error) {
 // GetSchemas returns schemas
 func (conn *BigQueryConn) GetSchemas() (iop.Dataset, error) {
 	// fields: [schema_name]
+
+	// get list of datasets
+	it := conn.Client.Datasets(conn.Context().Ctx)
+	conn.Datasets = []string{}
+	for {
+		dataset, err := it.Next()
+		if err == iterator.Done {
+			err = nil
+			break
+		} else if err != nil {
+			return iop.Dataset{}, g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
+		}
+		conn.Datasets = append(conn.Datasets, dataset.DatasetID)
+		if conn.Location == "" {
+			md, err := dataset.Metadata(conn.Context().Ctx)
+			if err == nil {
+				conn.Location = md.Location
+			}
+		}
+	}
+
 	data := iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
 	for _, dataset := range conn.Datasets {
 		data.Append([]interface{}{dataset})

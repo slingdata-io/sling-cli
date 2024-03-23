@@ -1,8 +1,0 @@
-source:
-  stream: file://tests/files/test1.2.csv
-
-target:
-  conn: DEMO_POSTGRES
-  object: public.test1
-
-mode: full-refresh

@@ -54,8 +54,7 @@ func (conn *MsSQLServerConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "true")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
@@ -496,7 +495,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 	go func() {
 		var bw int64
-		bw, err = azFs.WriteDataflowReady(df, azPath, fileReadyChn)
+		bw, err = azFs.WriteDataflowReady(df, azPath, fileReadyChn, iop.DefaultStreamConfig())
 		g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), azPath)
 
 		if err != nil {
@@ -509,7 +508,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 
 	doCopy := func(file filesys.FileReady) {
 		defer df.Context.Wg.Write.Done()
-		cnt, err := conn.CopyFromAzure(tableFName, file.URI)
+		cnt, err := conn.CopyFromAzure(tableFName, file.Node.URI)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "could not copy to azure dwh"))
 		} else {

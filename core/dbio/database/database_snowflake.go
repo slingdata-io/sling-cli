@@ -49,8 +49,16 @@ func (conn *SnowflakeConn) Init() error {
 		return g.Error("did not provide property `private_key_path` with authenticator=snowflake_jwt. See https://docs.slingdata.io/connections/database-connections/snowflake")
 	}
 
-	if m := conn.GetProp("CopyMethod"); m != "" {
-		conn.CopyMethod = conn.GetProp("CopyMethod")
+	if m := conn.GetProp("copy_method"); m != "" {
+		conn.CopyMethod = conn.GetProp("copy_method")
+	}
+
+	if val := cast.ToInt(conn.GetProp("max_chunk_download_workers")); val > 0 {
+		gosnowflake.MaxChunkDownloadWorkers = val
+	}
+
+	if val := conn.GetProp("custom_json_decoder_enabled"); val != "" {
+		gosnowflake.CustomJSONDecoderEnabled = cast.ToBool(val)
 	}
 
 	if kp := conn.GetProp("private_key_path"); kp != "" {
@@ -61,8 +69,7 @@ func (conn *SnowflakeConn) Init() error {
 		conn.SetProp("encoded_private_key", encPK)
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
@@ -188,7 +195,7 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		return df, g.Error("no table/query provided")
 	}
 
-	df = iop.NewDataflow()
+	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	columns, err := conn.GetSQLColumns(tables[0])
 	if err != nil {
@@ -232,13 +239,14 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 		return
 	}
 
-	df, err = fs.ReadDataflow(filePath)
+	fs.SetProp("header", "false")
+	fs.SetProp("format", "csv")
+	df, err = fs.ReadDataflow(filePath, filesys.FileStreamConfig{Columns: columns})
 	if err != nil {
 		err = g.Error(err, "Could not read "+filePath)
 		return
 	}
-	df.AddColumns(columns, true) // overwrite types so we don't need to infer
-	df.Inferred = true
+	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
 	df.Defer(func() { filesys.Delete(fs, filePath) })
 
 	return
@@ -690,7 +698,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			return
 		}
 
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))
@@ -711,17 +719,22 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 	doPut := func(file filesys.FileReady) (stageFilePath string) {
 		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-			defer os.Remove(file.URI)
+			defer os.Remove(file.Node.Path())
 		}
-		os.Chmod(file.URI, 0777) // make file readeable everywhere
-		err = conn.PutFile(file.URI, stageFolderPath)
+		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
+		err = conn.PutFile(file.Node.URI, stageFolderPath)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internalStage")))
 		}
-		pathArr := strings.Split(file.URI, "/")
+		pathArr := strings.Split(file.Node.Path(), "/")
 		fileName := pathArr[len(pathArr)-1]
 		stageFilePath = g.F("%s/%s", stageFolderPath, fileName)
 		return stageFilePath
+	}
+
+	doPutDone := func(file filesys.FileReady) {
+		defer context.Wg.Write.Done()
+		doPut(file)
 	}
 
 	doCopy := func(file filesys.FileReady) {
@@ -756,6 +769,39 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			df.Context.CaptureErr(err)
 		}
 	}
+	_ = doCopy
+
+	doCopyFolder := func() {
+
+		if df.Err() != nil {
+			return
+		}
+
+		tgtColumns := make([]string, len(df.Columns))
+		for i, name := range df.Columns.Names() {
+			colName, _ := ParseColumnName(name, conn.GetType())
+			tgtColumns[i] = conn.Quote(colName)
+		}
+
+		srcColumns := make([]string, len(df.Columns))
+		for i := range df.Columns {
+			srcColumns[i] = g.F("T.$%d", i+1)
+		}
+
+		sql := g.R(
+			conn.template.Core["copy_from_stage"],
+			"table", tableFName,
+			"tgt_columns", strings.Join(tgtColumns, ", "),
+			"src_columns", strings.Join(srcColumns, ", "),
+			"stage_path", stageFolderPath,
+		)
+		_, err = conn.Exec(sql)
+		if err != nil {
+			err = g.Error(err, "Error with COPY INTO")
+			df.Context.CaptureErr(err)
+		}
+	}
+	_ = doCopyFolder
 
 	for file := range fileReadyChn {
 		if df.Err() != nil || context.Err() != nil {
@@ -764,11 +810,14 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 		conn.Mux.Lock() // to not collide with schema change
 		context.Wg.Write.Add()
-		go doCopy(file)
+		go doPutDone(file) // when using doCopyFolder
+		// go doCopy(file)
 		conn.Mux.Unlock()
 	}
 
 	context.Wg.Write.Wait()
+
+	doCopyFolder()
 
 	if context.Err() != nil {
 		return 0, context.Err()
@@ -798,15 +847,15 @@ func (conn *SnowflakeConn) GetFile(internalStagePath, fPath string) (err error) 
 }
 
 // PutFile Copies a local file or folder into a staging location
-func (conn *SnowflakeConn) PutFile(fPath string, internalStagePath string) (err error) {
+func (conn *SnowflakeConn) PutFile(fileURI string, internalStagePath string) (err error) {
 	query := g.F(
-		"PUT 'file://%s' %s PARALLEL=1 AUTO_COMPRESS=FALSE",
-		fPath, internalStagePath,
+		"PUT '%s' %s PARALLEL=1 AUTO_COMPRESS=FALSE",
+		fileURI, internalStagePath,
 	)
 
 	_, err = conn.Exec(query)
 	if err != nil {
-		err = g.Error(err, "could not PUT file %s", fPath)
+		err = g.Error(err, "could not PUT file %s", fileURI)
 		return
 	}
 
@@ -824,12 +873,12 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 
 	sqlTempl := `
 	MERGE INTO {tgt_table} tgt
-	USING (SELECT *	FROM {src_table}) src
+	USING (SELECT {src_fields} FROM {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields})
+		INSERT ({insert_fields}) VALUES ({src_fields_values})
 	`
 
 	sql = g.R(
@@ -839,7 +888,8 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields", upsertMap["src_fields"],
+		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
 	)
 
 	return
@@ -911,6 +961,26 @@ func (conn *SnowflakeConn) GetViews(schema string) (data iop.Dataset, err error)
 	}
 
 	return data1.Pick("table_name"), nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+	srcDbType := strings.ToUpper(string(srcCol.DbType))
+	tgtDbType := strings.ToUpper(string(tgtCol.DbType))
+
+	switch {
+	case srcCol.IsString() && srcDbType != "VARIANT" && tgtDbType == "VARIANT":
+		selectStr = g.F("parse_json(%s::string) as %s", qName, qName)
+	case srcCol.IsString() && !tgtCol.IsString():
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case !srcCol.IsString() && tgtCol.IsString():
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
 
 func parseSnowflakeDataType(rec map[string]any) (dataType string, precision, scale int) {

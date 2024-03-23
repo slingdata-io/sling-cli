@@ -27,46 +27,32 @@ core:
 metadata:
 
   current_database:
-    select current_database()
     
-  databases: |
-    SELECT datname as name FROM pg_database
-
+  databases: 
+    
   schemas: |
     select schema_name
     from information_schema.schemata
-    where catalog_name = ( select current_catalog )
     order by schema_name
-
+    
   tables: |
     select table_name
     from information_schema.tables
     where table_type = 'BASE TABLE'
-      and table_catalog = ( select current_catalog )
       and table_schema = '{schema}'
     order by table_name
-
+    
   views: |
-    select * from (
-      select table_name
-      from information_schema.tables
-      where table_type in ('VIEW', 'FOREIGN')
-        and table_catalog = ( select current_catalog )
-        and table_schema = '{schema}'
-      
-      union
-
-      select matviewname as table_name
-      from pg_catalog.pg_matviews
-      where schemaname = '{schema}'
-    ) t
+    select table_name
+    from information_schema.tables
+    where table_type = 'VIEW'
+      and table_schema = '{schema}'
     order by table_name
 
   columns: |
-    select column_name, data_type, null as precision, null as scale
+    select column_name, data_type
     from information_schema.columns
-    where table_catalog = ( select current_catalog )
-      and table_schema = '{schema}'
+    where table_schema = '{schema}'
       and table_name = '{table}'
     order by ordinal_position
 
@@ -85,26 +71,7 @@ metadata:
              kcu.table_name,
              position
 
-  indexes: |
-    select
-      i.relname as index_name,
-      a.attname as column_name
-    from
-      pg_class t,
-      pg_class i,
-      pg_index ix,
-      pg_attribute a,
-      pg_namespace n
-    where
-      t.oid = ix.indrelid
-      and i.oid = ix.indexrelid
-      and n.oid = i.relnamespace
-      and a.attrelid = t.oid
-      and a.attnum = ANY(ix.indkey)
-      and n.nspname = '{schema}' and t.relname = '{table}'
-    order by
-      t.relname,
-      i.relname
+  indexes:
 
   columns_full: |
     with tables as (
@@ -113,9 +80,8 @@ metadata:
         table_schema,
         table_name,
         case table_type
-          when 'VIEW' then true
-          when 'FOREIGN' then true
-          else false
+          when 'VIEW' then 'true'
+          else 'false'
         end as is_view
       from information_schema.tables
       where table_schema = '{schema}' and table_name = '{table}'
@@ -134,25 +100,33 @@ metadata:
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
 
   schemata: |
+    with tables as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then 'true'
+          else 'false'
+        end as is_view
+      from information_schema.tables
+      where 1=1
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+    )
     select
-      s.nspname as schema_name,
-      t.relname as table_name,
-      case t.relkind
-        when 'r' then false
-        else true
-      end as is_view,
-      a.attname as column_name,
-      pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
-      a.attnum as position
-    from pg_attribute a
-      join pg_class t on a.attrelid = t.oid
-      join pg_namespace s on t.relnamespace = s.oid
-    where a.attnum > 0 
-      and not a.attisdropped
-      and t.relkind in ('r', 'v', 'm', 'f')
-      {{if .schema -}} and s.nspname = '{schema}' {{- end}}
-      {{if .tables -}} and t.relname in ({tables}) {{- end}}
-    order by s.nspname, t.relname, a.attnum
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      tables.is_view as is_view,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables
+      on tables.table_catalog = cols.table_catalog
+      and tables.table_schema = cols.table_schema
+      and tables.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
   
   row_count_estimates: |
     select 

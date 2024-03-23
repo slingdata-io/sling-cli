@@ -35,15 +35,14 @@ func (conn *PostgresConn) Init() error {
 	// also is slower than just select?
 	conn.BaseConn.SetProp("allow_bulk_export", "false")
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
 }
 
 // CopyToStdout Copy TO STDOUT
-func (conn *PostgresConn) CopyToStdout(sql string) (stdOutReader io.Reader, err error) {
+func (conn *PostgresConn) CopyToStdout(ctx *g.Context, sql string) (stdOutReader io.Reader, err error) {
 	var stderr bytes.Buffer
 	copyQuery := fmt.Sprintf(`\copy ( %s ) TO STDOUT WITH CSV HEADER`, sql)
 	copyQuery = strings.ReplaceAll(copyQuery, "\n", " ")
@@ -63,8 +62,7 @@ func (conn *PostgresConn) CopyToStdout(sql string) (stdOutReader io.Reader, err 
 					cmdStr, stderr.String(),
 				),
 			)
-			// FIXME: avoid using conn.Context().CaptureErr since it cancels all child contexts
-			conn.Context().CaptureErr(err)
+			ctx.CaptureErr(err)
 			g.LogError(err, "could not PG copy")
 		}
 	}()
@@ -101,13 +99,14 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 		return conn.StreamRows(table.Select(0), g.M("columns", table.Columns))
 	}
 
-	stdOutReader, err := conn.CopyToStdout(table.Select(0))
+	copyCtx := g.NewContext(conn.Context().Ctx)
+	stdOutReader, err := conn.CopyToStdout(&copyCtx, table.Select(0))
 	if err != nil {
 		return ds, err
 	}
 
 	csv := iop.CSV{Reader: stdOutReader}
-	ds, err = csv.ReadStream()
+	ds, err = csv.ReadStreamContext(copyCtx.Ctx)
 
 	return ds, err
 }

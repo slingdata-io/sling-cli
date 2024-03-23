@@ -46,8 +46,7 @@ func (conn *StarRocksConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "false")
 	}
 
-	var instance Connection
-	instance = conn
+	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
@@ -417,10 +416,6 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	}
 
 	localPath := path.Join(env.GetTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
-	err = filesys.Delete(fs, localPath)
-	if err != nil {
-		return count, g.Error(err, "Could not Delete: "+localPath)
-	}
 
 	// TODO: use reader to fead HTTP directly. Need to get proper redirected URL first.
 	// for ds := range df.StreamCh {
@@ -432,7 +427,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn)
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.DefaultStreamConfig())
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
 			return
@@ -469,12 +464,12 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
 		defer loadCtx.Wg.Write.Done()
-		g.Debug("loading %s [%s] %s", localFile.URI, humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
+		g.Debug("loading %s [%s] %s", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
-		defer os.Remove(localFile.URI)
-		reader, err := os.Open(localFile.URI)
+		defer os.Remove(localFile.Node.Path())
+		reader, err := os.Open(localFile.Node.Path())
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.URI))
+			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.Node.Path()))
 		}
 
 		timeout := 600
@@ -493,20 +488,20 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				redirectUrl, _ = url.Parse(redirectUrlStr)
 				g.Warn("StarRocks redirected the API call to '%s://%s'. Please use that as your FE url.", redirectUrl.Scheme, redirectUrl.Host)
 				conn.fePort = redirectUrl.Port()
-				reader, _ = os.Open(localFile.URI) // re-open file since it would be closed
+				reader, _ = os.Open(localFile.Node.Path()) // re-open file since it would be closed
 				_, respBytes, err = net.ClientDo(http.MethodPut, applyCreds(redirectUrl), reader, headers, timeout)
 			}
 		}
 
 		respString := strings.ReplaceAll(string(respBytes), "127.0.0.1", fu.U.Hostname())
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.URI, tableFName, respString))
+			df.Context.CaptureErr(g.Error(err, "Error loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 			df.Context.Cancel()
 		} else {
 			respMap, _ := g.UnmarshalMap(respString)
-			g.Debug("stream-load completed for %s => %s", localFile.URI, respString)
+			g.Debug("stream-load completed for %s => %s", localFile.Node.Path(), respString)
 			if cast.ToString(respMap["Status"]) == "Fail" {
-				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.URI, tableFName, respString))
+				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 				df.Context.Cancel()
 			}
 		}

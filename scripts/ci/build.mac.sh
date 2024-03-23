@@ -12,7 +12,7 @@ go mod tidy
 export VERSION=$1
 echo "VERSION -> $VERSION"
 sed -i '' "s/dev/$VERSION/g" core/version.go
-GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$PLAUSIBLE_URL'" -o sling-mac cmd/sling/*.go
+GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$SENTRY_DSN'" -o sling-mac cmd/sling/*.go
 
 ./sling-mac --version
 VERSION=$(./sling-mac --version | sed 's/Version: //')

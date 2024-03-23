@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
 	env "github.com/slingdata-io/sling-cli/core/dbio/env"
@@ -19,6 +18,7 @@ var (
 	HomeDirEnvFile = ""
 	Env            = &env.EnvFile{}
 	PlausibleURL   = ""
+	SentryDsn      = ""
 	NoColor        = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
 	OsStdErr       *os.File
 	StderrR        io.ReadCloser
@@ -48,6 +48,10 @@ func init() {
 	// other sources of creds
 	env.SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
 	env.SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
+
+	if SentryDsn == "" {
+		SentryDsn = os.Getenv("SENTRY_DSN")
+	}
 }
 
 func SetLogger() {
@@ -144,19 +148,33 @@ func GreenString(text string) string {
 	if NoColor {
 		return text
 	}
-	return color.GreenString(text)
+	return g.Colorize(g.ColorGreen, text)
 }
 
 func RedString(text string) string {
 	if NoColor {
 		return text
 	}
-	return color.RedString(text)
+	return g.Colorize(g.ColorRed, text)
 }
 
 func BlueString(text string) string {
 	if NoColor {
 		return text
 	}
-	return color.BlueString(text)
+	return g.Colorize(g.ColorBlue, text)
+}
+
+func CyanString(text string) string {
+	if NoColor {
+		return text
+	}
+	return g.Colorize(g.ColorCyan, text)
+}
+
+func DarkGrayString(text string) string {
+	if NoColor {
+		return text
+	}
+	return g.Colorize(g.ColorDarkGray, text)
 }

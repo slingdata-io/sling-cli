@@ -8,6 +8,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
 
@@ -38,14 +39,26 @@ func (fs *HTTPFileSysClient) Connect() (err error) {
 	return
 }
 
-func (fs *HTTPFileSysClient) cleanKey(key string) string {
-	if strings.HasPrefix(key, "/") {
-		key = key[1:]
+// Prefix returns the url prefix
+func (fs *HTTPFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://%s", fs.FsType().String(), fs.GetProp("host")) + strings.Join(suffix, "")
+}
+
+// GetPath returns the path of url
+func (fs *HTTPFileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+
+	host, path, err := ParseURL(uri)
+	if err != nil {
+		return
 	}
-	if strings.HasSuffix(key, "/") {
-		key = key[:len(key)-1]
+
+	if fs.GetProp("host") != host {
+		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.GetProp("host"))
 	}
-	return key
+
+	return path, err
 }
 
 func (fs *HTTPFileSysClient) doGet(url string) (resp *http.Response, err error) {
@@ -86,10 +99,10 @@ func (fs *HTTPFileSysClient) delete(path string) (err error) {
 }
 
 // List lists all urls on the page
-func (fs *HTTPFileSysClient) List(url string) (paths []string, err error) {
+func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
 
 	if strings.HasPrefix(url, "https://docs.google.com/spreadsheets/d") {
-		return []string{url}, nil
+		return dbio.FileNodes{{URI: url}}, nil
 	}
 
 	if strings.HasSuffix(url, "/") {
@@ -104,14 +117,14 @@ func (fs *HTTPFileSysClient) List(url string) (paths []string, err error) {
 	if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		// We have no easy way of determining if the url is a page with link
 		// or if the url is a body of data. Fow now, return url if not "text/html"
-		paths = append(paths, url)
+		nodes.Add(dbio.FileNode{URI: url})
 		return
 	}
 
 	// Load the HTML document
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return paths, g.Error(err, "could not parse HTTP body")
+		return nodes, g.Error(err, "could not parse HTTP body")
 	}
 	// html, _ := doc.Html()
 	// g.Trace("Html: " + html)
@@ -128,9 +141,9 @@ func (fs *HTTPFileSysClient) List(url string) (paths []string, err error) {
 		link, ok := s.Attr("href")
 		if ok {
 			if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
-				paths = append(paths, link)
+				nodes.Add(dbio.FileNode{URI: link})
 			} else {
-				paths = append(paths, urlParent+"/"+link)
+				nodes.Add(dbio.FileNode{URI: urlParent + "/" + link})
 			}
 		}
 	})
@@ -138,7 +151,7 @@ func (fs *HTTPFileSysClient) List(url string) (paths []string, err error) {
 }
 
 // ListRecursive lists all urls on the page
-func (fs *HTTPFileSysClient) ListRecursive(url string) (paths []string, err error) {
+func (fs *HTTPFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
 	return fs.List(url)
 }
 

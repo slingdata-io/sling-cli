@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	slingEnv "github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/denisenkom/go-mssqldb"
@@ -302,9 +302,9 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Init
 	conn.SetProp("orig_url", OrigURL)
-	conn.SetProp("dbio_conn_id", g.NewTsID("conn_"))
 	err = conn.Init()
 
+	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
 	return conn, err
 }
 
@@ -595,6 +595,8 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			if err != nil {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
+
+			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -675,6 +677,9 @@ func (conn *BaseConn) Close() error {
 	if conn.db != nil {
 		err = conn.db.Close()
 		conn.db = nil
+		if err == nil {
+			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+		}
 	}
 	if conn.sshClient != nil {
 		conn.sshClient.Close()
@@ -698,12 +703,12 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 
 	if strings.Contains(query, noDebugKey) {
 		if !noColor {
-			query = color.CyanString(query)
+			query = slingEnv.CyanString(query)
 		}
 		g.Trace(query, args...)
 	} else {
 		if !noColor {
-			query = color.CyanString(CleanSQL(conn, query))
+			query = slingEnv.CyanString(CleanSQL(conn, query))
 		}
 		g.Debug(query, args...)
 	}
@@ -1117,7 +1122,7 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...in
 	Res := Result{rowsAffected: 0}
 
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q) {
+	for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
 		res, err := conn.Self().ExecContext(ctx, sql, args...)
 		if err != nil {
 			eG.Capture(g.Error(err, "Error executing query"))
@@ -1148,34 +1153,42 @@ func (conn *BaseConn) MustExec(sql string, args ...interface{}) (result sql.Resu
 
 // Query runs a sql query, returns `result`, `error`
 func (conn *BaseConn) Query(sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
+	return conn.Self().QueryContext(conn.Context().Ctx, sql, options...)
+}
+
+// QueryContext runs a sql query with ctx, returns `result`, `error`
+func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data iop.Dataset, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		err = g.Error(err, "Could not reconnect")
 		return
 	}
 
-	ds, err := conn.Self().StreamRows(sql, options...)
-	if err != nil {
-		err = g.Error(err, "Error with StreamRows")
-		return iop.Dataset{SQL: sql}, err
+	for _, sql := range ParseSQLMultiStatements(sql, conn.Type) {
+
+		ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
+		if err != nil {
+			err = g.Error(err, "Error with StreamRows")
+			return iop.Dataset{SQL: sql}, err
+		}
+
+		if len(data.Columns) == 0 {
+			data, err = ds.Collect(0)
+			if err != nil {
+				return iop.Dataset{SQL: sql}, err
+			}
+		} else if len(data.Columns) == len(ds.Columns) {
+			dataNew, err := ds.Collect(0)
+			if err != nil {
+				return iop.Dataset{SQL: sql}, err
+			}
+			data.Append(dataNew.Rows...)
+		} else {
+			return iop.Dataset{SQL: sql}, g.Error("Multi-statement queries returned different number of columns")
+		}
+
 	}
 
-	data, err = ds.Collect(0)
-	data.SQL = sql
-	data.Duration = conn.Data.Duration // Collect does not time duration
-
-	return data, err
-}
-
-// QueryContext runs a sql query with ctx, returns `result`, `error`
-func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (iop.Dataset, error) {
-
-	ds, err := conn.Self().StreamRowsContext(ctx, sql, options...)
-	if err != nil {
-		return iop.Dataset{SQL: sql}, err
-	}
-
-	data, err := ds.Collect(0)
 	data.SQL = sql
 	data.Duration = conn.Data.Duration // Collect does not time duration
 
@@ -1730,12 +1743,11 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		}
 	}
 
+	currDatabase := conn.Type.String()
 	currDbData, err := conn.SumbitTemplate("single", conn.template.Metadata, "current_database", g.M())
-	if err != nil {
-		return schemata, g.Error(err, "Could not current database")
+	if err == nil {
+		currDatabase = cast.ToString(currDbData.FirstVal())
 	}
-
-	currDatabase := cast.ToString(currDbData.FirstVal())
 
 	schemaData, err := conn.SumbitTemplate(
 		"single", conn.template.Metadata, "schemata",
@@ -2405,9 +2417,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 		return conn.BulkExportFlowCSV(tables...)
 	}
 
-	ctx := g.NewContext(conn.Context().Ctx)
-	df = iop.NewDataflow()
-	df.Context = &ctx
+	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	dsCh := make(chan *iop.Datastream)
 
@@ -2455,7 +2465,8 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		return
 	}
 
-	df = iop.NewDataflow()
+	exportCtx := g.NewContext(conn.Context().Ctx)
+	df = iop.NewDataflowContext(exportCtx.Ctx)
 	dsCh := make(chan *iop.Datastream)
 
 	unload := func(table Table, pathPart string) {
@@ -2471,22 +2482,22 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArr()...)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Unable to create Local file sys Client"))
+			exportCtx.CaptureErr(g.Error(err, "Unable to create Local file sys Client"))
 			ds.Context.Cancel()
 			return
 		}
 
 		sqlDf, err := iop.MakeDataFlow(ds)
 		if err != nil {
-			conn.Context().CaptureErr(g.Error(err, "Unable to create data flow"))
+			exportCtx.CaptureErr(g.Error(err, "Unable to create data flow"))
 			ds.Context.Cancel()
 			return
 		}
 
 		go func() {
-			_, err := fs.Self().WriteDataflowReady(sqlDf, pathPart, fileReadyChn)
+			_, err := fs.Self().WriteDataflowReady(sqlDf, pathPart, fileReadyChn, iop.DefaultStreamConfig())
 			if err != nil {
-				conn.Context().CaptureErr(g.Error(err, "Unable to write to file: "+pathPart))
+				exportCtx.CaptureErr(g.Error(err, "Unable to write to file: "+pathPart))
 				ds.Context.Cancel()
 				return
 			}
@@ -2494,14 +2505,14 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 		for file := range fileReadyChn {
 			// when the file is ready, push to dataflow
-			nDs, err := iop.ReadCsvStream(file.URI)
+			nDs, err := iop.ReadCsvStream(file.Node.Path())
 			if err != nil {
-				conn.Context().CaptureErr(g.Error(err, "Unable to read stream: "+file.URI))
+				exportCtx.CaptureErr(g.Error(err, "Unable to read stream: "+file.Node.Path()))
 				ds.Context.Cancel()
 				df.Context.Cancel()
 				return
 			}
-			nDs.Defer(func() { os.RemoveAll(file.URI) })
+			nDs.Defer(func() { os.RemoveAll(file.Node.Path()) })
 			dsCh <- nDs
 		}
 	}
@@ -2902,7 +2913,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		return
 	}
 	fieldsMap := g.ArrMapString(fields, true)
-	g.Debug("comparing checksums %#v", tColumns.Types())
+	g.Debug("comparing checksums %s", g.Marshal(tColumns.Types()))
 
 	exprs := []string{}
 	colMap := lo.KeyBy(columns, func(c iop.Column) string { return strings.ToLower(c.Name) })
@@ -2972,7 +2983,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
-				eg.Add(g.Error("checksum failure for %s (sling-side vs db-side): %d != %d -- (%s)\n%#v", col.Name, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], data.Rows[0]))
+				eg.Add(g.Error("checksum failure for %s [%s | %s] (sling-side vs db-side): %d != %d -- (%s)\n%#v", col.Name, col.Type, col.DbType, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], data.Rows[0]))
 			}
 		}
 	}
@@ -3275,7 +3286,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
-func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
+func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) {
 	inQuote := false
 	inCommentLine := false
 	inCommentMulti := false
@@ -3283,6 +3294,11 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 	pChar := ""
 	nChar := ""
 	currState := ""
+
+	var dialect dbio.Type
+	if len(Dialect) > 0 {
+		dialect = Dialect[0]
+	}
 
 	inComment := func() bool {
 		return inCommentLine || inCommentMulti
@@ -3321,7 +3337,10 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 
 		// detect end
 		if char == ";" && !inQuote && !inComment() {
-			if strings.TrimSpace(currState) != "" {
+			if currState = strings.TrimSpace(currState); currState != "" {
+				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+					currState = strings.TrimSuffix(currState, ";")
+				}
 				sqls = append(sqls, currState)
 			}
 			currState = ""
@@ -3329,7 +3348,10 @@ func ParseSQLMultiStatements(sql string) (sqls g.Strings) {
 	}
 
 	if len(currState) > 0 {
-		if strings.TrimSpace(currState) != "" {
+		if currState = strings.TrimSpace(currState); currState != "" {
+			if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+				currState = strings.TrimSuffix(currState, ";")
+			}
 			sqls = append(sqls, currState)
 		}
 	}

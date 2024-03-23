@@ -30,6 +30,12 @@ func InitDB() {
 		return
 	}
 
+	err = Conn.Connect()
+	if err != nil {
+		g.Debug("could not connect to local .sling.db. %s", err.Error())
+		return
+	}
+
 	Db, err = Conn.GetGormConn(&gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

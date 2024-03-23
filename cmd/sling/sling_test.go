@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
+	"github.com/flarco/g/net"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	d "github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -26,20 +29,25 @@ import (
 )
 
 var testMux sync.Mutex
+var testContext = g.NewContext(context.Background())
+
+var ef = env.LoadSlingEnvFile()
+var ec = connection.EnvConns{EnvFile: &ef}
 
 type testDB struct {
 	name string
 	conn d.Connection
 }
 
-type testConn struct {
+type connTest struct {
 	name      string
 	schema    string
+	root      string
 	useBulk   *bool
 	adjustCol *bool
 }
 
-var dbConnMap = map[dbio.Type]testConn{
+var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbAzure:             {name: "azuresql"},
 	dbio.TypeDbAzureDWH:          {name: "azuredwh"},
 	dbio.TypeDbBigQuery:          {name: "bigquery"},
@@ -59,10 +67,18 @@ var dbConnMap = map[dbio.Type]testConn{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+
+	dbio.TypeFileLocal:  {name: "local"},
+	dbio.TypeFileSftp:   {name: "sftp"},
+	dbio.TypeFileAzure:  {name: "azure_storage"},
+	dbio.TypeFileS3:     {name: "aws_s3"},
+	dbio.TypeFileGoogle: {name: "google_storage"},
+	dbio.TypeFileFtp:    {name: "ftp_test_url"},
 }
 
 func init() {
 	env.InitLogger()
+	core.Version = "test"
 }
 
 func TestOptions(t *testing.T) {
@@ -152,7 +168,7 @@ func TestCfgPath(t *testing.T) {
 func TestExtract(t *testing.T) {
 	core.Version = "v1.0.43"
 
-	checkUpdate()
+	checkUpdate(true)
 	assert.NotEmpty(t, updateVersion)
 
 	printUpdateAvailable()
@@ -161,19 +177,32 @@ func TestExtract(t *testing.T) {
 	g.AssertNoError(t, err)
 }
 
-func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
-	conn, ok := dbConnMap[dbType]
+func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
+	defer time.Sleep(100 * time.Millisecond) // for log to flush
+
+	conn, ok := connMap[connType]
 	if !assert.True(t, ok) {
 		return
 	}
 
-	templateFilePath := "tests/suite.template.tsv"
-	tempFilePath := g.F("/tmp/tests.%s.tsv", dbType.String())
-	folderPath := g.F("tests/suite/%s", dbType.String())
+	templateFilePath := "tests/suite.db.template.tsv"
+	if connType.IsFile() {
+		templateFilePath = "tests/suite.file.template.tsv"
+	}
+
+	tempFilePath := g.F("/tmp/tests.%s.tsv", connType.String())
+	folderPath := g.F("tests/suite/%s", connType.String())
 	testSchema := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
-	testTable := g.F("test1k_%s", dbType.String())
+	testFolder := lo.Ternary(conn.schema == "", "sling_test", conn.schema)
+	testTable := g.F("test1k_%s", connType.String())
 	testWideFilePath, err := generateLargeDataset(300, 100, false)
 	g.LogFatal(err)
+
+	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) {
+		testFolder = g.F("/tmp/%s/sling_test", connType)
+	} else if g.In(connType, dbio.TypeFileFtp) {
+		testFolder = g.F("tmp/%s/sling_test", connType)
+	}
 
 	// generate files
 	os.RemoveAll(folderPath) // clean up
@@ -186,6 +215,7 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 	fileContent := string(filebytes)
 	fileContent = strings.ReplaceAll(fileContent, "[conn]", conn.name)
 	fileContent = strings.ReplaceAll(fileContent, "[schema]", testSchema)
+	fileContent = strings.ReplaceAll(fileContent, "[folder]", testFolder)
 	fileContent = strings.ReplaceAll(fileContent, "[table]", testTable)
 	fileContent = strings.ReplaceAll(fileContent, "[wide_file_path]", testWideFilePath)
 
@@ -251,7 +281,13 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 	time.Sleep(500 * time.Millisecond)
 	files, _ := g.ListDir(folderPath)
 
-	if tns := os.Getenv("TESTS"); tns != "" {
+	testNumbers := []int{}
+	tns := os.Getenv("TESTS")
+	if tns == "" && len(testSelect) > 0 {
+		tns = testSelect[0]
+	}
+
+	if tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
 				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
@@ -261,6 +297,12 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 						continue
 					}
 					testNumbers = append(testNumbers, i+1)
+				}
+			} else if parts := strings.Split(tn, "-"); len(parts) == 2 {
+				start := cast.ToInt(parts[0])
+				end := cast.ToInt(parts[1])
+				for testNumber := start; testNumber <= end; testNumber++ {
+					testNumbers = append(testNumbers, testNumber)
 				}
 			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
 				testNumbers = append(testNumbers, testNumber)
@@ -272,18 +314,22 @@ func testSuite(t *testing.T, dbType dbio.Type, testNumbers ...int) {
 		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
-		runOneTask(t, file, dbType)
+		runOneTask(t, file, connType)
 		if t.Failed() {
-			g.LogFatal(g.Error("Test `%s` Failed for => %s", file.Name, dbType))
+			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
+			testContext.Cancel()
+			return
 		}
 	}
 }
-func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
+
+func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
+	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
 	println()
 
 	bars := "---------------------------"
-	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, dbType, bars)
+	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, connType, bars)
 
 	cfg := &sling.Config{}
 	err := cfg.Unmarshal(file.FullPath)
@@ -291,6 +337,12 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 		return
 	}
 
+	if string(cfg.Mode) == "discover" {
+		testDiscover(t, cfg, connType)
+		return
+	}
+
+	g.Debug("task config => %s", g.Marshal(cfg))
 	task := sling.NewTask("", cfg)
 	if !g.AssertNoError(t, task.Err) {
 		return
@@ -308,27 +360,31 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 	}
 
 	// process PostSQL for different drop_view syntax
-	dbConn, err := task.Config.TgtConn.AsDatabase()
-	if err == nil {
-		table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
-		table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
-		if dbConn.GetType().DBNameUpperCase() {
-			table.Name = strings.ToUpper(table.Name)
+	if task.Config.TgtConn.Type.IsDb() {
+		dbConn, err := task.Config.TgtConn.AsDatabase()
+		if err == nil {
+			table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
+			if dbConn.GetType().DBNameUpperCase() {
+				table.Name = strings.ToUpper(table.Name)
+			}
+			viewName := table.FullName()
+			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
+			dropViewSQL = strings.TrimSpace(dropViewSQL)
+			task.Config.Target.Options.PreSQL = g.R(
+				task.Config.Target.Options.PreSQL,
+				"drop_view", dropViewSQL,
+			)
+			task.Config.Target.Options.PostSQL = g.R(
+				task.Config.Target.Options.PostSQL,
+				"drop_view", dropViewSQL,
+			)
 		}
-		viewName := table.FullName()
-		dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
-		dropViewSQL = strings.TrimSpace(dropViewSQL)
-		task.Config.Target.Options.PreSQL = g.R(
-			task.Config.Target.Options.PreSQL,
-			"drop_view", dropViewSQL,
-		)
-		task.Config.Target.Options.PostSQL = g.R(
-			task.Config.Target.Options.PostSQL,
-			"drop_view", dropViewSQL,
-		)
 	}
 
 	if g.AssertNoError(t, task.Err) {
+		taskContext := g.NewContext(testContext.Ctx)
+		task.Context = &taskContext
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			return
@@ -347,6 +403,12 @@ func runOneTask(t *testing.T, file g.FileItem, dbType dbio.Type) {
 			assert.EqualValues(t, task.GetCount(), count)
 			conn.Close()
 		}
+	}
+
+	if valRowCount := cast.ToInt(cfg.Env["validation_row_count"]); valRowCount > 0 {
+		conn, _ := task.Config.TgtConn.AsDatabase()
+		count, _ := conn.GetCount(task.Config.Target.Object)
+		assert.EqualValues(t, valRowCount, count)
 	}
 
 	// validate file
@@ -446,10 +508,10 @@ func TestSuiteDuckDb(t *testing.T) {
 	testSuite(t, dbio.TypeDbDuckDb)
 }
 
-// func TestSuiteMotherDuck(t *testing.T) {
-// 	t.Parallel()
-// 	testSuite(t, dbio.TypeDbMotherDuck)
-// }
+func TestSuiteMotherDuck(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5-10,16,22") // cannot add json type with version 0.9.2
+}
 
 func TestSuiteSQLServer(t *testing.T) {
 	t.Parallel()
@@ -474,12 +536,12 @@ func TestSuiteClickhouse(t *testing.T) {
 
 func TestSuiteTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, 1, 6, 12)
+	testSuite(t, dbio.TypeDbTrino, "1,3,10,16,22")
 }
 
 func TestSuiteMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, 6)
+	testSuite(t, dbio.TypeDbMongoDB, "10,22")
 }
 
 // generate large dataset or use cache
@@ -640,4 +702,204 @@ mode: full-refresh
 			g.AssertNoError(t, err)
 		}
 	}
+}
+
+func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
+
+	conn := connMap[connType]
+
+	opt := connection.DiscoverOptions{
+		Pattern:     cfg.Target.Object,
+		ColumnLevel: cast.ToBool(cfg.Env["column_level"]),
+		Recursive:   cast.ToBool(cfg.Env["recursive"]),
+	}
+
+	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
+		opt.Pattern = g.F("/tmp/%s/", connType)
+	}
+	if g.In(connType, dbio.TypeFileFtp) && opt.Pattern == "" {
+		opt.Pattern = g.F("tmp/%s/", connType)
+	}
+
+	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
+	files, schemata, err := ec.Discover(conn.name, &opt)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	valContains := strings.Split(cast.ToString(cfg.Env["validation_contains"]), ",")
+	valNotContains := strings.Split(cast.ToString(cfg.Env["validation_not_contains"]), ",")
+	valContains = lo.Filter(valContains, func(v string, i int) bool { return v != "" })
+	valNotContains = lo.Filter(valNotContains, func(v string, i int) bool { return v != "" })
+
+	valRowCount := cast.ToInt(cfg.Env["validation_row_count"])
+	valRowCountMin := -1
+	if val := cast.ToString(cfg.Env["validation_row_count"]); strings.HasPrefix(val, ">") {
+		valRowCountMin = cast.ToInt(strings.TrimPrefix(val, ">"))
+	}
+
+	containsMap := map[string]bool{}
+	for _, word := range append(valContains, valNotContains...) {
+		if word == "" {
+			continue
+		}
+		containsMap[word] = false
+	}
+
+	if connType.IsDb() {
+		tables := lo.Values(schemata.Tables())
+		columns := iop.Columns(lo.Values(schemata.Columns()))
+		if valRowCount > 0 {
+			if opt.ColumnLevel {
+				assert.Equal(t, valRowCount, len(columns), columns.Names())
+			} else {
+				assert.Equal(t, valRowCount, len(tables), lo.Keys(schemata.Tables()))
+			}
+		} else {
+			assert.Greater(t, len(tables), 0)
+		}
+
+		if valRowCountMin > -1 {
+			if opt.ColumnLevel {
+				assert.Greater(t, len(columns), valRowCountMin)
+			} else {
+				assert.Greater(t, len(tables), valRowCountMin)
+			}
+		}
+
+		if len(containsMap) > 0 {
+			resultType := "tables"
+
+			if opt.ColumnLevel {
+				resultType = "columns"
+				for _, col := range columns {
+					for word := range containsMap {
+						if strings.EqualFold(word, col.Name) {
+							containsMap[word] = true
+						}
+					}
+				}
+			} else {
+				for _, table := range tables {
+					for word := range containsMap {
+						if strings.EqualFold(word, table.Name) {
+							containsMap[word] = true
+						}
+					}
+				}
+			}
+
+			for _, word := range valContains {
+				found := containsMap[word]
+				assert.True(t, found, "did not find '%s' in %s for %s", word, resultType, connType)
+			}
+
+			for _, word := range valNotContains {
+				found := containsMap[word]
+				assert.False(t, found, "found '%s' in %s for %s", word, resultType, connType)
+			}
+		}
+	}
+
+	if connType.IsFile() {
+		g.Debug("returned into test: " + g.Marshal(files.Paths()))
+		// basic tests
+		assert.Greater(t, len(files), 0)
+		for _, uri := range files.URIs() {
+			u, err := net.NewURL(uri)
+			if !g.AssertNoError(t, err) {
+				break
+			}
+
+			if !g.In(connType, dbio.TypeFileSftp) {
+				if !assert.NotContains(t, strings.TrimPrefix(uri, u.U.Scheme+"://"), "//") {
+					break
+				}
+			}
+		}
+
+		if len(files) == 0 {
+			return
+		}
+
+		columns := iop.Columns(lo.Values(files.Columns()))
+
+		if valRowCount > 0 {
+			if opt.ColumnLevel {
+				assert.Equal(t, valRowCount, len(files[0].Columns), g.Marshal(files[0].Columns.Names()))
+			} else {
+				assert.Equal(t, valRowCount, len(files), g.Marshal(files.Paths()))
+			}
+		}
+
+		if valRowCountMin > -1 {
+			if opt.ColumnLevel {
+				assert.Greater(t, len(files[0].Columns), valRowCountMin)
+			} else {
+				assert.Greater(t, len(files), valRowCountMin)
+			}
+		}
+
+		if len(containsMap) > 0 {
+			resultType := "files"
+
+			if opt.ColumnLevel {
+				resultType = "columns"
+				for _, col := range columns {
+					for word := range containsMap {
+						if strings.EqualFold(word, col.Name) {
+							containsMap[word] = true
+						}
+					}
+				}
+			} else {
+				for _, file := range files {
+					for word := range containsMap {
+						if strings.Contains(file.URI, word) {
+							containsMap[word] = true
+						}
+					}
+				}
+			}
+
+			for _, word := range valContains {
+				found := containsMap[word]
+				assert.True(t, found, "did not find '%s' in %s for %s", word, resultType, connType)
+			}
+
+			for _, word := range valNotContains {
+				found := containsMap[word]
+				assert.False(t, found, "found '%s' in %s for %s", word, resultType, connType)
+			}
+		}
+	}
+
+	g.Info("valContains = %#v", valContains)
+	g.Info("valNotContains = %#v", valNotContains)
+	g.Info("containsMap = %#v", containsMap)
+}
+
+func TestSuiteFileS3(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileS3)
+}
+
+func TestSuiteFileGoogle(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileGoogle)
+}
+
+func TestSuiteFileAzure(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileAzure)
+}
+
+func TestSuiteFileLocal(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileLocal)
+}
+
+func TestSuiteFileSftp(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileSftp)
 }

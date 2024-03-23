@@ -40,7 +40,7 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten bool, jmespath s
 		sp:        NewStreamProcessor(),
 	}
 	if !flatten {
-		col := &Column{Position: 1, Name: "data", Type: JsonType}
+		col := &Column{Position: 1, Name: "data", Type: JsonType, FileURI: cast.ToString(js.ds.Metadata.StreamURL.Value)}
 		js.ColumnMap[col.Name] = col
 		js.addColumn(*col)
 		js.ds.Inferred = true
@@ -201,6 +201,7 @@ func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 					Name:     colName,
 					Type:     js.ds.Sp.GetType(newRec[colName]),
 					Position: len(js.ds.Columns) + len(colsToAdd) + 1,
+					FileURI:  cast.ToString(js.ds.Metadata.StreamURL.Value),
 				}
 				colsToAdd = append(colsToAdd, *col)
 				row = append(row, nil)

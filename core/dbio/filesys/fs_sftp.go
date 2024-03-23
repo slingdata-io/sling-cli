@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/flarco/g"
 	"github.com/pkg/sftp"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -31,6 +31,25 @@ func (fs *SftpFileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 	return fs.Connect()
+}
+
+// Prefix returns the url prefix
+func (fs *SftpFileSysClient) Prefix(suffix ...string) string {
+	return g.F("%s://%s", fs.FsType().String(), fs.GetProp("host")) + strings.Join(suffix, "")
+
+}
+
+// GetPath returns the path of url
+func (fs *SftpFileSysClient) GetPath(uri string) (path string, err error) {
+	// normalize, in case url is provided without prefix
+	uri = NormalizeURI(fs, uri)
+
+	_, path, err = ParseURL(uri)
+	if err != nil {
+		return
+	}
+
+	return path, err
 }
 
 // Connect initiates the Google Cloud Storage client
@@ -98,122 +117,130 @@ func (fs *SftpFileSysClient) Connect() (err error) {
 	return nil
 }
 
-func (fs *SftpFileSysClient) getPrefix() string {
-	return g.F(
-		"sftp://%s@%s:%s",
-		fs.GetProp("USER"),
-		fs.GetProp("HOST"),
-		fs.GetProp("PORT"),
-	)
-}
-
-func (fs *SftpFileSysClient) cleanKey(key string) string {
-	key = strings.TrimPrefix(key, "/")
-	key = strings.TrimSuffix(key, "/")
-	return key
-}
-
 // List list objects in path
-func (fs *SftpFileSysClient) List(url string) (paths []string, err error) {
-	_, path, err := ParseURL(url)
+func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
 		return
 	}
-	path = "/" + fs.cleanKey(path)
-
-	stat, err := fs.client.Stat(path)
-	if err != nil {
-		return paths, g.Error(err, "error stating path")
-	}
 
 	var files []os.FileInfo
-	if stat.IsDir() {
-		files, err = fs.client.ReadDir(path)
-		if err != nil {
-			return paths, g.Error(err, "error listing path")
+	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
+	if err == nil && (!stat.IsDir() || !strings.HasSuffix(path, "/")) {
+		node := dbio.FileNode{
+			URI:     g.F("%s%s", fs.Prefix("/"), path),
+			Updated: stat.ModTime().Unix(),
+			Size:    cast.ToUint64(stat.Size()),
+			IsDir:   stat.IsDir(),
 		}
-		path = path + "/"
-	} else {
-		paths = append(paths, g.F("%s%s", fs.getPrefix(), path))
+		nodes.Add(node)
 		return
 	}
 
-	for _, file := range files {
-		path := g.F("%s%s%s", fs.getPrefix(), path, file.Name())
-		paths = append(paths, path)
+	if path == "" {
+		path = "/"
+	} else if path != "/" {
+		path = strings.TrimSuffix(path, "/")
 	}
-	sort.Strings(paths)
+	files, err = fs.client.ReadDir(path)
+	if err != nil {
+		return nodes, g.Error(err, "error listing path: %#v", path)
+	}
+
+	if path == "/" {
+		path = ""
+	}
+
+	for _, file := range files {
+		node := dbio.FileNode{
+			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
+			Updated: file.ModTime().Unix(),
+			Size:    cast.ToUint64(file.Size()),
+			IsDir:   file.IsDir(),
+		}
+		nodes.Add(node)
+	}
 
 	return
 }
 
 // ListRecursive list objects in path recursively
-func (fs *SftpFileSysClient) ListRecursive(url string) (paths []string, err error) {
-	_, path, err := ParseURL(url)
+func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+	path, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+url)
+		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	path = "/" + fs.cleanKey(path)
-	ts := fs.GetRefTs()
 
-	stat, err := fs.client.Stat(path)
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
 	if err != nil {
-		return paths, g.Error(err, "error stating path")
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
 	}
+
+	ts := fs.GetRefTs().Unix()
 
 	var files []os.FileInfo
-	if stat.IsDir() {
-		files, err = fs.client.ReadDir(path)
-		if err != nil {
-			return paths, g.Error(err, "error listing path")
+	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
+	if err == nil {
+		node := dbio.FileNode{
+			URI:     g.F("%s%s", fs.Prefix("/"), path),
+			Updated: stat.ModTime().Unix(),
+			Size:    cast.ToUint64(stat.Size()),
+			IsDir:   stat.IsDir(),
 		}
-		path = path + "/"
-	} else {
-		paths = append(paths, g.F("%s%s", fs.getPrefix(), path))
-		return
+		nodes.Add(node)
+		if !stat.IsDir() {
+			return
+		}
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	files, err = fs.client.ReadDir(path)
+	if err != nil {
+		return nodes, g.Error(err, "error listing path: %#v", path)
 	}
 
 	for _, file := range files {
-		if ts.IsZero() || file.ModTime().IsZero() || file.ModTime().After(ts) {
-			path := g.F("%s%s%s", fs.getPrefix(), path, file.Name())
-			if file.IsDir() {
-				subPaths, err := fs.ListRecursive(path)
-				// g.P(subPaths)
-				if err != nil {
-					return []string{}, g.Error(err, "error listing sub path")
-				}
-				paths = append(paths, subPaths...)
-			} else {
-				paths = append(paths, path)
+		node := dbio.FileNode{
+			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
+			Updated: file.ModTime().Unix(),
+			Size:    cast.ToUint64(file.Size()),
+			IsDir:   file.IsDir(),
+		}
+
+		if file.IsDir() {
+			subNodes, err := fs.ListRecursive(node.Path() + "/")
+			if err != nil {
+				return nil, g.Error(err, "error listing sub path")
 			}
+			nodes.AddWhere(pattern, ts, subNodes...)
+		} else {
+			nodes.AddWhere(pattern, ts, node)
 		}
 	}
-	sort.Strings(paths)
 
 	return
 }
 
 // Delete list objects in path
 func (fs *SftpFileSysClient) delete(urlStr string) (err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return
 	}
-	path = "/" + fs.cleanKey(path)
-	paths, err := fs.ListRecursive(urlStr)
+	nodes, err := fs.ListRecursive(urlStr)
 	if err != nil {
 		return g.Error(err, "error listing path")
 	}
 
-	for _, sPath := range paths {
-		_, sPath, _ = ParseURL(sPath)
-		sPath = "/" + fs.cleanKey(sPath)
-		err = fs.client.Remove(sPath)
+	for _, sNode := range nodes {
+		sNode.URI, _ = fs.GetPath(sNode.URI)
+		err = fs.client.Remove(sNode.URI)
 		if err != nil {
-			return g.Error(err, "error deleting path "+sPath)
+			return g.Error(err, "error deleting path "+sNode.URI)
 		}
 	}
 
@@ -230,7 +257,7 @@ func (fs *SftpFileSysClient) MkdirAll(path string) (err error) {
 }
 
 func (fs *SftpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return
@@ -263,7 +290,7 @@ func (fs *SftpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, e
 
 // GetReader return a reader for the given path
 func (fs *SftpFileSysClient) GetReader(urlStr string) (reader io.Reader, err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return
@@ -296,7 +323,7 @@ func (fs *SftpFileSysClient) GetReader(urlStr string) (reader io.Reader, err err
 
 // GetWriter creates the file if non-existent and return a writer
 func (fs *SftpFileSysClient) GetWriter(urlStr string) (writer io.Writer, err error) {
-	_, path, err := ParseURL(urlStr)
+	path, err := fs.GetPath(urlStr)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+urlStr)
 		return

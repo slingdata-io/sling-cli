@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/gobwas/glob"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -40,15 +42,15 @@ func GetLocalConns(force ...bool) []ConnEntry {
 
 	connsMap := map[string]ConnEntry{}
 
-	// TODO: add local disk connection
-	// conn, _ := connection.NewConnection("LOCAL_DISK", dbio.TypeFileLocal, g.M("url", "file://."))
-	// c := Conn{
-	// 	Name:        "LOCAL_DISK",
-	// 	Description: dbio.TypeFileLocal.NameLong(),
-	// 	Source:      "built-in",
-	// 	Connection:  conn,
-	// }
-	// connsMap[c.Name] = c
+	// local disk connection
+	conn, _ := NewConnection("LOCAL", dbio.TypeFileLocal, g.M("type", "file"))
+	c := ConnEntry{
+		Name:        "LOCAL",
+		Description: dbio.TypeFileLocal.NameLong(),
+		Source:      "built-in",
+		Connection:  conn,
+	}
+	connsMap[c.Name] = c
 
 	// get dbt connections
 	dbtConns, err := ReadDbtConnections()
@@ -262,22 +264,20 @@ func (ec *EnvConns) List() string {
 }
 
 type DiscoverOptions struct {
-	Stream    string
-	Filter    string
-	Schema    string
-	Folder    string
-	Recursive bool
-	discover  bool
+	Pattern     string `json:"pattern,omitempty"`
+	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
+	Recursive   bool   `json:"recursive,omitempty"`
+	discover    bool
 }
 
-func (ec *EnvConns) Discover(name string, opt DiscoverOptions) (streamNames []string, schemata database.Schemata, err error) {
+func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
 	opt.discover = true
-	_, streamNames, schemata, err = ec.testDiscover(name, opt)
+	_, nodes, schemata, err = ec.testDiscover(name, opt)
 	return
 }
 
 func (ec *EnvConns) Test(name string) (ok bool, err error) {
-	ok, _, _, err = ec.testDiscover(name, DiscoverOptions{})
+	ok, _, _, err = ec.testDiscover(name, &DiscoverOptions{})
 	return
 }
 
@@ -291,17 +291,36 @@ func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 	return
 }
 
-func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, streamNames []string, schemata database.Schemata, err error) {
-	discover := opt.discover
-	stream := opt.Stream
-	schema := opt.Schema
-	folder := opt.Folder
-	filter := opt.Filter
-	recursive := opt.Recursive
+func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, nodes dbio.FileNodes, schemata database.Schemata, err error) {
+
+	patterns := []string{}
+	globPatterns := []glob.Glob{}
+
+	parsePattern := func() {
+		if opt.Pattern != "" {
+			patterns = []string{}
+			globPatterns = []glob.Glob{}
+			for _, f := range strings.Split(opt.Pattern, ",") {
+				patterns = append(patterns, f)
+				gc, err := glob.Compile(f)
+				if err == nil {
+					globPatterns = append(globPatterns, gc)
+				}
+			}
+		}
+	}
+
+	parsePattern()
+
+	if opt.Pattern != "" && len(patterns) == 1 {
+		if strings.Contains(opt.Pattern, "**") || strings.Contains(opt.Pattern, "*/*") {
+			opt.Recursive = true
+		}
+	}
 
 	conn, ok1 := ec.GetConnEntry(name)
 	if !ok1 || name == "" {
-		return ok, streamNames, schemata, g.Error("Invalid Connection name: %s", name)
+		return ok, nodes, schemata, g.Error("Invalid Connection name: %s", name)
 	}
 
 	switch {
@@ -309,78 +328,146 @@ func (ec *EnvConns) testDiscover(name string, opt DiscoverOptions) (ok bool, str
 	case conn.Connection.Type.IsDb():
 		dbConn, err := conn.Connection.AsDatabase()
 		if err != nil {
-			return ok, streamNames, schemata, g.Error(err, "could not initiate %s", name)
+			return ok, nodes, schemata, g.Error(err, "could not initiate %s", name)
 		}
 		err = dbConn.Connect()
 		if err != nil {
-			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
+			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
-		if discover {
-			if stream != "" {
-				table, err := database.ParseTableName(stream, dbConn.GetType())
-				if err != nil {
-					return ok, streamNames, schemata, g.Error(err, "could not parse table name %s", stream)
+
+		if opt.discover {
+			var table database.Table
+			if opt.Pattern != "" {
+				table, _ = database.ParseTableName(opt.Pattern, dbConn.GetType())
+				if strings.Contains(table.Schema, "*") {
+					table.Schema = ""
 				}
-				schema = table.Schema
-				stream = table.Name
+				if strings.Contains(table.Name, "*") {
+					table.Name = ""
+				}
 			}
-			schemata, err = dbConn.GetSchemata(schema, stream)
+			g.Debug("database discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "schema", table.Schema, "table", table.Name, "column_level", opt.ColumnLevel)))
+
+			schemata, err = dbConn.GetSchemata(table.Schema, table.Name)
 			if err != nil {
-				return ok, streamNames, schemata, g.Error(err, "could not discover %s", name)
+				return ok, nodes, schemata, g.Error(err, "could not discover %s", name)
 			}
-			for _, table := range schemata.Tables() {
-				streamNames = append(streamNames, table.FullName())
+
+			if opt.ColumnLevel {
+				g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
+				if len(schemata.Columns()) <= 10 {
+					g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
+				}
+			} else {
+				g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
+				if len(schemata.Tables()) <= 10 {
+					g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
+				}
+			}
+
+			// apply filter
+			if len(patterns) > 0 {
+				schemata = schemata.Filtered(opt.ColumnLevel, patterns...)
 			}
 		}
 
 	case conn.Connection.Type.IsFile():
 		fileClient, err := conn.Connection.AsFile()
 		if err != nil {
-			return ok, streamNames, schemata, g.Error(err, "could not initiate %s", name)
+			return ok, nodes, schemata, g.Error(err, "could not initiate %s", name)
 		}
 		err = fileClient.Init(context.Background())
 		if err != nil {
-			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
+			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
 		url := conn.Connection.URL()
-		if folder != "" {
-			if !strings.HasPrefix(folder, string(fileClient.FsType())+"://") {
-				return ok, streamNames, schemata, g.Error("need to use proper URL for folder path. Example -> %s/my-folder", url)
-			}
-			url = folder
+		if opt.Pattern != "" {
+			url = opt.Pattern
 		}
 
-		if recursive {
-			streamNames, err = fileClient.ListRecursive(url)
+		if strings.Contains(url, "*") {
+			opt.Pattern = url
+			url = filesys.GetDeepestParent(url)
+			parsePattern()
+		}
+
+		g.Debug("file discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "url", url, "column_level", opt.ColumnLevel, "recursive", opt.Recursive)))
+		if opt.Recursive {
+			nodes, err = fileClient.ListRecursive(url)
 		} else {
-			streamNames, err = fileClient.List(url)
+			nodes, err = fileClient.List(url)
 		}
 		if err != nil {
-			return ok, streamNames, schemata, g.Error(err, "could not connect to %s", name)
+			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
+		}
+		g.Debug("unfiltered nodes returned: %d", len(nodes))
+		if len(nodes) <= 10 {
+			g.Debug(g.Marshal(nodes.Paths()))
+		}
+
+		// apply filter
+		if opt.discover {
+			// sort alphabetically
+			nodes.Sort()
+			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
+				if len(patterns) == 0 || !strings.Contains(opt.Pattern, "*") {
+					return true
+				}
+				for _, gf := range globPatterns {
+					if gf.Match(n.Path()) {
+						return true
+					}
+				}
+				return false
+			})
+
+			// if single file, get columns of file content
+			if opt.ColumnLevel {
+				ctx := g.NewContext(fileClient.Context().Ctx, 5)
+
+				getColumns := func(i int) {
+					defer ctx.Wg.Read.Done()
+					node := nodes[i]
+
+					df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
+					if err != nil {
+						ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
+						return
+					}
+
+					// discard rows, just need columns
+					for stream := range df.StreamCh {
+						for range stream.Rows() {
+						}
+					}
+
+					// get columns
+					nodes[i].Columns = df.Columns
+				}
+
+				for i := range nodes {
+					ctx.Wg.Read.Add()
+					go getColumns(i)
+
+					if i+1 >= 15 {
+						g.Warn("limiting the number of read ops for files (15 files already read)")
+						break
+					}
+				}
+				ctx.Wg.Read.Wait()
+
+				if err = ctx.Err(); err != nil {
+					return ok, nodes, schemata, g.Error(err, "could not read files")
+				}
+			}
 		}
 
 	default:
-		return ok, streamNames, schemata, g.Error("Unhandled connection type: %s", conn.Connection.Type)
+		return ok, nodes, schemata, g.Error("Unhandled connection type: %s", conn.Connection.Type)
 	}
 
-	if discover {
-		// sort alphabetically
-		sort.Slice(streamNames, func(i, j int) bool {
-			return streamNames[i] < streamNames[j]
-		})
-
-		filters := strings.Split(filter, ",")
-		streamNames = lo.Filter(streamNames, func(n string, i int) bool {
-			return filter == "" || g.IsMatched(filters, n)
-		})
-		if len(streamNames) > 0 && conn.Connection.Type.IsFile() &&
-			folder == "" {
-			g.Warn("Those are non-recursive folder or file names (at the root level). Please use --folder flag to list sub-folders")
-		}
-	} else {
-		ok = true
-	}
+	ok = true
 
 	return
 }

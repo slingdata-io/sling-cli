@@ -233,7 +233,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	options := t.sourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
-	if cfg.SrcConn.URL() != "" {
+	if uri := cfg.SrcConn.URL(); uri != "" {
 		// construct props by merging with options
 		options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 		props := append(
@@ -241,14 +241,14 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			g.MapToKVArr(g.ToMapString(options))...,
 		)
 
-		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, cfg.SrcConn.URL(), props...)
+		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)
 		if err != nil {
 			err = g.Error(err, "Could not obtain client for %s ", cfg.SrcConn.Type)
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Columns: cfg.Source.Select, Limit: cfg.Source.Limit()}
-		df, err = fs.ReadDataflow(cfg.SrcConn.URL(), fsCfg)
+		fsCfg := filesys.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		df, err = fs.ReadDataflow(uri, fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
 			return t.df, err

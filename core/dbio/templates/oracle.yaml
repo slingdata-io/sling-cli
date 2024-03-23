@@ -73,6 +73,8 @@ core:
 
 metadata:
   current_database: select name from V$database
+  
+  databases: select name from V$database
 
   schemas: |
     select username as schema_name
@@ -157,44 +159,42 @@ metadata:
     order by col.owner, col.table_name, col.column_id
 
   schemata: |
-    select * from (
-      (select
-        col.owner as schema_name,
-        col.table_name as table_name,
-        case
-          when views.view_name is null then 'false'
-          else 'true'
-        end as is_view,
-        col.column_name as column_name,
-        col.data_type as data_type,
-        col.column_id as position
-      from sys.all_tab_columns col 
-      left join sys.all_views views
-        on views.owner = col.owner
-        and views.view_name = col.table_name
-      where 1=1
-        {{if .schema -}} and col.owner = '{schema}' {{- end}}
-        {{if .tables -}} and table_name in ({tables}) {{- end}}
-      )
+    select
+      col.owner as schema_name,
+      col.table_name as table_name,
+      case
+        when views.view_name is null then 'false'
+        else 'true'
+      end as is_view,
+      col.column_name as column_name,
+      col.data_type as data_type,
+      col.column_id as position
+    from sys.all_tab_columns col 
+    left join sys.all_views views
+      on views.owner = col.owner
+      and views.view_name = col.table_name
+    where 1=1
+      {{if .schema -}} and col.owner = '{schema}' {{- end}}
+      {{if .tables -}} and table_name in ({tables}) {{- end}}
+    order by col.owner, col.table_name, col.column_id
 
-      union all
+    ;
 
-      (select
-        syn.owner as schema_name,
-        syn.synonym_name as table_name,
-        'false' as is_view,
-        col.column_name as column_name,
-        col.data_type as data_type,
-        col.column_id as position
-      from sys.all_tab_columns col
-      inner join sys.all_synonyms syn
-        on syn.table_owner = col.owner
-        and syn.table_name = col.table_name
-      where 1=1
-        {{if .schema -}} and syn.owner = '{schema}' {{- end}}
-        {{if .tables -}} and syn.synonym_name in ({tables}) {{- end}})
-    )
-    order by 1, 2, position
+    select
+      syn.owner as schema_name,
+      syn.synonym_name as table_name,
+      'false' as is_view,
+      col.column_name as column_name,
+      col.data_type as data_type,
+      col.column_id as position
+    from sys.all_tab_columns col
+    inner join sys.all_synonyms syn
+      on syn.table_owner = col.owner
+      and syn.table_name = col.table_name
+    where 1=1
+      {{if .schema -}} and syn.owner = '{schema}' {{- end}}
+      {{if .tables -}} and syn.synonym_name in ({tables}) {{- end}}
+    order by syn.owner, syn.synonym_name, col.column_id
   
   sessions:
     select s.sid, s.serial# as serial,

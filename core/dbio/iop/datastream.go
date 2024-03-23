@@ -49,7 +49,7 @@ type Datastream struct {
 	closed        bool
 	empty         bool
 	it            *Iterator
-	config        *streamConfig
+	config        *StreamConfig
 	df            *Dataflow
 	bwRows        chan []any // for correct byte written
 	readyChn      chan struct{}
@@ -63,10 +63,10 @@ type Datastream struct {
 }
 
 type schemaChg struct {
-	I     int
-	Type  ColumnType
-	Added bool
-	Cols  Columns
+	ChangedIndex int
+	ChangedType  ColumnType
+	Added        bool
+	AddedCols    Columns
 }
 
 type KeyValue struct {
@@ -137,7 +137,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		Columns:       columns,
 		Context:       &context,
 		Sp:            NewStreamProcessor(),
-		config:        &streamConfig{EmptyAsNull: true, Header: true},
+		config:        &StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
 		bwRows:        make(chan []any, 100),
@@ -192,7 +192,7 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 		configMap[strings.ToLower(k)] = configMap[k]
 	}
 	ds.Sp.SetConfig(configMap)
-	ds.config = ds.Sp.config
+	ds.config = ds.Sp.Config
 
 	// set metadata
 	if metadata, ok := configMap["metadata"]; ok {
@@ -204,7 +204,7 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 func (ds *Datastream) GetConfig() (configMap map[string]string) {
 	// lower the keys
 	configMapI := g.M()
-	g.JSONConvert(ds.Sp.config, &configMapI)
+	g.JSONConvert(ds.Sp.Config, &configMapI)
 	return g.ToMapString(configMapI)
 }
 
@@ -316,8 +316,15 @@ func (ds *Datastream) Close() {
 
 // SetColumns sets the columns
 func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns) {
-	ds.Columns, added = ds.Columns.Add(newCols, overwrite)
-	ds.schemaChgChan <- schemaChg{Added: true, Cols: newCols}
+	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
+	ds.Columns = mergedCols
+	added = colsAdded.AddedCols
+
+	ds.schemaChgChan <- colsAdded
+	for _, change := range colsChanged {
+		ds.schemaChgChan <- change
+	}
+
 	return added
 }
 
@@ -340,7 +347,7 @@ func (ds *Datastream) ChangeColumn(i int, newType ColumnType) {
 
 	g.Debug("column type change for %s (%s to %s)", ds.Columns[i].Name, oldType, newType)
 	setChangedType(&ds.Columns[i], newType)
-	ds.schemaChgChan <- schemaChg{I: i, Type: newType}
+	ds.schemaChgChan <- schemaChg{ChangedIndex: i, ChangedType: newType}
 }
 
 func setChangedType(col *Column, newType ColumnType) {
@@ -395,6 +402,13 @@ func (ds *Datastream) SetFields(fields []string) {
 	for i, field := range fields {
 		ds.Columns[i].Name = field
 		ds.Columns[i].Position = i + 1
+	}
+}
+
+// SetFileURI sets the FileURI of the columns of the Datastream
+func (ds *Datastream) SetFileURI() {
+	for i := range ds.Columns {
+		ds.Columns[i].FileURI = cast.ToString(ds.Metadata.StreamURL.Value)
 	}
 }
 
@@ -483,12 +497,12 @@ loop:
 		sampleData.NoDebug = ds.NoDebug
 		sampleData.SafeInference = ds.SafeInference
 		sampleData.Sp.dateLayouts = ds.Sp.dateLayouts
-		sampleData.Sp.config = ds.Sp.config
+		sampleData.Sp.Config = ds.Sp.Config
 		sampleData.InferColumnTypes()
 		ds.Columns = sampleData.Columns
 		ds.Inferred = true
-	} else if len(ds.Sp.config.Columns) > 0 {
-		ds.Columns = ds.Columns.Coerce(ds.Sp.config.Columns, true)
+	} else if len(ds.Sp.Config.Columns) > 0 {
+		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true)
 	}
 
 	// set to have it loop process
@@ -639,13 +653,13 @@ loop:
 						ds.CurrentBatch.Close()
 
 						if schemaChgVal.Added {
-							g.DebugLow("adding columns %s", g.Marshal(schemaChgVal.Cols.Types()))
-							if _, ok := df.AddColumns(schemaChgVal.Cols, false, ds.ID); !ok {
+							// g.DebugLow("adding columns %s", g.Marshal(schemaChgVal.AddedCols.Types()))
+							if _, ok := df.AddColumns(schemaChgVal.AddedCols, false, ds.ID); !ok {
 								ds.schemaChgChan <- schemaChgVal // requeue to try adding again
 							}
 						} else {
 							// g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
-							if !df.ChangeColumn(schemaChgVal.I, schemaChgVal.Type, ds.ID) {
+							if !df.ChangeColumn(schemaChgVal.ChangedIndex, schemaChgVal.ChangedType, ds.ID) {
 								ds.schemaChgChan <- schemaChgVal // requeue to try changing again
 							}
 						}
@@ -736,7 +750,7 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 	}
 
 	decoder := json.NewDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -756,7 +770,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	}
 
 	decoder := xml.NewDecoder(reader2)
-	js := NewJSONStream(ds, decoder, ds.Sp.config.Flatten, ds.Sp.config.Jmespath)
+	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 
 	err = ds.Start()
@@ -778,11 +792,11 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	}
 
 	// set delimiter
-	ds.config.Delimiter = string(c.Delimiter)
+	// ds.config.Delimiter = string(c.Delimiter)
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("csv stream provided is empty")
+		g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
 		ds.SetReady()
 		ds.Close()
 		return nil
@@ -831,6 +845,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	}
 
 	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
 
 	err = ds.Start()
 	if err != nil {
@@ -853,6 +868,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 	ds.Columns = p.Columns()
 	ds.Inferred = ds.Columns.Sourced()
 	ds.it = ds.NewIterator(ds.Columns, p.nextFunc)
+	ds.SetFileURI()
 
 	err = ds.Start()
 	if err != nil {
@@ -899,6 +915,7 @@ func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) 
 	ds.Columns = a.Columns()
 	ds.Inferred = ds.Columns.Sourced()
 	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
+	ds.SetFileURI()
 
 	err = ds.Start()
 	if err != nil {
@@ -945,6 +962,7 @@ func (ds *Datastream) ConsumeSASReaderSeeker(reader io.ReadSeeker) (err error) {
 	ds.Columns = s.Columns()
 	ds.Inferred = false
 	ds.it = ds.NewIterator(ds.Columns, s.nextFunc)
+	ds.SetFileURI()
 
 	err = ds.Start()
 	if err != nil {

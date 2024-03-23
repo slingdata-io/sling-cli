@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
@@ -133,10 +132,6 @@ func (cfg *Config) SetDefault() {
 		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
-
-	case !g.In(cfg.TgtConn.Type, dbio.TypeDbTrino, dbio.TypeDbRedshift, dbio.TypeDbBigQuery, dbio.TypeDbSnowflake) && cfg.Target.Options.AdjustColumnType == nil:
-		// set AdjustColumnType to true for all others
-		cfg.Target.Options.AdjustColumnType = g.Bool(true)
 	}
 
 	// set vars
@@ -216,7 +211,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	// add config path
-	if _, err := os.Stat(cfgStr); err == nil && !cfg.ReplicationMode {
+	if g.PathExists(cfgStr) && !cfg.ReplicationMode {
 		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
@@ -250,7 +245,11 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		cfg.Mode = FullRefreshMode
+		if cfg.Source.PrimaryKeyI != nil || cfg.Source.UpdateKey != "" {
+			cfg.Mode = IncrementalMode
+		} else {
+			cfg.Mode = FullRefreshMode
+		}
 	}
 
 	validMode := g.In(cfg.Mode, FullRefreshMode, IncrementalMode, BackfillMode, SnapshotMode, TruncateMode)
@@ -422,6 +421,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = *c.Connection.Copy()
+		} else if connType := connection.SchemeType(cfg.Target.Conn); !connType.IsUnknown() {
+			cfg.TgtConn, err = connection.NewConnectionFromURL(connType.String(), cfg.Target.Conn)
+			if err != nil {
+				return g.Error(err, "could not init target connection")
+			}
 		} else if !strings.Contains(cfg.Target.Conn, "://") && cfg.Target.Conn != "" && cfg.TgtConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Target.Conn)
 		} else if cfg.TgtConn.Data == nil {
@@ -440,14 +444,14 @@ func (cfg *Config) Prepare() (err error) {
 		if err != nil {
 			return g.Error(err, "could not format target object name")
 		}
-	} else if cast.ToString(cfg.Target.Data["url"]) == "" {
-		if !connection.SchemeType(cfg.Target.Conn).IsUnknown() {
-			cfg.Target.Data["url"] = cfg.Target.Conn
-		} else if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
-			// object is not url, but relative path
-			prefix := strings.TrimSuffix(cfg.TgtConn.URL(), "/")
-			path := "/" + strings.TrimPrefix(cfg.Target.Object, "/")
-			cfg.Target.Data["url"] = prefix + path
+	} else {
+		if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
+			fc, err := cfg.TgtConn.AsFile()
+			if err != nil {
+				return g.Error(err, "could not init file connection")
+			}
+			// object is not url, but relative path, needs to be normalized
+			cfg.Target.Data["url"] = filesys.NormalizeURI(fc, cfg.Target.Object)
 		}
 	}
 
@@ -475,6 +479,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = *c.Connection.Copy()
+		} else if connType := connection.SchemeType(cfg.Source.Conn); !connType.IsUnknown() {
+			cfg.SrcConn, err = connection.NewConnectionFromURL(connType.String(), cfg.Source.Conn)
+			if err != nil {
+				return g.Error(err, "could not init source connection")
+			}
 		} else if !strings.Contains(cfg.Source.Conn, "://") && cfg.Source.Conn != "" && cfg.SrcConn.Data == nil {
 			return g.Error("could not find connection %s", cfg.Source.Conn)
 		} else if cfg.SrcConn.Data == nil {
@@ -490,14 +499,15 @@ func (cfg *Config) Prepare() (err error) {
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
-	} else if cast.ToString(cfg.Source.Data["url"]) == "" {
-		if !connection.SchemeType(cfg.Source.Conn).IsUnknown() {
-			cfg.Source.Data["url"] = cfg.Source.Conn
-		} else if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
+	} else {
+		if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			prefix := strings.TrimSuffix(cfg.SrcConn.URL(), "/")
-			path := "/" + strings.TrimPrefix(cfg.Source.Stream, "/")
-			cfg.Source.Data["url"] = prefix + path
+			fc, err := cfg.SrcConn.AsFile()
+			if err != nil {
+				return g.Error(err, "could not init file connection")
+			}
+			// object is not url, but relative path, needs to be normalized
+			cfg.Source.Data["url"] = filesys.NormalizeURI(fc, cfg.Source.Stream)
 		}
 	}
 
@@ -682,50 +692,38 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
-		url, err := net.NewURL(cfg.Source.Stream)
-		if err != nil {
-			return m, g.Error(err, "could not parse source stream url")
-		}
+		uri := cfg.SrcConn.URL()
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		filePath := strings.TrimPrefix(url.Path(), "/")
-		pathArr := strings.Split(strings.TrimSuffix(url.Path(), "/"), "/")
+		fc, err := cfg.SrcConn.AsFile()
+		if err != nil {
+			return m, g.Error(err, "could not init source conn as file")
+		}
+
+		filePath, err := fc.GetPath(uri)
+		if err != nil {
+			return m, g.Error(err, "could not parse file path")
+		}
+		if filePath != "" {
+			m["stream_file_path"] = cleanUp(filePath)
+		}
+
+		pathArr := strings.Split(strings.TrimPrefix(strings.TrimSuffix(filePath, "/"), "/"), "/")
 		fileName := pathArr[len(pathArr)-1]
+		m["stream_file_name"] = cleanUp(fileName)
+
 		fileFolder := ""
 		if len(pathArr) > 1 {
 			fileFolder = pathArr[len(pathArr)-2]
+			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
 		}
 
 		switch cfg.SrcConn.Type {
 		case dbio.TypeFileS3, dbio.TypeFileGoogle:
 			m["source_bucket"] = cfg.SrcConn.Data["bucket"]
-			if fileFolder != "" {
-				m["stream_file_folder"] = cleanUp(fileFolder)
-			}
-			m["stream_file_name"] = cleanUp(fileName)
 		case dbio.TypeFileAzure:
 			m["source_account"] = cfg.SrcConn.Data["account"]
 			m["source_container"] = cfg.SrcConn.Data["container"]
-			if fileFolder != "" {
-				m["stream_file_folder"] = cleanUp(fileFolder)
-			}
-			m["stream_file_name"] = cleanUp(fileName)
-			filePath = strings.TrimPrefix(cleanUp(filePath), cast.ToString(m["source_container"])+"_")
-		case dbio.TypeFileLocal:
-			path := strings.TrimPrefix(cfg.Source.Stream, "file://")
-			path = strings.ReplaceAll(path, `\`, `/`)
-			path = strings.TrimSuffix(path, "/")
-			pathArr = strings.Split(path, "/")
-
-			fileName = pathArr[len(pathArr)-1]
-			fileFolder = lo.Ternary(len(pathArr) > 1, pathArr[len(pathArr)-2], "")
-
-			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
-			m["stream_file_name"] = cleanUp(strings.TrimPrefix(fileName, "/"))
-			filePath = cleanUp(strings.TrimPrefix(path, "/"))
-		}
-		if filePath != "" {
-			m["stream_file_path"] = cleanUp(filePath)
 		}
 
 		if fileNameArr := strings.Split(fileName, "."); len(fileNameArr) > 1 {
@@ -1042,11 +1040,12 @@ var TargetDBOptionsDefault = TargetOptions{
 		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
 		0,
 	),
-	UseBulk:        g.Bool(true),
-	AddNewColumns:  g.Bool(true),
-	DatetimeFormat: "auto",
-	MaxDecimals:    g.Int(-1),
-	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
+	UseBulk:          g.Bool(true),
+	AddNewColumns:    g.Bool(true),
+	AdjustColumnType: g.Bool(false),
+	DatetimeFormat:   "auto",
+	MaxDecimals:      g.Int(-1),
+	ColumnCasing:     (*ColumnCasing)(g.String(string(SourceColumnCasing))),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
