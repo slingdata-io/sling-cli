@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"errors"
 	"math"
 	"math/big"
 	"os"
@@ -77,14 +78,14 @@ func NewStreamProcessor() *StreamProcessor {
 	sp.parseFuncs = map[string]func(s string) (interface{}, error){
 		"int": func(s string) (interface{}, error) {
 			if hasZeroPrefix(s) {
-				return s, g.Error("number has zero prefix, treat as string")
+				return s, errors.New("number has zero prefix, treat as string")
 			}
 			// return fastfloat.ParseInt64(s)
 			return strconv.ParseInt(s, 10, 64)
 		},
 		"float": func(s string) (interface{}, error) {
 			if hasZeroPrefix(s) {
-				return s, g.Error("number has zero prefix, treat as string")
+				return s, errors.New("number has zero prefix, treat as string")
 			}
 			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		},
