@@ -34,9 +34,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
   test-windows:
     # runs-on: [self-hosted, Windows]
