@@ -252,7 +252,6 @@ jobs:
     # runs-on: ubuntu-20.04
     runs-on: [self-hosted, Linux, X64, ubuntu-16]
     needs: [ release-linux-arm64 ] # for multi-platform docker image
-    # runs-on: [self-hosted, Linux]
     timeout-minutes: 20
 
     steps:
