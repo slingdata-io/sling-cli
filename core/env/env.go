@@ -112,10 +112,12 @@ func InitLogger() {
 	StderrR, StdErrW, _ = os.Pipe()
 	// os.Stderr = StdErrW
 
+	StderrR2 := io.TeeReader(StderrR, os.Stderr)
+
 	SetLogger()
 
 	if StderrR != nil {
-		StderrReader := bufio.NewReader(StderrR)
+		StderrReader := bufio.NewReader(StderrR2)
 
 		go func() {
 			buf := make([]byte, 4*1024)
@@ -123,7 +125,6 @@ func InitLogger() {
 				nr, err := StderrReader.Read(buf)
 				if err == nil && nr > 0 {
 					text := string(buf[0:nr])
-					print(text)
 					if StdErrChn != nil {
 						StdErrChn <- text
 					}
