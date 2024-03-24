@@ -175,7 +175,28 @@ func (data *Dataset) Print(limit int) {
 	}
 }
 
-func (data *Dataset) PrettyTable() (output string) {
+func (data *Dataset) PrettyTable(fields ...string) (output string) {
+	if len(fields) > 0 {
+		fieldMap := data.Columns.FieldMap(true)
+		colIndexes := []int{}
+		names := []string{}
+		for _, field := range fields {
+			if i, ok := fieldMap[strings.ToLower(field)]; ok {
+				colIndexes = append(colIndexes, i)
+				names = append(names, field)
+			}
+		}
+
+		rows := make([][]any, len(data.Rows))
+		for i, row0 := range data.Rows {
+			row := make([]any, len(colIndexes))
+			for ii, index := range colIndexes {
+				row[ii] = row0[index]
+			}
+			rows[i] = row
+		}
+		return g.PrettyTable(names, rows)
+	}
 	return g.PrettyTable(data.Columns.Names(), data.Rows)
 }
 

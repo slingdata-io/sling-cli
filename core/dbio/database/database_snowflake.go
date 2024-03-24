@@ -795,11 +795,12 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			"src_columns", strings.Join(srcColumns, ", "),
 			"stage_path", stageFolderPath,
 		)
-		_, err = conn.Exec(sql)
+		data, err := conn.Query(sql)
 		if err != nil {
 			err = g.Error(err, "Error with COPY INTO")
 			df.Context.CaptureErr(err)
 		}
+		g.Debug("\n" + data.PrettyTable("file", "status", "rows_loaded", "errors_seen"))
 	}
 	_ = doCopyFolder
 
