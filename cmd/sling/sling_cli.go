@@ -500,7 +500,8 @@ func setSentry() {
 			}
 
 			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
-			event.Message = event.Exception[0].Value
+			bars := "--------------------------------------------------------"
+			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telemetryMap)
 			event.Exception[0].Value = g.F("%s (%s)", exception.LastCaller(), taskType)
 
 			scope.SetUser(sentry.User{ID: machineID})

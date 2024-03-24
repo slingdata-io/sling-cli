@@ -637,6 +637,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
+			telemetryMap["conn_keys"] = lo.Keys(conn.Connection.Data)
 		}
 
 		ok, err = ec.Test(name)
