@@ -288,9 +288,13 @@ func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
 	for i := range row {
 		if columns[i].Type == iop.DecimalType {
 			sVal := cast.ToString(row[i])
-			val, err := decimal.NewFromString(sVal)
-			if !g.LogError(err, "could not convert value `%s` for clickhouse decimal", sVal) {
-				row[i] = val
+			if sVal != "" {
+				val, err := decimal.NewFromString(sVal)
+				if !g.LogError(err, "could not convert value `%s` for clickhouse decimal", sVal) {
+					row[i] = val
+				}
+			} else {
+				row[i] = nil
 			}
 		} else if columns[i].Type == iop.FloatType {
 			row[i] = cast.ToFloat64(row[i])
