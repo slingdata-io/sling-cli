@@ -386,7 +386,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	// clean up selectStreams
-	matchedStreams := map[string]sling.ReplicationStreamConfig{}
+	matchedStreams := map[string]*sling.ReplicationStreamConfig{}
 	for _, selectStream := range selectStreams {
 		for key, val := range replication.MatchStreams(selectStream) {
 			key = replication.Normalize(key)

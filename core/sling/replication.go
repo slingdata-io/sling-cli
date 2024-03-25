@@ -80,25 +80,25 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 }
 
 // GetStream returns the stream if the it exists
-func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg ReplicationStreamConfig, found bool) {
+func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *ReplicationStreamConfig, found bool) {
 
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(name) {
-			return streamName, *streamCfg, true
+			return streamName, streamCfg, true
 		}
 	}
 	return
 }
 
 // GetStream returns the stream if the it exists
-func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]ReplicationStreamConfig) {
-	streams = map[string]ReplicationStreamConfig{}
+func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
+	streams = map[string]*ReplicationStreamConfig{}
 	gc, err := glob.Compile(strings.ToLower(pattern))
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
-			streams[streamName] = *streamCfg
+			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
-			streams[streamName] = *streamCfg
+			streams[streamName] = streamCfg
 		}
 	}
 	return
@@ -151,7 +151,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
 }
 
-func (rd *ReplicationConfig) AddStream(key string, cfg ReplicationStreamConfig) {
+func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
 	rd.Streams[key] = &newCfg
@@ -216,11 +216,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 					}
 
 					cfg := rd.Streams[wildcardName]
-					if cfg != nil {
-						rd.AddStream(table.FullName(), *cfg)
-					} else {
-						rd.AddStream(table.FullName(), ReplicationStreamConfig{})
-					}
+					rd.AddStream(table.FullName(), cfg)
 				}
 			}
 
