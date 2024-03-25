@@ -588,7 +588,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		var totalAffected int64
 		for i, query := range queries {
 			if len(queries) > 1 {
-				g.Info("executing query #%d", i+1)
+				if strings.HasPrefix(query, "file://") {
+					g.Info("executing query #%d (%s)", i+1, query)
+				} else {
+					g.Info("executing query #%d", i+1)
+				}
 			} else {
 				g.Info("executing query")
 			}
