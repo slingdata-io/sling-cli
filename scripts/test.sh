@@ -43,6 +43,8 @@ sling conns discover POSTGRES -s 'public.*'
 sling conns discover local
 
 sling run -r cmd/sling/tests/replications/r.05.yaml
+sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
+
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
 SLING_STREAM_CNT=10 sling run -r cmd/sling/tests/replications/r.07.yaml
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml
