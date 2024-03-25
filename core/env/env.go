@@ -173,6 +173,13 @@ func CyanString(text string) string {
 	return g.Colorize(g.ColorCyan, text)
 }
 
+func MagentaString(text string) string {
+	if NoColor {
+		return text
+	}
+	return g.Colorize(g.ColorMagenta, text)
+}
+
 func DarkGrayString(text string) string {
 	if NoColor {
 		return text

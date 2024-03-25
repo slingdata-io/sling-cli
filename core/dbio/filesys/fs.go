@@ -1145,7 +1145,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 				continue
 			}
 
-			g.Debug("%s, processing reader from %s", ds.ID, path)
+			g.Debug("processing reader from %s", path)
 
 			ds.Context.Wg.Read.Add()
 

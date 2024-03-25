@@ -490,6 +490,13 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
+			g.Info(env.RedString(err.Error()))
+			if eh := sling.ErrorHelper(err); eh != "" {
+				env.Println("")
+				env.Println(env.MagentaString(eh))
+				env.Println("")
+			}
+
 			errors[i] = g.Error(err, "error for stream %s", name)
 			eG.Capture(err, streamsOrdered[i])
 		} else {
