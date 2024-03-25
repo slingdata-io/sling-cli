@@ -488,7 +488,11 @@ func setSentry() {
 	if telemetry {
 		g.SentryRelease = g.F("sling@%s", core.Version)
 		g.SentryDsn = env.SentryDsn
-		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) {
+		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) bool {
+			if exception.Err == "context canceled" {
+				return false
+			}
+
 			// set transaction
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
@@ -499,10 +503,12 @@ func setSentry() {
 				event.Transaction = g.F(targetType)
 			}
 
-			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
 			bars := "--------------------------------------------------------"
 			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telemetryMap)
-			event.Exception[0].Value = g.F("%s (%s)", exception.LastCaller(), taskType)
+
+			e := event.Exception[0]
+			event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
+			event.Exception[0].Value = g.F("%s [%s]", exception.LastCaller(), exception.CallerStackMD5())
 
 			scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {
@@ -522,6 +528,8 @@ func setSentry() {
 					scope.SetTag("project_id", projectID)
 				}
 			}
+
+			return true
 		}
 		g.SentryInit()
 	}
