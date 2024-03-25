@@ -169,6 +169,7 @@ type FileType string
 const FileTypeNone FileType = ""
 const FileTypeCsv FileType = "csv"
 const FileTypeXml FileType = "xml"
+const FileTypeExcel FileType = "xlsx"
 const FileTypeJson FileType = "json"
 const FileTypeParquet FileType = "parquet"
 const FileTypeAvro FileType = "avro"
@@ -304,38 +305,6 @@ func GetDeepestParent(path string) string {
 	return strings.Join(parentParts, "/")
 }
 
-func getExcelStream(fs FileSysClient, reader io.Reader) (ds *iop.Datastream, err error) {
-	xls, err := NewExcelFromReader(reader)
-	if err != nil {
-		err = g.Error(err, "Unable to open Excel File from reader")
-		return nil, err
-	}
-	xls.Props = fs.Client().properties
-
-	sheetName := fs.GetProp("sheet")
-	sheetRange := ""
-
-	if sheetName == "" {
-		sheetName = xls.Sheets[0]
-	} else if sheetNameArr := strings.Split(sheetName, "!"); len(sheetNameArr) == 2 {
-		sheetName = sheetNameArr[0]
-		sheetRange = sheetNameArr[1]
-	}
-
-	if sheetRange != "" {
-		data, err := xls.GetDatasetFromRange(sheetName, sheetRange)
-		if err != nil {
-			err = g.Error(err, "Unable to get range data for %s!%s", sheetName, sheetRange)
-			return nil, err
-		}
-		ds = data.Stream()
-	} else {
-		data := xls.GetDataset(sheetName)
-		ds = data.Stream()
-	}
-	return ds, nil
-}
-
 ////////////////////// BASE
 
 // BaseFileSysClient is the base file system type.
@@ -440,37 +409,6 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 	ds.Metadata.StreamURL.Value = urlStr
 	ds.SetConfig(fs.Props())
 
-	if strings.Contains(strings.ToLower(urlStr), ".xlsx") {
-		g.Debug("reading datastream from %s", urlStr)
-		reader, err := fs.Self().GetReader(urlStr)
-		if err != nil {
-			err = g.Error(err, "Error getting Excel reader")
-			return ds, err
-		}
-
-		// Wait for reader to start reading or err
-		for {
-			// Try peeking
-			if b := bufio.NewReader(reader).Size(); b > 0 {
-				// g.P(b)
-				break
-			}
-
-			if fs.Context().Err() != nil {
-				// has errorred
-				return ds, fs.Context().Err()
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-
-		eDs, err := getExcelStream(fs.Self(), reader)
-		if err != nil {
-			err = g.Error(err, "Error consuming Excel reader")
-			return ds, err
-		}
-		return eDs, nil
-	}
-
 	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
 	if string(fileFormat) == "" {
 		fileFormat = InferFileFormat(urlStr)
@@ -522,6 +460,8 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 			err = ds.ConsumeAvroReader(reader)
 		case FileTypeSAS:
 			err = ds.ConsumeSASReader(reader)
+		case FileTypeExcel:
+			err = ds.ConsumeExcelReader(reader, fs.properties)
 		case FileTypeCsv:
 			err = ds.ConsumeCsvReader(reader)
 		default:
@@ -603,33 +543,6 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 
 // WriteDataflow writes a dataflow to a file sys.
 func (fs *BaseFileSysClient) WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error) {
-	// handle excel file here, generate reader
-	if strings.Contains(strings.ToLower(url), ".xlsx") {
-		xls := NewExcel()
-
-		sheetName := fs.GetProp("sheet")
-		if sheetName == "" {
-			sheetName = "Sheet1"
-		}
-
-		err = xls.WriteSheet(sheetName, iop.MergeDataflow(df), "overwrite")
-		if err != nil {
-			err = g.Error(err, "error writing to excel file")
-			return
-		}
-
-		pr, pw := io.Pipe()
-		go func() {
-			defer pw.Close()
-			err = xls.WriteToWriter(pw)
-			if err != nil {
-				df.Context.CaptureErr(g.Error(err, "error writing to excel file"))
-			}
-		}()
-
-		bw, err = fs.Self().Write(url, pr)
-		return
-	}
 
 	fileReadyChn := make(chan FileReady, 10000)
 
@@ -804,6 +717,13 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			}
 		case FileTypeParquet:
 			for reader := range ds.NewParquetReaderChnl(fileRowLimit, fileBytesLimit, compression) {
+				err := processReader(reader)
+				if err != nil {
+					break
+				}
+			}
+		case FileTypeExcel:
+			for reader := range ds.NewExcelReaderChnl(fileRowLimit, fileBytesLimit, fs.GetProp("sheet")) {
 				err := processReader(reader)
 				if err != nil {
 					break
@@ -1269,6 +1189,8 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 		err = ds.ConsumeAvroReader(pipeR)
 	case FileTypeSAS:
 		err = ds.ConsumeSASReader(pipeR)
+	case FileTypeExcel:
+		err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
 	case FileTypeCsv:
 		err = ds.ConsumeCsvReader(pipeR)
 	default:
@@ -1327,7 +1249,7 @@ func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err erro
 func InferFileFormat(path string) FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
-	for _, fileType := range []FileType{FileTypeJsonLines, FileTypeJson, FileTypeXml, FileTypeParquet, FileTypeAvro, FileTypeSAS} {
+	for _, fileType := range []FileType{FileTypeJsonLines, FileTypeJson, FileTypeXml, FileTypeParquet, FileTypeAvro, FileTypeSAS, FileTypeExcel} {
 		ext := fileType.Ext()
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType

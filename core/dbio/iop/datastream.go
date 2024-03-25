@@ -999,6 +999,71 @@ func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	return ds.ConsumeSASReaderSeeker(file)
 }
 
+// ConsumeSASReaderSeeker uses the provided reader to stream rows
+func (ds *Datastream) ConsumeExcelReaderSeeker(reader io.ReadSeeker, props map[string]string) (err error) {
+	data, err := NewExcelDataset(reader, props)
+	if err != nil {
+		return g.Error(err, "could read Excel data")
+	}
+
+	rows := MakeRowsChan()
+	nextFunc := func(it *Iterator) bool {
+		for it.Row = range rows {
+			return true
+		}
+		return false
+	}
+
+	go func() {
+		defer close(rows)
+		for _, row := range data.Rows {
+			rows <- row
+		}
+	}()
+
+	ds.it.IsCasted = true
+	ds.Columns = data.Columns
+	ds.Inferred = data.Inferred
+	ds.Sp = data.Sp
+	ds.Sp.ds = ds
+	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
+// ConsumeSASReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]string) (err error) {
+	// need to write to temp file prior
+	tempDir := env.GetTempFolder()
+	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
+	ds.Defer(func() { os.Remove(excelPath) })
+
+	file, err := os.Create(excelPath)
+	if err != nil {
+		return g.Error(err, "Unable to create temp file: "+excelPath)
+	}
+
+	g.Debug("downloading to temp file on disk: %s", excelPath)
+	bw, err := io.Copy(file, reader)
+	if err != nil {
+		return g.Error(err, "Unable to write to temp file: "+excelPath)
+	}
+	g.Debug("wrote %d bytes to %s", bw, excelPath)
+
+	_, err = file.Seek(0, 0) // reset to beginning
+	if err != nil {
+		return g.Error(err, "Unable to seek to beginning of temp file: "+excelPath)
+	}
+
+	return ds.ConsumeExcelReaderSeeker(file, props)
+}
+
 // AddBytes add bytes as processed
 func (ds *Datastream) AddBytes(b int64) {
 	ds.Bytes = ds.Bytes + cast.ToUint64(b)
@@ -1632,6 +1697,40 @@ func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, 
 	}()
 
 	return readerChn
+}
+
+func (ds *Datastream) NewExcelReaderChnl(rowLimit int, bytesLimit int64, sheetName string) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+	xls := NewExcel()
+
+	if sheetName == "" {
+		sheetName = "Sheet1"
+	}
+
+	err := xls.WriteSheet(sheetName, ds, "overwrite")
+	if err != nil {
+		ds.Context.CaptureErr(g.Error(err, "error writing sheet"))
+		return
+	}
+
+	pipeR, pipeW := io.Pipe()
+
+	go func() {
+		defer close(readerChn)
+
+		br := &BatchReader{ds.CurrentBatch, ds.Columns, pipeR, 0}
+		readerChn <- br
+
+		err = xls.WriteToWriter(pipeW)
+		if err != nil {
+			ds.Context.CaptureErr(g.Error(err, "error writing to excel file"))
+		}
+
+		pipeW.Close()
+	}()
+
+	return
+
 }
 
 // NewParquetReaderChnl provides a channel of readers as the limit is reached
