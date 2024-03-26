@@ -279,10 +279,17 @@ type ReplicationStreamConfig struct {
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Schedule      *string        `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Schedule      []string       `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+
+	State StreamState `json:"-" yaml:"-"`
+}
+
+type StreamState struct {
+	Timestamp int64            `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	Files     map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -291,7 +298,7 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 
 func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
 
-	if stream.Schedule == nil {
+	if len(stream.Schedule) == 0 {
 		stream.Schedule = replicationCfg.Defaults.Schedule
 	}
 	if stream.PrimaryKeyI == nil {
