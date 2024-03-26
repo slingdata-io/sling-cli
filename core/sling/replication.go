@@ -342,6 +342,25 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	// parse env & expand variables
+	var Env map[string]any
+	g.Unmarshal(g.Marshal(m["env"]), &Env)
+	for k, v := range Env {
+		Env[k] = os.ExpandEnv(cast.ToString(v))
+	}
+
+	// replace variables across the yaml file
+	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
+	replicYAML = g.Rm(replicYAML, Env)
+
+	// parse again
+	m = g.M()
+	err = yaml.Unmarshal([]byte(replicYAML), &m)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
 	// source and target
 	source, ok := m["source"]
 	if !ok {
@@ -369,7 +388,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	config = ReplicationConfig{
 		Source: cast.ToString(source),
 		Target: cast.ToString(target),
-		Env:    map[string]any{},
+		Env:    Env,
 	}
 
 	// parse defaults
@@ -377,17 +396,6 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	if err != nil {
 		err = g.Error(err, "could not parse 'defaults'")
 		return
-	}
-
-	// parse env
-	if env, ok := m["env"]; ok {
-		err = g.Unmarshal(g.Marshal(env), &config.Env)
-		if err != nil {
-			err = g.Error(err, "could not parse 'env'")
-			return
-		}
-	} else {
-		config.Env = map[string]any{}
 	}
 
 	// parse streams
