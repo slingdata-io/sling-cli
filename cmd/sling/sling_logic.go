@@ -314,11 +314,14 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
 			taskMap["status"] = task.Status
+
+			if err != nil {
+				taskMap["tgt_table_ddl"] = task.Config.Target.Options.TableDDL
+			}
 		}
 
 		if err != nil {
 			telemetryMap["error"] = getErrString(err)
-			taskMap["tgt_table_ddl"] = task.Config.Target.Options.TableDDL
 		}
 
 		telemetryMap["task_stats"] = g.Marshal(taskStats)
