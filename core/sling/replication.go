@@ -284,12 +284,12 @@ type ReplicationStreamConfig struct {
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 
-	State StreamState `json:"-" yaml:"-"`
+	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
 }
 
-type StreamState struct {
-	Timestamp int64            `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
-	Files     map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
+type StreamIncrementalState struct {
+	Value int64            `json:"value,omitempty" yaml:"value,omitempty"`
+	Files map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
