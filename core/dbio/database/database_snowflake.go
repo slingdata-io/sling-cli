@@ -241,7 +241,9 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
-	df, err = fs.ReadDataflow(filePath, filesys.FileStreamConfig{Columns: columns})
+	fs.SetProp("columns", g.Marshal(columns))
+	fs.SetProp("metadata", conn.GetProp("metadata"))
+	df, err = fs.ReadDataflow(filePath)
 	if err != nil {
 		err = g.Error(err, "Could not read "+filePath)
 		return

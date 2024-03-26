@@ -822,15 +822,16 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
-	fs.SetProp("metadata", "{}")
-	df, err = fs.ReadDataflow(gsURL, filesys.FileStreamConfig{Columns: columns})
+	fs.SetProp("columns", g.Marshal(columns))
+	fs.SetProp("metadata", conn.GetProp("metadata"))
+	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)
 		return
 	}
 
 	// need to set columns so they match the source table
-	df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
+	// df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 

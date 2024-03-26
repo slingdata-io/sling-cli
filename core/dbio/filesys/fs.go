@@ -853,9 +853,8 @@ func Delete(fs FileSysClient, uri string) (err error) {
 }
 
 type FileStreamConfig struct {
-	Limit   int
-	Columns iop.Columns
-	Select  []string
+	Limit  int
+	Select []string
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
@@ -870,9 +869,6 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 	dsCh := make(chan *iop.Datastream)
 	fs.setDf(df)
 	fs.SetProp("selectFields", g.Marshal(cfg.Select))
-	if len(cfg.Columns) > 0 {
-		df.Columns = cfg.Columns
-	}
 
 	go func() {
 		defer close(dsCh)
@@ -896,14 +892,6 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 				}
 				dsCh <- ds.Map(cols, transf)
 			} else {
-				if len(cfg.Columns) > 0 {
-					if len(cfg.Columns) == len(ds.Columns) {
-						// set columns when provided
-						ds.Columns = cfg.Columns
-					} else {
-						g.Warn("provided dataflow.Columns differs from datastream.Columns:\ndf.Columns: %s\nds.Columns: %s", g.Marshal(cfg.Columns.Names()), g.Marshal(ds.Columns.Names()))
-					}
-				}
 				dsCh <- ds
 			}
 		}

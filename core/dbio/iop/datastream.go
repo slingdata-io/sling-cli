@@ -528,9 +528,11 @@ loop:
 		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
 			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
 			col := Column{
-				Name:     ds.Metadata.LoadedAt.Key,
-				Type:     IntegerType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.LoadedAt.Key,
+				Type:        IntegerType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.LoadedAt",
+				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -541,9 +543,11 @@ loop:
 		if ds.Metadata.StreamURL.Key != "" && ds.Metadata.StreamURL.Value != nil {
 			ds.Metadata.StreamURL.Key = ensureName(ds.Metadata.StreamURL.Key)
 			col := Column{
-				Name:     ds.Metadata.StreamURL.Key,
-				Type:     StringType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.StreamURL.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.StreamURL",
+				Metadata:    map[string]string{"sling_metadata": "stream_url"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -554,9 +558,11 @@ loop:
 		if ds.Metadata.RowNum.Key != "" {
 			ds.Metadata.RowNum.Key = ensureName(ds.Metadata.RowNum.Key)
 			col := Column{
-				Name:     ds.Metadata.RowNum.Key,
-				Type:     BigIntType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.RowNum.Key,
+				Type:        BigIntType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.RowNum",
+				Metadata:    map[string]string{"sling_metadata": "row_num"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -567,9 +573,11 @@ loop:
 		if ds.Metadata.RowID.Key != "" {
 			ds.Metadata.RowID.Key = ensureName(ds.Metadata.RowID.Key)
 			col := Column{
-				Name:     ds.Metadata.RowID.Key,
-				Type:     StringType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.RowID.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.RowID",
+				Metadata:    map[string]string{"sling_metadata": "row_id"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
