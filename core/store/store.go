@@ -20,6 +20,7 @@ func init() {
 	sling.StoreUpdate = StoreUpdate
 }
 
+// Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
 	// ID auto-increments
 	ID int64 `json:"id" gorm:"primaryKey"`
@@ -59,6 +60,9 @@ type Execution struct {
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
+
+	Task        *Task        `json:"task,omitempty" gorm:"-"`
+	Replication *Replication `json:"replication,omitempty" gorm:"-"`
 }
 
 type Task struct {
@@ -184,6 +188,7 @@ func StoreInsert(t *sling.TaskExecution) {
 		g.DebugLow("could not insert task config into local .sling.db. %s", err.Error())
 		return
 	}
+	exec.Task = task
 	exec.TaskMD5 = task.MD5
 
 	if replication != nil {
@@ -193,6 +198,7 @@ func StoreInsert(t *sling.TaskExecution) {
 			g.DebugLow("could not insert replication config into local .sling.db. %s", err.Error())
 			return
 		}
+		exec.Replication = replication
 		exec.ReplicationMD5 = replication.MD5
 	}
 
