@@ -157,19 +157,10 @@ func (ds *Datastream) Df() *Dataflow {
 }
 
 func (ds *Datastream) processBwRows() {
-	// bwRows slows process speed by 10x, but this is needed for byte sizing
-	go func() {
-		if os.Getenv("DBIO_CSV_BYTES") == "TRUE" {
-			for row := range ds.bwRows {
-				ds.writeBwCsv(ds.CastRowToString(row))
-				ds.bwCsv.Flush()
-			}
-		} else {
-			for range ds.bwRows {
-				// drain channel
-			}
-		}
-	}()
+	for row := range ds.bwRows {
+		ds.writeBwCsv(ds.CastRowToString(row))
+		ds.bwCsv.Flush()
+	}
 }
 
 // SetReady sets the ds.ready
