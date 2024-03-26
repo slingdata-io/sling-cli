@@ -658,7 +658,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			}
 			g.Trace("wrote %s [%d rows] to %s", humanize.Bytes(cast.ToUint64(bw0)), batchR.Counter, partURL)
 			bw += bw0
-			df.AddOutBytes(uint64(bw0))
+			df.AddEgressBytes(uint64(bw0))
 		}
 
 		// pre-add to WG to not hold next reader in memory while waiting
@@ -757,8 +757,6 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		}
 		localCtx.Wg.Read.Done() // clear that pre-added WG
 		localCtx.Wg.Read.Wait()
-
-		df.AddInBytes(ds.Bytes) // add in bytes
 	}
 
 	err = Delete(fsClient, url)

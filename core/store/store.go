@@ -88,13 +88,15 @@ type Replication struct {
 // Store saves the task into the local sqlite
 func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
+	bytes, _ := t.GetBytes()
+
 	exec := Execution{
 		ExecID:    t.ExecID,
 		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.Source.Stream),
 		Status:    t.Status,
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
-		Bytes:     t.Bytes,
+		Bytes:     bytes,
 		Output:    t.Output,
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),

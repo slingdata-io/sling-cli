@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
@@ -40,7 +41,7 @@ type Datastream struct {
 	Count         uint64
 	Context       *g.Context
 	Ready         bool
-	Bytes         uint64
+	Bytes         atomic.Uint64
 	Sp            *StreamProcessor
 	SafeInference bool
 	NoDebug       bool
@@ -1065,7 +1066,7 @@ func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]stri
 
 // AddBytes add bytes as processed
 func (ds *Datastream) AddBytes(b int64) {
-	ds.Bytes = ds.Bytes + cast.ToUint64(b)
+	ds.Bytes.Add(cast.ToUint64(b))
 }
 
 // Records return rows of maps
