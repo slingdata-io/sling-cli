@@ -170,7 +170,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 	// use specified path to duckdb binary
 	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
 		if !g.PathExists(envPath) {
-			return "", g.Error("duckdb binary not found")
+			return "", g.Error("duckdb binary not found: %s", envPath)
 		}
 		return envPath, nil
 	}
