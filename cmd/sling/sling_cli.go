@@ -45,16 +45,16 @@ var cliRun = &g.CliSC{
 	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
 	Flags: []g.Flag{
 		{
-			Name:        "config",
-			ShortName:   "c",
-			Type:        "string",
-			Description: "The task config string or file to use (JSON or YAML).",
-		},
-		{
 			Name:        "replication",
 			ShortName:   "r",
 			Type:        "string",
 			Description: "The replication config file to use (JSON or YAML).\n",
+		},
+		{
+			Name:        "config",
+			ShortName:   "c",
+			Type:        "string",
+			Description: "The task config string or file to use (JSON or YAML). [deprecated]",
 		},
 		{
 			Name:        "src-conn",
