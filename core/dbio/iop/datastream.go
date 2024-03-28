@@ -393,12 +393,6 @@ func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decod
 		applied := []Transform{}
 
 		if ts, ok := columnTransforms["*"]; ok {
-			remove := func(t Transform) {
-				ts = lo.Filter(ts, func(tName Transform, i int) bool {
-					return tName != t
-				})
-			}
-
 			for _, t := range ts {
 				switch t {
 				case TransformDecodeLatin1:
@@ -423,10 +417,9 @@ func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decod
 				applied = append(applied, t) // delete from transforms, already applied
 			}
 
-			for _, t := range applied {
-				remove(t)
-			}
-
+			ts = lo.Filter(ts, func(t Transform, i int) bool {
+				return !g.In(t, applied...)
+			})
 			columnTransforms["*"] = ts
 		}
 
