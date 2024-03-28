@@ -3,52 +3,42 @@ package iop
 import (
 	"bufio"
 	"embed"
-	"errors"
 	"regexp"
 	"strings"
 	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
-	"golang.org/x/text/transform"
 )
 
 //go:embed templates/*
 var templatesFolder embed.FS
 
-var Transforms = map[string]TransformFunc{}
+var Transforms = map[Transform]TransformFunc{}
 
-func ReplaceAccents(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.transformers.Accent, val)
-	if err != nil {
-		return val, errors.New("could not transform while running ReplaceAccents: " + err.Error())
-	}
-	return newVal, nil
-}
+type Transform string
 
-func DecodeUTF16(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.transformers.UTF16, val)
-	if err != nil {
-		return val, errors.New("could not transform while running DecodeUTF16: " + err.Error())
-	}
-	return newVal, nil
-}
-
-func DecodeUTF8(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.transformers.UTF8, val)
-	if err != nil {
-		return val, errors.New("could not transform while running DecodeUTF8: " + err.Error())
-	}
-	return newVal, nil
-}
-
-func DecodeUTF8BOM(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.transformers.UTF8BOM, val)
-	if err != nil {
-		return val, errors.New("could not transform while running DecodeUTF8BOM: " + err.Error())
-	}
-	return newVal, nil
-}
+const (
+	TransformDecodeLatin1        Transform = "decode_latin1"
+	TransformDecodeLatin5        Transform = "decode_latin5"
+	TransformDecodeLatin9        Transform = "decode_latin9"
+	TransformDecodeUtf8          Transform = "decode_utf8"
+	TransformDecodeUtf8Bom       Transform = "decode_utf8_bom"
+	TransformDecodeUtf16         Transform = "decode_utf16"
+	TransformDecodeWindows1250   Transform = "decode_windows1250"
+	TransformDecodeWindows1252   Transform = "decode_windows1252"
+	TransformDuckdbListToText    Transform = "duckdb_list_to_text"
+	TransformHashMd5             Transform = "hash_md5"
+	TransformHashSha256          Transform = "hash_sha256"
+	TransformHashSha512          Transform = "hash_sha512"
+	TransformParseBit            Transform = "parse_bit"
+	TransformParseFix            Transform = "parse_fix"
+	TransformParseUuid           Transform = "parse_uuid"
+	TransformReplace0x00         Transform = "replace_0x00"
+	TransformReplaceAccents      Transform = "replace_accents"
+	TransformReplaceNonPrintable Transform = "replace_non_printable"
+	TransformTrimSpace           Transform = "trim_space"
+)
 
 // https://stackoverflow.com/a/46637343/2295355
 // https://web.itu.edu.tr/sgunduz/courses/mikroisl/ascii.html

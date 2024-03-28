@@ -22,6 +22,7 @@ import (
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"golang.org/x/text/transform"
 
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -383,6 +384,63 @@ func (ds *Datastream) GetFields(args ...bool) []string {
 
 func (ds *Datastream) SetIterator(it *Iterator) {
 	ds.it = it
+}
+
+func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decoded bool) {
+	// decode File if requested
+	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
+		columnTransforms := makeColumnTransforms(transformsPayload)
+		applied := []Transform{}
+
+		if ts, ok := columnTransforms["*"]; ok {
+			remove := func(t Transform) {
+				ts = lo.Filter(ts, func(tName Transform, i int) bool {
+					return tName != t
+				})
+			}
+
+			for _, t := range ts {
+				switch t {
+				case TransformReplaceAccents:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.Accent)
+				case TransformDecodeLatin1:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_1)
+				case TransformDecodeLatin5:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_5)
+				case TransformDecodeLatin9:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_15)
+				case TransformDecodeWindows1250:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1250)
+				case TransformDecodeWindows1252:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1252)
+				case TransformDecodeUtf16:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF16)
+				case TransformDecodeUtf8:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8)
+				case TransformDecodeUtf8Bom:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8BOM)
+				default:
+					continue
+				}
+				applied = append(applied, t) // delete from transforms, already applied
+			}
+
+			for _, t := range applied {
+				remove(t)
+			}
+
+			columnTransforms["*"] = ts
+		}
+
+		if len(applied) > 0 {
+			// re-apply transforms
+			ds.Sp.applyTransforms(g.Marshal(columnTransforms))
+
+			return newReader, true
+		}
+	}
+
+	return reader, false
 }
 
 // SetFields sets the fields/columns of the Datastream
@@ -783,6 +841,11 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec}
+
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader); ok {
+		c.Reader = newReader
+	}
 
 	r, err := c.getReader(ds.config.Delimiter)
 	if err != nil {

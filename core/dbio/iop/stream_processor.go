@@ -14,6 +14,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
+	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
@@ -56,22 +57,34 @@ type StreamConfig struct {
 	Columns           Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string][]TransformFunc // array of transform functions to apply
 	maxDecimalsFormat string                     `json:"-"`
+
+	Map map[string]string `json:"-"`
 }
 
 type Transformers struct {
-	Accent  transform.Transformer
-	UTF8    transform.Transformer
-	UTF8BOM transform.Transformer
-	UTF16   transform.Transformer
+	Accent      transform.Transformer
+	UTF8        transform.Transformer
+	UTF8BOM     transform.Transformer
+	UTF16       transform.Transformer
+	ISO8859_1   transform.Transformer
+	ISO8859_5   transform.Transformer
+	ISO8859_15  transform.Transformer
+	Windows1250 transform.Transformer
+	Windows1252 transform.Transformer
 }
 
 func NewTransformers() Transformers {
-
+	win16be := encUnicode.UTF16(encUnicode.BigEndian, encUnicode.IgnoreBOM)
 	return Transformers{
-		Accent:  transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
-		UTF8:    encUnicode.UTF8.NewDecoder(),
-		UTF8BOM: encUnicode.UTF8BOM.NewDecoder(),
-		UTF16:   encUnicode.UTF16(encUnicode.LittleEndian, encUnicode.UseBOM).NewDecoder(),
+		Accent:      transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+		UTF8:        encUnicode.UTF8.NewDecoder(),
+		UTF8BOM:     encUnicode.UTF8BOM.NewDecoder(),
+		UTF16:       encUnicode.BOMOverride(win16be.NewDecoder()),
+		ISO8859_1:   charmap.ISO8859_1.NewDecoder(),
+		ISO8859_5:   charmap.ISO8859_5.NewDecoder(),
+		ISO8859_15:  charmap.ISO8859_15.NewDecoder(),
+		Windows1250: charmap.Windows1250.NewDecoder(),
+		Windows1252: charmap.Windows1252.NewDecoder(),
 	}
 }
 
@@ -192,6 +205,8 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		sp = NewStreamProcessor()
 	}
 
+	sp.Config.Map = configMap
+
 	if configMap["fields_per_rec"] != "" {
 		sp.Config.FieldsPerRec = cast.ToInt(configMap["fields_per_rec"])
 	}
@@ -246,21 +261,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		g.Unmarshal(configMap["columns"], &sp.Config.Columns)
 	}
 	if configMap["transforms"] != "" {
-		columnTransforms := map[string][]string{}
-		g.Unmarshal(configMap["transforms"], &columnTransforms)
-		sp.Config.transforms = map[string][]TransformFunc{}
-		for key, names := range columnTransforms {
-			key = strings.ToLower(key)
-			sp.Config.transforms[key] = []TransformFunc{}
-			for _, name := range names {
-				f, ok := Transforms[name]
-				if ok {
-					sp.Config.transforms[key] = append(sp.Config.transforms[key], f)
-				} else {
-					g.Warn("did find find transform named: '%s'", name)
-				}
-			}
-		}
+		sp.applyTransforms(configMap["transforms"])
 	}
 	sp.Config.Compression = configMap["compression"]
 
@@ -270,6 +271,28 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		sp.dateLayouts = append(
 			[]string{sp.Config.DatetimeFormat},
 			sp.dateLayouts...)
+	}
+}
+
+func makeColumnTransforms(transformsPayload string) map[string][]Transform {
+	columnTransforms := map[string][]Transform{}
+	g.Unmarshal(transformsPayload, &columnTransforms)
+	return columnTransforms
+}
+
+func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
+	columnTransforms := makeColumnTransforms(transformsPayload)
+	sp.Config.transforms = map[string][]TransformFunc{}
+	for key, names := range columnTransforms {
+		sp.Config.transforms[key] = []TransformFunc{}
+		for _, name := range names {
+			f, ok := Transforms[name]
+			if ok {
+				sp.Config.transforms[key] = append(sp.Config.transforms[key], f)
+			} else {
+				g.Warn("did find find transform named: '%s'", name)
+			}
+		}
 	}
 }
 
@@ -394,6 +417,38 @@ func (sp *StreamProcessor) commitChecksum() {
 		cs.Checksum = cs.Checksum + val
 		sp.ds.Columns[i].Stats.Checksum = cs.Checksum
 	}
+}
+
+func (sp *StreamProcessor) DecodeValue(t Transform, val string) (newVal string, err error) {
+
+	switch t {
+	case TransformReplaceAccents:
+		newVal, _, err = transform.String(sp.transformers.Accent, val)
+	case TransformDecodeLatin1:
+		newVal, _, err = transform.String(sp.transformers.ISO8859_1, val)
+	case TransformDecodeLatin5:
+		newVal, _, err = transform.String(sp.transformers.ISO8859_5, val)
+	case TransformDecodeLatin9:
+		newVal, _, err = transform.String(sp.transformers.ISO8859_15, val)
+	case TransformDecodeWindows1250:
+		newVal, _, err = transform.String(sp.transformers.Windows1250, val)
+	case TransformDecodeWindows1252:
+		newVal, _, err = transform.String(sp.transformers.Windows1252, val)
+	case TransformDecodeUtf16:
+		newVal, _, err = transform.String(sp.transformers.UTF16, val)
+	case TransformDecodeUtf8:
+		newVal, _, err = transform.String(sp.transformers.UTF8, val)
+	case TransformDecodeUtf8Bom:
+		newVal, _, err = transform.String(sp.transformers.UTF8BOM, val)
+	default:
+		return val, nil
+	}
+
+	if err != nil {
+		return val, err
+	}
+
+	return newVal, nil
 }
 
 // CastVal casts values with stats collection

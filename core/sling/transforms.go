@@ -10,35 +10,46 @@ import (
 	"github.com/google/uuid"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
 )
 
-var decISO8859_1 = charmap.ISO8859_1.NewDecoder()
-var decISO8859_5 = charmap.ISO8859_5.NewDecoder()
-var decISO8859_15 = charmap.ISO8859_15.NewDecoder()
-var decWindows1250 = charmap.Windows1250.NewDecoder()
-var decWindows1252 = charmap.Windows1252.NewDecoder()
-
-var transforms = map[string]iop.TransformFunc{
-	"decode_latin1":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
-	"decode_latin5":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
-	"decode_latin9":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
-	"decode_utf8":           func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF8(sp, val) },
-	"decode_utf8_bom":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF8BOM(sp, val) },
-	"decode_utf16":          func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF16(sp, val) },
-	"decode_windows1250":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
-	"decode_windows1252":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
-	"duckdb_list_to_text":   func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsText(val), nil },
-	"hash_md5":              func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
-	"hash_sha256":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
-	"hash_sha512":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
-	"parse_bit":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
-	"parse_fix":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
-	"parse_uuid":            func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
-	"replace_0x00":          func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
-	"replace_accents":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
-	"replace_non_printable": func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
-	"trim_space":            func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
+var transforms = map[iop.Transform]iop.TransformFunc{
+	iop.TransformDecodeLatin1: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeLatin1, val)
+	},
+	iop.TransformDecodeLatin5: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeLatin5, val)
+	},
+	iop.TransformDecodeLatin9: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeLatin9, val)
+	},
+	iop.TransformDecodeUtf8: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeUtf8, val)
+	},
+	iop.TransformDecodeUtf8Bom: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeUtf8Bom, val)
+	},
+	iop.TransformDecodeUtf16: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeUtf16, val)
+	},
+	iop.TransformDecodeWindows1250: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeWindows1250, val)
+	},
+	iop.TransformDecodeWindows1252: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformDecodeWindows1252, val)
+	},
+	iop.TransformDuckdbListToText: func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsText(val), nil },
+	iop.TransformHashMd5:          func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
+	iop.TransformHashSha256:       func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
+	iop.TransformHashSha512:       func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
+	iop.TransformParseBit:         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
+	iop.TransformParseFix:         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
+	iop.TransformParseUuid:        func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	iop.TransformReplace0x00:      func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
+	iop.TransformReplaceAccents: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return sp.DecodeValue(iop.TransformReplaceAccents, val)
+	},
+	iop.TransformReplaceNonPrintable: func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
+	iop.TransformTrimSpace:           func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
 }
 
 func init() {
