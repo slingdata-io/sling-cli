@@ -314,6 +314,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
 			taskMap["status"] = task.Status
+
+			if err != nil {
+				taskMap["tgt_table_ddl"] = task.Config.Target.Options.TableDDL
+			}
 		}
 
 		if err != nil {
@@ -385,7 +389,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	// clean up selectStreams
-	matchedStreams := map[string]sling.ReplicationStreamConfig{}
+	matchedStreams := map[string]*sling.ReplicationStreamConfig{}
 	for _, selectStream := range selectStreams {
 		for key, val := range replication.MatchStreams(selectStream) {
 			key = replication.Normalize(key)
@@ -489,6 +493,13 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		telemetryMap["replication_md5"] = replication.MD5()
 		err = runTask(&cfg, &replication)
 		if err != nil {
+			g.Info(env.RedString(err.Error()))
+			if eh := sling.ErrorHelper(err); eh != "" {
+				env.Println("")
+				env.Println(env.MagentaString(eh))
+				env.Println("")
+			}
+
 			errors[i] = g.Error(err, "error for stream %s", name)
 			eG.Capture(err, streamsOrdered[i])
 		} else {
@@ -582,38 +593,55 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "cannot connect to database (%s)", conn.Connection.Type)
 		}
 
-		query, err := sling.GetSQLText(cast.ToString(c.Vals["query"]))
-		if err != nil {
-			return ok, g.Error(err, "cannot get query")
-		}
+		queries := append([]string{cast.ToString(c.Vals["queries..."])}, flaggy.TrailingArguments...)
 
-		sQuery, err := database.ParseTableName(query, conn.Connection.Type)
-		if err != nil {
-			return ok, g.Error(err, "cannot parse query")
-		}
-
-		if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select")) {
-
-			data, err := dbConn.Query(sQuery.Select(100))
-			if err != nil {
-				return ok, g.Error(err, "cannot execute query")
-			}
-
-			println(g.PrettyTable(data.GetFields(), data.Rows))
-
-		} else {
-			result, err := dbConn.ExecMulti(query)
-			if err != nil {
-				return ok, g.Error(err, "cannot execute query")
-			}
-			end := time.Now()
-
-			affected, _ := result.RowsAffected()
-			if affected > 0 {
-				g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+		var totalAffected int64
+		for i, query := range queries {
+			if len(queries) > 1 {
+				if strings.HasPrefix(query, "file://") {
+					g.Info("executing query #%d (%s)", i+1, query)
+				} else {
+					g.Info("executing query #%d", i+1)
+				}
 			} else {
-				g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+				g.Info("executing query")
 			}
+
+			query, err = sling.GetSQLText(query)
+			if err != nil {
+				return ok, g.Error(err, "cannot get query")
+			}
+
+			sQuery, err := database.ParseTableName(query, conn.Connection.Type)
+			if err != nil {
+				return ok, g.Error(err, "cannot parse query")
+			}
+
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select")) {
+
+				data, err := dbConn.Query(sQuery.Select(100))
+				if err != nil {
+					return ok, g.Error(err, "cannot execute query")
+				}
+
+				println(g.PrettyTable(data.GetFields(), data.Rows))
+
+			} else {
+				result, err := dbConn.ExecMulti(query)
+				if err != nil {
+					return ok, g.Error(err, "cannot execute query")
+				}
+
+				affected, _ := result.RowsAffected()
+				totalAffected = totalAffected + affected
+			}
+		}
+
+		end := time.Now()
+		if totalAffected > 0 {
+			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
+		} else {
+			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
 	case "list":
@@ -624,6 +652,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
 			telemetryMap["conn_type"] = conn.Connection.Type.String()
+			telemetryMap["conn_keys"] = lo.Keys(conn.Connection.Data)
 		}
 
 		ok, err = ec.Test(name)

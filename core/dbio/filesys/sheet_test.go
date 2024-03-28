@@ -14,12 +14,12 @@ import (
 
 func TestExcel(t *testing.T) {
 	t.Parallel()
-	xls, err := NewExcelFromFile("test/test.excel2.xlsx")
+	_, err := iop.NewExcelFromFile("test/test.excel2.xlsx")
 	assert.NoError(t, err)
 
 	file, err := os.Open("test/test.excel2.xlsx")
 	assert.NoError(t, err)
-	xls, err = NewExcelFromReader(bufio.NewReader(file))
+	xls, err := iop.NewExcelFromReader(bufio.NewReader(file))
 	if assert.NoError(t, err) {
 		return
 	}
@@ -72,7 +72,7 @@ func TestExcel(t *testing.T) {
 	err = xls.WriteToFile("test/test.excel5.xlsx")
 	assert.NoError(t, err)
 
-	xls2, err := NewExcelFromFile("test/test.excel5.xlsx")
+	xls2, err := iop.NewExcelFromFile("test/test.excel5.xlsx")
 	assert.NoError(t, err)
 
 	data, err = xls2.GetDatasetFromRange(xls2.Sheets[0], "A:B")
@@ -88,7 +88,7 @@ func TestExcel(t *testing.T) {
 	_, err = localFs.WriteDataflow(df, "test/test.excel6.xlsx")
 	assert.NoError(t, err)
 
-	xls3, err := NewExcelFromFile("test/test.excel6.xlsx")
+	xls3, err := iop.NewExcelFromFile("test/test.excel6.xlsx")
 	assert.NoError(t, err)
 
 	data = xls3.GetDataset(xls3.Sheets[0])
@@ -102,7 +102,7 @@ func TestExcel(t *testing.T) {
 func TestGoogleSheet(t *testing.T) {
 
 	url := "https://docs.google.com/spreadsheets/d/1Wo7d_2oiYpWy1hYGqHIy0DSPWki24Xif3FnlRjNGzo4/edit#gid=0"
-	ggs, err := NewGoogleSheetFromURL(
+	ggs, err := iop.NewGoogleSheetFromURL(
 		url, "GSHEETS_CRED_FILE="+os.Getenv("GSHEETS_CRED_FILE"),
 	)
 	if !assert.NoError(t, err) {
@@ -150,7 +150,7 @@ func TestGoogleSheet(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Less(t, len(data.Rows), 400)
 
-	err = ggs.deleteSheet("new")
+	err = ggs.DeleteSheet("new")
 	assert.NoError(t, err)
 
 	jsonBody, err := os.ReadFile(os.Getenv("GSHEETS_CRED_FILE"))
@@ -177,6 +177,6 @@ func TestGoogleSheet(t *testing.T) {
 	assert.NoError(t, err)
 
 	ggs.RefreshSheets()
-	err = ggs.deleteSheet("new")
+	err = ggs.DeleteSheet("new")
 	assert.NoError(t, err)
 }

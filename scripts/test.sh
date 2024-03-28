@@ -18,6 +18,8 @@ alias sling="./sling-linux"
 # should return menu, not error
 sling run
 
+sling run --src-stream file://core/dbio/filesys/test/test.excel2.xlsx --tgt-object file://test.xlsx
+
 cat cmd/sling/tests/files/test1.1.csv | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options 'use_bulk: false'
@@ -41,6 +43,8 @@ sling conns discover POSTGRES -s 'public.*'
 sling conns discover local
 
 sling run -r cmd/sling/tests/replications/r.05.yaml
+sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
+
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
 SLING_STREAM_CNT=10 sling run -r cmd/sling/tests/replications/r.07.yaml
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml

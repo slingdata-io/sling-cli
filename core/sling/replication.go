@@ -80,25 +80,25 @@ func (rd ReplicationConfig) StreamsOrdered() []string {
 }
 
 // GetStream returns the stream if the it exists
-func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg ReplicationStreamConfig, found bool) {
+func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *ReplicationStreamConfig, found bool) {
 
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(name) {
-			return streamName, *streamCfg, true
+			return streamName, streamCfg, true
 		}
 	}
 	return
 }
 
 // GetStream returns the stream if the it exists
-func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]ReplicationStreamConfig) {
-	streams = map[string]ReplicationStreamConfig{}
+func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
+	streams = map[string]*ReplicationStreamConfig{}
 	gc, err := glob.Compile(strings.ToLower(pattern))
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
-			streams[streamName] = *streamCfg
+			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
-			streams[streamName] = *streamCfg
+			streams[streamName] = streamCfg
 		}
 	}
 	return
@@ -151,7 +151,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
 }
 
-func (rd *ReplicationConfig) AddStream(key string, cfg ReplicationStreamConfig) {
+func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
 	rd.Streams[key] = &newCfg
@@ -216,11 +216,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 					}
 
 					cfg := rd.Streams[wildcardName]
-					if cfg != nil {
-						rd.AddStream(table.FullName(), *cfg)
-					} else {
-						rd.AddStream(table.FullName(), ReplicationStreamConfig{})
-					}
+					rd.AddStream(table.FullName(), cfg)
 				}
 			}
 
@@ -283,10 +279,17 @@ type ReplicationStreamConfig struct {
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Schedule      *string        `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Schedule      []string       `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+
+	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
+}
+
+type StreamIncrementalState struct {
+	Value int64            `json:"value,omitempty" yaml:"value,omitempty"`
+	Files map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -295,7 +298,7 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 
 func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
 
-	if stream.Schedule == nil {
+	if len(stream.Schedule) == 0 {
 		stream.Schedule = replicationCfg.Defaults.Schedule
 	}
 	if stream.PrimaryKeyI == nil {
@@ -339,6 +342,25 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	// parse env & expand variables
+	var Env map[string]any
+	g.Unmarshal(g.Marshal(m["env"]), &Env)
+	for k, v := range Env {
+		Env[k] = os.ExpandEnv(cast.ToString(v))
+	}
+
+	// replace variables across the yaml file
+	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
+	replicYAML = g.Rm(replicYAML, Env)
+
+	// parse again
+	m = g.M()
+	err = yaml.Unmarshal([]byte(replicYAML), &m)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
 	// source and target
 	source, ok := m["source"]
 	if !ok {
@@ -366,7 +388,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	config = ReplicationConfig{
 		Source: cast.ToString(source),
 		Target: cast.ToString(target),
-		Env:    map[string]any{},
+		Env:    Env,
 	}
 
 	// parse defaults
@@ -374,17 +396,6 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	if err != nil {
 		err = g.Error(err, "could not parse 'defaults'")
 		return
-	}
-
-	// parse env
-	if env, ok := m["env"]; ok {
-		err = g.Unmarshal(g.Marshal(env), &config.Env)
-		if err != nil {
-			err = g.Error(err, "could not parse 'env'")
-			return
-		}
-	} else {
-		config.Env = map[string]any{}
 	}
 
 	// parse streams

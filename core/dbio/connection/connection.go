@@ -2,6 +2,7 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/url"
 	"os"
@@ -381,7 +382,7 @@ func (c *Connection) setURL() (err error) {
 		eG := g.ErrorGroup{}
 		for _, k := range keys {
 			if _, ok := c.Data[k]; !ok {
-				eG.Add(g.Error("Property value not provided: %s", k))
+				eG.Add(errors.New(g.F("Property value not provided: %s", k)))
 			}
 		}
 		if err = eG.Err(); err != nil {

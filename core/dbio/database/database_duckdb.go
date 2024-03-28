@@ -170,7 +170,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 	// use specified path to duckdb binary
 	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
 		if !g.PathExists(envPath) {
-			return "", g.Error("duckdb binary not found")
+			return "", g.Error("duckdb binary not found: %s", envPath)
 		}
 		return envPath, nil
 	}
@@ -539,6 +539,8 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 		errText := g.F("could not exec SQL for duckdb: %s\n%s\n%s", string(out), stderr.String(), sql)
 		if strings.Contains(errText, "version number") {
 			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.6.0\n" + errText
+		} else if strings.Contains(errText, "Could not set lock") {
+			return result, g.Error("File Lock Error.\n" + errText)
 		} else if err == nil {
 			err = g.Error("DuckDB Error")
 		}

@@ -109,7 +109,6 @@ func (t *BaseTransaction) Exec(sql string, args ...interface{}) (result sql.Resu
 func (t *BaseTransaction) QueryContext(ctx context.Context, q string, args ...interface{}) (result *sqlx.Rows, err error) {
 	t.log = append(t.log, q)
 
-	t.Conn.Base().LogSQL(q, args...)
 	result, err = t.Tx.QueryxContext(ctx, q, args...)
 	if err != nil {
 		err = g.Error(err, "Error executing query")

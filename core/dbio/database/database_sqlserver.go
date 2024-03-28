@@ -337,6 +337,10 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	instance := strings.ReplaceAll(url.Path, "/", "")
 	database := url.Query().Get("database")
 	user := url.User.Username()
+
+	if port == "" {
+		port = cast.ToString(conn.GetType().DefPort())
+	}
 	hostPort := fmt.Sprintf("tcp:%s,%s", host, port)
 	if instance != "" {
 		hostPort = g.F("%s\\%s", hostPort, instance)

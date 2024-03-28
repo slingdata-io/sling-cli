@@ -158,7 +158,7 @@ func (fs *HTTPFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, er
 // GetReader gets a reader for an HTTP resource (download)
 func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error) {
 	if strings.HasPrefix(url, "https://docs.google.com/spreadsheets/d") {
-		ggs, err := NewGoogleSheetFromURL(
+		ggs, err := iop.NewGoogleSheetFromURL(
 			url, "GSHEET_CLIENT_JSON_BODY="+fs.GetProp("GSHEET_CLIENT_JSON_BODY"),
 		)
 		if err != nil {
@@ -187,7 +187,7 @@ func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error)
 // Write uploads an HTTP file
 func (fs *HTTPFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, err error) {
 	if strings.HasPrefix(urlStr, "https://docs.google.com/spreadsheets/d") {
-		ggs, err := NewGoogleSheetFromURL(
+		ggs, err := iop.NewGoogleSheetFromURL(
 			urlStr, "GSHEET_CLIENT_JSON_BODY="+fs.GetProp("GSHEET_CLIENT_JSON_BODY"),
 		)
 		if err != nil {

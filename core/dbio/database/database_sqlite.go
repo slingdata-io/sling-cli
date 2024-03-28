@@ -370,6 +370,15 @@ func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 // EnsureBinSQLite ensures sqlite binary exists
 // if missing, downloads and uses
 func EnsureBinSQLite() (binPath string, err error) {
+
+	// use specified path to sqlite binary
+	if envPath := os.Getenv("SQLITE_PATH"); envPath != "" {
+		if !g.PathExists(envPath) {
+			return "", g.Error("sqlite binary not found: %s", envPath)
+		}
+		return envPath, nil
+	}
+
 	folderPath := path.Join(g.UserHomeDir(), "sqlite")
 	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
 	binPath = path.Join(g.UserHomeDir(), "sqlite", "sqlite3"+extension)

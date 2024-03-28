@@ -121,16 +121,6 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 	g.Unmarshal(fs.GetProp("selectFields"), &selectFields)
 	ds.Columns = iop.NewColumnsFromFields(selectFields...)
 
-	if strings.Contains(strings.ToLower(path), ".xlsx") {
-		g.Debug("reading datastream from %s", path)
-		eDs, err := getExcelStream(fs.Self(), bufio.NewReader(file))
-		if err != nil {
-			err = g.Error(err, "Error consuming Excel reader")
-			return ds, err
-		}
-		return eDs, nil
-	}
-
 	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
 	if string(fileFormat) == "" {
 		fileFormat = InferFileFormat(path)
@@ -162,6 +152,8 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 			err = ds.ConsumeAvroReaderSeeker(file)
 		case FileTypeSAS:
 			err = ds.ConsumeSASReaderSeeker(file)
+		case FileTypeExcel:
+			err = ds.ConsumeExcelReaderSeeker(file, fs.properties)
 		case FileTypeCsv:
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		default:

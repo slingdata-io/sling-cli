@@ -181,7 +181,9 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
-	df, err = fs.ReadDataflow(s3Path, filesys.FileStreamConfig{Columns: columns})
+	fs.SetProp("columns", g.Marshal(columns))
+	fs.SetProp("metadata", conn.GetProp("metadata"))
+	df, err = fs.ReadDataflow(s3Path)
 	if err != nil {
 		err = g.Error(err, "Could not read S3 Path for UNLOAD: "+s3Path)
 		return

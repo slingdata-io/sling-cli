@@ -45,16 +45,16 @@ var cliRun = &g.CliSC{
 	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
 	Flags: []g.Flag{
 		{
-			Name:        "config",
-			ShortName:   "c",
-			Type:        "string",
-			Description: "The task config string or file to use (JSON or YAML).",
-		},
-		{
 			Name:        "replication",
 			ShortName:   "r",
 			Type:        "string",
 			Description: "The replication config file to use (JSON or YAML).\n",
+		},
+		{
+			Name:        "config",
+			ShortName:   "c",
+			Type:        "string",
+			Description: "The task config string or file to use (JSON or YAML). [deprecated]",
 		},
 		{
 			Name:        "src-conn",
@@ -273,10 +273,10 @@ var cliConns = &g.CliSC{
 					Description: "The name of the connection to set",
 				},
 				{
-					Name:        "query",
+					Name:        "queries...",
 					ShortName:   "",
 					Type:        "string",
-					Description: "The SQL query to execute. Can be in-line text or a file",
+					Description: "The SQL queries to execute. Can be in-line text or a file",
 				},
 			},
 		},
@@ -488,7 +488,11 @@ func setSentry() {
 	if telemetry {
 		g.SentryRelease = g.F("sling@%s", core.Version)
 		g.SentryDsn = env.SentryDsn
-		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) {
+		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) bool {
+			if exception.Err == "context canceled" {
+				return false
+			}
+
 			// set transaction
 			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
@@ -499,9 +503,12 @@ func setSentry() {
 				event.Transaction = g.F(targetType)
 			}
 
-			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
-			event.Message = event.Exception[0].Value
-			event.Exception[0].Value = g.F("%s (%s)", exception.LastCaller(), taskType)
+			bars := "--------------------------------------------------------"
+			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telemetryMap)
+
+			e := event.Exception[0]
+			event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
+			event.Exception[0].Value = g.F("%s [%s]", exception.LastCaller(), exception.CallerStackMD5())
 
 			scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {
@@ -521,6 +528,8 @@ func setSentry() {
 					scope.SetTag("project_id", projectID)
 				}
 			}
+
+			return true
 		}
 		g.SentryInit()
 	}

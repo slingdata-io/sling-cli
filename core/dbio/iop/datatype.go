@@ -314,6 +314,21 @@ func (cols Columns) Names(args ...bool) []string {
 	return fields
 }
 
+// WithoutMeta returns the columns with metadata columns
+func (cols Columns) WithoutMeta() (newCols Columns) {
+	for _, column := range cols {
+		if column.Metadata == nil {
+			column.Metadata = map[string]string{}
+		}
+
+		if _, found := column.Metadata["sling_metadata"]; !found {
+			// we should not find key `sling_metadata`
+			newCols = append(newCols, column)
+		}
+	}
+	return newCols
+}
+
 // Names return the column names
 // args -> (lower bool, cleanUp bool)
 func (cols Columns) Keys() []string {

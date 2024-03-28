@@ -403,7 +403,7 @@ snowflake	varbinary	binary	col_varbinary varbinary(100)	FALSE	FALSE	Synonymous w
 snowflake	varchar	text	col_varchar varchar(100)	TRUE	TRUE	Default (and maximum) is 16,777,216 bytes.
 snowflake	variant	json	col_variant variant	FALSE	FALSE	
 sqlite	blob	text	col_blob blob	TRUE	TRUE	
-sqlite	varchar	string	col_varchar varchar	TRUE	TRUE	
+sqlite	varchar	text	col_varchar varchar	TRUE	TRUE	
 sqlite	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 sqlite	integer	bigint	col_integer integer	TRUE	TRUE	
 sqlite	null	text	col_null null	TRUE	TRUE	
