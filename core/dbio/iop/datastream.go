@@ -401,8 +401,6 @@ func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decod
 
 			for _, t := range ts {
 				switch t {
-				case TransformReplaceAccents:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.Accent)
 				case TransformDecodeLatin1:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_1)
 				case TransformDecodeLatin5:
@@ -807,6 +805,11 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 		return g.Error(err, "Could not decompress reader")
 	}
 
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader2); ok {
+		reader2 = newReader
+	}
+
 	decoder := json.NewDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
@@ -825,6 +828,11 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	reader2, err := AutoDecompress(reader)
 	if err != nil {
 		return g.Error(err, "Could not decompress reader")
+	}
+
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader2); ok {
+		reader2 = newReader
 	}
 
 	decoder := xml.NewDecoder(reader2)
