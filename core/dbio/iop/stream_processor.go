@@ -14,6 +14,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
+	encUnicode "golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
@@ -21,39 +22,57 @@ import (
 
 // StreamProcessor processes rows and values
 type StreamProcessor struct {
-	N                 uint64
-	dateLayoutCache   string
-	stringTypeCache   map[int]string
-	colStats          map[int]*ColumnStats
-	rowChecksum       []uint64
-	unrecognizedDate  string
-	warn              bool
-	parseFuncs        map[string]func(s string) (interface{}, error)
-	decReplRegex      *regexp.Regexp
-	ds                *Datastream
-	dateLayouts       []string
-	Config            *StreamConfig
-	rowBlankValCnt    int
-	accentTransformer transform.Transformer
+	N                uint64
+	dateLayoutCache  string
+	stringTypeCache  map[int]string
+	colStats         map[int]*ColumnStats
+	rowChecksum      []uint64
+	unrecognizedDate string
+	warn             bool
+	parseFuncs       map[string]func(s string) (interface{}, error)
+	decReplRegex     *regexp.Regexp
+	ds               *Datastream
+	dateLayouts      []string
+	Config           *StreamConfig
+	rowBlankValCnt   int
+	transformers     Transformers
 }
 
 type StreamConfig struct {
-	TrimSpace      bool                       `json:"trim_space"`
-	EmptyAsNull    bool                       `json:"empty_as_null"`
-	Header         bool                       `json:"header"`
-	Compression    string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf         string                     `json:"null_if"`
-	DatetimeFormat string                     `json:"datetime_format"`
-	SkipBlankLines bool                       `json:"skip_blank_lines"`
-	Delimiter      string                     `json:"delimiter"`
-	FileMaxRows    int64                      `json:"file_max_rows"`
-	MaxDecimals    int                        `json:"max_decimals"`
-	Flatten        bool                       `json:"flatten"`
-	FieldsPerRec   int                        `json:"fields_per_rec"`
-	Jmespath       string                     `json:"jmespath"`
-	BoolAsInt      bool                       `json:"-"`
-	Columns        Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms     map[string][]TransformFunc // array of transform functions to apply
+	TrimSpace         bool                       `json:"trim_space"`
+	EmptyAsNull       bool                       `json:"empty_as_null"`
+	Header            bool                       `json:"header"`
+	Compression       string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf            string                     `json:"null_if"`
+	DatetimeFormat    string                     `json:"datetime_format"`
+	SkipBlankLines    bool                       `json:"skip_blank_lines"`
+	Delimiter         string                     `json:"delimiter"`
+	FileMaxRows       int64                      `json:"file_max_rows"`
+	MaxDecimals       int                        `json:"max_decimals"`
+	Flatten           bool                       `json:"flatten"`
+	FieldsPerRec      int                        `json:"fields_per_rec"`
+	Jmespath          string                     `json:"jmespath"`
+	BoolAsInt         bool                       `json:"-"`
+	Columns           Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms        map[string][]TransformFunc // array of transform functions to apply
+	maxDecimalsFormat string                     `json:"-"`
+}
+
+type Transformers struct {
+	Accent  transform.Transformer
+	UTF8    transform.Transformer
+	UTF8BOM transform.Transformer
+	UTF16   transform.Transformer
+}
+
+func NewTransformers() Transformers {
+
+	return Transformers{
+		Accent:  transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+		UTF8:    encUnicode.UTF8.NewDecoder(),
+		UTF8BOM: encUnicode.UTF8BOM.NewDecoder(),
+		UTF16:   encUnicode.UTF16(encUnicode.LittleEndian, encUnicode.UseBOM).NewDecoder(),
+	}
 }
 
 type TransformFunc func(*StreamProcessor, string) (string, error)
@@ -61,15 +80,18 @@ type TransformFunc func(*StreamProcessor, string) (string, error)
 // NewStreamProcessor returns a new StreamProcessor
 func NewStreamProcessor() *StreamProcessor {
 	sp := StreamProcessor{
-		stringTypeCache:   map[int]string{},
-		colStats:          map[int]*ColumnStats{},
-		decReplRegex:      regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
-		accentTransformer: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+		stringTypeCache: map[int]string{},
+		colStats:        map[int]*ColumnStats{},
+		decReplRegex:    regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
+		transformers:    NewTransformers(),
 	}
 
 	sp.ResetConfig()
 	if val := os.Getenv("MAX_DECIMALS"); val != "" && val != "-1" {
 		sp.Config.MaxDecimals = cast.ToInt(os.Getenv("MAX_DECIMALS"))
+		if sp.Config.MaxDecimals > -1 {
+			sp.Config.maxDecimalsFormat = "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
+		}
 	}
 
 	// if val is '0400', '0401'. Such as codes.
@@ -197,6 +219,8 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		sp.Config.MaxDecimals, err = cast.ToIntE(configMap["max_decimals"])
 		if err != nil {
 			sp.Config.MaxDecimals = -1
+		} else if sp.Config.MaxDecimals > -1 {
+			sp.Config.maxDecimalsFormat = "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
 		}
 	}
 
@@ -617,8 +641,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		if sp.Config.MaxDecimals > -1 && !isInt {
-			format := "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
-			nVal = g.F(format, fVal)
+			nVal = g.F(sp.Config.maxDecimalsFormat, fVal)
 		} else {
 			nVal = strings.Replace(cast.ToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
 		}
@@ -698,10 +721,6 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
-		} else if sp.Config.MaxDecimals > -1 {
-			fVal, _ := sp.toFloat64E(val)
-			format := "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
-			val = g.F(format, fVal)
 		}
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)

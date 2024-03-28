@@ -20,22 +20,25 @@ var decWindows1250 = charmap.Windows1250.NewDecoder()
 var decWindows1252 = charmap.Windows1252.NewDecoder()
 
 var transforms = map[string]iop.TransformFunc{
-	"replace_accents":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
-	"replace_0x00":          func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
-	"replace_non_printable": func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
-	"trim_space":            func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
-	"parse_uuid":            func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
-	"parse_fix":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
-	"parse_bit":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
 	"decode_latin1":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_1, val) },
 	"decode_latin5":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_5, val) },
 	"decode_latin9":         func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decISO8859_15, val) },
+	"decode_utf8":           func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF8(sp, val) },
+	"decode_utf8_bom":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF8BOM(sp, val) },
+	"decode_utf16":          func(sp *iop.StreamProcessor, val string) (string, error) { return iop.DecodeUTF16(sp, val) },
 	"decode_windows1250":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1250, val) },
 	"decode_windows1252":    func(sp *iop.StreamProcessor, val string) (string, error) { return Decode(sp, decWindows1252, val) },
+	"duckdb_list_to_text":   func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsText(val), nil },
 	"hash_md5":              func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
 	"hash_sha256":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA256(val), nil },
 	"hash_sha512":           func(sp *iop.StreamProcessor, val string) (string, error) { return SHA512(val), nil },
-	"duckdb_list_to_text":   func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsTest(val), nil },
+	"parse_bit":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
+	"parse_fix":             func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
+	"parse_uuid":            func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	"replace_0x00":          func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
+	"replace_accents":       func(sp *iop.StreamProcessor, val string) (string, error) { return iop.ReplaceAccents(sp, val) },
+	"replace_non_printable": func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
+	"trim_space":            func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },
 }
 
 func init() {
@@ -103,12 +106,12 @@ func SHA512(val string) string {
 	return string(h.Sum(nil))
 }
 
-// duckDbListAsTest adds a space suffix to lists. This is used as
+// duckDbListAsText adds a space suffix to lists. This is used as
 // a workaround to not cast these values as JSON.
 // Lists / Arrays do not conform to JSON spec and can error out
 // In a case, [0121] is valid in DuckDB as VARCHAR[], but not JSON (zero prefix)
 // since we have to manually infer the stdout output from the duckdb binary
-func duckDbListAsTest(val string) string {
+func duckDbListAsText(val string) string {
 	if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
 		return val + " "
 	}

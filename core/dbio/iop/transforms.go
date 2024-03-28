@@ -3,6 +3,7 @@ package iop
 import (
 	"bufio"
 	"embed"
+	"errors"
 	"regexp"
 	"strings"
 	"unicode"
@@ -18,9 +19,33 @@ var templatesFolder embed.FS
 var Transforms = map[string]TransformFunc{}
 
 func ReplaceAccents(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.accentTransformer, val)
+	newVal, _, err := transform.String(sp.transformers.Accent, val)
 	if err != nil {
-		return val, g.Error(err, "could not transform while running ReplaceAccents")
+		return val, errors.New("could not transform while running ReplaceAccents: " + err.Error())
+	}
+	return newVal, nil
+}
+
+func DecodeUTF16(sp *StreamProcessor, val string) (string, error) {
+	newVal, _, err := transform.String(sp.transformers.UTF16, val)
+	if err != nil {
+		return val, errors.New("could not transform while running DecodeUTF16: " + err.Error())
+	}
+	return newVal, nil
+}
+
+func DecodeUTF8(sp *StreamProcessor, val string) (string, error) {
+	newVal, _, err := transform.String(sp.transformers.UTF8, val)
+	if err != nil {
+		return val, errors.New("could not transform while running DecodeUTF8: " + err.Error())
+	}
+	return newVal, nil
+}
+
+func DecodeUTF8BOM(sp *StreamProcessor, val string) (string, error) {
+	newVal, _, err := transform.String(sp.transformers.UTF8BOM, val)
+	if err != nil {
+		return val, errors.New("could not transform while running DecodeUTF8BOM: " + err.Error())
 	}
 	return newVal, nil
 }
