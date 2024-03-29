@@ -6,7 +6,9 @@ labels: 'bug, to-review'
 assignees: ''
 ---
 
-## Data Points to help us solve the issue:
+## Issue Description
+
+- Description of the issue: 
 
 - Sling version (`sling --version`): 
 
@@ -14,4 +16,15 @@ assignees: ''
 
 - Replication Configuration: 
 
+```yaml
+source: <source>
+target: <target>
+streams:
+  ...
+```
+
 - Log Output (please run command with `-d`): 
+
+```
+Paste log here.
+```
