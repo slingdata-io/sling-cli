@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
-	"github.com/jedib0t/go-pretty/table"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -253,14 +252,13 @@ func (ec *EnvConns) Unset(name string) (err error) {
 	return
 }
 
-func (ec *EnvConns) List() string {
+func (ec *EnvConns) List() (fields []string, rows [][]any) {
 	conns := GetLocalConns(true)
-	T := table.NewWriter()
-	T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
+	fields = []string{"Conn Name", "Conn Type", "Source"}
 	for _, conn := range conns {
-		T.AppendRow(table.Row{conn.Name, conn.Description, conn.Source})
+		rows = append(rows, []any{conn.Name, conn.Description, conn.Source})
 	}
-	return T.Render()
+	return fields, rows
 }
 
 type DiscoverOptions struct {

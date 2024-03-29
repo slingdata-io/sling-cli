@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -528,6 +529,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 	ef := env.LoadSlingEnvFile()
 	ec := connection.EnvConns{EnvFile: &ef}
+	asJSON := os.Getenv("SLING_OUTPUT") == "json"
 
 	telemetryMap["task_start_time"] = time.Now()
 	defer func() {
@@ -624,7 +626,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					return ok, g.Error(err, "cannot execute query")
 				}
 
-				println(g.PrettyTable(data.GetFields(), data.Rows))
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", data.GetFields(), "rows", data.Rows)))
+				} else {
+					fmt.Println(g.PrettyTable(data.GetFields(), data.Rows))
+				}
 
 			} else {
 				result, err := dbConn.ExecMulti(query)
@@ -645,7 +651,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 	case "list":
-		println(ec.List())
+		fields, rows := ec.List()
+		if asJSON {
+			fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+		} else {
+			fmt.Println(g.PrettyTable(fields, rows))
+		}
 
 	case "test":
 		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnTest))
@@ -690,9 +701,14 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			})
 
 			if opt.ColumnLevel {
-				println(iop.Columns(lo.Values(schemata.Columns())).PrettyTable(true))
+				columns := iop.Columns(lo.Values(schemata.Columns()))
+				if asJSON {
+					fmt.Println(columns.JSON(true))
+				} else {
+					fmt.Println(columns.PrettyTable(true))
+				}
 			} else {
-				header := []string{"#", "Schema", "Name", "Type", "Columns"}
+				fields := []string{"#", "Schema", "Name", "Type", "Columns"}
 				rows := lo.Map(tables, func(table database.Table, i int) []any {
 					tableType := lo.Ternary(table.IsView, "view", "table")
 					if table.Dialect.DBNameUpperCase() {
@@ -700,16 +716,25 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					}
 					return []any{i + 1, table.Schema, table.Name, tableType, len(table.Columns)}
 				})
-				println(g.PrettyTable(header, rows))
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+				} else {
+					fmt.Println(g.PrettyTable(fields, rows))
+				}
 			}
 		} else if len(files) > 0 {
 			if opt.ColumnLevel {
-				println(iop.Columns(lo.Values(files.Columns())).PrettyTable(true))
+				columns := iop.Columns(lo.Values(files.Columns()))
+				if asJSON {
+					fmt.Println(columns.JSON(true))
+				} else {
+					fmt.Println(columns.PrettyTable(true))
+				}
 			} else {
 
 				files.Sort()
 
-				header := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
+				fields := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
 				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
 					fileType := lo.Ternary(file.IsDir, "directory", "file")
 
@@ -728,7 +753,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					return []any{i + 1, file.Path(), fileType, size, lastUpdated}
 				})
 
-				println(g.PrettyTable(header, rows))
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+				} else {
+					fmt.Println(g.PrettyTable(fields, rows))
+				}
 
 				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
 					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --selector flag to list sub-folders, or --recursive")
