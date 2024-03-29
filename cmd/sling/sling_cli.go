@@ -197,8 +197,8 @@ var cliConns = &g.CliSC{
 			},
 			Flags: []g.Flag{
 				{
-					Name:        "selector",
-					ShortName:   "s",
+					Name:        "pattern",
+					ShortName:   "p",
 					Type:        "string",
 					Description: "filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet)",
 				},

@@ -681,7 +681,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 		opt := &connection.DiscoverOptions{
-			Pattern:     cast.ToString(c.Vals["selector"]),
+			Pattern:     cast.ToString(c.Vals["pattern"]),
 			ColumnLevel: cast.ToBool(c.Vals["columns"]),
 			Recursive:   cast.ToBool(c.Vals["recursive"]),
 		}
@@ -760,7 +760,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				}
 
 				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
-					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --selector flag to list sub-folders, or --recursive")
+					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --pattern flag to list sub-folders, or --recursive")
 				}
 			}
 		}
