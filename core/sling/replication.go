@@ -468,8 +468,10 @@ func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[stri
 	columns = map[string]any{}
 	for _, sourceOptionsNode := range sourceOptionsNodes {
 		if cast.ToString(sourceOptionsNode.Key) == "columns" {
-			for _, columnNode := range sourceOptionsNode.Value.(yaml.MapSlice) {
-				columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
+			if slice, ok := sourceOptionsNode.Value.(yaml.MapSlice); ok {
+				for _, columnNode := range slice {
+					columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
+				}
 			}
 		}
 	}
