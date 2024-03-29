@@ -23,43 +23,43 @@ func init() {
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
 	// ID auto-increments
-	ID int64 `json:"id" gorm:"primaryKey"`
+	ID int64 `json:"id,omitempty" gorm:"primaryKey"`
 
-	ExecID string `json:"exec_id" gorm:"index"`
+	ExecID string `json:"exec_id,omitempty" gorm:"index"`
 
 	// StreamID represents the stream inside the replication that is running.
 	// Is an MD5 construct:`md5(Source, Target, Stream)`.
-	StreamID string `json:"stream_id" sql:"not null" gorm:"index"`
+	StreamID string `json:"stream_id,omitempty" sql:"not null" gorm:"index"`
 
 	// ConfigMD5 points to config table. not null
-	TaskMD5        string `json:"task_md5" sql:"not null" gorm:"index"`
-	ReplicationMD5 string `json:"replication_md5" sql:"not null" gorm:"index"`
+	TaskMD5        string `json:"task_md5,omitempty" sql:"not null" gorm:"index"`
+	ReplicationMD5 string `json:"replication_md5,omitempty" sql:"not null" gorm:"index"`
 
-	Status    sling.ExecStatus `json:"status" gorm:"index"`
-	Err       *string          `json:"error"`
-	StartTime *time.Time       `json:"start_time" gorm:"index"`
-	EndTime   *time.Time       `json:"end_time" gorm:"index"`
-	Bytes     uint64           `json:"bytes"`
-	ExitCode  int              `json:"exit_code"`
-	Output    string           `json:"output" sql:"default ''"`
-	Rows      uint64           `json:"rows"`
-	Pid       int              `json:"pid"`
-	Version   string           `json:"version"`
+	Status    sling.ExecStatus `json:"status,omitempty" gorm:"index"`
+	Err       *string          `json:"error,omitempty"`
+	StartTime *time.Time       `json:"start_time,omitempty" gorm:"index"`
+	EndTime   *time.Time       `json:"end_time,omitempty" gorm:"index"`
+	Bytes     uint64           `json:"bytes,omitempty"`
+	ExitCode  int              `json:"exit_code,omitempty"`
+	Output    string           `json:"output,omitempty" sql:"default ''"`
+	Rows      uint64           `json:"rows,omitempty"`
+	Pid       int              `json:"pid,omitempty"`
+	Version   string           `json:"version,omitempty"`
 
 	// ProjectID represents the project or the repository.
 	// If .git exists, grab first commit with `git rev-list --max-parents=0 HEAD`.
 	// if not, use md5 of path of folder. Can be `null` if using task.
-	ProjectID *string `json:"project_id" gorm:"index"`
+	ProjectID *string `json:"project_id,omitempty" gorm:"index"`
 
 	// FilePath represents the path to a file.
 	// We would need this to refer back to the same file, even if
 	// the contents change. So this should just be the relative path
 	// of the replication.yaml or task.yaml from the root of the project.
 	// If Ad-hoc from CLI flags, let it be `null`.
-	FilePath *string `json:"file_path" gorm:"index"`
+	FilePath *string `json:"file_path,omitempty" gorm:"index"`
 
-	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
-	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
+	CreatedDt time.Time `json:"created_dt,omitempty" gorm:"autoCreateTime"`
+	UpdatedDt time.Time `json:"updated_dt,omitempty" gorm:"autoUpdateTime"`
 
 	Task        *Task        `json:"task,omitempty" gorm:"-"`
 	Replication *Replication `json:"replication,omitempty" gorm:"-"`
@@ -212,7 +212,7 @@ func StoreInsert(t *sling.TaskExecution) {
 	t.ExecID = exec.ExecID
 
 	// send status
-	sendStatus(exec)
+	sendStatus(*exec)
 }
 
 // Store saves the task into the local sqlite
@@ -244,15 +244,16 @@ func StoreUpdate(t *sling.TaskExecution) {
 	}
 
 	// send status
-	sendStatus(exec)
+	sendStatus(*exec)
 }
 
-func sendStatus(exec *Execution) {
+func sendStatus(exec Execution) {
 	if os.Getenv("SLING_STATUS_URL") == "" {
 		return
 	}
 
 	headers := map[string]string{"Content-Type": "application/json"}
+	exec.Output = "" // no need for output
 	payload := g.Marshal(exec)
 	net.ClientDo(
 		http.MethodPost, os.Getenv("SLING_STATUS_URL"),
