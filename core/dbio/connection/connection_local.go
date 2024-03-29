@@ -267,11 +267,11 @@ type DiscoverOptions struct {
 	Pattern     string `json:"pattern,omitempty"`
 	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
 	Recursive   bool   `json:"recursive,omitempty"`
-	discover    bool
+	Discover    bool
 }
 
 func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
-	opt.discover = true
+	opt.Discover = true
 	_, nodes, schemata, err = ec.testDiscover(name, opt)
 	return
 }
@@ -335,7 +335,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
-		if opt.discover {
+		if opt.Discover {
 			var table database.Table
 			if opt.Pattern != "" {
 				table, _ = database.ParseTableName(opt.Pattern, dbConn.GetType())
@@ -407,7 +407,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 		}
 
 		// apply filter
-		if opt.discover {
+		if opt.Discover {
 			// sort alphabetically
 			nodes.Sort()
 			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
