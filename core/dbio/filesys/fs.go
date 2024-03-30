@@ -895,7 +895,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 		}
 
 		flatten := cast.ToBool(fs.GetProp("flatten"))
-		if flatten && (fileFormat.IsJson() || isJson(paths...)) {
+		if flatten && (fileFormat.IsJson() || isFiletype(FileTypeJson, paths...) || isFiletype(FileTypeJsonLines, paths...)) {
 			ds, err := MergeReaders(fs, FileTypeJson, paths...)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -910,7 +910,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		if flatten && (fileFormat == FileTypeXml || isXml(paths...)) {
+		if flatten && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, paths...)) {
 			ds, err := MergeReaders(fs, FileTypeXml, paths...)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -926,7 +926,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 		}
 
 		// csvs with no header
-		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv) {
+		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, paths...)) {
 			ds, err := MergeReaders(fs, fileFormat, paths...)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -1057,38 +1057,22 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 	return
 }
 
-func isJson(paths ...string) bool {
-	jsonCnt := 0
+func isFiletype(fileType FileType, paths ...string) bool {
+	cnt := 0
 	dirCnt := 0
 
+	ext := fileType.Ext()
 	for _, path := range paths {
 		if strings.HasSuffix(path, "/") {
 			dirCnt++
 			continue
 		}
 
-		if strings.Contains(path, FileTypeJson.Ext()) && !strings.HasSuffix(path, FileTypeCsv.Ext()) && !strings.HasSuffix(path, FileTypeXml.Ext()) {
-			jsonCnt++
+		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
+			cnt++
 		}
 	}
-	return len(paths) == jsonCnt+dirCnt
-}
-
-func isXml(paths ...string) bool {
-	jsonCnt := 0
-	dirCnt := 0
-
-	for _, path := range paths {
-		if strings.HasSuffix(path, "/") {
-			dirCnt++
-			continue
-		}
-
-		if strings.Contains(path, FileTypeXml.Ext()) && !strings.HasSuffix(path, FileTypeCsv.Ext()) && !strings.HasSuffix(path, FileTypeJson.Ext()) {
-			jsonCnt++
-		}
-	}
-	return len(paths) == jsonCnt+dirCnt
+	return len(paths) == cnt+dirCnt
 }
 
 func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop.Datastream, err error) {
@@ -1121,7 +1105,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 	g.DebugLow("Merging %s readers from %s", fileType, url)
 
-	readerChn := make(chan io.Reader, ds.Context.Wg.Read.Size+2)
+	readerChn := make(chan io.Reader, 3)
 	go func() {
 		defer close(readerChn)
 
@@ -1133,19 +1117,13 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 			g.Debug("processing reader from %s", path)
 
-			ds.Context.Wg.Read.Add()
+			reader, err := fs.Self().GetReader(path)
+			if err != nil {
+				setError(g.Error(err, "Error getting reader"))
+				return
+			}
 
-			go func(path string) {
-				defer ds.Context.Wg.Read.Done()
-
-				reader, err := fs.Self().GetReader(path)
-				if err != nil {
-					setError(g.Error(err, "Error getting reader"))
-					return
-				}
-
-				readerChn <- reader
-			}(path)
+			readerChn <- reader
 		}
 
 		ds.Context.Wg.Read.Wait()
