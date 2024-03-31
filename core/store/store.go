@@ -144,6 +144,11 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 		Task: *t.Config,
 	}
 
+	projID := t.Config.Env["SLING_PROJECT_ID"]
+	if projID != "" {
+		task.ProjectID = g.String(projID)
+	}
+
 	if t.Replication != nil {
 		replication = &Replication{
 			Name:        t.Config.Env["SLING_CONFIG_PATH"],
@@ -151,11 +156,10 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 			MD5:         t.Replication.MD5(),
 			Replication: *t.Replication,
 		}
-	}
 
-	if projID := t.Config.Env["SLING_PROJECT_ID"]; projID != "" {
-		task.ProjectID = g.String(projID)
-		replication.ProjectID = g.String(projID)
+		if projID != "" {
+			replication.ProjectID = g.String(projID)
+		}
 	}
 
 	// clean up
