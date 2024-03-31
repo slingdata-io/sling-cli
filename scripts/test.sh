@@ -41,8 +41,8 @@ sling conns exec POSTGRES 'select count(1) from public.my_table'
 sling conns discover POSTGRES
 sling conns discover POSTGRES -s 'public.*'
 sling conns discover local
-sling conns discover prometheus --columns > /dev/nul
-sling conns discover prometheus --columns > /dev/nul
+sling conns discover prometheus --columns > /dev/null
+sling conns discover prometheus --columns > /dev/null
 sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
 
 sling run -r cmd/sling/tests/replications/r.05.yaml
