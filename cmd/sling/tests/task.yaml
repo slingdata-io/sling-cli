@@ -1,0 +1,7 @@
+source:
+  conn: DO_SPACES
+  stream: s3://ocral/mlo.community.test/channels.json
+
+target:
+  conn: SQLITE
+  object: 'main.{stream_file_name}_slack_data'
