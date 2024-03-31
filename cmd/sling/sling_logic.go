@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -29,11 +30,7 @@ import (
 )
 
 var (
-	projectID = os.Getenv("SLING_PROJECT")
-	headers   = map[string]string{
-		"Content-Type":     "application/json",
-		"Sling-Project-ID": projectID,
-	}
+	projectID     = os.Getenv("SLING_PROJECT_ID")
 	updateMessage = ""
 	updateVersion = ""
 )
@@ -56,7 +53,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			telemetryMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			env.SetTelVal("error", g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
 
@@ -67,13 +64,16 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		cfg.Options.StdIn = true
 	}
 
+	env.SetTelVal("stage", "0 - init")
+	env.SetTelVal("run_mode", "cli")
+
 	for k, v := range c.Vals {
 		switch k {
 		case "replication":
-			telemetryMap["run_mode"] = "replication"
+			env.SetTelVal("run_mode", "replication")
 			replicationCfgPath = cast.ToString(v)
 		case "config":
-			telemetryMap["run_mode"] = "task"
+			env.SetTelVal("run_mode", "task")
 			taskCfgStr = cast.ToString(v)
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
@@ -164,7 +164,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
-			if cfg.Options.Debug {
+			if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
 				os.Setenv("DEBUG", "LOW")
 				env.SetLogger()
 			}
@@ -244,6 +244,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	taskMap := g.M()
 	taskOptions := g.M()
+	env.SetTelVal("stage", "1 - task-creation")
 	setTM := func() {
 
 		if task != nil {
@@ -277,7 +278,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		}
 
 		if projectID != "" {
-			telemetryMap["project_id"] = projectID
+			env.SetTelVal("project_id", projectID)
 		}
 
 		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
@@ -287,8 +288,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["target_type"] = "stdout"
 		}
 
-		telemetryMap["task_options"] = g.Marshal(taskOptions)
-		telemetryMap["task"] = g.Marshal(taskMap)
+		env.SetTelVal("task_options", g.Marshal(taskOptions))
+		env.SetTelVal("task", g.Marshal(taskMap))
 	}
 
 	// track usage
@@ -314,15 +315,19 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
 			taskMap["status"] = task.Status
+
+			if err != nil {
+				taskMap["tgt_table_ddl"] = task.Config.Target.Options.TableDDL
+			}
 		}
 
 		if err != nil {
-			telemetryMap["error"] = getErrString(err)
+			env.SetTelVal("error", getErrString(err))
 		}
 
-		telemetryMap["task_stats"] = g.Marshal(taskStats)
-		telemetryMap["task_options"] = g.Marshal(taskOptions)
-		telemetryMap["task"] = g.Marshal(taskMap)
+		env.SetTelVal("task_stats", g.Marshal(taskStats))
+		env.SetTelVal("task_options", g.Marshal(taskOptions))
+		env.SetTelVal("task", g.Marshal(taskMap))
 
 		// telemetry
 		Track("run")
@@ -385,7 +390,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	// clean up selectStreams
-	matchedStreams := map[string]sling.ReplicationStreamConfig{}
+	matchedStreams := map[string]*sling.ReplicationStreamConfig{}
 	for _, selectStream := range selectStreams {
 		for key, val := range replication.MatchStreams(selectStream) {
 			key = replication.Normalize(key)
@@ -485,10 +490,17 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
 		}
 
-		telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
-		telemetryMap["replication_md5"] = replication.MD5()
+		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
+		env.SetTelVal("replication_md5", replication.MD5())
 		err = runTask(&cfg, &replication)
 		if err != nil {
+			g.Info(env.RedString(err.Error()))
+			if eh := sling.ErrorHelper(err); eh != "" {
+				env.Println("")
+				env.Println(env.MagentaString(eh))
+				env.Println("")
+			}
+
 			errors[i] = g.Error(err, "error for stream %s", name)
 			eG.Capture(err, streamsOrdered[i])
 		} else {
@@ -517,11 +529,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 	ef := env.LoadSlingEnvFile()
 	ec := connection.EnvConns{EnvFile: &ef}
+	asJSON := os.Getenv("SLING_OUTPUT") == "json"
 
-	telemetryMap["task_start_time"] = time.Now()
+	env.SetTelVal("task_start_time", time.Now())
 	defer func() {
-		telemetryMap["task_status"] = lo.Ternary(err != nil, "error", "success")
-		telemetryMap["task_end_time"] = time.Now()
+		env.SetTelVal("task_status", lo.Ternary(err != nil, "error", "success"))
+		env.SetTelVal("task_end_time", time.Now())
 	}()
 
 	switch c.UsedSC() {
@@ -557,7 +570,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
 	case "exec":
-		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnExec))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
@@ -565,7 +578,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error("did not find connection %s", name)
 		}
 
-		telemetryMap["conn_type"] = conn.Connection.Type.String()
+		env.SetTelVal("conn_type", conn.Connection.Type.String())
 
 		if !conn.Connection.Type.IsDb() {
 			return ok, g.Error("cannot execute SQL query on a non-database connection (%s)", conn.Connection.Type)
@@ -582,48 +595,76 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "cannot connect to database (%s)", conn.Connection.Type)
 		}
 
-		query, err := sling.GetSQLText(cast.ToString(c.Vals["query"]))
-		if err != nil {
-			return ok, g.Error(err, "cannot get query")
-		}
+		queries := append([]string{cast.ToString(c.Vals["queries..."])}, flaggy.TrailingArguments...)
 
-		sQuery, err := database.ParseTableName(query, conn.Connection.Type)
-		if err != nil {
-			return ok, g.Error(err, "cannot parse query")
-		}
+		var totalAffected int64
+		for i, query := range queries {
 
-		if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select")) {
-
-			data, err := dbConn.Query(sQuery.Select(100))
+			query, err = sling.GetSQLText(query)
 			if err != nil {
-				return ok, g.Error(err, "cannot execute query")
+				return ok, g.Error(err, "cannot get query")
 			}
 
-			println(g.PrettyTable(data.GetFields(), data.Rows))
-
-		} else {
-			result, err := dbConn.ExecMulti(query)
+			sQuery, err := database.ParseTableName(query, conn.Connection.Type)
 			if err != nil {
-				return ok, g.Error(err, "cannot execute query")
+				return ok, g.Error(err, "cannot parse query")
 			}
-			end := time.Now()
 
-			affected, _ := result.RowsAffected()
-			if affected > 0 {
-				g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), affected)
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
+
+				data, err := dbConn.Query(sQuery.Select(100))
+				if err != nil {
+					return ok, g.Error(err, "cannot execute query")
+				}
+
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", data.GetFields(), "rows", data.Rows)))
+				} else {
+					fmt.Println(g.PrettyTable(data.GetFields(), data.Rows))
+				}
+
 			} else {
-				g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+				if len(queries) > 1 {
+					if strings.HasPrefix(query, "file://") {
+						g.Info("executing query #%d (%s)", i+1, query)
+					} else {
+						g.Info("executing query #%d", i+1)
+					}
+				} else {
+					g.Info("executing query")
+				}
+
+				result, err := dbConn.ExecMulti(query)
+				if err != nil {
+					return ok, g.Error(err, "cannot execute query")
+				}
+
+				affected, _ := result.RowsAffected()
+				totalAffected = totalAffected + affected
 			}
+		}
+
+		end := time.Now()
+		if totalAffected > 0 {
+			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
+		} else {
+			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
 	case "list":
-		println(ec.List())
+		fields, rows := ec.List()
+		if asJSON {
+			fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+		} else {
+			fmt.Println(g.PrettyTable(fields, rows))
+		}
 
 	case "test":
-		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnTest))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
-			telemetryMap["conn_type"] = conn.Connection.Type.String()
+			env.SetTelVal("conn_type", conn.Connection.Type.String())
+			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
 		}
 
 		ok, err = ec.Test(name)
@@ -633,15 +674,15 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("success!") // successfully connected
 		}
 	case "discover":
-		telemetryMap["task"] = g.Marshal(g.M("type", sling.ConnDiscover))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnDiscover)))
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
 		if ok {
-			telemetryMap["conn_type"] = conn.Connection.Type.String()
+			env.SetTelVal("conn_type", conn.Connection.Type.String())
 		}
 
 		opt := &connection.DiscoverOptions{
-			Pattern:     cast.ToString(c.Vals["selector"]),
+			Pattern:     cast.ToString(c.Vals["pattern"]),
 			ColumnLevel: cast.ToBool(c.Vals["columns"]),
 			Recursive:   cast.ToBool(c.Vals["recursive"]),
 		}
@@ -661,9 +702,14 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			})
 
 			if opt.ColumnLevel {
-				println(iop.Columns(lo.Values(schemata.Columns())).PrettyTable(true))
+				columns := iop.Columns(lo.Values(schemata.Columns()))
+				if asJSON {
+					fmt.Println(columns.JSON(true))
+				} else {
+					fmt.Println(columns.PrettyTable(true))
+				}
 			} else {
-				header := []string{"#", "Schema", "Name", "Type", "Columns"}
+				fields := []string{"#", "Schema", "Name", "Type", "Columns"}
 				rows := lo.Map(tables, func(table database.Table, i int) []any {
 					tableType := lo.Ternary(table.IsView, "view", "table")
 					if table.Dialect.DBNameUpperCase() {
@@ -671,16 +717,25 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					}
 					return []any{i + 1, table.Schema, table.Name, tableType, len(table.Columns)}
 				})
-				println(g.PrettyTable(header, rows))
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+				} else {
+					fmt.Println(g.PrettyTable(fields, rows))
+				}
 			}
 		} else if len(files) > 0 {
 			if opt.ColumnLevel {
-				println(iop.Columns(lo.Values(files.Columns())).PrettyTable(true))
+				columns := iop.Columns(lo.Values(files.Columns()))
+				if asJSON {
+					fmt.Println(columns.JSON(true))
+				} else {
+					fmt.Println(columns.PrettyTable(true))
+				}
 			} else {
 
 				files.Sort()
 
-				header := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
+				fields := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
 				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
 					fileType := lo.Ternary(file.IsDir, "directory", "file")
 
@@ -699,12 +754,18 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					return []any{i + 1, file.Path(), fileType, size, lastUpdated}
 				})
 
-				println(g.PrettyTable(header, rows))
+				if asJSON {
+					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
+				} else {
+					fmt.Println(g.PrettyTable(fields, rows))
+				}
 
 				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
-					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --selector flag to list sub-folders, or --recursive")
+					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --pattern flag to list sub-folders, or --recursive")
 				}
 			}
+		} else {
+			g.Info("no result.")
 		}
 
 	case "":
@@ -762,7 +823,7 @@ func setProjectID(cfgPath string) {
 		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
 		cmd.Dir = filepath.Dir(cfgPath)
 		out, err := cmd.Output()
-		if err == nil {
+		if err == nil && projectID == "" {
 			projectID = strings.TrimSpace(string(out))
 		}
 	}

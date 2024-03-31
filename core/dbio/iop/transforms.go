@@ -9,21 +9,36 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
-	"golang.org/x/text/transform"
 )
 
 //go:embed templates/*
 var templatesFolder embed.FS
 
-var Transforms = map[string]TransformFunc{}
+var Transforms = map[Transform]TransformFunc{}
 
-func ReplaceAccents(sp *StreamProcessor, val string) (string, error) {
-	newVal, _, err := transform.String(sp.accentTransformer, val)
-	if err != nil {
-		return val, g.Error(err, "could not transform while running ReplaceAccents")
-	}
-	return newVal, nil
-}
+type Transform string
+
+const (
+	TransformDecodeLatin1        Transform = "decode_latin1"
+	TransformDecodeLatin5        Transform = "decode_latin5"
+	TransformDecodeLatin9        Transform = "decode_latin9"
+	TransformDecodeUtf8          Transform = "decode_utf8"
+	TransformDecodeUtf8Bom       Transform = "decode_utf8_bom"
+	TransformDecodeUtf16         Transform = "decode_utf16"
+	TransformDecodeWindows1250   Transform = "decode_windows1250"
+	TransformDecodeWindows1252   Transform = "decode_windows1252"
+	TransformDuckdbListToText    Transform = "duckdb_list_to_text"
+	TransformHashMd5             Transform = "hash_md5"
+	TransformHashSha256          Transform = "hash_sha256"
+	TransformHashSha512          Transform = "hash_sha512"
+	TransformParseBit            Transform = "parse_bit"
+	TransformParseFix            Transform = "parse_fix"
+	TransformParseUuid           Transform = "parse_uuid"
+	TransformReplace0x00         Transform = "replace_0x00"
+	TransformReplaceAccents      Transform = "replace_accents"
+	TransformReplaceNonPrintable Transform = "replace_non_printable"
+	TransformTrimSpace           Transform = "trim_space"
+)
 
 // https://stackoverflow.com/a/46637343/2295355
 // https://web.itu.edu.tr/sgunduz/courses/mikroisl/ascii.html

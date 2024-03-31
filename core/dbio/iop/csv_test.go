@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,4 +251,117 @@ BB01;85;45,3865814208984;133245234406821951;2023-03-29T00:30:40Z`
 	assert.NoError(t, err)
 	assert.Equal(t, string(';'), string(deli))
 	assert.Equal(t, 5, numCols)
+}
+
+func TestRecords1(t *testing.T) {
+	row := make([]any, 10)
+	start := time.Now()
+	for i := 0; i < 10000000; i++ {
+		row0 := []any{"1", 2, 3.6, 4, 5, 6, 7, 8, 9, i}
+		copy(row, row0)
+	}
+	end := time.Now()
+	g.Info("delta: %d us", end.UnixMicro()-start.UnixMicro())
+}
+
+func TestRecords2(t *testing.T) {
+	row := make(chan []any)
+	start := time.Now()
+	go func() {
+		for i := 0; i < 10000000; i++ {
+			row0 := []any{"1", 2, 3.6, 4, 5, 6, 7, 8, 9, i}
+			row <- row0
+		}
+		close(row)
+	}()
+
+	for val := range row {
+		_ = val
+	}
+
+	end := time.Now()
+	g.Info("delta: %d us", end.UnixMicro()-start.UnixMicro())
+}
+
+// TestRecords3 is the fastest, with Mutex
+func TestRecords3(t *testing.T) {
+	row := make([]any, 10)
+	done := atomic.Bool{}
+	mux := sync.Mutex{}
+	start := time.Now()
+	started := make(chan bool)
+
+	go func(r []any) {
+		started <- true
+
+		for i := 0; i < 10000000; i++ {
+			row0 := []any{"1", 2, 3.6, 4, 5, 6, 7, 8, 9, i}
+			mux.Lock()
+			copy(r, row0)
+			mux.Unlock()
+		}
+		done.Store(true)
+	}(row)
+
+	<-started
+
+	var j int
+
+	for {
+		if done.Load() {
+			break
+		}
+		mux.Lock()
+		j = row[9].(int)
+		_ = j
+		mux.Unlock()
+	}
+
+	end := time.Now()
+	g.Info("delta: %d us", end.UnixMicro()-start.UnixMicro())
+	g.Info("%#v", row)
+}
+
+func TestRecords4(t *testing.T) {
+	row := make([]any, 10)
+	done := atomic.Bool{}
+	hasNew := atomic.Bool{}
+	start := time.Now()
+	started := make(chan bool)
+
+	go func(r []any) {
+		started <- true
+
+		for i := 0; i < 10000000; i++ {
+		redo:
+			if hasNew.Load() {
+				goto redo
+			}
+
+			row0 := []any{"1", 2, 3.6, 4, 5, 6, 7, 8, 9, i}
+			copy(r, row0)
+			hasNew.Store(true)
+		}
+		done.Store(true)
+	}(row)
+
+	<-started
+
+	var j int
+
+	for {
+		if done.Load() {
+			break
+		} else if !hasNew.Load() {
+			continue
+		}
+		j = row[9].(int)
+		_ = j
+
+		hasNew.Store(false)
+	}
+
+	end := time.Now()
+	g.Info("delta: %d us", end.UnixMicro()-start.UnixMicro())
+	g.Info("%#v", row)
 }

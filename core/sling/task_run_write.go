@@ -22,6 +22,7 @@ import (
 func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, err error) {
 	var bw int64
 	defer t.PBar.Finish()
+	setStage("5 - load-into-final")
 
 	if uri := cfg.TgtConn.URL(); uri != "" {
 		dateMap := iop.GetISO8601DateMap(time.Now())
@@ -59,6 +60,16 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
 
 		for stream := range df.StreamCh {
+			// stream.SetConfig(options)
+			// c := iop.CSV{File: os.Stdout}
+			// cnt, err = c.WriteStream(stream)
+			// if err != nil {
+			// 	err = g.Error(err, "Could not write to Stdout")
+			// 	return
+			// }
+
+			// continue
+
 			stream.SetConfig(options)
 			for batchR := range stream.NewCsvReaderChnl(cast.ToInt(limit), 0) {
 				if limit > 0 && cnt >= limit {
@@ -91,6 +102,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		"wrote %s: %d rows [%s r/s]",
 		humanize.Bytes(cast.ToUint64(bw)), cnt, getRate(cnt),
 	)
+	setStage("6 - closing")
 
 	return
 }
@@ -162,6 +174,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
+	setStage("4 - prepare-temp")
+
 	// create schema if not exist
 	_, err = createSchemaIfNotExists(tgtConn, tableTmp.Schema)
 	if err != nil {
@@ -201,13 +215,15 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	_, err = createTableIfNotExists(tgtConn, sampleData, tableTmp)
+	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
 		return
 	}
+	cfg.Target.Options.TableDDL = tableTmp.DDL
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
+	setStage("4 - load-into-temp")
 
 	t.AddCleanupTaskFirst(func() {
 		if cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
@@ -367,6 +383,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	defer tgtConn.Rollback() // rollback in case of error
+	setStage("5 - prepare-final")
 
 	{
 		if cfg.Mode == FullRefreshMode {
@@ -383,7 +400,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
 
-		created, err := createTableIfNotExists(tgtConn, sample, targetTable)
+		created, err := createTableIfNotExists(tgtConn, sample, &targetTable)
 		if err != nil {
 			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return cnt, err
@@ -435,6 +452,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Put data from tmp to final
+	setStage("5 - load-into-final")
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
 	} else if cfg.Mode == "drop (need to optimize temp table in place)" {
@@ -520,5 +538,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	err = df.Err()
+	setStage("6 - closing")
+
 	return
 }

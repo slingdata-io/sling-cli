@@ -11,7 +11,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/fatih/color"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -64,6 +63,8 @@ func (t *TaskExecution) Execute() error {
 
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
+	env.SetTelVal("stage", "2 - task-execution")
+
 	go func() {
 		defer close(done)
 		defer t.PBar.Finish()
@@ -144,10 +145,9 @@ func (t *TaskExecution) Execute() error {
 	t.EndTime = &now2
 
 	// show help text
-	eh := ErrorHelper(t.Err)
-	if eh != "" {
+	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode {
 		env.Println("")
-		env.Println(color.MagentaString(eh))
+		env.Println(env.MagentaString(eh))
 		env.Println("")
 	}
 
@@ -387,10 +387,6 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
 	if err != nil {
 		err = g.Error(err, "could not write to database")
-		if t.Config.Target.TmpTableCreated {
-			// need to drop residue
-			tgtConn.DropTable(t.Config.Target.Options.TableTmp)
-		}
 		return
 	}
 

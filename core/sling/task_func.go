@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -49,7 +50,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
-func createTableIfNotExists(conn database.Connection, data iop.Dataset, table database.Table) (created bool, err error) {
+func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table) (created bool, err error) {
 
 	// check table existence
 	exists, err := database.TableExists(conn, table.FullName())
@@ -65,7 +66,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table da
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	table.DDL, err = conn.GenerateDDL(table, data, false)
+	table.DDL, err = conn.GenerateDDL(*table, data, false)
 	if err != nil {
 		return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 	}
@@ -264,4 +265,8 @@ func GetSQLText(sqlStringPath string) (string, error) {
 	}
 
 	return sqlStringPath, nil
+}
+
+func setStage(value string) {
+	env.SetTelVal("stage", value)
 }

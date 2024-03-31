@@ -264,6 +264,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &MySQLConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mongo") {
 		conn = &MongoDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "prometheus") {
+		conn = &PrometheusConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {
 		conn = &MySQLConn{URL: URL}
 	} else if strings.HasPrefix(URL, "oracle:") {
@@ -2983,7 +2985,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
-				eg.Add(g.Error("checksum failure for %s [%s | %s] (sling-side vs db-side): %d != %d -- (%s)\n%#v", col.Name, col.Type, col.DbType, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], data.Rows[0]))
+				eg.Add(g.Error("checksum failure for %s [%s | %s] (sling-side vs db-side): %d != %d -- (%s)\n%s", col.Name, col.Type, col.DbType, checksum1, checksum2, exprMap[strings.ToLower(col.Name)], g.Marshal(data.Records(true)[0])))
 			}
 		}
 	}

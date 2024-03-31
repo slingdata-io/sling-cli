@@ -8,8 +8,10 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
@@ -21,6 +23,7 @@ import (
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"golang.org/x/text/transform"
 
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
@@ -40,7 +43,7 @@ type Datastream struct {
 	Count         uint64
 	Context       *g.Context
 	Ready         bool
-	Bytes         uint64
+	Bytes         atomic.Uint64
 	Sp            *StreamProcessor
 	SafeInference bool
 	NoDebug       bool
@@ -157,19 +160,18 @@ func (ds *Datastream) Df() *Dataflow {
 }
 
 func (ds *Datastream) processBwRows() {
-	// bwRows slows process speed by 10x, but this is needed for byte sizing
-	go func() {
-		if os.Getenv("DBIO_CSV_BYTES") == "TRUE" {
-			for row := range ds.bwRows {
-				ds.writeBwCsv(ds.CastRowToString(row))
-				ds.bwCsv.Flush()
-			}
-		} else {
-			for range ds.bwRows {
-				// drain channel
-			}
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			g.LogError(err)
 		}
 	}()
+
+	for row := range ds.bwRows {
+		ds.writeBwCsv(ds.CastRowToString(row))
+		ds.bwCsv.Flush()
+	}
 }
 
 // SetReady sets the ds.ready
@@ -393,6 +395,54 @@ func (ds *Datastream) SetIterator(it *Iterator) {
 	ds.it = it
 }
 
+func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decoded bool) {
+	// decode File if requested
+	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
+		columnTransforms := makeColumnTransforms(transformsPayload)
+		applied := []Transform{}
+
+		if ts, ok := columnTransforms["*"]; ok {
+			for _, t := range ts {
+				switch t {
+				case TransformDecodeLatin1:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_1)
+				case TransformDecodeLatin5:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_5)
+				case TransformDecodeLatin9:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_15)
+				case TransformDecodeWindows1250:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1250)
+				case TransformDecodeWindows1252:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1252)
+				case TransformDecodeUtf16:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF16)
+				case TransformDecodeUtf8:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8)
+				case TransformDecodeUtf8Bom:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8BOM)
+				default:
+					continue
+				}
+				applied = append(applied, t) // delete from transforms, already applied
+			}
+
+			ts = lo.Filter(ts, func(t Transform, i int) bool {
+				return !g.In(t, applied...)
+			})
+			columnTransforms["*"] = ts
+		}
+
+		if len(applied) > 0 {
+			// re-apply transforms
+			ds.Sp.applyTransforms(g.Marshal(columnTransforms))
+
+			return newReader, true
+		}
+	}
+
+	return reader, false
+}
+
 // SetFields sets the fields/columns of the Datastream
 func (ds *Datastream) SetFields(fields []string) {
 	if ds.Columns == nil || len(ds.Columns) != len(fields) {
@@ -456,6 +506,14 @@ func (ds *Datastream) Err() (err error) {
 // Start generates the stream
 // Should cycle the Iter Func until done
 func (ds *Datastream) Start() (err error) {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			ds.Context.CaptureErr(err)
+		}
+	}()
+
 	if ds.it == nil {
 		err = g.Error("iterator not defined")
 		return g.Error(err, "need to define iterator")
@@ -528,9 +586,11 @@ loop:
 		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
 			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
 			col := Column{
-				Name:     ds.Metadata.LoadedAt.Key,
-				Type:     IntegerType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.LoadedAt.Key,
+				Type:        IntegerType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.LoadedAt",
+				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -541,9 +601,11 @@ loop:
 		if ds.Metadata.StreamURL.Key != "" && ds.Metadata.StreamURL.Value != nil {
 			ds.Metadata.StreamURL.Key = ensureName(ds.Metadata.StreamURL.Key)
 			col := Column{
-				Name:     ds.Metadata.StreamURL.Key,
-				Type:     StringType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.StreamURL.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.StreamURL",
+				Metadata:    map[string]string{"sling_metadata": "stream_url"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -554,9 +616,11 @@ loop:
 		if ds.Metadata.RowNum.Key != "" {
 			ds.Metadata.RowNum.Key = ensureName(ds.Metadata.RowNum.Key)
 			col := Column{
-				Name:     ds.Metadata.RowNum.Key,
-				Type:     BigIntType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.RowNum.Key,
+				Type:        BigIntType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.RowNum",
+				Metadata:    map[string]string{"sling_metadata": "row_num"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -567,9 +631,11 @@ loop:
 		if ds.Metadata.RowID.Key != "" {
 			ds.Metadata.RowID.Key = ensureName(ds.Metadata.RowID.Key)
 			col := Column{
-				Name:     ds.Metadata.RowID.Key,
-				Type:     StringType,
-				Position: len(ds.Columns) + 1,
+				Name:        ds.Metadata.RowID.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.RowID",
+				Metadata:    map[string]string{"sling_metadata": "row_id"},
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -602,7 +668,16 @@ loop:
 	if !ds.NoDebug {
 		g.Trace("new ds.Start %s [%s]", ds.ID, ds.Metadata.StreamURL.Value)
 	}
+
 	go func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				ds.Context.CaptureErr(err)
+			}
+		}()
+
 		var err error
 		defer ds.Close()
 
@@ -749,6 +824,11 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 		return g.Error(err, "Could not decompress reader")
 	}
 
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader2); ok {
+		reader2 = newReader
+	}
+
 	decoder := json.NewDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
@@ -769,6 +849,11 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 		return g.Error(err, "Could not decompress reader")
 	}
 
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader2); ok {
+		reader2 = newReader
+	}
+
 	decoder := xml.NewDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
@@ -783,6 +868,11 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec}
+
+	// decode File if requested by transform
+	if newReader, ok := ds.decodeReader(reader); ok {
+		c.Reader = newReader
+	}
 
 	r, err := c.getReader(ds.config.Delimiter)
 	if err != nil {
@@ -999,9 +1089,74 @@ func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	return ds.ConsumeSASReaderSeeker(file)
 }
 
+// ConsumeSASReaderSeeker uses the provided reader to stream rows
+func (ds *Datastream) ConsumeExcelReaderSeeker(reader io.ReadSeeker, props map[string]string) (err error) {
+	data, err := NewExcelDataset(reader, props)
+	if err != nil {
+		return g.Error(err, "could read Excel data")
+	}
+
+	rows := MakeRowsChan()
+	nextFunc := func(it *Iterator) bool {
+		for it.Row = range rows {
+			return true
+		}
+		return false
+	}
+
+	go func() {
+		defer close(rows)
+		for _, row := range data.Rows {
+			rows <- row
+		}
+	}()
+
+	ds.it.IsCasted = true
+	ds.Columns = data.Columns
+	ds.Inferred = data.Inferred
+	ds.Sp = data.Sp
+	ds.Sp.ds = ds
+	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
+// ConsumeSASReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]string) (err error) {
+	// need to write to temp file prior
+	tempDir := env.GetTempFolder()
+	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
+	ds.Defer(func() { os.Remove(excelPath) })
+
+	file, err := os.Create(excelPath)
+	if err != nil {
+		return g.Error(err, "Unable to create temp file: "+excelPath)
+	}
+
+	g.Debug("downloading to temp file on disk: %s", excelPath)
+	bw, err := io.Copy(file, reader)
+	if err != nil {
+		return g.Error(err, "Unable to write to temp file: "+excelPath)
+	}
+	g.Debug("wrote %d bytes to %s", bw, excelPath)
+
+	_, err = file.Seek(0, 0) // reset to beginning
+	if err != nil {
+		return g.Error(err, "Unable to seek to beginning of temp file: "+excelPath)
+	}
+
+	return ds.ConsumeExcelReaderSeeker(file, props)
+}
+
 // AddBytes add bytes as processed
 func (ds *Datastream) AddBytes(b int64) {
-	ds.Bytes = ds.Bytes + cast.ToUint64(b)
+	ds.Bytes.Add(cast.ToUint64(b))
 }
 
 // Records return rows of maps
@@ -1632,6 +1787,40 @@ func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, 
 	}()
 
 	return readerChn
+}
+
+func (ds *Datastream) NewExcelReaderChnl(rowLimit int, bytesLimit int64, sheetName string) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+	xls := NewExcel()
+
+	if sheetName == "" {
+		sheetName = "Sheet1"
+	}
+
+	err := xls.WriteSheet(sheetName, ds, "overwrite")
+	if err != nil {
+		ds.Context.CaptureErr(g.Error(err, "error writing sheet"))
+		return
+	}
+
+	pipeR, pipeW := io.Pipe()
+
+	go func() {
+		defer close(readerChn)
+
+		br := &BatchReader{ds.CurrentBatch, ds.Columns, pipeR, 0}
+		readerChn <- br
+
+		err = xls.WriteToWriter(pipeW)
+		if err != nil {
+			ds.Context.CaptureErr(g.Error(err, "error writing to excel file"))
+		}
+
+		pipeW.Close()
+	}()
+
+	return
+
 }
 
 // NewParquetReaderChnl provides a channel of readers as the limit is reached

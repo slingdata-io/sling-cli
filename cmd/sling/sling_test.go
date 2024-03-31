@@ -67,6 +67,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 
 	dbio.TypeFileLocal:  {name: "local"},
 	dbio.TypeFileSftp:   {name: "sftp"},
@@ -542,6 +543,11 @@ func TestSuiteTrino(t *testing.T) {
 func TestSuiteMongo(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMongoDB, "10,22")
+}
+
+func TestSuitePrometheus(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbPrometheus, "22")
 }
 
 // generate large dataset or use cache

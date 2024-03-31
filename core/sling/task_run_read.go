@@ -18,6 +18,8 @@ import (
 // ReadFromDB reads from a source database
 func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df *iop.Dataflow, err error) {
 
+	setStage("3 - prepare-dataflow")
+
 	selectFieldsStr := "*"
 	sTable, err := database.ParseTableName(cfg.Source.Stream, srcConn.GetType())
 	if err != nil {
@@ -220,12 +222,16 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	g.Trace("%#v", df.Columns.Types())
+	setStage("3 - dataflow-stream")
 
 	return
 }
 
 // ReadFromFile reads from a source file
 func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) {
+
+	setStage("3 - prepare-dataflow")
+
 	// sets metadata
 	metadata := t.setGetMetadata()
 
@@ -280,6 +286,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	}
 
 	g.Trace("%#v", df.Columns.Types())
+	setStage("3 - dataflow-stream")
 
 	return
 }

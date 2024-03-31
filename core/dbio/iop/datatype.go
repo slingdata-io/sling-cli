@@ -158,12 +158,11 @@ func NewColumnsFromFields(fields ...string) (cols Columns) {
 	return
 }
 
-// PrettyTable returns a text pretty table
-func (cols Columns) PrettyTable(includeParent bool) (output string) {
-	header := []string{"ID", "Column Name", "Native Type", "General Type"}
+func (cols Columns) Data(includeParent bool) (fields []string, rows [][]any) {
+	fields = []string{"ID", "Column Name", "Native Type", "General Type"}
 	parentIsDB := false
 	parentIsFile := false
-	rows := lo.Map(cols, func(col Column, i int) []any {
+	rows = lo.Map(cols, func(col Column, i int) []any {
 		if includeParent {
 			if col.Table != "" {
 				parentIsDB = true
@@ -194,13 +193,26 @@ func (cols Columns) PrettyTable(includeParent bool) (output string) {
 
 	if includeParent {
 		if parentIsDB {
-			header = []string{"Database", "Schema", "Table", "ID", "Column", "Native Type", "General Type"}
+			fields = []string{"Database", "Schema", "Table", "ID", "Column", "Native Type", "General Type"}
 		}
 		if parentIsFile {
-			header = []string{"File", "ID", "Column", "Native Type", "General Type"}
+			fields = []string{"File", "ID", "Column", "Native Type", "General Type"}
 		}
 	}
+
+	return
+}
+
+// PrettyTable returns a text pretty table
+func (cols Columns) PrettyTable(includeParent bool) (output string) {
+	header, rows := cols.Data(includeParent)
 	return g.PrettyTable(header, rows)
+}
+
+// PrettyTable returns a text pretty table
+func (cols Columns) JSON(includeParent bool) (output string) {
+	fields, rows := cols.Data(includeParent)
+	return g.Marshal(g.M("fields", fields, "rows", rows))
 }
 
 // GetKeys gets key columns
@@ -312,6 +324,21 @@ func (cols Columns) Names(args ...bool) []string {
 		fields[j] = field
 	}
 	return fields
+}
+
+// WithoutMeta returns the columns with metadata columns
+func (cols Columns) WithoutMeta() (newCols Columns) {
+	for _, column := range cols {
+		if column.Metadata == nil {
+			column.Metadata = map[string]string{}
+		}
+
+		if _, found := column.Metadata["sling_metadata"]; !found {
+			// we should not find key `sling_metadata`
+			newCols = append(newCols, column)
+		}
+	}
+	return newCols
 }
 
 // Names return the column names

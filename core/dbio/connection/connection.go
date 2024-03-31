@@ -2,6 +2,7 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/url"
 	"os"
@@ -381,7 +382,7 @@ func (c *Connection) setURL() (err error) {
 		eG := g.ErrorGroup{}
 		for _, k := range keys {
 			if _, ok := c.Data[k]; !ok {
-				eG.Add(g.Error("Property value not provided: %s", k))
+				eG.Add(errors.New(g.F("Property value not provided: %s", k)))
 			}
 		}
 		if err = eG.Err(); err != nil {
@@ -456,6 +457,21 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = "mongodb://{username}:{password}@{host}:{port}"
+	case dbio.TypeDbPrometheus:
+		setIfMissing("api_key", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		template = "prometheus://{host}"
 	case dbio.TypeDbBigTable:
 		template = "bigtable://{project}/{instance}?"
 		if _, ok := c.Data["keyfile"]; ok {

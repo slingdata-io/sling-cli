@@ -4,6 +4,7 @@ target: sqlite
 defaults:
   mode: full-refresh
   object: 'main.pg_{stream_table}'
+  sql: "select *, 'hi' there from {stream_name}"
 
 streams:
   public.my_table*:

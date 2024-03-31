@@ -30,7 +30,6 @@ import (
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
-var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "cli")
 var telemetry = true
 var interrupted = false
 var machineID = ""
@@ -39,131 +38,133 @@ func init() {
 	env.InitLogger()
 }
 
+var cliRunFlags = []g.Flag{
+	{
+		Name:        "replication",
+		ShortName:   "r",
+		Type:        "string",
+		Description: "The replication config file to use (JSON or YAML).\n",
+	},
+	{
+		Name:        "config",
+		ShortName:   "c",
+		Type:        "string",
+		Description: "The task config string or file to use (JSON or YAML). [deprecated]",
+	},
+	{
+		Name:        "src-conn",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The source database / storage connection (name, conn string or URL).",
+	},
+	{
+		Name:        "src-stream",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The source table (schema.table), local / cloud file path.\n                       Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
+	},
+	{
+		Name:        "src-options",
+		Type:        "string",
+		Description: "in-line options to further configure source (JSON or YAML).\n",
+	},
+	{
+		Name:        "tgt-conn",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The target database connection (name, conn string or URL).",
+	},
+	{
+		Name:        "tgt-object",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The target table (schema.table) or local / cloud file path. Use `file://` for local paths.",
+	},
+	{
+		Name:        "tgt-options",
+		Type:        "string",
+		Description: "in-line options to further configure target (JSON or YAML).\n",
+	},
+	{
+		Name:        "select",
+		ShortName:   "s",
+		Type:        "string",
+		Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
+	},
+	{
+		Name:        "streams",
+		ShortName:   "",
+		Type:        "string",
+		Description: "Only run specific streams from a replication. (comma separated)",
+	},
+	{
+		Name:        "stdout",
+		ShortName:   "",
+		Type:        "bool",
+		Description: "Output the stream to standard output (STDOUT).",
+	},
+	{
+		Name:        "env",
+		ShortName:   "",
+		Type:        "string",
+		Description: "in-line environment variable map to pass in (JSON or YAML).",
+	},
+	{
+		Name:        "mode",
+		ShortName:   "m",
+		Type:        "string",
+		Description: "The target load mode to use: backfill, incremental, truncate, snapshot, full-refresh.\n                       Default is full-refresh. For incremental, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
+	},
+	{
+		Name:        "limit",
+		ShortName:   "l",
+		Type:        "string",
+		Description: "The maximum number of rows to pull.",
+	},
+	{
+		Name:        "iterate",
+		ShortName:   "",
+		Type:        "string",
+		Description: "Have sling run continuously a number of times (useful for backfilling).\n                       Accepts an integer above 0, or 'infinite' to run indefinitely. If the run fails, sling will exit",
+	},
+	{
+		Name:        "range",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The range to use for backfill mode, separated by a single comma. Example: `2021-01-01,2021-02-01` or `1,10000`",
+	},
+	{
+		Name:        "primary-key",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The primary key to use for incremental. For composite key, put comma delimited values.",
+	},
+	{
+		Name:        "update-key",
+		ShortName:   "",
+		Type:        "string",
+		Description: "The update key to use for incremental.\n",
+	},
+	{
+		Name:        "debug",
+		ShortName:   "d",
+		Type:        "bool",
+		Description: "Set logging level to DEBUG.",
+	},
+	{
+		Name:        "examples",
+		ShortName:   "e",
+		Type:        "bool",
+		Description: "Shows some examples.",
+	},
+}
+
 var cliRun = &g.CliSC{
 	Name:                  "run",
 	Description:           "Execute a run",
 	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
-	Flags: []g.Flag{
-		{
-			Name:        "config",
-			ShortName:   "c",
-			Type:        "string",
-			Description: "The task config string or file to use (JSON or YAML).",
-		},
-		{
-			Name:        "replication",
-			ShortName:   "r",
-			Type:        "string",
-			Description: "The replication config file to use (JSON or YAML).\n",
-		},
-		{
-			Name:        "src-conn",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The source database / storage connection (name, conn string or URL).",
-		},
-		{
-			Name:        "src-stream",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The source table (schema.table), local / cloud file path.\n                       Can also be the path of sql file or in-line text to use as query. Use `file://` for local paths.",
-		},
-		{
-			Name:        "src-options",
-			Type:        "string",
-			Description: "in-line options to further configure source (JSON or YAML).\n",
-		},
-		{
-			Name:        "tgt-conn",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The target database connection (name, conn string or URL).",
-		},
-		{
-			Name:        "tgt-object",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The target table (schema.table) or local / cloud file path. Use `file://` for local paths.",
-		},
-		{
-			Name:        "tgt-options",
-			Type:        "string",
-			Description: "in-line options to further configure target (JSON or YAML).\n",
-		},
-		{
-			Name:        "select",
-			ShortName:   "s",
-			Type:        "string",
-			Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
-		},
-		{
-			Name:        "streams",
-			ShortName:   "",
-			Type:        "string",
-			Description: "Only run specific streams from a replication. (comma separated)",
-		},
-		{
-			Name:        "stdout",
-			ShortName:   "",
-			Type:        "bool",
-			Description: "Output the stream to standard output (STDOUT).",
-		},
-		{
-			Name:        "env",
-			ShortName:   "",
-			Type:        "string",
-			Description: "in-line environment variable map to pass in (JSON or YAML).",
-		},
-		{
-			Name:        "mode",
-			ShortName:   "m",
-			Type:        "string",
-			Description: "The target load mode to use: backfill, incremental, truncate, snapshot, full-refresh.\n                       Default is full-refresh. For incremental, must provide `update-key` and `primary-key` values.\n                       All modes load into a new temp table on tgtConn prior to final load.",
-		},
-		{
-			Name:        "limit",
-			ShortName:   "l",
-			Type:        "string",
-			Description: "The maximum number of rows to pull.",
-		},
-		{
-			Name:        "iterate",
-			ShortName:   "",
-			Type:        "string",
-			Description: "Have sling run continuously a number of times (useful for backfilling).\n                       Accepts an integer above 0, or 'infinite' to run indefinitely. If the run fails, sling will exit",
-		},
-		{
-			Name:        "range",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The range to use for backfill mode, separated by a single comma. Example: `2021-01-01,2021-02-01` or `1,10000`",
-		},
-		{
-			Name:        "primary-key",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The primary key to use for incremental. For composite key, put comma delimited values.",
-		},
-		{
-			Name:        "update-key",
-			ShortName:   "",
-			Type:        "string",
-			Description: "The update key to use for incremental.\n",
-		},
-		{
-			Name:        "debug",
-			ShortName:   "d",
-			Type:        "bool",
-			Description: "Set logging level to DEBUG.",
-		},
-		{
-			Name:        "examples",
-			ShortName:   "e",
-			Type:        "bool",
-			Description: "Shows some examples.",
-		},
-	},
-	ExecProcess: processRun,
+	Flags:                 cliRunFlags,
+	ExecProcess:           processRun,
 }
 
 var cliInteractive = &g.CliSC{
@@ -197,8 +198,8 @@ var cliConns = &g.CliSC{
 			},
 			Flags: []g.Flag{
 				{
-					Name:        "selector",
-					ShortName:   "s",
+					Name:        "pattern",
+					ShortName:   "p",
 					Type:        "string",
 					Description: "filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet)",
 				},
@@ -273,15 +274,50 @@ var cliConns = &g.CliSC{
 					Description: "The name of the connection to set",
 				},
 				{
-					Name:        "query",
+					Name:        "queries...",
 					ShortName:   "",
 					Type:        "string",
-					Description: "The SQL query to execute. Can be in-line text or a file",
+					Description: "The SQL queries to execute. Can be in-line text or a file",
 				},
 			},
 		},
 	},
 	ExecProcess: processConns,
+}
+
+var cliCloud = &g.CliSC{
+	Name:                  "cloud",
+	Singular:              "cloud",
+	Description:           "Manage and trigger replications on the cloud",
+	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
+	SubComs: []*g.CliSC{
+		{
+			Name:        "login",
+			Description: "Authenticate into Sling Cloud",
+		},
+		{
+			Name:        "status",
+			Description: "Get status of replications",
+		},
+		{
+			Name:        "deploy",
+			Description: "deploy one or more replications to the cloud",
+			PosFlags: []g.Flag{
+				{
+					Name:        "replication",
+					ShortName:   "r",
+					Type:        "string",
+					Description: "The file or folder path of YAML / JSON replication file(s)",
+				},
+			},
+		},
+		{
+			Name:        "run",
+			Description: "Execute a run on the cloud",
+			Flags:       cliRunFlags,
+		},
+	},
+	ExecProcess: processCloud,
 }
 
 func init() {
@@ -328,7 +364,7 @@ func Track(event string, props ...map[string]interface{}) {
 		"user_id", machineID,
 	)
 
-	for k, v := range telemetryMap {
+	for k, v := range env.TelMap {
 		properties[k] = v
 	}
 
@@ -416,7 +452,7 @@ func cliInit() int {
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			telemetryMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			env.SetTelVal("error", g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
 
@@ -441,13 +477,13 @@ func cliInit() int {
 		defer SlingMedia.PrintFollowUs()
 	}
 
-	if err != nil || telemetryMap["error"] != nil {
-		if err == nil && telemetryMap["error"] != nil {
-			err = g.Error(cast.ToString(telemetryMap["error"]))
+	if err != nil || env.TelMap["error"] != nil {
+		if err == nil && env.TelMap["error"] != nil {
+			err = g.Error(cast.ToString(env.TelMap["error"]))
 		}
 
-		if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
-			telemetryMap["error"] = getErrString(err)
+		if g.In(g.CliObj.Name, "conns", "update") || env.TelMap["error"] == nil {
+			env.SetTelVal("error", getErrString(err))
 
 			eventName := g.CliObj.Name
 			if g.CliObj.UsedSC() != "" {
@@ -488,28 +524,37 @@ func setSentry() {
 	if telemetry {
 		g.SentryRelease = g.F("sling@%s", core.Version)
 		g.SentryDsn = env.SentryDsn
-		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) {
+		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) bool {
+			if exception.Err == "context canceled" {
+				return false
+			}
+
 			// set transaction
-			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
+			taskMap, _ := g.UnmarshalMap(cast.ToString(env.TelMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
 			event.Transaction = g.F("%s - %s", sourceType, targetType)
 			if g.CliObj.Name == "conns" {
-				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
+				targetType = lo.Ternary(env.TelMap["conn_type"] == nil, "unknown", cast.ToString(env.TelMap["conn_type"]))
 				event.Transaction = g.F(targetType)
 			}
 
-			taskType := lo.Ternary(taskMap["type"] == nil, "unknown", cast.ToString(taskMap["type"]))
-			event.Message = event.Exception[0].Value
-			event.Exception[0].Value = g.F("%s (%s)", exception.LastCaller(), taskType)
+			bars := "--------------------------------------------------------"
+			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(env.TelMap)
+
+			e := event.Exception[0]
+			event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
+			event.Exception[0].Value = g.F("%s [%s]", exception.LastCaller(), exception.CallerStackMD5())
 
 			scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {
+				scope.SetTag("run_mode", "conns")
 				scope.SetTag("target_type", targetType)
 			} else {
 				scope.SetTag("source_type", sourceType)
 				scope.SetTag("target_type", targetType)
-				scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
+				scope.SetTag("stage", cast.ToString(env.TelMap["stage"]))
+				scope.SetTag("run_mode", cast.ToString(env.TelMap["run_mode"]))
 				if val := cast.ToString(taskMap["mode"]); val != "" {
 					scope.SetTag("mode", val)
 				}
@@ -521,6 +566,8 @@ func setSentry() {
 					scope.SetTag("project_id", projectID)
 				}
 			}
+
+			return true
 		}
 		g.SentryInit()
 	}

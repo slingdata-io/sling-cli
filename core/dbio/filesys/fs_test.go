@@ -63,8 +63,9 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	// Test datastream
 	fs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	fs.SetProp("header", "true")
 	df, err := fs.ReadDataflow("test/test1/csv")
-	assert.NoError(t, err)
+	g.AssertNoError(t, err)
 
 	if t.Failed() {
 		return
@@ -650,6 +651,7 @@ func TestFileSysS3(t *testing.T) {
 	assert.NoError(t, err)
 
 	localFs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	localFs.SetProp("header", "true")
 	df2, err := localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 
@@ -657,6 +659,7 @@ func TestFileSysS3(t *testing.T) {
 	err = Delete(fs, writeFolderPath)
 	assert.NoError(t, err)
 
+	fs.SetProp("header", "true")
 	fs.SetProp("FILE_MAX_BYTES", "20000")
 	_, err = fs.WriteDataflow(df2, writeFolderPath)
 	assert.NoError(t, err)
@@ -715,10 +718,12 @@ func TestFileSysAzure(t *testing.T) {
 	assert.NoError(t, err)
 
 	localFs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	localFs.SetProp("header", "true")
 	df2, err := localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
+	fs.SetProp("header", "true")
 	writeFolderPath := "https://flarcostorage.blob.core.windows.net/testcont/test2"
 	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
@@ -780,17 +785,21 @@ func TestFileSysGoogle(t *testing.T) {
 	assert.NoError(t, err)
 
 	localFs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	localFs.SetProp("header", "true")
 	df2, err := localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "gs://flarco_us_bucket/test"
+	fs.SetProp("header", "true")
 	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
 	df3, err := fs.ReadDataflow(writeFolderPath)
-	assert.NoError(t, err)
+	if !assert.NoError(t, err) {
+		return
+	}
 
 	data2, err := df3.Collect()
 	assert.NoError(t, err)
@@ -843,11 +852,13 @@ func TestFileSysSftp(t *testing.T) {
 	assert.NoError(t, err)
 
 	localFs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
+	localFs.SetProp("header", "true")
 	df2, err := localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := root + "/tmp/test"
+	fs.SetProp("header", "true")
 	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())

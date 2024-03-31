@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
-	"github.com/jedib0t/go-pretty/table"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -253,25 +252,24 @@ func (ec *EnvConns) Unset(name string) (err error) {
 	return
 }
 
-func (ec *EnvConns) List() string {
+func (ec *EnvConns) List() (fields []string, rows [][]any) {
 	conns := GetLocalConns(true)
-	T := table.NewWriter()
-	T.AppendHeader(table.Row{"Conn Name", "Conn Type", "Source"})
+	fields = []string{"Conn Name", "Conn Type", "Source"}
 	for _, conn := range conns {
-		T.AppendRow(table.Row{conn.Name, conn.Description, conn.Source})
+		rows = append(rows, []any{conn.Name, conn.Description, conn.Source})
 	}
-	return T.Render()
+	return fields, rows
 }
 
 type DiscoverOptions struct {
 	Pattern     string `json:"pattern,omitempty"`
 	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
 	Recursive   bool   `json:"recursive,omitempty"`
-	discover    bool
+	Discover    bool
 }
 
 func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
-	opt.discover = true
+	opt.Discover = true
 	_, nodes, schemata, err = ec.testDiscover(name, opt)
 	return
 }
@@ -335,7 +333,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
 
-		if opt.discover {
+		if opt.Discover {
 			var table database.Table
 			if opt.Pattern != "" {
 				table, _ = database.ParseTableName(opt.Pattern, dbConn.GetType())
@@ -407,7 +405,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 		}
 
 		// apply filter
-		if opt.discover {
+		if opt.Discover {
 			// sort alphabetically
 			nodes.Sort()
 			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {

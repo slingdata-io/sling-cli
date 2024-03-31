@@ -42,7 +42,7 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 
-	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME") {
+	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
 		if fs.GetProp(key) == "" {
 			fs.SetProp(key, fs.GetProp("AWS_"+key))
 		}
@@ -105,7 +105,9 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		// LogLevel: aws.LogLevel(aws.LogDebugWithHTTPBody),
 	}
 
-	if fs.GetProp("ACCESS_KEY_ID") != "" && fs.GetProp("SECRET_ACCESS_KEY") != "" {
+	if profile := fs.GetProp("PROFILE"); profile != "" {
+		awsConfig.Credentials = credentials.NewSharedCredentials("", profile)
+	} else if fs.GetProp("ACCESS_KEY_ID") != "" && fs.GetProp("SECRET_ACCESS_KEY") != "" {
 		awsConfig.Credentials = credentials.NewStaticCredentials(
 			fs.GetProp("ACCESS_KEY_ID"),
 			fs.GetProp("SECRET_ACCESS_KEY"),

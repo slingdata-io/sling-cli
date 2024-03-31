@@ -1,6 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  create_schema: create database {schema}
   create_table: create table {table} ({col_types}) engine=MergeTree {partition_by} ORDER BY tuple()
   create_temporary_table: create table {table} ({col_types}) engine=Memory
   rename_table: ALTER TABLE {table} RENAME TO {new_table}

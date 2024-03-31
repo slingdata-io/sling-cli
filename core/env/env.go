@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
@@ -24,6 +26,8 @@ var (
 	StderrR        io.ReadCloser
 	StdErrW        *os.File
 	StdErrChn      chan string
+	TelMap         = g.M("begin_time", time.Now().UnixMicro())
+	TelMux         = sync.Mutex{}
 )
 
 //go:embed *
@@ -52,6 +56,12 @@ func init() {
 	if SentryDsn == "" {
 		SentryDsn = os.Getenv("SENTRY_DSN")
 	}
+}
+
+func SetTelVal(key string, value any) {
+	TelMux.Lock()
+	TelMap[key] = value
+	TelMux.Unlock()
 }
 
 func SetLogger() {
@@ -112,10 +122,12 @@ func InitLogger() {
 	StderrR, StdErrW, _ = os.Pipe()
 	// os.Stderr = StdErrW
 
+	StderrR2 := io.TeeReader(StderrR, os.Stderr)
+
 	SetLogger()
 
 	if StderrR != nil {
-		StderrReader := bufio.NewReader(StderrR)
+		StderrReader := bufio.NewReader(StderrR2)
 
 		go func() {
 			buf := make([]byte, 4*1024)
@@ -123,7 +135,6 @@ func InitLogger() {
 				nr, err := StderrReader.Read(buf)
 				if err == nil && nr > 0 {
 					text := string(buf[0:nr])
-					print(text)
 					if StdErrChn != nil {
 						StdErrChn <- text
 					}
@@ -170,6 +181,13 @@ func CyanString(text string) string {
 		return text
 	}
 	return g.Colorize(g.ColorCyan, text)
+}
+
+func MagentaString(text string) string {
+	if NoColor {
+		return text
+	}
+	return g.Colorize(g.ColorMagenta, text)
 }
 
 func DarkGrayString(text string) string {
