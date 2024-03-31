@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -264,4 +265,8 @@ func GetSQLText(sqlStringPath string) (string, error) {
 	}
 
 	return sqlStringPath, nil
+}
+
+func setStage(value string) {
+	env.TelMap["stage"] = value
 }
