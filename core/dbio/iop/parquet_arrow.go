@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
 	"log"
@@ -23,9 +24,10 @@ import (
 
 // ParquetArrowReader is a parquet reader object
 type ParquetArrowReader struct {
-	Path   string
-	Reader *file.Reader
-	Data   *Dataset
+	Path    string
+	Reader  *file.Reader
+	Data    *Dataset
+	Context *g.Context
 
 	selectedColIndices []int
 	colMap             map[string]int
@@ -39,11 +41,13 @@ type nextRow struct {
 }
 
 func NewParquetArrowReader(reader *os.File, selected []string) (p *ParquetArrowReader, err error) {
+	ctx := g.NewContext(context.Background())
+
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			g.Warn("recovered from panic: %#v\n%s", r, string(debug.Stack()))
-			err = g.Error("panic occurred! %#v", r)
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			ctx.CaptureErr(err)
 		}
 	}()
 
@@ -52,7 +56,7 @@ func NewParquetArrowReader(reader *os.File, selected []string) (p *ParquetArrowR
 		return p, g.Error(err, "could not open parquet reader")
 	}
 
-	p = &ParquetArrowReader{Reader: r, nextRow: make(chan nextRow, 10)}
+	p = &ParquetArrowReader{Reader: r, nextRow: make(chan nextRow, 10), Context: &ctx}
 
 	columns := p.Columns()
 	p.colMap = columns.FieldMap(true)
@@ -198,6 +202,14 @@ func (p *ParquetArrowReader) Columns() Columns {
 }
 
 func (p *ParquetArrowReader) readRowsLoop() {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			p.Context.CaptureErr(err)
+		}
+	}()
+
 	count := 0
 	columns := p.Columns()
 	for r := 0; r < p.Reader.NumRowGroups(); r++ {
@@ -272,14 +284,6 @@ func (p *ParquetArrowReader) readRowsLoop() {
 }
 
 func (p *ParquetArrowReader) nextFunc(it *Iterator) bool {
-	// recover from panic
-	defer func() {
-		if r := recover(); r != nil {
-			g.Warn("recovered from panic: %#v\n%s", r, string(debug.Stack()))
-			err := g.Error("panic occurred! %#v", r)
-			it.Context.CaptureErr(err)
-		}
-	}()
 
 retry:
 	select {

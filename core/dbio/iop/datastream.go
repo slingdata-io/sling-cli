@@ -506,6 +506,14 @@ func (ds *Datastream) Err() (err error) {
 // Start generates the stream
 // Should cycle the Iter Func until done
 func (ds *Datastream) Start() (err error) {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			ds.Context.CaptureErr(err)
+		}
+	}()
+
 	if ds.it == nil {
 		err = g.Error("iterator not defined")
 		return g.Error(err, "need to define iterator")
@@ -660,7 +668,16 @@ loop:
 	if !ds.NoDebug {
 		g.Trace("new ds.Start %s [%s]", ds.ID, ds.Metadata.StreamURL.Value)
 	}
+
 	go func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				ds.Context.CaptureErr(err)
+			}
+		}()
+
 		var err error
 		defer ds.Close()
 
