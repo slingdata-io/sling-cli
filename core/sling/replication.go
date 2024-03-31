@@ -39,6 +39,7 @@ func (rd *ReplicationConfig) MD5() string {
 		g.M("target", rd.Target),
 		g.M("defaults", rd.Defaults),
 		g.M("streams", rd.Streams),
+		g.M("env", rd.Env),
 	})
 
 	// clean up
@@ -269,6 +270,11 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 		}
 	}
 
+	return
+}
+
+// TODO: Compile
+func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []Config, err error) {
 	return
 }
 

@@ -66,6 +66,8 @@ type Execution struct {
 }
 
 type Task struct {
+	ProjectID *string `json:"project_id,omitempty" gorm:"index"`
+
 	// MD5 is MD5 of Config json string
 	MD5 string `json:"md5" gorm:"primaryKey"`
 
@@ -78,6 +80,10 @@ type Task struct {
 }
 
 type Replication struct {
+	Name string `json:"name"  gorm:"index"`
+
+	ProjectID *string `json:"project_id,omitempty" gorm:"index"`
+
 	// MD5 is MD5 of Config json string
 	MD5 string `json:"md5" gorm:"primaryKey"`
 
@@ -95,18 +101,19 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 	bytes, _ := t.GetBytes()
 
 	exec := Execution{
-		ExecID:    t.ExecID,
-		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.Source.Stream),
-		Status:    t.Status,
-		StartTime: t.StartTime,
-		EndTime:   t.EndTime,
-		Bytes:     bytes,
-		Output:    t.Output,
-		Rows:      t.GetCount(),
-		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
-		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
-		Pid:       os.Getpid(),
-		Version:   core.Version,
+		ExecID:         t.ExecID,
+		StreamID:       g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.Source.Stream),
+		Status:         t.Status,
+		StartTime:      t.StartTime,
+		EndTime:        t.EndTime,
+		Bytes:          bytes,
+		Output:         t.Output,
+		Rows:           t.GetCount(),
+		ProjectID:      g.String(t.Config.Env["SLING_PROJECT_ID"]),
+		FilePath:       g.String(t.Config.Env["SLING_CONFIG_PATH"]),
+		ReplicationMD5: os.Getenv("SLING_REPLICATION_MD5"),
+		Pid:            os.Getpid(),
+		Version:        core.Version,
 	}
 
 	if t.Err != nil {
@@ -120,6 +127,8 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
 		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))
+	} else if fileID := os.Getenv("SLING_REPLICATION_ID"); fileID != "" {
+		exec.FilePath = g.String(fileID)
 	}
 
 	return &exec
@@ -137,12 +146,16 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 
 	if t.Replication != nil {
 		replication = &Replication{
+			Name:        t.Config.Env["SLING_CONFIG_PATH"],
 			Type:        t.Type,
+			MD5:         t.Replication.MD5(),
 			Replication: *t.Replication,
 		}
+	}
 
-		// set md5
-		replication.MD5 = t.Replication.MD5()
+	if projID := t.Config.Env["SLING_PROJECT_ID"]; projID != "" {
+		task.ProjectID = g.String(projID)
+		replication.ProjectID = g.String(projID)
 	}
 
 	// clean up
