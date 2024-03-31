@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
@@ -24,6 +25,7 @@ var (
 	StderrR        io.ReadCloser
 	StdErrW        *os.File
 	StdErrChn      chan string
+	TelMap         = g.M("begin_time", time.Now().UnixMicro())
 )
 
 //go:embed *

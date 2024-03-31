@@ -30,7 +30,6 @@ import (
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
-var telemetryMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "cli")
 var telemetry = true
 var interrupted = false
 var machineID = ""
@@ -365,7 +364,7 @@ func Track(event string, props ...map[string]interface{}) {
 		"user_id", machineID,
 	)
 
-	for k, v := range telemetryMap {
+	for k, v := range env.TelMap {
 		properties[k] = v
 	}
 
@@ -453,7 +452,7 @@ func cliInit() int {
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			telemetryMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			env.TelMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
 		}
 	}()
 
@@ -478,13 +477,13 @@ func cliInit() int {
 		defer SlingMedia.PrintFollowUs()
 	}
 
-	if err != nil || telemetryMap["error"] != nil {
-		if err == nil && telemetryMap["error"] != nil {
-			err = g.Error(cast.ToString(telemetryMap["error"]))
+	if err != nil || env.TelMap["error"] != nil {
+		if err == nil && env.TelMap["error"] != nil {
+			err = g.Error(cast.ToString(env.TelMap["error"]))
 		}
 
-		if g.In(g.CliObj.Name, "conns", "update") || telemetryMap["error"] == nil {
-			telemetryMap["error"] = getErrString(err)
+		if g.In(g.CliObj.Name, "conns", "update") || env.TelMap["error"] == nil {
+			env.TelMap["error"] = getErrString(err)
 
 			eventName := g.CliObj.Name
 			if g.CliObj.UsedSC() != "" {
@@ -531,17 +530,17 @@ func setSentry() {
 			}
 
 			// set transaction
-			taskMap, _ := g.UnmarshalMap(cast.ToString(telemetryMap["task"]))
+			taskMap, _ := g.UnmarshalMap(cast.ToString(env.TelMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
 			event.Transaction = g.F("%s - %s", sourceType, targetType)
 			if g.CliObj.Name == "conns" {
-				targetType = lo.Ternary(telemetryMap["conn_type"] == nil, "unknown", cast.ToString(telemetryMap["conn_type"]))
+				targetType = lo.Ternary(env.TelMap["conn_type"] == nil, "unknown", cast.ToString(env.TelMap["conn_type"]))
 				event.Transaction = g.F(targetType)
 			}
 
 			bars := "--------------------------------------------------------"
-			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telemetryMap)
+			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(env.TelMap)
 
 			e := event.Exception[0]
 			event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
@@ -553,7 +552,8 @@ func setSentry() {
 			} else {
 				scope.SetTag("source_type", sourceType)
 				scope.SetTag("target_type", targetType)
-				scope.SetTag("run_mode", cast.ToString(telemetryMap["run_mode"]))
+				scope.SetTag("stage", cast.ToString(env.TelMap["stage"]))
+				scope.SetTag("run_mode", cast.ToString(env.TelMap["run_mode"]))
 				if val := cast.ToString(taskMap["mode"]); val != "" {
 					scope.SetTag("mode", val)
 				}

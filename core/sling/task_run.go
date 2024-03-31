@@ -63,6 +63,8 @@ func (t *TaskExecution) Execute() error {
 
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
+	env.TelMap["stage"] = "2 - task-execution"
+
 	go func() {
 		defer close(done)
 		defer t.PBar.Finish()
