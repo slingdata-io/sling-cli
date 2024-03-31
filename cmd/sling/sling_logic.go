@@ -164,7 +164,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
 			cfg.Options.Debug = cast.ToBool(v)
-			if cfg.Options.Debug {
+			if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
 				os.Setenv("DEBUG", "LOW")
 				env.SetLogger()
 			}
@@ -599,15 +599,6 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		var totalAffected int64
 		for i, query := range queries {
-			if len(queries) > 1 {
-				if strings.HasPrefix(query, "file://") {
-					g.Info("executing query #%d (%s)", i+1, query)
-				} else {
-					g.Info("executing query #%d", i+1)
-				}
-			} else {
-				g.Info("executing query")
-			}
 
 			query, err = sling.GetSQLText(query)
 			if err != nil {
@@ -619,7 +610,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot parse query")
 			}
 
-			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select")) {
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
 
 				data, err := dbConn.Query(sQuery.Select(100))
 				if err != nil {
@@ -633,6 +624,16 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				}
 
 			} else {
+				if len(queries) > 1 {
+					if strings.HasPrefix(query, "file://") {
+						g.Info("executing query #%d (%s)", i+1, query)
+					} else {
+						g.Info("executing query #%d", i+1)
+					}
+				} else {
+					g.Info("executing query")
+				}
+
 				result, err := dbConn.ExecMulti(query)
 				if err != nil {
 					return ok, g.Error(err, "cannot execute query")
@@ -763,6 +764,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --pattern flag to list sub-folders, or --recursive")
 				}
 			}
+		} else {
+			g.Info("no result.")
 		}
 
 	case "":
