@@ -261,7 +261,7 @@ func (data *Dataset) Append(row ...[]any) {
 }
 
 // Stream returns a datastream of the dataset
-func (data *Dataset) Stream() *Datastream {
+func (data *Dataset) Stream(Props ...map[string]string) *Datastream {
 	rows := MakeRowsChan()
 	nextFunc := func(it *Iterator) bool {
 		for it.Row = range rows {
@@ -275,6 +275,9 @@ func (data *Dataset) Stream() *Datastream {
 	ds.Inferred = data.Inferred
 	ds.Sp = data.Sp
 	ds.Sp.ds = ds
+	if len(Props) > 0 {
+		ds.SetConfig(Props[0])
+	}
 
 	go func() {
 		defer close(rows)

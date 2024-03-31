@@ -117,6 +117,10 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 }
 
 func (t *Table) Select(limit int, fields ...string) (sql string) {
+	if g.In(t.Dialect, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB) {
+		return t.SQL
+	}
+
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
 		f = strings.TrimSpace(f)
