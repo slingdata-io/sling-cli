@@ -30,11 +30,7 @@ import (
 )
 
 var (
-	projectID = os.Getenv("SLING_PROJECT")
-	headers   = map[string]string{
-		"Content-Type":     "application/json",
-		"Sling-Project-ID": projectID,
-	}
+	projectID     = os.Getenv("SLING_PROJECT_ID")
 	updateMessage = ""
 	updateVersion = ""
 )
@@ -820,7 +816,7 @@ func setProjectID(cfgPath string) {
 		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
 		cmd.Dir = filepath.Dir(cfgPath)
 		out, err := cmd.Output()
-		if err == nil {
+		if err == nil && projectID == "" {
 			projectID = strings.TrimSpace(string(out))
 		}
 	}
