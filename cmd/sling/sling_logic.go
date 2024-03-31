@@ -53,7 +53,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			env.TelMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			env.SetTelVal("error", g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
 
@@ -64,16 +64,16 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		cfg.Options.StdIn = true
 	}
 
-	env.TelMap["stage"] = "0 - init"
-	env.TelMap["run_mode"] = "cli"
+	env.SetTelVal("stage", "0 - init")
+	env.SetTelVal("run_mode", "cli")
 
 	for k, v := range c.Vals {
 		switch k {
 		case "replication":
-			env.TelMap["run_mode"] = "replication"
+			env.SetTelVal("run_mode", "replication")
 			replicationCfgPath = cast.ToString(v)
 		case "config":
-			env.TelMap["run_mode"] = "task"
+			env.SetTelVal("run_mode", "task")
 			taskCfgStr = cast.ToString(v)
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
@@ -244,7 +244,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	taskMap := g.M()
 	taskOptions := g.M()
-	env.TelMap["stage"] = "1 - task-creation"
+	env.SetTelVal("stage", "1 - task-creation")
 	setTM := func() {
 
 		if task != nil {
@@ -278,7 +278,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		}
 
 		if projectID != "" {
-			env.TelMap["project_id"] = projectID
+			env.SetTelVal("project_id", projectID)
 		}
 
 		if cfg.Options.StdIn && cfg.SrcConn.Type.IsUnknown() {
@@ -288,8 +288,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["target_type"] = "stdout"
 		}
 
-		env.TelMap["task_options"] = g.Marshal(taskOptions)
-		env.TelMap["task"] = g.Marshal(taskMap)
+		env.SetTelVal("task_options", g.Marshal(taskOptions))
+		env.SetTelVal("task", g.Marshal(taskMap))
 	}
 
 	// track usage
@@ -322,12 +322,12 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		}
 
 		if err != nil {
-			env.TelMap["error"] = getErrString(err)
+			env.SetTelVal("error", getErrString(err))
 		}
 
-		env.TelMap["task_stats"] = g.Marshal(taskStats)
-		env.TelMap["task_options"] = g.Marshal(taskOptions)
-		env.TelMap["task"] = g.Marshal(taskMap)
+		env.SetTelVal("task_stats", g.Marshal(taskStats))
+		env.SetTelVal("task_options", g.Marshal(taskOptions))
+		env.SetTelVal("task", g.Marshal(taskMap))
 
 		// telemetry
 		Track("run")
@@ -491,7 +491,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
-		env.TelMap["replication_md5"] = replication.MD5()
+		env.SetTelVal("replication_md5", replication.MD5())
 		err = runTask(&cfg, &replication)
 		if err != nil {
 			g.Info(env.RedString(err.Error()))
@@ -531,10 +531,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	ec := connection.EnvConns{EnvFile: &ef}
 	asJSON := os.Getenv("SLING_OUTPUT") == "json"
 
-	env.TelMap["task_start_time"] = time.Now()
+	env.SetTelVal("task_start_time", time.Now())
 	defer func() {
-		env.TelMap["task_status"] = lo.Ternary(err != nil, "error", "success")
-		env.TelMap["task_end_time"] = time.Now()
+		env.SetTelVal("task_status", lo.Ternary(err != nil, "error", "success"))
+		env.SetTelVal("task_end_time", time.Now())
 	}()
 
 	switch c.UsedSC() {
@@ -570,7 +570,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
 	case "exec":
-		env.TelMap["task"] = g.Marshal(g.M("type", sling.ConnExec))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
@@ -578,7 +578,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error("did not find connection %s", name)
 		}
 
-		env.TelMap["conn_type"] = conn.Connection.Type.String()
+		env.SetTelVal("conn_type", conn.Connection.Type.String())
 
 		if !conn.Connection.Type.IsDb() {
 			return ok, g.Error("cannot execute SQL query on a non-database connection (%s)", conn.Connection.Type)
@@ -660,11 +660,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 	case "test":
-		env.TelMap["task"] = g.Marshal(g.M("type", sling.ConnTest))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
 		if conn, ok := ec.GetConnEntry(name); ok {
-			env.TelMap["conn_type"] = conn.Connection.Type.String()
-			env.TelMap["conn_keys"] = lo.Keys(conn.Connection.Data)
+			env.SetTelVal("conn_type", conn.Connection.Type.String())
+			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
 		}
 
 		ok, err = ec.Test(name)
@@ -674,11 +674,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("success!") // successfully connected
 		}
 	case "discover":
-		env.TelMap["task"] = g.Marshal(g.M("type", sling.ConnDiscover))
+		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnDiscover)))
 		name := cast.ToString(c.Vals["name"])
 		conn, ok := ec.GetConnEntry(name)
 		if ok {
-			env.TelMap["conn_type"] = conn.Connection.Type.String()
+			env.SetTelVal("conn_type", conn.Connection.Type.String())
 		}
 
 		opt := &connection.DiscoverOptions{

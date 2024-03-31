@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/flarco/g"
@@ -26,6 +27,7 @@ var (
 	StdErrW        *os.File
 	StdErrChn      chan string
 	TelMap         = g.M("begin_time", time.Now().UnixMicro())
+	TelMux         = sync.Mutex{}
 )
 
 //go:embed *
@@ -54,6 +56,12 @@ func init() {
 	if SentryDsn == "" {
 		SentryDsn = os.Getenv("SENTRY_DSN")
 	}
+}
+
+func SetTelVal(key string, value any) {
+	TelMux.Lock()
+	TelMap[key] = value
+	TelMux.Unlock()
 }
 
 func SetLogger() {

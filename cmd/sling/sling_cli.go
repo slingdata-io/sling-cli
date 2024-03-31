@@ -452,7 +452,7 @@ func cliInit() int {
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
-			env.TelMap["error"] = g.F("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			env.SetTelVal("error", g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
 
@@ -483,7 +483,7 @@ func cliInit() int {
 		}
 
 		if g.In(g.CliObj.Name, "conns", "update") || env.TelMap["error"] == nil {
-			env.TelMap["error"] = getErrString(err)
+			env.SetTelVal("error", getErrString(err))
 
 			eventName := g.CliObj.Name
 			if g.CliObj.UsedSC() != "" {
@@ -548,6 +548,7 @@ func setSentry() {
 
 			scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {
+				scope.SetTag("run_mode", "conns")
 				scope.SetTag("target_type", targetType)
 			} else {
 				scope.SetTag("source_type", sourceType)

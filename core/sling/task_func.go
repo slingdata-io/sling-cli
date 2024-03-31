@@ -268,5 +268,5 @@ func GetSQLText(sqlStringPath string) (string, error) {
 }
 
 func setStage(value string) {
-	env.TelMap["stage"] = value
+	env.SetTelVal("stage", value)
 }
