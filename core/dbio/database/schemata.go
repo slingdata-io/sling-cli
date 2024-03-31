@@ -310,8 +310,10 @@ func (s *Schemata) Columns(filters ...string) map[string]iop.Column {
 			for _, table := range schema.Tables {
 				for _, column := range table.Columns {
 					if len(filters) == 0 || g.IsMatched(filters, column.Name) {
-						// get general type
-						column.Type = NativeTypeToGeneral(column.Name, column.DbType, s.conn)
+						if !column.Type.IsValid() {
+							// get general type
+							column.Type = NativeTypeToGeneral(column.Name, column.DbType, s.conn)
+						}
 						column.SetLengthPrecisionScale()
 						key := strings.ToLower(g.F("%s.%s.%s.%s", db.Name, schema.Name, table.Name, column.Name))
 						columns[key] = column

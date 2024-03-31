@@ -133,8 +133,8 @@ func (conn *PrometheusConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, e
 
 	// parse options
 	options := g.M()
-	if parts := strings.Split(tables[0].SQL, `#{`); len(parts) > 1 {
-		lastPart := "{" + parts[len(parts)-1]
+	if parts := strings.Split(tables[0].SQL, `#`); len(parts) > 1 {
+		lastPart := parts[len(parts)-1]
 		g.Unmarshal(lastPart, &options)
 		g.Debug("query options: %s", g.Marshal(options))
 	}
