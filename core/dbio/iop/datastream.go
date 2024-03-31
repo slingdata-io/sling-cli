@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -159,6 +160,14 @@ func (ds *Datastream) Df() *Dataflow {
 }
 
 func (ds *Datastream) processBwRows() {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			g.LogError(err)
+		}
+	}()
+
 	for row := range ds.bwRows {
 		ds.writeBwCsv(ds.CastRowToString(row))
 		ds.bwCsv.Flush()
