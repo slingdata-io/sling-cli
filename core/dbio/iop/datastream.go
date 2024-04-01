@@ -269,6 +269,8 @@ func (ds *Datastream) Defer(f func()) {
 
 // Close closes the datastream
 func (ds *Datastream) Close() {
+	ds.Context.Lock()
+
 	if !ds.closed {
 		close(ds.bwRows)
 		close(ds.BatchChan)
@@ -310,6 +312,8 @@ func (ds *Datastream) Close() {
 		ds.it.close()
 	}
 	ds.closed = true
+	ds.Context.Unlock()
+
 	select {
 	case <-ds.readyChn:
 	default:
