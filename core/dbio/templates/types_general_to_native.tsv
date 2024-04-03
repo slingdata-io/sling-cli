@@ -1,6 +1,6 @@
 general_type	oracle	postgres	mysql	mariadb	sqlserver	azuresql	azuredwh	redshift	snowflake	sqlite	bigquery	clickhouse	duckdb	motherduck	starrocks	trino
 bigint	number(19)	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	int64	Nullable(Int64)	bigint	bigint	bigint	bigint
-binary	varbinary()	bytes	varbinary	varbinary	varbinary	varbinary	varbinary	varchar(65535)	binary	blob	bytes	Nullable(String)	binary	binary	varbinary	varbinary
+binary	varbinary()	bytea	varbinary	varbinary	varbinary	varbinary	varbinary	varchar(65535)	binary	blob	bytes	Nullable(String)	binary	binary	varbinary	varbinary
 bool	varchar(5)	bool	char(5)	char(5)	varchar(5)	varchar(5)	varchar(5)	bool	boolean	boolean	bool	Nullable(String)	bool	bool	char(5)	boolean
 date	date	date	date	date	date	date	date	date	date	text	date	Nullable(Date)	date	date	date	date
 datetime	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp	text	timestamp	Nullable(DateTime64(6))	datetime	datetime	datetime	timestamp
