@@ -926,7 +926,7 @@ func (col *Column) IsDatetime() bool {
 // IsString returns whether the column is a string
 func (ct ColumnType) IsString() bool {
 	switch ct {
-	case StringType, TextType, JsonType, TimeType, BinaryType, "":
+	case StringType, TextType, JsonType, TimeType, BinaryType:
 		return true
 	}
 	return false
