@@ -166,6 +166,7 @@ func (ds *Datastream) processBwRows() {
 		defer func() {
 			if r := recover(); r != nil {
 				g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				g.Debug("soft-panic occurred: %#v", r)
 			}
 		}()
 
