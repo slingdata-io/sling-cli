@@ -160,17 +160,28 @@ func (ds *Datastream) Df() *Dataflow {
 }
 
 func (ds *Datastream) processBwRows() {
-	// recover from panic
-	defer func() {
-		if r := recover(); r != nil {
-			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
-			g.LogError(err)
-		}
-	}()
+	done := false
+	process := func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			}
+		}()
 
-	for row := range ds.bwRows {
-		ds.writeBwCsv(ds.CastRowToString(row))
-		ds.bwCsv.Flush()
+		for row := range ds.bwRows {
+			ds.writeBwCsv(ds.CastRowToString(row))
+			ds.bwCsv.Flush()
+		}
+		done = true
+	}
+
+	for {
+		// loop so that if panic occurs, it continues
+		process()
+		if done {
+			break
+		}
 	}
 }
 
