@@ -717,7 +717,10 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		err = g.Error(err, "REMOVE: "+stageFolderPath)
 		return
 	}
-	df.Defer(func() { conn.Exec("REMOVE " + stageFolderPath) })
+	df.Defer(func() {
+		conn.tx = nil // clear any failed transactions
+		conn.Exec("REMOVE " + stageFolderPath)
+	})
 
 	doPut := func(file filesys.FileReady) (stageFilePath string) {
 		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
