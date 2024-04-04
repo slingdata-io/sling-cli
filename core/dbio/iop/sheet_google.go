@@ -9,6 +9,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/json"
+	"github.com/samber/lo"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -40,32 +41,18 @@ func NewGoogleSheet(props ...string) (ggs *GoogleSheet, err error) {
 		ggs.Props[k] = v
 	}
 
-	if ggs.Props["GSHEETS_CRED_FILE"] == "" {
-		ggs.Props["GSHEETS_CRED_FILE"] = os.Getenv("GSHEETS_CRED_FILE")
-	}
-	if ggs.Props["GSHEETS_API_KEY"] == "" {
-		ggs.Props["GSHEETS_API_KEY"] = os.Getenv("GSHEETS_API_KEY")
-	}
-	if ggs.Props["GSHEETS_TITLE"] == "" {
-		ggs.Props["GSHEETS_TITLE"] = os.Getenv("GSHEETS_TITLE")
-	}
-	ggs.Props["GOOGLE_USER"] = os.Getenv("GOOGLE_USER")
-	ggs.Props["GOOGLE_PASSWORD"] = os.Getenv("GOOGLE_PASSWORD")
-
-	// https://developers.google.com/sheets/api/quickstart/go
-	b, err := os.ReadFile(ggs.Props["GSHEETS_CRED_FILE"])
-	if err != nil {
-		err = g.Error(err, "Unable to read client secret file: "+ggs.Props["GSHEETS_CRED_FILE"])
-		return
+	if _, ok := ggs.Props["KEY_BODY"]; !ok {
+		return nil, g.Error("missing google credentials")
 	}
 
 	scope := "https://www.googleapis.com/auth/spreadsheets"
 	// scope = "https://www.googleapis.com/auth/spreadsheets.readonly"
-	config, err := google.ConfigFromJSON(b, scope)
+	config, err := google.ConfigFromJSON([]byte(ggs.Props["KEY_BODY"]), scope)
 	if err != nil {
-		err = g.Error(err, "Unable to parse client secret file to config: "+ggs.Props["GSHEETS_CRED_FILE"])
+		err = g.Error(err, "Unable to parse client secret file to config")
 		return
 	}
+
 	// client := ggs.getGoogleClient(config)
 	// if ggs.context.Err() != nil {
 	// 	err = g.Error(ggs.context.Err(), "unable to create google client")
@@ -92,7 +79,7 @@ func NewGoogleSheet(props ...string) (ggs *GoogleSheet, err error) {
 
 	srv, err := sheets.NewService(
 		ggs.context.Ctx,
-		// option.WithAPIKey(ggs.Props["GSHEETS_API_KEY"]),
+		// option.WithAPIKey(ggs.Props["API_KEY"]),
 		option.WithScopes(sheets.SpreadsheetsScope),
 		// option.WithScopes(sheets.SpreadsheetsReadonlyScope),
 		option.WithTokenSource(config.TokenSource(ggs.context.Ctx, token)),
@@ -150,7 +137,10 @@ func (ggs *GoogleSheet) RefreshSheets() (err error) {
 	if err != nil {
 		err = g.Error(err, "Unable to get sheets from "+ggs.SpreadsheetID)
 		return
+	} else if len(resp.Sheets) == 0 {
+		return g.Error("zero sheets returned")
 	}
+
 	for _, sheet := range resp.Sheets {
 		// https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/sheets#sheetproperties
 		// g.P(sheet.Data[0].MarshalJSON())
@@ -190,6 +180,12 @@ func (ggs *GoogleSheet) getRawRows(sheet *sheets.Sheet) [][]string {
 
 // GetDataset returns a dataset of the sheet
 func (ggs *GoogleSheet) GetDataset(shtName string) (data Dataset, err error) {
+	if parts := strings.Split(shtName, "!"); len(parts) == 2 {
+		return ggs.GetDatasetFromRange(parts[0], parts[1])
+	} else if shtName == "" {
+		shtName = ggs.Sheets[0]
+	}
+
 	sheet, ok := ggs.sheetObjects[shtName]
 	if !ok {
 		err = g.Error("sheet %s not found", shtName)
@@ -201,6 +197,7 @@ func (ggs *GoogleSheet) GetDataset(shtName string) (data Dataset, err error) {
 		return
 	}
 
+	g.Debug("reading sheet: %s", shtName)
 	data = ggs.makeDatasetAuto(ggs.getRawRows(sheet))
 
 	return
@@ -213,6 +210,7 @@ func (ggs *GoogleSheet) GetDatasetFromRange(shtName, cellRange string) (data Dat
 	}
 
 	readRange := g.F("%s!%s", shtName, cellRange)
+	g.Debug("reading sheet: %s", readRange)
 	resp, err := ggs.srv.Spreadsheets.Values.Get(ggs.SpreadsheetID, readRange).Do()
 	if err != nil {
 		err = g.Error(err, "Unable to retrieve data from "+readRange)
@@ -325,10 +323,12 @@ func (ggs *GoogleSheet) createSheet(shtName string) (newShtName string, err erro
 func (ggs *GoogleSheet) URL() string {
 	return "https://docs.google.com/spreadsheets/d/" + ggs.SpreadsheetID
 }
+
 func (ggs *GoogleSheet) createSpreadsheet() (spreadsheetID string, err error) {
+	title := lo.Ternary(ggs.Props["SHEET"] != "", ggs.Props["SHEET"], "Sheet1")
 	rb := &sheets.Spreadsheet{
 		Properties: &sheets.SpreadsheetProperties{
-			Title: ggs.Props["GSHEETS_TITLE"],
+			Title: title,
 		},
 	}
 	resp, err := ggs.srv.Spreadsheets.Create(rb).Do()
