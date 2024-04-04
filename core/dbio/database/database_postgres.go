@@ -228,6 +228,8 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case srcCol.IsString() && strings.ToLower(tgtCol.DbType) == "uuid":
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.IsBool() && tgtCol.IsInteger():
+		selectStr = g.F("%s::int as %s", qName, qName)
 	default:
 		selectStr = qName
 	}
