@@ -318,7 +318,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 
 	conn, ok1 := ec.GetConnEntry(name)
 	if !ok1 || name == "" {
-		return ok, nodes, schemata, g.Error("Invalid Connection name: %s", name)
+		return ok, nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 
 	switch {
