@@ -23,11 +23,12 @@ import (
 	slingEnv "github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
-	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/microsoft/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb/integratedauth/krb5"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	_ "github.com/snowflakedb/gosnowflake"
 

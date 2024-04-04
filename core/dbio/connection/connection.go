@@ -359,6 +359,11 @@ func (c *Connection) setURL() (err error) {
 
 			// set database
 			setIfMissing("database", pathValue)
+
+			// pass query params
+			for k, v := range U.Query() {
+				setIfMissing(k, v)
+			}
 		}
 		if g.In(c.Type, dbio.TypeFileSftp, dbio.TypeFileFtp) {
 			setIfMissing("user", U.Username())
@@ -531,6 +536,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("app_name", "sling")
 
 		template = "sqlserver://{username}:{password}@{host}:{port}"
 		if _, ok := c.Data["instance"]; ok {
@@ -539,28 +545,6 @@ func (c *Connection) setURL() (err error) {
 		template = template + "?"
 		if _, ok := c.Data["database"]; ok {
 			template = template + "&database={database}"
-		}
-		if _, ok := c.Data["encrypt"]; ok {
-			// disable, false, true
-			template = template + "&encrypt={encrypt}"
-		}
-		if _, ok := c.Data["TrustServerCertificate"]; ok {
-			// false, true
-			template = template + "&TrustServerCertificate={TrustServerCertificate}"
-		}
-		if _, ok := c.Data["hostNameInCertificate"]; ok {
-			template = template + "&hostNameInCertificate={hostNameInCertificate}"
-		}
-		if _, ok := c.Data["certificate"]; ok {
-			template = template + "&certificate={certificate}"
-		}
-		if _, ok := c.Data["user id"]; ok {
-			template = template + "&user id={user id}"
-		}
-		if _, ok := c.Data["app name"]; ok {
-			template = template + "&app name={app name}"
-		} else {
-			template = template + "&app name=sling"
 		}
 
 	case dbio.TypeDbTrino:
@@ -883,16 +867,8 @@ func (i *Info) IsURL() bool {
 
 // SchemeType returns the correct scheme of the url
 func SchemeType(url string) dbio.Type {
-	if !strings.Contains(url, "://") {
-		return dbio.TypeUnknown
-	}
-
-	if strings.HasPrefix(url, "file://") {
-		return dbio.TypeFileLocal
-	}
-
-	if strings.HasPrefix(url, "https") && strings.Contains(url, ".core.windows.") {
-		return dbio.TypeFileAzure
+	if t, _, _, err := dbio.ParseURL(url); err == nil {
+		return t
 	}
 
 	scheme := strings.Split(url, "://")[0]
