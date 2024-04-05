@@ -231,6 +231,29 @@ type Template struct {
 }
 
 // ToData convert is dataset
+func (template Template) Value(path string) (value string) {
+	prefixes := map[string]map[string]string{
+		"core.":             template.Core,
+		"analysis.":         template.Analysis,
+		"function.":         template.Function,
+		"metadata.":         template.Metadata,
+		"general_type_map.": template.GeneralTypeMap,
+		"native_type_map.":  template.NativeTypeMap,
+		"variable.":         template.Variable,
+	}
+
+	for prefix, dict := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			key := strings.Replace(path, prefix, "", 1)
+			value = dict[key]
+			break
+		}
+	}
+
+	return value
+}
+
+// ToData convert is dataset
 func (template Template) ToData() (data iop.Dataset) {
 	columns := []string{"key", "value"}
 	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
