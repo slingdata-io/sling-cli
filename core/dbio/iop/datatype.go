@@ -883,6 +883,11 @@ func (col *Column) HasNullsPlus1() bool {
 	return col.Stats.TotalCnt > 0 && col.Stats.TotalCnt == col.Stats.NullCnt+1
 }
 
+// IsBinary returns whether the column is a binary
+func (col *Column) IsBinary() bool {
+	return col.Type.IsBinary()
+}
+
 // IsString returns whether the column is a string
 func (col *Column) IsString() bool {
 	return col.Type.IsString()
@@ -921,6 +926,15 @@ func (col *Column) IsDate() bool {
 // IsDatetime returns whether the column is a datetime object
 func (col *Column) IsDatetime() bool {
 	return col.Type.IsDatetime()
+}
+
+// IsBinary returns whether the column is a binary
+func (ct ColumnType) IsBinary() bool {
+	switch ct {
+	case BinaryType:
+		return true
+	}
+	return false
 }
 
 // IsString returns whether the column is a string
@@ -990,7 +1004,7 @@ func (ct ColumnType) IsDatetime() bool {
 
 // IsValid returns whether the column has a valid type
 func (ct ColumnType) IsValid() bool {
-	return ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime()
+	return ct.IsBinary() || ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime()
 }
 
 func isDate(t *time.Time) bool {

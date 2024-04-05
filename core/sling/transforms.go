@@ -14,28 +14,31 @@ import (
 
 var transforms = map[iop.Transform]iop.TransformFunc{
 	iop.TransformDecodeLatin1: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeLatin1, val)
+		return sp.EncodingTransform(iop.TransformDecodeLatin1, val)
 	},
 	iop.TransformDecodeLatin5: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeLatin5, val)
+		return sp.EncodingTransform(iop.TransformDecodeLatin5, val)
 	},
 	iop.TransformDecodeLatin9: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeLatin9, val)
+		return sp.EncodingTransform(iop.TransformDecodeLatin9, val)
 	},
 	iop.TransformDecodeUtf8: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeUtf8, val)
+		return sp.EncodingTransform(iop.TransformDecodeUtf8, val)
 	},
 	iop.TransformDecodeUtf8Bom: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeUtf8Bom, val)
+		return sp.EncodingTransform(iop.TransformDecodeUtf8Bom, val)
 	},
 	iop.TransformDecodeUtf16: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeUtf16, val)
+		return sp.EncodingTransform(iop.TransformDecodeUtf16, val)
 	},
 	iop.TransformDecodeWindows1250: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeWindows1250, val)
+		return sp.EncodingTransform(iop.TransformDecodeWindows1250, val)
 	},
 	iop.TransformDecodeWindows1252: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformDecodeWindows1252, val)
+		return sp.EncodingTransform(iop.TransformDecodeWindows1252, val)
+	},
+	iop.TransformEncodeUtf8: func(sp *iop.StreamProcessor, val string) (string, error) {
+		return fmt.Sprintf("%q", val), nil
 	},
 	iop.TransformDuckdbListToText: func(sp *iop.StreamProcessor, val string) (string, error) { return duckDbListAsText(val), nil },
 	iop.TransformHashMd5:          func(sp *iop.StreamProcessor, val string) (string, error) { return g.MD5(val), nil },
@@ -46,7 +49,7 @@ var transforms = map[iop.Transform]iop.TransformFunc{
 	iop.TransformParseUuid:        func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
 	iop.TransformReplace0x00:      func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
 	iop.TransformReplaceAccents: func(sp *iop.StreamProcessor, val string) (string, error) {
-		return sp.DecodeValue(iop.TransformReplaceAccents, val)
+		return sp.EncodingTransform(iop.TransformReplaceAccents, val)
 	},
 	iop.TransformReplaceNonPrintable: func(sp *iop.StreamProcessor, val string) (string, error) { return ReplaceNonPrint(sp, val) },
 	iop.TransformTrimSpace:           func(sp *iop.StreamProcessor, val string) (string, error) { return strings.TrimSpace(val), nil },

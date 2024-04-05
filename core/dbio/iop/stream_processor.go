@@ -62,29 +62,49 @@ type StreamConfig struct {
 }
 
 type Transformers struct {
-	Accent      transform.Transformer
-	UTF8        transform.Transformer
-	UTF8BOM     transform.Transformer
-	UTF16       transform.Transformer
-	ISO8859_1   transform.Transformer
-	ISO8859_5   transform.Transformer
-	ISO8859_15  transform.Transformer
-	Windows1250 transform.Transformer
-	Windows1252 transform.Transformer
+	Accent transform.Transformer
+
+	DecodeUTF8        transform.Transformer
+	DecodeUTF8BOM     transform.Transformer
+	DecodeUTF16       transform.Transformer
+	DecodeISO8859_1   transform.Transformer
+	DecodeISO8859_5   transform.Transformer
+	DecodeISO8859_15  transform.Transformer
+	DecodeWindows1250 transform.Transformer
+	DecodeWindows1252 transform.Transformer
+
+	EncodeUTF8        transform.Transformer
+	EncodeUTF8BOM     transform.Transformer
+	EncodeUTF16       transform.Transformer
+	EncodeISO8859_1   transform.Transformer
+	EncodeISO8859_5   transform.Transformer
+	EncodeISO8859_15  transform.Transformer
+	EncodeWindows1250 transform.Transformer
+	EncodeWindows1252 transform.Transformer
 }
 
 func NewTransformers() Transformers {
 	win16be := encUnicode.UTF16(encUnicode.BigEndian, encUnicode.IgnoreBOM)
 	return Transformers{
-		Accent:      transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
-		UTF8:        encUnicode.UTF8.NewDecoder(),
-		UTF8BOM:     encUnicode.UTF8BOM.NewDecoder(),
-		UTF16:       encUnicode.BOMOverride(win16be.NewDecoder()),
-		ISO8859_1:   charmap.ISO8859_1.NewDecoder(),
-		ISO8859_5:   charmap.ISO8859_5.NewDecoder(),
-		ISO8859_15:  charmap.ISO8859_15.NewDecoder(),
-		Windows1250: charmap.Windows1250.NewDecoder(),
-		Windows1252: charmap.Windows1252.NewDecoder(),
+		Accent: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+
+		DecodeUTF8:        encUnicode.UTF8.NewDecoder(),
+		DecodeUTF8BOM:     encUnicode.UTF8BOM.NewDecoder(),
+		DecodeUTF16:       encUnicode.BOMOverride(win16be.NewDecoder()),
+		DecodeISO8859_1:   charmap.ISO8859_1.NewDecoder(),
+		DecodeISO8859_5:   charmap.ISO8859_5.NewDecoder(),
+		DecodeISO8859_15:  charmap.ISO8859_15.NewDecoder(),
+		DecodeWindows1250: charmap.Windows1250.NewDecoder(),
+		DecodeWindows1252: charmap.Windows1252.NewDecoder(),
+
+		EncodeUTF8:        encUnicode.UTF8.NewEncoder(),
+		EncodeUTF8BOM:     encUnicode.UTF8BOM.NewEncoder(),
+		EncodeUTF16:       encUnicode.BOMOverride(win16be.NewEncoder()),
+		EncodeISO8859_1:   charmap.ISO8859_1.NewEncoder(),
+		EncodeISO8859_5:   charmap.ISO8859_5.NewEncoder(),
+		EncodeISO8859_15:  charmap.ISO8859_15.NewEncoder(),
+		EncodeWindows1250: charmap.Windows1250.NewEncoder(),
+		EncodeWindows1252: charmap.Windows1252.NewEncoder(),
 	}
 }
 
@@ -372,6 +392,8 @@ func (sp *StreamProcessor) CastType(val interface{}, typ ColumnType) interface{}
 	var nVal interface{}
 
 	switch {
+	case typ.IsBinary():
+		nVal = []byte(cast.ToString(val))
 	case typ.IsString():
 		nVal = cast.ToString(val)
 	case typ == SmallIntType:
@@ -419,27 +441,45 @@ func (sp *StreamProcessor) commitChecksum() {
 	}
 }
 
-func (sp *StreamProcessor) DecodeValue(t Transform, val string) (newVal string, err error) {
+func (sp *StreamProcessor) EncodingTransform(t Transform, val string) (newVal string, err error) {
 
 	switch t {
 	case TransformReplaceAccents:
 		newVal, _, err = transform.String(sp.transformers.Accent, val)
+
 	case TransformDecodeLatin1:
-		newVal, _, err = transform.String(sp.transformers.ISO8859_1, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_1, val)
 	case TransformDecodeLatin5:
-		newVal, _, err = transform.String(sp.transformers.ISO8859_5, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_5, val)
 	case TransformDecodeLatin9:
-		newVal, _, err = transform.String(sp.transformers.ISO8859_15, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_15, val)
 	case TransformDecodeWindows1250:
-		newVal, _, err = transform.String(sp.transformers.Windows1250, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeWindows1250, val)
 	case TransformDecodeWindows1252:
-		newVal, _, err = transform.String(sp.transformers.Windows1252, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeWindows1252, val)
 	case TransformDecodeUtf16:
-		newVal, _, err = transform.String(sp.transformers.UTF16, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeUTF16, val)
 	case TransformDecodeUtf8:
-		newVal, _, err = transform.String(sp.transformers.UTF8, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeUTF8, val)
 	case TransformDecodeUtf8Bom:
-		newVal, _, err = transform.String(sp.transformers.UTF8BOM, val)
+		newVal, _, err = transform.String(sp.transformers.DecodeUTF8BOM, val)
+
+	case TransformEncodeLatin1:
+		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_1, val)
+	case TransformEncodeLatin5:
+		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_5, val)
+	case TransformEncodeLatin9:
+		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_15, val)
+	case TransformEncodeWindows1250:
+		newVal, _, err = transform.String(sp.transformers.EncodeWindows1250, val)
+	case TransformEncodeWindows1252:
+		newVal, _, err = transform.String(sp.transformers.EncodeWindows1252, val)
+	case TransformEncodeUtf16:
+		newVal, _, err = transform.String(sp.transformers.EncodeUTF16, val)
+	case TransformEncodeUtf8:
+		newVal, _, err = transform.String(sp.transformers.EncodeUTF8, val)
+	case TransformEncodeUtf8Bom:
+		newVal, _, err = transform.String(sp.transformers.EncodeUTF8BOM, val)
 	default:
 		return val, nil
 	}
@@ -544,7 +584,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		// above 4000 is considered text
-		if l > 4000 && col.Type != TextType {
+		if l > 4000 && !g.In(col.Type, TextType, BinaryType) {
 			sp.ds.ChangeColumn(i, TextType) // change to text
 		}
 
@@ -570,7 +610,11 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			}
 			cs.StringCnt++
 			sp.rowChecksum[i] = uint64(len(sVal))
-			nVal = sVal
+			if col.Type == BinaryType {
+				nVal = []byte(sVal)
+			} else {
+				nVal = sVal
+			}
 		}
 	case col.Type == SmallIntType:
 		iVal, err := cast.ToInt32E(val)
