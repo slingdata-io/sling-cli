@@ -36,6 +36,10 @@ sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
 
+# test binary
+sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
+SLING_ROW_CNT=1 sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"
+
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
 sling conns discover POSTGRES

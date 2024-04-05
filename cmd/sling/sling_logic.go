@@ -623,6 +623,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					fmt.Println(g.PrettyTable(data.GetFields(), data.Rows))
 				}
 
+				totalAffected = cast.ToInt64(len(data.Rows))
 			} else {
 				if len(queries) > 1 {
 					if strings.HasPrefix(query, "file://") {
@@ -649,6 +650,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
 		} else {
 			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+		}
+
+		if err := testRowCnt(totalAffected); err != nil {
+			return ok, err
 		}
 
 	case "list":
@@ -827,6 +832,24 @@ func setProjectID(cfgPath string) {
 			projectID = strings.TrimSpace(string(out))
 		}
 	}
+}
+
+func testRowCnt(rowCnt int64) error {
+	if expected := os.Getenv("SLING_ROW_CNT"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToInt64(strings.TrimPrefix(expected, ">"))
+			if rowCnt <= atLeast {
+				return g.Error("Expected at least %d rows, got %d", atLeast, rowCnt)
+			}
+			return nil
+		}
+
+		if rowCnt != cast.ToInt64(expected) {
+			return g.Error("Expected %d rows, got %d", cast.ToInt(expected), rowCnt)
+		}
+	}
+	return nil
 }
 
 func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
