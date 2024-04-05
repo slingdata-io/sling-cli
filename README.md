@@ -232,7 +232,7 @@ func main() {
 
 ## Config Schema
 
-An example. Put this in https://jsonschema.net/home
+An example. Put this in https://jsonschema.net/
 
 `--src-conn`/`source.conn` and `--tgt-conn`/`target.conn`  can be a name or URL of a folder:
 - `MY_PG` (connection ref in db, profile or env)

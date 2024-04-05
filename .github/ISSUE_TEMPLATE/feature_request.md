@@ -2,6 +2,7 @@
 name: Feature request
 about: Suggest an idea for Sling
 title: ''
+labels: 'enhancement'
 assignees: ''
 ---
 
