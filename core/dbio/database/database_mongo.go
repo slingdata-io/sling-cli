@@ -196,7 +196,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	collection := conn.Client.Database(table.Schema).Collection(table.Name)
 
 	if !cast.ToBool(opts["silent"]) {
-		conn.LogSQL(g.Marshal(g.M("database", table.Schema, "collection", table.Name, "filter", filter, "fields", fields, "options", g.M("limit", findOpts.Limit, "projection", findOpts.Projection))))
+		conn.LogSQL(g.Marshal(g.M("database", table.Schema, "collection", table.Name, "filter", filter, "options", g.M("limit", findOpts.Limit, "projection", findOpts.Projection))))
 	}
 
 	cur, err := collection.Find(queryContext.Ctx, filter, findOpts)
