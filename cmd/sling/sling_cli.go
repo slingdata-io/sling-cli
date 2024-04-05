@@ -550,6 +550,7 @@ func setSentry() {
 			if val, ok := telMap["task_stats"]; ok {
 				telMap["task_stats"], _ = g.UnmarshalMap(cast.ToString(val))
 			}
+			delete(telMap, "error")
 			bars := "--------------------------------------------------------"
 			se.Event.Message = se.Exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telMap)
 
