@@ -416,7 +416,7 @@ func main() {
 	go func() {
 		defer close(done)
 		exitCode = cliInit()
-		sentry.Flush(time.Second * 2)
+		g.SentryFlush(time.Second * 2)
 	}()
 
 	exit := func() {
@@ -432,7 +432,7 @@ func main() {
 		exitCode = 111
 		exit()
 	case <-interrupt:
-		go sentry.Flush(time.Second * 4)
+		go g.SentryFlush(time.Second * 4)
 		if cliRun.Sc.Used {
 			env.Println("\ninterrupting...")
 			interrupted = true
@@ -524,8 +524,8 @@ func setSentry() {
 	if telemetry {
 		g.SentryRelease = g.F("sling@%s", core.Version)
 		g.SentryDsn = env.SentryDsn
-		g.SentryConfigureFunc = func(event *sentry.Event, scope *sentry.Scope, exception *g.ErrType) bool {
-			if exception.Err == "context canceled" {
+		g.SentryConfigureFunc = func(se *g.SentryEvent) bool {
+			if se.Exception.Err == "context canceled" {
 				return false
 			}
 
@@ -533,37 +533,49 @@ func setSentry() {
 			taskMap, _ := g.UnmarshalMap(cast.ToString(env.TelMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			event.Transaction = g.F("%s - %s", sourceType, targetType)
+			se.Event.Transaction = g.F("%s - %s", sourceType, targetType)
 			if g.CliObj.Name == "conns" {
 				targetType = lo.Ternary(env.TelMap["conn_type"] == nil, "unknown", cast.ToString(env.TelMap["conn_type"]))
-				event.Transaction = g.F(targetType)
+				se.Event.Transaction = g.F(targetType)
 			}
 
+			// format telMap
+			telMap, _ := g.UnmarshalMap(g.Marshal(env.TelMap))
+			if val, ok := telMap["task"]; ok {
+				telMap["task"], _ = g.UnmarshalMap(cast.ToString(val))
+			}
+			if val, ok := telMap["task_options"]; ok {
+				telMap["task_options"], _ = g.UnmarshalMap(cast.ToString(val))
+			}
+			if val, ok := telMap["task_stats"]; ok {
+				telMap["task_stats"], _ = g.UnmarshalMap(cast.ToString(val))
+			}
+			delete(telMap, "error")
 			bars := "--------------------------------------------------------"
-			event.Message = exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(env.TelMap)
+			se.Event.Message = se.Exception.Debug() + "\n\n" + bars + "\n\n" + g.Pretty(telMap)
 
-			e := event.Exception[0]
-			event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
-			event.Exception[0].Value = g.F("%s [%s]", exception.LastCaller(), exception.CallerStackMD5())
+			e := se.Event.Exception[0]
+			se.Event.Exception[0].Type = e.Stacktrace.Frames[len(e.Stacktrace.Frames)-1].Function
+			se.Event.Exception[0].Value = g.F("%s [%s]", se.Exception.LastCaller(), se.Exception.CallerStackMD5())
 
-			scope.SetUser(sentry.User{ID: machineID})
+			se.Scope.SetUser(sentry.User{ID: machineID})
 			if g.CliObj.Name == "conns" {
-				scope.SetTag("run_mode", "conns")
-				scope.SetTag("target_type", targetType)
+				se.Scope.SetTag("run_mode", "conns")
+				se.Scope.SetTag("target_type", targetType)
 			} else {
-				scope.SetTag("source_type", sourceType)
-				scope.SetTag("target_type", targetType)
-				scope.SetTag("stage", cast.ToString(env.TelMap["stage"]))
-				scope.SetTag("run_mode", cast.ToString(env.TelMap["run_mode"]))
+				se.Scope.SetTag("source_type", sourceType)
+				se.Scope.SetTag("target_type", targetType)
+				se.Scope.SetTag("stage", cast.ToString(env.TelMap["stage"]))
+				se.Scope.SetTag("run_mode", cast.ToString(env.TelMap["run_mode"]))
 				if val := cast.ToString(taskMap["mode"]); val != "" {
-					scope.SetTag("mode", val)
+					se.Scope.SetTag("mode", val)
 				}
 				if val := cast.ToString(taskMap["type"]); val != "" {
-					scope.SetTag("type", val)
+					se.Scope.SetTag("type", val)
 				}
-				scope.SetTag("package", getSlingPackage())
+				se.Scope.SetTag("package", getSlingPackage())
 				if projectID != "" {
-					scope.SetTag("project_id", projectID)
+					se.Scope.SetTag("project_id", projectID)
 				}
 			}
 

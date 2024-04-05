@@ -109,7 +109,7 @@ func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (column
 		return nil, g.Error("did not find collection %s", table.FullName())
 	}
 
-	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10))
+	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10, "silent", true))
 	if err != nil {
 		return columns, g.Error("could not query to get columns")
 	}
@@ -117,6 +117,12 @@ func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (column
 	data, err := ds.Collect(10)
 	if err != nil {
 		return columns, g.Error("could not collect to get columns")
+	}
+
+	for i := range data.Columns {
+		data.Columns[i].Schema = table.Schema
+		data.Columns[i].Table = table.Name
+		data.Columns[i].DbType = "-"
 	}
 
 	return data.Columns, nil
@@ -131,7 +137,8 @@ func (conn *MongoDBConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err 
 		return
 	}
 
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].FullName())
+	options, _ := g.UnmarshalMap(tables[0].SQL)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].FullName(), options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}
@@ -151,6 +158,32 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 		Limit = val
 	}
 
+	findOpts := &options.FindOptions{Limit: &Limit}
+	fields := cast.ToStringSlice(opts["fields"])
+	if len(fields) > 0 {
+		d := bson.D{}
+		for _, field := range fields {
+			d = append(d, bson.D{{Key: field, Value: 1}}...)
+		}
+		findOpts = options.Find().SetProjection(d)
+	}
+
+	updateKey := cast.ToString(opts["update_key"])
+	incrementalValue := cast.ToString(opts["value"])
+	startValue := cast.ToString(opts["start_value"])
+	endValue := cast.ToString(opts["end_value"])
+
+	filter := bson.D{}
+	if updateKey != "" && incrementalValue != "" {
+		// incremental mode
+		incrementalValue = strings.Trim(incrementalValue, "'")
+		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$gt", Value: incrementalValue}}}}...)
+	} else if updateKey != "" && startValue != "" && endValue != "" {
+		// backfill mode
+		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$gte", Value: startValue}}}}...)
+		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$lte", Value: endValue}}}}...)
+	}
+
 	if strings.TrimSpace(collectionName) == "" {
 		g.Warn("Empty collection name")
 		return ds, nil
@@ -162,7 +195,11 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 	collection := conn.Client.Database(table.Schema).Collection(table.Name)
 
-	cur, err := collection.Find(queryContext.Ctx, bson.D{}, &options.FindOptions{Limit: &Limit})
+	if !cast.ToBool(opts["silent"]) {
+		conn.LogSQL(g.Marshal(g.M("database", table.Schema, "collection", table.Name, "filter", filter, "options", g.M("limit", findOpts.Limit, "projection", findOpts.Projection))))
+	}
+
+	cur, err := collection.Find(queryContext.Ctx, filter, findOpts)
 	if err != nil {
 		return ds, g.Error(err, "error querying collection")
 	}
@@ -244,7 +281,7 @@ func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) 
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
 func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
-	currDatabase := conn.Type.String()
+	currDatabase := dbio.TypeDbMongoDB.String()
 	schemata := Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,
@@ -302,6 +339,20 @@ func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (S
 			}
 
 			table.Columns = append(table.Columns, column)
+
+			if g.In(tableName, tableNames...) {
+				columns, err := conn.GetSQLColumns(table)
+				if err != nil {
+					return schemata, g.Error(err, "could not get columns")
+				}
+				for i := range columns {
+					columns[i].Database = table.Database
+				}
+				if len(columns) > 0 {
+					table.Columns = columns
+				}
+			}
+
 			schema.Tables[strings.ToLower(tableName)] = table
 			schemas[strings.ToLower(schema.Name)] = schema
 		}

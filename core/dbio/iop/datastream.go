@@ -160,17 +160,29 @@ func (ds *Datastream) Df() *Dataflow {
 }
 
 func (ds *Datastream) processBwRows() {
-	// recover from panic
-	defer func() {
-		if r := recover(); r != nil {
-			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
-			g.LogError(err)
-		}
-	}()
+	done := false
+	process := func() {
+		// recover from panic
+		defer func() {
+			if r := recover(); r != nil {
+				g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+				g.Debug("soft-panic occurred: %#v", r)
+			}
+		}()
 
-	for row := range ds.bwRows {
-		ds.writeBwCsv(ds.CastRowToString(row))
-		ds.bwCsv.Flush()
+		for row := range ds.bwRows {
+			ds.writeBwCsv(ds.CastRowToString(row))
+			ds.bwCsv.Flush()
+		}
+		done = true
+	}
+
+	for {
+		// loop so that if panic occurs, it continues
+		process()
+		if done {
+			break
+		}
 	}
 }
 
@@ -269,6 +281,8 @@ func (ds *Datastream) Defer(f func()) {
 
 // Close closes the datastream
 func (ds *Datastream) Close() {
+	ds.Context.Lock()
+
 	if !ds.closed {
 		close(ds.bwRows)
 		close(ds.BatchChan)
@@ -310,6 +324,8 @@ func (ds *Datastream) Close() {
 		ds.it.close()
 	}
 	ds.closed = true
+	ds.Context.Unlock()
+
 	select {
 	case <-ds.readyChn:
 	default:
@@ -395,7 +411,7 @@ func (ds *Datastream) SetIterator(it *Iterator) {
 	ds.it = it
 }
 
-func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decoded bool) {
+func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, decoded bool) {
 	// decode File if requested
 	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
 		columnTransforms := makeColumnTransforms(transformsPayload)
@@ -405,21 +421,39 @@ func (ds *Datastream) decodeReader(reader io.Reader) (newReader io.Reader, decod
 			for _, t := range ts {
 				switch t {
 				case TransformDecodeLatin1:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_1)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_1)
 				case TransformDecodeLatin5:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_5)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_5)
 				case TransformDecodeLatin9:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.ISO8859_15)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_15)
 				case TransformDecodeWindows1250:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1250)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1250)
 				case TransformDecodeWindows1252:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.Windows1252)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1252)
 				case TransformDecodeUtf16:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF16)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
 				case TransformDecodeUtf8:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8)
 				case TransformDecodeUtf8Bom:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.UTF8BOM)
+					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
+
+				case TransformEncodeLatin1:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_1)
+				case TransformEncodeLatin5:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_5)
+				case TransformEncodeLatin9:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_15)
+				case TransformEncodeWindows1250:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1250)
+				case TransformEncodeWindows1252:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1252)
+				case TransformEncodeUtf16:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF16)
+				case TransformEncodeUtf8:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8)
+				case TransformEncodeUtf8Bom:
+					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8BOM)
+
 				default:
 					continue
 				}
@@ -825,7 +859,7 @@ func (ds *Datastream) ConsumeJsonReader(reader io.Reader) (err error) {
 	}
 
 	// decode File if requested by transform
-	if newReader, ok := ds.decodeReader(reader2); ok {
+	if newReader, ok := ds.transformReader(reader2); ok {
 		reader2 = newReader
 	}
 
@@ -850,7 +884,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	}
 
 	// decode File if requested by transform
-	if newReader, ok := ds.decodeReader(reader2); ok {
+	if newReader, ok := ds.transformReader(reader2); ok {
 		reader2 = newReader
 	}
 
@@ -870,7 +904,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec}
 
 	// decode File if requested by transform
-	if newReader, ok := ds.decodeReader(reader); ok {
+	if newReader, ok := ds.transformReader(reader); ok {
 		c.Reader = newReader
 	}
 
@@ -886,7 +920,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		g.Debug("csv stream provided is empty (%#v)", ds.Metadata.StreamURL.Value)
 		ds.SetReady()
 		ds.Close()
 		return nil

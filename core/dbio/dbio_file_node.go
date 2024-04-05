@@ -1,6 +1,7 @@
 package dbio
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -176,7 +177,6 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 
 	u, err := net.NewURL(uri)
 	if err != nil {
-		err = g.Error(err, "Unable to parse URL "+uri)
 		return
 	}
 
@@ -187,17 +187,19 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
 
 	if scheme == "" || host == "" {
-		err = g.Error("Invalid URL: " + uri)
+		err = errors.New("Invalid URL: " + uri)
 	}
 
 	// handle azure blob
 	if scheme == "https" && strings.HasSuffix(host, ".blob.core.windows.net") {
 		return TypeFileAzure, host, path, nil
+	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
+		return TypeFileHTTP, host, path, nil
 	}
 
 	uType, ok := ValidateType(scheme)
 	if !ok {
-		err = g.Error("unrecognized url type: %s", scheme)
+		err = errors.New("unrecognized url type: " + scheme)
 	}
 
 	return

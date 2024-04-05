@@ -151,6 +151,7 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
+		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
 	case strings.HasPrefix(url, "file://"):
 		props = append(props, g.F("concurencyLimit=%d", 20))

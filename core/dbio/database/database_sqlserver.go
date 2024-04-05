@@ -18,7 +18,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
-	"github.com/jmoiron/sqlx"
+	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
@@ -38,15 +38,6 @@ func (conn *MsSQLServerConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbSQLServer
 	conn.BaseConn.defaultPort = 1433
-
-	version := getVersion(conn.GetURL())
-	if strings.Contains(strings.ToLower(version), "sql azure") {
-		conn.isAzureSQL = true
-		conn.Type = dbio.TypeDbAzure
-	} else if strings.Contains(strings.ToLower(version), "azure sql data warehouse") {
-		conn.isAzureDWH = true
-		conn.Type = dbio.TypeDbAzureDWH
-	}
 
 	conn.SetProp("use_bcp_map_parallel", "false")
 
@@ -73,43 +64,118 @@ func (conn *MsSQLServerConn) GetURL(newURL ...string) string {
 		return connURL
 	}
 
-	user := url.User.Username()
-	password, _ := url.User.Password()
-	port := url.Port()
-	server := strings.ReplaceAll(url.Host, ":"+port, "")
-	database := strings.ReplaceAll(url.Path, "/", "")
-	instance := conn.GetProp("instance")
-	if instance != "" {
-		server = g.F("%s\\\\%s", server, instance)
-	}
-	adoConnStr := fmt.Sprintf(
-		"server=%s;user id=%s;password=%s;port=%s;database=%s;",
-		server, user, password, port, database,
-	)
-	_ = adoConnStr
-
-	// return adoConnStr
-
 	return url.String()
 }
 
-func getVersion(URL string) (version string) {
-	db, err := sqlx.Open("mssql", URL)
-	if err != nil {
-		return
+func (conn *MsSQLServerConn) ConnString() string {
+
+	propMapping := map[string]string{
+		"connection timeout": "connection timeout",
+		"connection_timeout": "connection timeout",
+
+		"dial timeout": "dial timeout",
+		"dial_timeout": "dial timeout",
+
+		"encrypt": "encrypt",
+
+		"authenticator": "authenticator",
+
+		"app name": "app name",
+		"app_name": "app name",
+
+		"keepAlive":  "keepAlive",
+		"keep_alive": "keepAlive",
+
+		"failoverpartner":  "failoverpartner",
+		"failover_partner": "failoverpartner",
+
+		"failoverport":  "failoverport",
+		"failover_port": "failoverport",
+
+		"packet size": "packet size",
+		"packet_size": "packet size",
+
+		"log": "log",
+
+		"TrustServerCertificate":   "TrustServerCertificate",
+		"trust_server_certificate": "TrustServerCertificate",
+
+		"certificate": "certificate",
+
+		"hostNameInCertificate":   "hostNameInCertificate",
+		"hostname_in_certificate": "hostNameInCertificate",
+
+		"tlsmin":  "tlsmin",
+		"tls_min": "tlsmin",
+
+		"ServerSPN":  "ServerSPN",
+		"server_spn": "ServerSPN",
+
+		"Workstation ID": "Workstation ID",
+		"workstation_id": "Workstation ID",
+
+		"ApplicationIntent":  "ApplicationIntent",
+		"application_intent": "ApplicationIntent",
+
+		"protocol":          "protocol",
+		"columnencryption":  "columnencryption",
+		"column_encryption": "columnencryption",
+
+		"multisubnetfailover":   "multisubnetfailover",
+		"multi_subnet_failover": "multisubnetfailover",
+
+		"pipe": "pipe",
+
+		// Kerberos
+		"krb5-configfile":         "krb5-configfile",
+		"krb5-realm":              "krb5-realm",
+		"krb5-keytabfile":         "krb5-keytabfile",
+		"krb5-credcachefile":      "krb5-credcachefile",
+		"krb5-dnslookupkdc":       "krb5-dnslookupkdc",
+		"krb5-udppreferencelimit": "krb5-udppreferencelimit",
+
+		"krb5_config_file":          "krb5-configfile",
+		"krb5_realm":                "krb5-realm",
+		"krb5_keytab_file":          "krb5-keytabfile",
+		"krb5_cred_cache_file":      "krb5-credcachefile",
+		"krb5_dns_lookup_kdc":       "krb5-dnslookupkdc",
+		"krb5_udp_preference_limit": "krb5-udppreferencelimit",
+
+		// Azure Active Directory authentication (https://github.com/microsoft/go-mssqldb?tab=readme-ov-file#azure-active-directory-authentication)
+		"fedauth":  "fedauth",
+		"fed_auth": "fedauth",
 	}
-	res, err := db.Queryx("select @@version v")
-	if err != nil {
-		return
+
+	U, _ := net.NewURL(conn.GetURL())
+	for key, new_key := range propMapping {
+		if val := conn.GetProp(key); val != "" {
+			U.SetParam(new_key, val)
+		}
 	}
-	res.Next()
-	row, err := res.SliceScan()
+
+	return U.String()
+}
+
+func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
+	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
-		return
+		return err
 	}
-	version = cast.ToString(row[0])
-	db.Close()
-	return
+
+	// get version
+	data, _ := conn.Query(`select @@version v` + noDebugKey)
+	if len(data.Rows) > 0 {
+		version := cast.ToString(data.Rows[0][0])
+		if strings.Contains(strings.ToLower(version), "sql azure") {
+			conn.isAzureSQL = true
+			conn.Type = dbio.TypeDbAzure
+		} else if strings.Contains(strings.ToLower(version), "azure sql data warehouse") {
+			conn.isAzureDWH = true
+			conn.Type = dbio.TypeDbAzureDWH
+		}
+	}
+
+	return nil
 }
 
 // BulkImportFlow bulk import flow

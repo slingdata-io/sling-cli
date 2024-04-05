@@ -4,10 +4,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
@@ -15,18 +17,37 @@ import (
 // HTTPFileSysClient is for HTTP files
 type HTTPFileSysClient struct {
 	BaseFileSysClient
-	context  g.Context
-	client   *http.Client
-	username string
-	password string
+	context       g.Context
+	client        *http.Client
+	username      string
+	password      string
+	isHttps       bool
+	isGoogleSheet bool
 }
 
 // Init initializes the fs client
 func (fs *HTTPFileSysClient) Init(ctx context.Context) (err error) {
-	var instance FileSysClient
-	instance = fs
+	instance := FileSysClient(fs)
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
+
+	for _, key := range g.ArrStr("BUCKET", "KEY_FILE", "KEY_BODY", "CRED_API_KEY") {
+		if fs.GetProp(key) == "" {
+			fs.SetProp(key, fs.GetProp("GC_"+key))
+		}
+	}
+	if fs.GetProp("KEY_FILE") == "" {
+		fs.SetProp("KEY_FILE", fs.GetProp("KEYFILE")) // dbt style
+	}
+
+	if val := fs.GetProp("KEY_FILE"); val != "" {
+		b, err := os.ReadFile(val)
+		if err != nil {
+			return g.Error(err, "could not read google cloud key file")
+		}
+		fs.SetProp("KEY_BODY", string(b))
+	}
+
 	return fs.Connect()
 }
 
@@ -36,12 +57,16 @@ func (fs *HTTPFileSysClient) Connect() (err error) {
 	fs.client = &http.Client{}
 	fs.username = fs.GetProp("HTTP_USER")
 	fs.password = fs.GetProp("HTTP_PASSWORD")
+	fs.isHttps = strings.HasPrefix(fs.GetProp("url"), "https://")
+	fs.isGoogleSheet = strings.HasPrefix(fs.GetProp("url"), "https://docs.google.com/spreadsheets/d")
 	return
 }
 
 // Prefix returns the url prefix
 func (fs *HTTPFileSysClient) Prefix(suffix ...string) string {
-	return g.F("%s://%s", fs.FsType().String(), fs.GetProp("host")) + strings.Join(suffix, "")
+	_, host, _, _ := dbio.ParseURL(fs.GetProp("url"))
+	scheme := lo.Ternary(fs.isHttps, "https", "http")
+	return g.F("%s://%s/", scheme, host)
 }
 
 // GetPath returns the path of url
@@ -49,13 +74,9 @@ func (fs *HTTPFileSysClient) GetPath(uri string) (path string, err error) {
 	// normalize, in case url is provided without prefix
 	uri = fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 
-	host, path, err := ParseURL(uri)
+	_, path, err = ParseURL(uri)
 	if err != nil {
 		return
-	}
-
-	if fs.GetProp("host") != host {
-		err = g.Error("URL bucket differs from connection bucket. %s != %s", host, fs.GetProp("host"))
 	}
 
 	return path, err
@@ -105,9 +126,7 @@ func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 		return dbio.FileNodes{{URI: url}}, nil
 	}
 
-	if strings.HasSuffix(url, "/") {
-		url = url[:len(url)-1]
-	}
+	url = strings.TrimSuffix(url, "/")
 
 	resp, err := fs.doGet(url)
 	if err != nil {
@@ -158,9 +177,8 @@ func (fs *HTTPFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, er
 // GetReader gets a reader for an HTTP resource (download)
 func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error) {
 	if strings.HasPrefix(url, "https://docs.google.com/spreadsheets/d") {
-		ggs, err := iop.NewGoogleSheetFromURL(
-			url, "GSHEET_CLIENT_JSON_BODY="+fs.GetProp("GSHEET_CLIENT_JSON_BODY"),
-		)
+		props := map[string]string{"KEY_BODY": fs.GetProp("KEY_BODY")}
+		ggs, err := iop.NewGoogleSheetFromURL(url, g.MapToKVArr(props)...)
 		if err != nil {
 			return nil, g.Error(err, "could not load google sheets")
 		}
@@ -168,9 +186,9 @@ func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error)
 			ggs.Props[k] = v
 		}
 
-		data, err := ggs.GetDataset(fs.GetProp("GSHEET_SHEET_NAME"))
+		data, err := ggs.GetDataset(fs.GetProp("SHEET"))
 		if err != nil {
-			return nil, g.Error(err, "could not open sheet: "+fs.GetProp("GSHEET_SHEET_NAME"))
+			return nil, g.Error(err, "could not open sheet: "+fs.GetProp("SHEET"))
 		}
 		return data.Stream().NewCsvReader(0, 0), nil
 	}
@@ -187,9 +205,11 @@ func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error)
 // Write uploads an HTTP file
 func (fs *HTTPFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, err error) {
 	if strings.HasPrefix(urlStr, "https://docs.google.com/spreadsheets/d") {
-		ggs, err := iop.NewGoogleSheetFromURL(
-			urlStr, "GSHEET_CLIENT_JSON_BODY="+fs.GetProp("GSHEET_CLIENT_JSON_BODY"),
-		)
+		props := map[string]string{
+			"KEY_BODY": fs.GetProp("KEY_BODY"),
+			"SHEET":    fs.GetProp("SHEET"),
+		}
+		ggs, err := iop.NewGoogleSheetFromURL(urlStr, g.MapToKVArr(props)...)
 		if err != nil {
 			return 0, g.Error(err, "could not load google sheets")
 		}

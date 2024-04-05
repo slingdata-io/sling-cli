@@ -117,11 +117,14 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 		conn.SetProp("warehouse", cast.ToString(data.Rows[0][0]))
 	}
 
-	if conn.GetProp("schema") != "" {
-		_, err = conn.Exec("USE SCHEMA " + conn.GetProp("schema") + noDebugKey)
+	if val := conn.GetProp("database"); val != "" {
+		_, err = conn.Exec("USE DATABASE " + val + noDebugKey)
 	}
-	if conn.GetProp("role") != "" {
-		_, err = conn.Exec("USE ROLE " + conn.GetProp("role") + noDebugKey)
+	if val := conn.GetProp("schema"); val != "" {
+		_, err = conn.Exec("USE SCHEMA " + val + noDebugKey)
+	}
+	if val := conn.GetProp("role"); val != "" {
+		_, err = conn.Exec("USE ROLE " + val + noDebugKey)
 	}
 	return err
 }
@@ -717,7 +720,13 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		err = g.Error(err, "REMOVE: "+stageFolderPath)
 		return
 	}
-	df.Defer(func() { conn.Exec("REMOVE " + stageFolderPath) })
+	df.Defer(func() {
+		_, err := conn.Exec("REMOVE " + stageFolderPath)
+		if err != nil && strings.Contains(err.Error(), "transaction") {
+			conn.tx = nil // clear any failed transactions
+			conn.Exec("REMOVE " + stageFolderPath)
+		}
+	})
 
 	doPut := func(file filesys.FileReady) (stageFilePath string) {
 		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {

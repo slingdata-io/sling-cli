@@ -117,7 +117,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			greaterThan := lo.Ternary(t.Config.Source.HasPrimaryKey(), ">=", ">")
 
 			incrementalWhereCond = g.R(
-				"{update_key} {gt} {value}",
+				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
@@ -147,7 +147,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 
 			incrementalWhereCond = g.R(
-				`{update_key} >= {start_value} and {update_key} <= {end_value}`,
+				srcConn.GetTemplateValue("core.backfill_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"start_value", startValue,
 				"end_value", endValue,
@@ -155,24 +155,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		if sTable.SQL == "" {
-			limitTop := ""
-			limitEnd := ""
-			if cfg.Source.Limit() > 0 {
-				if g.In(srcConn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
-					limitTop = g.F("top %d", cfg.Source.Limit())
-				} else {
-					limitEnd = g.F("limit %d", cfg.Source.Limit())
-				}
-			}
-
 			sTable.SQL = g.R(
-				`select{limit_top} {fields} from {table} where {incremental_where_cond} order by {update_key} asc {limit_end}`,
+				srcConn.GetTemplateValue("core.incremental_select"),
 				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"limit_top", lo.Ternary(limitTop != "", " "+limitTop, ""),
-				"limit_end", limitEnd,
 			)
 		} else {
 			if !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
@@ -186,14 +174,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"incremental_value", cfg.IncrementalVal,
 			)
-
-			if cfg.Source.Limit() > 0 {
-				sTable.SQL = g.R(
-					srcConn.Template().Core["limit"],
-					"sql", sTable.SQL,
-					"limit", cast.ToString(cfg.Source.Limit()),
-				)
-			}
 		}
 	}
 
