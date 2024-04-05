@@ -24,6 +24,9 @@ core:
   column_names: '{sql}'
   enable_trigger: ALTER TABLE {table} ENABLE TRIGGER {trigger}
   disable_trigger: ALTER TABLE {table} DISABLE TRIGGER {trigger}
+  incremental_select: select {fields} from {table} where {incremental_where_cond} order by {update_key} asc
+  incremental_where: '{update_key} {gt} {value}'
+  backfill_where: '{update_key} >= {start_value} and {update_key} <= {end_value}'
 
 analysis:
   # table level

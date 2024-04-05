@@ -117,7 +117,20 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 }
 
 func (t *Table) Select(limit int, fields ...string) (sql string) {
-	if g.In(t.Dialect, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB) {
+	switch t.Dialect {
+	case dbio.TypeDbPrometheus:
+		return t.SQL
+	case dbio.TypeDbMongoDB:
+		m, _ := g.UnmarshalMap(t.SQL)
+		if m == nil {
+			m = g.M()
+		}
+		if len(fields) > 0 && fields[0] != "*" {
+			m["fields"] = lo.Map(fields, func(v string, i int) string {
+				return strings.TrimSpace(v)
+			})
+			return g.Marshal(m)
+		}
 		return t.SQL
 	}
 
@@ -623,7 +636,7 @@ func GetQualifierQuote(dialect dbio.Type) string {
 	switch dialect {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse:
 		quote = "`"
-	case dbio.TypeDbBigTable:
+	case dbio.TypeDbBigTable, dbio.TypeDbMongoDB, dbio.TypeDbPrometheus:
 		quote = ""
 	}
 	return quote

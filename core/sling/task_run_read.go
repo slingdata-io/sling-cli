@@ -117,7 +117,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			greaterThan := lo.Ternary(t.Config.Source.HasPrimaryKey(), ">=", ">")
 
 			incrementalWhereCond = g.R(
-				"{update_key} {gt} {value}",
+				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"value", cfg.IncrementalVal,
 				"gt", greaterThan,
@@ -147,7 +147,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			}
 
 			incrementalWhereCond = g.R(
-				`{update_key} >= {start_value} and {update_key} <= {end_value}`,
+				srcConn.GetTemplateValue("core.backfill_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"start_value", startValue,
 				"end_value", endValue,
@@ -156,7 +156,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		if sTable.SQL == "" {
 			sTable.SQL = g.R(
-				`select {fields} from {table} where {incremental_where_cond} order by {update_key} asc`,
+				srcConn.GetTemplateValue("core.incremental_select"),
 				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
