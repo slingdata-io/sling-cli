@@ -901,7 +901,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
-	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec}
+	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape}
 
 	// decode File if requested by transform
 	if newReader, ok := ds.transformReader(reader); ok {

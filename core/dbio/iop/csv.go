@@ -24,6 +24,7 @@ type CSV struct {
 	Path            string
 	NoHeader        bool
 	Delimiter       rune
+	Escape          string
 	FieldsPerRecord int
 	Columns         []Column
 	File            *os.File
@@ -182,8 +183,7 @@ func (c *CSV) SetFields(fields []string) {
 	}
 }
 
-func (c *CSV) getReader(delimiter string) (*csv.Reader, error) {
-	var r *csv.Reader
+func (c *CSV) getReader(delimiter string) (r *csv.CsvReader, err error) {
 	var reader2, reader3, reader4 io.Reader
 
 	if c.File == nil && c.Reader == nil {
@@ -266,18 +266,17 @@ func (c *CSV) getReader(delimiter string) (*csv.Reader, error) {
 		reader4 = reader3
 	}
 
-	r = csv.NewReader(reader4)
-	r.LazyQuotes = true
-	r.ReuseRecord = true
-	r.FieldsPerRecord = c.FieldsPerRecord
-	// r.TrimLeadingSpace = true
-	// r.TrailingComma = true
+	options := csv.CsvOptions{Delimiter: byte(c.Delimiter)}
 	if c.Delimiter != 0 {
-		r.Comma = c.Delimiter
+		options.Delimiter = byte(c.Delimiter)
 	} else {
-		r.Comma = deli
+		options.Delimiter = byte(deli)
 		c.Delimiter = deli
 	}
+	if c.Escape != "" {
+		options.Escape = []byte(c.Escape)[0]
+	}
+	r = csv.NewCsv(options).NewReader(reader4)
 
 	return r, err
 }
