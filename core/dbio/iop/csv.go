@@ -527,9 +527,8 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 		var csvErr error
 		var row, prevRow []string
 		RowNumCols := []int{}
-		csvR := csv.NewReader(strings.NewReader(testString))
-		csvR.LazyQuotes = true
-		csvR.Comma = d
+		opts := csv.CsvOptions{Delimiter: byte(d)}
+		csvR := csv.NewCsv(opts).NewReader(strings.NewReader(testString))
 		for {
 			row, csvErr = csvR.Read()
 			if csvErr == io.EOF {
