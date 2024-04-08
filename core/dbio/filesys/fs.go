@@ -895,8 +895,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			}
 		}
 
-		flatten := cast.ToBool(fs.GetProp("flatten"))
-		if flatten && (fileFormat.IsJson() || isFiletype(FileTypeJson, paths...) || isFiletype(FileTypeJsonLines, paths...)) {
+		if fileFormat.IsJson() || isFiletype(FileTypeJson, paths...) || isFiletype(FileTypeJsonLines, paths...) {
 			ds, err := MergeReaders(fs, FileTypeJson, paths...)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -911,7 +910,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		if flatten && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, paths...)) {
+		if fileFormat == FileTypeXml || isFiletype(FileTypeXml, paths...) {
 			ds, err := MergeReaders(fs, FileTypeXml, paths...)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
