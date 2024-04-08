@@ -2374,8 +2374,8 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 	defer df.CleanUp()
 
 	// g.Trace("BulkImportFlow not implemented for %s", conn.GetType())
-	df.Context.SetConcurencyLimit(conn.Context().Wg.Limit)
-	// df.Context.SetConcurencyLimit(1) // safer for now, fails with too many files
+	df.Context.SetConcurrencyLimit(conn.Context().Wg.Limit)
+	// df.Context.SetConcurrencyLimit(1) // safer for now, fails with too many files
 
 	doImport := func(tableFName string, ds *iop.Datastream) {
 		defer df.Context.Wg.Write.Done()

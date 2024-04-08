@@ -73,7 +73,7 @@ func (conn *BigQueryConn) Init() error {
 
 	// Google BigQuery has limits
 	// https://cloud.google.com/bigquery/quotas
-	conn.Context().SetConcurencyLimit(5)
+	conn.Context().SetConcurrencyLimit(5)
 	// conn.SetProp("FILE_MAX_ROWS", "1000000") // hard code?
 
 	if conn.GetProp("GC_KEY_FILE") == "" {

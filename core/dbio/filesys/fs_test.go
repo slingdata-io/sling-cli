@@ -983,7 +983,7 @@ func TestFileSysHTTP(t *testing.T) {
 }
 
 func testManyCSV(t *testing.T) {
-	fs, err := NewFileSysClient(dbio.TypeFileHTTP, "concurencyLimit=5")
+	fs, err := NewFileSysClient(dbio.TypeFileHTTP, "concurrencyLimit=5")
 	nodes, err := fs.List("https://people.sc.fsu.edu/~jburkardt/data/csv/csv.html")
 	// paths, err := fs.List("https://www.stats.govt.nz/large-datasets/csv-files-for-download/")
 	assert.NoError(t, err)

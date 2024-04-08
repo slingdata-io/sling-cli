@@ -68,15 +68,15 @@ func NewFileSysClient(fst dbio.Type, props ...string) (fsClient FileSysClient, e
 // such as local, s3, azure storage, google cloud storage
 // props are provided as `"Prop1=Value1", "Prop2=Value2", ...`
 func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string) (fsClient FileSysClient, err error) {
-	concurencyLimit := runtime.NumCPU()
-	if os.Getenv("CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(os.Getenv("CONCURENCY_LIMIT"))
+	concurrencyLimit := runtime.NumCPU()
+	if os.Getenv("CONCURRENCY_LIMIT") != "" {
+		concurrencyLimit = cast.ToInt(os.Getenv("CONCURRENCY_LIMIT"))
 	}
 
 	switch fst {
 	case dbio.TypeFileLocal:
 		fsClient = &LocalFileSysClient{}
-		concurencyLimit = 20
+		concurrencyLimit = 20
 	case dbio.TypeFileS3:
 		fsClient = &S3FileSysClient{}
 		//fsClient = &S3cFileSysClient{}
@@ -106,8 +106,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient.SetProp(k, v)
 	}
 
-	if fsClient.GetProp("CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(fsClient.GetProp("CONCURENCY_LIMIT"))
+	if fsClient.GetProp("CONCURRENCY_LIMIT") != "" {
+		concurrencyLimit = cast.ToInt(fsClient.GetProp("CONCURRENCY_LIMIT"))
 	}
 
 	for k, v := range env.Vars() {
@@ -121,7 +121,7 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 	if err != nil {
 		err = g.Error(err, "Error initiating File Sys Client")
 	}
-	fsClient.Context().SetConcurencyLimit(concurencyLimit)
+	fsClient.Context().SetConcurrencyLimit(concurrencyLimit)
 
 	return
 }
@@ -154,13 +154,13 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
 	case strings.HasPrefix(url, "file://"):
-		props = append(props, g.F("concurencyLimit=%d", 20))
+		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	case strings.Contains(url, "://"):
 		err = g.Error("Unable to determine FileSysClient for " + url)
 		return
 	default:
-		props = append(props, g.F("concurencyLimit=%d", 20))
+		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	}
 }
@@ -1103,9 +1103,13 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 		fs.Context().Cancel()
 	}
 
-	g.DebugLow("Merging %s readers from %s", fileType, url)
+	g.DebugLow("Merging %s readers of %d files from %s", fileType, len(paths), url)
 
-	readerChn := make(chan io.Reader, 3)
+	concurrency := 20
+	if val := fs.GetProp("CONCURRENCY"); val != "" {
+		concurrency = cast.ToInt(val)
+	}
+	readerChn := make(chan io.Reader, concurrency)
 	go func() {
 		defer close(readerChn)
 

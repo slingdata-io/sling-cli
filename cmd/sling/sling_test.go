@@ -675,7 +675,7 @@ func Test1Replication(t *testing.T) {
 	os.Setenv("DEBUG", "LOW")
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
-	os.Setenv("CONCURENCY_LIMIT", "2")
+	os.Setenv("CONCURRENCY_LIMIT", "2")
 	replicationCfgPath := "tests/replications/r.14.yaml"
 	err := runReplication(replicationCfgPath, nil)
 	if g.AssertNoError(t, err) {
