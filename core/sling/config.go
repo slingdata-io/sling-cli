@@ -993,8 +993,9 @@ var SourceFileOptionsDefault = SourceOptions{
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
 	SkipBlankLines: g.Bool(false),
-	Delimiter:      ",",
-	MaxDecimals:    g.Int(-1),
+	// Delimiter:      ",",
+	FieldsPerRec: g.Int(-1),
+	MaxDecimals:  g.Int(-1),
 }
 
 var SourceDBOptionsDefault = SourceOptions{

@@ -901,14 +901,18 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
-	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape}
+	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape, Delimiter: rune(0)}
+
+	if ds.config.Delimiter != "" {
+		c.Delimiter = rune(ds.config.Delimiter[0])
+	}
 
 	// decode File if requested by transform
 	if newReader, ok := ds.transformReader(reader); ok {
 		c.Reader = newReader
 	}
 
-	r, err := c.getReader(ds.config.Delimiter)
+	r, err := c.getReader()
 	if err != nil {
 		err = g.Error(err, "could not get reader")
 		ds.Context.CaptureErr(err)
@@ -920,7 +924,9 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("csv stream provided is empty (%#v)", ds.Metadata.StreamURL.Value)
+		if ds.Metadata.StreamURL.Value != nil {
+			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		}
 		ds.SetReady()
 		ds.Close()
 		return nil
