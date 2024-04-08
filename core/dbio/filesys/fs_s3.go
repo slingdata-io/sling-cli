@@ -460,6 +460,7 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 }
 
 func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string, pattern *glob.Glob) (nodes dbio.FileNodes, err error) {
+	maxItems := lo.Ternary(recursiveLimit == 0, 10000, recursiveLimit)
 	result, err := svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 	if err != nil {
 		err = g.Error(err, "Error with ListObjectsV2 for: %#v", input)
@@ -491,6 +492,10 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 			}
 
 			nodes.AddWhere(pattern, ts, node)
+			if len(nodes) >= maxItems {
+				g.Warn("Limiting S3 items at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
+				return
+			}
 		}
 
 		if *result.IsTruncated {

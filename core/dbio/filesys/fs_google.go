@@ -177,7 +177,7 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 	baseKeys := map[string]int{}
 	keyArr := strings.Split(key, "/")
 	counter := 0
-	maxItems := lo.Ternary(recursiveLimit == 0, 5000, recursiveLimit)
+	maxItems := lo.Ternary(recursiveLimit == 0, 10000, recursiveLimit)
 
 	query := &gcstorage.Query{Prefix: key}
 	query.SetAttrSelection([]string{"Name", "Size", "Created", "Updated", "Owner"})
