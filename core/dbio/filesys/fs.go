@@ -896,7 +896,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 		}
 
 		if fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...) {
-			ds, err := MergeReaders(fs, FileTypeJson, nodes)
+			ds, err := MergeReaders(fs, FileTypeJson, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -911,7 +911,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 		}
 
 		if fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...) {
-			ds, err := MergeReaders(fs, FileTypeXml, nodes)
+			ds, err := MergeReaders(fs, FileTypeXml, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -927,7 +927,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 
 		// csvs with no header
 		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, fileFormat, nodes)
+			ds, err := MergeReaders(fs, fileFormat, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1075,7 +1075,7 @@ func isFiletype(fileType FileType, paths ...string) bool {
 	return len(paths) == cnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes) (ds *iop.Datastream, err error) {
+func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, limit int) (ds *iop.Datastream, err error) {
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -1160,6 +1160,10 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes) (ds
 				_, err = io.Copy(pipeW, reader)
 				if err != nil {
 					setError(g.Error(err, "Error copying reader to pipe writer"))
+					return
+				}
+
+				if ds.Limited(limit) || len(ds.Buffer) >= limit {
 					return
 				}
 			}

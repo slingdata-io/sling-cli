@@ -159,6 +159,16 @@ func (ds *Datastream) Df() *Dataflow {
 	return ds.df
 }
 
+func (ds *Datastream) Limited(limit ...int) bool {
+	if len(limit) > 0 && ds.Count >= uint64(limit[0]) {
+		return true
+	}
+	if ds.df == nil || ds.df.Limit == 0 {
+		return false
+	}
+	return ds.Count >= ds.df.Limit
+}
+
 func (ds *Datastream) processBwRows() {
 	done := false
 	process := func() {
@@ -749,6 +759,9 @@ loop:
 				}
 				if ds.config.SkipBlankLines && ds.Sp.rowBlankValCnt == len(row) {
 					goto loop
+				}
+				if ds.Limited() {
+					break loop
 				}
 
 				if df := ds.df; df != nil && df.OnColumnAdded != nil && df.OnColumnChanged != nil {
