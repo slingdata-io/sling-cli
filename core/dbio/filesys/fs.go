@@ -1105,7 +1105,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 	g.DebugLow("Merging %s readers of %d files from %s", fileType, len(paths), url)
 
-	concurrency := 20
+	concurrency := 5
 	if val := fs.GetProp("CONCURRENCY"); val != "" {
 		concurrency = cast.ToInt(val)
 	}
@@ -1134,35 +1134,42 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 	}()
 
-	go func() {
-		defer pipeW.Close()
+	// Does not work very well.
+	if false && fileType == FileTypeCsv {
+		pipeW.Close()
+		err = ds.ConsumeCsvReaderChl(readerChn)
+	} else {
 
-		for reader := range readerChn {
-			_, err = io.Copy(pipeW, reader)
-			if err != nil {
-				setError(g.Error(err, "Error copying reader to pipe writer"))
-				return
+		go func() {
+			defer pipeW.Close()
+
+			for reader := range readerChn {
+				_, err = io.Copy(pipeW, reader)
+				if err != nil {
+					setError(g.Error(err, "Error copying reader to pipe writer"))
+					return
+				}
 			}
-		}
-	}()
+		}()
 
-	switch fileType {
-	case FileTypeJson:
-		err = ds.ConsumeJsonReader(pipeR)
-	case FileTypeXml:
-		err = ds.ConsumeXmlReader(pipeR)
-	case FileTypeParquet:
-		err = ds.ConsumeParquetReader(pipeR)
-	case FileTypeAvro:
-		err = ds.ConsumeAvroReader(pipeR)
-	case FileTypeSAS:
-		err = ds.ConsumeSASReader(pipeR)
-	case FileTypeExcel:
-		err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
-	case FileTypeCsv:
-		err = ds.ConsumeCsvReader(pipeR)
-	default:
-		return ds, g.Error("unrecognized fileType (%s) for MergeReaders", fileType)
+		switch fileType {
+		case FileTypeJson:
+			err = ds.ConsumeJsonReader(pipeR)
+		case FileTypeXml:
+			err = ds.ConsumeXmlReader(pipeR)
+		case FileTypeParquet:
+			err = ds.ConsumeParquetReader(pipeR)
+		case FileTypeAvro:
+			err = ds.ConsumeAvroReader(pipeR)
+		case FileTypeSAS:
+			err = ds.ConsumeSASReader(pipeR)
+		case FileTypeExcel:
+			err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
+		case FileTypeCsv:
+			err = ds.ConsumeCsvReader(pipeR)
+		default:
+			return ds, g.Error("unrecognized fileType (%s) for MergeReaders", fileType)
+		}
 	}
 	if err != nil {
 		return ds, g.Error(err, "Error consuming reader for fileType: '%s'", fileType)

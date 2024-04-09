@@ -899,6 +899,117 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	return
 }
 
+// ConsumeCsvReaderChl reads a channel of readers. Should be safe to use with
+// header top row
+func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
+
+	nextCSV := func(reader io.Reader) (c CSV, r csv.CsvReaderLike, err error) {
+		c = CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape, Delimiter: rune(0)}
+
+		if ds.config.Delimiter != "" {
+			c.Delimiter = rune(ds.config.Delimiter[0])
+		}
+
+		// decode File if requested by transform
+		if newReader, ok := ds.transformReader(reader); ok {
+			c.Reader = newReader
+		}
+
+		r, err = c.getReader()
+		if err != nil {
+			err = g.Error(err, "could not get reader")
+			ds.Context.CaptureErr(err)
+		}
+		return
+	}
+
+	var c CSV
+	var r csv.CsvReaderLike
+	c, r, err = nextCSV(<-readerChn)
+	if err != nil {
+		return
+	}
+
+	row0, err := r.Read()
+	if err == io.EOF {
+		if ds.Metadata.StreamURL.Value != nil {
+			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		}
+		ds.SetReady()
+		ds.Close()
+		return nil
+	} else if err != nil {
+		err = g.Error(err, "could not parse header line")
+		ds.Context.CaptureErr(err)
+		return err
+	}
+
+	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
+		ds.SetFields(CleanHeaderRow(row0))
+	}
+
+	nextFunc := func(it *Iterator) bool {
+
+	processNext:
+		row, err := r.Read()
+		if err == io.EOF {
+			c.File.Close()
+			select {
+			case reader := <-readerChn:
+				c, r, err = nextCSV(reader)
+				if err != nil {
+					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
+					return false
+				}
+
+				// skip header
+				if ds.Sp.Config.Header {
+					r.Read()
+				}
+
+				goto processNext
+			default:
+				return false
+			}
+		} else if err != nil {
+			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
+			return false
+		}
+
+		if len(row) > len(it.ds.Columns) {
+			it.addNewColumns(len(row))
+		}
+
+		it.Row = make([]any, len(row))
+		var val any
+		for i, val0 := range row {
+			if !it.ds.Columns[i].IsString() {
+				val0 = strings.TrimSpace(val0)
+				if val0 == "" {
+					val = nil
+				} else {
+					val = val0
+				}
+			} else {
+				val = val0
+			}
+			it.Row[i] = val
+		}
+
+		return true
+	}
+
+	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape, Delimiter: rune(0)}
