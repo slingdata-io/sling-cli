@@ -916,12 +916,20 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 // header top row
 func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
 
-	nextCSV := func(reader io.Reader) (c CSV, r csv.CsvReaderLike, err error) {
-		c = CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape, Delimiter: rune(0)}
+	c := CSV{
+		NoHeader:        !ds.config.Header,
+		FieldsPerRecord: ds.config.FieldsPerRec,
+		Escape:          ds.config.Escape,
+		Delimiter:       rune(0),
+		NoDebug:         ds.NoDebug,
+	}
 
-		if ds.config.Delimiter != "" {
-			c.Delimiter = rune(ds.config.Delimiter[0])
-		}
+	if ds.config.Delimiter != "" {
+		c.Delimiter = rune(ds.config.Delimiter[0])
+	}
+
+	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
+		c.Reader = reader
 
 		// decode File if requested by transform
 		if newReader, ok := ds.transformReader(reader); ok {
@@ -936,9 +944,8 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 		return
 	}
 
-	var c CSV
 	var r csv.CsvReaderLike
-	c, r, err = nextCSV(<-readerChn)
+	r, err = nextCSV(<-readerChn)
 	if err != nil {
 		return
 	}
@@ -969,16 +976,18 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 			c.File.Close()
 			select {
 			case reader := <-readerChn:
-				c, r, err = nextCSV(reader)
+				if reader == nil {
+					return false
+				}
+
+				r, err = nextCSV(reader)
 				if err != nil {
 					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
 					return false
 				}
 
-				// skip header
-				if ds.Sp.Config.Header {
-					r.Read()
-				}
+				// skip header for subsequent CSVs, since c.getReader() injects header line if missing
+				_, _ = r.Read()
 
 				goto processNext
 			default:
@@ -1025,7 +1034,14 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
-	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec, Escape: ds.config.Escape, Delimiter: rune(0)}
+	c := CSV{
+		Reader:          reader,
+		NoHeader:        !ds.config.Header,
+		FieldsPerRecord: ds.config.FieldsPerRec,
+		Escape:          ds.config.Escape,
+		Delimiter:       rune(0),
+		NoDebug:         ds.NoDebug,
+	}
 
 	if ds.config.Delimiter != "" {
 		c.Delimiter = rune(ds.config.Delimiter[0])

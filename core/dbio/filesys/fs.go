@@ -872,6 +872,8 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 	go func() {
 		defer close(dsCh)
 
+		allowMerging := strings.ToLower(os.Getenv("SLING_MERGE_READERS")) != "false"
+
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
 			skipSelect := g.In(fs.GetProp("FORMAT"), string(FileTypeParquet))
@@ -895,7 +897,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			}
 		}
 
-		if fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...) {
+		if allowMerging && (fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, FileTypeJson, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -910,7 +912,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			return // done
 		}
 
-		if fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...) {
+		if allowMerging && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, FileTypeXml, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -925,9 +927,9 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			return // done
 		}
 
-		// csvs with no header
-		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, fileFormat, nodes, cfg.Limit)
+		// csvs
+		if allowMerging && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, FileTypeCsv, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1148,7 +1150,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 	}()
 
 	// Does not work very well.
-	if false && fileType == FileTypeCsv {
+	if g.In(fileType, FileTypeCsv) {
 		pipeW.Close()
 		err = ds.ConsumeCsvReaderChl(readerChn)
 	} else {
