@@ -190,7 +190,7 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 	if c.File == nil && c.Reader == nil {
 		file, err := os.Open(c.Path)
 		if err != nil {
-			return r, g.Error(err, "os.Open(c.Path)")
+			return r, g.Error(err, "cannot open: %#v", c.Path)
 		}
 		c.File = file
 		c.Reader = bufio.NewReader(c.File)
@@ -258,6 +258,9 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 				}
 				c.Delimiter = deli
 			}
+		}
+		if c.FieldsPerRecord <= 0 && !c.NoDebug {
+			g.Trace("number-cols detected: %d", numCols)
 		}
 		err = nil
 	}

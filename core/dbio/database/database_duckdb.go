@@ -637,6 +637,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	ds = iop.NewDatastreamContext(queryCtx.Ctx, fetchedColumns)
 	ds.SafeInference = true
+	ds.NoDebug = strings.Contains(sql, noDebugKey)
 	ds.SetConfig(conn.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
 	ds.Defer(func() { fileContext.Mux.Unlock() })
