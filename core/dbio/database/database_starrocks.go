@@ -442,8 +442,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	// default is JSON
 	headers := map[string]string{
-		"Expect":  "100-continue",
-		"Timeout": "300",
+		"expect":  "100-continue",
+		"timeout": "300",
 
 		"columns": strings.Join(colNames, ", "),
 
@@ -454,19 +454,23 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	if conn.GetProp("format") == "json" {
 		headers = map[string]string{
-			"Expect":  "100-continue",
-			"Timeout": "300",
+			"expect":  "100-continue",
+			"timeout": "300",
 			"columns": strings.Join(colNames, ", "),
 
 			"format":            "JSON",
 			"strip_outer_array": "true",
 		}
 	}
+	timeout := 330
 
 	// set extra headers
-	for _, key := range []string{"max_filter_ratio", "timezone", "strict_mode"} {
+	for _, key := range []string{"max_filter_ratio", "timezone", "strict_mode", "timeout"} {
 		if val := conn.GetProp(key); val != "" {
 			headers[key] = val
+			if key == "timeout" {
+				timeout = cast.ToInt(val) + 30
+			}
 		}
 	}
 
@@ -482,7 +486,6 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.Node.Path()))
 		}
 
-		timeout := 330
 		apiURL := strings.TrimSuffix(applyCreds(fu.U), "/") + g.F("/api/%s/%s/_stream_load", table.Schema, table.Name)
 		if conn.fePort != "" {
 			// this is the fix to not freeze, call the redirected port directly
