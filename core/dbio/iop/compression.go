@@ -47,13 +47,11 @@ func CompressorTypePtr(v CompressorType) *CompressorType {
 
 // Unzip will decompress a zip archive, moving all files and folders
 // within the zip file (parameter 1) to an output directory (parameter 2).
-func Unzip(src string, dest string) ([]string, error) {
-
-	var filenames []string
+func Unzip(src string, dest string) (nodes []map[string]any, err error) {
 
 	r, err := zip.OpenReader(src)
 	if err != nil {
-		return filenames, g.Error(err)
+		return nodes, g.Error(err)
 	}
 	defer r.Close()
 
@@ -65,10 +63,16 @@ func Unzip(src string, dest string) ([]string, error) {
 
 		// Check for ZipSlip. More Info: http://bit.ly/2MsjAWE
 		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-			return filenames, g.Error("%s: illegal file path", fpath)
+			return nodes, g.Error("%s: illegal file path", fpath)
 		}
 
-		filenames = append(filenames, fpath)
+		node := map[string]any{
+			"uri":     "file://" + fpath,
+			"is_dir":  f.FileInfo().IsDir(),
+			"updated": f.Modified.Unix(),
+			"size":    f.UncompressedSize64,
+		}
+		nodes = append(nodes, node)
 
 		if f.FileInfo().IsDir() {
 			// Make Folder
@@ -78,17 +82,17 @@ func Unzip(src string, dest string) ([]string, error) {
 
 		// Make File
 		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-			return filenames, g.Error(err)
+			return nodes, g.Error(err)
 		}
 
 		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
-			return filenames, g.Error(err)
+			return nodes, g.Error(err)
 		}
 
 		rc, err := f.Open()
 		if err != nil {
-			return filenames, g.Error(err)
+			return nodes, g.Error(err)
 		}
 
 		_, err = io.Copy(outFile, rc)
@@ -98,10 +102,10 @@ func Unzip(src string, dest string) ([]string, error) {
 		rc.Close()
 
 		if err != nil {
-			return filenames, g.Error(err)
+			return nodes, g.Error(err)
 		}
 	}
-	return filenames, nil
+	return nodes, nil
 }
 
 func NewCompressor(cpType CompressorType) Compressor {

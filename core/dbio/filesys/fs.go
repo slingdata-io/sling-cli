@@ -19,7 +19,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 
 	"github.com/dustin/go-humanize"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -507,7 +507,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 			return df, g.Error(err, "could not write to "+zipPath)
 		}
 
-		paths, err := iop.Unzip(zipPath, folderPath)
+		nodeMaps, err := iop.Unzip(zipPath, folderPath)
 		if err != nil {
 			return df, g.Error(err, "Error unzipping")
 		}
@@ -515,7 +515,8 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		Delete(localFs, zipPath)
 
 		// TODO: handle multiple files, yielding multiple schemas
-		df, err = GetDataflow(localFs.Self(), paths, Cfg)
+		nodes := dbio.NewFileNodes(nodeMaps)
+		df, err = GetDataflow(localFs.Self(), nodes.URIs(), Cfg)
 		if err != nil {
 			return df, g.Error(err, "Error making dataflow")
 		}

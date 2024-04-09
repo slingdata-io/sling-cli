@@ -22,7 +22,7 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/text/transform"
 
 	"github.com/samber/lo"

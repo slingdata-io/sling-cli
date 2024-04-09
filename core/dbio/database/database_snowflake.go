@@ -13,8 +13,8 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
 
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/snowflakedb/gosnowflake"
 
 	"github.com/dustin/go-humanize"

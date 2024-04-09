@@ -17,8 +17,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/bigquery"

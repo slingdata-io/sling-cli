@@ -19,8 +19,8 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 // OracleConn is a Postgres connection

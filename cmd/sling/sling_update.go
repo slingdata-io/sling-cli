@@ -15,8 +15,7 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/kardianos/osext"
 	"github.com/slingdata-io/sling-cli/core"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
-	sEnv "github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -24,7 +23,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
 
 	ok = true
-	sEnv.TelMap["downloaded"] = false
+	env.TelMap["downloaded"] = false
 
 	// get latest version number
 	checkUpdate(true)
@@ -36,7 +35,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 		return
 	}
 
-	sEnv.TelMap["new_version"] = updateVersion
+	env.TelMap["new_version"] = updateVersion
 	url := ""
 	if runtime.GOOS == "linux" {
 		if runtime.GOARCH == "amd64" {
@@ -89,7 +88,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 		return ok, g.Error(strings.ReplaceAll(err.Error(), url, ""))
 	}
 
-	sEnv.TelMap["downloaded"] = true
+	env.TelMap["downloaded"] = true
 
 	// expand archive
 	err = ExtractTarGz(tazGzFilePath, folderPath)

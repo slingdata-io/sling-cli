@@ -7,7 +7,7 @@ import (
 
 	"github.com/flarco/g"
 	parquet "github.com/parquet-go/parquet-go"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 func TestParquetRead1(t *testing.T) {

@@ -81,6 +81,15 @@ func (fn *FileNode) Path() string {
 // FileNodes represent file nodes
 type FileNodes []FileNode
 
+// NewFileNodes creates fileNodes from slice of maps
+func NewFileNodes(nodes []map[string]any) (fns FileNodes) {
+	fns = make(FileNodes, len(nodes))
+	for i, node := range nodes {
+		g.Unmarshal(g.Marshal(node), &fns[i])
+	}
+	return
+}
+
 // AddWhere adds a new node to list if pattern matches name and after timestamp
 func (fns *FileNodes) AddWhere(pattern *glob.Glob, after int64, ns ...FileNode) {
 	nodes := *fns

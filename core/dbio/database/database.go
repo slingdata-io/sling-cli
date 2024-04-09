@@ -19,8 +19,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
-	slingEnv "github.com/slingdata-io/sling-cli/core/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/go-sql-driver/mysql"
@@ -706,12 +705,12 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 
 	if strings.Contains(query, noDebugKey) {
 		if !noColor {
-			query = slingEnv.CyanString(query)
+			query = env.CyanString(query)
 		}
 		g.Trace(query, args...)
 	} else {
 		if !noColor {
-			query = slingEnv.CyanString(CleanSQL(conn, query))
+			query = env.CyanString(CleanSQL(conn, query))
 		}
 		g.Debug(query, args...)
 	}
