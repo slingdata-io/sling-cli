@@ -415,7 +415,6 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		fileFormat = InferFileFormat(urlStr)
 	}
 
-	// CSV, JSON or XML files
 	go func() {
 		// recover from panic
 		defer func() {
@@ -516,7 +515,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 
 		// TODO: handle multiple files, yielding multiple schemas
 		nodes := dbio.NewFileNodes(nodeMaps)
-		df, err = GetDataflow(localFs.Self(), nodes.URIs(), Cfg)
+		df, err = GetDataflow(localFs.Self(), nodes, Cfg)
 		if err != nil {
 			return df, g.Error(err, "Error making dataflow")
 		}
@@ -533,7 +532,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		err = g.Error(err, "Error getting paths")
 		return
 	}
-	df, err = GetDataflow(fs.Self(), nodes.URIs(), Cfg)
+	df, err = GetDataflow(fs.Self(), nodes, Cfg)
 	if err != nil {
 		err = g.Error(err, "error getting dataflow")
 		return
@@ -858,10 +857,10 @@ type FileStreamConfig struct {
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
-func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
+func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
-	if len(paths) == 0 {
-		err = g.Error("Provided 0 files for: %#v", paths)
+	if len(nodes) == 0 {
+		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
 	}
 
@@ -896,8 +895,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			}
 		}
 
-		if fileFormat.IsJson() || isFiletype(FileTypeJson, paths...) || isFiletype(FileTypeJsonLines, paths...) {
-			ds, err := MergeReaders(fs, FileTypeJson, paths...)
+		if fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...) {
+			ds, err := MergeReaders(fs, FileTypeJson, nodes)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -911,8 +910,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		if fileFormat == FileTypeXml || isFiletype(FileTypeXml, paths...) {
-			ds, err := MergeReaders(fs, FileTypeXml, paths...)
+		if fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...) {
+			ds, err := MergeReaders(fs, FileTypeXml, nodes)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -927,8 +926,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 		}
 
 		// csvs with no header
-		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, paths...)) {
-			ds, err := MergeReaders(fs, fileFormat, paths...)
+		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, fileFormat, nodes)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -937,7 +936,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		for _, path := range paths {
+		for _, path := range nodes.URIs() {
 			if strings.HasSuffix(path, "/") {
 				g.DebugLow("skipping %s because is not file", path)
 				continue
@@ -1076,15 +1075,15 @@ func isFiletype(fileType FileType, paths ...string) bool {
 	return len(paths) == cnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop.Datastream, err error) {
-	if len(paths) == 0 {
-		err = g.Error("Provided 0 files for: %#v", paths)
+func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes) (ds *iop.Datastream, err error) {
+	if len(nodes) == 0 {
+		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
 	}
 
 	// infer if missing
 	if string(fileType) == "" {
-		fileType = InferFileFormat(paths[0])
+		fileType = InferFileFormat(nodes[0].URI)
 	}
 
 	pipeR, pipeW := io.Pipe()
@@ -1104,17 +1103,30 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 		fs.Context().Cancel()
 	}
 
-	g.DebugLow("Merging %s readers of %d files from %s", fileType, len(paths), url)
-
-	concurrency := 5
-	if val := fs.GetProp("CONCURRENCY"); val != "" {
-		concurrency = cast.ToInt(val)
+	concurrency := runtime.NumCPU()
+	switch {
+	case fs.GetProp("CONCURRENCY") != "":
+		concurrency = cast.ToInt(fs.GetProp("CONCURRENCY"))
+	case g.In(fs.FsType(), dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure):
+		switch {
+		// lots of small files (less than 50kb)
+		case len(nodes) > 100 && nodes.AvgSize() < uint64(50*1024):
+			concurrency = 20
+		default:
+			concurrency = 10
+		}
+	case fs.FsType() == dbio.TypeFileLocal:
+		concurrency = 3
+	case concurrency == 1:
+		concurrency = 3
 	}
+
+	g.DebugLow("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
 	readerChn := make(chan io.Reader, concurrency)
 	go func() {
 		defer close(readerChn)
 
-		for _, path := range paths {
+		for _, path := range nodes.URIs() {
 			if strings.HasSuffix(path, "/") {
 				g.DebugLow("skipping %s because is not file", path)
 				continue

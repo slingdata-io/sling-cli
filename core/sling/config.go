@@ -465,7 +465,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.TgtConn = tgtConn
 	}
 
-	if cfg.Options.StdOut {
+	if cfg.Options.StdOut && os.Getenv("CONCURRENCY") == "" {
 		os.Setenv("CONCURRENCY", "1")
 	}
 
