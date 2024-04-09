@@ -263,7 +263,10 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 	}
 
 	// inject dummy header if none present
-	if c.NoHeader && numCols > 0 {
+	if c.NoHeader {
+		if numCols == 0 {
+			return nil, g.Error("Unable to detect number of columns since `header=false`. Need to pass property `fields_per_rec`")
+		}
 		header := strings.Join(CreateDummyFields(numCols), string(c.Delimiter))
 		reader4 = io.MultiReader(strings.NewReader(header+"\n"), reader3)
 	} else {
