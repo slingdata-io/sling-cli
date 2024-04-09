@@ -654,8 +654,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				g.LogError(err)
 				df.Context.CaptureErr(g.Error(err))
 				ds.Context.CaptureErr(g.Error(err))
-				ds.Context.Cancel()
-				df.Context.Cancel()
+				io.Copy(io.Discard, reader) // flush it out so it can close
 			}
 			g.Trace("wrote %s [%d rows] to %s", humanize.Bytes(cast.ToUint64(bw0)), batchR.Counter, partURL)
 			bw += bw0

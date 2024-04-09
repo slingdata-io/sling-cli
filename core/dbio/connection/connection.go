@@ -218,9 +218,9 @@ func (c *Connection) URL() string {
 		case dbio.TypeFileLocal:
 			url = "file://"
 		case dbio.TypeFileSftp:
-			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
+			url = g.F("%s://%s:%s", c.Type.String(), c.Data["host"], cast.ToString(c.Data["port"]))
 		case dbio.TypeFileFtp:
-			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
+			url = g.F("%s://%s:%s", c.Type.String(), c.Data["host"], cast.ToString(c.Data["port"]))
 		case dbio.TypeFileS3:
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
 		case dbio.TypeFileGoogle:

@@ -35,7 +35,7 @@ func (fs *SftpFileSysClient) Init(ctx context.Context) (err error) {
 
 // Prefix returns the url prefix
 func (fs *SftpFileSysClient) Prefix(suffix ...string) string {
-	return g.F("%s://%s", fs.FsType().String(), fs.GetProp("host")) + strings.Join(suffix, "")
+	return g.F("%s://%s:%s", fs.FsType().String(), fs.GetProp("host"), fs.GetProp("port")) + strings.Join(suffix, "")
 
 }
 
