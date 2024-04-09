@@ -33,6 +33,7 @@ var (
 	projectID     = os.Getenv("SLING_PROJECT_ID")
 	updateMessage = ""
 	updateVersion = ""
+	rowCount      = int64(0)
 )
 
 func init() {
@@ -236,7 +237,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		g.Info("Iteration #%d", itNumber)
 	}
 
-	return ok, nil
+	// test count if need
+	err = testRowCnt(rowCount)
+
+	return ok, err
 }
 
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
@@ -372,6 +376,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	if err != nil {
 		return g.Error(err)
 	}
+
+	rowCount = rowCount + int64(task.GetCount())
 
 	return nil
 }
