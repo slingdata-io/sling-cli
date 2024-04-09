@@ -493,7 +493,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 
 			nodes.AddWhere(pattern, ts, node)
 			if len(nodes) >= maxItems {
-				g.Warn("Limiting S3 items at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
+				g.Warn("Limiting S3 list results at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
 				return
 			}
 		}

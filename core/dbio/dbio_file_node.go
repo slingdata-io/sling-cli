@@ -144,6 +144,18 @@ func (fns FileNodes) Paths() (paths []string) {
 	return paths
 }
 
+func (fns FileNodes) TotalSize() uint64 {
+	total := uint64(0)
+	for _, fn := range fns {
+		total = total + fn.Size
+	}
+	return total
+}
+
+func (fns FileNodes) AvgSize() uint64 {
+	return fns.TotalSize() / uint64(len(fns))
+}
+
 // Sort sorts the nodes
 func (fns FileNodes) Sort() {
 	sort.Slice(fns, func(i, j int) bool {
