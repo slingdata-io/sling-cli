@@ -463,6 +463,13 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		}
 	}
 
+	// set extra headers
+	for _, key := range []string{"max_filter_ratio", "timezone", "strict_mode"} {
+		if val := conn.GetProp(key); val != "" {
+			headers[key] = val
+		}
+	}
+
 	loadCtx := g.NewContext(conn.context.Ctx, 3)
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
