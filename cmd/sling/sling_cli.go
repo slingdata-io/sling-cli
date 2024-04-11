@@ -534,11 +534,7 @@ func setSentry() {
 			taskMap, _ := g.UnmarshalMap(cast.ToString(env.TelMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			se.Event.Transaction = g.F("%s - %s", sourceType, targetType)
-			if g.CliObj.Name == "conns" {
-				targetType = lo.Ternary(env.TelMap["conn_type"] == nil, "unknown", cast.ToString(env.TelMap["conn_type"]))
-				se.Event.Transaction = g.F(targetType)
-			}
+			se.Event.Transaction = "cli"
 
 			// format telMap
 			telMap, _ := g.UnmarshalMap(g.Marshal(env.TelMap))
