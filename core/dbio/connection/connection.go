@@ -195,10 +195,15 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 	}
 	data := map[string]string{}
 	for k, v := range c.Data {
+		val, err := cast.ToStringE(v)
+		if err != nil {
+			val = g.Marshal(v) // in case it's an array or object
+		}
+
 		if lc {
-			data[strings.ToLower(k)] = cast.ToString(v)
+			data[strings.ToLower(k)] = val
 		} else {
-			data[k] = cast.ToString(v)
+			data[k] = val
 		}
 	}
 	return data
