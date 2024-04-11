@@ -416,7 +416,9 @@ func main() {
 	go func() {
 		defer close(done)
 		exitCode = cliInit()
-		g.SentryFlush(time.Second * 2)
+		if !interrupted {
+			g.SentryFlush(time.Second * 2)
+		}
 	}()
 
 	exit := func() {
@@ -432,7 +434,6 @@ func main() {
 		exitCode = 111
 		exit()
 	case <-interrupt:
-		go g.SentryFlush(time.Second * 4)
 		if cliRun.Sc.Used {
 			env.Println("\ninterrupting...")
 			interrupted = true
