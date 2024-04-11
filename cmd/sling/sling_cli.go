@@ -434,6 +434,7 @@ func main() {
 		exitCode = 111
 		exit()
 	case <-interrupt:
+		g.SentryClear()
 		if cliRun.Sc.Used {
 			env.Println("\ninterrupting...")
 			interrupted = true
