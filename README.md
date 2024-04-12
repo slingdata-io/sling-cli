@@ -21,6 +21,12 @@
   <a href="https://github.com/slingdata-io/sling-cli/tags" rel="nofollow">
     <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/slingdata-io/sling-cli?include_prereleases&label=version"/>
   </a>
+  <a href="https://pypi.org/project/sling/" rel="nofollow">
+    <img alt="Pip Downloads" src="https://img.shields.io/pepy/dt/sling"/>
+  </a>
+  <a href="https://pypi.org/project/sling/" rel="nofollow">
+    <img alt="Pip Downloads" src="https://img.shields.io/docker/pulls/slingdata/sling"/>
+  </a>
 </p>
 
 Sling is a passion project turned into a free CLI Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
