@@ -1164,7 +1164,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 					return
 				}
 
-				if ds.Limited(limit) || len(ds.Buffer) >= limit {
+				if limit > 0 && (ds.Limited(limit) || len(ds.Buffer) >= limit) {
 					return
 				}
 			}
