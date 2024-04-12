@@ -653,9 +653,9 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		end := time.Now()
 		if totalAffected > 0 {
-			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
+			g.Info("successful! duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
 		} else {
-			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+			g.Info("successful! duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
 		if err := testRowCnt(totalAffected); err != nil {
