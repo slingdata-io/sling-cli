@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"os"
 	"testing"
 
 	"github.com/flarco/g"
@@ -45,5 +46,17 @@ func TestFIX(t *testing.T) {
 			assert.Contains(t, fixMap, "deliver_to_sub_id")
 		}
 		// g.Info("%s", g.Marshal(fixMap))
+	}
+}
+
+func TestDecode(t *testing.T) {
+	filePath := "test/my_file.utf16.csv"
+	bytes, err := os.ReadFile(filePath)
+	assert.NoError(t, err)
+	for i, r := range bytes {
+		if i > 6 {
+			break
+		}
+		g.Info("%#v, %#v, %d", string(r), r, r)
 	}
 }

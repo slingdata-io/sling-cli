@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/xml"
@@ -481,6 +482,27 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 			ds.Sp.applyTransforms(g.Marshal(columnTransforms))
 
 			return newReader, true
+		}
+	} else {
+		// auto-decode
+		bReader := bufio.NewReader(reader)
+		testBytes, err := bReader.Peek(3)
+		if err == nil {
+			// https://en.wikipedia.org/wiki/Byte_order_mark
+			switch {
+			case testBytes[0] == 255 && testBytes[1] == 254:
+				// is UTF-16 (LE)
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
+				return newReader, true
+			case testBytes[0] == 254 && testBytes[1] == 255:
+				// is UTF-16 (BE)
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
+				return newReader, true
+			case testBytes[0] == 239 && testBytes[1] == 187 && testBytes[2] == 191:
+				// is UTF-8 with BOM
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
+				return newReader, true
+			}
 		}
 	}
 
