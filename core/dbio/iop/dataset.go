@@ -252,6 +252,9 @@ func (data *Dataset) SetFields(fields []string) {
 	for i, field := range fields {
 		data.Columns[i].Name = field
 		data.Columns[i].Position = i + 1
+		if string(data.Columns[i].Type) == "" {
+			data.Columns[i].Type = StringType
+		}
 	}
 }
 
