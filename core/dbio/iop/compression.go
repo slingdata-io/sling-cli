@@ -262,7 +262,7 @@ func (cp *ZStandardCompressor) Suffix() string {
 	return cp.suffix
 }
 
-// AutoDecompress auto detexts compression to decompress. Otherwise return same reader
+// AutoDecompress auto detects compression to decompress. Otherwise return same reader
 func AutoDecompress(reader io.Reader) (gReader io.Reader, err error) {
 
 	bReader := bufio.NewReader(reader)
