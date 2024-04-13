@@ -938,9 +938,14 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	return
 }
 
+type ReaderReady struct {
+	URI    string
+	Reader io.Reader
+}
+
 // ConsumeCsvReaderChl reads a channel of readers. Should be safe to use with
 // header top row
-func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
+func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan ReaderReady) (err error) {
 
 	c := CSV{
 		NoHeader:        !ds.config.Header,
@@ -954,11 +959,11 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 		c.Delimiter = rune(ds.config.Delimiter[0])
 	}
 
-	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
-		c.Reader = reader
+	nextCSV := func(reader ReaderReady) (r csv.CsvReaderLike, err error) {
+		c.Reader = reader.Reader
 
 		// decode File if requested by transform
-		if newReader, ok := ds.transformReader(reader); ok {
+		if newReader, ok := ds.transformReader(reader.Reader); ok {
 			c.Reader = newReader
 		}
 
@@ -1002,7 +1007,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 			c.File.Close()
 
 			for reader := range readerChn {
-				if reader == nil {
+				if reader.Reader == nil {
 					return false
 				}
 

@@ -1123,11 +1123,12 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 	}
 
 	g.DebugLow("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
-	readerChn := make(chan io.Reader, concurrency)
+	nodeChn := make(chan iop.ReaderReady, concurrency)
 	go func() {
-		defer close(readerChn)
+		defer close(nodeChn)
 
-		for _, path := range nodes.URIs() {
+		for _, node := range nodes {
+			path := node.URI
 			if strings.HasSuffix(path, "/") {
 				g.DebugLow("skipping %s because is not file", path)
 				continue
@@ -1141,7 +1142,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 				return
 			}
 
-			readerChn <- reader
+			nodeChn <- iop.ReaderReady{URI: path, Reader: reader}
 		}
 
 		ds.Context.Wg.Read.Wait()
@@ -1151,14 +1152,14 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 	// Does not work very well.
 	if g.In(fileType, FileTypeCsv) {
 		pipeW.Close()
-		err = ds.ConsumeCsvReaderChl(readerChn)
+		err = ds.ConsumeCsvReaderChl(nodeChn)
 	} else {
 
 		go func() {
 			defer pipeW.Close()
 
-			for reader := range readerChn {
-				_, err = io.Copy(pipeW, reader)
+			for node := range nodeChn {
+				_, err = io.Copy(pipeW, node.Reader)
 				if err != nil {
 					setError(g.Error(err, "Error copying reader to pipe writer"))
 					return
