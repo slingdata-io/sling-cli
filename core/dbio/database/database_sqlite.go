@@ -511,7 +511,7 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	getOneSchemata := func(values map[string]interface{}) {
 		defer ctx.Wg.Read.Done()
 
-		schemaData, err := conn.SumbitTemplate(
+		schemaData, err := conn.SubmitTemplate(
 			"single", conn.template.Metadata, "schemata",
 			values,
 		)

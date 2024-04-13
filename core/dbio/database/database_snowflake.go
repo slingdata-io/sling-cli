@@ -916,7 +916,7 @@ func (conn *SnowflakeConn) GetColumnsFull(tableFName string) (data iop.Dataset, 
 		return data, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	data1, err := conn.SumbitTemplate(
+	data1, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "columns_full",
 		g.M("schema", table.Schema, "table", table.Name),
 	)

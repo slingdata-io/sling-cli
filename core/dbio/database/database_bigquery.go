@@ -1086,7 +1086,7 @@ func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (
 
 	getOneSchemata := func(values map[string]interface{}) error {
 		defer ctx.Wg.Read.Done()
-		schemaData, err := conn.SumbitTemplate(
+		schemaData, err := conn.SubmitTemplate(
 			"single", conn.template.Metadata, "schemata",
 			values,
 		)

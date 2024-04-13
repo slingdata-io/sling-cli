@@ -128,7 +128,7 @@ type Connection interface {
 	StreamRecords(sql string) (<-chan map[string]interface{}, error)
 	StreamRows(sql string, options ...map[string]interface{}) (*iop.Datastream, error)
 	StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error)
-	SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
+	SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
 	SwapTable(srcTable string, tgtTable string) (err error)
 	Template() dbio.Template
 	Tx() Transaction
@@ -1215,7 +1215,7 @@ func SplitTableFullName(tableName string) (string, string) {
 	return schema, table
 }
 
-func (conn *BaseConn) SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+func (conn *BaseConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
 	template, ok := templateMap[name]
 	if !ok {
 		err = g.Error("Could not find template %s", name)
@@ -1244,7 +1244,7 @@ func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
 // GetSchemas returns schemas
 func (conn *BaseConn) GetSchemas() (iop.Dataset, error) {
 	// fields: [schema_name]
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "schemas",
 		g.M(),
 	)
@@ -1253,7 +1253,7 @@ func (conn *BaseConn) GetSchemas() (iop.Dataset, error) {
 // GetObjects returns objects (tables or views) for given schema
 // `objectType` can be either 'table', 'view' or 'all'
 func (conn *BaseConn) GetObjects(schema string, objectType string) (iop.Dataset, error) {
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "objects",
 		g.M("schema", schema, "object_type", objectType),
 	)
@@ -1261,7 +1261,7 @@ func (conn *BaseConn) GetObjects(schema string, objectType string) (iop.Dataset,
 
 // CurrentDatabase returns the name of the current database
 func (conn *BaseConn) CurrentDatabase() (dbName string, err error) {
-	data, err := conn.SumbitTemplate("single", conn.template.Metadata, "current_database", g.M())
+	data, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
 	if err != nil {
 		err = g.Error(err, "could not get current database")
 	} else {
@@ -1274,13 +1274,13 @@ func (conn *BaseConn) CurrentDatabase() (dbName string, err error) {
 // GetDatabases returns databases for given connection
 func (conn *BaseConn) GetDatabases() (iop.Dataset, error) {
 	// fields: [name]
-	return conn.SumbitTemplate("single", conn.template.Metadata, "databases", g.M())
+	return conn.SubmitTemplate("single", conn.template.Metadata, "databases", g.M())
 }
 
 // GetTables returns tables for given schema
 func (conn *BaseConn) GetTables(schema string) (iop.Dataset, error) {
 	// fields: [table_name]
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "tables",
 		g.M("schema", schema),
 	)
@@ -1289,7 +1289,7 @@ func (conn *BaseConn) GetTables(schema string) (iop.Dataset, error) {
 // GetViews returns views for given schema
 func (conn *BaseConn) GetViews(schema string) (iop.Dataset, error) {
 	// fields: [table_name]
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "views",
 		g.M("schema", schema),
 	)
@@ -1436,7 +1436,7 @@ func TableExists(conn Connection, tableFName string) (exists bool, err error) {
 		return false, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	colData, err := conn.SumbitTemplate(
+	colData, err := conn.SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1459,7 +1459,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = iop.Columns{}
-	colData, err := conn.Self().SumbitTemplate(
+	colData, err := conn.Self().SubmitTemplate(
 		"single", conn.template.Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1547,7 +1547,7 @@ func (conn *BaseConn) GetColumnsFull(tableFName string) (iop.Dataset, error) {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "columns_full",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1560,7 +1560,7 @@ func (conn *BaseConn) GetPrimaryKeys(tableFName string) (iop.Dataset, error) {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "primary_keys",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1573,7 +1573,7 @@ func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
 		return iop.Dataset{}, g.Error(err, "could not parse table name: "+tableFName)
 	}
 
-	return conn.SumbitTemplate(
+	return conn.SubmitTemplate(
 		"single", conn.template.Metadata, "indexes",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1589,7 +1589,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
 	ddlCol := cast.ToInt(conn.template.Variable["ddl_col"])
 	ddlArr := []string{}
-	data, err := conn.SumbitTemplate(
+	data, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_view",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1603,7 +1603,7 @@ func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 		return ddl, err
 	}
 
-	data, err = conn.SumbitTemplate(
+	data, err = conn.SubmitTemplate(
 		"single", conn.template.Metadata, "ddl_table",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
@@ -1746,12 +1746,12 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 	}
 
 	currDatabase := conn.Type.String()
-	currDbData, err := conn.SumbitTemplate("single", conn.template.Metadata, "current_database", g.M())
+	currDbData, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
 	if err == nil {
 		currDatabase = cast.ToString(currDbData.FirstVal())
 	}
 
-	schemaData, err := conn.SumbitTemplate(
+	schemaData, err := conn.SubmitTemplate(
 		"single", conn.template.Metadata, "schemata",
 		values,
 	)
