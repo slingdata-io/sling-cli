@@ -198,17 +198,11 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 		c.Reader = bufio.NewReader(c.File)
 	}
 
-	// decompress if gzip
-	readerDecompr, err := AutoDecompress(c.Reader)
-	if err != nil {
-		return r, g.Error(err, "Decompress(c.Reader)")
-	}
-
-	testBytes, reader2, err := g.Peek(readerDecompr, 0)
+	testBytes, reader2, err := g.Peek(c.Reader, 0)
 	if err != nil {
 		g.LogError(err, "could not Peek")
 		err = nil
-		reader2 = readerDecompr
+		reader2 = c.Reader
 	}
 
 	// g.Trace("testBytes:\n%s", string(testBytes))
