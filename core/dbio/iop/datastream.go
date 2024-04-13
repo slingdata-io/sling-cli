@@ -1000,8 +1000,8 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 		row, err := r.Read()
 		if err == io.EOF {
 			c.File.Close()
-			select {
-			case reader := <-readerChn:
+
+			for reader := range readerChn {
 				if reader == nil {
 					return false
 				}
@@ -1016,9 +1016,9 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 				_, _ = r.Read()
 
 				goto processNext
-			default:
-				return false
 			}
+
+			return false
 		} else if err != nil {
 			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
 			return false
