@@ -448,6 +448,8 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 							return
 						}
 					}
+				} else {
+					break
 				}
 			}
 		}
