@@ -492,17 +492,21 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 			switch {
 			case testBytes[0] == 255 && testBytes[1] == 254:
 				// is UTF-16 (LE)
+				g.Debug("auto-decoding UTF-16 (LE)")
 				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
 				return newReader, true
 			case testBytes[0] == 254 && testBytes[1] == 255:
 				// is UTF-16 (BE)
+				g.Debug("auto-decoding UTF-16 (BE)")
 				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
 				return newReader, true
 			case testBytes[0] == 239 && testBytes[1] == 187 && testBytes[2] == 191:
 				// is UTF-8 with BOM
+				g.Debug("auto-decoding UTF-8-BOM")
 				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
 				return newReader, true
 			}
+			return bReader, true // since the reader advanced
 		}
 	}
 

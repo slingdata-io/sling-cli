@@ -264,8 +264,11 @@ func (cp *ZStandardCompressor) Suffix() string {
 
 // AutoDecompress auto detects compression to decompress. Otherwise return same reader
 func AutoDecompress(reader io.Reader) (gReader io.Reader, err error) {
+	bReader, ok := reader.(*bufio.Reader)
+	if !ok {
+		bReader = bufio.NewReader(reader)
+	}
 
-	bReader := bufio.NewReader(reader)
 	testBytes, err := bReader.Peek(2)
 	if err != nil {
 		// return bReader, g.Error(err, "Error Peeking")
