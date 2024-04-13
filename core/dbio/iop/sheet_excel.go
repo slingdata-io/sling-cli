@@ -177,7 +177,13 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 	rangeRows := make([][]string, rowEnd-rowStart+1)
 	for r := rowStart; r <= rowEnd; r++ {
 		row0 := []string{}
+		if r >= len(allRows) {
+			continue
+		}
 		for c := colStart; c <= colEnd; c++ {
+			if c >= len(allRows[r]) {
+				continue
+			}
 			row0 = append(row0, strings.TrimSpace(allRows[r][c]))
 		}
 		rangeRows[i] = row0

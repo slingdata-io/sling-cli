@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,7 @@ type CSV struct {
 	Path            string
 	NoHeader        bool
 	Delimiter       rune
+	Escape          string
 	FieldsPerRecord int
 	Columns         []Column
 	File            *os.File
@@ -182,14 +184,13 @@ func (c *CSV) SetFields(fields []string) {
 	}
 }
 
-func (c *CSV) getReader(delimiter string) (*csv.Reader, error) {
-	var r *csv.Reader
+func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 	var reader2, reader3, reader4 io.Reader
 
 	if c.File == nil && c.Reader == nil {
 		file, err := os.Open(c.Path)
 		if err != nil {
-			return r, g.Error(err, "os.Open(c.Path)")
+			return r, g.Error(err, "cannot open: %#v", c.Path)
 		}
 		c.File = file
 		c.Reader = bufio.NewReader(c.File)
@@ -242,44 +243,55 @@ func (c *CSV) getReader(delimiter string) (*csv.Reader, error) {
 		reader3 = reader2
 	}
 
-	var numCols int
-	deli := ','
+	numCols := c.FieldsPerRecord
+	if c.Delimiter == 0 || numCols <= 0 {
+		var deli rune
+		deli, numCols, err = detectDelimiter(string(c.Delimiter), testBytes)
 
-	if c.FieldsPerRecord == 0 {
-		deli, numCols, err = detectDelimiter(delimiter, testBytes)
-		if err != nil {
-			return r, g.Error(err, "could not detect delimiter")
-		} else if !c.NoDebug && deli != ',' {
-			if delimiter == "" {
-				g.Debug("delimiter auto-detected: %#v", string(deli))
+		if c.Delimiter == 0 {
+			if err != nil {
+				g.Debug(`could not detect delimiter. Using ","`)
+				c.Delimiter = ','
 			} else {
-				g.Debug("delimiter used: %#v", string(deli))
+				if !c.NoDebug {
+					g.Debug("delimiter auto-detected: %#v", string(deli))
+				}
+				c.Delimiter = deli
 			}
 		}
+		if c.FieldsPerRecord <= 0 && !c.NoDebug {
+			g.Trace("number-cols detected: %d", numCols)
+		}
+		err = nil
 	}
 
 	// inject dummy header if none present
-	if c.NoHeader && numCols > 0 {
-		header := strings.Join(CreateDummyFields(numCols), string(deli))
+	if c.NoHeader {
+		if numCols == 0 {
+			return nil, g.Error("Unable to detect number of columns since `header=false`. Need to pass property `fields_per_rec`")
+		}
+		header := strings.Join(CreateDummyFields(numCols), string(c.Delimiter))
 		reader4 = io.MultiReader(strings.NewReader(header+"\n"), reader3)
 	} else {
 		reader4 = reader3
 	}
 
-	r = csv.NewReader(reader4)
-	r.LazyQuotes = true
-	r.ReuseRecord = true
-	r.FieldsPerRecord = c.FieldsPerRecord
-	// r.TrimLeadingSpace = true
-	// r.TrailingComma = true
-	if c.Delimiter != 0 {
-		r.Comma = c.Delimiter
-	} else {
-		r.Comma = deli
-		c.Delimiter = deli
+	if c.Escape != "" {
+		options := csv.CsvOptions{}
+		options.Delimiter = byte(c.Delimiter)
+		options.Escape = []byte(c.Escape)[0]
+		return csv.NewCsv(options).NewReader(reader4), nil
 	}
 
-	return r, err
+	reader5 := csv.NewReader(reader4)
+	reader5.LazyQuotes = true
+	reader5.ReuseRecord = true
+	reader5.FieldsPerRecord = c.FieldsPerRecord
+	// r.TrimLeadingSpace = true
+	// r.TrailingComma = true
+	reader5.Comma = c.Delimiter
+
+	return reader5, err
 }
 
 // CreateDummyFields creates dummy columns for csvs with no header row
@@ -302,7 +314,7 @@ func (c *CSV) ReadStreamContext(ctx context.Context) (ds *Datastream, err error)
 
 	ds = NewDatastreamContext(ctx, c.Columns)
 
-	r, err := c.getReader("")
+	r, err := c.getReader()
 	if err != nil {
 		return ds, g.Error(err, "Error getting CSV reader")
 	}
@@ -511,7 +523,13 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 		deliList = append([]rune{bestDeli}, deliList...)
 	}
 
-	testCsvRowNumCols := make([][]int, len(deliList))
+	type stats struct {
+		total float64
+		count float64
+		max   int
+	}
+
+	testCsvRowStats := make([]stats, len(deliList))
 	eG := g.ErrorGroup{}
 
 	// remove last line
@@ -526,8 +544,7 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 	errMap := map[rune]error{}
 	for i, d := range deliList {
 		var csvErr error
-		var row, prevRow []string
-		RowNumCols := []int{}
+		var row []string
 		csvR := csv.NewReader(strings.NewReader(testString))
 		csvR.LazyQuotes = true
 		csvR.Comma = d
@@ -535,7 +552,6 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 			row, csvErr = csvR.Read()
 			if csvErr == io.EOF {
 				csvErr = nil
-				row = prevRow
 				break
 			} else if csvErr != nil {
 				// g.Trace("failed delimiter detection for %#v: %s", string(d), csvErr.Error())
@@ -543,51 +559,28 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 				eG.Capture(errMap[d])
 				break
 			}
-			RowNumCols = append(RowNumCols, len(row))
-			prevRow = row
+			testCsvRowStats[i].total = testCsvRowStats[i].total + float64(len(row))
+			testCsvRowStats[i].count++
+			if len(row) > testCsvRowStats[i].max {
+				testCsvRowStats[i].max = len(row)
+			}
 		}
-
-		testCsvRowNumCols[i] = RowNumCols
 	}
 
-	bestAlignedRowNumCol := 0
-	maxRowNumCol := 0
-	var maxRowNumColDeli rune
-	for i, RowNumCols := range testCsvRowNumCols {
+	var maxRowNumAvg float64
+	for i, RowStats := range testCsvRowStats {
 		d := deliList[i]
-		prevRowNumCol := 0
-		aligned := true
-		for i, RowNumCol := range RowNumCols {
-			if RowNumCol > maxRowNumCol {
-				maxRowNumCol = RowNumCol
-				maxRowNumColDeli = d
-			}
-			if i == 0 {
-				prevRowNumCol = RowNumCol
-				continue
-			}
-			if RowNumCol != prevRowNumCol {
-				aligned = false
-				break
-			}
-		}
-		if _, errored := errMap[d]; !errored && aligned {
-			if prevRowNumCol > bestAlignedRowNumCol {
-				bestDeli = d
-				bestAlignedRowNumCol = prevRowNumCol
-				numCols = bestAlignedRowNumCol
-			}
+		avg := RowStats.total / RowStats.count
+		if avg > maxRowNumAvg {
+			maxRowNumAvg = avg
+			bestDeli = d
+			numCols = RowStats.max
 		}
 	}
 
-	if len(eG.Errors) == len(deliList) {
-		err = g.Error(eG.Err(), "could not auto-detect delimiter")
-	} else if err := errMap[maxRowNumColDeli]; err != nil && maxRowNumCol > numCols {
-		if delimiter != "" {
-			return []rune(delimiter)[0], 0, nil
-		}
-		err = g.Error(err, "could not use delimiter %#v. Try specifying a delimiter.", string(maxRowNumColDeli))
-		return maxRowNumColDeli, maxRowNumCol, err
+	if numCols <= 1 || len(eG.Errors) == len(deliList) {
+		err = errors.New("could not detect delimiter")
+		return
 	}
 
 	return

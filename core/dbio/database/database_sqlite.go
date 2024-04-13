@@ -15,9 +15,9 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -379,9 +379,9 @@ func EnsureBinSQLite() (binPath string, err error) {
 		return envPath, nil
 	}
 
-	folderPath := path.Join(g.UserHomeDir(), "sqlite")
+	folderPath := path.Join(env.HomeBinDir(), "sqlite")
 	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
-	binPath = path.Join(g.UserHomeDir(), "sqlite", "sqlite3"+extension)
+	binPath = path.Join(env.HomeBinDir(), "sqlite", "sqlite3"+extension)
 	found := g.PathExists(binPath)
 
 	defaultBin := func(name string) (string, error) {
@@ -419,6 +419,7 @@ func EnsureBinSQLite() (binPath string, err error) {
 		// we need to download it ourselves
 		var downloadURL string
 		zipPath := path.Join(g.UserHomeDir(), "sqlite.zip")
+		defer os.Remove(zipPath)
 
 		// all valid GOARCH -> https://gist.github.com/nictuku/c9858a4fe2c7b92a01da2e635b7c147c
 		// compile steps: https://sqlite.org/forum/info/8b223b66319f05bf
@@ -451,12 +452,14 @@ func EnsureBinSQLite() (binPath string, err error) {
 			return "", g.Error(err, "Unable to download sqlite binary")
 		}
 
-		paths, err := iop.Unzip(zipPath, folderPath)
+		nodeMaps, err := iop.Unzip(zipPath, folderPath)
 		if err != nil {
 			return "", g.Error(err, "Error unzipping sqlite zip")
 		}
 
-		for _, pathVal := range paths {
+		nodes := dbio.NewFileNodes(nodeMaps)
+		for _, pathVal := range nodes.URIs() {
+			pathVal = strings.TrimPrefix(pathVal, "file://")
 			if strings.HasSuffix(pathVal, "sqlite3") || strings.HasSuffix(pathVal, "sqlite3.exe") {
 				err = os.Rename(pathVal, binPath)
 				if err != nil {
@@ -467,7 +470,7 @@ func EnsureBinSQLite() (binPath string, err error) {
 		}
 
 		if !g.PathExists(binPath) {
-			return "", g.Error("cannot find %s, paths are: %s", binPath, g.Marshal(paths))
+			return "", g.Error("cannot find %s, paths are: %s", binPath, g.Marshal(nodes.URIs()))
 		}
 	}
 
@@ -508,7 +511,7 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	getOneSchemata := func(values map[string]interface{}) {
 		defer ctx.Wg.Read.Done()
 
-		schemaData, err := conn.SumbitTemplate(
+		schemaData, err := conn.SubmitTemplate(
 			"single", conn.template.Metadata, "schemata",
 			values,
 		)

@@ -1,0 +1,6 @@
+col1|header|col3
+column1_data|"column2 data with \"space\""|column3_data
+"column1_data"|"column2 data with \"space\""|column3_data
+"column2 data with \"space\""|"column2 data with \"space\""|column3_data
+"column2 data with
+heeelo \"space\" -- "|"column2 data with \"space\""|column3_data

@@ -19,8 +19,8 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 // OracleConn is a Postgres connection
@@ -182,7 +182,7 @@ func (conn *OracleConn) ExecMultiContext(ctx context.Context, q string, args ...
 func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
 	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
 	if err != nil {
-		// try synomym
+		// try synonym
 		conn.SetProp("get_synonym", "true")
 		columns, err = conn.BaseConn.GetTableColumns(table, fields...)
 		conn.SetProp("get_synonym", "false")
@@ -190,11 +190,11 @@ func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns
 	return
 }
 
-func (conn *OracleConn) SumbitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+func (conn *OracleConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
 	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
 		name = "columns_synonym"
 	}
-	return conn.BaseConn.SumbitTemplate(level, templateMap, name, values)
+	return conn.BaseConn.SubmitTemplate(level, templateMap, name, values)
 }
 
 // BulkImportStream bulk import stream

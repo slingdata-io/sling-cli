@@ -133,7 +133,7 @@ func (fs *AzureFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 	baseKeys := map[string]int{}
 	keyArr := strings.Split(key, "/")
 	counter := 0
-	maxItems := lo.Ternary(recursiveLimit == 0, 5000, recursiveLimit)
+	maxItems := lo.Ternary(recursiveLimit == 0, 10000, recursiveLimit)
 
 	pagerOpts := &container.ListBlobsFlatOptions{}
 	if key != "" {
@@ -157,7 +157,7 @@ func (fs *AzureFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 
 			counter++
 			if counter >= maxItems {
-				g.Warn("Azure Storage returns results recursively by default. Limiting results at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
+				g.Warn("Azure Storage returns results recursively by default. Limiting list results at %d items. Set SLING_RECURSIVE_LIMIT to increase.", maxItems)
 				break
 			} else if !strings.HasPrefix(blobName, key) {
 				// needs to have correct key, since it's recursive

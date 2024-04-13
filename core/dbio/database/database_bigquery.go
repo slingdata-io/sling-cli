@@ -17,8 +17,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/bigquery"
@@ -73,7 +73,7 @@ func (conn *BigQueryConn) Init() error {
 
 	// Google BigQuery has limits
 	// https://cloud.google.com/bigquery/quotas
-	conn.Context().SetConcurencyLimit(5)
+	conn.Context().SetConcurrencyLimit(5)
 	// conn.SetProp("FILE_MAX_ROWS", "1000000") // hard code?
 
 	if conn.GetProp("GC_KEY_FILE") == "" {
@@ -1086,7 +1086,7 @@ func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (
 
 	getOneSchemata := func(values map[string]interface{}) error {
 		defer ctx.Wg.Read.Done()
-		schemaData, err := conn.SumbitTemplate(
+		schemaData, err := conn.SubmitTemplate(
 			"single", conn.template.Metadata, "schemata",
 			values,
 		)

@@ -19,9 +19,9 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
-	dbioEnv "github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
+	dbioEnv "github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/slingdata-io/sling-cli/core/store"
 
@@ -33,6 +33,7 @@ var (
 	projectID     = os.Getenv("SLING_PROJECT_ID")
 	updateMessage = ""
 	updateVersion = ""
+	rowCount      = int64(0)
 )
 
 func init() {
@@ -236,7 +237,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		g.Info("Iteration #%d", itNumber)
 	}
 
-	return ok, nil
+	// test count if need
+	err = testRowCnt(rowCount)
+
+	return ok, err
 }
 
 func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error) {
@@ -372,6 +376,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	if err != nil {
 		return g.Error(err)
 	}
+
+	rowCount = rowCount + int64(task.GetCount())
 
 	return nil
 }
@@ -647,9 +653,9 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		end := time.Now()
 		if totalAffected > 0 {
-			g.Info("Successful! Duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
+			g.Info("successful! duration: %d seconds (%d affected records)", end.Unix()-start.Unix(), totalAffected)
 		} else {
-			g.Info("Successful! Duration: %d seconds.", end.Unix()-start.Unix())
+			g.Info("successful! duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
 		if err := testRowCnt(totalAffected); err != nil {

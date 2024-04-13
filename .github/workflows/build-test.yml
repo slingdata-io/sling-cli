@@ -8,7 +8,7 @@ on:
 jobs:
   build-for-test:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, linux, ubuntu-20]
     timeout-minutes: 15
 
     steps:
@@ -48,7 +48,7 @@ jobs:
 
     needs: [build-for-test]
 
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, linux, ubuntu-20]
     timeout-minutes: 20
 
     steps:
@@ -70,7 +70,7 @@ jobs:
           go-version: "1.21"
           cache: false
 
-      - name: Run Go Tests
+      - name: Run Go Tests (sling)
         run: |
           export DEBUG=''
 
@@ -81,6 +81,16 @@ jobs:
           bash scripts/prep.gomod.sh
           
           bash scripts/test.sh
+
+      - name: Run Go Tests (dbio)
+        run: |
+          export DEBUG=''
+
+          # Oracle env
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+          export PATH="$PATH:$ORACLE_HOME/bin"
+
+          bash scripts/prep.gomod.sh
 
           cd core/dbio
           bash scripts/test.sh

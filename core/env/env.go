@@ -6,19 +6,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
-	env "github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/spf13/cast"
 )
 
 var (
 	HomeDir        = os.Getenv("SLING_HOME_DIR")
 	HomeDirEnvFile = ""
-	Env            = &env.EnvFile{}
+	Env            = &EnvFile{}
 	PlausibleURL   = ""
 	SentryDsn      = ""
 	NoColor        = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
@@ -28,6 +29,8 @@ var (
 	StdErrChn      chan string
 	TelMap         = g.M("begin_time", time.Now().UnixMicro())
 	TelMux         = sync.Mutex{}
+	HomeDirs       = map[string]string{}
+	envMux         = sync.Mutex{}
 )
 
 //go:embed *
@@ -35,8 +38,8 @@ var envFolder embed.FS
 
 func init() {
 
-	HomeDir = env.SetHomeDir("sling")
-	HomeDirEnvFile = env.GetEnvFilePath(HomeDir)
+	HomeDir = SetHomeDir("sling")
+	HomeDirEnvFile = GetEnvFilePath(HomeDir)
 
 	// create env file if not exists
 	os.MkdirAll(HomeDir, 0755)
@@ -50,12 +53,16 @@ func init() {
 	}
 
 	// other sources of creds
-	env.SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
-	env.SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
+	SetHomeDir("dbnet")  // https://github.com/dbnet-io/dbnet
+	SetHomeDir("dbrest") // https://github.com/dbrest-io/dbrest
 
 	if SentryDsn == "" {
 		SentryDsn = os.Getenv("SENTRY_DSN")
 	}
+}
+
+func HomeBinDir() string {
+	return path.Join(HomeDir, "bin")
 }
 
 func SetTelVal(key string, value any) {
@@ -148,8 +155,8 @@ func Print(text string) { fmt.Fprintf(StdErrW, "%s", text) }
 
 func Println(text string) { fmt.Fprintf(StdErrW, "%s\n", text) }
 
-func LoadSlingEnvFile() (ef env.EnvFile) {
-	ef = env.LoadEnvFile(HomeDirEnvFile)
+func LoadSlingEnvFile() (ef EnvFile) {
+	ef = LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
 	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"
 	return
@@ -195,4 +202,57 @@ func DarkGrayString(text string) string {
 		return text
 	}
 	return g.Colorize(g.ColorDarkGray, text)
+}
+
+func GetHomeDirConnsMap() (connsMap map[string]map[string]any, err error) {
+	defer envMux.Unlock()
+	envMux.Lock()
+	connsMap = map[string]map[string]any{}
+	for _, homeDir := range HomeDirs {
+		envFilePath := GetEnvFilePath(homeDir)
+		if g.PathExists(envFilePath) {
+			m := g.M()
+			g.JSONConvert(LoadEnvFile(envFilePath), &m)
+			cm, _ := readConnectionsMap(m)
+			for k, v := range cm {
+				connsMap[k] = v
+			}
+		}
+	}
+	return connsMap, nil
+}
+
+func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string]any, err error) {
+	conns = map[string]map[string]any{}
+
+	if connections, ok := env["connections"]; ok {
+		switch connectionsV := connections.(type) {
+		case map[string]interface{}, map[interface{}]interface{}:
+			connMap := cast.ToStringMap(connectionsV)
+			for name, v := range connMap {
+				switch v.(type) {
+				case map[string]interface{}, map[interface{}]interface{}:
+					conns[strings.ToLower(name)] = cast.ToStringMap(v)
+				default:
+					g.Warn("did not handle %s", name)
+				}
+			}
+		default:
+			g.Warn("did not handle connections profile type %T", connections)
+		}
+	}
+	return
+}
+
+func GetTempFolder() string {
+	tempDir := os.TempDir()
+	if val := os.Getenv("SLING_TEMP_DIR"); val != "" {
+		tempDir = val
+	}
+	tempDir = strings.TrimRight(strings.TrimRight(tempDir, "/"), "\\")
+	return cleanWindowsPath(tempDir)
+}
+
+func cleanWindowsPath(path string) string {
+	return strings.ReplaceAll(path, `\`, `/`)
 }

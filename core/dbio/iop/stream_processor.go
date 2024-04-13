@@ -48,6 +48,7 @@ type StreamConfig struct {
 	DatetimeFormat    string                     `json:"datetime_format"`
 	SkipBlankLines    bool                       `json:"skip_blank_lines"`
 	Delimiter         string                     `json:"delimiter"`
+	Escape            string                     `json:"escape"`
 	FileMaxRows       int64                      `json:"file_max_rows"`
 	MaxDecimals       int                        `json:"max_decimals"`
 	Flatten           bool                       `json:"flatten"`
@@ -233,6 +234,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["delimiter"] != "" {
 		sp.Config.Delimiter = configMap["delimiter"]
+	}
+
+	if configMap["escape"] != "" {
+		sp.Config.Escape = configMap["escape"]
 	}
 
 	if configMap["file_max_rows"] != "" {

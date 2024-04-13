@@ -416,7 +416,9 @@ func main() {
 	go func() {
 		defer close(done)
 		exitCode = cliInit()
-		g.SentryFlush(time.Second * 2)
+		if !interrupted {
+			g.SentryFlush(time.Second * 2)
+		}
 	}()
 
 	exit := func() {
@@ -432,7 +434,7 @@ func main() {
 		exitCode = 111
 		exit()
 	case <-interrupt:
-		go g.SentryFlush(time.Second * 4)
+		g.SentryClear()
 		if cliRun.Sc.Used {
 			env.Println("\ninterrupting...")
 			interrupted = true
@@ -533,11 +535,7 @@ func setSentry() {
 			taskMap, _ := g.UnmarshalMap(cast.ToString(env.TelMap["task"]))
 			sourceType := lo.Ternary(taskMap["source_type"] == nil, "unknown", cast.ToString(taskMap["source_type"]))
 			targetType := lo.Ternary(taskMap["target_type"] == nil, "unknown", cast.ToString(taskMap["target_type"]))
-			se.Event.Transaction = g.F("%s - %s", sourceType, targetType)
-			if g.CliObj.Name == "conns" {
-				targetType = lo.Ternary(env.TelMap["conn_type"] == nil, "unknown", cast.ToString(env.TelMap["conn_type"]))
-				se.Event.Transaction = g.F(targetType)
-			}
+			se.Event.Transaction = "cli"
 
 			// format telMap
 			telMap, _ := g.UnmarshalMap(g.Marshal(env.TelMap))

@@ -465,7 +465,7 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.TgtConn = tgtConn
 	}
 
-	if cfg.Options.StdOut {
+	if cfg.Options.StdOut && os.Getenv("CONCURRENCY") == "" {
 		os.Setenv("CONCURRENCY", "1")
 	}
 
@@ -949,6 +949,7 @@ type SourceOptions struct {
 	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
 	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
+	Escape         string              `json:"escape,omitempty" yaml:"escape,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
@@ -992,8 +993,9 @@ var SourceFileOptionsDefault = SourceOptions{
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
 	SkipBlankLines: g.Bool(false),
-	Delimiter:      ",",
-	MaxDecimals:    g.Int(-1),
+	// Delimiter:      ",",
+	FieldsPerRec: g.Int(-1),
+	MaxDecimals:  g.Int(-1),
 }
 
 var SourceDBOptionsDefault = SourceOptions{
@@ -1088,6 +1090,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.Delimiter == "" {
 		o.Delimiter = sourceOptions.Delimiter
+	}
+	if o.Escape == "" {
+		o.Escape = sourceOptions.Escape
 	}
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = sourceOptions.MaxDecimals

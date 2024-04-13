@@ -448,6 +448,8 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 							return
 						}
 					}
+				} else {
+					break
 				}
 			}
 		}
@@ -675,8 +677,8 @@ func Test1Replication(t *testing.T) {
 	os.Setenv("DEBUG", "LOW")
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
-	os.Setenv("CONCURENCY_LIMIT", "2")
-	replicationCfgPath := "tests/replications/r.14.yaml"
+	os.Setenv("CONCURRENCY_LIMIT", "2")
+	replicationCfgPath := "tests/replications/r.test.yaml"
 	err := runReplication(replicationCfgPath, nil)
 	if g.AssertNoError(t, err) {
 		return

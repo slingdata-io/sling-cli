@@ -195,10 +195,15 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 	}
 	data := map[string]string{}
 	for k, v := range c.Data {
+		val, err := cast.ToStringE(v)
+		if err != nil {
+			val = g.Marshal(v) // in case it's an array or object
+		}
+
 		if lc {
-			data[strings.ToLower(k)] = cast.ToString(v)
+			data[strings.ToLower(k)] = val
 		} else {
-			data[k] = cast.ToString(v)
+			data[k] = val
 		}
 	}
 	return data
@@ -218,9 +223,9 @@ func (c *Connection) URL() string {
 		case dbio.TypeFileLocal:
 			url = "file://"
 		case dbio.TypeFileSftp:
-			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
+			url = g.F("%s://%s:%s", c.Type.String(), c.Data["host"], cast.ToString(c.Data["port"]))
 		case dbio.TypeFileFtp:
-			url = g.F("%s://%s", c.Type.String(), c.Data["host"])
+			url = g.F("%s://%s:%s", c.Type.String(), c.Data["host"], cast.ToString(c.Data["port"]))
 		case dbio.TypeFileS3:
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
 		case dbio.TypeFileGoogle:

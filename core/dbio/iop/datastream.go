@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/xml"
@@ -22,7 +23,7 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/text/transform"
 
 	"github.com/samber/lo"
@@ -157,6 +158,16 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 
 func (ds *Datastream) Df() *Dataflow {
 	return ds.df
+}
+
+func (ds *Datastream) Limited(limit ...int) bool {
+	if len(limit) > 0 && ds.Count >= uint64(limit[0]) {
+		return true
+	}
+	if ds.df == nil || ds.df.Limit == 0 {
+		return false
+	}
+	return ds.Count >= ds.df.Limit
 }
 
 func (ds *Datastream) processBwRows() {
@@ -472,6 +483,31 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 
 			return newReader, true
 		}
+	} else {
+		// auto-decode
+		bReader := bufio.NewReader(reader)
+		testBytes, err := bReader.Peek(3)
+		if err == nil {
+			// https://en.wikipedia.org/wiki/Byte_order_mark
+			switch {
+			case testBytes[0] == 255 && testBytes[1] == 254:
+				// is UTF-16 (LE)
+				g.Debug("auto-decoding UTF-16 (LE)")
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
+				return newReader, true
+			case testBytes[0] == 254 && testBytes[1] == 255:
+				// is UTF-16 (BE)
+				g.Debug("auto-decoding UTF-16 (BE)")
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
+				return newReader, true
+			case testBytes[0] == 239 && testBytes[1] == 187 && testBytes[2] == 191:
+				// is UTF-8 with BOM
+				g.Debug("auto-decoding UTF-8-BOM")
+				newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
+				return newReader, true
+			}
+			return bReader, true // since the reader advanced
+		}
 	}
 
 	return reader, false
@@ -750,6 +786,9 @@ loop:
 				if ds.config.SkipBlankLines && ds.Sp.rowBlankValCnt == len(row) {
 					goto loop
 				}
+				if ds.Limited() {
+					break loop
+				}
 
 				if df := ds.df; df != nil && df.OnColumnAdded != nil && df.OnColumnChanged != nil {
 					select {
@@ -899,16 +938,147 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	return
 }
 
+// ConsumeCsvReaderChl reads a channel of readers. Should be safe to use with
+// header top row
+func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
+
+	c := CSV{
+		NoHeader:        !ds.config.Header,
+		FieldsPerRecord: ds.config.FieldsPerRec,
+		Escape:          ds.config.Escape,
+		Delimiter:       rune(0),
+		NoDebug:         ds.NoDebug,
+	}
+
+	if ds.config.Delimiter != "" {
+		c.Delimiter = rune(ds.config.Delimiter[0])
+	}
+
+	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
+		c.Reader = reader
+
+		// decode File if requested by transform
+		if newReader, ok := ds.transformReader(reader); ok {
+			c.Reader = newReader
+		}
+
+		r, err = c.getReader()
+		if err != nil {
+			err = g.Error(err, "could not get reader")
+			ds.Context.CaptureErr(err)
+		}
+		return
+	}
+
+	var r csv.CsvReaderLike
+	r, err = nextCSV(<-readerChn)
+	if err != nil {
+		return
+	}
+
+	row0, err := r.Read()
+	if err == io.EOF {
+		if ds.Metadata.StreamURL.Value != nil {
+			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		}
+		ds.SetReady()
+		ds.Close()
+		return nil
+	} else if err != nil {
+		err = g.Error(err, "could not parse header line")
+		ds.Context.CaptureErr(err)
+		return err
+	}
+
+	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
+		ds.SetFields(CleanHeaderRow(row0))
+	}
+
+	nextFunc := func(it *Iterator) bool {
+
+	processNext:
+		row, err := r.Read()
+		if err == io.EOF {
+			c.File.Close()
+
+			for reader := range readerChn {
+				if reader == nil {
+					return false
+				}
+
+				r, err = nextCSV(reader)
+				if err != nil {
+					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
+					return false
+				}
+
+				// skip header for subsequent CSVs, since c.getReader() injects header line if missing
+				_, _ = r.Read()
+
+				goto processNext
+			}
+
+			return false
+		} else if err != nil {
+			it.ds.Context.CaptureErr(g.Error(err, "Error reading file"))
+			return false
+		}
+
+		if len(row) > len(it.ds.Columns) {
+			it.addNewColumns(len(row))
+		}
+
+		it.Row = make([]any, len(row))
+		var val any
+		for i, val0 := range row {
+			if !it.ds.Columns[i].IsString() {
+				val0 = strings.TrimSpace(val0)
+				if val0 == "" {
+					val = nil
+				} else {
+					val = val0
+				}
+			} else {
+				val = val0
+			}
+			it.Row[i] = val
+		}
+
+		return true
+	}
+
+	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
 // ConsumeCsvReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
-	c := CSV{Reader: reader, NoHeader: !ds.config.Header, FieldsPerRecord: ds.config.FieldsPerRec}
+	c := CSV{
+		Reader:          reader,
+		NoHeader:        !ds.config.Header,
+		FieldsPerRecord: ds.config.FieldsPerRec,
+		Escape:          ds.config.Escape,
+		Delimiter:       rune(0),
+		NoDebug:         ds.NoDebug,
+	}
+
+	if ds.config.Delimiter != "" {
+		c.Delimiter = rune(ds.config.Delimiter[0])
+	}
 
 	// decode File if requested by transform
 	if newReader, ok := ds.transformReader(reader); ok {
 		c.Reader = newReader
 	}
 
-	r, err := c.getReader(ds.config.Delimiter)
+	r, err := c.getReader()
 	if err != nil {
 		err = g.Error(err, "could not get reader")
 		ds.Context.CaptureErr(err)
@@ -920,7 +1090,9 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 
 	row0, err := r.Read()
 	if err == io.EOF {
-		g.Debug("csv stream provided is empty (%#v)", ds.Metadata.StreamURL.Value)
+		if ds.Metadata.StreamURL.Value != nil {
+			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		}
 		ds.SetReady()
 		ds.Close()
 		return nil

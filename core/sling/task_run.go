@@ -437,7 +437,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 		return
 	}
 
-	t.SetProgress("wrote %d rows to %s [%s r/s]", cnt, t.getTargetObjectValue(), getRate(cnt))
+	elapsed := int(time.Since(start).Seconds())
+	t.SetProgress("wrote %d rows to %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error in runFileToFile")

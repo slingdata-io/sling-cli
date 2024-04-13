@@ -490,17 +490,15 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 			return
 		}
 
-		var hasLower, hasUpper, hasSpecial bool
+		var hasUpper, hasSpecial bool
 
 		for _, r := range word {
 			if unicode.IsUpper(r) {
 				hasUpper = true
-			} else if unicode.IsLower(r) {
-				hasLower = true
 			}
 		}
 
-		defCaseAsIs := (hasLower && hasUpper) || hasSpecial
+		defCaseAsIs := hasUpper || hasSpecial
 		if caseAsIs || defCaseAsIs {
 		} else {
 			word = lo.Ternary(dialect.DBNameUpperCase(), strings.ToUpper(word), strings.ToLower(word))

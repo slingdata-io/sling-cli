@@ -19,7 +19,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 
 	"github.com/dustin/go-humanize"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -68,15 +68,15 @@ func NewFileSysClient(fst dbio.Type, props ...string) (fsClient FileSysClient, e
 // such as local, s3, azure storage, google cloud storage
 // props are provided as `"Prop1=Value1", "Prop2=Value2", ...`
 func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string) (fsClient FileSysClient, err error) {
-	concurencyLimit := runtime.NumCPU()
-	if os.Getenv("CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(os.Getenv("CONCURENCY_LIMIT"))
+	concurrencyLimit := runtime.NumCPU()
+	if os.Getenv("CONCURRENCY_LIMIT") != "" {
+		concurrencyLimit = cast.ToInt(os.Getenv("CONCURRENCY_LIMIT"))
 	}
 
 	switch fst {
 	case dbio.TypeFileLocal:
 		fsClient = &LocalFileSysClient{}
-		concurencyLimit = 20
+		concurrencyLimit = 20
 	case dbio.TypeFileS3:
 		fsClient = &S3FileSysClient{}
 		//fsClient = &S3cFileSysClient{}
@@ -106,8 +106,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient.SetProp(k, v)
 	}
 
-	if fsClient.GetProp("CONCURENCY_LIMIT") != "" {
-		concurencyLimit = cast.ToInt(fsClient.GetProp("CONCURENCY_LIMIT"))
+	if fsClient.GetProp("CONCURRENCY_LIMIT") != "" {
+		concurrencyLimit = cast.ToInt(fsClient.GetProp("CONCURRENCY_LIMIT"))
 	}
 
 	for k, v := range env.Vars() {
@@ -121,7 +121,7 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 	if err != nil {
 		err = g.Error(err, "Error initiating File Sys Client")
 	}
-	fsClient.Context().SetConcurencyLimit(concurencyLimit)
+	fsClient.Context().SetConcurrencyLimit(concurrencyLimit)
 
 	return
 }
@@ -154,13 +154,13 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileHTTP, props...)
 	case strings.HasPrefix(url, "file://"):
-		props = append(props, g.F("concurencyLimit=%d", 20))
+		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	case strings.Contains(url, "://"):
 		err = g.Error("Unable to determine FileSysClient for " + url)
 		return
 	default:
-		props = append(props, g.F("concurencyLimit=%d", 20))
+		props = append(props, g.F("concurrencyLimit=%d", 20))
 		return NewFileSysClientContext(ctx, dbio.TypeFileLocal, props...)
 	}
 }
@@ -415,7 +415,6 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		fileFormat = InferFileFormat(urlStr)
 	}
 
-	// CSV, JSON or XML files
 	go func() {
 		// recover from panic
 		defer func() {
@@ -507,7 +506,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 			return df, g.Error(err, "could not write to "+zipPath)
 		}
 
-		paths, err := iop.Unzip(zipPath, folderPath)
+		nodeMaps, err := iop.Unzip(zipPath, folderPath)
 		if err != nil {
 			return df, g.Error(err, "Error unzipping")
 		}
@@ -515,7 +514,8 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		Delete(localFs, zipPath)
 
 		// TODO: handle multiple files, yielding multiple schemas
-		df, err = GetDataflow(localFs.Self(), paths, Cfg)
+		nodes := dbio.NewFileNodes(nodeMaps)
+		df, err = GetDataflow(localFs.Self(), nodes, Cfg)
 		if err != nil {
 			return df, g.Error(err, "Error making dataflow")
 		}
@@ -532,7 +532,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		err = g.Error(err, "Error getting paths")
 		return
 	}
-	df, err = GetDataflow(fs.Self(), nodes.URIs(), Cfg)
+	df, err = GetDataflow(fs.Self(), nodes, Cfg)
 	if err != nil {
 		err = g.Error(err, "error getting dataflow")
 		return
@@ -654,8 +654,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				g.LogError(err)
 				df.Context.CaptureErr(g.Error(err))
 				ds.Context.CaptureErr(g.Error(err))
-				ds.Context.Cancel()
-				df.Context.Cancel()
+				io.Copy(io.Discard, reader) // flush it out so it can close
 			}
 			g.Trace("wrote %s [%d rows] to %s", humanize.Bytes(cast.ToUint64(bw0)), batchR.Counter, partURL)
 			bw += bw0
@@ -857,10 +856,10 @@ type FileStreamConfig struct {
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
-func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
+func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
-	if len(paths) == 0 {
-		err = g.Error("Provided 0 files for: %#v", paths)
+	if len(nodes) == 0 {
+		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
 	}
 
@@ -871,6 +870,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 
 	go func() {
 		defer close(dsCh)
+
+		allowMerging := strings.ToLower(os.Getenv("SLING_MERGE_READERS")) != "false"
 
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
@@ -895,9 +896,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			}
 		}
 
-		flatten := cast.ToBool(fs.GetProp("flatten"))
-		if flatten && (fileFormat.IsJson() || isFiletype(FileTypeJson, paths...) || isFiletype(FileTypeJsonLines, paths...)) {
-			ds, err := MergeReaders(fs, FileTypeJson, paths...)
+		if allowMerging && (fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, FileTypeJson, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -911,8 +911,8 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		if flatten && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, paths...)) {
-			ds, err := MergeReaders(fs, FileTypeXml, paths...)
+		if allowMerging && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, FileTypeXml, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -926,9 +926,9 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		// csvs with no header
-		if !cast.ToBool(fs.GetProp("header")) && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, paths...)) {
-			ds, err := MergeReaders(fs, fileFormat, paths...)
+		// csvs
+		if allowMerging && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, FileTypeCsv, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -937,7 +937,7 @@ func GetDataflow(fs FileSysClient, paths []string, cfg FileStreamConfig) (df *io
 			return // done
 		}
 
-		for _, path := range paths {
+		for _, path := range nodes.URIs() {
 			if strings.HasSuffix(path, "/") {
 				g.DebugLow("skipping %s because is not file", path)
 				continue
@@ -1076,15 +1076,15 @@ func isFiletype(fileType FileType, paths ...string) bool {
 	return len(paths) == cnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop.Datastream, err error) {
-	if len(paths) == 0 {
-		err = g.Error("Provided 0 files for: %#v", paths)
+func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, limit int) (ds *iop.Datastream, err error) {
+	if len(nodes) == 0 {
+		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
 	}
 
 	// infer if missing
 	if string(fileType) == "" {
-		fileType = InferFileFormat(paths[0])
+		fileType = InferFileFormat(nodes[0].URI)
 	}
 
 	pipeR, pipeW := io.Pipe()
@@ -1104,13 +1104,30 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 		fs.Context().Cancel()
 	}
 
-	g.DebugLow("Merging %s readers from %s", fileType, url)
+	concurrency := runtime.NumCPU()
+	switch {
+	case fs.GetProp("CONCURRENCY") != "":
+		concurrency = cast.ToInt(fs.GetProp("CONCURRENCY"))
+	case g.In(fs.FsType(), dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure):
+		switch {
+		// lots of small files (less than 50kb)
+		case len(nodes) > 100 && nodes.AvgSize() < uint64(50*1024):
+			concurrency = 20
+		default:
+			concurrency = 10
+		}
+	case fs.FsType() == dbio.TypeFileLocal:
+		concurrency = 3
+	case concurrency == 1:
+		concurrency = 3
+	}
 
-	readerChn := make(chan io.Reader, 3)
+	g.DebugLow("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
+	readerChn := make(chan io.Reader, concurrency)
 	go func() {
 		defer close(readerChn)
 
-		for _, path := range paths {
+		for _, path := range nodes.URIs() {
 			if strings.HasSuffix(path, "/") {
 				g.DebugLow("skipping %s because is not file", path)
 				continue
@@ -1131,35 +1148,46 @@ func MergeReaders(fs FileSysClient, fileType FileType, paths ...string) (ds *iop
 
 	}()
 
-	go func() {
-		defer pipeW.Close()
+	// Does not work very well.
+	if g.In(fileType, FileTypeCsv) {
+		pipeW.Close()
+		err = ds.ConsumeCsvReaderChl(readerChn)
+	} else {
 
-		for reader := range readerChn {
-			_, err = io.Copy(pipeW, reader)
-			if err != nil {
-				setError(g.Error(err, "Error copying reader to pipe writer"))
-				return
+		go func() {
+			defer pipeW.Close()
+
+			for reader := range readerChn {
+				_, err = io.Copy(pipeW, reader)
+				if err != nil {
+					setError(g.Error(err, "Error copying reader to pipe writer"))
+					return
+				}
+
+				if limit > 0 && (ds.Limited(limit) || len(ds.Buffer) >= limit) {
+					return
+				}
 			}
-		}
-	}()
+		}()
 
-	switch fileType {
-	case FileTypeJson:
-		err = ds.ConsumeJsonReader(pipeR)
-	case FileTypeXml:
-		err = ds.ConsumeXmlReader(pipeR)
-	case FileTypeParquet:
-		err = ds.ConsumeParquetReader(pipeR)
-	case FileTypeAvro:
-		err = ds.ConsumeAvroReader(pipeR)
-	case FileTypeSAS:
-		err = ds.ConsumeSASReader(pipeR)
-	case FileTypeExcel:
-		err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
-	case FileTypeCsv:
-		err = ds.ConsumeCsvReader(pipeR)
-	default:
-		return ds, g.Error("unrecognized fileType (%s) for MergeReaders", fileType)
+		switch fileType {
+		case FileTypeJson:
+			err = ds.ConsumeJsonReader(pipeR)
+		case FileTypeXml:
+			err = ds.ConsumeXmlReader(pipeR)
+		case FileTypeParquet:
+			err = ds.ConsumeParquetReader(pipeR)
+		case FileTypeAvro:
+			err = ds.ConsumeAvroReader(pipeR)
+		case FileTypeSAS:
+			err = ds.ConsumeSASReader(pipeR)
+		case FileTypeExcel:
+			err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
+		case FileTypeCsv:
+			err = ds.ConsumeCsvReader(pipeR)
+		default:
+			return ds, g.Error("unrecognized fileType (%s) for MergeReaders", fileType)
+		}
 	}
 	if err != nil {
 		return ds, g.Error(err, "Error consuming reader for fileType: '%s'", fileType)

@@ -28,7 +28,6 @@ func (s *spreadsheet) makeDatasetAuto(rows [][]string) (data Dataset) {
 			}
 			row[i] = val
 		}
-		// g.P(row)
 
 		rowWidthDistro[len(row)]++
 		allRows = append(allRows, row)
@@ -41,20 +40,24 @@ func (s *spreadsheet) makeDatasetAuto(rows [][]string) (data Dataset) {
 
 		if rowWidthDistro[len(row)] > maxCount {
 			maxCount = rowWidthDistro[len(row)]
-			// widthMostUsed = len(row)
 		}
 	}
 
 	// g.Debug("trailingBlankRows: %d", trailingBlankRows)
 	data = NewDataset(nil)
 	data.Sp.SetConfig(s.Props)
+	hasHeader := cast.ToBool(s.Props["header"])
 
 	for i, row0 := range allRows[:len(allRows)-trailingBlankRows] {
 		if i == 0 {
-			// assume first row is header row
-			row0 = CleanHeaderRow(row0)
-			data.SetFields(row0)
-			continue
+			if hasHeader {
+				// assume first row is header row
+				row0 = CleanHeaderRow(row0)
+				data.SetFields(row0)
+				continue
+			} else if len(data.Columns) == 0 {
+				data.SetFields(CreateDummyFields(len(row0)))
+			}
 		}
 
 		row := make([]interface{}, len(row0))

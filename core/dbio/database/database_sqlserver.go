@@ -13,8 +13,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
@@ -417,14 +417,11 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		defer os.Remove(errPath)
 	}
 
-	proc := exec.Command(
-		"bcp",
+	bcpArgs := []string{
 		strings.ReplaceAll(tableFName, `"`, ""),
 		"in", filePath,
 		"-S", hostPort,
 		"-d", database,
-		"-U", user,
-		"-P", password,
 		"-t", ",",
 		"-m", "1",
 		"-c",
@@ -432,7 +429,29 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		"-b", cast.ToString(batchSize),
 		"-F", "2",
 		"-e", errPath,
-	)
+	}
+
+	if bcpAuthString := conn.GetProp("bcp_auth_string"); bcpAuthString != "" {
+		bcpAuthParts := []string{}
+		err = g.Unmarshal(bcpAuthString, &bcpAuthParts)
+		if err != nil {
+			err = g.Error("could not parse property `bcp_auth_string`. Is an array of strings provided?")
+			return
+		}
+		bcpArgs = append(bcpArgs, bcpAuthParts...)
+	} else {
+		if g.In(conn.GetProp("authenticator"), "winsspi") {
+			bcpArgs = append(bcpArgs, "-T")
+		} else {
+			bcpArgs = append(bcpArgs, "-U", user, "-P", password)
+		}
+
+		if g.In(conn.GetType(), dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+			bcpArgs = append(bcpArgs, "-G")
+		}
+	}
+
+	proc := exec.Command("bcp", bcpArgs...)
 	proc.Stderr = &stderr
 	proc.Stdout = &stdout
 
@@ -447,7 +466,9 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	args := lo.Map(proc.Args, func(v string, i int) string {
 		if !g.In(v, "in", "-S", "-d", "-U", "-P", "-t", "-u", "-m", "-c", "-q", "-b", "-F", "-e", "bcp") {
 			v = strings.ReplaceAll(v, hostPort, "****")
-			v = strings.ReplaceAll(v, password, "****")
+			if password != "" {
+				v = strings.ReplaceAll(v, password, "****")
+			}
 			return `'` + strings.ReplaceAll(v, `'`, `''`) + `'`
 		}
 		return v

@@ -20,9 +20,9 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -183,7 +183,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		DuckDbUseTempFile = true
 	}
 
-	folderPath := path.Join(g.UserHomeDir(), "duckdb", version)
+	folderPath := path.Join(env.HomeBinDir(), "duckdb", version)
 	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
 	binPath = path.Join(folderPath, "duckdb"+extension)
 	found := g.PathExists(binPath)
@@ -215,6 +215,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		// we need to download it ourselves
 		var downloadURL string
 		zipPath := path.Join(g.UserHomeDir(), "duckdb.zip")
+		defer os.Remove(zipPath)
 
 		switch runtime.GOOS + "/" + runtime.GOARCH {
 
@@ -636,6 +637,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	ds = iop.NewDatastreamContext(queryCtx.Ctx, fetchedColumns)
 	ds.SafeInference = true
+	ds.NoDebug = strings.Contains(sql, noDebugKey)
 	ds.SetConfig(conn.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
 	ds.Defer(func() { fileContext.Mux.Unlock() })

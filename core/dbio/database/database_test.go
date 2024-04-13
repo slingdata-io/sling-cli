@@ -15,8 +15,8 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio/env"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"github.com/xo/dburl"

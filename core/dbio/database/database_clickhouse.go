@@ -167,18 +167,64 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 			}
 
 			decimalCols := []int{}
+			intCols := []int{}
+			int64Cols := []int{}
+			floatCols := []int{}
 			for i, col := range batch.Columns {
-				if col.Type == iop.DecimalType {
+				switch {
+				case col.Type == iop.DecimalType:
 					decimalCols = append(decimalCols, i)
+				case col.Type == iop.SmallIntType:
+					intCols = append(intCols, i)
+				case col.Type.IsInteger():
+					int64Cols = append(int64Cols, i)
+				case col.Type == iop.FloatType:
+					floatCols = append(floatCols, i)
 				}
 			}
 
 			for row := range batch.Rows {
+				var eG g.ErrorGroup
+
 				// set decimals correctly
 				for _, colI := range decimalCols {
-					if val, err := decimal.NewFromString(cast.ToString(row[colI])); err == nil {
-						row[colI] = val
+					if row[colI] != nil {
+						val, err := decimal.NewFromString(cast.ToString(row[colI]))
+						if err == nil {
+							row[colI] = val
+						}
+						eG.Capture(err)
 					}
+				}
+
+				// set Int32 correctly
+				for _, colI := range intCols {
+					if row[colI] != nil {
+						row[colI], err = cast.ToIntE(row[colI])
+						eG.Capture(err)
+					}
+				}
+
+				// set Int64 correctly
+				for _, colI := range int64Cols {
+					if row[colI] != nil {
+						row[colI], err = cast.ToInt64E(row[colI])
+						eG.Capture(err)
+					}
+				}
+
+				// set Float64 correctly
+				for _, colI := range floatCols {
+					if row[colI] != nil {
+						row[colI], err = cast.ToFloat64E(row[colI])
+						eG.Capture(err)
+					}
+				}
+
+				if err = eG.Err(); err != nil {
+					err = g.Error(err, "could not convert value for COPY into table %s", tableFName)
+					ds.Context.CaptureErr(err)
+					return err
 				}
 
 				count++
@@ -188,7 +234,6 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				ds.Context.Unlock()
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
-					ds.Context.Cancel()
 					g.Trace("error for row: %#v", row)
 					return g.Error(err, "could not execute statement")
 				}

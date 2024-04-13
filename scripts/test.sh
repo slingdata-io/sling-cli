@@ -23,12 +23,15 @@ sling run --src-stream file://core/dbio/filesys/test/test.excel2.xlsx --tgt-obje
 cat cmd/sling/tests/files/test1.1.csv | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options 'use_bulk: false'
+sling run --src-stream file://cmd/sling/tests/files/test4.csv --src-options '{ delimiter: "|", escape: "\\" }' --stdout > /dev/null
 
 cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 sling run --src-stream 'file://cmd/sling/tests/files/test1.1.csv.gz' --tgt-conn MYSQL --tgt-object mysql.my_table --mode full-refresh --tgt-options 'use_bulk: false'
 
 cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
 sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
+
+SLING_ROW_CNT=2 sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
 
 # test various cli commands / flags
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
@@ -53,7 +56,7 @@ sling run -r cmd/sling/tests/replications/r.05.yaml
 sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
 
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
-SLING_STREAM_CNT=11 sling run -r cmd/sling/tests/replications/r.07.yaml
+SLING_STREAM_CNT=13 sling run -r cmd/sling/tests/replications/r.07.yaml
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml
 SLING_STREAM_CNT=">0" sling run -r cmd/sling/tests/replications/r.09.yaml
 YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
