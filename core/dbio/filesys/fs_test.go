@@ -664,7 +664,7 @@ func TestFileSysS3(t *testing.T) {
 	_, err = fs.WriteDataflow(df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
-	assert.EqualValues(t, 3, len(df2.Streams))
+	assert.EqualValues(t, 1, len(df2.Streams))
 
 	// eventual consistency
 	time.Sleep(2 * time.Second) // wait to s3 files to write on AWS side
@@ -725,6 +725,9 @@ func TestFileSysAzure(t *testing.T) {
 
 	fs.SetProp("header", "true")
 	writeFolderPath := "https://flarcostorage.blob.core.windows.net/testcont/test2"
+	err = Delete(fs, writeFolderPath)
+	assert.NoError(t, err)
+
 	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
