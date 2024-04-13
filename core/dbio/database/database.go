@@ -2732,6 +2732,8 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			continue
 		case col.Type.IsDatetime() && newCol.Type.IsDatetime():
 			newCol.Type = iop.TimestampType
+		case col.Type.IsDatetime() && newCol.Type.IsDate():
+			newCol.Type = iop.TimestampType
 		case col.Type.IsInteger() && newCol.Type.IsDecimal():
 			newCol.Type = iop.DecimalType
 		case col.Type.IsInteger() && newCol.Type.IsFloat():
