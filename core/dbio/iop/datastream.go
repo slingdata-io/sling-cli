@@ -485,7 +485,10 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 		}
 	} else {
 		// auto-decode
-		bReader := bufio.NewReader(reader)
+		bReader, ok := reader.(*bufio.Reader)
+		if !ok {
+			bReader = bufio.NewReader(reader)
+		}
 		testBytes, err := bReader.Peek(3)
 		if err == nil {
 			// https://en.wikipedia.org/wiki/Byte_order_mark
@@ -957,8 +960,15 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
 		c.Reader = reader
 
+		// decompress if needed
+		readerDecompr, err := AutoDecompress(c.Reader)
+		if err != nil {
+			return r, g.Error(err, "Decompress(c.Reader)")
+		}
+
 		// decode File if requested by transform
-		if newReader, ok := ds.transformReader(reader); ok {
+		c.Reader = readerDecompr
+		if newReader, ok := ds.transformReader(c.Reader); ok {
 			c.Reader = newReader
 		}
 
@@ -1073,8 +1083,17 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		c.Delimiter = rune(ds.config.Delimiter[0])
 	}
 
+	// decompress if needed
+	readerDecompr, err := AutoDecompress(reader)
+	if err != nil {
+		err = g.Error(err, "could not AutoDecompress")
+		ds.Context.CaptureErr(err)
+		return err
+	}
+
 	// decode File if requested by transform
-	if newReader, ok := ds.transformReader(reader); ok {
+	c.Reader = readerDecompr
+	if newReader, ok := ds.transformReader(readerDecompr); ok {
 		c.Reader = newReader
 	}
 

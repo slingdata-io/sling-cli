@@ -187,28 +187,11 @@ func (c *CSV) SetFields(fields []string) {
 func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 	var reader2, reader3, reader4 io.Reader
 
-	if c.File == nil && c.Reader == nil {
-		file, err := os.Open(c.Path)
-		if err != nil {
-			return r, g.Error(err, "cannot open: %#v", c.Path)
-		}
-		c.File = file
-		c.Reader = bufio.NewReader(c.File)
-	} else if c.File != nil {
-		c.Reader = bufio.NewReader(c.File)
-	}
-
-	// decompress if gzip
-	readerDecompr, err := AutoDecompress(c.Reader)
-	if err != nil {
-		return r, g.Error(err, "Decompress(c.Reader)")
-	}
-
-	testBytes, reader2, err := g.Peek(readerDecompr, 0)
+	testBytes, reader2, err := g.Peek(c.Reader, 0)
 	if err != nil {
 		g.LogError(err, "could not Peek")
 		err = nil
-		reader2 = readerDecompr
+		reader2 = c.Reader
 	}
 
 	// g.Trace("testBytes:\n%s", string(testBytes))
@@ -313,6 +296,24 @@ func (c *CSV) ReadStream() (ds *Datastream, err error) {
 func (c *CSV) ReadStreamContext(ctx context.Context) (ds *Datastream, err error) {
 
 	ds = NewDatastreamContext(ctx, c.Columns)
+
+	if c.File == nil && c.Reader == nil {
+		file, err := os.Open(c.Path)
+		if err != nil {
+			return ds, g.Error(err, "cannot open: %#v", c.Path)
+		}
+		c.File = file
+		c.Reader = bufio.NewReader(c.File)
+	} else if c.File != nil {
+		c.Reader = bufio.NewReader(c.File)
+	}
+
+	// decompress if needed
+	c.Reader, err = AutoDecompress(c.Reader)
+	if err != nil {
+		err = g.Error(err, "could not AutoDecompress")
+		return
+	}
 
 	r, err := c.getReader()
 	if err != nil {
