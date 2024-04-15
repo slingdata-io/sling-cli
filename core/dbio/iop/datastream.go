@@ -941,14 +941,9 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	return
 }
 
-type ReaderReady struct {
-	URI    string
-	Reader io.Reader
-}
-
 // ConsumeCsvReaderChl reads a channel of readers. Should be safe to use with
 // header top row
-func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan ReaderReady) (err error) {
+func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
 
 	c := CSV{
 		NoHeader:        !ds.config.Header,
@@ -962,18 +957,18 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan ReaderReady) (err error
 		c.Delimiter = rune(ds.config.Delimiter[0])
 	}
 
-	nextCSV := func(reader ReaderReady) (r csv.CsvReaderLike, err error) {
-		c.Reader = reader.Reader
+	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
+		c.Reader = reader
 
-		readerD, err := AutoDecompress(c.Reader)
+		// decompress if gzip
+		readerDecompr, err := AutoDecompress(c.Reader)
 		if err != nil {
-			err = g.Error(err, "Could not decompress reader")
-			ds.Context.CaptureErr(err)
-			return
+			return r, g.Error(err, "Decompress(c.Reader)")
 		}
 
 		// decode File if requested by transform
-		if newReader, ok := ds.transformReader(readerD); ok {
+		c.Reader = readerDecompr
+		if newReader, ok := ds.transformReader(c.Reader); ok {
 			c.Reader = newReader
 		}
 
@@ -1017,7 +1012,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan ReaderReady) (err error
 			c.File.Close()
 
 			for reader := range readerChn {
-				if reader.Reader == nil {
+				if reader == nil {
 					return false
 				}
 
@@ -1088,15 +1083,8 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		c.Delimiter = rune(ds.config.Delimiter[0])
 	}
 
-	readerD, err := AutoDecompress(c.Reader)
-	if err != nil {
-		err = g.Error(err, "Could not decompress reader")
-		ds.Context.CaptureErr(err)
-		return
-	}
-
 	// decode File if requested by transform
-	if newReader, ok := ds.transformReader(readerD); ok {
+	if newReader, ok := ds.transformReader(reader); ok {
 		c.Reader = newReader
 	}
 
