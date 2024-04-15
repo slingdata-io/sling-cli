@@ -446,7 +446,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 			bcpArgs = append(bcpArgs, "-U", user, "-P", password)
 		}
 
-		if g.In(conn.GetType(), dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+		if cast.ToBool(conn.GetProp("bcp_entra_auth")) {
 			bcpArgs = append(bcpArgs, "-G")
 		}
 	}
