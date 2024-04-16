@@ -69,7 +69,6 @@ require (
 	gorm.io/driver/sqlite v1.1.4
 	gorm.io/gorm v1.20.7
 	syreclabs.com/go/faker v1.2.2
-	github.com/timeplus-io/proton-go-driver/v2 v2.0.17
 )
 
 require (

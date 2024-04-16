@@ -114,7 +114,7 @@ func (cfg *Config) SetDefault() {
 	case dbio.TypeDbBigQuery, dbio.TypeDbBigTable:
 		cfg.Source.Options.MaxDecimals = g.Int(9)
 		cfg.Target.Options.MaxDecimals = g.Int(9)
-	case dbio.TypeDbClickhouse:
+	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
 		cfg.Source.Options.MaxDecimals = g.Int(11)
 		cfg.Target.Options.MaxDecimals = g.Int(11)
 	}
