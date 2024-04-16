@@ -57,6 +57,7 @@ const (
 	TypeDbClickhouse Type = "clickhouse"
 	TypeDbMongoDB    Type = "mongodb"
 	TypeDbPrometheus Type = "prometheus"
+	TypeDbProton     Type = "proton"
 )
 
 // ValidateType returns true is type is valid
@@ -102,6 +103,7 @@ func (t Type) DefPort() int {
 		TypeDbClickhouse: 9000,
 		TypeDbMongoDB:    27017,
 		TypeDbPrometheus: 9090,
+		TypeDbProton:     8463,
 		TypeFileFtp:      21,
 		TypeFileSftp:     22,
 	}
@@ -117,7 +119,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbPrometheus:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -175,6 +177,7 @@ func (t Type) NameLong() string {
 		TypeDbClickhouse: "DB - Clickhouse",
 		TypeDbPrometheus: "DB - Prometheus",
 		TypeDbMongoDB:    "DB - MongoDB",
+		TypeDbProton:     "DB - Proton",
 	}
 
 	return mapping[t]
@@ -210,6 +213,7 @@ func (t Type) Name() string {
 		TypeDbPrometheus: "Prometheus",
 		TypeDbMongoDB:    "MongoDB",
 		TypeDbAzure:      "Azure",
+		TypeDbProton:     "Proton",
 	}
 
 	return mapping[t]

@@ -69,6 +69,7 @@ require (
 	gorm.io/driver/sqlite v1.1.4
 	gorm.io/gorm v1.20.7
 	syreclabs.com/go/faker v1.2.2
+	github.com/timeplus-io/proton-go-driver/v2 v2.0.17
 )
 
 require (
@@ -229,5 +230,3 @@ require (
 	gopkg.in/mattn/go-isatty.v0 v0.0.4 // indirect
 	gopkg.in/mattn/go-runewidth.v0 v0.0.4 // indirect
 )
-
-replace github.com/flarco/g => ../g
