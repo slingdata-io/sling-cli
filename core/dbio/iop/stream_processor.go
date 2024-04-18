@@ -849,8 +849,7 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 	}
 }
 
-// CastToString to string. used for csv writing
-// slows processing down 5% with upstream CastRow or 35% without upstream CastRow
+// CastToStringSafe to string (safer)
 func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...ColumnType) string {
 	typ := ColumnType("")
 	switch v := val.(type) {
