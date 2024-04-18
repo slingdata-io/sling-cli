@@ -182,7 +182,7 @@ func (ds *Datastream) processBwRows() {
 		}()
 
 		for row := range ds.bwRows {
-			ds.writeBwCsv(ds.CastRowToString(row))
+			ds.writeBwCsv(ds.CastRowToStringSafe(row))
 			ds.bwCsv.Flush()
 		}
 		done = true
@@ -238,6 +238,15 @@ func (ds *Datastream) CastRowToString(row []any) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
 		rowStr[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+	}
+	return rowStr
+}
+
+// CastRowToStringSafe returns the row as string casted (safer)
+func (ds *Datastream) CastRowToStringSafe(row []any) []string {
+	rowStr := make([]string, len(row))
+	for i, val := range row {
+		rowStr[i] = ds.Sp.CastToStringSafe(i, val, ds.Columns[i].Type)
 	}
 	return rowStr
 }

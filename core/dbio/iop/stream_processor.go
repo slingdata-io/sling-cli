@@ -849,6 +849,49 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 	}
 }
 
+// CastToString to string. used for csv writing
+// slows processing down 5% with upstream CastRow or 35% without upstream CastRow
+func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...ColumnType) string {
+	typ := ColumnType("")
+	switch v := val.(type) {
+	case time.Time:
+		typ = DatetimeType
+	default:
+		_ = v
+	}
+
+	if len(valType) > 0 {
+		typ = valType[0]
+	}
+
+	switch {
+	case val == nil:
+		return ""
+	case sp.Config.BoolAsInt && typ.IsBool():
+		switch cast.ToString(val) {
+		case "true", "1", "TRUE":
+			return "1"
+		}
+		return "0"
+	case typ.IsDecimal() || typ.IsFloat():
+		return cast.ToString(val)
+	case typ.IsDate():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.Format("2006-01-02")
+	case typ.IsDatetime():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.UTC().Format("2006-01-02 15:04:05.000000") + " +00"
+	default:
+		return cast.ToString(val)
+	}
+}
+
 // CastValWithoutStats casts the value without counting stats
 func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ ColumnType) interface{} {
 	var nVal interface{}
