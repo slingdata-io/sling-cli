@@ -880,7 +880,7 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 		if tVal.IsZero() {
 			return ""
 		}
-		return tVal.Format("2006-01-02")
+		return tVal.UTC().Format("2006-01-02")
 	case typ.IsDatetime():
 		tVal, _ := sp.CastToTime(val)
 		if tVal.IsZero() {
