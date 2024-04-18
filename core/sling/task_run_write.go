@@ -28,6 +28,11 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		dateMap := iop.GetISO8601DateMap(time.Now())
 		cfg.TgtConn.Set(g.M("url", g.Rm(uri, dateMap)))
 
+		if len(df.Buffer) == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
+			g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty files, set SLING_ALLOW_EMPTY=TRUE")
+			return
+		}
+
 		// construct props by merging with options
 		options := g.M()
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
@@ -345,8 +350,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) {
-		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY_TABLES=TRUE")
+	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
+		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
 		return
 	} else if cnt > 0 {
 		// FIXME: find root cause of why columns don't synch while streaming
@@ -363,7 +368,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
 					return
 				}
-				g.DebugLow(g.ErrMsgSimple(err))
+				g.Trace(g.ErrMsgSimple(err))
 			}
 		}
 	}
