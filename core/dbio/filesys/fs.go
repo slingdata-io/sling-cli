@@ -902,11 +902,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
 			}
-			ds, err = ProcessStreamViaTempFile(ds)
-			if err != nil {
-				df.Context.CaptureErr(g.Error(err, "Unable to process stream via temp file"))
-				return
-			}
+
 			pushDatastream(ds)
 			return // done
 		}
@@ -917,11 +913,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
 			}
-			ds, err = ProcessStreamViaTempFile(ds)
-			if err != nil {
-				df.Context.CaptureErr(g.Error(err, "Unable to process stream via temp file"))
-				return
-			}
+
 			pushDatastream(ds)
 			return // done
 		}
@@ -1123,7 +1115,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 	}
 
 	g.DebugLow("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
-	readerChn := make(chan io.Reader, concurrency)
+	readerChn := make(chan *iop.ReaderReady, concurrency)
 	go func() {
 		defer close(readerChn)
 
@@ -1133,32 +1125,45 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 				continue
 			}
 
-			g.Debug("processing reader from %s", path)
+			ds.Context.Wg.Read.Add()
+			go func(path string) {
+				defer ds.Context.Wg.Read.Done()
+				g.Debug("processing reader from %s", path)
 
-			reader, err := fs.Self().GetReader(path)
-			if err != nil {
-				setError(g.Error(err, "Error getting reader"))
-				return
-			}
+				reader, err := fs.Self().GetReader(path)
+				if err != nil {
+					setError(g.Error(err, "Error getting reader"))
+					return
+				}
 
-			readerChn <- reader
+				r := &iop.ReaderReady{Reader: reader, URI: path}
+				readerChn <- r
+			}(path)
 		}
 
 		ds.Context.Wg.Read.Wait()
 
 	}()
 
-	// Does not work very well.
-	if g.In(fileType, FileTypeCsv) {
+	if g.In(fileType, FileTypeCsv, FileTypeJson, FileTypeJsonLines, FileTypeXml) {
 		pipeW.Close()
-		err = ds.ConsumeCsvReaderChl(readerChn)
+
+		switch fileType {
+		case FileTypeJson, FileTypeJsonLines:
+			err = ds.ConsumeJsonReaderChl(readerChn, false)
+		case FileTypeXml:
+			err = ds.ConsumeJsonReaderChl(readerChn, true)
+		case FileTypeCsv:
+			err = ds.ConsumeCsvReaderChl(readerChn)
+		}
+
 	} else {
 
 		go func() {
 			defer pipeW.Close()
 
 			for reader := range readerChn {
-				_, err = io.Copy(pipeW, reader)
+				_, err = io.Copy(pipeW, reader.Reader)
 				if err != nil {
 					setError(g.Error(err, "Error copying reader to pipe writer"))
 					return
@@ -1171,7 +1176,7 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 		}()
 
 		switch fileType {
-		case FileTypeJson:
+		case FileTypeJson, FileTypeJsonLines:
 			err = ds.ConsumeJsonReader(pipeR)
 		case FileTypeXml:
 			err = ds.ConsumeXmlReader(pipeR)

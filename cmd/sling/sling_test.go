@@ -456,98 +456,98 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 }
 
-func TestSuitePostgres(t *testing.T) {
+func TestSuiteDatabasePostgres(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbPostgres)
 }
 
-// func TestSuiteRedshift(t *testing.T) {
+// func TestSuiteDatabaseRedshift(t *testing.T) {
 // 	t.Parallel()
 // 	testSuite(t, dbio.TypeDbRedshift)
 // }
 
-func TestSuiteStarRocks(t *testing.T) {
+func TestSuiteDatabaseStarRocks(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbStarRocks)
 }
 
-func TestSuiteMySQL(t *testing.T) {
+func TestSuiteDatabaseMySQL(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMySQL)
 }
 
-func TestSuiteMariaDB(t *testing.T) {
+func TestSuiteDatabaseMariaDB(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMariaDB)
 }
 
-func TestSuiteOracle(t *testing.T) {
+func TestSuiteDatabaseOracle(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbOracle)
 }
 
-// func TestSuiteBigTable(t *testing.T) {
+// func TestSuiteDatabaseBigTable(t *testing.T) {
 // 	t.Parallel()
 // 	testSuite(t, dbio.TypeDbBigTable)
 // }
 
-func TestSuiteBigQuery(t *testing.T) {
+func TestSuiteDatabaseBigQuery(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbBigQuery)
 }
 
-func TestSuiteSnowflake(t *testing.T) {
+func TestSuiteDatabaseSnowflake(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSnowflake)
 }
 
-func TestSuiteSQLite(t *testing.T) {
+func TestSuiteDatabaseSQLite(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLite)
 }
 
-func TestSuiteDuckDb(t *testing.T) {
+func TestSuiteDatabaseDuckDb(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbDuckDb)
 }
 
-func TestSuiteMotherDuck(t *testing.T) {
+func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5-10,16,22") // cannot add json type with version 0.9.2
 }
 
-func TestSuiteSQLServer(t *testing.T) {
+func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
 }
 
-// func TestSuiteAzure(t *testing.T) {
+// func TestSuiteDatabaseAzure(t *testing.T) {
 // 	t.Parallel()
 // 	testSuite(t, dbio.TypeDbAzure)
 // }
 
-// func TestSuiteAzureDWH(t *testing.T) {
+// func TestSuiteDatabaseAzureDWH(t *testing.T) {
 // 	t.Parallel()
 // 	testSuite(t, dbio.TypeDbAzureDWH)
 // }
 
-func TestSuiteClickhouse(t *testing.T) {
+func TestSuiteDatabaseClickhouse(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
 }
 
-func TestSuiteTrino(t *testing.T) {
+func TestSuiteDatabaseTrino(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbTrino, "1,3,10,16,22")
 }
 
-func TestSuiteMongo(t *testing.T) {
+func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMongoDB, "10,22")
 }
 
-func TestSuitePrometheus(t *testing.T) {
+func TestSuiteDatabasePrometheus(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbPrometheus, "22")
 }

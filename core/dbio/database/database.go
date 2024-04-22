@@ -894,9 +894,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		result.Close()
 
 		// if any error occurs during iteration
-		if result.Err() != nil {
-			it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
-		}
+		// if result.Err() != nil {
+		// 	it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
+		// }
 		return false
 	}
 
@@ -1193,7 +1193,7 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 
 	data.SQL = sql
 	data.Duration = conn.Data.Duration // Collect does not time duration
-
+	g.Trace("query returned %d rows", len(data.Rows))
 	return data, err
 }
 
@@ -1404,16 +1404,12 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := g.R(
-		conn.GetTemplateValue("core.limit"),
-		"sql", table.SQL,
-		"limit", "1",
-	)
+	limitSQL := table.Select(1)
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
-	ds, err := conn.Self().StreamRows(limitSQL)
+	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", 1))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}
