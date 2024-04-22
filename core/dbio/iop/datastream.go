@@ -1082,26 +1082,36 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 	}
 
 	var r csv.CsvReaderLike
-	r, err = nextCSV(<-readerChn)
-	if err != nil {
-		return
+	var row0 []string
+	for reader := range readerChn {
+		r, err = nextCSV(reader)
+		if err != nil {
+			return
+		}
+
+		row0, err = r.Read()
+		if err == io.EOF {
+			if ds.Metadata.StreamURL.Value != nil {
+				g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+			}
+
+			// if first reader is empty, continue cycling until non-empty file
+			continue
+		} else if err != nil {
+			err = g.Error(err, "could not parse header line")
+			ds.Context.CaptureErr(err)
+			return err
+		}
+
+		break // got header row
 	}
 
-	row0, err := r.Read()
 	if err == io.EOF {
-		if ds.Metadata.StreamURL.Value != nil {
-			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
-		}
+		// all readers are empty
 		ds.SetReady()
 		ds.Close()
 		return nil
-	} else if err != nil {
-		err = g.Error(err, "could not parse header line")
-		ds.Context.CaptureErr(err)
-		return err
-	}
-
-	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
+	} else if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 
