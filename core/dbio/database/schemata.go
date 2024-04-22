@@ -169,6 +169,17 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		)
 	}
 
+	switch t.Dialect {
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
+		// move the inner "order by" clause to outside
+		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
+		if len(matches) == 1 {
+			orderBy := matches[0].Full
+			sql = strings.ReplaceAll(sql, orderBy, "")
+			sql = sql + orderBy
+		}
+	}
+
 	return
 }
 

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -54,7 +55,7 @@ func TestParseTableName(t *testing.T) {
 		{
 			input:   "DB-4.table",
 			dialect: dbio.TypeDbMySQL,
-			output:  Table{Schema: "db-4", Name: "table"},
+			output:  Table{Schema: "DB-4", Name: "table"},
 		},
 		{
 			input:   "`DB-4`.table",
@@ -93,6 +94,17 @@ func TestParseTableName(t *testing.T) {
 		assert.Equal(t, c.output.Database, table.Database, c)
 		assert.Equal(t, c.output.SQL, table.SQL, c)
 	}
+}
+
+func TestRegexMatch(t *testing.T) {
+	table, err := ParseTableName(`select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
+	if !assert.NoError(t, err) {
+		return
+	}
+	sql := table.Select(10)
+	assert.True(t, strings.HasSuffix(sql, ` order by "created" asc`))
+	sql = table.Select(0, "id")
+	assert.True(t, strings.HasSuffix(sql, ` order by "created" asc`))
 }
 
 func TestParseColumnName(t *testing.T) {
