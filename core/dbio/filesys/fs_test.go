@@ -202,7 +202,9 @@ func TestFileSysLocalJson(t *testing.T) {
 
 	data1, err := df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 2019, len(data1.Rows))
+	if assert.EqualValues(t, 2019, len(data1.Rows)) {
+		assert.Equal(t, len(df1.Columns), len(data1.Rows[len(data1.Rows)-1]))
+	}
 
 	fs.SetProp("flatten", "true")
 	df1, err = fs.ReadDataflow("test/test1/json")
@@ -210,7 +212,10 @@ func TestFileSysLocalJson(t *testing.T) {
 
 	data1, err = df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 2036, len(data1.Rows))
+	if assert.EqualValues(t, 2036, len(data1.Rows)) {
+		lastRow := data1.Rows[len(data1.Rows)-1]
+		assert.Equal(t, len(df1.Columns), len(lastRow), "cols: %s \n lastRow: %s", g.Marshal(df1.Columns.Names()), g.Marshal(lastRow))
+	}
 
 	fs.SetProp("flatten", "false")
 	df2, err := fs.ReadDataflow("test/test2/json")
@@ -229,7 +234,7 @@ func TestFileSysLocalJson(t *testing.T) {
 	g.Debug("%#v", df2.Columns.Names())
 	assert.NoError(t, err)
 	assert.EqualValues(t, 20, len(data2.Rows))
-	assert.GreaterOrEqual(t, 9, len(data2.Columns)) // FIXME: can be 8 or 9...
+	assert.GreaterOrEqual(t, 9, len(data2.Columns))
 
 }
 

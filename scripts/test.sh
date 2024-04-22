@@ -43,6 +43,10 @@ sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-i
 sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
 SLING_ROW_CNT=1 sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"
 
+# test _sling_stream_url
+SLING_STREAM_URL_COLUMN=true sling run --src-stream file://../../core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+SLING_ROW_CNT=4 sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"
+
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
 sling conns discover POSTGRES
