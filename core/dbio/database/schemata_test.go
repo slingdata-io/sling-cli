@@ -105,6 +105,13 @@ func TestRegexMatch(t *testing.T) {
 	assert.True(t, strings.HasSuffix(sql, ` order by "created" asc`))
 	sql = table.Select(0, "id")
 	assert.True(t, strings.HasSuffix(sql, ` order by "created" asc`))
+
+	table, err = ParseTableName(`with () select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
+	if !assert.NoError(t, err) {
+		return
+	}
+	sql = table.Select(10)
+	assert.True(t, strings.HasPrefix(sql, `with () select id`), sql)
 }
 
 func TestParseColumnName(t *testing.T) {

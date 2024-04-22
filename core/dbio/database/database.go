@@ -1404,16 +1404,12 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := g.R(
-		conn.GetTemplateValue("core.limit"),
-		"sql", table.SQL,
-		"limit", "1",
-	)
+	limitSQL := table.Select(1)
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
-	ds, err := conn.Self().StreamRows(limitSQL)
+	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", 1))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}

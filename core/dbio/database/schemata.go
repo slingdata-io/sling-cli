@@ -134,6 +134,8 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		return t.SQL
 	}
 
+	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
+
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
 		f = strings.TrimSpace(f)
@@ -158,22 +160,26 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
+	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(sql)), "with")
 	if limit > 0 {
-		template, err := t.Dialect.Template()
-		g.LogError(err)
+		if isSQLServer && startsWith {
+			// leave it alone since it starts with WITH
+		} else {
+			template, err := t.Dialect.Template()
+			g.LogError(err)
 
-		sql = g.R(
-			template.Core["limit"],
-			"sql", sql,
-			"limit", cast.ToString(limit),
-		)
+			sql = g.R(
+				template.Core["limit"],
+				"sql", sql,
+				"limit", cast.ToString(limit),
+			)
+		}
 	}
 
-	switch t.Dialect {
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
+	if isSQLServer {
 		// move the inner "order by" clause to outside
 		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
-		if len(matches) == 1 {
+		if !startsWith && len(matches) == 1 {
 			orderBy := matches[0].Full
 			sql = strings.ReplaceAll(sql, orderBy, "")
 			sql = sql + orderBy
