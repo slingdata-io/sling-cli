@@ -225,6 +225,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	df.Defer(func() { filesys.Delete(s3Fs, s3Path) }) // cleanup
 
 	g.Info("writing to s3 for redshift import")
+	s3Fs.SetProp("null_as", `\N`)
 	bw, err := s3Fs.WriteDataflow(df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
@@ -311,6 +312,8 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		"aws_access_key_id", AwsID,
 		"aws_secret_access_key", AwsAccessKey,
 	)
+	sql = conn.setEmptyAsNull(sql)
+
 	_, err = conn.Exec(sql)
 	if err != nil {
 		conn.WarnStlLoadErrors(err)
@@ -318,6 +321,13 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	}
 
 	return 0, nil
+}
+
+func (conn *RedshiftConn) setEmptyAsNull(sql string) string {
+	if !cast.ToBool(conn.GetProp("empty_as_null")) {
+		sql = strings.ReplaceAll(sql, " EMPTYASNULL BLANKSASNULL", "")
+	}
+	return sql
 }
 
 func (conn *RedshiftConn) WarnStlLoadErrors(err error) {

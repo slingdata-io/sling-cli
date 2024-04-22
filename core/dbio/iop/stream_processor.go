@@ -45,6 +45,7 @@ type StreamConfig struct {
 	Header            bool                       `json:"header"`
 	Compression       string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
 	NullIf            string                     `json:"null_if"`
+	NullAs            string                     `json:"null_as"`
 	DatetimeFormat    string                     `json:"datetime_format"`
 	SkipBlankLines    bool                       `json:"skip_blank_lines"`
 	Delimiter         string                     `json:"delimiter"`
@@ -271,6 +272,9 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 	if configMap["null_if"] != "" {
 		sp.Config.NullIf = configMap["null_if"]
+	}
+	if configMap["null_as"] != "" {
+		sp.Config.NullAs = configMap["null_as"]
 	}
 	if configMap["trim_space"] != "" {
 		sp.Config.TrimSpace = cast.ToBool(configMap["trim_space"])
@@ -816,7 +820,7 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 
 	switch {
 	case val == nil:
-		return ""
+		return sp.Config.NullAs
 	case sp.Config.BoolAsInt && typ.IsBool():
 		switch cast.ToString(val) {
 		case "true", "1", "TRUE":

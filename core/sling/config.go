@@ -999,7 +999,7 @@ var SourceFileOptionsDefault = SourceOptions{
 }
 
 var SourceDBOptionsDefault = SourceOptions{
-	EmptyAsNull:    g.Bool(true),
+	EmptyAsNull:    g.Bool(false),
 	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
 	MaxDecimals:    g.Int(-1),
