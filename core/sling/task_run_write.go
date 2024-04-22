@@ -285,7 +285,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
-			// time.Sleep(100 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 
 			// df.Context.Lock()
 			// defer df.Context.Unlock()
