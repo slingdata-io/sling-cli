@@ -761,6 +761,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		cfgMap := ds.GetConfig()
 		cfgMap["header"] = "true"
 		cfgMap["delimiter"] = ","
+		cfgMap["null_as"] = `\N`
 		cfgMap["datetime_format"] = "2006-01-02 15:04:05.000000-07:00"
 		ds.SetConfig(cfgMap)
 
@@ -791,7 +792,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"');`, table.FDQN(), strings.Join(columnNames, ", "), csvPath, conn.generateCsvColumns(ds.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), csvPath, conn.generateCsvColumns(ds.Columns)),
 		}
 
 		var out []byte
