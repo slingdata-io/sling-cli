@@ -7,7 +7,7 @@ shopt -s expand_aliases
 # export _DEBUG_CALLER_LEVEL=2
 cd cmd/sling
 go test -parallel 2 -run TestSuiteFile
-go test -parallel 4 -run TestSuiteDatabase
+go test -parallel 4 -timeout 15m -run TestSuiteDatabase
 
 cd -
 
