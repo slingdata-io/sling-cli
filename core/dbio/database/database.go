@@ -894,9 +894,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		result.Close()
 
 		// if any error occurs during iteration
-		if result.Err() != nil {
-			it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
-		}
+		// if result.Err() != nil {
+		// 	it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
+		// }
 		return false
 	}
 
@@ -1193,7 +1193,7 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 
 	data.SQL = sql
 	data.Duration = conn.Data.Duration // Collect does not time duration
-
+	g.Trace("query returned %d rows", len(data.Rows))
 	return data, err
 }
 
