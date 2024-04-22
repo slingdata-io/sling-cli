@@ -135,6 +135,7 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 	}
 
 	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
+	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(t.SQL)), "with")
 
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
@@ -146,7 +147,7 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 	})
 
 	if t.IsQuery() {
-		if len(fields) > 0 {
+		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
 			fieldsStr := strings.Join(fields, ", ")
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
 		} else {
@@ -160,7 +161,6 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
-	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(sql)), "with")
 	if limit > 0 {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
