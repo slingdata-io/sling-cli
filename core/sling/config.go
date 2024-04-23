@@ -658,10 +658,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		if table.Schema != "" {
-			m["stream_schema"] = table.Schema
+			m["stream_schema"] = strings.ToLower(table.Schema)
 		}
 		if table.Name != "" {
-			m["stream_table"] = table.Name
+			m["stream_table"] = strings.ToLower(table.Name)
 		}
 
 		if cfg.StreamName != "" {
