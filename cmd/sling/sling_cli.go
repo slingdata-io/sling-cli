@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/cast"
 )
 
-//go:embed *
+//go:embed examples.sh
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
