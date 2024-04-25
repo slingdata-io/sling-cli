@@ -45,9 +45,10 @@ sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-
 SLING_ROW_CNT=1 sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"
 
 # test _sling_stream_url
-SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
 SLING_ROW_CNT=4 sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"
-SLING_ROW_CNT=3 sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18"
+SLING_ROW_CNT=3 sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names
+SLING_ROW_CNT=2 sling conns exec postgres "select * from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name like '_sling%'" # should not have _sling_loaded_at
 
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
