@@ -2972,6 +2972,10 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	data, err := conn.Self().Query(sql)
 	if err != nil {
 		return g.Error(err, "error running CompareChecksums query")
+	} else if len(data.Rows) == 0 {
+		return g.Error("error running CompareChecksums query. No Rows returns")
+	} else if len(data.Rows[0]) != len(data.Columns) {
+		return g.Error("error running CompareChecksums query. Row vs Column size mismatch (%d != %d)", len(data.Rows[0]), len(data.Columns))
 	}
 
 	eg := g.ErrorGroup{}
