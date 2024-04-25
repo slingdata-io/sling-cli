@@ -280,7 +280,8 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	if t.Config.MetadataLoadedAt {
+	if (t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt) ||
+		(t.Config.MetadataLoadedAt == nil && t.Type == FileToDB) {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
 		metadata.LoadedAt.Value = t.StartTime.Unix()
 	}

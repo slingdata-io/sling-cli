@@ -145,7 +145,7 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		cfg.MetadataLoadedAt = cast.ToBool(val)
+		cfg.MetadataLoadedAt = g.Bool(cast.ToBool(val))
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		cfg.MetadataStreamURL = cast.ToBool(val)
@@ -270,7 +270,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			}
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
-			cfg.MetadataLoadedAt = true
+			cfg.MetadataLoadedAt = g.Bool(true)
 		} else if cfg.Source.UpdateKey == "" && len(cfg.Source.PrimaryKey()) == 0 {
 			err = g.Error("must specify value for 'update_key' and/or 'primary_key' for incremental mode. See docs for more details: https://docs.slingdata.io/sling-cli/run/configuration")
 			if args := os.Getenv("SLING_CLI_ARGS"); strings.Contains(args, "-src-conn") || strings.Contains(args, "-tgt-conn") {
@@ -294,7 +294,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			return
 		}
 	} else if cfg.Mode == SnapshotMode {
-		cfg.MetadataLoadedAt = true // needed for snapshot mode
+		cfg.MetadataLoadedAt = g.Bool(true) // needed for snapshot mode
 	}
 
 	if srcDbProvided && tgtDbProvided {
@@ -806,10 +806,10 @@ type Config struct {
 	IncrementalVal  string                `json:"-" yaml:"-"`
 	ReplicationMode bool                  `json:"-" yaml:"-"`
 
-	MetadataLoadedAt  bool `json:"-" yaml:"-"`
-	MetadataStreamURL bool `json:"-" yaml:"-"`
-	MetadataRowNum    bool `json:"-" yaml:"-"`
-	MetadataRowID     bool `json:"-" yaml:"-"`
+	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
+	MetadataStreamURL bool  `json:"-" yaml:"-"`
+	MetadataRowNum    bool  `json:"-" yaml:"-"`
+	MetadataRowID     bool  `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
