@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -2894,6 +2895,13 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 // CompareChecksums compares the checksum values from the database side
 // to the checkum values from the StreamProcessor
 func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (err error) {
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
+		}
+	}()
 
 	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {
