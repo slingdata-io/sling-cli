@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
 	"github.com/flarco/g"
@@ -38,7 +38,7 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
 		if strings.Contains(err.Error(), "unexpected packet") {
-			g.Info(color.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+			g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 		}
 	}
 

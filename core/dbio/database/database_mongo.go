@@ -9,6 +9,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -80,6 +81,9 @@ func (conn *MongoDBConn) Connect(timeOut ...int) error {
 	defer cancel()
 	err = conn.Client.Ping(ctx, readpref.Primary())
 	if err != nil {
+		if strings.Contains(err.Error(), "server selection error") {
+			g.Info(env.MagentaString("Try setting the `tls` key to 'true'. See https://docs.slingdata.io/connections/database-connections/mongodb"))
+		}
 		return g.Error(err, "Failed to ping mongo server")
 	}
 
