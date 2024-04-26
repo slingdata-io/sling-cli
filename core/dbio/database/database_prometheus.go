@@ -41,7 +41,7 @@ func (conn *PrometheusConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
-// Init initiates the object
+// Init initiates the client
 func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err error) {
 
 	var rt http.RoundTripper
@@ -55,19 +55,19 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 
 	key := conn.GetProp("client_key")
 	cert := conn.GetProp("client_cert")
-	cacert := conn.GetProp("client_cacert")
+	caCert := conn.GetProp("client_cacert")
 	if key != "" && cert != "" {
 		cert, err := tls.LoadX509KeyPair(cert, key)
 		if err != nil {
-			return nil, g.Error("Failed to load client certificate: %v", err)
+			return nil, g.Error(err, "Failed to load client certificate")
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
-		if cacert != "" {
-			caCert, err := os.ReadFile(cacert)
+		if caCert != "" {
+			caCert, err := os.ReadFile(caCert)
 			if err != nil {
-				return nil, g.Error("Failed to load CA certificate: %v", err)
+				return nil, g.Error(err, "Failed to load CA certificate")
 			}
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
