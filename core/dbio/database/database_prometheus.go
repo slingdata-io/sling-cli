@@ -70,7 +70,11 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 				return nil, g.Error(err, "Failed to load CA certificate")
 			}
 			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
+			ok := caCertPool.AppendCertsFromPEM(caCert)
+			if !ok {
+				return nil, g.Error("Failed to parse PEM file")
+			}
+
 			tlsConfig.RootCAs = caCertPool
 		}
 		rt = &http.Transport{
