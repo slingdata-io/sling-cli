@@ -264,7 +264,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				if len(sample.Histograms) > 0 {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -300,7 +300,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				} else {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -358,7 +358,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				if sample.Histogram != nil {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -394,7 +394,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				} else {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -438,7 +438,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		data.Columns = iop.Columns{
 			{
 				Name:     "timestamp",
-				Type:     iop.TimestampType,
+				Type:     iop.BigIntType,
 				Position: 1,
 			},
 			{
@@ -447,12 +447,12 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{scalar.Timestamp, cast.ToFloat64(scalar.Value)})
+		data.Append([]any{scalar.Timestamp.Unix(), cast.ToFloat64(scalar.Value)})
 	} else if str, ok := result.(*model.String); ok {
 		data.Columns = iop.Columns{
 			{
 				Name:     "timestamp",
-				Type:     iop.TimestampType,
+				Type:     iop.BigIntType,
 				Position: 1,
 			},
 			{
@@ -461,7 +461,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{str.Timestamp, cast.ToFloat64(str.Value)})
+		data.Append([]any{str.Timestamp.Unix(), cast.ToFloat64(str.Value)})
 	} else {
 		return nil, g.Error("invalid result: %#v", result)
 	}
