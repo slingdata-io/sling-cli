@@ -133,12 +133,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]
 
-			if updateCol.IsDatetime() {
-				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
+			// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
+			isOracleDate := updateCol.DbType == "DATE" && srcConn.GetType() == dbio.TypeDbOracle
+
+			if updateCol.IsDate() || isOracleDate {
+				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
-			} else if updateCol.IsDate() {
-				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
+			} else if updateCol.IsDatetime() {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
 			} else if updateCol.IsString() {
