@@ -64,13 +64,14 @@ func (conn *MongoDBConn) getNewClient(timeOut ...int) (client *mongo.Client, err
 	if caFile := conn.GetProp("cert_ca_file"); caFile != "" {
 		tlsConfig := new(tls.Config)
 		certs, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load CA certificate")
+		}
+
 		tlsConfig.RootCAs = x509.NewCertPool()
 		ok := tlsConfig.RootCAs.AppendCertsFromPEM(certs)
 		if !ok {
-			return nil, g.Error(err, "failed parsing pem file")
-		}
-		if err != nil {
-			return nil, g.Error(err, "failed getting tls configuration")
+			return nil, g.Error("Failed to parse PEM file")
 		}
 
 		opts[0].SetTLSConfig(tlsConfig)
