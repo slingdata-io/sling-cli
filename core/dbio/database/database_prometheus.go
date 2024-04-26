@@ -8,6 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"crypto/tls"
+	"crypto/x509"
+	"os"
+
 	"github.com/flarco/g"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -47,6 +51,31 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 
 	if user := conn.GetProp("user"); user != "" {
 		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", api.DefaultRoundTripper)
+	}
+
+	key := conn.GetProp("client_key")
+	cert := conn.GetProp("client_cert")
+	cacert := conn.GetProp("client_cacert")
+	if key != "" && cert != "" {
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return nil, g.Error("Failed to load client certificate: %v", err)
+		}
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		if cacert != "" {
+			caCert, err := os.ReadFile(cacert)
+			if err != nil {
+				return nil, g.Error("Failed to load CA certificate: %v", err)
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			tlsConfig.RootCAs = caCertPool
+		}
+		rt = &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
 	}
 
 	c, err := api.NewClient(api.Config{
