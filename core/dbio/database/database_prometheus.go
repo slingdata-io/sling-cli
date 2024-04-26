@@ -53,9 +53,9 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", api.DefaultRoundTripper)
 	}
 
-	key := conn.GetProp("client_key")
-	cert := conn.GetProp("client_cert")
-	caCert := conn.GetProp("client_cacert")
+	key := conn.GetProp("cert_key")
+	cert := conn.GetProp("cert_file")
+	caCert := conn.GetProp("cert_ca_file")
 	if key != "" && cert != "" {
 		cert, err := tls.LoadX509KeyPair(cert, key)
 		if err != nil {

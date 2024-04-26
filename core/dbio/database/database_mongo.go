@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
+	"os"
 	"strings"
 	"time"
 
@@ -53,8 +56,27 @@ func (conn *MongoDBConn) getNewClient(timeOut ...int) (client *mongo.Client, err
 	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, time.Duration(to)*time.Second)
 	defer cancel()
 
-	opts := options.Client().SetCompressors([]string{"zstd", "snappy", "zlib"})
-	return mongo.Connect(ctx, options.Client().ApplyURI(conn.URL), opts)
+	opts := []*options.ClientOptions{
+		options.Client().ApplyURI(conn.URL),
+		options.Client().SetCompressors([]string{"zstd", "snappy", "zlib"}),
+	}
+
+	if caFile := conn.GetProp("cert_ca_file"); caFile != "" {
+		tlsConfig := new(tls.Config)
+		certs, err := os.ReadFile(caFile)
+		tlsConfig.RootCAs = x509.NewCertPool()
+		ok := tlsConfig.RootCAs.AppendCertsFromPEM(certs)
+		if !ok {
+			return nil, g.Error(err, "failed parsing pem file")
+		}
+		if err != nil {
+			return nil, g.Error(err, "failed getting tls configuration")
+		}
+
+		opts[0].SetTLSConfig(tlsConfig)
+	}
+
+	return mongo.Connect(ctx, opts...)
 }
 
 // Connect connects to the database
