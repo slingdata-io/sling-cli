@@ -13,9 +13,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/slingdata-io/sling-cli/core/env"
-	dbioEnv "github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
-	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -27,11 +25,6 @@ var (
 	updateVersion = ""
 	rowCount      = int64(0)
 )
-
-func init() {
-	// init sqlite
-	store.InitDB()
-}
 
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
@@ -205,7 +198,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			// run as replication is stream is wildcard
 			if cfg.HasWildcard() {
 				rc := cfg.AsReplication()
-				replicationCfgPath = path.Join(dbioEnv.GetTempFolder(), g.NewTsID("replication.temp")+".json")
+				replicationCfgPath = path.Join(env.GetTempFolder(), g.NewTsID("replication.temp")+".json")
 				err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
 				if err != nil {
 					return ok, g.Error(err, "could not write temp replication: %s", replicationCfgPath)
@@ -520,12 +513,6 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 
 	return eG.Err()
-}
-
-func printUpdateAvailable() {
-	if updateVersion != "" {
-		println(updateMessage)
-	}
 }
 
 func parsePayload(payload string, validate bool) (options map[string]any, err error) {
