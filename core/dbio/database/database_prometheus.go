@@ -314,30 +314,33 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				fieldMap = data.Columns.FieldMap(true)
 			}
 
-			row := make([]any, len(data.Columns))
-			for k, v := range metricMap {
-				row[index(k)] = v
-			}
-
 			for _, value := range sample.Values {
-				row[index("timestamp")] = value.Timestamp.Time()
-				row[index("value")] = cast.ToFloat64(value.Value)
+				row := make([]any, len(data.Columns))
+				for k, v := range metricMap {
+					row[index(k)] = v
+				}
+				row[index("timestamp")] = value.Timestamp.Unix()
+				row[index("value")] = value.Value
+				data.Append(row)
 			}
 
 			for _, value := range sample.Histograms {
-				row[index("timestamp")] = value.Timestamp.Time()
-				row[index("count")] = cast.ToFloat64(value.Histogram.Count)
-				row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
-
 				for _, bucket := range value.Histogram.Buckets {
+					row := make([]any, len(data.Columns))
+					for k, v := range metricMap {
+						row[index(k)] = v
+					}
+					row[index("timestamp")] = value.Timestamp.Unix()
+					row[index("count")] = cast.ToFloat64(value.Histogram.Count)
+					row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
 					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
 					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
 					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
 					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+					data.Append(row)
 				}
 			}
 
-			data.Append(row)
 			if Limit > 0 && len(data.Rows) >= Limit {
 				break
 			}
@@ -411,7 +414,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 			}
 
 			if sample.Histogram != nil {
-				row[index("timestamp")] = sample.Timestamp.Time()
+				row[index("timestamp")] = sample.Timestamp.Unix()
 				row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
 				row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
 
@@ -422,7 +425,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
 				}
 			} else {
-				row[index("timestamp")] = sample.Timestamp.Time()
+				row[index("timestamp")] = sample.Timestamp.Unix()
 				row[index("value")] = cast.ToFloat64(sample.Value)
 			}
 
