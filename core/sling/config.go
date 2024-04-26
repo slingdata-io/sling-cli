@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -212,7 +213,11 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	// add config path
 	if g.PathExists(cfgStr) && !cfg.ReplicationMode {
-		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
+		fp, err := filepath.Abs(cfgStr)
+		if err != nil {
+			fp = cfgStr
+		}
+		cfg.Env["SLING_CONFIG_PATH"] = fp
 	}
 
 	return nil
