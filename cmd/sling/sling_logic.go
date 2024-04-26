@@ -435,11 +435,11 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 		counter++
 
-		stream := replication.Streams[name]
-		if stream == nil {
-			stream = &sling.ReplicationStreamConfig{}
+		stream := sling.ReplicationStreamConfig{}
+		if replication.Streams[name] != nil {
+			stream = *replication.Streams[name]
 		}
-		sling.SetStreamDefaults(stream, replication)
+		sling.SetStreamDefaults(&stream, replication)
 
 		if stream.Object == "" {
 			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
