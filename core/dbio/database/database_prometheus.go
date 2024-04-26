@@ -8,10 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"crypto/tls"
-	"crypto/x509"
-	"os"
-
 	"github.com/flarco/g"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -44,40 +40,22 @@ func (conn *PrometheusConn) Init() error {
 // Init initiates the client
 func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err error) {
 
-	var rt http.RoundTripper
+	rt := api.DefaultRoundTripper
+
+	// get tls
+	tlsConfig, err := conn.getTlsConfig()
+	if err != nil {
+		return nil, g.Error(err)
+	} else if tlsConfig != nil {
+		rt = &http.Transport{TLSClientConfig: tlsConfig}
+	}
+
 	if token := conn.GetProp("token"); token != "" {
-		rt = config.NewAuthorizationCredentialsRoundTripper("Bearer", config.Secret(token), api.DefaultRoundTripper)
+		rt = config.NewAuthorizationCredentialsRoundTripper("Bearer", config.Secret(token), rt)
 	}
 
 	if user := conn.GetProp("user"); user != "" {
-		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", api.DefaultRoundTripper)
-	}
-
-	key := conn.GetProp("cert_key")
-	cert := conn.GetProp("cert_file")
-	caCert := conn.GetProp("cert_ca_file")
-	if key != "" && cert != "" {
-		cert, err := tls.LoadX509KeyPair(cert, key)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load client certificate")
-		}
-		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-		if caCert != "" {
-			caCert, err := os.ReadFile(caCert)
-			if err != nil {
-				return nil, g.Error(err, "Failed to load CA certificate")
-			}
-			tlsConfig.RootCAs = x509.NewCertPool()
-			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
-			if !ok {
-				return nil, g.Error("Failed to parse PEM file")
-			}
-		}
-		rt = &http.Transport{
-			TLSClientConfig: tlsConfig,
-		}
+		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", rt)
 	}
 
 	c, err := api.NewClient(api.Config{

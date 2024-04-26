@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"math"
@@ -3036,6 +3038,41 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 		}
 	}
 	return false
+}
+
+func (conn *BaseConn) getTlsConfig() (tlsConfig *tls.Config, err error) {
+	if cast.ToBool(conn.GetProp("tls")) {
+		tlsConfig = &tls.Config{}
+	}
+
+	cert := conn.GetProp("cert_file")
+	key := conn.GetProp("cert_key_file")
+	caCert := conn.GetProp("cert_ca_file")
+
+	if key != "" && cert != "" {
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load client certificate")
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		if caCert != "" {
+			caCert, err := os.ReadFile(caCert)
+			if err != nil {
+				return nil, g.Error(err, "Failed to load CA certificate")
+			}
+			tlsConfig.RootCAs = x509.NewCertPool()
+			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
+			if !ok {
+				return nil, g.Error("Failed to parse PEM file")
+			}
+		}
+	}
+
+	return
 }
 
 // settingMppBulkImportFlow sets settings for MPP databases type

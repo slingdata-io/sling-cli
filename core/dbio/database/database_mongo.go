@@ -2,10 +2,7 @@ package database
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"database/sql"
-	"os"
 	"strings"
 	"time"
 
@@ -61,19 +58,10 @@ func (conn *MongoDBConn) getNewClient(timeOut ...int) (client *mongo.Client, err
 		options.Client().SetCompressors([]string{"zstd", "snappy", "zlib"}),
 	}
 
-	if caFile := conn.GetProp("cert_ca_file"); caFile != "" {
-		tlsConfig := new(tls.Config)
-		certs, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, g.Error(err, "Failed to load CA certificate")
-		}
-
-		tlsConfig.RootCAs = x509.NewCertPool()
-		ok := tlsConfig.RootCAs.AppendCertsFromPEM(certs)
-		if !ok {
-			return nil, g.Error("Failed to parse PEM file")
-		}
-
+	tlsConfig, err := conn.getTlsConfig()
+	if err != nil {
+		return nil, g.Error(err)
+	} else if tlsConfig != nil {
 		opts[0].SetTLSConfig(tlsConfig)
 	}
 
