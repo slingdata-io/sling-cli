@@ -586,6 +586,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			g.F("@127.0.0.1:%d", localPort),
 		)
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
+		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
 	if conn.db == nil {

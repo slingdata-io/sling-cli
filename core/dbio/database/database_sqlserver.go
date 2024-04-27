@@ -377,7 +377,13 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 // need to use delimiter not in field, or do some other transformation
 func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count uint64, err error) {
 	var stderr, stdout bytes.Buffer
-	url, err := dburl.Parse(conn.URL)
+
+	connURL := conn.URL
+	if su := conn.GetProp("ssh_url"); su != "" {
+		connURL = su // use ssh url if specified
+	}
+
+	url, err := dburl.Parse(connURL)
 	if err != nil {
 		return
 	}
