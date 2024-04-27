@@ -738,6 +738,11 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		return
 	}
 
+	if len(ds.Buffer) == 0 {
+		// nothing to import
+		return
+	}
+
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
