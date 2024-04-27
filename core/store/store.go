@@ -125,10 +125,10 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		}
 	}
 
-	if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
+	if fileName := os.Getenv("SLING_REPLICATION_NAME"); fileName != "" {
+		exec.FilePath = g.String(fileName)
+	} else if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
 		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))
-	} else if fileID := os.Getenv("SLING_REPLICATION_ID"); fileID != "" {
-		exec.FilePath = g.String(fileID)
 	}
 
 	return &exec
