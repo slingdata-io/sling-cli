@@ -231,15 +231,19 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	value := data.Rows[0][0]
 	colType := data.Columns[0].Type
-	if colType.IsDatetime() {
-		val = g.R(
-			srcConnVarMap["timestamp_layout_str"],
-			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
-		)
-	} else if colType == iop.DateType {
+
+	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
+	isOracleDate := data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle
+
+	if colType.IsDate() || isOracleDate {
 		val = g.R(
 			srcConnVarMap["date_layout_str"],
 			"value", cast.ToTime(value).Format(srcConnVarMap["date_layout"]),
+		)
+	} else if colType.IsDatetime() {
+		val = g.R(
+			srcConnVarMap["timestamp_layout_str"],
+			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
 		)
 	} else if colType.IsNumber() {
 		val = cast.ToString(value)

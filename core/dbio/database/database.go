@@ -2,12 +2,15 @@ package database
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"math"
 	"net/url"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -585,6 +588,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			g.F("@127.0.0.1:%d", localPort),
 		)
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
+		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
 	if conn.db == nil {
@@ -896,9 +900,9 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		result.Close()
 
 		// if any error occurs during iteration
-		if result.Err() != nil {
-			it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
-		}
+		// if result.Err() != nil {
+		// 	it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
+		// }
 		return false
 	}
 
@@ -1195,7 +1199,7 @@ func (conn *BaseConn) QueryContext(ctx context.Context, sql string, options ...m
 
 	data.SQL = sql
 	data.Duration = conn.Data.Duration // Collect does not time duration
-
+	g.Trace("query returned %d rows", len(data.Rows))
 	return data, err
 }
 
@@ -1411,16 +1415,12 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := g.R(
-		conn.GetTemplateValue("core.limit"),
-		"sql", table.SQL,
-		"limit", "1",
-	)
+	limitSQL := table.Select(1)
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
-	ds, err := conn.Self().StreamRows(limitSQL)
+	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", 1))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}
@@ -2906,6 +2906,13 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 // to the checkum values from the StreamProcessor
 func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (err error) {
 
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
+		}
+	}()
+
 	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {
 		return g.Error(err, "could not parse table name")
@@ -2975,6 +2982,10 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	data, err := conn.Self().Query(sql)
 	if err != nil {
 		return g.Error(err, "error running CompareChecksums query")
+	} else if len(data.Rows) == 0 {
+		return g.Error("error running CompareChecksums query. No Rows returns")
+	} else if len(data.Rows[0]) != len(data.Columns) {
+		return g.Error("error running CompareChecksums query. Row vs Column size mismatch (%d != %d)", len(data.Rows[0]), len(data.Columns))
 	}
 
 	eg := g.ErrorGroup{}
@@ -3035,6 +3046,41 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 		}
 	}
 	return false
+}
+
+func (conn *BaseConn) getTlsConfig() (tlsConfig *tls.Config, err error) {
+	if cast.ToBool(conn.GetProp("tls")) {
+		tlsConfig = &tls.Config{}
+	}
+
+	cert := conn.GetProp("cert_file")
+	key := conn.GetProp("cert_key_file")
+	caCert := conn.GetProp("cert_ca_file")
+
+	if key != "" && cert != "" {
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load client certificate")
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		if caCert != "" {
+			caCert, err := os.ReadFile(caCert)
+			if err != nil {
+				return nil, g.Error(err, "Failed to load CA certificate")
+			}
+			tlsConfig.RootCAs = x509.NewCertPool()
+			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
+			if !ok {
+				return nil, g.Error("Failed to parse PEM file")
+			}
+		}
+	}
+
+	return
 }
 
 // settingMppBulkImportFlow sets settings for MPP databases type

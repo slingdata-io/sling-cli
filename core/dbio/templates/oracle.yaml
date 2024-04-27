@@ -303,5 +303,5 @@ variable:
   error_ignore_drop_view: "ORA-00942"
   bind_string: ":{field}{n}"
   batch_rows: 20
-  date_layout_str: TO_DATE('{value}', 'YYYY-MM-DD HH24:MI:SS')
+  date_layout_str: TO_DATE('{value}', 'YYYY-MM-DD HH24:MI:SS') # DATE in oracle has a time component
   timestamp_layout_str: TO_TIMESTAMP('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6')

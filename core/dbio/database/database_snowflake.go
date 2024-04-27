@@ -487,6 +487,7 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 	df.Defer(func() { filesys.Delete(s3Fs, s3Path) }) // cleanup
 
 	g.Info("writing to s3 for snowflake import")
+	s3Fs.SetProp("null_as", `\N`)
 	bw, err := s3Fs.WriteDataflow(df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "Error in FileSysWriteDataflow")
@@ -513,6 +514,7 @@ func (conn *SnowflakeConn) CopyFromS3(tableFName, s3Path string) (err error) {
 		"aws_access_key_id", AwsID,
 		"aws_secret_access_key", AwsAccessKey,
 	)
+	sql = conn.setEmptyAsNull(sql)
 
 	g.Info("copying into snowflake from s3")
 	g.Debug("url: " + s3Path)
@@ -555,6 +557,7 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 	df.Defer(func() { filesys.Delete(azFs, azPath) }) // cleanup
 
 	g.Info("writing to azure for snowflake import")
+	azFs.SetProp("null_as", `\N`)
 	bw, err := azFs.WriteDataflow(df, azPath)
 	if err != nil {
 		return df.Count(), g.Error(err, "Error in FileSysWriteDataflow")
@@ -578,6 +581,7 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 		"azure_path", azPath,
 		"azure_sas_token", azToken,
 	)
+	sql = conn.setEmptyAsNull(sql)
 
 	g.Info("copying into snowflake from azure")
 	g.Debug("url: " + azPath)
@@ -703,6 +707,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			return
 		}
 
+		fs.SetProp("null_as", `\N`)
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
@@ -774,6 +779,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			"src_columns", strings.Join(srcColumns, ", "),
 			"stage_path", stageFilePath,
 		)
+		sql = conn.setEmptyAsNull(sql)
+
 		_, err = conn.Exec(sql)
 		if err != nil {
 			err = g.Error(err, "Error with COPY INTO")
@@ -806,6 +813,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			"src_columns", strings.Join(srcColumns, ", "),
 			"stage_path", stageFolderPath,
 		)
+		sql = conn.setEmptyAsNull(sql)
+
 		data, err := conn.Query(sql)
 		if err != nil {
 			err = g.Error(err, "Error with COPY INTO")
@@ -840,6 +849,13 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	return df.Count(), nil
+}
+
+func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
+	if !cast.ToBool(conn.GetProp("empty_as_null")) {
+		sql = strings.ReplaceAll(sql, "EMPTY_FIELD_AS_NULL=TRUE", "EMPTY_FIELD_AS_NULL=FALSE")
+	}
+	return sql
 }
 
 // GetFile Copies from a staging location to a local file or folder

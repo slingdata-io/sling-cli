@@ -94,17 +94,21 @@ func (m *Metadata) AsMap() map[string]any {
 
 // Iterator is the row provider for a datastream
 type Iterator struct {
-	Row         []any
-	Reprocess   chan []any
-	IsCasted    bool
-	RowIsCasted bool
-	Counter     uint64
-	Context     *g.Context
-	Closed      bool
-	ds          *Datastream
-	dsBufferI   int // -1 means ds is not buffered
-	nextFunc    func(it *Iterator) bool
-	limitCnt    uint64 // to not check for df limit each cycle
+	Row          []any
+	Reprocess    chan []any
+	IsCasted     bool
+	RowIsCasted  bool
+	Counter      uint64
+	StreamRowNum uint64
+	Context      *g.Context
+	Closed       bool
+	ds           *Datastream
+	dsBufferI    int // -1 means ds is not buffered
+	nextFunc     func(it *Iterator) bool
+	limitCnt     uint64 // to not check for df limit each cycle
+
+	prevStreamURL  any
+	dsBufferStream []string
 }
 
 // NewDatastream return a new datastream
@@ -138,6 +142,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		ID:            g.NewTsID("ds"),
 		BatchChan:     make(chan *Batch, 1000),
 		Batches:       []*Batch{},
+		Buffer:        make([][]any, 0, SampleSize),
 		Columns:       columns,
 		Context:       &context,
 		Sp:            NewStreamProcessor(),
@@ -145,7 +150,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
 		bwRows:        make(chan []any, 100),
-		readyChn:      make(chan struct{}),
+		readyChn:      make(chan struct{}, 1),
 		schemaChgChan: make(chan schemaChg, 1000),
 		pauseChan:     make(chan struct{}),
 		unpauseChan:   make(chan struct{}),
@@ -182,7 +187,7 @@ func (ds *Datastream) processBwRows() {
 		}()
 
 		for row := range ds.bwRows {
-			ds.writeBwCsv(ds.CastRowToString(row))
+			ds.writeBwCsv(ds.CastRowToStringSafe(row))
 			ds.bwCsv.Flush()
 		}
 		done = true
@@ -238,6 +243,15 @@ func (ds *Datastream) CastRowToString(row []any) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
 		rowStr[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+	}
+	return rowStr
+}
+
+// CastRowToStringSafe returns the row as string casted (safer)
+func (ds *Datastream) CastRowToStringSafe(row []any) []string {
+	rowStr := make([]string, len(row))
+	for i, val := range row {
+		rowStr[i] = ds.Sp.CastToStringSafe(i, val, ds.Columns[i].Type)
 	}
 	return rowStr
 }
@@ -697,7 +711,7 @@ loop:
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return it.Counter
+				return it.StreamRowNum
 			}
 		}
 
@@ -742,6 +756,8 @@ loop:
 		g.Trace("new ds.Start %s [%s]", ds.ID, ds.Metadata.StreamURL.Value)
 	}
 
+	ds.SetReady()
+
 	go func() {
 		// recover from panic
 		defer func() {
@@ -754,7 +770,6 @@ loop:
 		var err error
 		defer ds.Close()
 
-		ds.SetReady()
 		if ds.CurrentBatch == nil {
 			ds.CurrentBatch = ds.NewBatch(ds.Columns)
 		}
@@ -793,7 +808,7 @@ loop:
 					break loop
 				}
 
-				if df := ds.df; df != nil && df.OnColumnAdded != nil && df.OnColumnChanged != nil {
+				if df := ds.df; df != nil {
 					select {
 					case <-ds.pauseChan:
 						<-ds.unpauseChan // wait for unpause
@@ -803,12 +818,12 @@ loop:
 					case schemaChgVal := <-ds.schemaChgChan:
 						ds.CurrentBatch.Close()
 
-						if schemaChgVal.Added {
+						if schemaChgVal.Added && df.OnColumnAdded != nil {
 							// g.DebugLow("adding columns %s", g.Marshal(schemaChgVal.AddedCols.Types()))
 							if _, ok := df.AddColumns(schemaChgVal.AddedCols, false, ds.ID); !ok {
 								ds.schemaChgChan <- schemaChgVal // requeue to try adding again
 							}
-						} else {
+						} else if df.OnColumnChanged != nil {
 							// g.DebugLow("changing column %s to %s", df.Columns[schemaChgVal.I].Name, schemaChgVal.Type)
 							if !df.ChangeColumn(schemaChgVal.ChangedIndex, schemaChgVal.ChangedType, ds.ID) {
 								ds.schemaChgChan <- schemaChgVal // requeue to try changing again
@@ -941,9 +956,94 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 	return
 }
 
+type ReaderReady struct {
+	Reader io.Reader
+	URI    string
+}
+
+func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bool) (err error) {
+
+	nextJSON := func(reader *ReaderReady) (*jsonStream, error) {
+
+		// set URI
+		ds.Metadata.StreamURL.Value = reader.URI
+
+		// decompress if needed
+		reader2, err := AutoDecompress(reader.Reader)
+		if err != nil {
+			return nil, g.Error(err, "could not auto-decompress")
+		}
+
+		// decode File if requested by transform
+		if newReader, ok := ds.transformReader(reader2); ok {
+			reader2 = newReader
+		}
+
+		var decoder decoderLike
+		if isXML {
+			decoder = xml.NewDecoder(reader2)
+		} else {
+			decoder = json.NewDecoder(reader2)
+		}
+		jsNew := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
+		return jsNew, nil
+	}
+
+	js, err := nextJSON(<-readerChn)
+	if err != nil {
+		return
+	}
+
+	nextFunc := func(it *Iterator) bool {
+
+	processNext:
+		hasNext := js.NextFunc(it)
+
+		if !hasNext && it.Context.Err() == nil {
+			// next reader
+			for reader := range readerChn {
+				if reader == nil {
+					return false
+				}
+
+				jsNew, err := nextJSON(reader)
+				if err != nil {
+					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
+					return false
+				}
+
+				// keep column map & sp
+				jsNew.ColumnMap = js.ColumnMap
+				jsNew.sp = js.sp
+				js = jsNew
+
+				goto processNext
+			}
+		}
+
+		// set stream url
+		if it.dsBufferI == -1 {
+			// still buffering
+			streamURL := cast.ToString(ds.Metadata.StreamURL.Value)
+			it.dsBufferStream = append(it.dsBufferStream, streamURL)
+		}
+
+		return hasNext
+	}
+
+	ds.it = ds.NewIterator(ds.Columns, nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+	return
+}
+
 // ConsumeCsvReaderChl reads a channel of readers. Should be safe to use with
 // header top row
-func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) {
+func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err error) {
 
 	c := CSV{
 		NoHeader:        !ds.config.Header,
@@ -957,13 +1057,16 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 		c.Delimiter = rune(ds.config.Delimiter[0])
 	}
 
-	nextCSV := func(reader io.Reader) (r csv.CsvReaderLike, err error) {
-		c.Reader = reader
+	nextCSV := func(reader *ReaderReady) (r csv.CsvReaderLike, err error) {
+		c.Reader = reader.Reader
+
+		// set URI
+		ds.Metadata.StreamURL.Value = reader.URI
 
 		// decompress if needed
 		readerDecompr, err := AutoDecompress(c.Reader)
 		if err != nil {
-			return r, g.Error(err, "Decompress(c.Reader)")
+			return r, g.Error(err, "could not auto-decompress")
 		}
 
 		// decode File if requested by transform
@@ -981,26 +1084,36 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 	}
 
 	var r csv.CsvReaderLike
-	r, err = nextCSV(<-readerChn)
-	if err != nil {
-		return
+	var row0 []string
+	for reader := range readerChn {
+		r, err = nextCSV(reader)
+		if err != nil {
+			return
+		}
+
+		row0, err = r.Read()
+		if err == io.EOF {
+			if ds.Metadata.StreamURL.Value != nil {
+				g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+			}
+
+			// if first reader is empty, continue cycling until non-empty file
+			continue
+		} else if err != nil {
+			err = g.Error(err, "could not parse header line")
+			ds.Context.CaptureErr(err)
+			return err
+		}
+
+		break // got header row
 	}
 
-	row0, err := r.Read()
 	if err == io.EOF {
-		if ds.Metadata.StreamURL.Value != nil {
-			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
-		}
+		// all readers are empty
 		ds.SetReady()
 		ds.Close()
 		return nil
-	} else if err != nil {
-		err = g.Error(err, "could not parse header line")
-		ds.Context.CaptureErr(err)
-		return err
-	}
-
-	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
+	} else if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 
@@ -1052,6 +1165,13 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan io.Reader) (err error) 
 				val = val0
 			}
 			it.Row[i] = val
+		}
+
+		// set stream url
+		if it.dsBufferI == -1 {
+			// still buffering
+			streamURL := cast.ToString(ds.Metadata.StreamURL.Value)
+			it.dsBufferStream = append(it.dsBufferStream, streamURL)
 		}
 
 		return true
@@ -2240,6 +2360,18 @@ func (it *Iterator) addNewColumns(newRowLen int) {
 	mux.Unlock()
 }
 
+func (it *Iterator) incrementStreamRowNum() {
+	if it.dsBufferI == -1 {
+		return
+	}
+	if it.prevStreamURL == it.ds.Metadata.StreamURL.Value {
+		it.StreamRowNum++
+	} else {
+		it.prevStreamURL = it.ds.Metadata.StreamURL.Value
+		it.StreamRowNum = 1
+	}
+}
+
 func (it *Iterator) next() bool {
 	it.RowIsCasted = false // reset RowIsCasted
 
@@ -2258,12 +2390,17 @@ func (it *Iterator) next() bool {
 		// process ds Buffer, dsBufferI should be > -1
 		if it.dsBufferI > -1 && it.dsBufferI < len(it.ds.Buffer) {
 			it.Row = it.ds.Buffer[it.dsBufferI]
+			if it.dsBufferI < len(it.dsBufferStream) && it.dsBufferStream[it.dsBufferI] != "" {
+				it.ds.Metadata.StreamURL.Value = it.dsBufferStream[it.dsBufferI]
+			}
+			it.incrementStreamRowNum()
 			it.dsBufferI++
 			return true
 		}
 
 		next := it.nextFunc(it)
 		if next {
+			it.incrementStreamRowNum()
 			it.Counter++
 
 			// logic to improve perf but not checking if

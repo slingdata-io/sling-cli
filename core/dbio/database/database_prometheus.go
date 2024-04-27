@@ -37,16 +37,25 @@ func (conn *PrometheusConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
-// Init initiates the object
+// Init initiates the client
 func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err error) {
 
-	var rt http.RoundTripper
+	rt := api.DefaultRoundTripper
+
+	// get tls
+	tlsConfig, err := conn.getTlsConfig()
+	if err != nil {
+		return nil, g.Error(err)
+	} else if tlsConfig != nil {
+		rt = &http.Transport{TLSClientConfig: tlsConfig}
+	}
+
 	if token := conn.GetProp("token"); token != "" {
-		rt = config.NewAuthorizationCredentialsRoundTripper("Bearer", config.Secret(token), api.DefaultRoundTripper)
+		rt = config.NewAuthorizationCredentialsRoundTripper("Bearer", config.Secret(token), rt)
 	}
 
 	if user := conn.GetProp("user"); user != "" {
-		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", api.DefaultRoundTripper)
+		rt = config.NewBasicAuthRoundTripper(user, config.Secret(conn.GetProp("password")), "", "", rt)
 	}
 
 	c, err := api.NewClient(api.Config{
@@ -255,7 +264,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				if len(sample.Histograms) > 0 {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -291,7 +300,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				} else {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -305,30 +314,33 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				fieldMap = data.Columns.FieldMap(true)
 			}
 
-			row := make([]any, len(data.Columns))
-			for k, v := range metricMap {
-				row[index(k)] = v
-			}
-
 			for _, value := range sample.Values {
-				row[index("timestamp")] = value.Timestamp.Time()
-				row[index("value")] = cast.ToFloat64(value.Value)
+				row := make([]any, len(data.Columns))
+				for k, v := range metricMap {
+					row[index(k)] = v
+				}
+				row[index("timestamp")] = value.Timestamp.Unix()
+				row[index("value")] = value.Value
+				data.Append(row)
 			}
 
 			for _, value := range sample.Histograms {
-				row[index("timestamp")] = value.Timestamp.Time()
-				row[index("count")] = cast.ToFloat64(value.Histogram.Count)
-				row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
-
 				for _, bucket := range value.Histogram.Buckets {
+					row := make([]any, len(data.Columns))
+					for k, v := range metricMap {
+						row[index(k)] = v
+					}
+					row[index("timestamp")] = value.Timestamp.Unix()
+					row[index("count")] = cast.ToFloat64(value.Histogram.Count)
+					row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
 					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
 					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
 					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
 					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+					data.Append(row)
 				}
 			}
 
-			data.Append(row)
 			if Limit > 0 && len(data.Rows) >= Limit {
 				break
 			}
@@ -346,7 +358,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				if sample.Histogram != nil {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -382,7 +394,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				} else {
 					columns = append(columns, iop.Column{
 						Name:     "timestamp",
-						Type:     iop.TimestampType,
+						Type:     iop.BigIntType,
 						Position: len(columns) + 1,
 					})
 					columns = append(columns, iop.Column{
@@ -402,7 +414,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 			}
 
 			if sample.Histogram != nil {
-				row[index("timestamp")] = sample.Timestamp.Time()
+				row[index("timestamp")] = sample.Timestamp.Unix()
 				row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
 				row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
 
@@ -413,7 +425,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
 				}
 			} else {
-				row[index("timestamp")] = sample.Timestamp.Time()
+				row[index("timestamp")] = sample.Timestamp.Unix()
 				row[index("value")] = cast.ToFloat64(sample.Value)
 			}
 
@@ -426,7 +438,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		data.Columns = iop.Columns{
 			{
 				Name:     "timestamp",
-				Type:     iop.TimestampType,
+				Type:     iop.BigIntType,
 				Position: 1,
 			},
 			{
@@ -435,12 +447,12 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{scalar.Timestamp, cast.ToFloat64(scalar.Value)})
+		data.Append([]any{scalar.Timestamp.Unix(), cast.ToFloat64(scalar.Value)})
 	} else if str, ok := result.(*model.String); ok {
 		data.Columns = iop.Columns{
 			{
 				Name:     "timestamp",
-				Type:     iop.TimestampType,
+				Type:     iop.BigIntType,
 				Position: 1,
 			},
 			{
@@ -449,7 +461,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 				Position: 2,
 			},
 		}
-		data.Append([]any{str.Timestamp, cast.ToFloat64(str.Value)})
+		data.Append([]any{str.Timestamp.Unix(), cast.ToFloat64(str.Value)})
 	} else {
 		return nil, g.Error("invalid result: %#v", result)
 	}

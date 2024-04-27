@@ -28,7 +28,7 @@ type Execution struct {
 	ExecID string `json:"exec_id,omitempty" gorm:"index"`
 
 	// StreamID represents the stream inside the replication that is running.
-	// Is an MD5 construct:`md5(Source, Target, Stream)`.
+	// Is an MD5 construct:`md5(Source, Target, Stream, Object)`.
 	StreamID string `json:"stream_id,omitempty" sql:"not null" gorm:"index"`
 
 	// ConfigMD5 points to config table. not null
@@ -73,7 +73,7 @@ type Task struct {
 
 	Type sling.JobType `json:"type"  gorm:"index"`
 
-	Task sling.Config `json:"task"`
+	Config sling.Config `json:"config"`
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
@@ -89,7 +89,7 @@ type Replication struct {
 
 	Type sling.JobType `json:"type"  gorm:"index"`
 
-	Replication sling.ReplicationConfig `json:"replication"`
+	Config sling.ReplicationConfig `json:"config"`
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
@@ -102,7 +102,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	exec := Execution{
 		ExecID:         t.ExecID,
-		StreamID:       g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.Source.Stream),
+		StreamID:       g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.StreamName, t.Config.Target.Object),
 		Status:         t.Status,
 		StartTime:      t.StartTime,
 		EndTime:        t.EndTime,
@@ -125,10 +125,10 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		}
 	}
 
-	if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
+	if fileName := os.Getenv("SLING_REPLICATION_NAME"); fileName != "" {
+		exec.FilePath = g.String(fileName)
+	} else if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
 		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))
-	} else if fileID := os.Getenv("SLING_REPLICATION_ID"); fileID != "" {
-		exec.FilePath = g.String(fileID)
 	}
 
 	return &exec
@@ -140,8 +140,8 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 	}
 
 	task = &Task{
-		Type: t.Type,
-		Task: *t.Config,
+		Type:   t.Type,
+		Config: *t.Config,
 	}
 
 	projID := t.Config.Env["SLING_PROJECT_ID"]
@@ -151,10 +151,10 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 
 	if t.Replication != nil {
 		replication = &Replication{
-			Name:        t.Config.Env["SLING_CONFIG_PATH"],
-			Type:        t.Type,
-			MD5:         t.Replication.MD5(),
-			Replication: *t.Replication,
+			Name:   t.Config.Env["SLING_CONFIG_PATH"],
+			Type:   t.Type,
+			MD5:    t.Replication.MD5(),
+			Config: *t.Replication,
 		}
 
 		if projID != "" {
@@ -163,24 +163,24 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 	}
 
 	// clean up
-	if strings.Contains(task.Task.Source.Conn, "://") {
-		task.Task.Source.Conn = strings.Split(task.Task.Source.Conn, "://")[0] + "://"
+	if strings.Contains(task.Config.Source.Conn, "://") {
+		task.Config.Source.Conn = strings.Split(task.Config.Source.Conn, "://")[0] + "://"
 	}
 
-	if strings.Contains(task.Task.Target.Conn, "://") {
-		task.Task.Target.Conn = strings.Split(task.Task.Target.Conn, "://")[0] + "://"
+	if strings.Contains(task.Config.Target.Conn, "://") {
+		task.Config.Target.Conn = strings.Split(task.Config.Target.Conn, "://")[0] + "://"
 	}
 
-	task.Task.Source.Data = nil
-	task.Task.Target.Data = nil
+	task.Config.Source.Data = nil
+	task.Config.Target.Data = nil
 
-	task.Task.SrcConn = connection.Connection{}
-	task.Task.TgtConn = connection.Connection{}
+	task.Config.SrcConn = connection.Connection{}
+	task.Config.TgtConn = connection.Connection{}
 
-	task.Task.Prepared = false
+	task.Config.Prepared = false
 
-	delete(task.Task.Env, "SLING_PROJECT_ID")
-	delete(task.Task.Env, "SLING_CONFIG_PATH")
+	delete(task.Config.Env, "SLING_PROJECT_ID")
+	delete(task.Config.Env, "SLING_CONFIG_PATH")
 
 	// set md5
 	task.MD5 = t.Config.MD5()

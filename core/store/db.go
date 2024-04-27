@@ -50,6 +50,9 @@ func InitDB() {
 		&Replication{},
 	}
 
+	// manual migrations
+	migrate()
+
 	for _, table := range allTables {
 		dryDB := Db.Session(&gorm.Session{DryRun: true})
 		tableName := dryDB.Find(table).Statement.Table
@@ -63,8 +66,14 @@ func InitDB() {
 			return
 		}
 	}
+}
 
-	// fix bad unique index
+func migrate() {
+	// migrations
+	Db.Migrator().RenameColumn(&Task{}, "task", "config")               // rename column for consistency
+	Db.Migrator().RenameColumn(&Replication{}, "replication", "config") // rename column for consistency
+
+	// fix bad unique index on Execution.ExecID
 	data, _ := Conn.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
 	if len(data.Rows) > 0 {
 		Db.Exec(g.F("drop index if exists %s", data.Rows[0][0]))

@@ -45,6 +45,7 @@ type StreamConfig struct {
 	Header            bool                       `json:"header"`
 	Compression       string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
 	NullIf            string                     `json:"null_if"`
+	NullAs            string                     `json:"null_as"`
 	DatetimeFormat    string                     `json:"datetime_format"`
 	SkipBlankLines    bool                       `json:"skip_blank_lines"`
 	Delimiter         string                     `json:"delimiter"`
@@ -203,6 +204,8 @@ func NewStreamProcessor() *StreamProcessor {
 		"2006-01-02 15:04",
 		"2006-01-02T15:04",
 		"2006/01/02 15:04:05",
+		"02-01-2006",
+		"02-01-2006 15:04:05",
 	}
 	return &sp
 }
@@ -269,6 +272,9 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 	if configMap["null_if"] != "" {
 		sp.Config.NullIf = configMap["null_if"]
+	}
+	if configMap["null_as"] != "" {
+		sp.Config.NullAs = configMap["null_as"]
 	}
 	if configMap["trim_space"] != "" {
 		sp.Config.TrimSpace = cast.ToBool(configMap["trim_space"])
@@ -814,7 +820,7 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 
 	switch {
 	case val == nil:
-		return ""
+		return sp.Config.NullAs
 	case sp.Config.BoolAsInt && typ.IsBool():
 		switch cast.ToString(val) {
 		case "true", "1", "TRUE":
@@ -844,6 +850,48 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return tVal.Format("2006-01-02 15:04:05.000000") + " +00"
 		}
 		return tVal.Format("2006-01-02 15:04:05.000000 -07")
+	default:
+		return cast.ToString(val)
+	}
+}
+
+// CastToStringSafe to string (safer)
+func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...ColumnType) string {
+	typ := ColumnType("")
+	switch v := val.(type) {
+	case time.Time:
+		typ = DatetimeType
+	default:
+		_ = v
+	}
+
+	if len(valType) > 0 {
+		typ = valType[0]
+	}
+
+	switch {
+	case val == nil:
+		return ""
+	case sp.Config.BoolAsInt && typ.IsBool():
+		switch cast.ToString(val) {
+		case "true", "1", "TRUE":
+			return "1"
+		}
+		return "0"
+	case typ.IsDecimal() || typ.IsFloat():
+		return cast.ToString(val)
+	case typ.IsDate():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.UTC().Format("2006-01-02")
+	case typ.IsDatetime():
+		tVal, _ := sp.CastToTime(val)
+		if tVal.IsZero() {
+			return ""
+		}
+		return tVal.UTC().Format("2006-01-02 15:04:05.000000") + " +00"
 	default:
 		return cast.ToString(val)
 	}
