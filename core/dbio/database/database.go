@@ -335,6 +335,8 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 		driverName = "sqlserver"
 	case dbio.TypeDbTrino:
 		driverName = "trino"
+	case dbio.TypeDbProton:
+		driverName = "proton"
 	default:
 		driverName = dbType.String()
 	}

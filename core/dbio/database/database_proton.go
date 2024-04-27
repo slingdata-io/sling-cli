@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+	_ "github.com/timeplus-io/proton-go-driver/v2"
 
 	"github.com/flarco/g"
 )

@@ -54,11 +54,12 @@ require (
 	github.com/snowflakedb/gosnowflake v1.8.0
 	github.com/spf13/cast v1.5.0
 	github.com/stretchr/testify v1.9.0
+	github.com/timeplus-io/proton-go-driver/v2 v2.0.17
 	github.com/trinodb/trino-go-client v0.313.0
 	github.com/xo/dburl v0.3.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	go.mongodb.org/mongo-driver v1.14.0
-	golang.org/x/crypto v0.21.0
+	golang.org/x/crypto v0.22.0
 	golang.org/x/oauth2 v0.18.0
 	golang.org/x/text v0.14.0
 	google.golang.org/api v0.167.0

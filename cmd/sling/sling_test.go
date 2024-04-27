@@ -68,6 +68,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
+	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 
 	dbio.TypeFileLocal:  {name: "local"},
 	dbio.TypeFileSftp:   {name: "sftp"},
@@ -535,6 +536,11 @@ func TestSuiteDatabaseClickhouse(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
+}
+
+func TestSuiteDatabaseProton(t *testing.T) {
+	t.Parallel()
+	// testSuite(t, dbio.TypeDbProton)
 }
 
 func TestSuiteDatabaseTrino(t *testing.T) {

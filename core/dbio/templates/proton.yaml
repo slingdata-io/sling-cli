@@ -68,7 +68,7 @@ metadata:
       cols.name as column_name,
       cols.type as data_type,
       cols.position as position
-    from system.columns cols
+    from system.columns as cols
     join tables
       on tables.database = cols.database
       and tables.table_name = cols.table
@@ -92,7 +92,7 @@ metadata:
       cols.name as column_name,
       cols.type as data_type,
       cols.position as position
-    from system.columns cols
+    from system.columns as cols
     join tables
       on tables.database = cols.database
       and tables.table_name = cols.table
