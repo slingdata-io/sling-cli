@@ -408,23 +408,25 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 
 	if valRowCountVal := cfg.Env["validation_stream_row_count"]; valRowCountVal != "" {
+		taskCount := cast.ToInt(task.GetCount())
 		if strings.HasPrefix(valRowCountVal, ">") {
-			valRowCount := cast.ToUint64(strings.TrimPrefix(valRowCountVal, ">"))
-			assert.Greater(t, task.GetCount(), valRowCount, "validation_stream_row_count")
+			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
+			assert.Greater(t, taskCount, valRowCount, "validation_stream_row_count")
 		} else {
-			valRowCount := cast.ToUint64(valRowCountVal)
-			assert.EqualValues(t, valRowCount, task.GetCount(), "validation_stream_row_count")
+			valRowCount := cast.ToInt(valRowCountVal)
+			assert.EqualValues(t, valRowCount, taskCount, "validation_stream_row_count")
 		}
 	}
 
 	if valRowCountVal := cfg.Env["validation_row_count"]; valRowCountVal != "" {
 		conn, _ := task.Config.TgtConn.AsDatabase()
-		count, _ := conn.GetCount(task.Config.Target.Object)
+		countU, _ := conn.GetCount(task.Config.Target.Object)
+		count := cast.ToInt(countU)
 		if strings.HasPrefix(valRowCountVal, ">") {
-			valRowCount := cast.ToUint64(strings.TrimPrefix(valRowCountVal, ">"))
+			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
 			assert.Greater(t, count, valRowCount, "validation_row_count")
 		} else {
-			valRowCount := cast.ToUint64(valRowCountVal)
+			valRowCount := cast.ToInt(valRowCountVal)
 			assert.EqualValues(t, valRowCount, count, "validation_row_count")
 		}
 	}
