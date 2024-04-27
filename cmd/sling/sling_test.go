@@ -540,7 +540,7 @@ func TestSuiteDatabaseClickhouse(t *testing.T) {
 
 func TestSuiteDatabaseProton(t *testing.T) {
 	t.Parallel()
-	// testSuite(t, dbio.TypeDbProton)
+	testSuite(t, dbio.TypeDbProton, "22")
 }
 
 func TestSuiteDatabaseTrino(t *testing.T) {
