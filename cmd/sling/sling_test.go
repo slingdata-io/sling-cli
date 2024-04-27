@@ -551,6 +551,9 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 // }
 
 func TestSuiteDatabaseClickhouse(t *testing.T) {
+	if cast.ToBool(os.Getenv("SKIP_CLICKHOUSE")) {
+		return
+	}
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
