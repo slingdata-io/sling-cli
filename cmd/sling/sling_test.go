@@ -407,10 +407,26 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 	}
 
-	if valRowCount := cast.ToInt(cfg.Env["validation_row_count"]); valRowCount > 0 {
+	if valRowCountVal := cfg.Env["validation_stream_row_count"]; valRowCountVal != "" {
+		if strings.HasPrefix(valRowCountVal, ">") {
+			valRowCount := cast.ToUint64(strings.TrimPrefix(valRowCountVal, ">"))
+			assert.Greater(t, task.GetCount(), valRowCount, "validation_stream_row_count")
+		} else {
+			valRowCount := cast.ToUint64(valRowCountVal)
+			assert.EqualValues(t, valRowCount, task.GetCount(), "validation_stream_row_count")
+		}
+	}
+
+	if valRowCountVal := cfg.Env["validation_row_count"]; valRowCountVal != "" {
 		conn, _ := task.Config.TgtConn.AsDatabase()
 		count, _ := conn.GetCount(task.Config.Target.Object)
-		assert.EqualValues(t, valRowCount, count)
+		if strings.HasPrefix(valRowCountVal, ">") {
+			valRowCount := cast.ToUint64(strings.TrimPrefix(valRowCountVal, ">"))
+			assert.Greater(t, count, valRowCount, "validation_row_count")
+		} else {
+			valRowCount := cast.ToUint64(valRowCountVal)
+			assert.EqualValues(t, valRowCount, count, "validation_row_count")
+		}
 	}
 
 	// validate file
