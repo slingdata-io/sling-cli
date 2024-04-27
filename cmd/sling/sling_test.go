@@ -411,10 +411,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		taskCount := cast.ToInt(task.GetCount())
 		if strings.HasPrefix(valRowCountVal, ">") {
 			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
-			assert.Greater(t, taskCount, valRowCount, "validation_stream_row_count")
+			assert.Greater(t, taskCount, valRowCount, "validation_stream_row_count (%s)", file.Name)
 		} else {
 			valRowCount := cast.ToInt(valRowCountVal)
-			assert.EqualValues(t, valRowCount, taskCount, "validation_stream_row_count")
+			assert.EqualValues(t, valRowCount, taskCount, "validation_stream_row_count (%s)", file.Name)
 		}
 	}
 
@@ -424,10 +424,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		count := cast.ToInt(countU)
 		if strings.HasPrefix(valRowCountVal, ">") {
 			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
-			assert.Greater(t, count, valRowCount, "validation_row_count")
+			assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
 		} else {
 			valRowCount := cast.ToInt(valRowCountVal)
-			assert.EqualValues(t, valRowCount, count, "validation_row_count")
+			assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
 		}
 	}
 
@@ -457,7 +457,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				// g.P(dataDB.ColValues(0))
 				// g.P(dataDB.ColValues(1))
 				// g.P(valuesDb)
-				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+				if assert.Equal(t, len(valuesFile), len(valuesDb), file.Name) {
 					for i := range valuesDb {
 						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
 						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
