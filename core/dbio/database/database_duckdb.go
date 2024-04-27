@@ -50,7 +50,7 @@ func (conn *DuckDbConn) Init() error {
 
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbDuckDb
-	if strings.HasPrefix(conn.URL, "motherduck") {
+	if strings.HasPrefix(conn.URL, "motherduck") || strings.HasPrefix(conn.URL, "duckdb://md:") {
 		conn.BaseConn.Type = dbio.TypeDbMotherDuck
 	}
 
@@ -603,7 +603,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	conn.LogSQL(sql)
 
-	cmd.Args = append(cmd.Args, "-csv")
+	cmd.Args = append(cmd.Args, "-csv", "-nullvalue", `\N\`)
 
 	conn.setDuckDbFileCmd(cmd)
 	fileContext, _ := conn.getDuckDbFileContext()
@@ -646,12 +646,9 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	ds.SafeInference = true
 	ds.NoDebug = strings.Contains(sql, noDebugKey)
 	ds.SetConfig(conn.Props())
-	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
+	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
 	ds.Defer(func() { conn.unlockFileContext(fileContext) })
 
-	// ds.SetConfig(map[string]string{"flatten": "true"})
-	// err = ds.ConsumeJsonReader(stdOutReader)
-	// err = ds.ConsumeParquetReader(stdOutReader)
 	err = ds.ConsumeCsvReader(stdOutReader)
 	if err != nil {
 		ds.Close()
