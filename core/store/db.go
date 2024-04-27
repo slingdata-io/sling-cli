@@ -59,7 +59,6 @@ func InitDB() {
 		if DropAll {
 			Db.Exec(g.F(`drop table if exists "%s"`, tableName))
 		}
-		g.Trace("Creating table: " + tableName)
 		err = Db.AutoMigrate(table)
 		if err != nil {
 			g.Debug("error AutoMigrating table for local .sling.db. => %s\n%s", tableName, err.Error())
