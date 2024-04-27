@@ -19,6 +19,10 @@ var (
 	DropAll = false
 )
 
+func init() {
+	InitDB()
+}
+
 // InitDB initializes the database
 func InitDB() {
 	var err error
