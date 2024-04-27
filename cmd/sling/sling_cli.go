@@ -18,6 +18,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -36,6 +37,7 @@ var machineID = ""
 
 func init() {
 	env.InitLogger()
+	store.InitDB()
 }
 
 var cliRunFlags = []g.Flag{
