@@ -346,6 +346,32 @@ postgres	boolean[]	json		FALSE	FALSE	Steampipe Data Type
 postgres	double precision[]	json		FALSE	FALSE	Steampipe Data Type
 postgres	regtype	string				
 postgres	void			FALSE	FALSE	
+proton	ipv6	string	col_enum8 json	FALSE	FALSE
+proton	array	json	col_array array	FALSE	FALSE
+proton	uuid	string	col_uuid array	FALSE	FALSE
+proton	date	date	col_date date	TRUE	TRUE
+proton	datetime	datetime	col_datetime datetime	TRUE	TRUE
+proton	datetime64	datetime	col_datetime64 datetime64	TRUE	TRUE
+proton	decimal	decimal	col_decimal decimal	TRUE	TRUE
+proton	enum	string	col_enum enum	FALSE	FALSE
+proton	fixedstring	text	col_fixedstring fixedstring	TRUE	TRUE
+proton	float32	float	col_float32 float32	TRUE	TRUE
+proton	float64	float	col_float64 float64	TRUE	TRUE
+proton	int16	smallint	col_int16 int16	TRUE	TRUE
+proton	int32	bigint	col_int32 int32	TRUE	TRUE
+proton	int64	bigint	col_int64 int64	TRUE	TRUE
+proton	int8	integer	col_int8 int8	TRUE	TRUE
+proton	string	text	col_string string	TRUE	TRUE
+proton	tuple	string	col_tuple tuple	TRUE	TRUE
+proton	uint16	integer	col_uint16 uint16	TRUE	TRUE
+proton	uint32	bigint	col_uint32 uint32	TRUE	TRUE
+proton	uint64	decimal(28,0)	col_uint64 uint64	TRUE	TRUE
+proton	uint8	integer	col_uint8 uint8	TRUE	TRUE
+proton	json	json	col_json json	FALSE	FALSE
+proton	map	json	col_map json	FALSE	FALSE
+proton	lowcardinality	string	col_lowcardinality json	FALSE	FALSE
+proton	enum8	string	col_enum8 json	FALSE	FALSE
+proton	ipv6	string	col_enum8 json	FALSE	FALSE
 redshift	bigint	bigint	col_bigint bigint	TRUE	TRUE	signed eight-byte integer
 redshift	boolean	bool	col_boolean boolean	TRUE	FALSE	logical boolean (true/false)
 redshift	bool	bool	col_bool bool	TRUE	FALSE	logical boolean (true/false)

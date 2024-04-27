@@ -592,6 +592,25 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "clickhouse://{username}:{password}@{host}:{port}/{database}"
+	case dbio.TypeDbProton:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("username", "") // proton can work without a user
+		setIfMissing("password", "")
+		setIfMissing("schema", c.Data["database"])
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+			setIfMissing("database", "default")
+		}
+
+		template = "proton://{username}:{password}@{host}:{port}/{database}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

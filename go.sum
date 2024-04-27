@@ -181,6 +181,8 @@ github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/flarco/bigquery v0.0.9 h1:WfxO6XuuHZTJV+55Bq24FhdHYpmAOzgVk9xOcJpEecY=
 github.com/flarco/bigquery v0.0.9/go.mod h1:IpRSw4quaXxHjFyDSXUo7B6v+XcNF2pSmnNfeqXa/gM=
+github.com/flarco/g v0.1.96 h1:UnzvdlBoOaiNTIsgcCMLEp07XMQrOLCFQiJ6Sf4mAmg=
+github.com/flarco/g v0.1.96/go.mod h1:zV+BrXvzDiIRcJDBOrPo0G7jG9gHyxF9FRljkjuCTlk=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/form3tech-oss/jwt-go v3.2.5+incompatible h1:/l4kBbb4/vGSsdtB5nUe8L7B9mImVMaBPw9L/0TBHU8=
 github.com/form3tech-oss/jwt-go v3.2.5+incompatible/go.mod h1:pbq4aXjuKjdthFRnoDwaVPLA+WlJuPGy+QneDUgJi2k=

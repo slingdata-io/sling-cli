@@ -280,6 +280,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BigTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "clickhouse:") {
 		conn = &ClickhouseConn{URL: URL}
+	} else if strings.HasPrefix(URL, "proton:") {
+		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
@@ -1378,6 +1380,11 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 	dbType = strings.ToLower(dbType)
 
 	if conn.GetType() == dbio.TypeDbClickhouse {
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.ReplaceAll(dbType, "nullable(", "")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+	} else if conn.GetType() == dbio.TypeDbProton {
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")

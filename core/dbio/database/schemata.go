@@ -649,7 +649,7 @@ func ParseColumnName(text string, dialect dbio.Type) (colName string, err error)
 func GetQualifierQuote(dialect dbio.Type) string {
 	quote := `"`
 	switch dialect {
-	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse:
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse, dbio.TypeDbProton:
 		quote = "`"
 	case dbio.TypeDbBigTable, dbio.TypeDbMongoDB, dbio.TypeDbPrometheus:
 		quote = ""
