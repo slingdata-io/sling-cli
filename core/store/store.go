@@ -1,13 +1,11 @@
 package store
 
 import (
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/flarco/g"
-	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -19,6 +17,8 @@ func init() {
 	sling.StoreInsert = StoreInsert
 	sling.StoreUpdate = StoreUpdate
 }
+
+var syncStatus = func(t sling.TaskExecution) {}
 
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
@@ -228,8 +228,8 @@ func StoreInsert(t *sling.TaskExecution) {
 
 	t.ExecID = exec.ExecID
 
-	// send status
-	sendStatus(*exec)
+	// sync status
+	syncStatus(*t)
 }
 
 // Store saves the task into the local sqlite
@@ -260,20 +260,6 @@ func StoreUpdate(t *sling.TaskExecution) {
 		return
 	}
 
-	// send status
-	sendStatus(*exec)
-}
-
-func sendStatus(exec Execution) {
-	if os.Getenv("SLING_STATUS_URL") == "" {
-		return
-	}
-
-	headers := map[string]string{"Content-Type": "application/json"}
-	exec.Output = "" // no need for output
-	payload := g.Marshal(exec)
-	net.ClientDo(
-		http.MethodPost, os.Getenv("SLING_STATUS_URL"),
-		strings.NewReader(payload), headers, 3,
-	)
+	// sync status
+	syncStatus(*t)
 }

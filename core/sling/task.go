@@ -246,6 +246,11 @@ func (t *TaskExecution) GetCount() (count uint64) {
 	return t.df.Count()
 }
 
+// Df return the dataflow object
+func (t *TaskExecution) Df() *iop.Dataflow {
+	return t.df
+}
+
 // GetRate return the speed of flow (rows / sec and bytes / sec)
 // secWindow is how many seconds back to measure (0 is since beginning)
 func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
