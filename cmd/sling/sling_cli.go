@@ -443,6 +443,7 @@ func main() {
 	if !interrupted {
 		g.SentryFlush(time.Second * 2)
 	}
+	time.Sleep(50 * time.Millisecond) // so logger can flush
 }
 
 func cliInit(done chan struct{}) int {
