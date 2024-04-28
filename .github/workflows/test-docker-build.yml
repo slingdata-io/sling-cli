@@ -7,6 +7,7 @@ env:
   AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
   PLAUSIBLE_URL: ${{ secrets.PLAUSIBLE_URL }}
+  GOPRIVATE: github.com/slingdata-io/*
 
 jobs:
   # test1:
@@ -31,8 +32,8 @@ jobs:
   #       run: |
   #         docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:dev-arm64 . 
 
-  release-linux-amd64:
-    runs-on: ubuntu-20.04
+  build-linux-amd64:
+    runs-on: [self-hosted, Linux, X64, ubuntu-16]
     timeout-minutes: 20
 
     steps:
@@ -52,15 +53,14 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
+        
+      - name: Configure private token
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
-
-      - name: Dispatch test-sling-action
-        uses: peter-evans/repository-dispatch@v2
-        with:
-          event-type: test-sling-action
+          args: build --clean --skip=validate -f .goreleaser.linux.amd64.yaml

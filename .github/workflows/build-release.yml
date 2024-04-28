@@ -15,6 +15,7 @@ env:
   AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
   PLAUSIBLE_URL: ${{ secrets.PLAUSIBLE_URL }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+  GOPRIVATE: github.com/slingdata-io/*
 
 jobs:
   build:

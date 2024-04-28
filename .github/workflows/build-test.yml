@@ -7,6 +7,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+  GOPRIVATE: github.com/slingdata-io/*
 
 jobs:
   build-for-test:
