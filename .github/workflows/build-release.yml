@@ -76,10 +76,6 @@ jobs:
         runner: [macos-latest, ubuntu-20.04, windows-latest]
         # runner: [self-hosted-mac, ubuntu-20.04, windows-latest]
 
-    # doesn't work, put double quote at the end
-    # env:
-    #   VERSION: ${{ needs.build.outputs.version }}"
-
     steps:
       - uses: actions/checkout@v3
 
