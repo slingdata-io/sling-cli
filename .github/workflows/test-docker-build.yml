@@ -135,7 +135,6 @@ jobs:
   build-linux-amd64:
     # runs-on: ubuntu-20.04
     runs-on: [self-hosted, Linux, X64, ubuntu-16]
-    needs: [ release-linux-arm64 ] # for multi-platform docker image
     timeout-minutes: 20
 
     steps:
