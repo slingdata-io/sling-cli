@@ -9,6 +9,7 @@ env:
   PLAUSIBLE_URL: ${{ secrets.PLAUSIBLE_URL }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   GOPRIVATE: github.com/slingdata-io/*
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
 jobs:
   # test1:
@@ -33,8 +34,41 @@ jobs:
   #       run: |
   #         docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:dev-arm64 . 
 
-  build-linux-amd64:
-    runs-on: [self-hosted, Linux, X64, ubuntu-16]
+  build-brew:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 20
+    # runs-on: macos-latest
+
+    defaults:
+      run:
+        working-directory: /tmp
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.21"
+          cache: false
+        
+      - name: Configure private token
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --clean --skip=validate -f .goreleaser.mac.yaml
+
+  build-scoop:
+    # runs-on: [self-hosted, Windows]
+    runs-on: windows-latest
     timeout-minutes: 20
 
     steps:
@@ -49,9 +83,74 @@ jobs:
           go-version: "1.21"
           cache: true
 
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+            minimum-size: 16GB
+            maximum-size: 16GB
+            disk-root: "C:"
+        
+      - name: Configure private token
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"   
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --clean --skip=validate -f .goreleaser.windows.yaml
+
+  build-linux-arm64:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.21"
+          cache: false
+
       - name: Login docker
-        env:
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
+        
+      - name: Configure private token
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --clean --skip=validate -f .goreleaser.linux.arm64.yaml
+
+  build-linux-amd64:
+    # runs-on: ubuntu-20.04
+    runs-on: [self-hosted, Linux, X64, ubuntu-16]
+    needs: [ release-linux-arm64 ] # for multi-platform docker image
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.21"
+          cache: false
+
+      - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
