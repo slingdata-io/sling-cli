@@ -92,7 +92,8 @@ jobs:
         
       - name: Configure private token
         run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"   
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"  
+          go env -w GOPRIVATE=github.com/slingdata-io/sling 
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
