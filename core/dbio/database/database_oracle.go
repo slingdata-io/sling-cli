@@ -237,7 +237,13 @@ func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 // cannot import when newline in value. Need to scan for new lines.
 func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var stderr, stdout bytes.Buffer
-	url, err := dburl.Parse(conn.ConnString())
+
+	connURL := conn.ConnString()
+	if su := conn.GetProp("ssh_url"); su != "" {
+		connURL = su // use ssh url if specified
+	}
+
+	url, err := dburl.Parse(connURL)
 	if err != nil {
 		err = g.Error(err, "Error dburl.Parse(conn.URL)")
 		return

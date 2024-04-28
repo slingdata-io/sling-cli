@@ -236,3 +236,9 @@ func ExtractTarGz(filePath, outFolder string) (err error) {
 
 	return nil
 }
+
+func printUpdateAvailable() {
+	if updateVersion != "" {
+		println(updateMessage)
+	}
+}

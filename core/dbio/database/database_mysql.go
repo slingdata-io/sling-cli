@@ -183,7 +183,13 @@ func (conn *MySQLConn) LoadDataOutFile(ctx *g.Context, sql string) (stdOutReader
 // LoadDataInFile Bulk Import
 func (conn *MySQLConn) LoadDataInFile(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var stderr bytes.Buffer
-	url, err := dburl.Parse(conn.URL)
+
+	connURL := conn.URL
+	if su := conn.GetProp("ssh_url"); su != "" {
+		connURL = su // use ssh url if specified
+	}
+
+	url, err := dburl.Parse(connURL)
 	if err != nil {
 		err = g.Error(err, "Error dburl.Parse(conn.URL)")
 		return

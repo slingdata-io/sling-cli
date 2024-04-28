@@ -27,6 +27,20 @@ const FileToFile JobType = "file-file"
 // DbSQL is for a db sql query
 const DbSQL JobType = "db-sql"
 
+var AllJobType = []struct {
+	Value  JobType
+	TSName string
+}{
+	{ConnTest, "ConnTest"},
+	{ConnDiscover, "ConnDiscover"},
+	{ConnExec, "ConnExec"},
+	{DbToDb, "DbToDb"},
+	{FileToDB, "FileToDB"},
+	{DbToFile, "DbToFile"},
+	{FileToFile, "FileToFile"},
+	{DbSQL, "DbSQL"},
+}
+
 // ExecStatus is the status of an execution
 type ExecStatus string
 
@@ -54,6 +68,23 @@ const (
 	// ExecStatusStalled = stalled (when still heartbeating, but rows are unchanged for a while)
 	ExecStatusStalled ExecStatus = "stalled"
 )
+
+var AllExecStatus = []struct {
+	Value  ExecStatus
+	TSName string
+}{
+	{ExecStatusCreated, "ExecStatusCreated"},
+	{ExecStatusQueued, "ExecStatusQueued"},
+	{ExecStatusStarted, "ExecStatusStarted"},
+	{ExecStatusRunning, "ExecStatusRunning"},
+	{ExecStatusSuccess, "ExecStatusSuccess"},
+	{ExecStatusTerminated, "ExecStatusTerminated"},
+	{ExecStatusInterrupted, "ExecStatusInterrupted"},
+	{ExecStatusTimedOut, "ExecStatusTimedOut"},
+	{ExecStatusError, "ExecStatusError"},
+	{ExecStatusSkipped, "ExecStatusSkipped"},
+	{ExecStatusStalled, "ExecStatusStalled"},
+}
 
 // IsRunning returns true if an execution is running
 func (s ExecStatus) IsRunning() bool {

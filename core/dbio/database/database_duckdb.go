@@ -50,7 +50,7 @@ func (conn *DuckDbConn) Init() error {
 
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbDuckDb
-	if strings.HasPrefix(conn.URL, "motherduck") {
+	if strings.HasPrefix(conn.URL, "motherduck") || strings.HasPrefix(conn.URL, "duckdb://md:") {
 		conn.BaseConn.Type = dbio.TypeDbMotherDuck
 	}
 
@@ -603,7 +603,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	conn.LogSQL(sql)
 
-	cmd.Args = append(cmd.Args, "-csv")
+	cmd.Args = append(cmd.Args, "-csv", "-nullvalue", `\N\`)
 
 	conn.setDuckDbFileCmd(cmd)
 	fileContext, _ := conn.getDuckDbFileContext()
@@ -646,12 +646,9 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	ds.SafeInference = true
 	ds.NoDebug = strings.Contains(sql, noDebugKey)
 	ds.SetConfig(conn.Props())
-	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms)})
+	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
 	ds.Defer(func() { conn.unlockFileContext(fileContext) })
 
-	// ds.SetConfig(map[string]string{"flatten": "true"})
-	// err = ds.ConsumeJsonReader(stdOutReader)
-	// err = ds.ConsumeParquetReader(stdOutReader)
 	err = ds.ConsumeCsvReader(stdOutReader)
 	if err != nil {
 		ds.Close()
@@ -741,6 +738,11 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		return
 	}
 
+	if len(ds.Buffer) == 0 {
+		// nothing to import
+		return
+	}
+
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
@@ -761,6 +763,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		cfgMap := ds.GetConfig()
 		cfgMap["header"] = "true"
 		cfgMap["delimiter"] = ","
+		cfgMap["null_as"] = `\N`
 		cfgMap["datetime_format"] = "2006-01-02 15:04:05.000000-07:00"
 		ds.SetConfig(cfgMap)
 
@@ -791,7 +794,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"');`, table.FDQN(), strings.Join(columnNames, ", "), csvPath, conn.generateCsvColumns(ds.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), csvPath, conn.generateCsvColumns(ds.Columns)),
 		}
 
 		var out []byte

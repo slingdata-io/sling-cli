@@ -563,6 +563,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
+		fs.SetProp("null_as", `\N`)
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
@@ -647,6 +648,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
+		fs.SetProp("null_as", `\N`)
 		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, iop.DefaultStreamConfig())
 
 		if err != nil {
@@ -722,6 +724,7 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 	source.FieldDelimiter = ","
 	source.AllowQuotedNewlines = true
 	source.Quote = `"`
+	source.NullMarker = `\N`
 	source.SkipLeadingRows = 1
 	source.Schema = getBqSchema(dsColumns)
 	source.SourceFormat = bigquery.CSV
@@ -767,6 +770,7 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
+	gcsRef.NullMarker = `\N`
 	gcsRef.SkipLeadingRows = 1
 	gcsRef.Schema = getBqSchema(dsColumns)
 	if strings.HasSuffix(strings.ToLower(gcsURI), ".gz") {
@@ -824,6 +828,11 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	fs.SetProp("format", "csv")
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
+
+	// setting empty_as_null=true. no way to export with proper null_marker.
+	// Parquet export doesn't support JSON types
+	fs.SetProp("empty_as_null", "true")
+
 	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)

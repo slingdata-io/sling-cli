@@ -444,7 +444,7 @@ func (data *Dataset) InferColumnTypes() {
 
 			valStr := cast.ToString(val)
 			l := len(valStr)
-			if val == nil || l == 0 {
+			if val == nil || l == 0 || (data.Sp.Config.NullIf != "" && data.Sp.Config.NullIf == valStr) {
 				columns[j].Stats.NullCnt++
 				continue
 			} else {

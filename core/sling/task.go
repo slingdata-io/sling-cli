@@ -18,7 +18,8 @@ import (
 )
 
 // Set in the store/store.go file for history keeping
-var StoreInsert, StoreUpdate func(t *TaskExecution)
+var StoreInsert = func(t *TaskExecution) {}
+var StoreUpdate = func(t *TaskExecution) {}
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
@@ -246,6 +247,11 @@ func (t *TaskExecution) GetCount() (count uint64) {
 	return t.df.Count()
 }
 
+// Df return the dataflow object
+func (t *TaskExecution) Df() *iop.Dataflow {
+	return t.df
+}
+
 // GetRate return the speed of flow (rows / sec and bytes / sec)
 // secWindow is how many seconds back to measure (0 is since beginning)
 func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
@@ -280,8 +286,8 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	// need to loaded_at column for file incremental
-	if t.Config.MetadataLoadedAt || t.Type == FileToDB {
+	if (t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt) ||
+		(t.Config.MetadataLoadedAt == nil && t.Type == FileToDB) {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
 		metadata.LoadedAt.Value = t.StartTime.Unix()
 	}

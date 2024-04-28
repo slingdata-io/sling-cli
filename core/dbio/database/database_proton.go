@@ -7,45 +7,46 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	_ "github.com/timeplus-io/proton-go-driver/v2"
 
 	"github.com/flarco/g"
 )
 
-// ClickhouseConn is a Clikchouse connection
-type ClickhouseConn struct {
+// ProtonConn is a Proton connection
+type ProtonConn struct {
 	BaseConn
 	URL string
 }
 
 // Init initiates the object
-func (conn *ClickhouseConn) Init() error {
+func (conn *ProtonConn) Init() error {
 
 	conn.BaseConn.URL = conn.URL
-	conn.BaseConn.Type = dbio.TypeDbClickhouse
+	conn.BaseConn.Type = dbio.TypeDbProton
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
 }
 
-func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
+func (conn *ProtonConn) Connect(timeOut ...int) (err error) {
 
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
 		if strings.Contains(err.Error(), "unexpected packet") {
-			g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+			g.Info(color.MagentaString("Try using the `http_url` instead to connect to Proton via HTTP. See https://docs.slingdata.io/connections/database-connections/Proton"))
 		}
 	}
 
 	return err
 }
 
-func (conn *ClickhouseConn) ConnString() string {
+func (conn *ProtonConn) ConnString() string {
 
 	if url := conn.GetProp("http_url"); url != "" {
 		return url
@@ -55,7 +56,7 @@ func (conn *ClickhouseConn) ConnString() string {
 }
 
 // NewTransaction creates a new transaction
-func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (Transaction, error) {
+func (conn *ProtonConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (Transaction, error) {
 
 	context := g.NewContext(ctx)
 
@@ -78,7 +79,7 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
+func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
 	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
 		return sql, g.Error(err)
@@ -98,7 +99,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 }
 
 // BulkImportStream inserts a stream into a table
-func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
 
 	table, err := ParseTableName(tableFName, conn.GetType())
@@ -264,7 +265,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
+func (conn *ProtonConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
 
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
@@ -296,7 +297,7 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []s
 }
 
 // GenerateUpsertSQL generates the upsert SQL
-func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
@@ -329,13 +330,13 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	return
 }
 
-func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
+func processProtonInsertRow(columns iop.Columns, row []any) []any {
 	for i := range row {
 		if columns[i].Type == iop.DecimalType {
 			sVal := cast.ToString(row[i])
 			if sVal != "" {
 				val, err := decimal.NewFromString(sVal)
-				if !g.LogError(err, "could not convert value `%s` for clickhouse decimal", sVal) {
+				if !g.LogError(err, "could not convert value `%s` for Proton decimal", sVal) {
 					row[i] = val
 				}
 			} else {

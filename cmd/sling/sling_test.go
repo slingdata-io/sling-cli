@@ -68,6 +68,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
+	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 
 	dbio.TypeFileLocal:  {name: "local"},
 	dbio.TypeFileSftp:   {name: "sftp"},
@@ -406,10 +407,28 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 	}
 
-	if valRowCount := cast.ToInt(cfg.Env["validation_row_count"]); valRowCount > 0 {
+	if valRowCountVal := cfg.Env["validation_stream_row_count"]; valRowCountVal != "" {
+		taskCount := cast.ToInt(task.GetCount())
+		if strings.HasPrefix(valRowCountVal, ">") {
+			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
+			assert.Greater(t, taskCount, valRowCount, "validation_stream_row_count (%s)", file.Name)
+		} else {
+			valRowCount := cast.ToInt(valRowCountVal)
+			assert.EqualValues(t, valRowCount, taskCount, "validation_stream_row_count (%s)", file.Name)
+		}
+	}
+
+	if valRowCountVal := cfg.Env["validation_row_count"]; valRowCountVal != "" {
 		conn, _ := task.Config.TgtConn.AsDatabase()
-		count, _ := conn.GetCount(task.Config.Target.Object)
-		assert.EqualValues(t, valRowCount, count)
+		countU, _ := conn.GetCount(task.Config.Target.Object)
+		count := cast.ToInt(countU)
+		if strings.HasPrefix(valRowCountVal, ">") {
+			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
+			assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
+		} else {
+			valRowCount := cast.ToInt(valRowCountVal)
+			assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
+		}
 	}
 
 	// validate file
@@ -438,7 +457,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				// g.P(dataDB.ColValues(0))
 				// g.P(dataDB.ColValues(1))
 				// g.P(valuesDb)
-				if assert.Equal(t, len(valuesFile), len(valuesDb)) {
+				if assert.Equal(t, len(valuesFile), len(valuesDb), file.Name) {
 					for i := range valuesDb {
 						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
 						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
@@ -532,9 +551,17 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 // }
 
 func TestSuiteDatabaseClickhouse(t *testing.T) {
+	if cast.ToBool(os.Getenv("SKIP_CLICKHOUSE")) {
+		return
+	}
 	t.Parallel()
 	testSuite(t, dbio.TypeDbClickhouse)
 	testSuite(t, dbio.Type("clickhouse_http"))
+}
+
+func TestSuiteDatabaseProton(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbProton, "22")
 }
 
 func TestSuiteDatabaseTrino(t *testing.T) {

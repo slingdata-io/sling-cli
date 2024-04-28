@@ -18,6 +18,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -26,7 +27,7 @@ import (
 	"github.com/spf13/cast"
 )
 
-//go:embed *
+//go:embed examples.sh
 var slingFolder embed.FS
 var examples = ``
 var ctx = g.NewContext(context.Background())
@@ -36,6 +37,7 @@ var machineID = ""
 
 func init() {
 	env.InitLogger()
+	store.InitDB()
 }
 
 var cliRunFlags = []g.Flag{
@@ -330,14 +332,9 @@ func init() {
 	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
 	examples = string(examplesBytes)
 
-	// cliInteractive.Make().Add()
-	// cliAuth.Make().Add()
-	// cliCloud.Make().Add()
 	cliConns.Make().Add()
-	// cliProject.Make().Add()
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
-	// cliUi.Make().Add()
 
 	if telemetry {
 		if projectID == "" {
@@ -413,43 +410,44 @@ func main() {
 	sling.ShowProgress = os.Getenv("SLING_SHOW_PROGRESS") != "false"
 	database.UseBulkExportFlowCSV = cast.ToBool(os.Getenv("SLING_BULK_EXPORT_FLOW_CSV"))
 
-	go func() {
-		defer close(done)
-		exitCode = cliInit()
-		if !interrupted {
-			g.SentryFlush(time.Second * 2)
-		}
-	}()
-
 	exit := func() {
 		time.Sleep(50 * time.Millisecond) // so logger can flush
 		os.Exit(exitCode)
 	}
 
-	select {
-	case <-done:
-		exit()
-	case <-kill:
-		env.Println("\nkilling process...")
-		exitCode = 111
-		exit()
-	case <-interrupt:
-		g.SentryClear()
-		if cliRun.Sc.Used {
-			env.Println("\ninterrupting...")
-			interrupted = true
-			ctx.Cancel()
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
+	go func() {
+		select {
+		case <-kill:
+			env.Println("\nkilling process...")
+			exitCode = 111
+			exit()
+		case <-interrupt:
+			g.SentryClear()
+			if cliRun.Sc.Used {
+				env.Println("\ninterrupting...")
+				interrupted = true
+				ctx.Cancel()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+				}
 			}
+			exit()
+			return
+		case <-done:
+			exit()
 		}
-		exit()
-		return
+	}()
+
+	exitCode = cliInit(done)
+	if !interrupted {
+		g.SentryFlush(time.Second * 2)
 	}
+	time.Sleep(50 * time.Millisecond) // so logger can flush
 }
 
-func cliInit() int {
+func cliInit(done chan struct{}) int {
+	defer close(done)
 
 	// recover from panic
 	defer func() {

@@ -94,18 +94,20 @@ func (m *Metadata) AsMap() map[string]any {
 
 // Iterator is the row provider for a datastream
 type Iterator struct {
-	Row         []any
-	Reprocess   chan []any
-	IsCasted    bool
-	RowIsCasted bool
-	Counter     uint64
-	Context     *g.Context
-	Closed      bool
-	ds          *Datastream
-	dsBufferI   int // -1 means ds is not buffered
-	nextFunc    func(it *Iterator) bool
-	limitCnt    uint64 // to not check for df limit each cycle
+	Row          []any
+	Reprocess    chan []any
+	IsCasted     bool
+	RowIsCasted  bool
+	Counter      uint64
+	StreamRowNum uint64
+	Context      *g.Context
+	Closed       bool
+	ds           *Datastream
+	dsBufferI    int // -1 means ds is not buffered
+	nextFunc     func(it *Iterator) bool
+	limitCnt     uint64 // to not check for df limit each cycle
 
+	prevStreamURL  any
 	dsBufferStream []string
 }
 
@@ -709,7 +711,7 @@ loop:
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
-				return it.Counter
+				return it.StreamRowNum
 			}
 		}
 
@@ -2358,6 +2360,18 @@ func (it *Iterator) addNewColumns(newRowLen int) {
 	mux.Unlock()
 }
 
+func (it *Iterator) incrementStreamRowNum() {
+	if it.dsBufferI == -1 {
+		return
+	}
+	if it.prevStreamURL == it.ds.Metadata.StreamURL.Value {
+		it.StreamRowNum++
+	} else {
+		it.prevStreamURL = it.ds.Metadata.StreamURL.Value
+		it.StreamRowNum = 1
+	}
+}
+
 func (it *Iterator) next() bool {
 	it.RowIsCasted = false // reset RowIsCasted
 
@@ -2379,12 +2393,14 @@ func (it *Iterator) next() bool {
 			if it.dsBufferI < len(it.dsBufferStream) && it.dsBufferStream[it.dsBufferI] != "" {
 				it.ds.Metadata.StreamURL.Value = it.dsBufferStream[it.dsBufferI]
 			}
+			it.incrementStreamRowNum()
 			it.dsBufferI++
 			return true
 		}
 
 		next := it.nextFunc(it)
 		if next {
+			it.incrementStreamRowNum()
 			it.Counter++
 
 			// logic to improve perf but not checking if

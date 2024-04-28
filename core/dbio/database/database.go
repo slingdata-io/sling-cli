@@ -2,12 +2,15 @@ package database
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"math"
 	"net/url"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -277,6 +280,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BigTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "clickhouse:") {
 		conn = &ClickhouseConn{URL: URL}
+	} else if strings.HasPrefix(URL, "proton:") {
+		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
@@ -330,6 +335,8 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 		driverName = "sqlserver"
 	case dbio.TypeDbTrino:
 		driverName = "trino"
+	case dbio.TypeDbProton:
+		driverName = "proton"
 	default:
 		driverName = dbType.String()
 	}
@@ -583,6 +590,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			g.F("@127.0.0.1:%d", localPort),
 		)
 		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
+		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
 	}
 
 	if conn.db == nil {
@@ -1374,6 +1382,11 @@ func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.Colu
 	dbType = strings.ToLower(dbType)
 
 	if conn.GetType() == dbio.TypeDbClickhouse {
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.ReplaceAll(dbType, "nullable(", "")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+	} else if conn.GetType() == dbio.TypeDbProton {
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")
@@ -2895,6 +2908,13 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 // to the checkum values from the StreamProcessor
 func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (err error) {
 
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
+		}
+	}()
+
 	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {
 		return g.Error(err, "could not parse table name")
@@ -2964,6 +2984,10 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	data, err := conn.Self().Query(sql)
 	if err != nil {
 		return g.Error(err, "error running CompareChecksums query")
+	} else if len(data.Rows) == 0 {
+		return g.Error("error running CompareChecksums query. No Rows returns")
+	} else if len(data.Rows[0]) != len(data.Columns) {
+		return g.Error("error running CompareChecksums query. Row vs Column size mismatch (%d != %d)", len(data.Rows[0]), len(data.Columns))
 	}
 
 	eg := g.ErrorGroup{}
@@ -3024,6 +3048,41 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 		}
 	}
 	return false
+}
+
+func (conn *BaseConn) getTlsConfig() (tlsConfig *tls.Config, err error) {
+	if cast.ToBool(conn.GetProp("tls")) {
+		tlsConfig = &tls.Config{}
+	}
+
+	cert := conn.GetProp("cert_file")
+	key := conn.GetProp("cert_key_file")
+	caCert := conn.GetProp("cert_ca_file")
+
+	if key != "" && cert != "" {
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load client certificate")
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		if caCert != "" {
+			caCert, err := os.ReadFile(caCert)
+			if err != nil {
+				return nil, g.Error(err, "Failed to load CA certificate")
+			}
+			tlsConfig.RootCAs = x509.NewCertPool()
+			ok := tlsConfig.RootCAs.AppendCertsFromPEM(caCert)
+			if !ok {
+				return nil, g.Error("Failed to parse PEM file")
+			}
+		}
+	}
+
+	return
 }
 
 // settingMppBulkImportFlow sets settings for MPP databases type
