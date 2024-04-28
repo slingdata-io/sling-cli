@@ -100,9 +100,21 @@ jobs:
           go-version: "1.21"
           cache: true
         
-      - name: Configure private token
+      - name: Configure private token (Mac)
+        if: runner.os == 'macOS'
         run: |
           git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        
+      - name: Configure private token (Linux)
+        if: runner.os == 'linux'
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        
+      - name: Configure private token (Windows)
+        if: runner.os == 'windows'
+        run: |
+          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
+          git config --global url."$url".insteadOf "https://github.com/"  
 
       - name: Build Sling (Linux)
         env:
@@ -213,7 +225,8 @@ jobs:
         
       - name: Configure private token
         run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"   
+          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
+          git config --global url."$url".insteadOf "https://github.com/"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3

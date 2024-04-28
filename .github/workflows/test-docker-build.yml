@@ -93,7 +93,7 @@ jobs:
       - name: Configure private token
         run: |
           $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"  
+          git config --global url."$url".insteadOf "https://github.com/"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
