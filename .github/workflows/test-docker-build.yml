@@ -58,6 +58,9 @@ jobs:
       - name: Configure private token
         run: |
           git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        
+      - name: Fetch Tags
+        run: git fetch --tags --force
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -122,6 +125,9 @@ jobs:
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
+      - name: Fetch Tags
+        run: git fetch --tags --force
+        
       - name: Configure private token
         run: |
           git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
@@ -153,6 +159,9 @@ jobs:
       - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
+        
+      - name: Fetch Tags
+        run: git fetch --tags --force
         
       - name: Configure private token
         run: |

@@ -20,7 +20,7 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux]
+    runs-on: [self-hosted, linux, ubuntu-20]
     timeout-minutes: 5
 
     outputs:
