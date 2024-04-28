@@ -67,7 +67,6 @@ jobs:
           args: build --clean --skip=validate -f .goreleaser.mac.yaml
 
   build-scoop:
-    # runs-on: [self-hosted, Windows]
     runs-on: windows-latest
     timeout-minutes: 20
 
