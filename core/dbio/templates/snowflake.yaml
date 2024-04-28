@@ -67,7 +67,6 @@ core:
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
-      EMPTY_FIELD_AS_NULL = TRUE
       NULL_IF = '\\N'
       COMPRESSION = GZIP
       ESCAPE_UNENCLOSED_FIELD = NONE
@@ -84,7 +83,6 @@ core:
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
-      EMPTY_FIELD_AS_NULL = TRUE
       NULL_IF = '\\N'
       COMPRESSION = GZIP
       ESCAPE_UNENCLOSED_FIELD = NONE
@@ -100,7 +98,6 @@ core:
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
-      EMPTY_FIELD_AS_NULL = TRUE
       NULL_IF = '\\N'
       COMPRESSION = GZIP
       ESCAPE_UNENCLOSED_FIELD = NONE

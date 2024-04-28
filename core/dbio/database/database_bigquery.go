@@ -828,6 +828,11 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	fs.SetProp("format", "csv")
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
+
+	// setting empty_as_null=true. no way to export with proper null_marker.
+	// Parquet export doesn't support JSON types
+	fs.SetProp("empty_as_null", "true")
+
 	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)

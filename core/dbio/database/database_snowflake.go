@@ -244,6 +244,7 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
+	fs.SetProp("null_as", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 	df, err = fs.ReadDataflow(filePath)
