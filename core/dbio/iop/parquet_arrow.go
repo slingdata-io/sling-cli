@@ -187,6 +187,11 @@ func (p *ParquetArrowReader) Columns() Columns {
 			col.Sourced = false
 		}
 
+		// clean DbType
+		if parts := strings.Split(col.DbType, "("); len(parts) > 1 {
+			col.DbType = parts[0]
+		}
+
 		cols[i] = col
 	}
 
