@@ -123,6 +123,8 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.Mux.Unlock()
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	conn.SetProp("connected", "true")
 
 	_, err = conn.Exec("select 1" + noDebugKey)
@@ -709,6 +711,8 @@ func (conn *DuckDbConn) Close() error {
 	conn.cmdInteractive = nil
 
 	conn.unlockFileContext(fileContext)
+
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 
 	return nil
 }

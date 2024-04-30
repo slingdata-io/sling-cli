@@ -87,6 +87,8 @@ func (conn *MongoDBConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to ping mongo server")
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 
@@ -97,6 +99,8 @@ func (conn *MongoDBConn) Close() error {
 	if err != nil {
 		return g.Error(err, "Failed to disconnect")
 	}
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 

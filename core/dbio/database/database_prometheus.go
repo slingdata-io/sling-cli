@@ -84,10 +84,13 @@ func (conn *PrometheusConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to connect to client")
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 
 func (conn *PrometheusConn) Close() error {
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 	return nil
 }
 
