@@ -6,8 +6,8 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/spf13/cast"
 	pb "gopkg.in/cheggaaa/pb.v2"
 )

@@ -12,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -299,6 +300,12 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskStats["rows_count"] = task.GetCount()
 			taskStats["rows_in_bytes"] = inBytes
 			taskStats["rows_out_bytes"] = outBytes
+			taskStats["rows_out_bytes"] = outBytes
+
+			if memRAM, _ := mem.VirtualMemory(); memRAM != nil {
+				taskStats["mem_used"] = memRAM.Used
+				taskStats["mem_total"] = memRAM.Total
+			}
 
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
