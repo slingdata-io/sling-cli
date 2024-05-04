@@ -332,6 +332,12 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		return
 	}
 
+	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
 	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
 	err = tgtConn.Connect()
 	if err != nil {
@@ -349,7 +355,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
 		varMap := map[string]string{} // should always be number
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
+		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn, varMap)
 		if err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
@@ -494,7 +500,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// get watermark
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
+		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn, srcConn.Template().Variable)
 		if err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err

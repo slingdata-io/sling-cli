@@ -177,7 +177,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (val string, err error) {
+func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConn database.Connection, srcConnVarMap map[string]string) (val string, err error) {
 	// get table columns type for table creation if not exists
 	// in order to get max value
 	// does table exists?
@@ -196,7 +196,8 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	// get target columns to match update-key
 	// in case column casing needs adjustment
 	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
-	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol.Name != "" {
+	updateCol := targetCols.GetColumn(tgtUpdateKey)
+	if updateCol.Name != "" {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
 		return // target table does not exist
@@ -233,8 +234,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	colType := data.Columns[0].Type
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
-	isOracleDate := data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle
-
+	isOracleDate := updateCol.DbType == "DATETIME" && srcConn.GetType() == dbio.TypeDbOracle
 	if colType.IsDate() || isOracleDate {
 		val = g.R(
 			srcConnVarMap["date_layout_str"],
