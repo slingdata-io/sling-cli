@@ -26,6 +26,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+	"google.golang.org/api/idtoken"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -123,6 +124,16 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 			return client, g.Error(err, "No Google credentials provided or could not find Application Default Credentials.")
 		}
 		authOption = option.WithCredentials(creds)
+	}
+
+	// OpenID auth with provided audience
+	if audience := conn.GetProp("audience"); audience != "" {
+		ts, err := idtoken.NewTokenSource(conn.BaseConn.Context().Ctx, audience, authOption)
+		if err != nil {
+			return client, g.Error(err, "failed to create NewTokenSource for OpenID Auth: %s", audience)
+		}
+
+		authOption = option.WithTokenSource(ts)
 	}
 
 	if conn.ProjectID == "" && credJsonBody != "" {
