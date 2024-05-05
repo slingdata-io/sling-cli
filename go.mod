@@ -46,7 +46,7 @@ require (
 	github.com/rs/zerolog v1.20.0
 	github.com/samber/lo v1.39.0
 	github.com/segmentio/ksuid v1.0.4
-	github.com/shirou/gopsutil v3.21.11+incompatible
+	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.3.1
 	github.com/sijms/go-ora/v2 v2.8.10-0.20240228213529-2ce633cb669f
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
@@ -199,7 +199,6 @@ require (
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/segmentio/encoding v0.3.6 // indirect
-	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
@@ -214,7 +213,7 @@ require (
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
-	github.com/yusufpapurcu/wmi v1.2.3 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.48.0 // indirect
