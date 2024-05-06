@@ -793,8 +793,10 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			nVal = dVal
 			if isDate(&dVal) {
 				cs.DateCnt++
-			} else {
+			} else if isUTC(&dVal) {
 				cs.DateTimeCnt++
+			} else {
+				cs.DateTimeZCnt++
 			}
 			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
 		}

@@ -460,8 +460,10 @@ func (data *Dataset) InferColumnTypes() {
 			case time.Time:
 				if isDate(&v) {
 					columns[j].Stats.DateCnt++
-				} else {
+				} else if isUTC(&v) {
 					columns[j].Stats.DateTimeCnt++
+				} else {
+					columns[j].Stats.DateTimeZCnt++
 				}
 			case nil:
 				columns[j].Stats.NullCnt++

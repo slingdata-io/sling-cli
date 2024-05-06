@@ -466,6 +466,7 @@ func (df *Dataflow) SyncStats() {
 			dfCols[i].Stats.BoolCnt = dfCols[i].Stats.BoolCnt + colStats.BoolCnt
 			dfCols[i].Stats.DateCnt = dfCols[i].Stats.DateCnt + colStats.DateCnt
 			dfCols[i].Stats.DateTimeCnt = dfCols[i].Stats.DateTimeCnt + colStats.DateTimeCnt
+			dfCols[i].Stats.DateTimeZCnt = dfCols[i].Stats.DateTimeZCnt + colStats.DateTimeZCnt
 			dfCols[i].Stats.Checksum = dfCols[i].Stats.Checksum + colStats.Checksum
 
 			if colStats.Min < dfCols[i].Stats.Min {
