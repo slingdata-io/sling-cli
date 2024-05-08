@@ -190,6 +190,11 @@ func (ds *Datastream) Limited(limit ...int) bool {
 }
 
 func (ds *Datastream) processBwRows() {
+	processBw := true
+	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
+		processBw = cast.ToBool(val)
+	}
+
 	done := false
 	process := func() {
 		// recover from panic
@@ -201,8 +206,10 @@ func (ds *Datastream) processBwRows() {
 		}()
 
 		for row := range ds.bwRows {
-			ds.writeBwCsv(ds.CastRowToStringSafe(row))
-			ds.bwCsv.Flush()
+			if processBw {
+				ds.writeBwCsv(ds.CastRowToStringSafe(row))
+				ds.bwCsv.Flush()
+			}
 		}
 		done = true
 	}
