@@ -3130,6 +3130,11 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 		if err != nil {
 			return false, g.Error(err, "could not add column %s to table %s", col.Name, table.FullName())
 		}
+
+		if g.In(conn.GetType(), dbio.TypeDbBigQuery) {
+			// avoid rate limit error
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	return len(missing) > 0, nil
