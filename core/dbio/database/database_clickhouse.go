@@ -13,6 +13,8 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
+
 	"github.com/flarco/g"
 )
 
