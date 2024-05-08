@@ -323,6 +323,22 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	return 0, nil
 }
 
+// CastColumnForSelect casts to the correct target column type
+func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
+}
+
 func (conn *RedshiftConn) setEmptyAsNull(sql string) string {
 	if !cast.ToBool(conn.GetProp("empty_as_null")) {
 		sql = strings.ReplaceAll(sql, " EMPTYASNULL BLANKSASNULL", "")

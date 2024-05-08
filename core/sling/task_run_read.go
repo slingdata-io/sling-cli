@@ -222,9 +222,20 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	options := t.sourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
+	if t.Config.IncrementalVal != "" {
+		// file stream incremental mode
+		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
+			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
+			g.Debug(`file stream using file_sys_timestamp="%s" and update_key="%s"`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+		} else {
+			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey
+			options["SLING_INCREMENTAL_VAL"] = t.Config.IncrementalVal
+			g.Debug(`file stream using incremental_val="%s" and update_key="%s"`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+		}
+	}
+
 	if uri := cfg.SrcConn.URL(); uri != "" {
 		// construct props by merging with options
-		options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()),
 			g.MapToKVArr(g.ToMapString(options))...,

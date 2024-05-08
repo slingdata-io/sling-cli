@@ -1005,6 +1005,10 @@ func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Col
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case !srcCol.IsString() && tgtCol.IsString():
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	default:
 		selectStr = qName
 	}

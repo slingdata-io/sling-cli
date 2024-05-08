@@ -348,7 +348,12 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
-		varMap := map[string]string{} // should always be number
+		varMap := map[string]string{
+			"date_layout":          "2006-01-02",
+			"date_layout_str":      "{value}",
+			"timestamp_layout":     "2006-01-02 15:04:05.000 -07",
+			"timestamp_layout_str": "{value}",
+		}
 		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
 		if err != nil {
 			err = g.Error(err, "Could not get incremental value")

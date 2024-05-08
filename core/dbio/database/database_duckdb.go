@@ -931,3 +931,19 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 
 	return
 }
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
+}
