@@ -159,7 +159,7 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 	if len(tables) == 0 {
 		return df, g.Error("no table/query provided")
 	} else if conn.GetProp("AWS_BUCKET") == "" {
-		g.Debug("using cursor to export. Please set AWS creds for Sling to use to UNLOAD function (for bigger datasets). See https://docs.slingdata.io/connections/database-connections/redshift")
+		g.Debug("using cursor to export. Please set AWS creds for Sling to use the UNLOAD function (for bigger datasets). See https://docs.slingdata.io/connections/database-connections/redshift")
 		return conn.BaseConn.BulkExportFlow(tables...)
 	}
 
