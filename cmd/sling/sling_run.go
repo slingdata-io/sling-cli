@@ -25,6 +25,7 @@ var (
 	updateMessage = ""
 	updateVersion = ""
 	rowCount      = int64(0)
+	totalBytes    = uint64(0)
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -223,8 +224,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		g.Info("Iteration #%d", itNumber)
 	}
 
-	// test count if need
-	err = testRowCnt(rowCount)
+	// test count/bytes if need
+	err = testOutput(rowCount, totalBytes)
 
 	return ok, err
 }
@@ -571,13 +572,13 @@ func setProjectID(cfgPath string) {
 	}
 }
 
-func testRowCnt(rowCnt int64) error {
+func testOutput(rowCnt int64, totalBytes uint64) error {
 	if expected := os.Getenv("SLING_ROW_CNT"); expected != "" {
 
 		if strings.HasPrefix(expected, ">") {
 			atLeast := cast.ToInt64(strings.TrimPrefix(expected, ">"))
 			if rowCnt <= atLeast {
-				return g.Error("Expected at least %d rows, got %d", atLeast, rowCnt)
+				return g.Error("Expected at least %d rows, got %d", atLeast+1, rowCnt)
 			}
 			return nil
 		}
@@ -586,23 +587,21 @@ func testRowCnt(rowCnt int64) error {
 			return g.Error("Expected %d rows, got %d", cast.ToInt(expected), rowCnt)
 		}
 	}
-	return nil
-}
 
-func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
-	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
+	if expected := os.Getenv("SLING_TOTAL_BYTES"); expected != "" {
 
 		if strings.HasPrefix(expected, ">") {
-			atLeast := cast.ToInt(strings.TrimPrefix(expected, ">"))
-			if streamCnt <= atLeast {
-				return g.Error("Expected at least %d streams, got %d => %s", atLeast, streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+			atLeast := cast.ToUint64(strings.TrimPrefix(expected, ">"))
+			if totalBytes <= atLeast {
+				return g.Error("Expected at least %d bytes, got %d", atLeast+1, totalBytes)
 			}
 			return nil
 		}
 
-		if streamCnt != cast.ToInt(expected) {
-			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+		if totalBytes != cast.ToUint64(expected) {
+			return g.Error("Expected %d bytes, got %d", cast.ToInt(expected), totalBytes)
 		}
 	}
+
 	return nil
 }

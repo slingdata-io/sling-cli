@@ -643,13 +643,10 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			defer localCtx.Wg.Read.Done()
 
 			bw0, err := fsClient.Write(partURL, reader)
-			if batchR.Counter != 0 {
-				bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
-				node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
-				fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
-			} else {
-				g.DebugLow("no data, did not write to %s", partURL)
-			}
+			bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
+			node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
+
 			if err != nil {
 				g.LogError(err)
 				df.Context.CaptureErr(g.Error(err))

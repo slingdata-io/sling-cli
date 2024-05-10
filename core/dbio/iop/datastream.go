@@ -1917,6 +1917,7 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 				}
 			}
 
+			w.Flush()
 		}
 
 		pipeW.Close()

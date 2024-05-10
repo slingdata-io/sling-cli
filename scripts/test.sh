@@ -33,6 +33,7 @@ cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" -
 sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
 
 SLING_ROW_CNT=2 sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
+echo 'a,b,c' | SLING_ALLOW_EMPTY=true SLING_TOTAL_BYTES=6 sling  run --tgt-object file:///tmp/test.csv
 
 # test various cli commands / flags
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
