@@ -371,6 +371,12 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	rowCount = rowCount + int64(task.GetCount())
+	inBytes, outBytes := task.GetBytes()
+	if inBytes == 0 {
+		totalBytes = totalBytes + outBytes
+	} else {
+		totalBytes = totalBytes + inBytes
+	}
 
 	return nil
 }
