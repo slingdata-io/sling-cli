@@ -343,6 +343,15 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
+	// check if table exists by getting target columns
+	// only pull if ignore_existing is specified (don't need columns yet otherwise)
+	if t.Config.IgnoreExisting() {
+		if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
+
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
@@ -494,7 +503,12 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	pullTargetTableColumns(t.Config, tgtConn, false)
+	if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+		if t.Config.IgnoreExisting() {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
 
 	// get watermark
 	if t.usingCheckpoint() {

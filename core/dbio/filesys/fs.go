@@ -561,6 +561,24 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 // WriteDataflow writes a dataflow to a file sys.
 func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, err error) {
 
+	// if ignore_existing is specified, check if files exists.
+	// if exists, then don't delete / overwrite
+	if cast.ToBool(fs.GetProp("ignore_existing")) {
+		paths, err := fs.List(url)
+		if err != nil {
+			return 0, g.Error(err, "could not list files")
+		} else if len(paths) > 0 {
+			g.Debug("not writing since file/folder exists at %s (ignore_existing=true)", url)
+
+			// close datastreams
+			for _, ds := range df.Streams {
+				ds.Close()
+			}
+			df.Close() // close dataflow
+			return 0, nil
+		}
+	}
+
 	fileReadyChn := make(chan FileReady, 10000)
 
 	g.Trace("writing dataflow to %s", url)

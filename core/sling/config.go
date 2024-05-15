@@ -853,6 +853,11 @@ func (cfg *Config) ReplicationMode() bool {
 	return cfg.ReplicationStream != nil
 }
 
+// IgnoreExisting returns true target_options.ignore_existing is true
+func (cfg *Config) IgnoreExisting() bool {
+	return cfg.Target.Options.IgnoreExisting != nil && *cfg.Target.Options.IgnoreExisting
+}
+
 // Value return json value, implement driver.Valuer interface
 func (cfg Config) Value() (driver.Value, error) {
 	jBytes, err := json.Marshal(cfg)

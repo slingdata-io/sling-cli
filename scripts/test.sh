@@ -42,6 +42,10 @@ sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
 
+# test ignore_existing, should write 0 rows
+cat cmd/sling/tests/files/test1.1.csv.gz | SLING_ROW_CNT=0 sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options 'ignore_existing: true'
+SLING_ROW_CNT=0 sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options 'ignore_existing: true'
+
 # test binary
 sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
 SLING_ROW_CNT=1 sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"
