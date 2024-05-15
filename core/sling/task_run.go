@@ -354,8 +354,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			"timestamp_layout":     "2006-01-02 15:04:05.000 -07",
 			"timestamp_layout_str": "{value}",
 		}
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
-		if err != nil {
+
+		if err = getIncrementalValue(t.Config, tgtConn, varMap); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -369,8 +369,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -416,8 +416,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -499,8 +499,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// get watermark
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
-		if err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}

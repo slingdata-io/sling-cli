@@ -2445,13 +2445,19 @@ func (it *Iterator) BelowEqualIncrementalVal() bool {
 	incrementalCol := it.ds.Columns[it.incrementalColI]
 	rowVal := it.Row[it.incrementalColI]
 
+	if rowVal == nil {
+		return true // consider as not above IncrementalVal
+	}
+
 again:
 	switch iVal := it.incrementalVal.(type) {
 	case string:
 		switch {
 		case incrementalCol.Type == "":
 			it.incrementalVal = it.ds.Sp.ParseString(cast.ToString(it.incrementalVal))
-			goto again
+			if _, ok := it.incrementalVal.(string); !ok {
+				goto again // try other switch cases if not string
+			}
 		case incrementalCol.IsDatetime():
 			incrementalValT, err := cast.ToTimeE(iVal)
 			if err != nil {
@@ -2477,13 +2483,12 @@ again:
 				return false
 			}
 			it.incrementalVal = incrementalValF
-		default:
-			return cast.ToString(iVal) >= cast.ToString(rowVal)
 		}
+		return cast.ToString(iVal) >= cast.ToString(rowVal)
 	case time.Time:
-		rowValT, err := cast.ToTimeE(rowVal)
+		rowValT, err := it.ds.Sp.ParseTime(rowVal)
 		if err != nil {
-			it.Context.CaptureErr(g.Error(err, "unable to cast row value to time.Time: %s", rowVal))
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to time.Time: %#v", rowVal))
 			it.incrementalVal = nil
 			return false
 		}
@@ -2491,7 +2496,7 @@ again:
 	case int64:
 		rowValI, err := cast.ToInt64E(rowVal)
 		if err != nil {
-			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Int64: %s", rowVal))
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Int64: %#v", rowVal))
 			it.incrementalVal = nil
 			return false
 		}
@@ -2499,7 +2504,7 @@ again:
 	case float64:
 		rowValF, err := cast.ToFloat64E(rowVal)
 		if err != nil {
-			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Float64: %s", rowVal))
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Float64: %#v", rowVal))
 			it.incrementalVal = nil
 			return false
 		}
