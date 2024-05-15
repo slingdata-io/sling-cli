@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql/driver"
 	"os"
 	"strings"
 	"time"
@@ -79,6 +80,16 @@ type Task struct {
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
 }
 
+// Scan scan value into Jsonb, implements sql.Scanner interface
+func (t *Task) Scan(value interface{}) error {
+	return g.JSONScanner(t, value)
+}
+
+// Value return json value, implement driver.Valuer interface
+func (t Task) Value() (driver.Value, error) {
+	return g.JSONValuer(t, "{}")
+}
+
 type Replication struct {
 	Name string `json:"name"  gorm:"index"`
 
@@ -93,6 +104,16 @@ type Replication struct {
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
+}
+
+// Scan scan value into Jsonb, implements sql.Scanner interface
+func (r *Replication) Scan(value interface{}) error {
+	return g.JSONScanner(r, value)
+}
+
+// Value return json value, implement driver.Valuer interface
+func (r Replication) Value() (driver.Value, error) {
+	return g.JSONValuer(r, "{}")
 }
 
 // Store saves the task into the local sqlite
