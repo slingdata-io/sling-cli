@@ -1,0 +1,14 @@
+source: local
+target: postgres
+
+defaults:
+  mode: incremental
+  update_key: create_dt
+  primary_key: id
+  object: public.incremental_csv
+  target_options:
+    adjust_column_type: true
+
+streams:
+  cmd/sling/tests/files/test1.csv:
+  cmd/sling/tests/files/test1.upsert.csv:

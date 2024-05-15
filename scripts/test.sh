@@ -70,6 +70,10 @@ SLING_STREAM_CNT=">0" sling run -r cmd/sling/tests/replications/r.09.yaml
 YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 sling run -r cmd/sling/tests/replications/r.12.yaml
 
+# file incremental. Second run should have no new rows
+sling run -r cmd/sling/tests/replications/r.14.yaml
+SLING_ROW_CNT=0 sling run -r cmd/sling/tests/replications/r.14.yaml
+
 sling run -c cmd/sling/tests/task.yaml
 
 sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
