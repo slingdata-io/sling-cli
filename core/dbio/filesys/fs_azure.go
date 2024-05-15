@@ -99,7 +99,7 @@ func (fs *AzureFileSysClient) Connect() (err error) {
 			return
 		}
 	} else if ak := fs.GetProp("ACCOUNT_KEY"); ak != "" {
-		cred, err := azblob.NewSharedKeyCredential(serviceURL, ak)
+		cred, err := azblob.NewSharedKeyCredential(fs.account, ak)
 		if err != nil {
 			return g.Error(err, "Could not process shared key / account key")
 		}
