@@ -971,7 +971,7 @@ func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
 	s := cast.ToString(i)
 	if s == "" {
-		return t, g.Error("blank val")
+		return t, nil // return zero time, so it become nil
 	}
 
 	// date layouts to try out
