@@ -1138,6 +1138,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 
+	var colMap map[int]int
 	nextFunc := func(it *Iterator) bool {
 
 	processNext:
@@ -1156,8 +1157,35 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					return false
 				}
 
-				// skip header for subsequent CSVs, since c.getReader() injects header line if missing
-				_, _ = r.Read()
+				// analyze header for subsequent CSVs, since c.getReader() injects header line if missing
+				row0, _ = r.Read()
+				row0 = CleanHeaderRow(row0)
+
+				// some files may have new columns
+				fm := it.ds.Columns.FieldMap(true)
+				toAdd := Columns{}
+				for _, name := range row0 {
+					if _, ok := fm[strings.ToLower(name)]; !ok {
+						// field is not found, so we need to add
+						toAdd = append(toAdd, Column{Name: name, Type: StringType, Position: len(it.ds.Columns) + 1})
+					}
+				}
+
+				// add new columns, ensure all columns exist
+				if len(toAdd) > 0 {
+					it.ds.AddColumns(toAdd, false)
+				}
+
+				// set column mapping if in different order
+				if g.Marshal(row0) != g.Marshal(it.ds.Columns.Names()) {
+					fm := it.ds.Columns.FieldMap(true)
+					colMap = map[int]int{}
+					for incorrectI, name := range row0 {
+						colMap[incorrectI] = fm[strings.ToLower(name)]
+					}
+				} else {
+					colMap = nil
+				}
 
 				goto processNext
 			}
@@ -1170,6 +1198,15 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 
 		if len(row) > len(it.ds.Columns) {
 			it.addNewColumns(len(row))
+		}
+
+		if colMap != nil {
+			// remake row in proper order. row has new structure
+			correctRow := make([]string, len(it.ds.Columns))
+			for incorrectI, correctI := range colMap {
+				correctRow[correctI] = row[incorrectI]
+			}
+			row = correctRow
 		}
 
 		it.Row = make([]any, len(row))
