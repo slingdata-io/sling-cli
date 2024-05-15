@@ -285,6 +285,7 @@ func (cols Columns) Clone() (newCols Columns) {
 		newCols[j] = Column{
 			Position:    col.Position,
 			Name:        col.Name,
+			Description: col.Description,
 			Type:        col.Type,
 			DbType:      col.DbType,
 			DbPrecision: col.DbPrecision,
@@ -295,6 +296,7 @@ func (cols Columns) Clone() (newCols Columns) {
 			Table:       col.Table,
 			Schema:      col.Schema,
 			Database:    col.Database,
+			Metadata:    col.Metadata,
 		}
 	}
 	return newCols

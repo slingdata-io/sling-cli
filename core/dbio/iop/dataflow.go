@@ -424,24 +424,9 @@ func (df *Dataflow) SyncStats() {
 
 	// for some reason, df.Columns remains the same as the first ds.Columns
 	// need to recreate them, reassign from dfCols
-	dfCols := Columns{}
-	for _, col := range df.Columns {
-		dfCols = append(dfCols, Column{
-			Name:        col.Name,
-			Type:        col.Type,
-			Description: col.Description,
-			Position:    col.Position,
-			DbType:      col.DbType,
-			DbPrecision: col.DbPrecision,
-			DbScale:     col.DbScale,
-			Sourced:     col.Sourced,
-			goType:      col.goType,
-			Table:       col.Table,
-			Schema:      col.Schema,
-			Database:    col.Database,
-			Stats:       ColumnStats{MaxLen: col.Stats.MaxLen}, // keep manual column length spec
-			Metadata:    col.Metadata,
-		})
+	dfCols := df.Columns.Clone()
+	for i, col := range dfCols {
+		dfCols[i].Stats = ColumnStats{MaxLen: col.Stats.MaxLen} // keep manual column length spec
 	}
 
 	for _, ds := range df.Streams {

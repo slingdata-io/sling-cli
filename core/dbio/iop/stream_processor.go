@@ -219,6 +219,10 @@ func DefaultStreamConfig() *StreamConfig {
 	}
 }
 
+func (sp *StreamProcessor) ColStats() map[int]*ColumnStats {
+	return sp.colStats
+}
+
 func (sp *StreamProcessor) ResetConfig() {
 	sp.Config = DefaultStreamConfig()
 }
