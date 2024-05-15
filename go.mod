@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/bigtable v1.16.0
 	cloud.google.com/go/storage v1.39.1
 	github.com/360EntSecGroup-Skylar/excelize v1.4.1
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.5.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.0.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.24.0
 	github.com/PuerkitoBio/goquery v1.6.0
@@ -81,6 +82,7 @@ require (
 	github.com/99designs/keyring v1.2.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.9.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.5.1 // indirect
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.2.1 // indirect
 	github.com/ClickHouse/ch-go v0.61.5 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
@@ -128,6 +130,7 @@ require (
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.0 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
@@ -162,6 +165,7 @@ require (
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/kr/fs v0.1.0 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/labstack/echo/v4 v4.10.2 // indirect
 	github.com/labstack/echo/v5 v5.0.0-20230722203903-ec5b858dab61 // indirect
 	github.com/labstack/gommon v0.4.0 // indirect
@@ -180,7 +184,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
-	github.com/montanaflynn/stats v0.6.6 // indirect
+	github.com/montanaflynn/stats v0.7.0 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
