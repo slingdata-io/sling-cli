@@ -9,7 +9,7 @@ require (
 	cloud.google.com/go/storage v1.39.1
 	github.com/360EntSecGroup-Skylar/excelize v1.4.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.0.0
-	github.com/ClickHouse/clickhouse-go/v2 v2.20.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.24.0
 	github.com/PuerkitoBio/goquery v1.6.0
 	github.com/apache/arrow/go/v16 v16.0.0-20240331151108-17a536839ee2
 	github.com/aws/aws-sdk-go v1.51.1
@@ -47,7 +47,7 @@ require (
 	github.com/samber/lo v1.39.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil/v3 v3.24.4
-	github.com/shopspring/decimal v1.3.1
+	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.10-0.20240228213529-2ce633cb669f
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.8.0
@@ -81,7 +81,7 @@ require (
 	github.com/99designs/keyring v1.2.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.9.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.5.1 // indirect
-	github.com/ClickHouse/ch-go v0.61.3 // indirect
+	github.com/ClickHouse/ch-go v0.61.5 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/andybalholm/cascadia v1.1.0 // indirect
@@ -218,9 +218,9 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.48.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.48.0 // indirect
-	go.opentelemetry.io/otel v1.24.0 // indirect
-	go.opentelemetry.io/otel/metric v1.24.0 // indirect
-	go.opentelemetry.io/otel/trace v1.24.0 // indirect
+	go.opentelemetry.io/otel v1.26.0 // indirect
+	go.opentelemetry.io/otel/metric v1.26.0 // indirect
+	go.opentelemetry.io/otel/trace v1.26.0 // indirect
 	go.temporal.io/api v1.29.1 // indirect
 	go.temporal.io/sdk v1.26.0 // indirect
 	golang.org/x/exp v0.0.0-20240222234643-814bf88cf225 // indirect
