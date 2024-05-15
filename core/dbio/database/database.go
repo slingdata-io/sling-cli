@@ -1528,6 +1528,14 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = SQLColumns(colTypes, conn)
+
+	// add table info
+	for i := range columns {
+		columns[i].Database = table.Database
+		columns[i].Schema = table.Schema
+		columns[i].Table = table.Name
+	}
+
 	table.Columns = columns
 
 	if len(columns) == 0 {
