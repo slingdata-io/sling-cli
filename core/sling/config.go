@@ -42,6 +42,17 @@ const (
 	BackfillMode Mode = "backfill"
 )
 
+var AllMode = []struct {
+	Value  Mode
+	TSName string
+}{
+	{FullRefreshMode, "FullRefreshMode"},
+	{IncrementalMode, "IncrementalMode"},
+	{TruncateMode, "TruncateMode"},
+	{SnapshotMode, "SnapshotMode"},
+	{BackfillMode, "BackfillMode"},
+}
+
 // ColumnCasing is the casing method to use
 type ColumnCasing string
 
@@ -50,6 +61,15 @@ const (
 	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
 	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
 )
+
+var AllColumnCasing = []struct {
+	Value  ColumnCasing
+	TSName string
+}{
+	{SourceColumnCasing, "SourceColumnCasing"},
+	{TargetColumnCasing, "TargetColumnCasing"},
+	{SnakeColumnCasing, "SnakeColumnCasing"},
+}
 
 // NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg *Config, err error) {

@@ -40,6 +40,18 @@ const (
 	ZStandardCompressorType CompressorType = "ZSTD"
 )
 
+var AllCompressorType = []struct {
+	Value  CompressorType
+	TSName string
+}{
+	{AutoCompressorType, "AutoCompressorType"},
+	{NoneCompressorType, "NoneCompressorType"},
+	{ZipCompressorType, "ZipCompressorType"},
+	{GzipCompressorType, "GzipCompressorType"},
+	{SnappyCompressorType, "SnappyCompressorType"},
+	{ZStandardCompressorType, "ZStandardCompressorType"},
+}
+
 // CompressorTypePtr returns a pointer to the CompressorType value passed in.
 func CompressorTypePtr(v CompressorType) *CompressorType {
 	return &v

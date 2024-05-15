@@ -167,15 +167,32 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 
 type FileType string
 
-const FileTypeNone FileType = ""
-const FileTypeCsv FileType = "csv"
-const FileTypeXml FileType = "xml"
-const FileTypeExcel FileType = "xlsx"
-const FileTypeJson FileType = "json"
-const FileTypeParquet FileType = "parquet"
-const FileTypeAvro FileType = "avro"
-const FileTypeSAS FileType = "sas7bdat"
-const FileTypeJsonLines FileType = "jsonlines"
+const (
+	FileTypeNone      FileType = ""
+	FileTypeCsv       FileType = "csv"
+	FileTypeXml       FileType = "xml"
+	FileTypeExcel     FileType = "xlsx"
+	FileTypeJson      FileType = "json"
+	FileTypeParquet   FileType = "parquet"
+	FileTypeAvro      FileType = "avro"
+	FileTypeSAS       FileType = "sas7bdat"
+	FileTypeJsonLines FileType = "jsonlines"
+)
+
+var AllFileType = []struct {
+	Value  FileType
+	TSName string
+}{
+	{FileTypeNone, "FileTypeNone"},
+	{FileTypeCsv, "FileTypeCsv"},
+	{FileTypeXml, "FileTypeXml"},
+	{FileTypeExcel, "FileTypeExcel"},
+	{FileTypeJson, "FileTypeJson"},
+	{FileTypeParquet, "FileTypeParquet"},
+	{FileTypeAvro, "FileTypeAvro"},
+	{FileTypeSAS, "FileTypeSAS"},
+	{FileTypeJsonLines, "FileTypeJsonLines"},
+}
 
 func (ft FileType) Ext() string {
 	switch ft {
