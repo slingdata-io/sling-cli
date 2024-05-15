@@ -1034,7 +1034,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	Header: g.Bool(true),
 	Compression: lo.Ternary(
 		os.Getenv("COMPRESSION") != "",
-		iop.CompressorTypePtr(iop.CompressorType(os.Getenv("COMPRESSION"))),
+		iop.CompressorTypePtr(iop.CompressorType(strings.ToLower(os.Getenv("COMPRESSION")))),
 		iop.CompressorTypePtr(iop.AutoCompressorType),
 	),
 	Concurrency: lo.Ternary(

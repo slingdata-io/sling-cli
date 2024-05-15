@@ -605,7 +605,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	defer close(fileReadyChn)
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
 	concurrency := cast.ToInt(fs.GetProp("CONCURRENCY"))
-	compression := iop.CompressorType(strings.ToUpper(fs.GetProp("COMPRESSION")))
+	compression := iop.CompressorType(strings.ToLower(fs.GetProp("COMPRESSION")))
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	fileRowLimit := cast.ToInt(fs.GetProp("FILE_MAX_ROWS"))
 	fileBytesLimit := cast.ToInt64(fs.GetProp("FILE_MAX_BYTES")) // uncompressed file size
@@ -701,7 +701,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 			compressor := iop.NewCompressor(compression)
 			if fileFormat == FileTypeParquet {
-				compressor = iop.NewCompressor("NONE") // compression is done internally
+				compressor = iop.NewCompressor("none") // compression is done internally
 			} else {
 				subPartURL = subPartURL + compressor.Suffix()
 			}
