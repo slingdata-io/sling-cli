@@ -50,7 +50,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
-		bw, err = fs.WriteDataflow(df, uri)
+		bw, err = filesys.WriteDataflow(fs, df, uri)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err

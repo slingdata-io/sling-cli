@@ -46,7 +46,6 @@ type FileSysClient interface {
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
-	WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error)
 	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
@@ -560,7 +559,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 }
 
 // WriteDataflow writes a dataflow to a file sys.
-func (fs *BaseFileSysClient) WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error) {
+func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, err error) {
 
 	fileReadyChn := make(chan FileReady, 10000)
 

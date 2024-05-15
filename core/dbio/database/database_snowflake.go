@@ -489,7 +489,7 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 
 	g.Info("writing to s3 for snowflake import")
 	s3Fs.SetProp("null_as", `\N`)
-	bw, err := s3Fs.WriteDataflow(df, s3Path)
+	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "Error in FileSysWriteDataflow")
 	}
@@ -559,7 +559,7 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 
 	g.Info("writing to azure for snowflake import")
 	azFs.SetProp("null_as", `\N`)
-	bw, err := azFs.WriteDataflow(df, azPath)
+	bw, err := filesys.WriteDataflow(azFs, df, azPath)
 	if err != nil {
 		return df.Count(), g.Error(err, "Error in FileSysWriteDataflow")
 	}

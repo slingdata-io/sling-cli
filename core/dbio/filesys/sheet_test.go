@@ -85,7 +85,7 @@ func TestExcel(t *testing.T) {
 	df, err = iop.MakeDataFlow(data.Stream())
 	assert.NoError(t, err)
 	localFs.SetProp("COMPRESSION", "NONE")
-	_, err = localFs.WriteDataflow(df, "test/test.excel6.xlsx")
+	_, err = WriteDataflow(localFs, df, "test/test.excel6.xlsx")
 	assert.NoError(t, err)
 
 	xls3, err := iop.NewExcelFromFile("test/test.excel6.xlsx")

@@ -229,7 +229,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 
 	g.Info("writing to s3 for redshift import")
 	s3Fs.SetProp("null_as", `\N`)
-	bw, err := s3Fs.WriteDataflow(df, s3Path)
+	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
