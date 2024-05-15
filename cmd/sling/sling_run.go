@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
 	"github.com/shirou/gopsutil/v3/mem"
@@ -384,120 +383,48 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
-	replication, err := sling.LoadReplicationConfig(cfgPath)
+	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
 		return g.Error(err, "Error parsing replication config")
 	}
 
-	err = replication.ProcessWildcards()
+	taskConfigs, err := replication.Compile(cfgOverwrite, selectStreams...)
 	if err != nil {
-		return g.Error(err, "could not process streams using wildcard")
+		return g.Error(err, "Error compiling replication config")
 	}
 
-	// clean up selectStreams
-	matchedStreams := map[string]*sling.ReplicationStreamConfig{}
-	for _, selectStream := range selectStreams {
-		for key, val := range replication.MatchStreams(selectStream) {
-			key = replication.Normalize(key)
-			matchedStreams[key] = val
-		}
-	}
-
-	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(replication.Streams))
-	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(replication.Streams))
-	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
-
-	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(replication.Streams)); err != nil {
-		return err
-	}
-
-	if streamCnt == 0 {
-		g.Warn("Did not match any streams. Exiting.")
-		return
-	}
-
-	streamsOrdered := replication.StreamsOrdered()
 	eG := g.ErrorGroup{}
-	succcess := 0
-	errors := make([]error, len(streamsOrdered))
+	successes := 0
+
+	// get final stream count
+	streamCnt := 0
+	for _, cfg := range taskConfigs {
+		if cfg.ReplicationStream.Disabled {
+			continue
+		}
+		streamCnt++
+	}
 
 	counter := 0
-	for i, name := range streamsOrdered {
+	for _, cfg := range taskConfigs {
 		if interrupted {
 			break
 		}
 
-		_, matched := matchedStreams[replication.Normalize(name)]
-		if len(selectStreams) > 0 && !matched {
-			g.Trace("skipping stream %s since it is not selected", name)
-			continue
-		}
 		counter++
-
-		stream := sling.ReplicationStreamConfig{}
-		if replication.Streams[name] != nil {
-			stream = *replication.Streams[name]
-		}
-		sling.SetStreamDefaults(&stream, replication)
-
-		if stream.Object == "" {
-			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
-		}
-
-		// config overwrite
-		if cfgOverwrite != nil {
-			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
-				g.Debug("stream mode overwritten: %s => %s", stream.Mode, cfgOverwrite.Mode)
-				stream.Mode = cfgOverwrite.Mode
-			}
-			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
-				g.Debug("stream update_key overwritten: %s => %s", stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
-				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
-			}
-			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
-				g.Debug("stream primary_key overwritten: %#v => %#v", stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
-				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
-			}
-		}
-
-		cfg := sling.Config{
-			Source: sling.Source{
-				Conn:        replication.Source,
-				Stream:      name,
-				Select:      stream.Select,
-				PrimaryKeyI: stream.PrimaryKey(),
-				UpdateKey:   stream.UpdateKey,
-			},
-			Target: sling.Target{
-				Conn:   replication.Target,
-				Object: stream.Object,
-			},
-			Mode:            stream.Mode,
-			ReplicationMode: true,
-			Env:             g.ToMapString(replication.Env),
-			StreamName:      name,
-		}
-
-		// so that the next stream does not retain previous pointer values
-		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
-		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
-
-		if stream.SQL != "" {
-			cfg.Source.Stream = stream.SQL
-		}
 
 		println()
 
-		if stream.Disabled {
-			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
+		if cfg.ReplicationStream.Disabled {
+			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, cfg.StreamName)
 			continue
 		} else {
-			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
+			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		env.SetTelVal("replication_md5", replication.MD5())
-		err = runTask(&cfg, &replication)
+		err = runTask(cfg, &replication)
 		if err != nil {
 			g.Info(env.RedString(err.Error()))
 			if eh := sling.ErrorHelper(err); eh != "" {
@@ -506,17 +433,16 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 				env.Println("")
 			}
 
-			errors[i] = g.Error(err, "error for stream %s", name)
-			eG.Capture(err, streamsOrdered[i])
+			eG.Capture(err, cfg.StreamName)
 		} else {
-			succcess++
+			successes++
 		}
 	}
 
 	println()
 	delta := time.Since(startTime)
 
-	successStr := env.GreenString(g.F("%d Successes", succcess))
+	successStr := env.GreenString(g.F("%d Successes", successes))
 	failureStr := g.F("%d Failures", len(eG.Errors))
 	if len(eG.Errors) > 0 {
 		failureStr = env.RedString(failureStr)

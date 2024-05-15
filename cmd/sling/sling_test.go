@@ -373,14 +373,18 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
-			task.Config.Target.Options.PreSQL = g.R(
-				task.Config.Target.Options.PreSQL,
-				"drop_view", dropViewSQL,
-			)
-			task.Config.Target.Options.PostSQL = g.R(
-				task.Config.Target.Options.PostSQL,
-				"drop_view", dropViewSQL,
-			)
+			if preSQL := task.Config.Target.Options.PreSQL; preSQL != nil {
+				task.Config.Target.Options.PreSQL = g.String(g.R(
+					*preSQL,
+					"drop_view", dropViewSQL,
+				))
+			}
+			if postSQL := task.Config.Target.Options.PostSQL; postSQL != nil {
+				task.Config.Target.Options.PostSQL = g.String(g.R(
+					*postSQL,
+					"drop_view", dropViewSQL,
+				))
+			}
 		}
 	}
 
@@ -697,6 +701,114 @@ func generateLargeDataset(numCols, numRows int, force bool) (path string, err er
 func TestGenerateWideFile(t *testing.T) {
 	_, err := generateLargeDataset(300, 100, true)
 	g.LogFatal(err)
+}
+
+func TestReplicationDefaults(t *testing.T) {
+	replicationCfg := `
+source: local
+target: postgres
+
+defaults:
+  mode: full-refresh
+  object: my_schema1.table1
+  select: [col1, col2, col3]
+  primary_key: [col1, col2]
+  update_key: col3
+  source_options:
+    trim_space: false
+    delimiter: ","
+  target_options:
+    file_max_rows: 500000
+    add_new_columns: false
+    post_sql: some sql
+
+streams:
+  stream_0: {}
+
+  stream_1: 
+    mode: incremental
+    object: my_schema2.table2
+    select: [col1]
+    primary_key: col3
+    update_key: col2
+    source_options:
+      trim_space: true
+      delimiter: "|"
+    target_options:
+      file_max_rows: 600000
+      add_new_columns: true
+
+  stream_2: 
+    select: []
+    primary_key: []
+    update_key: null
+    target_options:
+      file_max_rows: 0
+      post_sql: ""
+    disabled: true
+`
+	replication, err := sling.LoadReplicationConfig(replicationCfg)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	taskConfigs, err := replication.Compile(nil)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+
+	if !assert.Len(t, taskConfigs, 3) {
+		return
+	}
+
+	{
+		// First Stream: stream_0
+		config := taskConfigs[0]
+		assert.Equal(t, sling.FullRefreshMode, config.Mode)
+		assert.Equal(t, "local", config.Source.Conn)
+		assert.Equal(t, "stream_0", config.Source.Stream)
+		assert.Equal(t, []string{"col1", "col2", "col3"}, config.Source.Select)
+		assert.Equal(t, []string{"col1", "col2"}, config.Source.PrimaryKey())
+		assert.Equal(t, "col3", config.Source.UpdateKey)
+		assert.Equal(t, g.Bool(false), config.Source.Options.TrimSpace)
+		assert.Equal(t, ",", config.Source.Options.Delimiter)
+
+		assert.Equal(t, "postgres", config.Target.Conn)
+		assert.Equal(t, g.Bool(false), config.Target.Options.AddNewColumns)
+		assert.EqualValues(t, g.Int64(500000), config.Target.Options.FileMaxRows)
+		assert.EqualValues(t, false, config.ReplicationStream.Disabled)
+	}
+
+	{
+		// Second Stream: stream_1
+		config := taskConfigs[1]
+		assert.Equal(t, sling.IncrementalMode, config.Mode)
+		assert.Equal(t, "stream_1", config.Source.Stream)
+		assert.Equal(t, []string{"col1"}, config.Source.Select)
+		assert.Equal(t, []string{"col3"}, config.Source.PrimaryKey())
+		assert.Equal(t, "col2", config.Source.UpdateKey)
+		assert.Equal(t, g.Bool(true), config.Source.Options.TrimSpace)
+		assert.Equal(t, "|", config.Source.Options.Delimiter)
+
+		assert.Equal(t, g.Bool(true), config.Target.Options.AddNewColumns)
+		assert.EqualValues(t, g.Int64(600000), config.Target.Options.FileMaxRows)
+		assert.EqualValues(t, g.String("some sql"), config.Target.Options.PostSQL)
+		assert.EqualValues(t, false, config.ReplicationStream.Disabled)
+	}
+
+	{
+		// Second Stream: stream_2
+		config := taskConfigs[2]
+		assert.Equal(t, "stream_2", config.Source.Stream)
+		assert.Equal(t, []string{}, config.Source.Select)
+		assert.Equal(t, []string{}, config.Source.PrimaryKey())
+		assert.Equal(t, "", config.Source.UpdateKey)
+		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
+		assert.EqualValues(t, g.String(""), config.Target.Options.PostSQL)
+		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
+	}
+
+	// g.Debug(g.Pretty(taskConfigs))
 }
 
 func Test1Replication(t *testing.T) {

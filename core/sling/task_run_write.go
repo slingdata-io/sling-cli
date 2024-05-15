@@ -129,7 +129,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		return 0, g.Error(err, "could not parse object table name")
 	}
-	targetTable.DDL = cfg.Target.Options.TableDDL
+
+	if cfg.Target.Options.TableDDL != nil {
+		targetTable.DDL = *cfg.Target.Options.TableDDL
+	}
 	targetTable.DDL = g.R(targetTable.DDL, "object_name", targetTable.Raw, "table", targetTable.Raw)
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
@@ -225,7 +228,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
 		return
 	}
-	cfg.Target.Options.TableDDL = tableTmp.DDL
+	cfg.Target.Options.TableDDL = g.String(tableTmp.DDL)
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
@@ -329,9 +332,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// pre SQL
-	if preSQL := cfg.Target.Options.PreSQL; preSQL != "" {
+	if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
 		t.SetProgress("executing pre-sql")
-		preSQL, err = GetSQLText(preSQL)
+		sql, err := GetSQLText(*preSQL)
 		if err != nil {
 			err = g.Error(err, "could not get pre-sql body")
 			return cnt, err
@@ -343,7 +346,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return cnt, err
 		}
 
-		_, err = tgtConn.ExecMulti(g.Rm(preSQL, fMap))
+		_, err = tgtConn.ExecMulti(g.Rm(sql, fMap))
 		if err != nil {
 			err = g.Error(err, "could not execute pre-sql on target")
 			return cnt, err
@@ -514,12 +517,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// post SQL
-	if postSQL := cfg.Target.Options.PostSQL; postSQL != "" {
+	if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
 		t.SetProgress("executing post-sql")
 
-		postSQL, err = GetSQLText(postSQL)
+		sql, err := GetSQLText(*postSQL)
 		if err != nil {
-			err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
+			err = g.Error(err, "could not get post-sql body")
 			return cnt, err
 		}
 
@@ -529,9 +532,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			return cnt, err
 		}
 
-		_, err = tgtConn.ExecMulti(g.Rm(postSQL, fMap))
+		_, err = tgtConn.ExecMulti(g.Rm(sql, fMap))
 		if err != nil {
-			err = g.Error(err, "Error executing Target.PostSQL")
+			err = g.Error(err, "Error executing post-sql")
 			return cnt, err
 		}
 	}

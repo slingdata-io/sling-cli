@@ -145,7 +145,7 @@ func (t *TaskExecution) Execute() error {
 	t.EndTime = &now2
 
 	// show help text
-	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode {
+	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode() {
 		env.Println("")
 		env.Println(env.MagentaString(eh))
 		env.Println("")

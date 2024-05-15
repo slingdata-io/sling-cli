@@ -232,7 +232,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	// add config path
-	if g.PathExists(cfgStr) && !cfg.ReplicationMode {
+	if g.PathExists(cfgStr) && !cfg.ReplicationMode() {
 		fp, err := filepath.Abs(cfgStr)
 		if err != nil {
 			fp = cfgStr
@@ -330,8 +330,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		Type = FileToFile
-	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != "" {
-		cfg.Target.Object = cfg.Target.Options.PostSQL
+	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
+		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
 	}
 
@@ -566,6 +566,10 @@ func (cfg *Config) Prepare() (err error) {
 	// see variable `connPool`
 	cfg.SrcConn.Data["_source_options_md5"] = g.MD5(g.Marshal(cfg.Source.Options))
 	cfg.TgtConn.Data["_target_options_md5"] = g.MD5(g.Marshal(cfg.Target.Options))
+
+	// set conn types
+	cfg.Source.Type = cfg.SrcConn.Type
+	cfg.Target.Type = cfg.TgtConn.Type
 
 	// validate table keys
 	if tkMap := cfg.Target.Options.TableKeys; tkMap != nil {
@@ -824,12 +828,14 @@ type Config struct {
 	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
 	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
-	StreamName      string                `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
-	SrcConn         connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn         connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared        bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
-	IncrementalVal  string                `json:"-" yaml:"-"`
-	ReplicationMode bool                  `json:"-" yaml:"-"`
+	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
+	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
+	SrcConn           connection.Connection    `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
+	TgtConn           connection.Connection    `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
+	Prepared          bool                     `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
+
+	IncrementalVal    any    `json:"-" yaml:"-"`
+	IncrementalValStr string `json:"-" yaml:"-"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -840,6 +846,11 @@ type Config struct {
 // Scan scan value into Jsonb, implements sql.Scanner interface
 func (cfg *Config) Scan(value interface{}) error {
 	return g.JSONScanner(cfg, value)
+}
+
+// ReplicationMode returns true for replication mode
+func (cfg *Config) ReplicationMode() bool {
+	return cfg.ReplicationStream != nil
 }
 
 // Value return json value, implement driver.Valuer interface
@@ -887,6 +898,7 @@ type ConfigOptions struct {
 // Source is a source of data
 type Source struct {
 	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type        dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
 	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
@@ -923,6 +935,7 @@ func (s *Source) PrimaryKey() []string {
 func (s *Source) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", s.Conn),
+		g.M("type", s.Type),
 		g.M("stream", s.Stream),
 		g.M("primary_key", s.PrimaryKeyI),
 		g.M("update_key", s.UpdateKey),
@@ -939,6 +952,7 @@ func (s *Source) MD5() string {
 // Target is a target of data
 type Target struct {
 	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type    dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
 	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
 	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
@@ -950,6 +964,7 @@ type Target struct {
 func (t *Target) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", t.Conn),
+		g.M("type", t.Type),
 		g.M("object", t.Object),
 		g.M("options", t.Options),
 	})
@@ -993,20 +1008,21 @@ type TargetOptions struct {
 	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
-	FileMaxRows      int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
-	FileMaxBytes     int64               `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
+	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
+	FileMaxBytes     *int64              `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
 	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
+	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	TableDDL  string             `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	PreSQL    string             `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL   string             `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	TableDDL  *string            `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	PreSQL    *string            `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL   *string            `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
@@ -1044,13 +1060,13 @@ var TargetFileOptionsDefault = TargetOptions{
 	),
 	FileMaxRows: lo.Ternary(
 		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_ROWS"))),
+		g.Int64(0),
 	),
 	FileMaxBytes: lo.Ternary(
 		os.Getenv("FILE_MAX_BYTES") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_BYTES")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_BYTES"))),
+		g.Int64(0),
 	),
 	Format:         filesys.FileTypeNone,
 	UseBulk:        g.Bool(true),
@@ -1064,8 +1080,8 @@ var TargetFileOptionsDefault = TargetOptions{
 var TargetDBOptionsDefault = TargetOptions{
 	FileMaxRows: lo.Ternary(
 		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_ROWS"))),
+		g.Int64(0),
 	),
 	UseBulk:          g.Bool(true),
 	AddNewColumns:    g.Bool(true),
@@ -1148,20 +1164,29 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Concurrency == 0 {
 		o.Concurrency = targetOptions.Concurrency
 	}
-	if o.FileMaxRows == 0 {
+	if o.FileMaxRows == nil {
 		o.FileMaxRows = targetOptions.FileMaxRows
 	}
-	if o.FileMaxBytes == 0 {
+	if o.FileMaxBytes == nil {
 		o.FileMaxBytes = targetOptions.FileMaxBytes
 	}
 	if o.UseBulk == nil {
 		o.UseBulk = targetOptions.UseBulk
 	}
-	if o.PreSQL == "" {
+	if o.IgnoreExisting == nil {
+		o.IgnoreExisting = targetOptions.IgnoreExisting
+	}
+	if o.PreSQL == nil {
 		o.PreSQL = targetOptions.PreSQL
 	}
-	if o.PostSQL == "" {
+	if o.PostSQL == nil {
 		o.PostSQL = targetOptions.PostSQL
+	}
+	if o.TableTmp == "" {
+		o.TableTmp = targetOptions.TableTmp
+	}
+	if o.TableDDL == nil {
+		o.TableDDL = targetOptions.TableDDL
 	}
 	if o.AdjustColumnType == nil {
 		o.AdjustColumnType = targetOptions.AdjustColumnType
@@ -1189,15 +1214,30 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 
 func castKeyArray(keyI any) (key []string) {
 	switch keyV := keyI.(type) {
+	case nil:
+		return []string{}
 	case []string:
+		if keyV == nil {
+			return []string{}
+		}
 		return keyV
 	case string:
+		if keyV == "" {
+			return []string{}
+		}
 		return []string{keyV}
 	case *string:
+		if keyV == nil || *keyV == "" {
+			return []string{}
+		}
 		return []string{*keyV}
 	case []any:
 		for _, v := range keyV {
-			key = append(key, cast.ToString(v))
+			val := cast.ToString(v)
+			if val == "" {
+				continue
+			}
+			key = append(key, val)
 		}
 		return key
 	}
