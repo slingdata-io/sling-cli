@@ -570,7 +570,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	}
 
 	// set originalCfg
-	config.originalCfg = g.Marshal(config)
+	config.originalCfg = replicYAML
 
 	return
 }
