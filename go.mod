@@ -33,7 +33,7 @@ require (
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/klauspost/compress v1.17.7
 	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011
-	github.com/lib/pq v1.10.2
+	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/microsoft/go-mssqldb v1.7.1
