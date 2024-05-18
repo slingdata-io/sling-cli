@@ -230,6 +230,10 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case srcCol.IsBool() && tgtCol.IsInteger():
 		selectStr = g.F("%s::int as %s", qName, qName)
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	default:
 		selectStr = qName
 	}

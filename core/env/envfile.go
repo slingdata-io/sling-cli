@@ -18,6 +18,7 @@ type EnvFile struct {
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
+	Body       string `json:"-" yaml:"-"`
 }
 
 func SetHomeDir(name string) string {
@@ -130,6 +131,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		_ = err
 	}
 
+	ef.Body = string(bytes)
 	ef.Path = path
 
 	if ef.Connections == nil {

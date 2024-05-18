@@ -424,24 +424,9 @@ func (df *Dataflow) SyncStats() {
 
 	// for some reason, df.Columns remains the same as the first ds.Columns
 	// need to recreate them, reassign from dfCols
-	dfCols := Columns{}
-	for _, col := range df.Columns {
-		dfCols = append(dfCols, Column{
-			Name:        col.Name,
-			Type:        col.Type,
-			Description: col.Description,
-			Position:    col.Position,
-			DbType:      col.DbType,
-			DbPrecision: col.DbPrecision,
-			DbScale:     col.DbScale,
-			Sourced:     col.Sourced,
-			goType:      col.goType,
-			Table:       col.Table,
-			Schema:      col.Schema,
-			Database:    col.Database,
-			Stats:       ColumnStats{MaxLen: col.Stats.MaxLen}, // keep manual column length spec
-			Metadata:    col.Metadata,
-		})
+	dfCols := df.Columns.Clone()
+	for i, col := range dfCols {
+		dfCols[i].Stats = ColumnStats{MaxLen: col.Stats.MaxLen} // keep manual column length spec
 	}
 
 	for _, ds := range df.Streams {
@@ -466,6 +451,7 @@ func (df *Dataflow) SyncStats() {
 			dfCols[i].Stats.BoolCnt = dfCols[i].Stats.BoolCnt + colStats.BoolCnt
 			dfCols[i].Stats.DateCnt = dfCols[i].Stats.DateCnt + colStats.DateCnt
 			dfCols[i].Stats.DateTimeCnt = dfCols[i].Stats.DateTimeCnt + colStats.DateTimeCnt
+			dfCols[i].Stats.DateTimeZCnt = dfCols[i].Stats.DateTimeZCnt + colStats.DateTimeZCnt
 			dfCols[i].Stats.Checksum = dfCols[i].Stats.Checksum + colStats.Checksum
 
 			if colStats.Min < dfCols[i].Stats.Min {

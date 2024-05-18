@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
@@ -74,6 +75,7 @@ func (fs *AzureFileSysClient) GetPath(uri string) (path string, err error) {
 // Connect initiates the fs client connection
 func (fs *AzureFileSysClient) Connect() (err error) {
 
+	serviceURL := g.F("https://%s.blob.core.windows.net/", fs.account)
 	if cs := fs.GetProp("CONN_STR"); cs != "" {
 		connProps := g.KVArrToMap(strings.Split(cs, ";")...)
 		fs.account = connProps["AccountName"]
@@ -96,8 +98,26 @@ func (fs *AzureFileSysClient) Connect() (err error) {
 			err = g.Error(err, "Could not connect to Azure using provided SAS_SVC_URL")
 			return
 		}
+	} else if ak := fs.GetProp("ACCOUNT_KEY"); ak != "" {
+		cred, err := azblob.NewSharedKeyCredential(fs.account, ak)
+		if err != nil {
+			return g.Error(err, "Could not process shared key / account key")
+		}
+
+		fs.client, err = azblob.NewClientWithSharedKeyCredential(serviceURL, cred, &azblob.ClientOptions{})
+		if err != nil {
+			return g.Error(err, "Could not connect to Azure using shared key credentials")
+		}
 	} else {
-		return g.Error("No Azure credentials preovided")
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return g.Error(err, "No Azure credentials provided")
+		}
+
+		fs.client, err = azblob.NewClient(serviceURL, cred, &azblob.ClientOptions{})
+		if err != nil {
+			return g.Error(err, "Could not connect to Azure using default credentials")
+		}
 	}
 	return
 }

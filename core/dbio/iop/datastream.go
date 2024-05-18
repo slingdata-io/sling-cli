@@ -109,6 +109,10 @@ type Iterator struct {
 
 	prevStreamURL  any
 	dsBufferStream []string
+
+	incrementalVal  any
+	incrementalCol  string
+	incrementalColI int
 }
 
 // NewDatastream return a new datastream
@@ -124,14 +128,24 @@ func NewDatastreamIt(ctx context.Context, columns Columns, nextFunc func(it *Ite
 }
 
 func (ds *Datastream) NewIterator(columns Columns, nextFunc func(it *Iterator) bool) *Iterator {
-	return &Iterator{
-		Row:       make([]any, len(columns)),
-		Reprocess: make(chan []any, 1), // for reprocessing row
-		nextFunc:  nextFunc,
-		Context:   ds.Context,
-		ds:        ds,
-		dsBufferI: -1,
+	it := &Iterator{
+		Row:             make([]any, len(columns)),
+		Reprocess:       make(chan []any, 1), // for reprocessing row
+		nextFunc:        nextFunc,
+		Context:         ds.Context,
+		ds:              ds,
+		dsBufferI:       -1,
+		incrementalColI: -1,
 	}
+
+	if ds.config.Map["sling_incremental_col"] != "" {
+		it.incrementalCol = ds.config.Map["sling_incremental_col"]
+	}
+	if ds.config.Map["sling_incremental_val"] != "" {
+		it.incrementalVal = ds.config.Map["sling_incremental_val"]
+	}
+
+	return it
 }
 
 // NewDatastreamContext return a new datastream
@@ -176,19 +190,26 @@ func (ds *Datastream) Limited(limit ...int) bool {
 }
 
 func (ds *Datastream) processBwRows() {
+	processBw := true
+	if val := os.Getenv("SLING_PROCESS_BW"); val != "" {
+		processBw = cast.ToBool(val)
+	}
+
 	done := false
 	process := func() {
 		// recover from panic
 		defer func() {
 			if r := recover(); r != nil {
-				g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
-				g.Debug("soft-panic occurred: %#v", r)
+				g.Error("panic occurred! %s\n%s", r, string(debug.Stack()))
+				g.Debug("soft-panic occurred: %s", r)
 			}
 		}()
 
 		for row := range ds.bwRows {
-			ds.writeBwCsv(ds.CastRowToStringSafe(row))
-			ds.bwCsv.Flush()
+			if processBw {
+				ds.writeBwCsv(ds.CastRowToStringSafe(row))
+				ds.bwCsv.Flush()
+			}
 		}
 		done = true
 	}
@@ -1117,6 +1138,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 
+	var colMap map[int]int
 	nextFunc := func(it *Iterator) bool {
 
 	processNext:
@@ -1135,8 +1157,35 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					return false
 				}
 
-				// skip header for subsequent CSVs, since c.getReader() injects header line if missing
-				_, _ = r.Read()
+				// analyze header for subsequent CSVs, since c.getReader() injects header line if missing
+				row0, _ = r.Read()
+				row0 = CleanHeaderRow(row0)
+
+				// some files may have new columns
+				fm := it.ds.Columns.FieldMap(true)
+				toAdd := Columns{}
+				for _, name := range row0 {
+					if _, ok := fm[strings.ToLower(name)]; !ok {
+						// field is not found, so we need to add
+						toAdd = append(toAdd, Column{Name: name, Type: StringType, Position: len(it.ds.Columns) + 1})
+					}
+				}
+
+				// add new columns, ensure all columns exist
+				if len(toAdd) > 0 {
+					it.ds.AddColumns(toAdd, false)
+				}
+
+				// set column mapping if in different order
+				if g.Marshal(row0) != g.Marshal(it.ds.Columns.Names()) {
+					fm := it.ds.Columns.FieldMap(true)
+					colMap = map[int]int{}
+					for incorrectI, name := range row0 {
+						colMap[incorrectI] = fm[strings.ToLower(name)]
+					}
+				} else {
+					colMap = nil
+				}
 
 				goto processNext
 			}
@@ -1149,6 +1198,15 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 
 		if len(row) > len(it.ds.Columns) {
 			it.addNewColumns(len(row))
+		}
+
+		if colMap != nil {
+			// remake row in proper order. row has new structure
+			correctRow := make([]string, len(it.ds.Columns))
+			for incorrectI, correctI := range colMap {
+				correctRow[correctI] = row[incorrectI]
+			}
+			row = correctRow
 		}
 
 		it.Row = make([]any, len(row))
@@ -1896,6 +1954,7 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 				}
 			}
 
+			w.Flush()
 		}
 
 		pipeW.Close()
@@ -2360,6 +2419,103 @@ func (it *Iterator) addNewColumns(newRowLen int) {
 	mux.Unlock()
 }
 
+// BelowEqualIncrementalVal evaluates the incremental value against the incrementalCol
+// this is used when the stream is a file with incremental mode
+// (unable to filter at source like a database)
+// it.incrementalVal and it.incrementalColI need to be set
+func (it *Iterator) BelowEqualIncrementalVal() bool {
+
+	if it.incrementalVal == nil || it.incrementalCol == "" {
+		// no incremental val or col
+		return false
+	} else if it.incrementalColI == -1 {
+		it.incrementalColI = it.ds.Columns.GetColumn(it.incrementalCol).Position - 1
+	}
+
+	if it.incrementalColI == -1 || it.incrementalColI > len(it.ds.Columns) {
+		// column index exceeds
+		it.Context.CaptureErr(g.Error("unable to get it.incrementalCol: %d (len(it.ds.Columns) = %d)", it.incrementalColI, len(it.ds.Columns)))
+		return false
+	} else if it.incrementalColI > len(it.Row) {
+		// column index exceeds row
+		it.Context.CaptureErr(g.Error("unable to get it.incrementalCol: %d (len(it.Row) = %d)", it.incrementalColI, len(it.Row)))
+		return false
+	}
+
+	incrementalCol := it.ds.Columns[it.incrementalColI]
+	rowVal := it.Row[it.incrementalColI]
+
+	if rowVal == nil {
+		return true // consider as not above IncrementalVal
+	}
+
+again:
+	switch iVal := it.incrementalVal.(type) {
+	case string:
+		switch {
+		case incrementalCol.Type == "":
+			it.incrementalVal = it.ds.Sp.ParseString(cast.ToString(it.incrementalVal))
+			if _, ok := it.incrementalVal.(string); !ok {
+				goto again // try other switch cases if not string
+			}
+		case incrementalCol.IsDatetime():
+			incrementalValT, err := cast.ToTimeE(iVal)
+			if err != nil {
+				it.Context.CaptureErr(g.Error(err, "unable to cast incremental value to time.Time: %s", iVal))
+				it.incrementalVal = nil
+				return false
+			}
+			it.incrementalVal = incrementalValT
+			goto again
+		case incrementalCol.IsInteger():
+			incrementalValI, err := cast.ToInt64E(iVal)
+			if err != nil {
+				it.Context.CaptureErr(g.Error(err, "unable to cast incremental value to Int64: %s", iVal))
+				it.incrementalVal = nil
+				return false
+			}
+			it.incrementalVal = incrementalValI
+		case incrementalCol.IsNumber():
+			incrementalValF, err := cast.ToFloat64E(iVal)
+			if err != nil {
+				it.Context.CaptureErr(g.Error(err, "unable to cast incremental value to Float64: %s", iVal))
+				it.incrementalVal = nil
+				return false
+			}
+			it.incrementalVal = incrementalValF
+		}
+		return cast.ToString(iVal) >= cast.ToString(rowVal)
+	case time.Time:
+		rowValT, err := it.ds.Sp.ParseTime(rowVal)
+		if err != nil {
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to time.Time: %#v", rowVal))
+			it.incrementalVal = nil
+			return false
+		}
+		return iVal.UnixNano() >= rowValT.UnixNano()
+	case int64:
+		rowValI, err := cast.ToInt64E(rowVal)
+		if err != nil {
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Int64: %#v", rowVal))
+			it.incrementalVal = nil
+			return false
+		}
+		return iVal >= rowValI
+	case float64:
+		rowValF, err := cast.ToFloat64E(rowVal)
+		if err != nil {
+			it.Context.CaptureErr(g.Error(err, "unable to cast row value to Float64: %#v", rowVal))
+			it.incrementalVal = nil
+			return false
+		}
+		return iVal >= rowValF
+	default:
+		return cast.ToString(iVal) >= cast.ToString(rowVal)
+	}
+
+	return false
+}
+
 func (it *Iterator) incrementStreamRowNum() {
 	if it.dsBufferI == -1 {
 		return
@@ -2398,8 +2554,13 @@ func (it *Iterator) next() bool {
 			return true
 		}
 
+	processNext:
 		next := it.nextFunc(it)
 		if next {
+			if it.BelowEqualIncrementalVal() {
+				goto processNext
+			}
+
 			it.incrementStreamRowNum()
 			it.Counter++
 

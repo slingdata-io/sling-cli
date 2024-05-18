@@ -60,6 +60,41 @@ const (
 	TypeDbProton     Type = "proton"
 )
 
+var AllType = []struct {
+	Value  Type
+	TSName string
+}{
+	{TypeUnknown, "TypeUnknown"},
+	{TypeFileLocal, "TypeFileLocal"},
+	{TypeFileHDFS, "TypeFileHDFS"},
+	{TypeFileS3, "TypeFileS3"},
+	{TypeFileAzure, "TypeFileAzure"},
+	{TypeFileGoogle, "TypeFileGoogle"},
+	{TypeFileFtp, "TypeFileFtp"},
+	{TypeFileSftp, "TypeFileSftp"},
+	{TypeFileHTTP, "TypeFileHTTP"},
+	{TypeDbPostgres, "TypeDbPostgres"},
+	{TypeDbRedshift, "TypeDbRedshift"},
+	{TypeDbStarRocks, "TypeDbStarRocks"},
+	{TypeDbMySQL, "TypeDbMySQL"},
+	{TypeDbMariaDB, "TypeDbMariaDB"},
+	{TypeDbOracle, "TypeDbOracle"},
+	{TypeDbBigTable, "TypeDbBigTable"},
+	{TypeDbBigQuery, "TypeDbBigQuery"},
+	{TypeDbSnowflake, "TypeDbSnowflake"},
+	{TypeDbSQLite, "TypeDbSQLite"},
+	{TypeDbDuckDb, "TypeDbDuckDb"},
+	{TypeDbMotherDuck, "TypeDbMotherDuck"},
+	{TypeDbSQLServer, "TypeDbSQLServer"},
+	{TypeDbAzure, "TypeDbAzure"},
+	{TypeDbAzureDWH, "TypeDbAzureDWH"},
+	{TypeDbTrino, "TypeDbTrino"},
+	{TypeDbClickhouse, "TypeDbClickhouse"},
+	{TypeDbMongoDB, "TypeDbMongoDB"},
+	{TypeDbPrometheus, "TypeDbPrometheus"},
+	{TypeDbProton, "TypeDbProton"},
+}
+
 // ValidateType returns true is type is valid
 func ValidateType(tStr string) (Type, bool) {
 	t := Type(strings.ToLower(tStr))

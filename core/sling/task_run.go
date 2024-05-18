@@ -34,7 +34,7 @@ func init() {
 	// we need a webserver to get the pprof webserver
 	if cast.ToBool(os.Getenv("SLING_PPROF")) {
 		go func() {
-			g.Trace("Starting pprof webserver @ localhost:6060")
+			g.Debug("Starting pprof webserver @ localhost:6060")
 			g.LogError(http.ListenAndServe("localhost:6060", nil))
 		}()
 	}
@@ -145,7 +145,7 @@ func (t *TaskExecution) Execute() error {
 	t.EndTime = &now2
 
 	// show help text
-	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode {
+	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode() {
 		env.Println("")
 		env.Println(env.MagentaString(eh))
 		env.Println("")
@@ -343,14 +343,28 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
+	// check if table exists by getting target columns
+	// only pull if ignore_existing is specified (don't need columns yet otherwise)
+	if t.Config.IgnoreExisting() {
+		if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
+
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
-		varMap := map[string]string{} // should always be number
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, varMap)
-		if err != nil {
+		varMap := map[string]string{
+			"date_layout":          "2006-01-02",
+			"date_layout_str":      "{value}",
+			"timestamp_layout":     "2006-01-02 15:04:05.000 -07",
+			"timestamp_layout_str": "{value}",
+		}
+
+		if err = getIncrementalValue(t.Config, tgtConn, varMap); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -364,8 +378,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -411,8 +425,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -489,13 +503,17 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	pullTargetTableColumns(t.Config, tgtConn, false)
+	if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+		if t.Config.IgnoreExisting() {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
 
 	// get watermark
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
-		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable)
-		if err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}

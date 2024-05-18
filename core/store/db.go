@@ -23,6 +23,11 @@ var (
 func InitDB() {
 	var err error
 
+	if Db != nil {
+		// already initiated
+		return
+	}
+
 	dbURL := g.F("sqlite://%s/.sling.db?cache=shared&mode=rwc&_journal_mode=WAL", env.HomeDir)
 	Conn, err = database.NewConn(dbURL)
 	if err != nil {

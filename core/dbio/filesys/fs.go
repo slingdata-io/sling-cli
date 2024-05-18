@@ -46,7 +46,6 @@ type FileSysClient interface {
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
-	WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error)
 	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
@@ -167,15 +166,32 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 
 type FileType string
 
-const FileTypeNone FileType = ""
-const FileTypeCsv FileType = "csv"
-const FileTypeXml FileType = "xml"
-const FileTypeExcel FileType = "xlsx"
-const FileTypeJson FileType = "json"
-const FileTypeParquet FileType = "parquet"
-const FileTypeAvro FileType = "avro"
-const FileTypeSAS FileType = "sas7bdat"
-const FileTypeJsonLines FileType = "jsonlines"
+const (
+	FileTypeNone      FileType = ""
+	FileTypeCsv       FileType = "csv"
+	FileTypeXml       FileType = "xml"
+	FileTypeExcel     FileType = "xlsx"
+	FileTypeJson      FileType = "json"
+	FileTypeParquet   FileType = "parquet"
+	FileTypeAvro      FileType = "avro"
+	FileTypeSAS       FileType = "sas7bdat"
+	FileTypeJsonLines FileType = "jsonlines"
+)
+
+var AllFileType = []struct {
+	Value  FileType
+	TSName string
+}{
+	{FileTypeNone, "FileTypeNone"},
+	{FileTypeCsv, "FileTypeCsv"},
+	{FileTypeXml, "FileTypeXml"},
+	{FileTypeExcel, "FileTypeExcel"},
+	{FileTypeJson, "FileTypeJson"},
+	{FileTypeParquet, "FileTypeParquet"},
+	{FileTypeAvro, "FileTypeAvro"},
+	{FileTypeSAS, "FileTypeSAS"},
+	{FileTypeJsonLines, "FileTypeJsonLines"},
+}
 
 func (ft FileType) Ext() string {
 	switch ft {
@@ -543,7 +559,25 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 }
 
 // WriteDataflow writes a dataflow to a file sys.
-func (fs *BaseFileSysClient) WriteDataflow(df *iop.Dataflow, url string) (bw int64, err error) {
+func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, err error) {
+
+	// if ignore_existing is specified, check if files exists.
+	// if exists, then don't delete / overwrite
+	if cast.ToBool(fs.GetProp("ignore_existing")) {
+		paths, err := fs.List(url)
+		if err != nil {
+			return 0, g.Error(err, "could not list files")
+		} else if len(paths) > 0 {
+			g.Debug("not writing since file/folder exists at %s (ignore_existing=true)", url)
+
+			// close datastreams
+			for _, ds := range df.Streams {
+				ds.Close()
+			}
+			df.Close() // close dataflow
+			return 0, nil
+		}
+	}
 
 	fileReadyChn := make(chan FileReady, 10000)
 
@@ -588,7 +622,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	defer close(fileReadyChn)
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
 	concurrency := cast.ToInt(fs.GetProp("CONCURRENCY"))
-	compression := iop.CompressorType(strings.ToUpper(fs.GetProp("COMPRESSION")))
+	compression := iop.CompressorType(strings.ToLower(fs.GetProp("COMPRESSION")))
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	fileRowLimit := cast.ToInt(fs.GetProp("FILE_MAX_ROWS"))
 	fileBytesLimit := cast.ToInt64(fs.GetProp("FILE_MAX_BYTES")) // uncompressed file size
@@ -643,13 +677,10 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			defer localCtx.Wg.Read.Done()
 
 			bw0, err := fsClient.Write(partURL, reader)
-			if batchR.Counter != 0 {
-				bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
-				node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
-				fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
-			} else {
-				g.DebugLow("no data, did not write to %s", partURL)
-			}
+			bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
+			node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
+
 			if err != nil {
 				g.LogError(err)
 				df.Context.CaptureErr(g.Error(err))
@@ -687,7 +718,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 			compressor := iop.NewCompressor(compression)
 			if fileFormat == FileTypeParquet {
-				compressor = iop.NewCompressor("NONE") // compression is done internally
+				compressor = iop.NewCompressor("none") // compression is done internally
 			} else {
 				subPartURL = subPartURL + compressor.Suffix()
 			}

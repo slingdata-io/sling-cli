@@ -267,6 +267,13 @@ func BenchmarkIsDate(b *testing.B) {
 	}
 }
 
+func BenchmarkIsUTC(b *testing.B) {
+	t := time.Now()
+	for n := 0; n < b.N; n++ {
+		isUTC(&t)
+	}
+}
+
 func TestInterfVal(t *testing.T) {
 	row := make([]interface{}, 3)
 	g.P(row[0])
@@ -345,4 +352,14 @@ func TestParseString(t *testing.T) {
 	sp := NewStreamProcessor()
 	val := sp.ParseString("1697104406")
 	assert.Equal(t, int64(1697104406), val)
+
+	val = sp.ParseString("2024-04-24 14:49:58")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
+	val = sp.ParseString("2024-04-24 13:49:58.000000 -03")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
+	val = sp.ParseString("2024-05-05 09:10:09.000000 -07")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
 }

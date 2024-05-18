@@ -148,7 +148,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		fs.SetProp("header", "false")
 		df2, _ := fs.ReadDataflow("test/test2/test2.1.noheader.csv")
-		_, err = fs2.WriteDataflow(df2, g.F("test/test_write/%s.test", formatS))
+		_, err = WriteDataflow(fs2, df2, g.F("test/test_write/%s.test", formatS))
 		assert.NoError(t, err, formatS)
 		df3, err := fs2.ReadDataflow(g.F("test/test_write/%s.test", formatS))
 		g.LogError(err)
@@ -163,7 +163,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		fs.SetProp("header", "false")
 		df2, _ = fs.ReadDataflow("test/test2/test2.1.noheader.csv")
-		_, err = fs2.WriteDataflow(df2, g.F("test/test_write/%s.folder", formatS))
+		_, err = WriteDataflow(fs2, df2, g.F("test/test_write/%s.folder", formatS))
 		assert.NoError(t, err, formatS)
 		df3, err = fs2.ReadDataflow(g.F("test/test_write/%s.folder", formatS))
 		assert.NoError(t, err, formatS)
@@ -176,7 +176,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		df4, err := iop.MakeDataFlow(data.Stream())
 		assert.NoError(t, err, formatS)
-		_, err = fs3.WriteDataflow(df4, g.F("test/test_write/%s.type.test", formatS))
+		_, err = WriteDataflow(fs3, df4, g.F("test/test_write/%s.type.test", formatS))
 		assert.NoError(t, err, formatS)
 		df5, err := fs2.ReadDataflow(g.F("test/test_write/%s.type.test", formatS))
 		assert.NoError(t, err, formatS)
@@ -255,7 +255,7 @@ func TestFileSysLocalParquet(t *testing.T) {
 	df2, err := iop.MakeDataFlow(data1.Stream())
 	assert.NoError(t, err)
 
-	_, err = fs.WriteDataflow(df2, "file:///tmp/parquet.test.parquet")
+	_, err = WriteDataflow(fs, df2, "file:///tmp/parquet.test.parquet")
 	assert.NoError(t, err)
 
 }
@@ -552,7 +552,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "s3://ocral/test.fs.write"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -560,7 +560,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 	df2, err = localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 	writeFolderPath = "s3://ocral/test.fs.write.json"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -666,7 +666,7 @@ func TestFileSysS3(t *testing.T) {
 
 	fs.SetProp("header", "true")
 	fs.SetProp("FILE_MAX_BYTES", "20000")
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 	assert.EqualValues(t, 1, len(df2.Streams))
@@ -733,7 +733,7 @@ func TestFileSysAzure(t *testing.T) {
 	err = Delete(fs, writeFolderPath)
 	assert.NoError(t, err)
 
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -800,7 +800,7 @@ func TestFileSysGoogle(t *testing.T) {
 
 	writeFolderPath := "gs://flarco_us_bucket/test"
 	fs.SetProp("header", "true")
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -867,7 +867,7 @@ func TestFileSysSftp(t *testing.T) {
 
 	writeFolderPath := root + "/tmp/test"
 	fs.SetProp("header", "true")
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -951,7 +951,7 @@ func TestFileSysFtp(t *testing.T) {
 	// // assert.EqualValues(t, 3, len(df2.Streams))
 
 	// writeFolderPath := root + "/home/test/test"
-	// _, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	// _, err = WriteDataflow(fs,df2, writeFolderPath+"/*.csv")
 	// assert.NoError(t, err)
 	// assert.EqualValues(t, 1036, df2.Count())
 }

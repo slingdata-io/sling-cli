@@ -158,6 +158,9 @@ func (conn *RedshiftConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
 	if len(tables) == 0 {
 		return df, g.Error("no table/query provided")
+	} else if conn.GetProp("AWS_BUCKET") == "" {
+		g.Debug("using cursor to export. Please set AWS creds for Sling to use the UNLOAD function (for bigger datasets). See https://docs.slingdata.io/connections/database-connections/redshift")
+		return conn.BaseConn.BulkExportFlow(tables...)
 	}
 
 	columns, err := conn.GetSQLColumns(tables[0])
@@ -226,7 +229,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 
 	g.Info("writing to s3 for redshift import")
 	s3Fs.SetProp("null_as", `\N`)
-	bw, err := s3Fs.WriteDataflow(df, s3Path)
+	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
@@ -321,6 +324,22 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	}
 
 	return 0, nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
 
 func (conn *RedshiftConn) setEmptyAsNull(sql string) string {

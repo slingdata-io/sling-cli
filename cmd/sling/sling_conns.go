@@ -148,7 +148,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("successful! duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
-		if err := testRowCnt(totalAffected); err != nil {
+		if err := testOutput(totalAffected, 0); err != nil {
 			return ok, err
 		}
 

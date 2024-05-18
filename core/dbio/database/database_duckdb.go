@@ -123,6 +123,8 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.Mux.Unlock()
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	conn.SetProp("connected", "true")
 
 	_, err = conn.Exec("select 1" + noDebugKey)
@@ -710,6 +712,8 @@ func (conn *DuckDbConn) Close() error {
 
 	conn.unlockFileContext(fileContext)
 
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 
@@ -926,4 +930,20 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	)
 
 	return
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }

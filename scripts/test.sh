@@ -6,6 +6,7 @@ shopt -s expand_aliases
 # export _DEBUG=LOW
 # export _DEBUG_CALLER_LEVEL=2
 cd cmd/sling
+go test -run 'TestReplicationDefaults'
 go test -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
 SKIP_CLICKHOUSE=TRUE go test -parallel 4 -timeout 15m -run TestSuiteDatabase
 
@@ -33,12 +34,17 @@ cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" -
 sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
 
 SLING_ROW_CNT=2 sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
+echo 'a,b,c' | SLING_ALLOW_EMPTY=true SLING_TOTAL_BYTES=6 sling  run --tgt-object file:///tmp/test.csv
 
 # test various cli commands / flags
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
 sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
+
+# test ignore_existing, should write 0 rows
+cat cmd/sling/tests/files/test1.1.csv.gz | SLING_ROW_CNT=0 sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options 'ignore_existing: true'
+SLING_ROW_CNT=0 sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options 'ignore_existing: true'
 
 # test binary
 sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
@@ -68,6 +74,10 @@ SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml
 SLING_STREAM_CNT=">0" sling run -r cmd/sling/tests/replications/r.09.yaml
 YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 sling run -r cmd/sling/tests/replications/r.12.yaml
+
+# file incremental. Second run should have no new rows
+sling run -r cmd/sling/tests/replications/r.14.yaml
+SLING_ROW_CNT=0 sling run -r cmd/sling/tests/replications/r.14.yaml
 
 sling run -c cmd/sling/tests/task.yaml
 

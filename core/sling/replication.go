@@ -26,6 +26,12 @@ type ReplicationConfig struct {
 
 	streamsOrdered []string
 	originalCfg    string
+	maps           replicationConfigMaps // raw maps for validation
+}
+
+type replicationConfigMaps struct {
+	Defaults map[string]any
+	Streams  map[string]map[string]any
 }
 
 // OriginalCfg returns original config
@@ -274,8 +280,98 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	return
 }
 
-// TODO: Compile
-func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []Config, err error) {
+// Compile compiles the replication into tasks
+func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []*Config, err error) {
+
+	err = rd.ProcessWildcards()
+	if err != nil {
+		return tasks, g.Error(err, "could not process streams using wildcard")
+	}
+
+	// clean up selectStreams
+	matchedStreams := map[string]*ReplicationStreamConfig{}
+	for _, selectStream := range selectStreams {
+		for key, val := range rd.MatchStreams(selectStream) {
+			key = rd.Normalize(key)
+			matchedStreams[key] = val
+		}
+	}
+
+	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
+	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, rd.Source, rd.Target)
+
+	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
+		return tasks, err
+	}
+
+	if streamCnt == 0 {
+		g.Warn("Did not match any streams. Exiting.")
+		return
+	}
+
+	for _, name := range rd.StreamsOrdered() {
+
+		_, matched := matchedStreams[rd.Normalize(name)]
+		if len(selectStreams) > 0 && !matched {
+			g.Trace("skipping stream %s since it is not selected", name)
+			continue
+		}
+
+		stream := ReplicationStreamConfig{}
+		if rd.Streams[name] != nil {
+			stream = *rd.Streams[name]
+		}
+		SetStreamDefaults(name, &stream, rd)
+
+		if stream.Object == "" {
+			return tasks, g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
+		}
+
+		// config overwrite
+		if cfgOverwrite != nil {
+			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
+				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
+				stream.Mode = cfgOverwrite.Mode
+			}
+			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
+			}
+			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
+				g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
+		}
+
+		cfg := Config{
+			Source: Source{
+				Conn:        rd.Source,
+				Stream:      name,
+				Select:      stream.Select,
+				PrimaryKeyI: stream.PrimaryKey(),
+				UpdateKey:   stream.UpdateKey,
+			},
+			Target: Target{
+				Conn:   rd.Target,
+				Object: stream.Object,
+			},
+			Mode:              stream.Mode,
+			Env:               g.ToMapString(rd.Env),
+			StreamName:        name,
+			ReplicationStream: &stream,
+		}
+
+		// so that the next stream does not retain previous pointer values
+		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
+		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
+
+		if stream.SQL != "" {
+			cfg.Source.Stream = stream.SQL
+		}
+
+		tasks = append(tasks, &cfg)
+	}
 	return
 }
 
@@ -303,29 +399,32 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
-func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
+func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
 
-	if len(stream.Schedule) == 0 {
-		stream.Schedule = replicationCfg.Defaults.Schedule
+	streamMap, ok := replicationCfg.maps.Streams[name]
+	if !ok {
+		streamMap = g.M()
 	}
-	if stream.PrimaryKeyI == nil {
-		stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI
+
+	// the keys to check if provided in map
+	defaultSet := map[string]func(){
+		"mode":        func() { stream.Mode = replicationCfg.Defaults.Mode },
+		"object":      func() { stream.Object = replicationCfg.Defaults.Object },
+		"select":      func() { stream.Select = replicationCfg.Defaults.Select },
+		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
+		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
+		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
+		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
+		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 	}
-	if string(stream.Mode) == "" {
-		stream.Mode = replicationCfg.Defaults.Mode
+
+	for key, setFunc := range defaultSet {
+		if _, found := streamMap[key]; !found {
+			setFunc() // if not found, set default
+		}
 	}
-	if stream.UpdateKey == "" {
-		stream.UpdateKey = replicationCfg.Defaults.UpdateKey
-	}
-	if stream.Object == "" {
-		stream.Object = replicationCfg.Defaults.Object
-	}
-	if stream.SQL == "" {
-		stream.SQL = replicationCfg.Defaults.SQL
-	}
-	if len(stream.Select) == 0 {
-		stream.Select = replicationCfg.Defaults.Select
-	}
+
+	// set default options
 	if stream.SourceOptions == nil {
 		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
 	} else if replicationCfg.Defaults.SourceOptions != nil {
@@ -392,10 +491,15 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	maps := replicationConfigMaps{}
+	g.Unmarshal(g.Marshal(defaults), &maps.Defaults)
+	g.Unmarshal(g.Marshal(streams), &maps.Streams)
+
 	config = ReplicationConfig{
 		Source: cast.ToString(source),
 		Target: cast.ToString(target),
 		Env:    Env,
+		maps:   maps,
 	}
 
 	// parse defaults
@@ -466,7 +570,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	}
 
 	// set originalCfg
-	config.originalCfg = g.Marshal(config)
+	config.originalCfg = replicYAML
 
 	return
 }
@@ -486,7 +590,7 @@ func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[stri
 	return columns
 }
 
-func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error) {
+func LoadReplicationConfigFromFile(cfgPath string) (config ReplicationConfig, err error) {
 	cfgFile, err := os.Open(cfgPath)
 	if err != nil {
 		err = g.Error(err, "Unable to open replication path: "+cfgPath)
@@ -499,9 +603,8 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	config, err = UnmarshalReplication(string(cfgBytes))
+	config, err = LoadReplicationConfig(string(cfgBytes))
 	if err != nil {
-		err = g.Error(err, "Error parsing replication config")
 		return
 	}
 
@@ -513,4 +616,32 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 	config.Env["SLING_CONFIG_PATH"] = fp
 
 	return
+}
+
+func LoadReplicationConfig(content string) (config ReplicationConfig, err error) {
+	config, err = UnmarshalReplication(content)
+	if err != nil {
+		err = g.Error(err, "Error parsing replication config")
+		return
+	}
+
+	return
+}
+
+func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
+	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToInt(strings.TrimPrefix(expected, ">"))
+			if streamCnt <= atLeast {
+				return g.Error("Expected at least %d streams, got %d => %s", atLeast, streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+			}
+			return nil
+		}
+
+		if streamCnt != cast.ToInt(expected) {
+			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+		}
+	}
+	return nil
 }

@@ -177,7 +177,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (val string, err error) {
+func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (err error) {
 	// get table columns type for table creation if not exists
 	// in order to get max value
 	// does table exists?
@@ -218,7 +218,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 			strings.Contains(errMsg, "invalid object") {
 			// table does not exists, will be create later
 			// set val to blank for full load
-			return "", nil
+			return nil
 		}
 		err = g.Error(err, "could not get max value for "+tgtUpdateKey)
 		return
@@ -226,30 +226,30 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	if len(data.Rows) == 0 {
 		// table is empty
 		// set val to blank for full load
-		return "", nil
+		return nil
 	}
 
-	value := data.Rows[0][0]
+	cfg.IncrementalVal = data.Rows[0][0]
 	colType := data.Columns[0].Type
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
 	isOracleDate := data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle
 
 	if colType.IsDate() || isOracleDate {
-		val = g.R(
+		cfg.IncrementalValStr = g.R(
 			srcConnVarMap["date_layout_str"],
-			"value", cast.ToTime(value).Format(srcConnVarMap["date_layout"]),
+			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["date_layout"]),
 		)
 	} else if colType.IsDatetime() {
-		val = g.R(
+		cfg.IncrementalValStr = g.R(
 			srcConnVarMap["timestamp_layout_str"],
-			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
+			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
 		)
 	} else if colType.IsNumber() {
-		val = cast.ToString(value)
+		cfg.IncrementalValStr = cast.ToString(cfg.IncrementalVal)
 	} else {
-		val = strings.ReplaceAll(cast.ToString(value), `'`, `''`)
-		val = `'` + val + `'`
+		cfg.IncrementalValStr = strings.ReplaceAll(cast.ToString(cfg.IncrementalVal), `'`, `''`)
+		cfg.IncrementalValStr = `'` + cfg.IncrementalValStr + `'`
 	}
 
 	return

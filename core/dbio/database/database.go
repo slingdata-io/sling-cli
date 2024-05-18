@@ -24,7 +24,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
-	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -1529,6 +1528,14 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = SQLColumns(colTypes, conn)
+
+	// add table info
+	for i := range columns {
+		columns[i].Database = table.Database
+		columns[i].Schema = table.Schema
+		columns[i].Table = table.Name
+	}
+
 	table.Columns = columns
 
 	if len(columns) == 0 {
@@ -3096,7 +3103,7 @@ func settingMppBulkImportFlow(conn Connection, compressor iop.CompressorType) {
 		conn.SetProp("FILE_MAX_BYTES", "50000000")
 	}
 
-	compr := strings.ToUpper(conn.GetProp("COMPRESSION"))
+	compr := strings.ToLower(conn.GetProp("COMPRESSION"))
 	if g.In(compr, "", string(iop.AutoCompressorType)) {
 		conn.SetProp("COMPRESSION", string(compressor))
 	}
@@ -3130,6 +3137,11 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "could not add column %s to table %s", col.Name, table.FullName())
+		}
+
+		if g.In(conn.GetType(), dbio.TypeDbBigQuery) {
+			// avoid rate limit error
+			time.Sleep(2 * time.Second)
 		}
 	}
 

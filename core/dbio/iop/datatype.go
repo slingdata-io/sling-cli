@@ -86,22 +86,23 @@ var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, Partit
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
-	MinLen      int    `json:"min_len,omitempty"`
-	MaxLen      int    `json:"max_len,omitempty"`
-	MaxDecLen   int    `json:"max_dec_len,omitempty"`
-	Min         int64  `json:"min"`
-	Max         int64  `json:"max"`
-	NullCnt     int64  `json:"null_cnt"`
-	IntCnt      int64  `json:"int_cnt,omitempty"`
-	DecCnt      int64  `json:"dec_cnt,omitempty"`
-	BoolCnt     int64  `json:"bool_cnt,omitempty"`
-	JsonCnt     int64  `json:"json_cnt,omitempty"`
-	StringCnt   int64  `json:"string_cnt,omitempty"`
-	DateCnt     int64  `json:"date_cnt,omitempty"`
-	DateTimeCnt int64  `json:"datetime_cnt,omitempty"`
-	TotalCnt    int64  `json:"total_cnt"`
-	UniqCnt     int64  `json:"uniq_cnt"`
-	Checksum    uint64 `json:"checksum"`
+	MinLen       int    `json:"min_len,omitempty"`
+	MaxLen       int    `json:"max_len,omitempty"`
+	MaxDecLen    int    `json:"max_dec_len,omitempty"`
+	Min          int64  `json:"min"`
+	Max          int64  `json:"max"`
+	NullCnt      int64  `json:"null_cnt"`
+	IntCnt       int64  `json:"int_cnt,omitempty"`
+	DecCnt       int64  `json:"dec_cnt,omitempty"`
+	BoolCnt      int64  `json:"bool_cnt,omitempty"`
+	JsonCnt      int64  `json:"json_cnt,omitempty"`
+	StringCnt    int64  `json:"string_cnt,omitempty"`
+	DateCnt      int64  `json:"date_cnt,omitempty"`
+	DateTimeCnt  int64  `json:"datetime_cnt,omitempty"`
+	DateTimeZCnt int64  `json:"datetimez_cnt,omitempty"`
+	TotalCnt     int64  `json:"total_cnt"`
+	UniqCnt      int64  `json:"uniq_cnt"`
+	Checksum     uint64 `json:"checksum"`
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -284,6 +285,7 @@ func (cols Columns) Clone() (newCols Columns) {
 		newCols[j] = Column{
 			Position:    col.Position,
 			Name:        col.Name,
+			Description: col.Description,
 			Type:        col.Type,
 			DbType:      col.DbType,
 			DbPrecision: col.DbPrecision,
@@ -294,6 +296,7 @@ func (cols Columns) Clone() (newCols Columns) {
 			Table:       col.Table,
 			Schema:      col.Schema,
 			Database:    col.Database,
+			Metadata:    col.Metadata,
 		}
 	}
 	return newCols
@@ -745,8 +748,12 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DateTimeCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
-			col.Type = DatetimeType
+		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+			if colStats.DateTimeZCnt > 0 {
+				col.Type = TimestampzType
+			} else {
+				col.Type = DatetimeType
+			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
 		} else if colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
@@ -1008,6 +1015,10 @@ func (ct ColumnType) IsValid() bool {
 }
 
 func isDate(t *time.Time) bool {
-	return t.Unix()%(24*60*60) == 0
+	return t != nil && t.Unix()%(24*60*60) == 0
 	// return t.Format("15:04:05.000") == "00:00:00.000" // much slower
+}
+
+func isUTC(t *time.Time) bool {
+	return t != nil && t.Location().String() == "UTC"
 }

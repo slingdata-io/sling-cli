@@ -27,18 +27,30 @@ type CompressorType string
 
 const (
 	// AutoCompressorType is for auto compression
-	AutoCompressorType CompressorType = "AUTO"
+	AutoCompressorType CompressorType = "auto"
 	// NoneCompressorType is for no compression
-	NoneCompressorType CompressorType = "NONE"
+	NoneCompressorType CompressorType = "none"
 	// ZipCompressorType is for Zip compression
-	ZipCompressorType CompressorType = "ZIP"
+	ZipCompressorType CompressorType = "zip"
 	// GzipCompressorType is for Gzip compression
-	GzipCompressorType CompressorType = "GZIP"
+	GzipCompressorType CompressorType = "gzip"
 	// SnappyCompressorType is for Snappy compression
-	SnappyCompressorType CompressorType = "SNAPPY"
+	SnappyCompressorType CompressorType = "snappy"
 	// ZStandardCompressorType is for ZStandard
-	ZStandardCompressorType CompressorType = "ZSTD"
+	ZStandardCompressorType CompressorType = "zstd"
 )
+
+var AllCompressorType = []struct {
+	Value  CompressorType
+	TSName string
+}{
+	{AutoCompressorType, "AutoCompressorType"},
+	{NoneCompressorType, "NoneCompressorType"},
+	{ZipCompressorType, "ZipCompressorType"},
+	{GzipCompressorType, "GzipCompressorType"},
+	{SnappyCompressorType, "SnappyCompressorType"},
+	{ZStandardCompressorType, "ZStandardCompressorType"},
+}
 
 // CompressorTypePtr returns a pointer to the CompressorType value passed in.
 func CompressorTypePtr(v CompressorType) *CompressorType {
