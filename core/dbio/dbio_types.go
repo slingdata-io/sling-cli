@@ -23,6 +23,15 @@ const (
 	KindUnknown Kind = ""
 )
 
+var AllKind = []struct {
+	Value  Kind
+	TSName string
+}{
+	{KindDatabase, "KindDatabase"},
+	{KindFile, "KindFile"},
+	{KindUnknown, "KindUnknown"},
+}
+
 // Type is the connection type
 type Type string
 
