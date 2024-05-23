@@ -826,21 +826,15 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 
 	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
+	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
-
-	// setting empty_as_null=true. no way to export with proper null_marker.
-	// Parquet export doesn't support JSON types
-	fs.SetProp("empty_as_null", "true")
 
 	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
 		err = g.Error(err, "Could not read "+gsURL)
 		return
 	}
-
-	// need to set columns so they match the source table
-	// df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
@@ -931,6 +925,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
+	gcsRef.NullMarker = `\N`
 	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
 		gcsRef.Compression = bigquery.Gzip
 	}
