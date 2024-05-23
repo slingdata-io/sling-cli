@@ -110,7 +110,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if cfg.IncrementalValStr != "" {
+		if cfg.IncrementalVal != nil {
 			// if primary key is defined, use greater than or equal
 			// in case that many timestamp values are the same and
 			// IncrementalVal has been truncated in target database system

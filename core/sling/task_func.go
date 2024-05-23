@@ -223,19 +223,23 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 		err = g.Error(err, "could not get max value for "+tgtUpdateKey)
 		return
 	}
-	if len(data.Rows) == 0 {
+	if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
 		// table is empty
 		// set val to blank for full load
 		return nil
 	}
 
-	cfg.IncrementalVal = data.Rows[0][0]
+	// set null for empty value (e.g. if target table exists but is empty)
+	cfg.IncrementalVal = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
 	colType := data.Columns[0].Type
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
 	isOracleDate := data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle
 
-	if colType.IsDate() || isOracleDate {
+	if cfg.IncrementalVal == nil {
+		// if is null, don't set IncrementalValStr
+		return nil
+	} else if colType.IsDate() || isOracleDate {
 		cfg.IncrementalValStr = g.R(
 			srcConnVarMap["date_layout_str"],
 			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["date_layout"]),
