@@ -365,7 +365,7 @@ variable:
   date_layout_str: "'{value}'"
   date_layout: '2006-01-02'
   timestamp_layout_str: "'{value}'"
-  timestamp_layout: '2006-01-02 15:04:05.000'
+  timestamp_layout: '2006-01-02 15:04:05.000000'
   error_filter_table_exists: already
   bool_as: bool
 
