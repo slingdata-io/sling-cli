@@ -182,8 +182,8 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
+	fs.SetProp("delimiter", ",")
 	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
