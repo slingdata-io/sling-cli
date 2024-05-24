@@ -124,7 +124,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), filePathStorageSlug, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.parquet", conn.GetProp("AWS_BUCKET"), filePathStorageSlug, cast.ToString(g.Now()))
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
@@ -182,10 +182,7 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("format", "csv")
-	fs.SetProp("delimiter", ",")
-	fs.SetProp("header", "true")
-	fs.SetProp("null_if", `\N`)
+	fs.SetProp("format", "parquet")
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 	df, err = fs.ReadDataflow(s3Path)
