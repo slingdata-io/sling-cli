@@ -48,6 +48,16 @@ func (conn *MsSQLServerConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
+	// https://github.com/slingdata-io/sling-cli/issues/310
+	// If both a portNumber and instanceName are used, the portNumber will take precedence and the instanceName will be ignored.
+	// therefore, if instanceName is provided, don't set a defaultPort
+	if u, err := dburl.Parse(conn.URL); err == nil {
+		if instanceName := strings.TrimPrefix(u.Path, "/"); instanceName != "" {
+			// set as 0 so BaseConn.Init won't inject port number
+			conn.BaseConn.defaultPort = 0
+		}
+	}
+
 	return conn.BaseConn.Init()
 }
 
