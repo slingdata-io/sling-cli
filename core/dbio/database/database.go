@@ -383,8 +383,7 @@ func (conn *BaseConn) GetURL(newURL ...string) string {
 // Init initiates the connection object & add default port if missing
 func (conn *BaseConn) Init() (err error) {
 	if conn.instance == nil {
-		var instance Connection
-		instance = conn
+		instance := Connection(conn)
 		conn.instance = &instance
 	}
 
