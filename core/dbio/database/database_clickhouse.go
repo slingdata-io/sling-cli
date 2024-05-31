@@ -73,9 +73,6 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
 	conn.tx = Tx
 
-	// CH does not support transactions at the moment
-	// Tx := &BlankTransaction{Conn: conn.Self(), context: &context}
-
 	return Tx, nil
 }
 
@@ -134,6 +131,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 	}
 
 	for batch := range ds.BatchChan {
+		batch.Limit = 20000
 		if batch.ColumnsChanged() || batch.IsFirst() {
 			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
 			if err != nil {
