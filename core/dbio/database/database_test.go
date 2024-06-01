@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/xo/dburl"
 	"syreclabs.com/go/faker"
-	// "github.com/gobuffalo/packr"
 )
 
 var (

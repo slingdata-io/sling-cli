@@ -262,10 +262,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 				continue
 			}
 
-			newCfg := ReplicationStreamConfig{}
-			g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-			rd.Streams[node.URI] = &newCfg
-			rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			rd.AddStream(node.URI, rd.Streams[wildcardName])
 			added++
 		}
 
