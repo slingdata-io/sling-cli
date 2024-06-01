@@ -51,6 +51,7 @@ type StreamConfig struct {
 	Delimiter         string                     `json:"delimiter"`
 	Escape            string                     `json:"escape"`
 	FileMaxRows       int64                      `json:"file_max_rows"`
+	BatchLimit        int64                      `json:"batch_limit"`
 	MaxDecimals       int                        `json:"max_decimals"`
 	Flatten           bool                       `json:"flatten"`
 	FieldsPerRec      int                        `json:"fields_per_rec"`
@@ -249,6 +250,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["file_max_rows"] != "" {
 		sp.Config.FileMaxRows = cast.ToInt64(configMap["file_max_rows"])
+	}
+
+	if configMap["batch_limit"] != "" {
+		sp.Config.BatchLimit = cast.ToInt64(configMap["batch_limit"])
 	}
 
 	if configMap["header"] != "" {

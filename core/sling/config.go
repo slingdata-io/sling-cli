@@ -138,6 +138,11 @@ func (cfg *Config) SetDefault() {
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
 		cfg.Source.Options.MaxDecimals = g.Int(11)
 		cfg.Target.Options.MaxDecimals = g.Int(11)
+		if cfg.Target.Options.BatchLimit == nil {
+			// set default batch_limit to limit memory usage. Bug in clickhouse driver?
+			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
+			cfg.Target.Options.BatchLimit = g.Int64(100000)
+		}
 	}
 
 	// set default transforms
@@ -1011,6 +1016,7 @@ type TargetOptions struct {
 	Header           *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Compression      *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	BatchLimit       *int64              `json:"batch_limit,omitempty" yaml:"batch_limit,omitempty"`
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
@@ -1168,6 +1174,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.Concurrency == 0 {
 		o.Concurrency = targetOptions.Concurrency
+	}
+	if o.BatchLimit == nil {
+		o.BatchLimit = targetOptions.BatchLimit
 	}
 	if o.FileMaxRows == nil {
 		o.FileMaxRows = targetOptions.FileMaxRows
