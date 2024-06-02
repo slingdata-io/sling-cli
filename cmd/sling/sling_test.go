@@ -746,8 +746,16 @@ streams:
       file_max_rows: 0
       post_sql: ""
     disabled: true
+
+  file://tests/files/parquet/*.parquet:
+		
+		single: true
+    object: my_schema3.table3
+
+  file://tests/files/*.csv:
+    object: my_schema3.table3
 `
-	replication, err := sling.LoadReplicationConfig(replicationCfg)
+	replication, err := sling.LoadReplicationConfig(strings.ReplaceAll(replicationCfg, "\t", "  "))
 	if !g.AssertNoError(t, err) {
 		return
 	}
@@ -757,7 +765,7 @@ streams:
 		return
 	}
 
-	if !assert.Len(t, taskConfigs, 3) {
+	if !assert.GreaterOrEqual(t, len(taskConfigs), 5) {
 		return
 	}
 
@@ -790,6 +798,7 @@ streams:
 		assert.Equal(t, g.Bool(true), config.Source.Options.TrimSpace)
 		assert.Equal(t, "|", config.Source.Options.Delimiter)
 
+		assert.Equal(t, "my_schema2.table2", config.Target.Object)
 		assert.Equal(t, g.Bool(true), config.Target.Options.AddNewColumns)
 		assert.EqualValues(t, g.Int64(600000), config.Target.Options.FileMaxRows)
 		assert.EqualValues(t, g.String("some sql"), config.Target.Options.PostSQL)
@@ -797,7 +806,7 @@ streams:
 	}
 
 	{
-		// Second Stream: stream_2
+		// Third Stream: stream_2
 		config := taskConfigs[2]
 		assert.Equal(t, "stream_2", config.Source.Stream)
 		assert.Equal(t, []string{}, config.Source.Select)
@@ -806,6 +815,24 @@ streams:
 		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
 		assert.EqualValues(t, g.String(""), config.Target.Options.PostSQL)
 		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
+	}
+
+	{
+		// Fourth Stream: file://tests/files/parquet/*.parquet
+		// single, wildcard not expanded
+		config := taskConfigs[3]
+		assert.Equal(t, config.Source.Stream, "file://tests/files/parquet/*.parquet")
+		assert.Equal(t, "my_schema3.table3", config.Target.Object)
+	}
+
+	{
+		// Fifth Stream: file://tests/files/*.csv
+		// wildcard expanded
+		config := taskConfigs[4]
+		assert.True(t, strings.HasPrefix(config.Source.Stream, "file://tests/files/"))
+		assert.NotEqual(t, config.Source.Stream, "file://tests/files/*.csv")
+		assert.Equal(t, "my_schema3.table3", config.Target.Object)
+		// g.Info(g.Pretty(config))
 	}
 
 	// g.Debug(g.Pretty(taskConfigs))
