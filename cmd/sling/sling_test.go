@@ -486,6 +486,7 @@ func TestSuiteDatabasePostgres(t *testing.T) {
 
 // func TestSuiteDatabaseRedshift(t *testing.T) {
 // 	t.Parallel()
+// 	os.Setenv("SAMPLE_SIZE", "1200") // adjust_column_type does not work in Redshift
 // 	testSuite(t, dbio.TypeDbRedshift)
 // }
 
