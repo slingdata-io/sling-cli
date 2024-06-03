@@ -109,8 +109,9 @@ func ValidateType(tStr string) (Type, bool) {
 	t := Type(strings.ToLower(tStr))
 
 	tMap := map[string]Type{
-		"postgresql": TypeDbPostgres,
-		"file":       TypeFileLocal,
+		"postgresql":  TypeDbPostgres,
+		"mongodb+srv": TypeDbMongoDB,
+		"file":        TypeFileLocal,
 	}
 
 	if tMatched, ok := tMap[tStr]; ok {
