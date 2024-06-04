@@ -824,13 +824,15 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("header", "false")
+	fs.SetProp("header", "true")
 	fs.SetProp("format", "csv")
+	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 
 	// setting empty_as_null=true. no way to export with proper null_marker.
-	// Parquet export doesn't support JSON types
+	// gcsRef.NullMarker = `\N` does not work, not way to do so in EXPORT DATA OPTIONS
+	// Also, Parquet export doesn't support JSON types
 	fs.SetProp("empty_as_null", "true")
 
 	df, err = fs.ReadDataflow(gsURL)
@@ -838,9 +840,6 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		err = g.Error(err, "Could not read "+gsURL)
 		return
 	}
-
-	// need to set columns so they match the source table
-	// df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
@@ -914,7 +913,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if true || table.IsQuery() || table.IsView {
+	if table.IsQuery() || table.IsView {
 		return conn.ExportToGCS(table.Select(0), gcsURI)
 	}
 
@@ -924,16 +923,12 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	}
 	defer client.Close()
 
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsURI = gcsURI + ".gz"
-	}
 	gcsRef := bigquery.NewGCSReference(gcsURI)
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsRef.Compression = bigquery.Gzip
-	}
+	// gcsRef.NullMarker = `\N` // does not work for export, only importing
+	gcsRef.Compression = bigquery.Gzip
 	gcsRef.MaxBadRecords = 0
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
@@ -951,7 +946,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 		return g.Error(err, "Error in task.Wait")
 	}
 	if err := status.Err(); err != nil {
-		if strings.Contains(err.Error(), "it is currently a VIEW") {
+		if strings.Contains(err.Error(), "it is currently a VIEW") || strings.Contains(err.Error(), "it currently has type VIEW") {
 			table.IsView = true
 			return conn.CopyToGCS(table, gcsURI)
 		}

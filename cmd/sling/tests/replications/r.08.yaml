@@ -7,3 +7,5 @@ defaults:
 
 streams:
   s3://ocral/test.fs.write/*:
+  s3://ocral/test.fs.write/*.csv:
+    single: true

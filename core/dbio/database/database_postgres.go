@@ -193,6 +193,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 			err = stmt.Close()
 			if err != nil {
+				g.Warn("%#v", err)
 				return g.Error(err, "could not close statement")
 			}
 

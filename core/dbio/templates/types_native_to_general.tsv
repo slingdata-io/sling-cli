@@ -398,6 +398,8 @@ redshift	float8	float	col_float8 float8	TRUE	TRUE	eigth-byte float
 redshift	numeric	decimal	col_numeric numeric	TRUE	TRUE	exact numeric of selectable precision
 redshift	varchar	text	col_varchar varchar	TRUE	TRUE	variable-length character string with a user-defined limit
 redshift	name	string		FALSE	FALSE	
+redshift	text	text		FALSE	FALSE	
+redshift	bytea	binary	col_bytea bytea	TRUE	FALSE	binary data (byte array)
 snowflake	array	json	col_array array	FALSE	FALSE	
 snowflake	bigint	bigint	col_bigint bigint	TRUE	TRUE	Synonymous with NUMBER except precision and scale cannot be specified.
 snowflake	binary	binary	col_binary binary(100)	FALSE	FALSE	

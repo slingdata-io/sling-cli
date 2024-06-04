@@ -23,6 +23,15 @@ const (
 	KindUnknown Kind = ""
 )
 
+var AllKind = []struct {
+	Value  Kind
+	TSName string
+}{
+	{KindDatabase, "KindDatabase"},
+	{KindFile, "KindFile"},
+	{KindUnknown, "KindUnknown"},
+}
+
 // Type is the connection type
 type Type string
 
@@ -100,8 +109,9 @@ func ValidateType(tStr string) (Type, bool) {
 	t := Type(strings.ToLower(tStr))
 
 	tMap := map[string]Type{
-		"postgresql": TypeDbPostgres,
-		"file":       TypeFileLocal,
+		"postgresql":  TypeDbPostgres,
+		"mongodb+srv": TypeDbMongoDB,
+		"file":        TypeFileLocal,
 	}
 
 	if tMatched, ok := tMap[tStr]; ok {

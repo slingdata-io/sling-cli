@@ -2340,17 +2340,6 @@ func (ds *Datastream) NewCsvReader(rowLimit int, bytesLimit int64) *io.PipeReade
 			return
 		}
 
-		// ensure that previous batch has same amount of columns
-		if pBatch := batch.Previous; pBatch != nil {
-			if len(pBatch.Columns) != len(batch.Columns) {
-				err := g.Error("number of columns have changed across files")
-				ds.Context.CaptureErr(err)
-				ds.Context.Cancel()
-				pipeW.Close()
-				return
-			}
-		}
-
 		c := 0 // local counter
 		w := csv.NewWriter(pipeW)
 		w.Comma = ','

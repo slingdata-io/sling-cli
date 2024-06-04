@@ -124,7 +124,16 @@ func (rd ReplicationConfig) Normalize(n string) string {
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	wildcardNames := []string{}
-	for name := range rd.Streams {
+	for name, stream := range rd.Streams {
+		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams)
+		if stream != nil && stream.Single != nil {
+			if *stream.Single {
+				continue
+			}
+		} else if rd.Defaults.Single != nil && *rd.Defaults.Single {
+			continue
+		}
+
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if strings.Contains(name, "*") {
@@ -164,6 +173,12 @@ func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig)
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
+
+	// add to streams map if not found
+	if _, found := rd.maps.Streams[key]; !found {
+		mapEntry, _ := g.UnmarshalMap(g.Marshal(cfg))
+		rd.maps.Streams[key] = mapEntry
+	}
 }
 
 func (rd *ReplicationConfig) DeleteStream(key string) {
@@ -262,10 +277,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 				continue
 			}
 
-			newCfg := ReplicationStreamConfig{}
-			g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-			rd.Streams[node.URI] = &newCfg
-			rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
+			rd.AddStream(node.URI, rd.Streams[wildcardName])
 			added++
 		}
 
@@ -386,6 +398,7 @@ type ReplicationStreamConfig struct {
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 
 	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
 }
@@ -416,6 +429,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
 		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
+		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
 	}
 
 	for key, setFunc := range defaultSet {

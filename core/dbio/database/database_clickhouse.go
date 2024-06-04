@@ -73,9 +73,6 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
 	conn.tx = Tx
 
-	// CH does not support transactions at the moment
-	// Tx := &BlankTransaction{Conn: conn.Self(), context: &context}
-
 	return Tx, nil
 }
 

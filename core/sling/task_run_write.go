@@ -308,6 +308,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	df.Unpause() // to create DDL and set column change functions
 	t.SetProgress("streaming data")
+
+	// set batch size if specified
+	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
+		df.SetBatchLimit(*batchLimit)
+	}
+
 	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
 	if err != nil {
 		tgtConn.Rollback()

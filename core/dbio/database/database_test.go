@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/xo/dburl"
 	"syreclabs.com/go/faker"
-	// "github.com/gobuffalo/packr"
 )
 
 var (
@@ -1380,6 +1380,12 @@ func TestConcurrentDuckDb(t *testing.T) {
 
 	c.Wg.Read.Wait()
 
+}
+
+func TestParseURL(t *testing.T) {
+	u, err := url.Parse("sqlserver://myuser:mypass@host.ip?database=master")
+	g.AssertNoError(t, err)
+	g.Info(g.Marshal(u))
 }
 
 func TestInteractiveDuckDb(t *testing.T) {

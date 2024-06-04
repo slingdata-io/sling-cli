@@ -32,6 +32,7 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 		Rows:       MakeRowsChan(),
 		Previous:   ds.LatestBatch(),
 		ds:         ds,
+		Limit:      ds.Sp.Config.BatchLimit,
 		closeChan:  make(chan struct{}),
 		transforms: []func(row []any) []any{},
 		context:    &ctx,

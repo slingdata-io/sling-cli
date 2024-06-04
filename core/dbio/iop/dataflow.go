@@ -110,13 +110,13 @@ func (df *Dataflow) SetConfig(cfg *StreamConfig) {
 	}
 }
 
-// ResetConfig resets the Sp config, so that, for example,
-// delimiter settings are not carried through.
-func (df *Dataflow) ResetConfig() {
+// SetBatchLimit set the ds.Batch.Limit
+func (df *Dataflow) SetBatchLimit(limit int64) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
-		ds.Sp.ResetConfig()
+		ds.Sp.Config.BatchLimit = limit
+		ds.CurrentBatch.Limit = limit
 	}
 }
 

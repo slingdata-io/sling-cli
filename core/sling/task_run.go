@@ -378,7 +378,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
 				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
@@ -425,7 +425,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalValStr != "" {
+			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
 				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")

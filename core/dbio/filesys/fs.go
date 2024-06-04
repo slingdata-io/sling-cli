@@ -566,8 +566,13 @@ func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, er
 	if cast.ToBool(fs.GetProp("ignore_existing")) {
 		paths, err := fs.List(url)
 		if err != nil {
-			return 0, g.Error(err, "could not list files")
-		} else if len(paths) > 0 {
+			if g.IsDebugLow() {
+				g.Warn("could not list path %s\n%s", url, err.Error())
+			}
+			err = nil
+		}
+
+		if len(paths) > 0 {
 			g.Debug("not writing since file/folder exists at %s (ignore_existing=true)", url)
 
 			// close datastreams
