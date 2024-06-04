@@ -824,11 +824,16 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("header", "false")
+	fs.SetProp("header", "true")
 	fs.SetProp("format", "csv")
 	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
+
+	// setting empty_as_null=true. no way to export with proper null_marker.
+	// gcsRef.NullMarker = `\N` does not work, not way to do so in EXPORT DATA OPTIONS
+	// Also, Parquet export doesn't support JSON types
+	fs.SetProp("empty_as_null", "true")
 
 	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
@@ -908,7 +913,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if true || table.IsQuery() || table.IsView {
+	if table.IsQuery() || table.IsView {
 		return conn.ExportToGCS(table.Select(0), gcsURI)
 	}
 
@@ -918,17 +923,12 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	}
 	defer client.Close()
 
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsURI = gcsURI + ".gz"
-	}
 	gcsRef := bigquery.NewGCSReference(gcsURI)
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
-	gcsRef.NullMarker = `\N`
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsRef.Compression = bigquery.Gzip
-	}
+	// gcsRef.NullMarker = `\N` // does not work for export, only importing
+	gcsRef.Compression = bigquery.Gzip
 	gcsRef.MaxBadRecords = 0
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
