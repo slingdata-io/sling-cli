@@ -946,7 +946,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 		return g.Error(err, "Error in task.Wait")
 	}
 	if err := status.Err(); err != nil {
-		if strings.Contains(err.Error(), "it is currently a VIEW") {
+		if strings.Contains(err.Error(), "it is currently a VIEW") || strings.Contains(err.Error(), "it currently has type VIEW") {
 			table.IsView = true
 			return conn.CopyToGCS(table, gcsURI)
 		}
