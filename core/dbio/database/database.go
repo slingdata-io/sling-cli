@@ -604,7 +604,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
 
-			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			if !cast.ToBool(conn.GetProp("silent")) {
+				g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -669,7 +671,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 func reconnectIfClosed(conn Connection) (err error) {
 	// g.Warn("connected => %s", conn.GetProp("connected"))
 	if conn.GetProp("connected") != "true" {
-		g.Debug("connection was closed, reconnecting")
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug("connection was closed, reconnecting")
+		}
 		err = conn.Self().Connect()
 		if err != nil {
 			err = g.Error(err, "Could not connect")
@@ -685,7 +689,7 @@ func (conn *BaseConn) Close() error {
 	if conn.db != nil {
 		err = conn.db.Close()
 		conn.db = nil
-		if err == nil {
+		if err == nil && !cast.ToBool(conn.GetProp("silent")) {
 			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 	}
@@ -718,7 +722,9 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		if !noColor {
 			query = env.CyanString(CleanSQL(conn, query))
 		}
-		g.Debug(query, args...)
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug(query, args...)
+		}
 	}
 }
 
@@ -2556,7 +2562,6 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		return df, g.Error(err)
 	}
 
-	g.Debug("Unloading to %s", folderPath)
 	df.AddColumns(columns, true) // overwrite types so we don't need to infer
 	df.Inferred = true
 
