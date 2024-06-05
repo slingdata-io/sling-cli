@@ -171,7 +171,9 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		cfg.MetadataLoadedAt = g.Bool(cast.ToBool(val))
+		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
+			cfg.MetadataLoadedAt = g.Bool(cast.ToBool(val))
+		}
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		cfg.MetadataStreamURL = cast.ToBool(val)

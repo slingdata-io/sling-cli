@@ -693,9 +693,10 @@ loop:
 
 		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
 			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
+			_, isTimestamp := ds.Metadata.LoadedAt.Value.(time.Time)
 			col := Column{
 				Name:        ds.Metadata.LoadedAt.Key,
-				Type:        IntegerType,
+				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.LoadedAt",
 				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
