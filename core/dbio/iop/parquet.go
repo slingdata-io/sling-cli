@@ -191,7 +191,7 @@ func (pw *ParquetWriter) Close() error {
 }
 
 func getParquetSchema(cols Columns) *parquet.Schema {
-	return parquet.NewSchema("", NewRecNode(cols))
+	return parquet.NewSchema("sling_schema", NewRecNode(cols))
 }
 
 func NewRecNode(cols Columns) *RecNode {
