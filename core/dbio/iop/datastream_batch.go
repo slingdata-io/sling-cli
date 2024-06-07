@@ -60,7 +60,7 @@ func (ds *Datastream) LatestBatch() *Batch {
 }
 
 func (b *Batch) ID() string {
-	if b == nil {
+	if b == nil || b.ds == nil {
 		return ""
 	}
 	return g.F("%s-%d", b.ds.ID, b.id)
