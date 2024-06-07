@@ -60,18 +60,30 @@ func (ds *Datastream) LatestBatch() *Batch {
 }
 
 func (b *Batch) ID() string {
+	if b == nil {
+		return ""
+	}
 	return g.F("%s-%d", b.ds.ID, b.id)
 }
 
 func (b *Batch) Ds() *Datastream {
+	if b == nil {
+		return nil
+	}
 	return b.ds
 }
 
 func (b *Batch) IsFirst() bool {
+	if b == nil {
+		return false
+	}
 	return b.id == 0
 }
 
 func (b *Batch) Close() {
+	if b == nil {
+		return
+	}
 	b.context.Lock()
 	defer b.context.Unlock()
 	if !b.closed {
