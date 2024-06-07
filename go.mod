@@ -72,8 +72,6 @@ require (
 	syreclabs.com/go/faker v1.2.2
 )
 
-require github.com/tentone/mssql-uuid v0.0.0-20221020215613-8c4214a7b4f6
-
 require (
 	cloud.google.com/go/auth v0.2.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.1 // indirect

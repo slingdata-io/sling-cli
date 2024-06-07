@@ -576,8 +576,6 @@ github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXl
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
-github.com/tentone/mssql-uuid v0.0.0-20221020215613-8c4214a7b4f6 h1:gecBElr51ZYJS4NywPY0fSAKzoRZ0NMz8fueEqnabGo=
-github.com/tentone/mssql-uuid v0.0.0-20221020215613-8c4214a7b4f6/go.mod h1:ojBYkCTBEF6Ja5l9GvaVITFIkR3u3kA3KLi05XS/338=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/timeplus-io/proton-go-driver/v2 v2.0.17 h1:rXPT21/9FgQYFntSgLvJRL/7pgPAfTXWIZKp5UG+vQ0=
 github.com/timeplus-io/proton-go-driver/v2 v2.0.17/go.mod h1:rUs4zvXvKsmuyFpzdJnnid6p8IvRJTa/n/jNQ2B6Dfw=
