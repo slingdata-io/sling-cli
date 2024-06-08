@@ -59,6 +59,9 @@ type Execution struct {
 	// If Ad-hoc from CLI flags, let it be `null`.
 	FilePath *string `json:"file_path,omitempty" gorm:"index"`
 
+	// WorkPath is where the sling process ran from
+	WorkPath *string `json:"work_path,omitempty"`
+
 	CreatedDt time.Time `json:"created_dt,omitempty" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt,omitempty" gorm:"autoUpdateTime"`
 
@@ -132,6 +135,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		Rows:           t.GetCount(),
 		ProjectID:      g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:       g.String(t.Config.Env["SLING_CONFIG_PATH"]),
+		WorkPath:       g.String(t.Config.Env["SLING_WORK_PATH"]),
 		ReplicationMD5: os.Getenv("SLING_REPLICATION_MD5"),
 		Pid:            os.Getpid(),
 		Version:        core.Version,
@@ -202,6 +206,7 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 
 	delete(task.Config.Env, "SLING_PROJECT_ID")
 	delete(task.Config.Env, "SLING_CONFIG_PATH")
+	delete(task.Config.Env, "SLING_WORK_PATH")
 
 	// set md5
 	task.MD5 = t.Config.MD5()
