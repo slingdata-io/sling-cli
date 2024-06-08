@@ -59,6 +59,11 @@ func init() {
 	if SentryDsn == "" {
 		SentryDsn = os.Getenv("SENTRY_DSN")
 	}
+
+	// legacy env var for ERROR_ON_CHECKSUM_FAILURE
+	if val := os.Getenv("ERROR_ON_CHECKSUM_FAILURE"); val != "" {
+		os.Setenv("SLING_CHECKSUM_ROWS", "10000")
+	}
 }
 
 func HomeBinDir() string {

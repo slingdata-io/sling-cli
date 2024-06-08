@@ -370,14 +370,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.Inferred = !cfg.sourceIsFile() // re-infer is source is file
 		df.SyncStats()
 
-		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
-		if df.Count() <= 10000 {
+		// Checksum Comparison, data quality. Limit to env var SLING_CHECKSUM_ROWS, cause sums get too high
+		if val := cast.ToUint64(os.Getenv("SLING_CHECKSUM_ROWS")); val > 0 && df.Count() <= val {
 			err = tgtConn.CompareChecksums(tableTmp.FullName(), df.Columns)
 			if err != nil {
-				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
-					return
-				}
-				g.Trace(g.ErrMsgSimple(err))
+				return
 			}
 		}
 	}
