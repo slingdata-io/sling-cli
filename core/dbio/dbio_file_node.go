@@ -3,6 +3,7 @@ package dbio
 import (
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,6 +205,10 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 	scheme := u.U.Scheme
 	host = u.Hostname()
 
+	if u.Port() != 0 {
+		host += ":" + strconv.Itoa(u.Port())
+	}
+
 	path = strings.TrimPrefix(u.U.Path, "/")
 	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
 
@@ -216,6 +221,8 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 		return TypeFileAzure, host, path, nil
 	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
 		return TypeFileHTTP, host, path, nil
+	} else if scheme == "azurecustom-http" || scheme == "azurecustom-https" {
+		return TypeFileAzure, host, path, nil
 	}
 
 	uType, ok := ValidateType(scheme)
