@@ -693,7 +693,16 @@ loop:
 
 		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
 			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
-			_, isTimestamp := ds.Metadata.LoadedAt.Value.(time.Time)
+
+			// handle timestamp value
+			isTimestamp := false
+			if tVal, err := cast.ToTimeE(ds.Metadata.LoadedAt.Value); err == nil {
+				isTimestamp = true
+				ds.Metadata.LoadedAt.Value = tVal
+			} else {
+				ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
+			}
+
 			col := Column{
 				Name:        ds.Metadata.LoadedAt.Key,
 				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
@@ -921,7 +930,6 @@ func (ds *Datastream) SetMetadata(jsonStr string) {
 	if jsonStr != "" {
 		streamValue := ds.Metadata.StreamURL.Value
 		g.Unmarshal(jsonStr, &ds.Metadata)
-		ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
 		if ds.Metadata.StreamURL.Value == nil {
 			ds.Metadata.StreamURL.Value = streamValue
 		}
