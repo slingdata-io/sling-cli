@@ -951,7 +951,9 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
-					colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					if vals[0] != "parse_ms_uuid" {
+						colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					}
 				} else {
 					colTransforms[key] = []string{"parse_uuid"}
 				}
@@ -2447,7 +2449,6 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
-
 		for _, table := range tables {
 			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {

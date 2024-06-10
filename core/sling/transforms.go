@@ -3,6 +3,7 @@ package sling
 import (
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -47,6 +48,7 @@ var transforms = map[iop.Transform]iop.TransformFunc{
 	iop.TransformParseBit:         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseBit(sp, val) },
 	iop.TransformParseFix:         func(sp *iop.StreamProcessor, val string) (string, error) { return ParseFIX(sp, val) },
 	iop.TransformParseUuid:        func(sp *iop.StreamProcessor, val string) (string, error) { return ParseUUID(sp, val) },
+	iop.TransformParseMsUuid:      func(sp *iop.StreamProcessor, val string) (string, error) { return ParseMsUUID(sp, val) },
 	iop.TransformReplace0x00:      func(sp *iop.StreamProcessor, val string) (string, error) { return Replace0x00(sp, val) },
 	iop.TransformReplaceAccents: func(sp *iop.StreamProcessor, val string) (string, error) {
 		return sp.EncodingTransform(iop.TransformReplaceAccents, val)
@@ -77,6 +79,23 @@ func ParseUUID(sp *iop.StreamProcessor, val string) (string, error) {
 			return val, g.Error(err, "could not transform while running ParseUUID")
 		}
 		return newVal.String(), nil
+	}
+	return val, nil
+}
+
+func ParseMsUUID(sp *iop.StreamProcessor, val string) (string, error) {
+	if len(val) == 16 {
+		data := []byte(val)
+		var a = binary.LittleEndian.Uint32(data[0:])
+		var b = binary.LittleEndian.Uint16(data[4:])
+		var c = binary.LittleEndian.Uint16(data[6:])
+
+		var d = binary.BigEndian.Uint16(data[8:])
+		var e = binary.BigEndian.Uint16(data[10:])
+		var f = binary.BigEndian.Uint32(data[12:])
+
+		var uid = fmt.Sprintf("%08x-%04x-%04x-%04x-%04x%08x", a, b, c, d, e, f)
+		return uid, nil
 	}
 	return val, nil
 }
