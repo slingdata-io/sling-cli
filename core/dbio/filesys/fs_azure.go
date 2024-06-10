@@ -46,6 +46,14 @@ func (fs *AzureFileSysClient) Init(ctx context.Context) (err error) {
 
 // Prefix returns the url prefix
 func (fs *AzureFileSysClient) Prefix(suffix ...string) string {
+	if cs := fs.GetProp("CONN_STR"); cs != "" {
+		connProps := g.KVArrToMap(strings.Split(cs, ";")...)
+
+		var blobEndpoint = connProps["BlobEndpoint"]
+		if blobEndpoint != "" {
+			return "azureCustom-" + blobEndpoint + "/" + fs.container + strings.Join(suffix, "")
+		}
+	}
 	return g.F("https://%s.blob.core.windows.net/%s", fs.account, fs.container) + strings.Join(suffix, "")
 }
 
@@ -60,9 +68,9 @@ func (fs *AzureFileSysClient) GetPath(uri string) (path string, err error) {
 	}
 
 	pathContainer := strings.Split(path, "/")[0]
-	if !strings.HasPrefix(host, fs.account) {
+	if !strings.HasPrefix(host, fs.account) && !strings.HasPrefix(uri, "azureCustom-") {
 		err = g.Error("URL account differs from connection account. %s != %s.blob.core.windows.net", host, fs.account)
-	} else if pathContainer != fs.container {
+	} else if pathContainer != fs.container && !strings.HasPrefix(uri, "azureCustom-") {
 		err = g.Error("URL container differs from connection container. %s != %s", pathContainer, fs.container)
 	}
 
@@ -80,6 +88,11 @@ func (fs *AzureFileSysClient) Connect() (err error) {
 		connProps := g.KVArrToMap(strings.Split(cs, ";")...)
 		fs.account = connProps["AccountName"]
 		fs.key = connProps["AccountKey"]
+
+		var blobEndpoint = connProps["BlobEndpoint"]
+		if blobEndpoint != "" {
+			serviceURL = g.F("%s/", blobEndpoint)
+		}
 
 		fs.client, err = azblob.NewClientFromConnectionString(cs, &azblob.ClientOptions{})
 		if err != nil {
