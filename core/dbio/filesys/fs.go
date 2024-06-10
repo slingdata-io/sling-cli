@@ -135,7 +135,7 @@ func NewFileSysClientFromURL(url string, props ...string) (fsClient FileSysClien
 // props are provided as `"Prop1=Value1", "Prop2=Value2", ...`
 func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...string) (fsClient FileSysClient, err error) {
 	switch {
-	case strings.HasPrefix(url, "azureCustom-http://") || strings.HasPrefix(url, "azureCustom-https://"):
+	case strings.HasPrefix(url, "azurecustom-http://") || strings.HasPrefix(url, "azurecustom-https://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "s3://"):
