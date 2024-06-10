@@ -9,8 +9,10 @@ cd cmd/sling
 go test -run 'TestReplicationDefaults'
 go test -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
 SKIP_CLICKHOUSE=TRUE go test -parallel 4 -timeout 15m -run TestSuiteDatabase
-go test -run 'TestMsUUID'
+cd -
 
+cd core/sling
+go test -run 'TestTransformMsUUID'
 cd -
 
 ## test cli commands

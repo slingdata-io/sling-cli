@@ -951,7 +951,8 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
-					if vals[0] != "parse_ms_uuid" {
+					// only add transform parse_uuid if parse_ms_uuid is not specified
+					if !lo.Contains(vals, "parse_ms_uuid") {
 						colTransforms[key] = append([]string{"parse_uuid"}, vals...)
 					}
 				} else {
