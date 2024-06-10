@@ -959,7 +959,7 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 	return nVal
 }
 
-// CastToTime converts interface to time
+// CastToBool converts interface to bool
 func (sp *StreamProcessor) CastToBool(i interface{}) (b bool, err error) {
 	i = sp.indirect(i)
 
