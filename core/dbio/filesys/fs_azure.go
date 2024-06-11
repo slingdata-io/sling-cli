@@ -51,7 +51,7 @@ func (fs *AzureFileSysClient) Prefix(suffix ...string) string {
 
 		var blobEndpoint = connProps["BlobEndpoint"]
 		if blobEndpoint != "" {
-			return "azurecustom-" + blobEndpoint + "/" + fs.container + strings.Join(suffix, "")
+			return "azurecustom-" + blobEndpoint + strings.Join(suffix, "")
 		}
 	}
 	return g.F("https://%s.blob.core.windows.net/%s", fs.account, fs.container) + strings.Join(suffix, "")
