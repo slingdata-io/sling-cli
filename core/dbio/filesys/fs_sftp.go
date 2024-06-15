@@ -19,15 +19,13 @@ import (
 // SftpFileSysClient is for SFTP / SSH file ops
 type SftpFileSysClient struct {
 	BaseFileSysClient
-	context   g.Context
 	client    *sftp.Client
 	sshClient *iop.SSHClient
 }
 
 // Init initializes the fs client
 func (fs *SftpFileSysClient) Init(ctx context.Context) (err error) {
-	var instance FileSysClient
-	instance = fs
+	instance := FileSysClient(fs)
 	fs.BaseFileSysClient.instance = &instance
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 	return fs.Connect()

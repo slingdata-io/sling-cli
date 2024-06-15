@@ -814,6 +814,27 @@ func TestFileSysGoogle(t *testing.T) {
 	assert.EqualValues(t, 1036, len(data2.Rows))
 }
 
+func TestFileSysNormalizeURI(t *testing.T) {
+	url := "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}"
+	fs, err := NewFileSysClient(dbio.TypeFileSftp, "URL="+url)
+	assert.NoError(t, err)
+	if t.Failed() {
+		return
+	}
+
+	u := url
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}"
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}", NormalizeURI(fs, u))
+
+	u = "/path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}", NormalizeURI(fs, u))
+}
+
 func TestFileSysSftp(t *testing.T) {
 	t.Parallel()
 

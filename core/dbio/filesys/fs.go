@@ -249,22 +249,20 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 	case dbio.TypeFileSftp:
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
-		if err == nil {
+		if strings.Contains(uri, "://") && err == nil {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
 			path = strings.TrimPrefix(path, password)
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
-			if strings.HasPrefix(path, "//") {
-				path = strings.TrimPrefix(path, "/")
-			}
+			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
 	case dbio.TypeFileFtp:
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
-		if err == nil {
+		if strings.Contains(uri, "://") && err == nil {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
