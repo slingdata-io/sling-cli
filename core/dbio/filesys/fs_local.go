@@ -279,6 +279,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 			Size:    cast.ToUint64(fInfo.Size()),
 			IsDir:   file.IsDir(),
 		}
+		node.URI = strings.ReplaceAll(node.URI, `\`, "/")
 		nodes.Add(node)
 	}
 	return
@@ -304,6 +305,7 @@ func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 		if err != nil {
 			return err
 		}
+		subPath = strings.ReplaceAll(subPath, `\`, "/")
 		node := dbio.FileNode{
 			URI:     "file://" + subPath,
 			Updated: info.ModTime().Unix(),
