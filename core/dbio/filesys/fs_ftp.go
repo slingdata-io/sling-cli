@@ -3,6 +3,7 @@ package filesys
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"io"
 	"net/url"
 	"strings"
@@ -92,7 +93,22 @@ func (fs *FtpFileSysClient) Connect() (err error) {
 		address = g.F("%s:%s", fs.GetProp("host"), fs.GetProp("port"))
 	}
 
-	fs.client, err = ftp.Dial(address, ftp.DialWithTimeout(time.Duration(timeout)*time.Second))
+	options := []ftp.DialOption{
+		ftp.DialWithTimeout(time.Duration(timeout) * time.Second),
+		ftp.DialWithForceListHidden(true),
+		// ftp.DialWithDebugOutput(os.Stderr),
+	}
+
+	if cast.ToBool(fs.GetProp("ftps")) {
+		tlsConfig := &tls.Config{
+			// Enable TLS 1.2.
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS12,
+		}
+		options = append(options, ftp.DialWithExplicitTLS(tlsConfig))
+	}
+
+	fs.client, err = ftp.Dial(address, options...)
 	if err != nil {
 		return g.Error(err, "unable to connect to ftp server ")
 	}
@@ -142,6 +158,10 @@ func (fs *FtpFileSysClient) List(url string) (paths dbio.FileNodes, err error) {
 
 // ListRecursive list objects in path recursively
 func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
+	if g.IsDebug() {
+		// FIXME: we get `229 Extended Passive mode OK (|||30005|)` when calling fs.client.List
+		g.Warn("ListRecursive currently not supported for FTP")
+	}
 	return dbio.FileNodes{{URI: url}}, nil
 
 	path, err := fs.GetPath(url)
