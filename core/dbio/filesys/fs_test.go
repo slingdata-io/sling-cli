@@ -33,7 +33,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://./fs_test.go")
 
-	paths, err = fs.ListRecursive(".")
+	paths, err = fs.ListRecursive("test/test1/csv/*.csv")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.csv")
 
@@ -59,7 +59,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	paths, err = fs.ListRecursive(".")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, "./"+testPath)
+	assert.NotContains(t, paths.URIs(), "./"+testPath)
 
 	// Test datastream
 	fs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
@@ -526,7 +526,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	paths, err = fs.ListRecursive("s3://ocral/test/")
 	assert.NoError(t, err)
@@ -630,7 +630,15 @@ func TestFileSysS3(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "s3://ocral-data-1/test/")
 
-	paths, err = fs.ListRecursive("s3://ocral-data-1/")
+	paths, err = fs.ListRecursive("s3://ocral-data-1/test/*.test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*.test")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
 
@@ -648,7 +656,7 @@ func TestFileSysS3(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral-data-1/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// Test concurrent writing from datastream
 
@@ -696,7 +704,7 @@ func TestFileSysAzure(t *testing.T) {
 	assert.NotEmpty(t, buckets)
 
 	testString := "abcde"
-	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test1"
+	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test/test1"
 	reader := strings.NewReader(testString)
 	bw, err := fs.Write(testPath, reader)
 	_ = bw
@@ -711,13 +719,25 @@ func TestFileSysAzure(t *testing.T) {
 	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
+	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net/testcont/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	assert.Equal(t, testString, string(testBytes))
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
+	paths, err = fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -782,12 +802,24 @@ func TestFileSysGoogle(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test")
+	paths, err = fs.ListRecursive("gs://flarco_us_bucket/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -851,7 +883,7 @@ func TestFileSysSftp(t *testing.T) {
 	root := os.Getenv("SSH_TEST_PASSWD_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "sftp://" + rootU.Hostname()
+	root = g.F("sftp://%s:22", rootU.Hostname())
 
 	testString := "abcde"
 	testPath := root + "/tmp/test/test1"
@@ -870,12 +902,28 @@ func TestFileSysSftp(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive(root + "/tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive(root + "/tmp/test")
+	paths, err = fs.ListRecursive(root + "/tmp/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -940,6 +988,16 @@ func TestFileSysFtp(t *testing.T) {
 	g.AssertNoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
+	// paths, err := fs.ListRecursive(root + "/")
+	// g.LogError(err)
+	// if !assert.NoError(t, err) {
+	// 	return
+	// }
+	// assert.Contains(t, paths.URIs(), testPath)
+
+	// paths, err = fs.ListRecursive(root + "/*.csv")
+	// assert.NoError(t, err)
+	// assert.Contains(t, paths.URIs(), testPath)
 
 	return
 
@@ -961,7 +1019,7 @@ func TestFileSysFtp(t *testing.T) {
 
 	// paths, err := fs.ListRecursive(root + "/home/test/test")
 	// assert.NoError(t, err)
-	// assert.NotContains(t, paths, testPath)
+	// assert.NotContains(t, paths.URIs(), testPath)
 
 	// localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	// assert.NoError(t, err)
@@ -1046,3 +1104,65 @@ func testManyCSV(t *testing.T) {
 		}
 	}
 }
+
+// func TestPatterns(t *testing.T) {
+
+// 	// local
+// 	// s3
+// 	// google
+// 	// azure
+// 	// sftp
+// 	// ftp
+
+// 	type test struct {
+// 		pattern  string // the input glob pattern
+// 		expected int    // number of files expected
+// 	}
+
+// 	type input struct {
+// 		Type  dbio.Type
+// 		Props []string
+// 		Tests []test
+// 	}
+
+// 	inputs := []input{
+// 		{
+// 			dbio.TypeFileLocal,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileFtp,
+// 			[]string{"URL=" + os.Getenv("FTP_TEST_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileSftp,
+// 			[]string{"URL=" + os.Getenv("SSH_TEST_PASSWD_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileGoogle,
+// 			[]string{"BUCKET=flarco_us_bucket"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileAzure,
+// 			[]string{"container=testcont"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileS3,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 	}
+
+// 	for _, input := range inputs {
+// 		fs, err := NewFileSysClient(input.Type, input.Props...)
+// 		if !g.AssertNoError(t, err) {
+// 			return
+// 		}
+// 	}
+
+// }

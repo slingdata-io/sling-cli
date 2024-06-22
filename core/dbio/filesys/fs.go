@@ -285,8 +285,13 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	if !strings.Contains(path, "*") {
 		return nil, nil
 	}
-	if connType == dbio.TypeFileLocal {
+
+	switch connType {
+	case dbio.TypeFileLocal:
 		path = strings.TrimPrefix(path, "./")
+	case dbio.TypeFileAzure:
+		pathContainer := strings.Split(path, "/")[0]
+		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
 	}
 
 	gc, err := glob.Compile(path)
