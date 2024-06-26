@@ -966,15 +966,14 @@ func TestFileSysFtp(t *testing.T) {
 	root := os.Getenv("FTP_TEST_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "ftp://" + rootU.Hostname()
+	root = "ftp://" + rootU.Hostname() + ":" + rootU.U.Port()
 
 	csvBytes, err := os.ReadFile("test/test1/csv/test1.csv")
 	if !g.AssertNoError(t, err) {
 		return
 	}
-
 	testString := string(csvBytes)
-	testPath := root + "/test1.csv"
+	testPath := root + "/test/test1.csv"
 	reader := strings.NewReader(testString)
 	_, err = fs.Write(testPath, reader)
 	g.AssertNoError(t, err)
@@ -988,20 +987,35 @@ func TestFileSysFtp(t *testing.T) {
 	g.AssertNoError(t, err)
 
 	assert.Equal(t, testString, string(testBytes))
-	// paths, err := fs.ListRecursive(root + "/")
-	// g.LogError(err)
-	// if !assert.NoError(t, err) {
-	// 	return
-	// }
-	// assert.Contains(t, paths.URIs(), testPath)
 
-	// paths, err = fs.ListRecursive(root + "/*.csv")
-	// assert.NoError(t, err)
-	// assert.Contains(t, paths.URIs(), testPath)
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	assert.NoError(t, err)
+	paths, err := fs.ListRecursive(root + "/")
+	g.LogError(err)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Contains(t, paths.URIs(), testPath)
 
-	return
+	paths, err = fs.ListRecursive(root + "/")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
 
-	// FIXME: test fail with `229 Extended Passive mode OK (|||30005|)`
+	paths, err = fs.ListRecursive(root + "/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.1csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	df3, err := fs.ReadDataflow(testPath)
 	if !g.AssertNoError(t, err) {
@@ -1010,16 +1024,21 @@ func TestFileSysFtp(t *testing.T) {
 
 	data2, err := df3.Collect()
 	g.AssertNoError(t, err)
-	assert.EqualValues(t, 1036, len(data2.Rows))
+	assert.EqualValues(t, 1000, len(data2.Rows))
 
-	return
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	g.AssertNoError(t, err)
 
-	// err = Delete(fs, testPath)
-	// g.AssertNoError(t, err)
+	err = Delete(fs, testPath)
+	g.AssertNoError(t, err)
 
-	// paths, err := fs.ListRecursive(root + "/home/test/test")
-	// assert.NoError(t, err)
-	// assert.NotContains(t, paths.URIs(), testPath)
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	// assert.NoError(t, err)

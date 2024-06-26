@@ -332,6 +332,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
+		defer dbConn.Close()
 
 		if opt.Discover {
 			var table database.Table
@@ -378,6 +379,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
 		}
+		defer fileClient.Close()
 
 		url := conn.Connection.URL()
 		if opt.Pattern != "" {

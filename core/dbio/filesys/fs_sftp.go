@@ -115,6 +115,14 @@ func (fs *SftpFileSysClient) Connect() (err error) {
 	return nil
 }
 
+// Close closes the client
+func (fs *SftpFileSysClient) Close() error {
+	if fs.client != nil {
+		return fs.client.Close()
+	}
+	return nil
+}
+
 // List list objects in path
 func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
 	path, err := fs.GetPath(url)
@@ -223,20 +231,20 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, er
 }
 
 // Delete list objects in path
-func (fs *SftpFileSysClient) delete(urlStr string) (err error) {
-	path, err := fs.GetPath(urlStr)
+func (fs *SftpFileSysClient) delete(uri string) (err error) {
+	path, err := fs.GetPath(uri)
 	if err != nil {
-		err = g.Error(err, "Error Parsing url: "+urlStr)
+		err = g.Error(err, "Error Parsing url: "+uri)
 		return
 	}
-	nodes, err := fs.ListRecursive(urlStr)
+
+	nodes, err := fs.ListRecursive(uri)
 	if err != nil {
 		return g.Error(err, "error listing path")
 	}
 
 	for _, sNode := range nodes {
-		sNode.URI, _ = fs.GetPath(sNode.URI)
-		err = fs.client.Remove(sNode.URI)
+		err = fs.client.Remove(sNode.Path())
 		if err != nil {
 			return g.Error(err, "error deleting path "+sNode.URI)
 		}

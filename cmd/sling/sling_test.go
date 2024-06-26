@@ -1078,3 +1078,8 @@ func TestSuiteFileSftp(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileSftp)
 }
+
+func TestSuiteFileFtp(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileFtp)
+}
