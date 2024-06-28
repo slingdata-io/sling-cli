@@ -109,6 +109,39 @@ func TestParquetWrite2(t *testing.T) {
 
 }
 
+func TestParquetWrite3(t *testing.T) {
+	// parquet.Node
+	// parquet.NewSchema("test", node)
+
+	file, err := os.CreateTemp(env.GetTempFolder(), "*.parquet")
+	g.Info(file.Name())
+	g.LogFatal(err)
+
+	type Row struct {
+		Col1 *int `parquet:",,optional"`
+		Col2 int
+		Col3 *time.Time `parquet:",,optional"`
+	}
+	w := parquet.NewGenericWriter[Row](file)
+
+	now := time.Now()
+	rows := []Row{
+		{Col1: g.Int(1), Col2: 0, Col3: &now},
+		{Col1: nil, Col2: 1, Col3: nil},
+		{Col1: g.Int(10), Col2: 4, Col3: nil},
+	}
+
+	_, err = w.Write(rows)
+	g.LogFatal(err)
+
+	err = w.Close()
+	g.LogFatal(err)
+
+	err = file.Close()
+	g.LogFatal(err)
+
+}
+
 func TestParquet(t *testing.T) {
 	file, err := os.Open("/tmp/test.parquet")
 	g.LogFatal(err)
