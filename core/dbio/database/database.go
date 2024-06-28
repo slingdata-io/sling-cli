@@ -290,7 +290,6 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
-	conn.setContext(ctx, concurrency)
 
 	// Add / Extract provided Props
 	for _, propStr := range props {
@@ -308,6 +307,11 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Init
 	conn.SetProp("orig_url", OrigURL)
+
+	if val := conn.GetProp("concurrency"); val != "" {
+		concurrency = cast.ToInt(val)
+	}
+	conn.setContext(ctx, concurrency)
 	err = conn.Init()
 
 	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
