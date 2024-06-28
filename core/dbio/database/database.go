@@ -125,7 +125,6 @@ type Connection interface {
 	RunAnalysis(string, map[string]interface{}) (iop.Dataset, error)
 	Schemata() Schemata
 	Self() Connection
-	setContext(ctx context.Context, concurrency int)
 	SetProp(string, string)
 	StreamRecords(sql string) (<-chan map[string]interface{}, error)
 	StreamRows(sql string, options ...map[string]interface{}) (*iop.Datastream, error)
@@ -291,6 +290,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BaseConn{URL: URL}
 	}
 
+	conn.Base().setContext(ctx, concurrency)
+
 	// Add / Extract provided Props
 	for _, propStr := range props {
 		// g.Trace("setting connection prop -> " + propStr)
@@ -310,8 +311,9 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	if val := conn.GetProp("concurrency"); val != "" {
 		concurrency = cast.ToInt(val)
+		conn.Base().setContext(ctx, concurrency)
 	}
-	conn.setContext(ctx, concurrency)
+
 	err = conn.Init()
 
 	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
