@@ -63,7 +63,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.mac.yaml
 
   build-scoop:
@@ -98,7 +98,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.windows.yaml
 
   build-linux-arm64:
@@ -129,7 +129,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.linux.arm64.yaml
 
   build-linux-amd64:
@@ -161,5 +161,5 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.linux.amd64.yaml

@@ -107,7 +107,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.mac.yaml
 
   release-scoop:
@@ -143,7 +143,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.windows.yaml
 
   release-linux-arm64:
@@ -174,7 +174,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml
 
       # pushing to docker manually
@@ -218,7 +218,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
 
       - name: Dispatch test-sling-action
