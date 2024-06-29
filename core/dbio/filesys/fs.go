@@ -33,6 +33,7 @@ var recursiveLimit = cast.ToInt(os.Getenv("SLING_RECURSIVE_LIMIT"))
 type FileSysClient interface {
 	Self() FileSysClient
 	Init(ctx context.Context) (err error)
+	Close() (err error)
 	Client() *BaseFileSysClient
 	Context() (context *g.Context)
 	FsType() dbio.Type
@@ -82,6 +83,7 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		//fsClient.Client().fsType = S3cFileSys
 	case dbio.TypeFileFtp:
 		fsClient = &FtpFileSysClient{}
+		concurrencyLimit = 1 // can only write 1 file at a time
 	case dbio.TypeFileSftp:
 		fsClient = &SftpFileSysClient{}
 	// case HDFSFileSys:
@@ -121,6 +123,11 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		err = g.Error(err, "Error initiating File Sys Client")
 	}
 	fsClient.Context().SetConcurrencyLimit(concurrencyLimit)
+	fsClient.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", fst), 3))
+
+	if !cast.ToBool(fsClient.GetProp("silent")) {
+		g.Debug(`opened "%s" connection (%s)`, fst, fsClient.GetProp("sling_conn_id"))
+	}
 
 	return
 }
@@ -249,22 +256,20 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 	case dbio.TypeFileSftp:
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
-		if err == nil {
+		if strings.Contains(uri, "://") && err == nil {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
 			path = strings.TrimPrefix(path, password)
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
-			if strings.HasPrefix(path, "//") {
-				path = strings.TrimPrefix(path, "/")
-			}
+			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
 	case dbio.TypeFileFtp:
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
-		if err == nil {
+		if strings.Contains(uri, "://") && err == nil {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
@@ -287,8 +292,13 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	if !strings.Contains(path, "*") {
 		return nil, nil
 	}
-	if connType == dbio.TypeFileLocal {
+
+	switch connType {
+	case dbio.TypeFileLocal:
 		path = strings.TrimPrefix(path, "./")
+	case dbio.TypeFileAzure:
+		pathContainer := strings.Split(path, "/")[0]
+		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
 	}
 
 	gc, err := glob.Compile(path)
@@ -342,6 +352,11 @@ func (fs *BaseFileSysClient) Context() (context *g.Context) {
 // Client provides a pointer to itself
 func (fs *BaseFileSysClient) Client() *BaseFileSysClient {
 	return fs
+}
+
+// Close closes the client
+func (fs *BaseFileSysClient) Close() error {
+	return nil
 }
 
 // setDf sets the dataflow
@@ -501,7 +516,9 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		Cfg = cfg[0]
 	}
 
-	fs.SetProp("url", url)
+	// if fs.GetProp("url") == "" {
+	// 	fs.SetProp("url", url)
+	// }
 
 	if strings.HasSuffix(strings.ToLower(url), ".zip") {
 		localFs, err := NewFileSysClient(dbio.TypeFileLocal)
@@ -802,10 +819,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
-		err = fsClient.MkdirAll(url)
+		path, err := fsClient.GetPath(url)
 		if err != nil {
-			err = g.Error(err, "could not create directory")
-			return
+			return 0, g.Error(err, "Error Parsing url: "+url)
+		}
+
+		err = fsClient.MkdirAll(path)
+		if err != nil {
+			return 0, g.Error(err, "could not create directory")
 		}
 	}
 
@@ -1123,13 +1144,14 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 	ds.SetMetadata(fs.GetProp("METADATA"))
 	ds.Metadata.StreamURL.Value = url
 	ds.SetConfig(fs.Client().Props())
-	g.Debug("reading datastream from %s [format=%s]", url, fileType)
+	g.Debug("reading single datastream from %s [format=%s]", url, fileType)
 
 	setError := func(err error) {
 		ds.Context.CaptureErr(err)
 		ds.Context.Cancel()
 		fs.Context().CaptureErr(err)
 		fs.Context().Cancel()
+		g.LogError(err)
 	}
 
 	concurrency := runtime.NumCPU()

@@ -693,9 +693,19 @@ loop:
 
 		if ds.Metadata.LoadedAt.Key != "" && ds.Metadata.LoadedAt.Value != nil {
 			ds.Metadata.LoadedAt.Key = ensureName(ds.Metadata.LoadedAt.Key)
+
+			// handle timestamp value
+			isTimestamp := false
+			if tVal, err := cast.ToTimeE(ds.Metadata.LoadedAt.Value); err == nil {
+				isTimestamp = true
+				ds.Metadata.LoadedAt.Value = tVal
+			} else {
+				ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
+			}
+
 			col := Column{
 				Name:        ds.Metadata.LoadedAt.Key,
-				Type:        IntegerType,
+				Type:        lo.Ternary(isTimestamp, TimestampzType, IntegerType),
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.LoadedAt",
 				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
@@ -920,7 +930,6 @@ func (ds *Datastream) SetMetadata(jsonStr string) {
 	if jsonStr != "" {
 		streamValue := ds.Metadata.StreamURL.Value
 		g.Unmarshal(jsonStr, &ds.Metadata)
-		ds.Metadata.LoadedAt.Value = cast.ToInt64(ds.Metadata.LoadedAt.Value)
 		if ds.Metadata.StreamURL.Value == nil {
 			ds.Metadata.StreamURL.Value = streamValue
 		}
@@ -2272,7 +2281,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 				codec = &parquet.Uncompressed
 			}
 
-			pw, err = NewParquetWriter(pipeW, batch.Columns, codec)
+			pw, err = NewParquetWriterMap(pipeW, batch.Columns, codec)
 			if err != nil {
 				return g.Error(err, "could not create parquet writer")
 			}
@@ -2291,7 +2300,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 
 			for row := range batch.Rows {
 
-				err := pw.WriteRow(row)
+				err := pw.WriteRec(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
 					ds.Context.Cancel()

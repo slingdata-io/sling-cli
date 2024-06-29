@@ -9,7 +9,10 @@ cd cmd/sling
 go test -run 'TestReplicationDefaults'
 go test -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
 SKIP_CLICKHOUSE=TRUE go test -parallel 4 -timeout 15m -run TestSuiteDatabase
+cd -
 
+cd core/sling
+go test -run 'TestTransformMsUUID'
 cd -
 
 ## test cli commands
@@ -55,6 +58,10 @@ SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=t
 SLING_ROW_CNT=4 sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"
 SLING_ROW_CNT=3 sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names
 SLING_ROW_CNT=2 sling conns exec postgres "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name like '_sling%'" # should not have _sling_loaded_at
+
+# test _sling_loaded_at as timestamp
+SLING_LOADED_AT_COLUMN='timestamp' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+SLING_ROW_CNT=1 sling conns exec postgres "select data_type from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name = '_sling_loaded_at' and data_type like 'timestamp%'" # _sling_loaded_at should be a timestamp
 
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'

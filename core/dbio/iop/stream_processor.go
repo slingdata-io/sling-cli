@@ -1,7 +1,9 @@
 package iop
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"os"
@@ -767,7 +769,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 
 	case col.Type.IsBool():
 		var err error
-		bVal, err := cast.ToBoolE(val)
+		bVal, err := sp.CastToBool(val)
 		if err != nil {
 			// is string
 			sp.ds.ChangeColumn(i, StringType)
@@ -955,6 +957,30 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 	}
 
 	return nVal
+}
+
+// CastToBool converts interface to bool
+func (sp *StreamProcessor) CastToBool(i interface{}) (b bool, err error) {
+	i = sp.indirect(i)
+
+	switch b := i.(type) {
+	case bool:
+		return b, nil
+	case nil:
+		return false, nil
+	case int64, int32, int16, int8, uint, uint64, uint32, uint16, uint8, float64, float32:
+		return cast.ToInt(i) != 0, nil
+	case string:
+		return strconv.ParseBool(i.(string))
+	case json.Number:
+		v, err := cast.ToInt64E(b)
+		if err == nil {
+			return v != 0, nil
+		}
+		return false, fmt.Errorf("unable to cast %#v of type %T to bool", i, i)
+	default:
+		return false, fmt.Errorf("unable to cast %#v of type %T to bool", i, i)
+	}
 }
 
 // CastToTime converts interface to time

@@ -327,7 +327,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
-	os.Setenv("ERROR_ON_CHECKSUM_FAILURE", "1") // so that it errors when checksums don't match
+	os.Setenv("SLING_CHECKSUM_ROWS", "10000") // so that it errors when checksums don't match
 	println()
 
 	bars := "---------------------------"
@@ -1077,4 +1077,9 @@ func TestSuiteFileLocal(t *testing.T) {
 func TestSuiteFileSftp(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileSftp)
+}
+
+func TestSuiteFileFtp(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileFtp)
 }

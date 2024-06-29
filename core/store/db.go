@@ -29,7 +29,7 @@ func InitDB() {
 	}
 
 	dbURL := g.F("sqlite://%s/.sling.db?cache=shared&mode=rwc&_journal_mode=WAL", env.HomeDir)
-	Conn, err = database.NewConn(dbURL)
+	Conn, err = database.NewConn(dbURL, "silent=true")
 	if err != nil {
 		g.Debug("could not initialize local .sling.db. %s", err.Error())
 		return

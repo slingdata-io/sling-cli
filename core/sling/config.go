@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -171,7 +170,11 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		cfg.MetadataLoadedAt = g.Bool(cast.ToBool(val))
+		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
+			cfg.MetadataLoadedAt = g.Bool(true)
+		} else {
+			cfg.MetadataLoadedAt = g.Bool(false)
+		}
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		cfg.MetadataStreamURL = cast.ToBool(val)
@@ -238,11 +241,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 
 	// add config path
 	if g.PathExists(cfgStr) && !cfg.ReplicationMode() {
-		fp, err := filepath.Abs(cfgStr)
-		if err != nil {
-			fp = cfgStr
-		}
-		cfg.Env["SLING_CONFIG_PATH"] = fp
+		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
 	return nil
@@ -331,6 +330,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided {
 		Type = FileToDB
+		if cfg.MetadataLoadedAt == nil {
+			cfg.MetadataLoadedAt = g.Bool(true) // default when source is file
+		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {

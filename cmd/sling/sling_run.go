@@ -339,6 +339,16 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	setProjectID(cfg.Env["SLING_CONFIG_PATH"])
 	cfg.Env["SLING_PROJECT_ID"] = projectID
 
+	// set working directory path
+	if val := cfg.Env["SLING_WORK_PATH"]; val != "" {
+		if err = os.Chdir(val); err != nil {
+			err = g.Error(err, "could not set working directory: %s", val)
+			return
+		}
+	} else {
+		cfg.Env["SLING_WORK_PATH"], _ = os.Getwd()
+	}
+
 	// set logging
 	if val := cfg.Env["SLING_LOGGING"]; val != "" {
 		os.Setenv("SLING_LOGGING", val)

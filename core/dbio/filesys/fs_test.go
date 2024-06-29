@@ -33,7 +33,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://./fs_test.go")
 
-	paths, err = fs.ListRecursive(".")
+	paths, err = fs.ListRecursive("test/test1/csv/*.csv")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.csv")
 
@@ -59,7 +59,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	paths, err = fs.ListRecursive(".")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, "./"+testPath)
+	assert.NotContains(t, paths.URIs(), "./"+testPath)
 
 	// Test datastream
 	fs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
@@ -275,7 +275,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 	config, err := parquet.NewWriterConfig()
 	g.LogFatal(err)
 
-	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns))
+	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns, false))
 
 	fw := parquet.NewWriter(f, config)
 
@@ -348,9 +348,6 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
 			for row := range batch.Rows {
-				if batch.Count > 10000 {
-					continue
-				}
 				err = pw.WriteRow(row)
 				g.LogFatal(err)
 			}
@@ -359,6 +356,81 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 
 	err = pw.Close()
 	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func TestFileSysLocalLargeParquet3(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.3.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriterMap(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				err = pw.WriteRec(row)
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = pw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func BenchmarkFileSysLocalLargeParquet1(b *testing.B) {
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	g.LogError(err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	g.LogError(err)
+
+	filePath := "/tmp/test.1.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriter(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	var rows [][]any
+	ds := <-df1.StreamCh
+	batch := <-ds.BatchChan
+	for row := range batch.Rows {
+		if batch.Count > 100 {
+			break
+		}
+		rows = append(rows, row)
+	}
+
+	for n := 0; n < b.N; n++ {
+		for _, row := range rows {
+			err = pw.WriteRow(row)
+			g.LogFatal(err)
+		}
+	}
+
+	err = pw.Close()
+	g.LogError(err)
 
 	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
 	g.Info("wrote %d in %f secs", df1.Count(), duration)
@@ -526,7 +598,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	paths, err = fs.ListRecursive("s3://ocral/test/")
 	assert.NoError(t, err)
@@ -630,7 +702,15 @@ func TestFileSysS3(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "s3://ocral-data-1/test/")
 
-	paths, err = fs.ListRecursive("s3://ocral-data-1/")
+	paths, err = fs.ListRecursive("s3://ocral-data-1/test/*.test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*.test")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
 
@@ -648,7 +728,7 @@ func TestFileSysS3(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral-data-1/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// Test concurrent writing from datastream
 
@@ -696,7 +776,7 @@ func TestFileSysAzure(t *testing.T) {
 	assert.NotEmpty(t, buckets)
 
 	testString := "abcde"
-	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test1"
+	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test/test1"
 	reader := strings.NewReader(testString)
 	bw, err := fs.Write(testPath, reader)
 	_ = bw
@@ -711,13 +791,25 @@ func TestFileSysAzure(t *testing.T) {
 	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
+	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net/testcont/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	assert.Equal(t, testString, string(testBytes))
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
+	paths, err = fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -782,12 +874,24 @@ func TestFileSysGoogle(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test")
+	paths, err = fs.ListRecursive("gs://flarco_us_bucket/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -814,6 +918,27 @@ func TestFileSysGoogle(t *testing.T) {
 	assert.EqualValues(t, 1036, len(data2.Rows))
 }
 
+func TestFileSysNormalizeURI(t *testing.T) {
+	url := "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}"
+	fs, err := NewFileSysClient(dbio.TypeFileSftp, "URL="+url)
+	assert.NoError(t, err)
+	if t.Failed() {
+		return
+	}
+
+	u := url
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}"
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}", NormalizeURI(fs, u))
+
+	u = "/path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}", NormalizeURI(fs, u))
+}
+
 func TestFileSysSftp(t *testing.T) {
 	t.Parallel()
 
@@ -830,7 +955,7 @@ func TestFileSysSftp(t *testing.T) {
 	root := os.Getenv("SSH_TEST_PASSWD_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "sftp://" + rootU.Hostname()
+	root = g.F("sftp://%s:22", rootU.Hostname())
 
 	testString := "abcde"
 	testPath := root + "/tmp/test/test1"
@@ -849,12 +974,28 @@ func TestFileSysSftp(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive(root + "/tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive(root + "/tmp/test")
+	paths, err = fs.ListRecursive(root + "/tmp/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -897,15 +1038,14 @@ func TestFileSysFtp(t *testing.T) {
 	root := os.Getenv("FTP_TEST_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "ftp://" + rootU.Hostname()
+	root = "ftp://" + rootU.Hostname() + ":" + rootU.U.Port()
 
 	csvBytes, err := os.ReadFile("test/test1/csv/test1.csv")
 	if !g.AssertNoError(t, err) {
 		return
 	}
-
 	testString := string(csvBytes)
-	testPath := root + "/test1.csv"
+	testPath := root + "/test/test1.csv"
 	reader := strings.NewReader(testString)
 	_, err = fs.Write(testPath, reader)
 	g.AssertNoError(t, err)
@@ -920,9 +1060,34 @@ func TestFileSysFtp(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
-	return
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	assert.NoError(t, err)
+	paths, err := fs.ListRecursive(root + "/")
+	g.LogError(err)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Contains(t, paths.URIs(), testPath)
 
-	// FIXME: test fail with `229 Extended Passive mode OK (|||30005|)`
+	paths, err = fs.ListRecursive(root + "/")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.1csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	df3, err := fs.ReadDataflow(testPath)
 	if !g.AssertNoError(t, err) {
@@ -931,16 +1096,21 @@ func TestFileSysFtp(t *testing.T) {
 
 	data2, err := df3.Collect()
 	g.AssertNoError(t, err)
-	assert.EqualValues(t, 1036, len(data2.Rows))
+	assert.EqualValues(t, 1000, len(data2.Rows))
 
-	return
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	g.AssertNoError(t, err)
 
-	// err = Delete(fs, testPath)
-	// g.AssertNoError(t, err)
+	err = Delete(fs, testPath)
+	g.AssertNoError(t, err)
 
-	// paths, err := fs.ListRecursive(root + "/home/test/test")
-	// assert.NoError(t, err)
-	// assert.NotContains(t, paths, testPath)
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	// assert.NoError(t, err)
@@ -1025,3 +1195,65 @@ func testManyCSV(t *testing.T) {
 		}
 	}
 }
+
+// func TestPatterns(t *testing.T) {
+
+// 	// local
+// 	// s3
+// 	// google
+// 	// azure
+// 	// sftp
+// 	// ftp
+
+// 	type test struct {
+// 		pattern  string // the input glob pattern
+// 		expected int    // number of files expected
+// 	}
+
+// 	type input struct {
+// 		Type  dbio.Type
+// 		Props []string
+// 		Tests []test
+// 	}
+
+// 	inputs := []input{
+// 		{
+// 			dbio.TypeFileLocal,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileFtp,
+// 			[]string{"URL=" + os.Getenv("FTP_TEST_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileSftp,
+// 			[]string{"URL=" + os.Getenv("SSH_TEST_PASSWD_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileGoogle,
+// 			[]string{"BUCKET=flarco_us_bucket"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileAzure,
+// 			[]string{"container=testcont"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileS3,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 	}
+
+// 	for _, input := range inputs {
+// 		fs, err := NewFileSysClient(input.Type, input.Props...)
+// 		if !g.AssertNoError(t, err) {
+// 			return
+// 		}
+// 	}
+
+// }

@@ -42,6 +42,7 @@ const (
 	TransformParseBit            Transform = "parse_bit"
 	TransformParseFix            Transform = "parse_fix"
 	TransformParseUuid           Transform = "parse_uuid"
+	TransformParseMsUuid         Transform = "parse_ms_uuid"
 	TransformReplace0x00         Transform = "replace_0x00"
 	TransformReplaceAccents      Transform = "replace_accents"
 	TransformReplaceNonPrintable Transform = "replace_non_printable"

@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/flarco/g"
@@ -622,12 +621,8 @@ func LoadReplicationConfigFromFile(cfgPath string) (config ReplicationConfig, er
 		return
 	}
 
-	// get file path
-	fp, err := filepath.Abs(cfgPath)
-	if err != nil {
-		fp = cfgPath
-	}
-	config.Env["SLING_CONFIG_PATH"] = fp
+	// set config path
+	config.Env["SLING_CONFIG_PATH"] = cfgPath
 
 	return
 }

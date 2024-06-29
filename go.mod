@@ -31,14 +31,14 @@ require (
 	github.com/jmoiron/sqlx v1.2.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
-	github.com/klauspost/compress v1.17.7
+	github.com/klauspost/compress v1.17.8
 	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/microsoft/go-mssqldb v1.7.1
 	github.com/nqd/flat v0.1.1
-	github.com/parquet-go/parquet-go v0.20.0
+	github.com/parquet-go/parquet-go v0.22.0
 	github.com/pkg/sftp v1.12.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1

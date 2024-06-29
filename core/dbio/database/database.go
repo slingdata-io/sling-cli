@@ -125,7 +125,6 @@ type Connection interface {
 	RunAnalysis(string, map[string]interface{}) (iop.Dataset, error)
 	Schemata() Schemata
 	Self() Connection
-	setContext(ctx context.Context, concurrency int)
 	SetProp(string, string)
 	StreamRecords(sql string) (<-chan map[string]interface{}, error)
 	StreamRows(sql string, options ...map[string]interface{}) (*iop.Datastream, error)
@@ -290,7 +289,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
-	conn.setContext(ctx, concurrency)
+
+	conn.Base().setContext(ctx, concurrency)
 
 	// Add / Extract provided Props
 	for _, propStr := range props {
@@ -308,6 +308,12 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Init
 	conn.SetProp("orig_url", OrigURL)
+
+	if val := conn.GetProp("concurrency"); val != "" {
+		concurrency = cast.ToInt(val)
+		conn.Base().setContext(ctx, concurrency)
+	}
+
 	err = conn.Init()
 
 	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
@@ -604,7 +610,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
 
-			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			if !cast.ToBool(conn.GetProp("silent")) {
+				g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -669,7 +677,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 func reconnectIfClosed(conn Connection) (err error) {
 	// g.Warn("connected => %s", conn.GetProp("connected"))
 	if conn.GetProp("connected") != "true" {
-		g.Debug("connection was closed, reconnecting")
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug("connection was closed, reconnecting")
+		}
 		err = conn.Self().Connect()
 		if err != nil {
 			err = g.Error(err, "Could not connect")
@@ -685,7 +695,7 @@ func (conn *BaseConn) Close() error {
 	if conn.db != nil {
 		err = conn.db.Close()
 		conn.db = nil
-		if err == nil {
+		if err == nil && !cast.ToBool(conn.GetProp("silent")) {
 			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 	}
@@ -718,7 +728,9 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		if !noColor {
 			query = env.CyanString(CleanSQL(conn, query))
 		}
-		g.Debug(query, args...)
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug(query, args...)
+		}
 	}
 }
 
@@ -945,7 +957,10 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
-					colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					// only add transform parse_uuid if parse_ms_uuid is not specified
+					if !lo.Contains(vals, "parse_ms_uuid") {
+						colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					}
 				} else {
 					colTransforms[key] = []string{"parse_uuid"}
 				}
@@ -2441,7 +2456,6 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
-
 		for _, table := range tables {
 			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
@@ -2556,7 +2570,6 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		return df, g.Error(err)
 	}
 
-	g.Debug("Unloading to %s", folderPath)
 	df.AddColumns(columns, true) // overwrite types so we don't need to infer
 	df.Inferred = true
 

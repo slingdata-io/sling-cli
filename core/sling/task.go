@@ -286,10 +286,13 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	if (t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt) ||
-		(t.Config.MetadataLoadedAt == nil && t.Type == FileToDB) {
+	if t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
-		metadata.LoadedAt.Value = t.StartTime.Unix()
+		if os.Getenv("SLING_LOADED_AT_COLUMN") == "timestamp" {
+			metadata.LoadedAt.Value = *t.StartTime
+		} else {
+			metadata.LoadedAt.Value = t.StartTime.Unix()
+		}
 	}
 	if t.Config.MetadataStreamURL {
 		metadata.StreamURL.Key = slingStreamURLColumn
