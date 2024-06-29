@@ -180,6 +180,15 @@ func TestNewParquetWriter(t *testing.T) {
 			`{"msg": "Bye!"}`, // col_json
 			time.Now(),        // col_timestamp
 		},
+		{
+			nil, // col_string
+			nil, // col_bool
+			nil, // col_bigint
+			0,   // col_decimal
+			nil, // col_float
+			nil, // col_json
+			nil, // col_timestamp
+		},
 	}
 
 	data := NewDataset(columns)

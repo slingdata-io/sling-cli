@@ -275,7 +275,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 	config, err := parquet.NewWriterConfig()
 	g.LogFatal(err)
 
-	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns))
+	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns, false))
 
 	fw := parquet.NewWriter(f, config)
 
@@ -348,9 +348,6 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
 			for row := range batch.Rows {
-				if batch.Count > 10000 {
-					continue
-				}
 				err = pw.WriteRow(row)
 				g.LogFatal(err)
 			}
@@ -359,6 +356,81 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 
 	err = pw.Close()
 	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func TestFileSysLocalLargeParquet3(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.3.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriterMap(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				err = pw.WriteRec(row)
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = pw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func BenchmarkFileSysLocalLargeParquet1(b *testing.B) {
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	g.LogError(err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	g.LogError(err)
+
+	filePath := "/tmp/test.1.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriter(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	var rows [][]any
+	ds := <-df1.StreamCh
+	batch := <-ds.BatchChan
+	for row := range batch.Rows {
+		if batch.Count > 100 {
+			break
+		}
+		rows = append(rows, row)
+	}
+
+	for n := 0; n < b.N; n++ {
+		for _, row := range rows {
+			err = pw.WriteRow(row)
+			g.LogFatal(err)
+		}
+	}
+
+	err = pw.Close()
+	g.LogError(err)
 
 	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
 	g.Info("wrote %d in %f secs", df1.Count(), duration)

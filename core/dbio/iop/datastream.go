@@ -2281,7 +2281,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 				codec = &parquet.Uncompressed
 			}
 
-			pw, err = NewParquetWriter(pipeW, batch.Columns, codec)
+			pw, err = NewParquetWriterMap(pipeW, batch.Columns, codec)
 			if err != nil {
 				return g.Error(err, "could not create parquet writer")
 			}
@@ -2300,7 +2300,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 
 			for row := range batch.Rows {
 
-				err := pw.WriteRow(row)
+				err := pw.WriteRec(row)
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "error writing row"))
 					ds.Context.Cancel()

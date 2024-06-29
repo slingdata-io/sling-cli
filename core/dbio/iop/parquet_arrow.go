@@ -581,7 +581,7 @@ func (p *ParquetArrowWriter) Columns() Columns {
 }
 
 func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
-	rep := parquet.Repetitions.Optional
+	rep := parquet.Repetitions.Required
 	fields := make([]schema.Node, len(p.Columns()))
 	for i, col := range p.Columns() {
 		fields[i], _ = schema.NewPrimitiveNode(col.Name, rep, parquetMapPhysicalType[col.Type], -1, 12)
