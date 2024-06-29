@@ -277,7 +277,7 @@ func (pw *ParquetWriter) WriteRec(row []any) error {
 
 func (pw *ParquetWriter) writeBuffer() error {
 	if pw.recBufferI > 0 {
-		_, err := pw.WriterMap.Write(pw.recBuffer)
+		_, err := pw.WriterMap.Write(pw.recBuffer[:pw.recBufferI])
 		if err != nil {
 			return g.Error(err, "error writing record")
 		}
