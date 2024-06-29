@@ -286,8 +286,7 @@ func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
 }
 
 func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
-	if (t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt) ||
-		(t.Config.MetadataLoadedAt == nil && t.Type == FileToDB) {
+	if t.Config.MetadataLoadedAt != nil && *t.Config.MetadataLoadedAt {
 		metadata.LoadedAt.Key = slingLoadedAtColumn
 		if os.Getenv("SLING_LOADED_AT_COLUMN") == "timestamp" {
 			metadata.LoadedAt.Value = *t.StartTime

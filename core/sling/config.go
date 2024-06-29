@@ -172,6 +172,8 @@ func (cfg *Config) SetDefault() {
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
 		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
 			cfg.MetadataLoadedAt = g.Bool(true)
+		} else {
+			cfg.MetadataLoadedAt = g.Bool(false)
 		}
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
@@ -328,6 +330,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided {
 		Type = FileToDB
+		if cfg.MetadataLoadedAt == nil {
+			cfg.MetadataLoadedAt = g.Bool(true) // default when source is file
+		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
