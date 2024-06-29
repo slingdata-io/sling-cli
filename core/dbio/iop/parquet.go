@@ -109,7 +109,6 @@ type ParquetWriter struct {
 	columns     Columns
 	decNumScale []*big.Rat
 	recBuffer   []map[string]any
-	recBufferI  int
 }
 
 func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *ParquetWriter, err error) {
@@ -176,7 +175,7 @@ func NewParquetWriterMap(w io.Writer, columns Columns, codec compress.Codec) (p 
 		WriterMap:   parquet.NewGenericWriter[map[string]any](w, config, parquet.DataPageStatistics(true)),
 		columns:     columns,
 		decNumScale: decNumScale,
-		recBuffer:   make([]map[string]any, 100),
+		recBuffer:   make([]map[string]any, 0, 100),
 	}, nil
 
 }
@@ -261,29 +260,26 @@ func (pw *ParquetWriter) WriteRec(row []any) error {
 		}
 	}
 
-	pw.recBuffer[pw.recBufferI] = rec
+	pw.recBuffer = append(pw.recBuffer, rec)
 
-	if pw.recBufferI+1 == 100 {
+	if len(pw.recBuffer) == 100 {
 		err := pw.writeBuffer()
 		if err != nil {
 			return g.Error(err, "error writing buffer")
 		}
-	} else {
-		pw.recBufferI++
 	}
 
 	return nil
 }
 
 func (pw *ParquetWriter) writeBuffer() error {
-	if pw.recBufferI > 0 {
-		_, err := pw.WriterMap.Write(pw.recBuffer[:pw.recBufferI])
+	if len(pw.recBuffer) > 0 {
+		_, err := pw.WriterMap.Write(pw.recBuffer)
 		if err != nil {
 			return g.Error(err, "error writing record")
 		}
 
-		pw.recBuffer = make([]map[string]any, 100)
-		pw.recBufferI = 0
+		pw.recBuffer = pw.recBuffer[:0] // reset
 	}
 	return nil
 }
