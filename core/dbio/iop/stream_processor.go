@@ -910,6 +910,38 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 	}
 }
 
+// CastToStringSafe to masks to count bytes (even safer)
+func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType ...ColumnType) string {
+	typ := ColumnType("")
+	switch v := val.(type) {
+	case time.Time:
+		typ = DatetimeType
+	default:
+		_ = v
+	}
+
+	if len(valType) > 0 {
+		typ = valType[0]
+	}
+
+	switch {
+	case val == nil:
+		return ""
+	case sp.Config.BoolAsInt && typ.IsBool():
+		return "0" // as a mask
+	case typ.IsBool():
+		return cast.ToString(val)
+	case typ.IsDecimal() || typ.IsFloat():
+		return cast.ToString(val)
+	case typ.IsDate():
+		return "2006-01-02" // as a mask
+	case typ.IsDatetime():
+		return "2006-01-02 15:04:05.000000 +00" // as a mask
+	default:
+		return cast.ToString(val)
+	}
+}
+
 // CastValWithoutStats casts the value without counting stats
 func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ ColumnType) interface{} {
 	var nVal interface{}
