@@ -639,7 +639,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// normalize casing of object names
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
-			return g.Error(err, "could not get parse target table name")
+			return g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return g.Error("invalid table name: %s", table.Raw)
 		}
 		cfg.Target.Object = table.FullName()
 	}
@@ -694,10 +696,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		if table.Schema != "" {
-			m["stream_schema"] = strings.ToLower(table.Schema)
+			m["stream_schema"] = iop.CleanName(strings.ToLower(table.Schema))
 		}
 		if table.Name != "" {
-			m["stream_table"] = strings.ToLower(table.Name)
+			m["stream_table"] = iop.CleanName(strings.ToLower(table.Name))
 		}
 
 		if cfg.StreamName != "" {
@@ -711,6 +713,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return m, g.Error("invalid table name: %s", table.Raw)
 		}
 
 		m["object_schema"] = table.Schema
