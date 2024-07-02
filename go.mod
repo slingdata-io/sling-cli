@@ -31,14 +31,14 @@ require (
 	github.com/jmoiron/sqlx v1.2.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
-	github.com/klauspost/compress v1.17.8
+	github.com/klauspost/compress v1.17.9
 	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/microsoft/go-mssqldb v1.7.1
 	github.com/nqd/flat v0.1.1
-	github.com/parquet-go/parquet-go v0.22.0
+	github.com/parquet-go/parquet-go v0.23.0
 	github.com/pkg/sftp v1.12.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1
@@ -199,10 +199,10 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/rivo/uniseg v0.4.4 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
-	github.com/segmentio/encoding v0.3.6 // indirect
+	github.com/segmentio/encoding v0.4.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
@@ -231,7 +231,7 @@ require (
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.24.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.19.0 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/term v0.19.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.20.0 // indirect
@@ -240,7 +240,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20240415180920-8c6c420018be // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240415180920-8c6c420018be // indirect
 	google.golang.org/grpc v1.63.2 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/VividCortex/ewma.v1 v1.1.1 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/fatih/color.v1 v1.7.0 // indirect
