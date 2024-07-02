@@ -135,6 +135,8 @@ func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *Pa
 	}
 	config.Schema = getParquetSchema(columns, false)
 	config.Compression = codec
+	config.CreatedBy = "slingdata.io"
+	config.DataPageStatistics = true
 
 	fw := parquet.NewWriter(w, config, parquet.DataPageStatistics(true))
 
@@ -170,6 +172,8 @@ func NewParquetWriterMap(w io.Writer, columns Columns, codec compress.Codec) (p 
 	}
 	config.Schema = getParquetSchema(columns, true)
 	config.Compression = codec
+	config.CreatedBy = "slingdata.io"
+	config.DataPageStatistics = true
 
 	return &ParquetWriter{
 		WriterMap:   parquet.NewGenericWriter[map[string]any](w, config, parquet.DataPageStatistics(true)),

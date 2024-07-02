@@ -103,7 +103,7 @@ type Replication struct {
 
 	Type sling.JobType `json:"type"  gorm:"index"`
 
-	Config sling.ReplicationConfig `json:"config"`
+	Config string `json:"config"` // Original config
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
@@ -179,7 +179,7 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 			Name:   t.Config.Env["SLING_CONFIG_PATH"],
 			Type:   t.Type,
 			MD5:    t.Replication.MD5(),
-			Config: *t.Replication,
+			Config: t.Replication.OriginalCfg(),
 		}
 
 		if projID != "" {

@@ -490,13 +490,13 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	table.Dialect = dialect
 	table.Raw = text
 
+	quote := GetQualifierQuote(dialect)
+
 	textLower := strings.ToLower(text)
-	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) {
+	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) && !strings.Contains(text, quote) {
 		table.SQL = strings.TrimSpace(text)
 		return
 	}
-
-	quote := GetQualifierQuote(dialect)
 
 	inQuote := false
 	words := []string{}
@@ -556,7 +556,7 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	}
 
 	if len(words) == 0 {
-		err = g.Error("invalid table name")
+		err = g.Error("invalid table name: %s", text)
 		return
 	} else if len(words) == 1 {
 		table.Name = words[0]

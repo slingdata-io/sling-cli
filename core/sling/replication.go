@@ -38,8 +38,8 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 	return rd.originalCfg
 }
 
-// MD5 returns a md5 hash of the config
-func (rd *ReplicationConfig) MD5() string {
+// JSON returns json payload
+func (rd *ReplicationConfig) JSON() string {
 	payload := g.Marshal([]any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
@@ -59,7 +59,12 @@ func (rd *ReplicationConfig) MD5() string {
 		payload = strings.ReplaceAll(payload, g.Marshal(rd.Target), g.Marshal(cleanTarget))
 	}
 
-	return g.MD5(payload)
+	return payload
+}
+
+// MD5 returns a md5 hash of the json payload
+func (rd *ReplicationConfig) MD5() string {
+	return g.MD5(rd.JSON())
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -69,16 +74,7 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
-	if rd.OriginalCfg() != "" {
-		return []byte(rd.OriginalCfg()), nil
-	}
-
-	jBytes, err := json.Marshal(rd)
-	if err != nil {
-		return nil, g.Error(err, "could not marshal")
-	}
-
-	return jBytes, err
+	return []byte(rd.JSON()), nil
 }
 
 // StreamsOrdered returns the stream names as ordered in the YAML file
