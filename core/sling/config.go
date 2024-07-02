@@ -632,6 +632,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
+	// clean values for replacing
+	for k, v := range m {
+		m[k] = iop.CleanName(cast.ToString(v))
+	}
+
 	// replace placeholders
 	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
 
@@ -696,10 +701,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		if table.Schema != "" {
-			m["stream_schema"] = iop.CleanName(strings.ToLower(table.Schema))
+			m["stream_schema"] = table.Schema
 		}
 		if table.Name != "" {
-			m["stream_table"] = iop.CleanName(strings.ToLower(table.Name))
+			m["stream_table"] = table.Name
 		}
 
 		if cfg.StreamName != "" {
