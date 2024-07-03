@@ -64,7 +64,7 @@ func (rd *ReplicationConfig) JSON() string {
 
 // MD5 returns a md5 hash of the json payload
 func (rd *ReplicationConfig) MD5() string {
-	return g.MD5(rd.JSON())
+	return g.MD5(rd.OriginalCfg())
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -450,6 +450,10 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 // UnmarshalReplication converts a yaml file to a replication
 func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err error) {
 
+	// set base values when erroring
+	config.originalCfg = replicYAML
+	config.Env = map[string]any{}
+
 	m := g.M()
 	err = yaml.Unmarshal([]byte(replicYAML), &m)
 	if err != nil {
@@ -505,10 +509,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	g.Unmarshal(g.Marshal(streams), &maps.Streams)
 
 	config = ReplicationConfig{
-		Source: cast.ToString(source),
-		Target: cast.ToString(target),
-		Env:    Env,
-		maps:   maps,
+		Source:      cast.ToString(source),
+		Target:      cast.ToString(target),
+		Env:         Env,
+		maps:        maps,
+		originalCfg: replicYAML, // set originalCfg
 	}
 
 	// parse defaults
@@ -577,9 +582,6 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 			}
 		}
 	}
-
-	// set originalCfg
-	config.originalCfg = replicYAML
 
 	return
 }

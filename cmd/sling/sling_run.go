@@ -20,11 +20,12 @@ import (
 )
 
 var (
-	projectID     = os.Getenv("SLING_PROJECT_ID")
-	updateMessage = ""
-	updateVersion = ""
-	rowCount      = int64(0)
-	totalBytes    = uint64(0)
+	projectID         = os.Getenv("SLING_PROJECT_ID")
+	updateMessage     = ""
+	updateVersion     = ""
+	rowCount          = int64(0)
+	totalBytes        = uint64(0)
+	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -395,7 +396,12 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
-		return g.Error(err, "Error parsing replication config")
+		if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
+			replication, err = r, e
+		}
+		if err != nil {
+			return g.Error(err, "Error parsing replication config")
+		}
 	}
 
 	taskConfigs, err := replication.Compile(cfgOverwrite, selectStreams...)
