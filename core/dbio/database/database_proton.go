@@ -232,6 +232,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				// Do insert
 				ds.Context.Lock()
 				_, err := stmt.Exec(row...)
+				time.Sleep(100 * time.Millisecond)
 				ds.Context.Unlock()
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
@@ -249,6 +250,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			if err != nil {
 				return g.Error(err, "could not commit transaction")
 			}
+			time.Sleep(100 * time.Millisecond)
 
 			return nil
 		}()
@@ -260,7 +262,8 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 	ds.SetEmpty()
 
-	g.Debug("COPY %d ROWS", count)
+	g.Debug("%d ROWS COPIED", count)
+	time.Sleep(100 * time.Millisecond)
 	return count, nil
 }
 
@@ -305,17 +308,17 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	ALTER TABLE {tgt_table}
+	ALTER STREAM {tgt_table}
 	DELETE WHERE ({pk_fields}) in (
 			SELECT {pk_fields}
-			FROM {src_table} src
+			FROM table({src_table}) src
 	)
 	;
 
 	INSERT INTO {tgt_table}
 		({insert_fields})
 	SELECT {src_fields}
-	FROM {src_table} src
+	FROM table({src_table}) src
 	`
 	sql = g.R(
 		sqlTempl,
@@ -336,7 +339,7 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 			sVal := cast.ToString(row[i])
 			if sVal != "" {
 				val, err := decimal.NewFromString(sVal)
-				if !g.LogError(err, "could not convert value `%s` for Proton decimal", sVal) {
+				if !g.LogError(err, "could not convert value `%s` for Timeplus decimal", sVal) {
 					row[i] = val
 				}
 			} else {
@@ -347,4 +350,17 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 		}
 	}
 	return row
+}
+
+// GetCount returns count of records
+func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
+	// wait for 3 sec before getting count, otherwise newly added row can be 0
+	time.Sleep(3000 * time.Millisecond)
+	sql := fmt.Sprintf(`select count(*) as cnt from table(%s)`, tableFName)
+	data, err := conn.Self().Query(sql)
+	if err != nil {
+		g.LogError(err, "could not get row number")
+		return 0, err
+	}
+	return cast.ToUint64(data.Rows[0][0]), nil
 }
