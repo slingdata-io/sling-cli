@@ -1,42 +1,39 @@
 core:
-  drop_table: drop table if exists {table}
+  drop_table: drop stream if exists {table}
   drop_view: drop view if exists {view}
   create_schema: create database {schema}
-  create_table: create table {table} ({col_types}) engine=MergeTree {partition_by} ORDER BY tuple()
-  create_temporary_table: create table {table} ({col_types}) engine=Memory
-  rename_table: ALTER TABLE {table} RENAME TO {new_table}
-  alter_columns: alter table {table} modify column {col_ddl}
-  modify_column: '{column} {type}'
-  update: alter table {table} update {set_fields} where {pk_fields_equal}
-
+  create_table: create stream {table} ({col_types}) {partition_by}
+  create_temporary_table: create stream {table} ({col_types}) engine=Memory
+  rename_table: ALTER stream {table} RENAME TO {new_table}
+  alter_columns: alter stream {table} modify column {col_ddl}
+  modify_column: "{column} {type}"
+  update: alter stream {table} update {set_fields} where {pk_fields_equal}
 
 metadata:
+  current_database: select current_database()
 
-  current_database:
-    select currentDatabase()
-    
   databases: |
-    select currentDatabase() as name
-  
-  # clickhouse does not have schemas
+    select current_database() as name
+
+  # Timeplus does not have schemas
   # has database and table, for example: database1.table1
   # for our purpose a schema is a database
   schemas: |
     select name as schema_name
     from system.databases
     order by name
-    
+
   tables: |
     select name as table_name
     from system.tables
-    where engine not in ('View')
+    where engine not in ('View','MaterializedView')
       and database = '{schema}'
     order by name
-    
+
   views: |
     select name as table_name
     from system.tables
-    where engine = 'View'
+    where engine in ('View','MaterializedView')
       and database = '{schema}'
     order by name
 
@@ -52,13 +49,13 @@ metadata:
 
   indexes: |
     SELECT 1
-  
+
   columns_full: |
     with tables as (
       select
         database,
         name as table_name,
-        engine in ('View') as is_view
+        engine in ('View','MaterializedView') as is_view
       from system.tables
       where database = '{schema}' and name = '{table}'
     )
@@ -79,7 +76,7 @@ metadata:
       select
         database,
         name as table_name,
-        engine in ('View') as is_view
+        engine in ('View','MaterializedView') as is_view
       from system.tables
       where 1=1
         {{if .schema -}} and database = '{schema}' {{- end}}
@@ -97,31 +94,28 @@ metadata:
       on tables.database = cols.database
       and tables.table_name = cols.table
     order by cols.database, cols.table, cols.position
-  
-  ddl_table:
-    SHOW CREATE TABLE `{schema}`.`{table}`
-  
+
+  ddl_table: SHOW CREATE STREAM `{schema}`.`{table}`
+
   ddl_view: |
     SHOW CREATE VIEW `{schema}`.`{table}`
-  
-  sessions:
-    select *
+
+  sessions: select *
     from pg_stat_activity
     where state = 'active'
 
-  session_terminate:
-    select pg_terminate_backend({pid})
+  session_terminate: select pg_terminate_backend({pid})
 
 analysis:
   field_chars: |
     select
       '{schema}' as schema_nm,
       '{table}' as table_nm,
-      '{field}' as field, sum(case when cast({field} as text) ~ '\n' then 1 else 0 end) as cnt_nline, 
-      sum(case when cast({field} as text) ~ '\t' then 1 else 0 end) as cnt_tab, 
-      sum(case when cast({field} as text) ~ ',' then 1 else 0 end) as cnt_comma, 
-      sum(case when cast({field} as text) ~ '"' then 1 else 0 end) as cnt_dquote, 
-      min(char_length(cast({field} as text))) as f_min_len, 
+      '{field}' as field, sum(case when cast({field} as text) ~ '\n' then 1 else 0 end) as cnt_nline,
+      sum(case when cast({field} as text) ~ '\t' then 1 else 0 end) as cnt_tab,
+      sum(case when cast({field} as text) ~ ',' then 1 else 0 end) as cnt_comma,
+      sum(case when cast({field} as text) ~ '"' then 1 else 0 end) as cnt_dquote,
+      min(char_length(cast({field} as text))) as f_min_len,
       max(char_length(cast({field} as text))) as f_max_len
     from `{schema}`.`{table}`
 
@@ -187,7 +181,7 @@ analysis:
       select
         '{field}'::text as field,
         {group_expr} as group_exp,
-        {field},        
+        {field},
         count(*) cnt
       from `{schema}`.`{table}`
       group by {field}, {group_expr}
@@ -226,7 +220,7 @@ analysis:
         select '{field}'::text as field, count(*) ttl_cnt
         from `{schema}`.`{table}`
       )
-      select 
+      select
         '{schema}' as schema_nm,
         '{table}' as table_nm,
         t1.field,
@@ -243,10 +237,8 @@ function:
   truncate_f: round({field}, 2, 1)
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   checksum_string: char_length({field})
-  checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
-  # checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
-  checksum_decimal: ABS(CAST({field} as Nullable(Int64)))
-
+  checksum_datetime: to_unix_timestamp64_nano(toDateTime64({field}, 6)) / 1000
+  checksum_decimal: ABS(CAST({field} as nullable(int64)))
 
 variable:
   # bind_string: "@p{c}"
@@ -254,6 +246,6 @@ variable:
   batch_values: 2000
   bool_as: string
   error_filter_table_exists: already
-  quote_char: '`'
-  timestamp_layout: '2006-01-02 15:04:05.000000 -07'
-  timestamp_layout_str: parseDateTime64BestEffortOrNull('{value}')
+  quote_char: "`"
+  timestamp_layout: "2006-01-02 15:04:05.000000 -07"
+  timestamp_layout_str: to_time('{value}')
