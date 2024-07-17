@@ -394,7 +394,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		}
 
 		if conn.GetType() == dbio.TypeDbProton {
-			batchSize = 100
+			batchSize = 1
 		} else {
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
 		}

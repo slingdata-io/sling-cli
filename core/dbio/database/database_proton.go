@@ -250,7 +250,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			if err != nil {
 				return g.Error(err, "could not commit transaction")
 			}
-			time.Sleep(100 * time.Millisecond)
+			// time.Sleep(100 * time.Millisecond)
 
 			return nil
 		}()
@@ -263,7 +263,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	ds.SetEmpty()
 
 	g.Debug("%d ROWS COPIED", count)
-	time.Sleep(100 * time.Millisecond)
+	// time.Sleep(100 * time.Millisecond)
 	return count, nil
 }
 
@@ -354,8 +354,8 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 
 // GetCount returns count of records
 func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
-	// wait for 3 sec before getting count, otherwise newly added row can be 0
-	time.Sleep(3000 * time.Millisecond)
+	// wait for 4 sec before getting count, otherwise newly added row can be 0
+	time.Sleep(4000 * time.Millisecond)
 	sql := fmt.Sprintf(`select count(*) as cnt from table(%s)`, tableFName)
 	data, err := conn.Self().Query(sql)
 	if err != nil {
