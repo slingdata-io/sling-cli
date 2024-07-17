@@ -232,7 +232,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				// Do insert
 				ds.Context.Lock()
 				_, err := stmt.Exec(row...)
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1 * time.Millisecond)
 				ds.Context.Unlock()
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
@@ -354,8 +354,8 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 
 // GetCount returns count of records
 func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
-	// wait for 4 sec before getting count, otherwise newly added row can be 0
-	time.Sleep(4000 * time.Millisecond)
+	// wait for a while before getting count, otherwise newly added row can be 0
+	time.Sleep(3300 * time.Millisecond)
 	sql := fmt.Sprintf(`select count(*) as cnt from table(%s)`, tableFName)
 	data, err := conn.Self().Query(sql)
 	if err != nil {
