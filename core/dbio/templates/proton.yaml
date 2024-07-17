@@ -3,11 +3,12 @@ core:
   drop_view: drop view if exists {view}
   create_schema: create database {schema}
   create_table: create stream {table} ({col_types}) {partition_by}
-  create_temporary_table: create stream {table} ({col_types}) engine=Memory
+  create_temporary_table: create stream {table} ({col_types})
   rename_table: ALTER stream {table} RENAME TO {new_table}
   alter_columns: alter stream {table} modify column {col_ddl}
   modify_column: "{column} {type}"
   update: alter stream {table} update {set_fields} where {pk_fields_equal}
+  insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from table({src_table})
 
 metadata:
   current_database: select current_database()
