@@ -197,9 +197,13 @@ var (
 )
 
 func init() {
-	if os.Getenv("SLING_TEMP_CLOUD_FOLDER") != "" {
+	if os.Getenv("SLING_TEMP_CLOUD_FOLDER") != "" || os.Getenv("FILEPATH_SLUG") != "" {
 		tempCloudStorageFolder = os.Getenv("SLING_TEMP_CLOUD_FOLDER")
+		if tempCloudStorageFolder == "" {
+			tempCloudStorageFolder = os.Getenv("FILEPATH_SLUG") // legacy
+		}
 	}
+
 }
 
 // NewConn return the most proper connection for a given database
