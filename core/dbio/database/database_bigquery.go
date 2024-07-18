@@ -632,7 +632,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	gcsPath := fmt.Sprintf(
 		"gs://%s/%s/%s.csv",
 		gcBucket,
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -877,7 +877,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
-	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, filePathStorageSlug, cast.ToString(g.Now()))
+	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(gsFs, gsPath)
 

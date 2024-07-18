@@ -188,7 +188,7 @@ var (
 	ddlMaxDecLength = 38
 	ddlMinDecScale  = 6
 
-	filePathStorageSlug = "temp"
+	tempCloudStorageFolder = "temp"
 
 	noDebugKey = " /* nD */"
 
@@ -197,8 +197,8 @@ var (
 )
 
 func init() {
-	if os.Getenv("FILEPATH_SLUG") != "" {
-		filePathStorageSlug = os.Getenv("FILEPATH_SLUG")
+	if os.Getenv("SLING_TEMP_CLOUD_FOLDER") != "" {
+		tempCloudStorageFolder = os.Getenv("SLING_TEMP_CLOUD_FOLDER")
 	}
 }
 

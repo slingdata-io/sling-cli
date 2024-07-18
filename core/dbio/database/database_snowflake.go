@@ -295,7 +295,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", s3Bucket, filePathStorageSlug, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", s3Bucket, tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
@@ -360,7 +360,7 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 		"azure://%s.blob.core.windows.net/%s/%s-%s",
 		conn.GetProp("AZURE_ACCOUNT"),
 		conn.GetProp("AZURE_CONTAINER"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		cast.ToString(g.Now()),
 	)
 
@@ -470,7 +470,7 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 	s3Path := fmt.Sprintf(
 		"s3://%s/%s/%s",
 		conn.GetProp("AWS_BUCKET"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -540,7 +540,7 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 		"azure://%s.blob.core.windows.net/%s/%s-%s",
 		conn.GetProp("AZURE_ACCOUNT"),
 		conn.GetProp("AZURE_CONTAINER"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -600,7 +600,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
 		conn.GetProp("internalStage"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		cast.ToString(g.Now()),
 	)
 
