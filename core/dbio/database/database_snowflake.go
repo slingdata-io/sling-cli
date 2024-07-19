@@ -193,14 +193,10 @@ func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 }
 
 // BulkExportFlow reads in bulk
-func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
-	}
-
+func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	df = iop.NewDataflowContext(conn.Context().Ctx)
 
-	columns, err := conn.GetSQLColumns(tables[0])
+	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -210,30 +206,30 @@ func (conn *SnowflakeConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, er
 
 	switch conn.CopyMethod {
 	case "AZURE":
-		filePath, err = conn.CopyToAzure(tables...)
+		filePath, err = conn.CopyToAzure(table)
 		if err != nil {
 			err = g.Error(err, "Could not copy to S3.")
 			return
 		}
 	case "AWS":
-		filePath, err = conn.CopyToS3(tables...)
+		filePath, err = conn.CopyToS3(table)
 		if err != nil {
 			err = g.Error(err, "Could not copy to S3.")
 			return
 		}
 	// case "STAGE":
 	// 	// TODO: This is not working, buggy driver. Use SQL Rows stream
-	// 	if stage := conn.getOrCreateStage(tables[0].Schema); stage != "" {
-	// 		filePath, err = conn.UnloadViaStage(tables...)
+	// 	if stage := conn.getOrCreateStage(table.Schema); stage != "" {
+	// 		filePath, err = conn.UnloadViaStage(table)
 	// 		if err != nil {
 	// 			err = g.Error(err, "Could not unload to stage.")
 	// 			return
 	// 		}
 	// 	} else {
-	// 		return conn.BaseConn.BulkExportFlow(tables...)
+	// 		return conn.BaseConn.BulkExportFlow(table)
 	// 	}
 	default:
-		return conn.BaseConn.BulkExportFlow(tables...)
+		return conn.BaseConn.BulkExportFlow(table)
 	}
 
 	fs, err := filesys.NewFileSysClientFromURL(filePath, conn.PropArr()...)

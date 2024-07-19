@@ -790,12 +790,8 @@ func tSelectStreamLarge(t *testing.T, conn Connection, tableName string, dfMult 
 		return humanize.Commaf(math.Round(cast.ToFloat64(cnt) / time.Since(start).Seconds()))
 	}
 	table, _ := ParseTableName(tableName, conn.GetType())
-	tables := []Table{}
-	for i := 0; i < dfMult; i++ {
-		tables = append(tables, table)
-	}
 	UseBulkExportFlowCSV = false
-	df, err := conn.BulkExportFlow(tables...)
+	df, err := conn.BulkExportFlow(table)
 	if !g.AssertNoError(t, err) {
 		return
 	}

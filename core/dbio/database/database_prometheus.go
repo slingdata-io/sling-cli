@@ -138,20 +138,16 @@ func (conn *PrometheusConn) ExecContext(ctx context.Context, sql string, args ..
 	return nil, g.Error("ExecContext not implemented on PrometheusConn")
 }
 
-func (conn *PrometheusConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
+func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	// parse options
 	options := g.M()
-	if parts := strings.Split(tables[0].SQL, `#`); len(parts) > 1 {
+	if parts := strings.Split(table.SQL, `#`); len(parts) > 1 {
 		lastPart := parts[len(parts)-1]
 		g.Unmarshal(lastPart, &options)
 		g.Debug("query options: %s", g.Marshal(options))
 	}
 
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].SQL, options)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.SQL, options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}

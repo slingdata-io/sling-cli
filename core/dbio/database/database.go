@@ -57,7 +57,7 @@ type Connection interface {
 	BaseURL() string
 	Begin(options ...*sql.TxOptions) error
 	BeginContext(ctx context.Context, options ...*sql.TxOptions) error
-	BulkExportFlow(tables ...Table) (*iop.Dataflow, error)
+	BulkExportFlow(table Table) (*iop.Dataflow, error)
 	BulkExportStream(table Table) (*iop.Datastream, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
@@ -2446,17 +2446,18 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 }
 
 // BulkExportFlow creates a dataflow from a sql query
-func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+func (conn *BaseConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 
 	g.Trace("BulkExportFlow not implemented for %s", conn.GetType())
 	if UseBulkExportFlowCSV {
-		return conn.BulkExportFlowCSV(tables...)
+		return conn.BulkExportFlowCSV(table)
 	}
 
 	df = iop.NewDataflowContext(conn.Context().Ctx)
 
 	dsCh := make(chan *iop.Datastream)
 
+	tables := []Table{table}
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
@@ -2489,12 +2490,9 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 }
 
 // BulkExportFlowCSV creates a dataflow from a sql query, using CSVs
-func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
-	}
+func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err error) {
 
-	columns, err := conn.Self().GetSQLColumns(tables[0])
+	columns, err := conn.Self().GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -2554,6 +2552,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 	folderPath := path.Join(env.GetTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
 
+	tables := []Table{table}
 	go func() {
 		defer df.Close()
 		for i, table := range tables {
