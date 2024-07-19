@@ -341,13 +341,42 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
 				stream.Mode = cfgOverwrite.Mode
 			}
-			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
-				g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+
+			if cfgOverwrite.Source.Options.Limit != nil && stream.SourceOptions.Limit != cfgOverwrite.Source.Options.Limit {
+				if stream.SourceOptions.Limit != nil {
+					g.Debug("stream limit overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Limit, *cfgOverwrite.Source.Options.Limit)
+				}
+				stream.SourceOptions.Limit = cfgOverwrite.Source.Options.Limit
+			}
+
+			if cfgOverwrite.Source.Options.Offset != nil && stream.SourceOptions.Offset != cfgOverwrite.Source.Options.Offset {
+				if stream.SourceOptions.Offset != nil {
+					g.Debug("stream offset overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Offset, *cfgOverwrite.Source.Options.Offset)
+				}
+				stream.SourceOptions.Offset = cfgOverwrite.Source.Options.Offset
+			}
+
+			if cfgOverwrite.Source.UpdateKey != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				if stream.UpdateKey != "" {
+					g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				}
 				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
 			}
+
 			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
-				g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				if stream.PrimaryKeyI != nil {
+					g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				}
 				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
+
+			if newRange := cfgOverwrite.Source.Options.Range; newRange != nil {
+				if stream.SourceOptions.Range == nil || *stream.SourceOptions.Range != *newRange {
+					if stream.SourceOptions.Range != nil && *stream.SourceOptions.Range != "" {
+						g.Debug("stream range overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Range, *newRange)
+					}
+					stream.SourceOptions.Range = newRange
+				}
 			}
 		}
 
