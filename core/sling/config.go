@@ -941,6 +941,13 @@ func (s *Source) Limit() int {
 	return *s.Options.Limit
 }
 
+func (s *Source) Offset() int {
+	if s.Options.Offset == nil {
+		return 0
+	}
+	return *s.Options.Offset
+}
+
 func (s *Source) HasUpdateKey() bool {
 	return s.UpdateKey != ""
 }
@@ -1016,6 +1023,7 @@ type SourceOptions struct {
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 

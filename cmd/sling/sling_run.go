@@ -99,6 +99,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
 
+		case "offset":
+			if cfg.Source.Options == nil {
+				cfg.Source.Options = &sling.SourceOptions{}
+			}
+			cfg.Source.Options.Offset = g.Int(cast.ToInt(v))
+
 		case "iterate":
 			if cast.ToString(v) == "infinite" {
 				iterate = -1

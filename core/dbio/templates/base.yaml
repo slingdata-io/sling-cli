@@ -12,7 +12,7 @@ core:
   limit: |
     select * from (
       {sql}
-    ) as t limit {limit}
+    ) as t limit {limit} offset {offset}
   insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from {src_table}
   truncate_table: truncate table {table}
   alter_columns: alter table {table} {col_ddl}

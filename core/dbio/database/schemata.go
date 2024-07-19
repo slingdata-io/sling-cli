@@ -116,7 +116,8 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(limit int, fields ...string) (sql string) {
+func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
@@ -146,25 +147,21 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
+	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			fieldsStr := strings.Join(fields, ", ")
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
 		} else {
 			sql = t.SQL
 		}
 	} else {
-		fieldsStr := "*"
-		if len(fields) > 0 {
-			fieldsStr = strings.Join(fields, ", ")
-		}
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
 	if limit > 0 {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
-		} else {
+		} else if t.IsQuery() {
 			template, err := t.Dialect.Template()
 			g.LogError(err)
 
@@ -172,19 +169,27 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 				template.Core["limit"],
 				"sql", sql,
 				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
 			)
+		} else {
+			sql = g.F("select %s from %s limit %d", fieldsStr, t.FDQN(), limit)
+			if offset > 0 {
+				sql = g.F("select %s from %s limit %d offset %d", fieldsStr, t.FDQN(), limit, offset)
+			}
 		}
 	}
 
 	if isSQLServer {
-		// move the inner "order by" clause to outside
+		// add offset after "order by"
 		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
 		if !startsWith && len(matches) == 1 {
 			orderBy := matches[0].Full
-			sql = strings.ReplaceAll(sql, orderBy, "")
-			sql = sql + orderBy
+			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", orderBy, offset))
 		}
 	}
+
+	// replace any provided placeholders
+	sql = g.R(sql, "{limit}", cast.ToString(limit), "{offset}", cast.ToString(offset))
 
 	return
 }

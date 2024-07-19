@@ -914,7 +914,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if table.IsQuery() || table.IsView {
-		return conn.ExportToGCS(table.Select(0), gcsURI)
+		return conn.ExportToGCS(table.Select(0, 0), gcsURI)
 	}
 
 	client, err := conn.getNewClient()
