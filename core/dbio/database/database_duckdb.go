@@ -38,7 +38,7 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "0.10.0"
+var DuckDbVersion = "1.0.0"
 var DuckDbUseTempFile = false
 var DuckDbMux = sync.Mutex{}
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
