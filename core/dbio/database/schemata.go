@@ -25,6 +25,13 @@ type Table struct {
 	Keys     TableKeys   `json:"keys,omitempty"`
 
 	Raw string `json:"raw"`
+
+	limit, offset int
+}
+
+var PartitionByOffset = func(conn Connection, table Table, l int) ([]Table, error) { return []Table{table}, nil }
+var PartitionByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
+	return []Table{table}, nil
 }
 
 func (t *Table) IsQuery() bool {
@@ -107,6 +114,23 @@ func (t *Table) FDQN() string {
 	return strings.Join(fdqnArr, ".")
 }
 
+func (t *Table) Clone() Table {
+	return Table{
+		Name:     t.Name,
+		Schema:   t.Schema,
+		Database: t.Database,
+		IsView:   t.IsView,
+		SQL:      t.SQL,
+		DDL:      t.DDL,
+		Dialect:  t.Dialect,
+		Columns:  t.Columns,
+		Keys:     t.Keys,
+		Raw:      t.Raw,
+		limit:    t.limit,
+		offset:   t.offset,
+	}
+}
+
 func (t *Table) ColumnsMap() map[string]iop.Column {
 	columns := map[string]iop.Column{}
 	for _, column := range t.Columns {
@@ -117,6 +141,10 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 }
 
 func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+
+	// set to internal value if not specified
+	limit = lo.Ternary(limit == 0, t.limit, limit)
+	offset = lo.Ternary(offset == 0, t.offset, offset)
 
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
