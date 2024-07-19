@@ -301,7 +301,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskStats["rows_count"] = task.GetCount()
 			taskStats["rows_in_bytes"] = inBytes
 			taskStats["rows_out_bytes"] = outBytes
-			taskStats["rows_out_bytes"] = outBytes
 
 			if memRAM, _ := mem.VirtualMemory(); memRAM != nil {
 				taskStats["mem_used"] = memRAM.Used
@@ -396,7 +395,9 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
-		if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
+		if strings.HasPrefix(cfgPath, "{") && strings.HasSuffix(cfgPath, "}") {
+			replication, err = sling.LoadReplicationConfig(cfgPath) // is JSON
+		} else if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
 			replication, err = r, e
 		}
 		if err != nil {
@@ -503,7 +504,7 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 
 // setProjectID attempts to get the first sha of the repo
 func setProjectID(cfgPath string) {
-	if cfgPath == "" {
+	if cfgPath == "" && !strings.HasPrefix(cfgPath, "{") {
 		return
 	}
 
