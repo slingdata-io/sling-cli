@@ -267,6 +267,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	ds.NoDebug = strings.Contains(collectionName, noDebugKey)
 	ds.SetMetadata(conn.GetProp("METADATA"))
 	ds.SetConfig(conn.Props())
+	ds.Defer(func() { cur.Close(queryContext.Ctx) }) // close cursor when done
 
 	err = ds.Start()
 	if err != nil {
