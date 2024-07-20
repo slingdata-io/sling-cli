@@ -658,11 +658,13 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 
 	process := func(stagePath string) {
 		defer context.Wg.Write.Done()
-		// filePath := path.Join(folderPath, cast.ToString(index))
-		err := conn.GetFile(stagePath, folderPath)
+		filePath, err := conn.GetFile(stagePath, folderPath)
 		if context.CaptureErr(err) {
 			return
 		}
+
+		// TODO: Push files to a dataflow as they land (instead of waiting for all to download)
+		_ = filePath
 	}
 
 	// this continues to read with 2 concurrent streams at most
@@ -866,10 +868,10 @@ func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
 }
 
 // GetFile Copies from a staging location to a local file or folder
-func (conn *SnowflakeConn) GetFile(internalStagePath, fPath string) (err error) {
+func (conn *SnowflakeConn) GetFile(internalStagePath, folderPath string) (filePath string, err error) {
 	query := g.F(
 		"GET %s 'file://%s' overwrite=true",
-		internalStagePath, fPath,
+		internalStagePath, folderPath,
 	)
 
 	data, err := conn.Query(query)
@@ -878,11 +880,11 @@ func (conn *SnowflakeConn) GetFile(internalStagePath, fPath string) (err error) 
 		return
 	}
 
-	g.Trace("\n" + data.PrettyTable())
+	nameParts := strings.Split(cast.ToString(data.Rows[0][0]), "/")
+	fileName := nameParts[len(nameParts)-1]
+	filePath = g.F("%s/%s", folderPath, fileName)
 
-	if !g.PathExists(fPath) {
-		return g.Error("%s does not exists, but GET query succeeded?", fPath)
-	}
+	g.Trace("\n" + data.PrettyTable())
 
 	return
 }
