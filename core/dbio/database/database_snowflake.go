@@ -204,43 +204,46 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 
 	filePath := ""
 
-	switch conn.CopyMethod {
-	case "AZURE":
-		filePath, err = conn.CopyToAzure(table)
-		if err != nil {
-			err = g.Error(err, "Could not copy to S3.")
-			return
+	if conn.GetProp("use_bulk") != "false" {
+		switch conn.CopyMethod {
+		case "AZURE":
+			filePath, err = conn.CopyToAzure(table)
+			if err != nil {
+				err = g.Error(err, "Could not copy to S3.")
+				return
+			}
+		case "AWS":
+			filePath, err = conn.CopyToS3(table)
+			if err != nil {
+				err = g.Error(err, "Could not copy to S3.")
+				return
+			}
+		default:
+			if stage := conn.getOrCreateStage(table.Schema); stage != "" {
+				filePath, err = conn.UnloadViaStage(table)
+				if err != nil {
+					err = g.Error(err, "Could not unload to stage.")
+					return
+				}
+				filePath = "file://" + filePath // add scheme
+			} else {
+				return conn.BaseConn.BulkExportFlow(table)
+			}
 		}
-	case "AWS":
-		filePath, err = conn.CopyToS3(table)
-		if err != nil {
-			err = g.Error(err, "Could not copy to S3.")
-			return
-		}
-	// case "STAGE":
-	// 	// TODO: This is not working, buggy driver. Use SQL Rows stream
-	// 	if stage := conn.getOrCreateStage(table.Schema); stage != "" {
-	// 		filePath, err = conn.UnloadViaStage(table)
-	// 		if err != nil {
-	// 			err = g.Error(err, "Could not unload to stage.")
-	// 			return
-	// 		}
-	// 	} else {
-	// 		return conn.BaseConn.BulkExportFlow(table)
-	// 	}
-	default:
+	} else {
 		return conn.BaseConn.BulkExportFlow(table)
 	}
 
-	fs, err := filesys.NewFileSysClientFromURL(filePath, conn.PropArr()...)
+	fs, err := filesys.NewFileSysClientFromURL(filePath, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client")
 		return
 	}
 
-	fs.SetProp("header", "false")
 	fs.SetProp("format", "csv")
-	fs.SetProp("null_as", `\N`)
+	fs.SetProp("delimiter", ",")
+	fs.SetProp("header", "true")
+	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 	df, err = fs.ReadDataflow(filePath)
@@ -285,7 +288,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 	}
 
 	s3Bucket := conn.GetProp("AWS_BUCKET")
-	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -346,7 +349,7 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 
 	}
 
-	azFs, err := filesys.NewFileSysClient(dbio.TypeFileAzure, conn.PropArr()...)
+	azFs, err := filesys.NewFileSysClient(dbio.TypeFileAzure, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -470,7 +473,7 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 		tableFName,
 	)
 
-	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -540,7 +543,7 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 		tableFName,
 	)
 
-	azFs, err := filesys.NewFileSysClient(dbio.TypeFileAzure, conn.PropArr()...)
+	azFs, err := filesys.NewFileSysClient(dbio.TypeFileAzure, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -604,6 +607,10 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 
 	// Write the each stage file to temp file, read to ds
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
+	if err = os.MkdirAll(folderPath, 0777); err != nil {
+		return "", g.Error(err, "could not create temp directory: %s", folderPath)
+	}
+
 	unload := func(sql string, stagePartPath string) {
 
 		defer context.Wg.Write.Done()
@@ -614,17 +621,19 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 			"stage_path", stagePartPath,
 		)
 
-		_, err = conn.Exec(unloadSQL)
+		_, err = conn.Query(unloadSQL)
+		g.LogError(err)
 		if err != nil {
 			err = g.Error(err, "SQL Error for %s", stagePartPath)
 			context.CaptureErr(err)
 		}
+
 	}
 
 	conn.Exec("REMOVE " + stageFolderPath)
 	defer conn.Exec("REMOVE " + stageFolderPath)
 	for i, table := range tables {
-		stagePathPart := fmt.Sprintf("%s/u%02d-", stageFolderPath, i+1)
+		stagePathPart := fmt.Sprintf("%s/%02d_", stageFolderPath, i+1)
 		context.Wg.Write.Add()
 		go unload(table.Select(0, 0), stagePathPart)
 	}
@@ -636,37 +645,38 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		return
 	}
 
-	// get stream
+	g.Debug("Unloaded to %s", stageFolderPath)
+
+	// get file paths
 	data, err := conn.Query("LIST " + stageFolderPath)
 	if err != nil {
 		err = g.Error(err, "Could not LIST for %s", stageFolderPath)
 		context.CaptureErr(err)
 		return
 	}
+	g.Trace("\n" + data.PrettyTable())
 
-	process := func(index int, stagePath string) {
+	process := func(stagePath string) {
 		defer context.Wg.Write.Done()
-		filePath := path.Join(folderPath, cast.ToString(index))
-		err := conn.GetFile(stagePath, filePath)
+		// filePath := path.Join(folderPath, cast.ToString(index))
+		err := conn.GetFile(stagePath, folderPath)
 		if context.CaptureErr(err) {
 			return
 		}
 	}
 
 	// this continues to read with 2 concurrent streams at most
-	for i, rec := range data.Records() {
+	for _, rec := range data.Records() {
 		if context.Err() != nil {
 			break
 		}
 		name := cast.ToString(rec["name"])
 		context.Wg.Write.Add()
-		go process(i, "@"+name)
+		go process("@" + name)
 	}
 	context.Wg.Write.Wait()
 
-	g.Debug("Unloaded to %s", stageFolderPath)
-
-	return folderPath, err
+	return folderPath, context.Err()
 }
 
 // CopyViaStage uses the Snowflake COPY INTO Table command
@@ -698,7 +708,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 	go func() {
-		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArr()...)
+		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Could not get fs client for Local"))
 			return
@@ -858,14 +868,20 @@ func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
 // GetFile Copies from a staging location to a local file or folder
 func (conn *SnowflakeConn) GetFile(internalStagePath, fPath string) (err error) {
 	query := g.F(
-		"GET 'file://%s' %s auto_compress=false overwrite=true",
-		fPath, internalStagePath,
+		"GET %s 'file://%s' overwrite=true",
+		internalStagePath, fPath,
 	)
 
-	_, err = conn.Exec(query)
+	data, err := conn.Query(query)
 	if err != nil {
 		err = g.Error(err, "could not GET file %s", internalStagePath)
 		return
+	}
+
+	g.Trace("\n" + data.PrettyTable())
+
+	if !g.PathExists(fPath) {
+		return g.Error("%s does not exists, but GET query succeeded?", fPath)
 	}
 
 	return
@@ -878,11 +894,13 @@ func (conn *SnowflakeConn) PutFile(fileURI string, internalStagePath string) (er
 		fileURI, internalStagePath,
 	)
 
-	_, err = conn.Exec(query)
+	data, err := conn.Query(query)
 	if err != nil {
 		err = g.Error(err, "could not PUT file %s", fileURI)
 		return
 	}
+
+	g.Trace("\n" + data.PrettyTable())
 
 	return
 }
