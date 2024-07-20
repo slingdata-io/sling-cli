@@ -502,9 +502,16 @@ func (conn *BaseConn) SetProp(key string, val string) {
 
 // PropArr returns an array of properties
 func (conn *BaseConn) PropArr() []string {
+	return conn.PropArrExclude() // don't exclude any key
+}
+
+func (conn *BaseConn) PropArrExclude(exclude ...string) []string {
 	props := []string{}
 	conn.context.Mux.Lock()
 	for k, v := range conn.properties {
+		if g.In(k, exclude...) {
+			continue
+		}
 		props = append(props, g.F("%s=%s", k, v))
 	}
 	conn.context.Mux.Unlock()
