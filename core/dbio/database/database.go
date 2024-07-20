@@ -188,7 +188,7 @@ var (
 	ddlMaxDecLength = 38
 	ddlMinDecScale  = 6
 
-	tempCloudStorageFolder = "temp"
+	tempCloudStorageFolder = "sling_temp"
 
 	noDebugKey = " /* nD */"
 
