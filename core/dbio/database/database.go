@@ -2464,11 +2464,10 @@ func (conn *BaseConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) 
 
 	dsCh := make(chan *iop.Datastream)
 
-	tables := []Table{table}
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
-		for _, table := range tables {
+		for _, table := range []Table{table} {
 			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
@@ -2559,10 +2558,9 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 
 	folderPath := path.Join(env.GetTempFolder(), "sling", "stream", string(conn.GetType()), g.NowFileStr())
 
-	tables := []Table{table}
 	go func() {
 		defer df.Close()
-		for i, table := range tables {
+		for i, table := range []Table{table} {
 			pathPart := fmt.Sprintf("%s/sql%02d", folderPath, i+1)
 			df.Context.Wg.Read.Add()
 			go unload(table, pathPart)
