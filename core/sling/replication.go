@@ -670,6 +670,18 @@ func LoadReplicationConfig(content string) (config ReplicationConfig, err error)
 	return
 }
 
+// IsJSONorYAML detects a JSON or YAML payload
+func IsJSONorYAML(payload string) bool {
+	if strings.HasPrefix(payload, "{") && strings.HasSuffix(payload, "}") {
+		return true
+	}
+	if strings.Contains(payload, ":") && strings.Contains(payload, "\n") &&
+		(strings.Contains(payload, "'") || strings.Contains(payload, `"`)) {
+		return true
+	}
+	return false
+}
+
 func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
 	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
 

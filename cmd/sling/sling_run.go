@@ -395,7 +395,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
-		if strings.HasPrefix(cfgPath, "{") && strings.HasSuffix(cfgPath, "}") {
+		if sling.IsJSONorYAML(cfgPath) {
 			replication, err = sling.LoadReplicationConfig(cfgPath) // is JSON
 		} else if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
 			replication, err = r, e
