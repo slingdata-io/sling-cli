@@ -322,6 +322,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processClickhouseInsertRow(bColumns, row)
 			} else if conn.GetType() == dbio.TypeDbTrino {
 				row = processTrinoInsertRow(bColumns, row)
+			} else if conn.GetType() == dbio.TypeDbProton {
+				row = processClickhouseInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}
@@ -386,6 +388,12 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		}
 
 		if conn.GetType() == dbio.TypeDbClickhouse {
+			batchSize = 1
+		} else {
+			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
+		}
+
+		if conn.GetType() == dbio.TypeDbProton {
 			batchSize = 1
 		} else {
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
