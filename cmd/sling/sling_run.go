@@ -30,7 +30,10 @@ var (
 
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
-	cfg := &sling.Config{}
+	cfg := &sling.Config{
+		Source: sling.Source{Options: &sling.SourceOptions{}},
+		Target: sling.Target{Options: &sling.TargetOptions{}},
+	}
 	replicationCfgPath := ""
 	taskCfgStr := ""
 	showExamples := false
@@ -94,15 +97,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Source.UpdateKey = cast.ToString(v)
 
 		case "limit":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
 
 		case "offset":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Offset = g.Int(cast.ToInt(v))
 
 		case "iterate":
@@ -114,9 +111,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error("invalid value for `iterate`")
 			}
 		case "range":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Range = g.String(cast.ToString(v))
 
 		case "tgt-object", "tgt-table", "tgt-file":
@@ -457,6 +451,11 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			}
 
 			eG.Capture(err, cfg.StreamName)
+
+			// if a connection issue, stop
+			if e, ok := err.(*g.ErrType); ok && strings.Contains(e.Debug(), "Could not connect to ") {
+				break
+			}
 		} else {
 			successes++
 		}

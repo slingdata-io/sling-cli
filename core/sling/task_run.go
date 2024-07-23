@@ -186,6 +186,12 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		connPool[t.Config.SrcConn.Hash()] = conn
 	}
 
+	err = conn.Connect()
+	if err != nil {
+		err = g.Error(err, "Could not connect to source connection")
+		return
+	}
+
 	// set read_only if sqlite / duckdb since it's a source
 	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
 		conn.SetProp("read_only", "true")
@@ -216,6 +222,12 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	// cache connection is using replication from CLI
 	if t.isUsingPool() {
 		connPool[t.Config.TgtConn.Hash()] = conn
+	}
+
+	err = conn.Connect()
+	if err != nil {
+		err = g.Error(err, "Could not connect to target connection")
+		return
 	}
 
 	// set bulk
