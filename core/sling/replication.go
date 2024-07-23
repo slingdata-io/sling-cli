@@ -147,7 +147,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	if !ok {
 		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
 			c = connection.LocalFileConnEntry()
+		} else if strings.Contains(rd.Source, "://") {
+			c.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
+			if err != nil {
+				return
+			}
 		} else {
+			g.Error("did not find connection for wildcards: %s", rd.Source)
 			return
 		}
 	}
