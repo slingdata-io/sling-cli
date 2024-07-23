@@ -32,7 +32,7 @@ type SQLiteConn struct {
 	URL string
 }
 
-const SQLiteVersion = "3.41.0"
+var SQLiteVersion = "3.41"
 
 // Init initiates the object
 func (conn *SQLiteConn) Init() error {
@@ -46,6 +46,11 @@ func (conn *SQLiteConn) Init() error {
 	// handle S3 url
 	if err := conn.setHttpURL(); err != nil {
 		return g.Error(err, "could not set http url")
+	}
+
+	// set version for windows
+	if runtime.GOOS == "windows" {
+		SQLiteVersion = "3.44"
 	}
 
 	return conn.BaseConn.Init()
@@ -379,9 +384,9 @@ func EnsureBinSQLite() (binPath string, err error) {
 		return envPath, nil
 	}
 
-	folderPath := path.Join(env.HomeBinDir(), "sqlite")
+	folderPath := path.Join(env.HomeBinDir(), "sqlite", SQLiteVersion)
 	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
-	binPath = path.Join(env.HomeBinDir(), "sqlite", "sqlite3"+extension)
+	binPath = path.Join(folderPath, "sqlite3"+extension)
 	found := g.PathExists(binPath)
 
 	defaultBin := func(name string) (string, error) {
