@@ -199,6 +199,12 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
+		} else if isSQLServer {
+			sql = g.F("select top %d %s from %s", limit, fieldsStr, t.FDQN())
+			if offset > 0 {
+				// need ORDER BY for sql server OFFSET
+				sql = g.F("select top %d * from ( select %s from %s order by 1 offset %d rows) as t", limit, fieldsStr, t.FDQN(), offset)
+			}
 		} else {
 			sql = g.F("select %s from %s limit %d", fieldsStr, t.FDQN(), limit)
 			if offset > 0 {
@@ -212,7 +218,8 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
 		if !startsWith && len(matches) == 1 {
 			orderBy := matches[0].Full
-			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", orderBy, offset))
+			newOrderBy := strings.ReplaceAll(matches[0].Full, " asc", "  asc") // to not match again
+			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", newOrderBy, offset))
 		}
 	}
 
