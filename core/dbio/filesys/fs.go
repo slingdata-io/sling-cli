@@ -872,27 +872,27 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	switch fs.FsType() {
 	case dbio.TypeFileS3, dbio.TypeFileGoogle:
 		if len(p) == 0 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (bucket): %s", uri)
 		}
 	case dbio.TypeFileAzure:
 		if len(p) == 0 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (account): %s", uri)
 		}
 		// container level
 		if len(pArr) <= 1 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (container): %s", uri)
 		}
 	case dbio.TypeFileLocal:
 		if len(host) == 0 && len(p) == 0 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (root): %s", uri)
 		}
 	case dbio.TypeFileSftp:
 		if len(p) == 0 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (root): %s", uri)
 		}
 	case dbio.TypeFileFtp:
 		if len(p) == 0 {
-			return g.Error("invalid uri / path for overwriting: %s", uri)
+			return g.Error("invalid uri / path for overwriting (root): %s", uri)
 		}
 	}
 
