@@ -175,6 +175,11 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
+	template, err := t.Dialect.Template()
+	if err != nil {
+		return
+	}
+
 	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
@@ -190,26 +195,21 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
-			template, err := t.Dialect.Template()
-			g.LogError(err)
-
 			sql = g.R(
-				template.Core["limit"],
+				template.Core["limit_sql"],
 				"sql", sql,
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
-		} else if isSQLServer {
-			sql = g.F("select top %d %s from %s", limit, fieldsStr, t.FDQN())
-			if offset > 0 {
-				// need ORDER BY for sql server OFFSET
-				sql = g.F("select top %d * from ( select %s from %s order by 1 offset %d rows) as t", limit, fieldsStr, t.FDQN(), offset)
-			}
 		} else {
-			sql = g.F("select %s from %s limit %d", fieldsStr, t.FDQN(), limit)
-			if offset > 0 {
-				sql = g.F("select %s from %s limit %d offset %d", fieldsStr, t.FDQN(), limit, offset)
-			}
+			key := lo.Ternary(offset > 0, "limit_offset", "limit")
+			sql = g.R(
+				template.Core[key],
+				"fields", fieldsStr,
+				"table", t.FDQN(),
+				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
+			)
 		}
 	}
 

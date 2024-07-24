@@ -9,7 +9,9 @@ core:
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
-  limit: |
+  limit: select {fields} from {table} limit {limit} offset {offset}
+  limit_offset: select {fields} from {table} limit {limit}
+  limit_sql: |
     select * from (
       {sql}
     ) as t limit {limit} offset {offset}
