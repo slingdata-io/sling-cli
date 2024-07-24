@@ -430,6 +430,9 @@ func (cfg *Config) Prepare() (err error) {
 		}
 		return g.Error("invalid target connection (blank or not found)")
 	}
+	if !cfg.Options.StdOut && cfg.Target.Conn != "" && cfg.Target.Object == "" {
+		return g.Error("invalid target object (blank or not found)")
+	}
 
 	if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
 		os.Setenv("DEBUG", "LOW")

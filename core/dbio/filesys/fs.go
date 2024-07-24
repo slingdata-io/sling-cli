@@ -855,7 +855,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	return
 }
 
-// Delete deletes the provided path
+// Delete deletes the provided path before writing
 // with some safeguards so to not accidentally delete some root path
 func Delete(fs FileSysClient, uri string) (err error) {
 	uri = NormalizeURI(fs, uri)
@@ -872,27 +872,27 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	switch fs.FsType() {
 	case dbio.TypeFileS3, dbio.TypeFileGoogle:
 		if len(p) == 0 {
-			return g.Error("will not delete bucket level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 	case dbio.TypeFileAzure:
 		if len(p) == 0 {
-			return g.Error("will not delete account level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 		// container level
 		if len(pArr) <= 1 {
-			return g.Error("will not delete container level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 	case dbio.TypeFileLocal:
 		if len(host) == 0 && len(p) == 0 {
-			return g.Error("will not delete root level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 	case dbio.TypeFileSftp:
 		if len(p) == 0 {
-			return g.Error("will not delete root level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 	case dbio.TypeFileFtp:
 		if len(p) == 0 {
-			return g.Error("will not delete root level %s", uri)
+			return g.Error("invalid uri / path for overwriting: %s", uri)
 		}
 	}
 
