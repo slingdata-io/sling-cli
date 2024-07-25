@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
@@ -201,6 +202,14 @@ func BenchmarkProcessValBlank(b *testing.B) {
 	sp.ds = NewDatastream(columns)
 	for n := 0; n < b.N; n++ {
 		row = sp.CastRow(row, columns)
+	}
+}
+
+func BenchmarkDecimalToString(b *testing.B) {
+	val, _ := decimal.NewFromString("1234456.789")
+	for n := 0; n < b.N; n++ {
+		// val.String() // much slower
+		val.NumDigits()
 	}
 }
 
