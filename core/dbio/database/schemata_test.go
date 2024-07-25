@@ -102,9 +102,9 @@ func TestRegexMatch(t *testing.T) {
 		return
 	}
 	sql := table.Select(10, 5)
-	assert.True(t, strings.Contains(sql, ` order by "created" asc offset 5 rows`))
+	assert.True(t, strings.Contains(sql, ` order by "created"  asc offset 5 rows`))
 	sql = table.Select(0, 0, "id")
-	assert.True(t, strings.Contains(sql, ` order by "created" asc offset 0 rows`))
+	assert.True(t, strings.Contains(sql, ` order by "created"  asc offset 0 rows`))
 
 	table, err = ParseTableName(`with () select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
 	if !assert.NoError(t, err) {
