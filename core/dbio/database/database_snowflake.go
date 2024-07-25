@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -656,27 +657,13 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	}
 	g.Trace("\n" + data.PrettyTable())
 
-	process := func(stagePath string) {
-		defer context.Wg.Write.Done()
-		filePath, err := conn.GetFile(stagePath, folderPath)
-		if context.CaptureErr(err) {
-			return
-		}
-
-		// TODO: Push files to a dataflow as they land (instead of waiting for all to download)
-		_ = filePath
+	// copies the folder level
+	_, err = conn.StageGET(stageFolderPath, folderPath)
+	if err != nil {
+		err = g.Error(err, "Could not GET %s", stageFolderPath)
+		context.CaptureErr(err)
+		return
 	}
-
-	// this continues to read with 2 concurrent streams at most
-	for _, rec := range data.Records() {
-		if context.Err() != nil {
-			break
-		}
-		name := cast.ToString(rec["name"])
-		context.Wg.Write.Add()
-		go process("@" + name)
-	}
-	context.Wg.Write.Wait()
 
 	return folderPath, context.Err()
 }
@@ -747,7 +734,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			defer os.Remove(file.Node.Path())
 		}
 		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
-		err = conn.PutFile(file.Node.URI, stageFolderPath)
+		err = conn.StagePUT(file.Node.URI, stageFolderPath)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internalStage")))
 		}
@@ -867,11 +854,11 @@ func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
 	return sql
 }
 
-// GetFile Copies from a staging location to a local file or folder
-func (conn *SnowflakeConn) GetFile(internalStagePath, folderPath string) (filePath string, err error) {
+// StageGET Copies from a staging location to a local file or folder
+func (conn *SnowflakeConn) StageGET(internalStagePath, folderPath string) (filePaths []string, err error) {
 	query := g.F(
-		"GET %s 'file://%s' overwrite=true",
-		internalStagePath, folderPath,
+		"GET %s 'file://%s' overwrite=true parallel=%d",
+		internalStagePath, folderPath, runtime.NumCPU(),
 	)
 
 	data, err := conn.Query(query)
@@ -880,20 +867,22 @@ func (conn *SnowflakeConn) GetFile(internalStagePath, folderPath string) (filePa
 		return
 	}
 
-	nameParts := strings.Split(cast.ToString(data.Rows[0][0]), "/")
-	fileName := nameParts[len(nameParts)-1]
-	filePath = g.F("%s/%s", folderPath, fileName)
+	g.Debug("\n" + data.PrettyTable())
 
-	g.Trace("\n" + data.PrettyTable())
+	for _, row := range data.Rows {
+		nameParts := strings.Split(cast.ToString(row[0]), "/")
+		fileName := nameParts[len(nameParts)-1]
+		filePaths = append(filePaths, g.F("%s/%s", folderPath, fileName))
+	}
 
 	return
 }
 
-// PutFile Copies a local file or folder into a staging location
-func (conn *SnowflakeConn) PutFile(fileURI string, internalStagePath string) (err error) {
+// StagePUT Copies a local file or folder into a staging location
+func (conn *SnowflakeConn) StagePUT(fileURI string, internalStagePath string) (err error) {
 	query := g.F(
-		"PUT '%s' %s PARALLEL=1 AUTO_COMPRESS=FALSE",
-		fileURI, internalStagePath,
+		"PUT '%s' %s PARALLEL=%d AUTO_COMPRESS=FALSE",
+		fileURI, internalStagePath, runtime.NumCPU(),
 	)
 
 	data, err := conn.Query(query)
