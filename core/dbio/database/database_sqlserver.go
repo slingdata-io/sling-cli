@@ -582,7 +582,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 		"https://%s.blob.core.windows.net/%s/%s-%s",
 		conn.GetProp("AZURE_ACCOUNT"),
 		conn.GetProp("AZURE_CONTAINER"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 

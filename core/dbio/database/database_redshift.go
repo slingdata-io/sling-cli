@@ -98,7 +98,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 
 		defer conn.Context().Wg.Write.Done()
 
-		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0), "\n", " "), "'", "''")
+		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0, 0), "\n", " "), "'", "''")
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],
@@ -124,7 +124,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), filePathStorageSlug, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
@@ -155,22 +155,20 @@ func (conn *RedshiftConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 }
 
 // BulkExportFlow reads in bulk
-func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
-	} else if conn.GetProp("AWS_BUCKET") == "" {
+func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	if conn.GetProp("AWS_BUCKET") == "" {
 		g.Warn("using cursor to export. Please set AWS creds for Sling to use the Redshift UNLOAD function (for bigger datasets). See https://docs.slingdata.io/connections/database-connections/redshift")
-		return conn.BaseConn.BulkExportFlow(tables...)
+		return conn.BaseConn.BulkExportFlow(table)
 	}
 
-	columns, err := conn.GetSQLColumns(tables[0])
+	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
 	}
 
 	unloadCtx := g.NewContext(conn.Context().Ctx)
-	s3Path, err := conn.Unload(&unloadCtx, tables...)
+	s3Path, err := conn.Unload(&unloadCtx, table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
@@ -212,7 +210,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	s3Path := fmt.Sprintf(
 		"s3://%s/%s/%s",
 		conn.GetProp("AWS_BUCKET"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 

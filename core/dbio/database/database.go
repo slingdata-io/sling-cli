@@ -57,7 +57,7 @@ type Connection interface {
 	BaseURL() string
 	Begin(options ...*sql.TxOptions) error
 	BeginContext(ctx context.Context, options ...*sql.TxOptions) error
-	BulkExportFlow(tables ...Table) (*iop.Dataflow, error)
+	BulkExportFlow(table Table) (*iop.Dataflow, error)
 	BulkExportStream(table Table) (*iop.Datastream, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
@@ -188,7 +188,7 @@ var (
 	ddlMaxDecLength = 38
 	ddlMinDecScale  = 6
 
-	filePathStorageSlug = "temp"
+	tempCloudStorageFolder = "sling_temp"
 
 	noDebugKey = " /* nD */"
 
@@ -197,9 +197,13 @@ var (
 )
 
 func init() {
-	if os.Getenv("FILEPATH_SLUG") != "" {
-		filePathStorageSlug = os.Getenv("FILEPATH_SLUG")
+	if os.Getenv("SLING_TEMP_CLOUD_FOLDER") != "" || os.Getenv("FILEPATH_SLUG") != "" {
+		tempCloudStorageFolder = os.Getenv("SLING_TEMP_CLOUD_FOLDER")
+		if tempCloudStorageFolder == "" {
+			tempCloudStorageFolder = os.Getenv("FILEPATH_SLUG") // legacy
+		}
 	}
+
 }
 
 // NewConn return the most proper connection for a given database
@@ -498,9 +502,16 @@ func (conn *BaseConn) SetProp(key string, val string) {
 
 // PropArr returns an array of properties
 func (conn *BaseConn) PropArr() []string {
+	return conn.PropArrExclude() // don't exclude any key
+}
+
+func (conn *BaseConn) PropArrExclude(exclude ...string) []string {
 	props := []string{}
 	conn.context.Mux.Lock()
 	for k, v := range conn.properties {
+		if g.In(k, exclude...) {
+			continue
+		}
 		props = append(props, g.F("%s=%s", k, v))
 	}
 	conn.context.Mux.Unlock()
@@ -782,7 +793,7 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(table.Select(0), g.M("columns", table.Columns))
+	return conn.Self().StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -1430,7 +1441,7 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(1)
+	limitSQL := table.Select(1, 0)
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
@@ -2442,11 +2453,11 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 }
 
 // BulkExportFlow creates a dataflow from a sql query
-func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+func (conn *BaseConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 
 	g.Trace("BulkExportFlow not implemented for %s", conn.GetType())
 	if UseBulkExportFlowCSV {
-		return conn.BulkExportFlowCSV(tables...)
+		return conn.BulkExportFlowCSV(table)
 	}
 
 	df = iop.NewDataflowContext(conn.Context().Ctx)
@@ -2456,7 +2467,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
-		for _, table := range tables {
+		for _, table := range []Table{table} {
 			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
@@ -2485,12 +2496,9 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 }
 
 // BulkExportFlowCSV creates a dataflow from a sql query, using CSVs
-func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
-	}
+func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err error) {
 
-	columns, err := conn.Self().GetSQLColumns(tables[0])
+	columns, err := conn.Self().GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -2552,7 +2560,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 	go func() {
 		defer df.Close()
-		for i, table := range tables {
+		for i, table := range []Table{table} {
 			pathPart := fmt.Sprintf("%s/sql%02d", folderPath, i+1)
 			df.Context.Wg.Read.Add()
 			go unload(table, pathPart)

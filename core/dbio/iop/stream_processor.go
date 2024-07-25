@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/flarco/g"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
@@ -39,6 +40,7 @@ type StreamProcessor struct {
 	Config           *StreamConfig
 	rowBlankValCnt   int
 	transformers     Transformers
+	digitString      map[int]string
 }
 
 type StreamConfig struct {
@@ -122,6 +124,7 @@ func NewStreamProcessor() *StreamProcessor {
 		colStats:        map[int]*ColumnStats{},
 		decReplRegex:    regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
 		transformers:    NewTransformers(),
+		digitString:     map[int]string{0: "0"},
 	}
 
 	sp.ResetConfig()
@@ -209,6 +212,15 @@ func NewStreamProcessor() *StreamProcessor {
 		"2006/01/02 15:04:05",
 		"02-01-2006",
 		"02-01-2006 15:04:05",
+	}
+
+	// up to 90 digits. This is done for CastToStringSafeMask
+	// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
+	// we can create a approximate value mask to output the correct number of bytes
+	digitString := "0"
+	for i := 1; i <= 90; i++ {
+		sp.digitString[i] = digitString
+		digitString = digitString + "0"
 	}
 	return &sp
 }
@@ -905,6 +917,43 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 			return ""
 		}
 		return tVal.UTC().Format("2006-01-02 15:04:05.000000") + " +00"
+	default:
+		return cast.ToString(val)
+	}
+}
+
+// CastToStringSafe to masks to count bytes (even safer)
+func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType ...ColumnType) string {
+	typ := ColumnType("")
+	switch v := val.(type) {
+	case time.Time:
+		typ = DatetimeType
+	default:
+		_ = v
+	}
+
+	if len(valType) > 0 {
+		typ = valType[0]
+	}
+
+	switch {
+	case val == nil:
+		return ""
+	case sp.Config.BoolAsInt && typ.IsBool():
+		return "0" // as a mask
+	case typ.IsBool():
+		return cast.ToString(val)
+	case typ.IsDecimal() || typ.IsFloat():
+		if valD, ok := val.(decimal.Decimal); ok {
+			// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
+			// we can create a approximate value mask to output the correct number of bytes
+			return sp.digitString[valD.NumDigits()]
+		}
+		return cast.ToString(val)
+	case typ.IsDate():
+		return "2006-01-02" // as a mask
+	case typ.IsDatetime():
+		return "2006-01-02 15:04:05.000000 +00" // as a mask
 	default:
 		return cast.ToString(val)
 	}

@@ -395,12 +395,8 @@ func (conn *BigTableConn) GetColumns(tableFName string, fields ...string) (colum
 	return
 }
 
-func (conn *BigTableConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
-	ds, err := conn.StreamRowsContext(conn.context.Ctx, tables[0].Name)
+func (conn *BigTableConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	ds, err := conn.StreamRowsContext(conn.context.Ctx, table.Name)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}

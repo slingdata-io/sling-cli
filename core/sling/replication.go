@@ -38,8 +38,8 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 	return rd.originalCfg
 }
 
-// MD5 returns a md5 hash of the config
-func (rd *ReplicationConfig) MD5() string {
+// JSON returns json payload
+func (rd *ReplicationConfig) JSON() string {
 	payload := g.Marshal([]any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
@@ -59,7 +59,12 @@ func (rd *ReplicationConfig) MD5() string {
 		payload = strings.ReplaceAll(payload, g.Marshal(rd.Target), g.Marshal(cleanTarget))
 	}
 
-	return g.MD5(payload)
+	return payload
+}
+
+// MD5 returns a md5 hash of the json payload
+func (rd *ReplicationConfig) MD5() string {
+	return g.MD5(rd.OriginalCfg())
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -69,16 +74,7 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
-	if rd.OriginalCfg() != "" {
-		return []byte(rd.OriginalCfg()), nil
-	}
-
-	jBytes, err := json.Marshal(rd)
-	if err != nil {
-		return nil, g.Error(err, "could not marshal")
-	}
-
-	return jBytes, err
+	return []byte(rd.JSON()), nil
 }
 
 // StreamsOrdered returns the stream names as ordered in the YAML file
@@ -151,7 +147,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	if !ok {
 		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
 			c = connection.LocalFileConnEntry()
+		} else if strings.Contains(rd.Source, "://") {
+			c.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
+			if err != nil {
+				return
+			}
 		} else {
+			g.Error("did not find connection for wildcards: %s", rd.Source)
 			return
 		}
 	}
@@ -345,13 +347,42 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
 				stream.Mode = cfgOverwrite.Mode
 			}
-			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
-				g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+
+			if cfgOverwrite.Source.Options.Limit != nil && stream.SourceOptions.Limit != cfgOverwrite.Source.Options.Limit {
+				if stream.SourceOptions.Limit != nil {
+					g.Debug("stream limit overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Limit, *cfgOverwrite.Source.Options.Limit)
+				}
+				stream.SourceOptions.Limit = cfgOverwrite.Source.Options.Limit
+			}
+
+			if cfgOverwrite.Source.Options.Offset != nil && stream.SourceOptions.Offset != cfgOverwrite.Source.Options.Offset {
+				if stream.SourceOptions.Offset != nil {
+					g.Debug("stream offset overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Offset, *cfgOverwrite.Source.Options.Offset)
+				}
+				stream.SourceOptions.Offset = cfgOverwrite.Source.Options.Offset
+			}
+
+			if cfgOverwrite.Source.UpdateKey != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				if stream.UpdateKey != "" {
+					g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				}
 				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
 			}
+
 			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
-				g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				if stream.PrimaryKeyI != nil {
+					g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				}
 				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
+
+			if newRange := cfgOverwrite.Source.Options.Range; newRange != nil {
+				if stream.SourceOptions.Range == nil || *stream.SourceOptions.Range != *newRange {
+					if stream.SourceOptions.Range != nil && *stream.SourceOptions.Range != "" {
+						g.Debug("stream range overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Range, *newRange)
+					}
+					stream.SourceOptions.Range = newRange
+				}
 			}
 		}
 
@@ -454,6 +485,10 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 // UnmarshalReplication converts a yaml file to a replication
 func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err error) {
 
+	// set base values when erroring
+	config.originalCfg = replicYAML
+	config.Env = map[string]any{}
+
 	m := g.M()
 	err = yaml.Unmarshal([]byte(replicYAML), &m)
 	if err != nil {
@@ -509,10 +544,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	g.Unmarshal(g.Marshal(streams), &maps.Streams)
 
 	config = ReplicationConfig{
-		Source: cast.ToString(source),
-		Target: cast.ToString(target),
-		Env:    Env,
-		maps:   maps,
+		Source:      cast.ToString(source),
+		Target:      cast.ToString(target),
+		Env:         Env,
+		maps:        maps,
+		originalCfg: replicYAML, // set originalCfg
 	}
 
 	// parse defaults
@@ -582,9 +618,6 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		}
 	}
 
-	// set originalCfg
-	config.originalCfg = replicYAML
-
 	return
 }
 
@@ -635,6 +668,18 @@ func LoadReplicationConfig(content string) (config ReplicationConfig, err error)
 	}
 
 	return
+}
+
+// IsJSONorYAML detects a JSON or YAML payload
+func IsJSONorYAML(payload string) bool {
+	if strings.HasPrefix(payload, "{") && strings.HasSuffix(payload, "}") {
+		return true
+	}
+	if strings.Contains(payload, ":") && strings.Contains(payload, "\n") &&
+		(strings.Contains(payload, "'") || strings.Contains(payload, `"`)) {
+		return true
+	}
+	return false
 }
 
 func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {

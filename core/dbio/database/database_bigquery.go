@@ -632,7 +632,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	gcsPath := fmt.Sprintf(
 		"gs://%s/%s/%s.csv",
 		gcBucket,
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -797,22 +797,20 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 }
 
 // BulkExportFlow reads in bulk
-func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	if conn.GetProp("GC_BUCKET") == "" {
 		g.Warn("No GCS Bucket was provided, pulling from cursor (which may be slower for big datasets). ")
-		return conn.BaseConn.BulkExportFlow(tables...)
-	} else if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
+		return conn.BaseConn.BulkExportFlow(table)
 	}
 
 	// get columns
-	columns, err := conn.GetSQLColumns(tables[0])
+	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
 	}
 
-	gsURL, err := conn.Unload(tables...)
+	gsURL, err := conn.Unload(table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
@@ -877,7 +875,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
-	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, filePathStorageSlug, cast.ToString(g.Now()))
+	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(gsFs, gsPath)
 
@@ -914,7 +912,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if table.IsQuery() || table.IsView {
-		return conn.ExportToGCS(table.Select(0), gcsURI)
+		return conn.ExportToGCS(table.Select(0, 0), gcsURI)
 	}
 
 	client, err := conn.getNewClient()

@@ -124,6 +124,12 @@ var cliRunFlags = []g.Flag{
 		Description: "The maximum number of rows to pull.",
 	},
 	{
+		Name:        "offset",
+		ShortName:   "o",
+		Type:        "string",
+		Description: "The number of rows to offset by.",
+	},
+	{
 		Name:        "iterate",
 		ShortName:   "",
 		Type:        "string",
@@ -444,6 +450,8 @@ func main() {
 		g.SentryFlush(time.Second * 2)
 	}
 	time.Sleep(50 * time.Millisecond) // so logger can flush
+
+	os.Exit(exitCode)
 }
 
 func cliInit(done chan struct{}) int {

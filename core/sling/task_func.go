@@ -83,15 +83,6 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 	return true, nil
 }
 
-func pullSourceTableColumns(cfg *Config, srcConn database.Connection, table string) (cols iop.Columns, err error) {
-	cfg.Source.columns, err = srcConn.GetColumns(table)
-	if err != nil {
-		err = g.Error(err, "could not get column list for "+table)
-		return
-	}
-	return cfg.Source.columns, nil
-}
-
 func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
 	if len(cfg.Target.columns) == 0 || force {
 		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Object)

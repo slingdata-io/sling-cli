@@ -183,7 +183,7 @@ func (home *Home) CloneRepo(URL string) (path string, err error) {
 			err = g.Error(err, "could not init 'git pull'")
 			return "", err
 		}
-		proc.Workdir = path
+		proc.WorkDir = path
 		// proc.Print = true
 		err = proc.Run()
 		if err != nil {

@@ -20,16 +20,20 @@ import (
 )
 
 var (
-	projectID     = os.Getenv("SLING_PROJECT_ID")
-	updateMessage = ""
-	updateVersion = ""
-	rowCount      = int64(0)
-	totalBytes    = uint64(0)
+	projectID         = os.Getenv("SLING_PROJECT_ID")
+	updateMessage     = ""
+	updateVersion     = ""
+	rowCount          = int64(0)
+	totalBytes        = uint64(0)
+	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
-	cfg := &sling.Config{}
+	cfg := &sling.Config{
+		Source: sling.Source{Options: &sling.SourceOptions{}},
+		Target: sling.Target{Options: &sling.TargetOptions{}},
+	}
 	replicationCfgPath := ""
 	taskCfgStr := ""
 	showExamples := false
@@ -93,10 +97,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Source.UpdateKey = cast.ToString(v)
 
 		case "limit":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
+
+		case "offset":
+			cfg.Source.Options.Offset = g.Int(cast.ToInt(v))
 
 		case "iterate":
 			if cast.ToString(v) == "infinite" {
@@ -107,9 +111,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error("invalid value for `iterate`")
 			}
 		case "range":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Range = g.String(cast.ToString(v))
 
 		case "tgt-object", "tgt-table", "tgt-file":
@@ -300,7 +301,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskStats["rows_count"] = task.GetCount()
 			taskStats["rows_in_bytes"] = inBytes
 			taskStats["rows_out_bytes"] = outBytes
-			taskStats["rows_out_bytes"] = outBytes
 
 			if memRAM, _ := mem.VirtualMemory(); memRAM != nil {
 				taskStats["mem_used"] = memRAM.Used
@@ -395,7 +395,14 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
-		return g.Error(err, "Error parsing replication config")
+		if sling.IsJSONorYAML(cfgPath) {
+			replication, err = sling.LoadReplicationConfig(cfgPath) // is JSON
+		} else if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
+			replication, err = r, e
+		}
+		if err != nil {
+			return g.Error(err, "Error parsing replication config")
+		}
 	}
 
 	taskConfigs, err := replication.Compile(cfgOverwrite, selectStreams...)
@@ -444,6 +451,11 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			}
 
 			eG.Capture(err, cfg.StreamName)
+
+			// if a connection issue, stop
+			if e, ok := err.(*g.ErrType); ok && strings.Contains(e.Debug(), "Could not connect to ") {
+				break
+			}
 		} else {
 			successes++
 		}
@@ -497,7 +509,7 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 
 // setProjectID attempts to get the first sha of the repo
 func setProjectID(cfgPath string) {
-	if cfgPath == "" {
+	if cfgPath == "" && !strings.HasPrefix(cfgPath, "{") {
 		return
 	}
 

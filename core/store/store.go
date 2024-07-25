@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -15,11 +16,19 @@ import (
 )
 
 func init() {
-	sling.StoreInsert = StoreInsert
-	sling.StoreUpdate = StoreUpdate
+
+	sling.StoreInsert = func(t *sling.TaskExecution) error {
+		_, err := StoreInsert(t)
+		return err
+	}
+
+	sling.StoreUpdate = func(t *sling.TaskExecution) error {
+		_, err := StoreUpdate(t)
+		return err
+	}
 }
 
-var syncStatus = func(t sling.TaskExecution) {}
+var syncStatus = func(e *Execution) {}
 
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
@@ -67,6 +76,8 @@ type Execution struct {
 
 	Task        *Task        `json:"task,omitempty" gorm:"-"`
 	Replication *Replication `json:"replication,omitempty" gorm:"-"`
+
+	TaskExec *sling.TaskExecution `json:"-" gorm:"-"`
 }
 
 type Task struct {
@@ -103,7 +114,9 @@ type Replication struct {
 
 	Type sling.JobType `json:"type"  gorm:"index"`
 
-	Config sling.ReplicationConfig `json:"config"`
+	Config string `json:"config"` // Original config
+
+	ID *string `json:"id"  gorm:"index"`
 
 	CreatedDt time.Time `json:"created_dt" gorm:"autoCreateTime"`
 	UpdatedDt time.Time `json:"updated_dt" gorm:"autoUpdateTime"`
@@ -125,20 +138,20 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 	bytes, _ := t.GetBytes()
 
 	exec := Execution{
-		ExecID:         t.ExecID,
-		StreamID:       g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.StreamName, t.Config.Target.Object),
-		Status:         t.Status,
-		StartTime:      t.StartTime,
-		EndTime:        t.EndTime,
-		Bytes:          bytes,
-		Output:         t.Output,
-		Rows:           t.GetCount(),
-		ProjectID:      g.String(t.Config.Env["SLING_PROJECT_ID"]),
-		FilePath:       g.String(t.Config.Env["SLING_CONFIG_PATH"]),
-		WorkPath:       g.String(t.Config.Env["SLING_WORK_PATH"]),
-		ReplicationMD5: os.Getenv("SLING_REPLICATION_MD5"),
-		Pid:            os.Getpid(),
-		Version:        core.Version,
+		ExecID:    t.ExecID,
+		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.StreamName, t.Config.Target.Object),
+		Status:    t.Status,
+		StartTime: t.StartTime,
+		EndTime:   t.EndTime,
+		Bytes:     bytes,
+		Output:    t.Output,
+		Rows:      t.GetCount(),
+		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
+		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
+		WorkPath:  g.String(t.Config.Env["SLING_WORK_PATH"]),
+		Pid:       os.Getpid(),
+		Version:   core.Version,
+		TaskExec:  t,
 	}
 
 	if t.Err != nil {
@@ -179,7 +192,10 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 			Name:   t.Config.Env["SLING_CONFIG_PATH"],
 			Type:   t.Type,
 			MD5:    t.Replication.MD5(),
-			Config: *t.Replication,
+			Config: t.Replication.OriginalCfg(),
+		}
+		if id := os.Getenv("SLING_REPLICATION_ID"); id != "" {
+			replication.ID = g.String(id)
 		}
 
 		if projID != "" {
@@ -215,18 +231,24 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 }
 
 // Store saves the task into the local sqlite
-func StoreInsert(t *sling.TaskExecution) {
+func StoreInsert(t *sling.TaskExecution) (exec *Execution, err error) {
 	if Db == nil {
 		return
 	}
 
 	// make execution
-	exec := ToExecutionObject(t)
+	exec = ToExecutionObject(t)
+
+	// determine if execution already exists
+	result := g.M()
+	Db.Raw(`select count(1) cnt from executions where exec_id = ? and stream_id = ?`, exec.ExecID, exec.StreamID).Scan(&result)
+	if cnt := cast.ToInt(result["cnt"]); cnt > 0 {
+		return StoreUpdate(t)
+	}
 
 	// insert config
 	task, replication := ToConfigObject(t)
-	err := Db.Clauses(clause.OnConflict{DoNothing: true}).
-		Create(task).Error
+	err = Db.Clauses(clause.OnConflict{DoNothing: true}).Create(task).Error
 	if err != nil {
 		g.Error(err, "could not insert task config into local .sling.db.")
 		return
@@ -235,8 +257,12 @@ func StoreInsert(t *sling.TaskExecution) {
 	exec.TaskMD5 = task.MD5
 
 	if replication != nil {
-		err := Db.Clauses(clause.OnConflict{DoNothing: true}).
-			Create(replication).Error
+		clauses := lo.Ternary(
+			replication.ID != nil,
+			clause.OnConflict{UpdateAll: true},
+			clause.OnConflict{DoNothing: true},
+		)
+		err = Db.Clauses(clauses).Create(replication).Error
 		if err != nil {
 			g.Error(err, "could not insert replication config into local .sling.db.")
 			return
@@ -255,18 +281,20 @@ func StoreInsert(t *sling.TaskExecution) {
 	t.ExecID = exec.ExecID
 
 	// sync status
-	syncStatus(*t)
+	syncStatus(exec)
+
+	return
 }
 
 // Store saves the task into the local sqlite
-func StoreUpdate(t *sling.TaskExecution) {
+func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
 	if Db == nil {
 		return
 	}
 	e := ToExecutionObject(t)
 
-	exec := &Execution{ExecID: t.ExecID, StreamID: e.StreamID}
-	err := Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
+	exec = &Execution{ExecID: t.ExecID, StreamID: e.StreamID, TaskExec: t}
+	err = Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
 	if err != nil {
 		g.Error(err, "could not select execution from local .sling.db.")
 		return
@@ -287,5 +315,7 @@ func StoreUpdate(t *sling.TaskExecution) {
 	}
 
 	// sync status
-	syncStatus(*t)
+	syncStatus(exec)
+
+	return
 }

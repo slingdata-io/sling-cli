@@ -152,13 +152,9 @@ func (conn *MongoDBConn) ExecContext(ctx context.Context, sql string, args ...in
 	return nil, g.Error("ExecContext not implemented on MongoConn")
 }
 
-func (conn *MongoDBConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
-	options, _ := g.UnmarshalMap(tables[0].SQL)
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].FullName(), options)
+func (conn *MongoDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	options, _ := g.UnmarshalMap(table.SQL)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.FullName(), options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}
@@ -271,6 +267,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	ds.NoDebug = strings.Contains(collectionName, noDebugKey)
 	ds.SetMetadata(conn.GetProp("METADATA"))
 	ds.SetConfig(conn.Props())
+	ds.Defer(func() { cur.Close(queryContext.Ctx) }) // close cursor when done
 
 	err = ds.Start()
 	if err != nil {

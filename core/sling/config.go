@@ -430,6 +430,9 @@ func (cfg *Config) Prepare() (err error) {
 		}
 		return g.Error("invalid target connection (blank or not found)")
 	}
+	if !cfg.Options.StdOut && cfg.Target.Conn != "" && cfg.Target.Object == "" {
+		return g.Error("invalid target object (blank or not found)")
+	}
 
 	if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
 		os.Setenv("DEBUG", "LOW")
@@ -632,6 +635,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
+	// clean values for replacing
+	for k, v := range m {
+		m[k] = iop.CleanName(cast.ToString(v))
+	}
+
 	// replace placeholders
 	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
 
@@ -639,7 +647,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// normalize casing of object names
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
-			return g.Error(err, "could not get parse target table name")
+			return g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return g.Error("invalid table name: %s", table.Raw)
 		}
 		cfg.Target.Object = table.FullName()
 	}
@@ -694,10 +704,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		if table.Schema != "" {
-			m["stream_schema"] = strings.ToLower(table.Schema)
+			m["stream_schema"] = table.Schema
 		}
 		if table.Name != "" {
-			m["stream_table"] = strings.ToLower(table.Name)
+			m["stream_table"] = table.Name
 		}
 
 		if cfg.StreamName != "" {
@@ -711,6 +721,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return m, g.Error("invalid table name: %s", table.Raw)
 		}
 
 		m["object_schema"] = table.Schema
@@ -917,8 +929,6 @@ type Source struct {
 	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
-
-	columns iop.Columns `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -930,6 +940,13 @@ func (s *Source) Limit() int {
 		return 0
 	}
 	return *s.Options.Limit
+}
+
+func (s *Source) Offset() int {
+	if s.Options.Offset == nil {
+		return 0
+	}
+	return *s.Options.Offset
 }
 
 func (s *Source) HasUpdateKey() bool {
@@ -1007,6 +1024,7 @@ type SourceOptions struct {
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 

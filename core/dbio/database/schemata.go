@@ -25,6 +25,13 @@ type Table struct {
 	Keys     TableKeys   `json:"keys,omitempty"`
 
 	Raw string `json:"raw"`
+
+	limit, offset int
+}
+
+var PartitionByOffset = func(conn Connection, table Table, l int) ([]Table, error) { return []Table{table}, nil }
+var PartitionByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
+	return []Table{table}, nil
 }
 
 func (t *Table) IsQuery() bool {
@@ -107,6 +114,23 @@ func (t *Table) FDQN() string {
 	return strings.Join(fdqnArr, ".")
 }
 
+func (t *Table) Clone() Table {
+	return Table{
+		Name:     t.Name,
+		Schema:   t.Schema,
+		Database: t.Database,
+		IsView:   t.IsView,
+		SQL:      t.SQL,
+		DDL:      t.DDL,
+		Dialect:  t.Dialect,
+		Columns:  t.Columns,
+		Keys:     t.Keys,
+		Raw:      t.Raw,
+		limit:    t.limit,
+		offset:   t.offset,
+	}
+}
+
 func (t *Table) ColumnsMap() map[string]iop.Column {
 	columns := map[string]iop.Column{}
 	for _, column := range t.Columns {
@@ -116,7 +140,12 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(limit int, fields ...string) (sql string) {
+func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+
+	// set to internal value if not specified
+	limit = lo.Ternary(limit == 0, t.limit, limit)
+	offset = lo.Ternary(offset == 0, t.offset, offset)
+
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
@@ -146,45 +175,56 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
+	template, err := t.Dialect.Template()
+	if err != nil {
+		return
+	}
+
+	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			fieldsStr := strings.Join(fields, ", ")
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
 		} else {
 			sql = t.SQL
 		}
 	} else {
-		fieldsStr := "*"
-		if len(fields) > 0 {
-			fieldsStr = strings.Join(fields, ", ")
-		}
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
 	if limit > 0 {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
-		} else {
-			template, err := t.Dialect.Template()
-			g.LogError(err)
-
+		} else if t.IsQuery() {
 			sql = g.R(
-				template.Core["limit"],
+				template.Core["limit_sql"],
 				"sql", sql,
 				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
+			)
+		} else {
+			key := lo.Ternary(offset > 0, "limit_offset", "limit")
+			sql = g.R(
+				template.Core[key],
+				"fields", fieldsStr,
+				"table", t.FDQN(),
+				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
 			)
 		}
 	}
 
 	if isSQLServer {
-		// move the inner "order by" clause to outside
+		// add offset after "order by"
 		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
 		if !startsWith && len(matches) == 1 {
 			orderBy := matches[0].Full
-			sql = strings.ReplaceAll(sql, orderBy, "")
-			sql = sql + orderBy
+			newOrderBy := strings.ReplaceAll(matches[0].Full, " asc", "  asc") // to not match again
+			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", newOrderBy, offset))
 		}
 	}
+
+	// replace any provided placeholders
+	sql = g.R(sql, "{limit}", cast.ToString(limit), "{offset}", cast.ToString(offset))
 
 	return
 }
@@ -490,13 +530,13 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	table.Dialect = dialect
 	table.Raw = text
 
+	quote := GetQualifierQuote(dialect)
+
 	textLower := strings.ToLower(text)
-	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) {
+	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) && !strings.Contains(text, quote) {
 		table.SQL = strings.TrimSpace(text)
 		return
 	}
-
-	quote := GetQualifierQuote(dialect)
 
 	inQuote := false
 	words := []string{}
@@ -556,7 +596,7 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	}
 
 	if len(words) == 0 {
-		err = g.Error("invalid table name")
+		err = g.Error("invalid table name: %s", text)
 		return
 	} else if len(words) == 1 {
 		table.Name = words[0]

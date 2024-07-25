@@ -339,21 +339,21 @@ func (t Type) Template() (template Template, err error) {
 
 	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
 	if err != nil {
-		return template, g.Error(err, "io.ReadAll(baseTemplateFile)")
+		return template, g.Error(err, "could not read base.yaml")
 	}
 
 	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
-		return template, g.Error(err, "yaml.Unmarshal")
+		return template, g.Error(err, "could not unmarshal baseTemplateBytes")
 	}
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
 	if err != nil {
-		return template, g.Error(err, "io.ReadAll(templateFile) for "+t.String())
+		return template, g.Error(err, "could not read "+t.String()+".yaml")
 	}
 
 	err = yaml.Unmarshal([]byte(templateBytes), &connTemplate)
 	if err != nil {
-		return template, g.Error(err, "yaml.Unmarshal")
+		return template, g.Error(err, "could not unmarshal templateBytes")
 	}
 
 	for key, val := range connTemplate.Core {
