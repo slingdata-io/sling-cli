@@ -63,12 +63,41 @@ metadata:
     order by table_name
 
   columns: |
-    select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
-    from information_schema.columns
-    where table_catalog = ( select current_catalog )
-      and table_schema = '{schema}'
-      and table_name = '{table}'
-    order by ordinal_position
+    SELECT
+      pg_attribute.attname AS column_name,
+      pg_catalog.format_type(pg_attribute.atttypid, pg_attribute.atttypmod) as data_type,
+      CASE pg_attribute.atttypid
+        WHEN 21 /*int2*/ THEN 16
+        WHEN 23 /*int4*/ THEN 32
+        WHEN 20 /*int8*/ THEN 64
+        WHEN 1700 /*numeric*/ THEN
+            CASE WHEN pg_attribute.atttypmod = -1
+                  THEN null
+                  ELSE ((pg_attribute.atttypmod - 4) >> 16) & 65535     -- calculate the precision
+                  END
+        WHEN 700 /*float4*/ THEN 24 /*FLT_MANT_DIG*/
+        WHEN 701 /*float8*/ THEN 53 /*DBL_MANT_DIG*/
+        ELSE null
+      END AS precision,
+      CASE 
+        WHEN pg_attribute.atttypid IN (21, 23, 20) THEN 0
+        WHEN pg_attribute.atttypid IN (1700) THEN            
+            CASE 
+                WHEN pg_attribute.atttypmod = -1 THEN null       
+                ELSE (pg_attribute.atttypmod - 4) & 65535            -- calculate the scale  
+            END
+          ELSE null
+      END AS scale
+    FROM pg_catalog.pg_class
+    INNER JOIN pg_catalog.pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+    INNER JOIN pg_catalog.pg_attribute ON pg_class.oid = pg_attribute.attrelid
+    WHERE 1=1
+      and pg_class.relkind in ('r', 'v', 'm', 'f')
+      and pg_namespace.nspname = '{schema}'
+      and pg_class.relname = '{table}'
+      and pg_attribute.attnum >= 1
+      and not pg_attribute.attisdropped
+    ORDER BY pg_attribute.attnum
 
   primary_keys: |
     select tco.constraint_name as pk_name,
@@ -107,31 +136,21 @@ metadata:
       i.relname
 
   columns_full: |
-    with tables as (
-      select
-        table_catalog,
-        table_schema,
-        table_name,
-        case table_type
-          when 'VIEW' then true
-          when 'FOREIGN' then true
-          else false
-        end as is_view
-      from information_schema.tables
-      where table_schema = '{schema}' and table_name = '{table}'
-    )
     select
-      cols.table_schema as schema_name,
-      cols.table_name as table_name,
-      cols.column_name as column_name,
-      cols.data_type as data_type,
-      cols.ordinal_position as position
-    from information_schema.columns cols
-    join tables
-      on tables.table_catalog = cols.table_catalog
-      and tables.table_schema = cols.table_schema
-      and tables.table_name = cols.table_name
-    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+      s.nspname as schema_name,
+      t.relname as table_name,
+      a.attname as column_name,
+      pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
+      a.attnum as position
+    from pg_attribute a
+      join pg_class t on a.attrelid = t.oid
+      join pg_namespace s on t.relnamespace = s.oid
+    where a.attnum > 0 
+      and not a.attisdropped
+      and t.relkind in ('r', 'v', 'm', 'f')
+      {{if .schema -}} and s.nspname = '{schema}' {{- end}}
+      {{if .table -}} and t.relname = '{table}' {{- end}}
+    order by s.nspname, t.relname, a.attnum
 
   schemata: |
     select
