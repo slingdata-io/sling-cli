@@ -827,16 +827,16 @@ func generateLargeDataset(path string, numRows int) (data iop.Dataset) {
 	}
 
 	fieldsFunc := []*FakeField{
-		&FakeField{"name", func() interface{} { return faker.Name().Name() }},
-		&FakeField{"url", func() interface{} { return faker.Internet().Url() }},
-		&FakeField{"date_time", func() interface{} { return faker.Date().Forward(100 * time.Minute).Format("2006-01-02 15:04:05") }},
-		&FakeField{"address", func() interface{} { return faker.Address().SecondaryAddress() }},
-		&FakeField{"price", func() interface{} { return faker.Commerce().Price() }},
-		&FakeField{"my_int", func() interface{} { return faker.Number().NumberInt64(5) }},
-		&FakeField{"email", func() interface{} { return faker.Internet().Email() }},
-		&FakeField{"creditcardexpirydate", func() interface{} { return faker.Date().Forward(1000000 * time.Minute).Format("2006-01-02") }},
-		&FakeField{"latitude", func() interface{} { return faker.Address().Latitude() }},
-		&FakeField{"longitude", func() interface{} { return faker.Address().Longitude() }},
+		{"name", func() interface{} { return faker.Name().Name() }},
+		{"url", func() interface{} { return faker.Internet().Url() }},
+		{"date_time", func() interface{} { return faker.Date().Forward(100 * time.Minute).Format("2006-01-02 15:04:05") }},
+		{"address", func() interface{} { return faker.Address().SecondaryAddress() }},
+		{"price", func() interface{} { return faker.Commerce().Price() }},
+		{"my_int", func() interface{} { return faker.Number().NumberInt64(5) }},
+		{"email", func() interface{} { return faker.Internet().Email() }},
+		{"creditcardexpirydate", func() interface{} { return faker.Date().Forward(1000000 * time.Minute).Format("2006-01-02") }},
+		{"latitude", func() interface{} { return faker.Address().Latitude() }},
+		{"longitude", func() interface{} { return faker.Address().Longitude() }},
 	}
 
 	makeRow := func() (row []interface{}) {
