@@ -306,3 +306,4 @@ variable:
   bind_string: "@p{c}"
   bool_as: string
   batch_rows: 200
+  max_string_type: nvarchar(max)

@@ -323,3 +323,4 @@ variable:
   batch_values: 2000
   bool_as: string
   error_filter_table_exists: already
+  max_string_type: nvarchar(max)

@@ -2276,7 +2276,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 			col.DbType,
 			conn.Type,
 		)
-		// return "", g.Error(err)
+
 		g.Warn(err.Error() + ". Using 'string'")
 		err = nil
 		nativeType = conn.template.GeneralTypeMap["string"]
@@ -2286,14 +2286,21 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	if strings.HasSuffix(nativeType, "()") {
 		length := col.Stats.MaxLen
 		if col.IsString() {
-			if !col.Sourced || length <= 0 {
+			isSourced := col.Sourced && col.DbPrecision > 0
+			if isSourced {
+				// string length was manually provided
+				length = col.DbPrecision
+			} else if length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
 					length = 255
 				}
 			}
 
-			if length > 255 {
+			maxStringType := conn.GetTemplateValue("variable.max_string_type")
+			if !isSourced && maxStringType != "" {
+				nativeType = maxStringType // use specified default
+			} else if length > 255 {
 				// let's make text since high
 				nativeType = conn.template.GeneralTypeMap["text"]
 			} else {

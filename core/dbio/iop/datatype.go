@@ -800,9 +800,7 @@ func (col *Column) SetLengthPrecisionScale() {
 		if len(vals) > 0 {
 			vals[0] = strings.TrimSpace(vals[0])
 			// grab length or precision
-			if col.Type.IsString() {
-				col.Stats.MaxLen = cast.ToInt(vals[0])
-			} else if col.IsNumber() || col.IsDatetime() {
+			if col.Type.IsString() || col.IsNumber() || col.IsDatetime() {
 				col.DbPrecision = cast.ToInt(vals[0])
 			}
 		}
@@ -815,7 +813,7 @@ func (col *Column) SetLengthPrecisionScale() {
 			}
 		}
 
-		if col.DbPrecision > 0 || col.Stats.MaxLen > 0 {
+		if col.DbPrecision > 0 {
 			col.Sourced = true
 		}
 	}

@@ -377,3 +377,4 @@ variable:
   tmp_folder: /tmp
   bind_string: ${c}
   error_filter_table_exists: already exists
+  max_string_type: varchar(65500)

@@ -399,6 +399,7 @@ variable:
   bool_as: integer
   error_ignore_drop_view: unknown
   error_ignore_drop_table: unknown
+  max_string_type: varchar(65533)
 
 error_filter:
   table_not_exist: exist

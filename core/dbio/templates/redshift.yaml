@@ -558,3 +558,6 @@ function:
   checksum_boolean: length(case when {field} = true then 'true' when {field} = false then 'false' end)
   checksum_json: length(replace({field}::text, ' ', ''))
   # checksum_datetime: (date_part('epoch', {field}) * 1000000)::bigint
+
+variable:
+  max_string_type: varchar(65535)

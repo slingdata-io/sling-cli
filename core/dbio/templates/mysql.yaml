@@ -388,6 +388,7 @@ variable:
   ddl_col: 1
   batch_rows: 500
   bool_as: integer
+  max_string_type: mediumtext
 
 error_filter:
   table_not_exist: exist
