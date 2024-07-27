@@ -82,7 +82,7 @@ const (
 	UpdateKey       KeyType = "update"
 )
 
-var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
+var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, IndexKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
