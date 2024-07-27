@@ -636,7 +636,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	}
 
 	// clean values for replacing
+	dateMap := iop.GetISO8601DateMap(time.Now())
 	for k, v := range m {
+		if _, ok := dateMap[k]; ok {
+			continue // don't clean the date values
+		}
 		m[k] = iop.CleanName(cast.ToString(v))
 	}
 
