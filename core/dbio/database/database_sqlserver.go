@@ -188,6 +188,26 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
+func (conn *MsSQLServerConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	table.Columns = data.Columns
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return ddl, nil
+}
+
 // BulkImportFlow bulk import flow
 func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()

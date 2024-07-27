@@ -67,6 +67,25 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 	return u.DSN
 }
 
+func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return ddl, nil
+}
+
 // BulkInsert
 // Common Error: ERROR 3948 (42000) at line 1: Loading local data is disabled; this must be enabled on both the client and server sides
 // Need to enable on serer side: https://stackoverflow.com/a/60027776

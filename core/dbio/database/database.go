@@ -78,8 +78,8 @@ type Connection interface {
 	DropView(...string) error
 	Exec(sql string, args ...interface{}) (result sql.Result, err error)
 	ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMulti(sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
+	ExecMulti(sqls ...string) (result sql.Result, err error)
+	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, fields []string, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
@@ -1092,14 +1092,14 @@ func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, 
 }
 
 // ExecMulti runs mutiple sql queries, returns `error`
-func (conn *BaseConn) ExecMulti(sql string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMulti(sqls ...string) (result sql.Result, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		err = g.Error(err, "Could not reconnect")
 		return
 	}
 
-	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sql, args...)
+	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sqls...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
 	}
@@ -1132,22 +1132,24 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 }
 
 // ExecMultiContext runs multiple sql queries with context, returns `error`
-func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
 
 	Res := Result{rowsAffected: 0}
 
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
-		res, err := conn.Self().ExecContext(ctx, sql, args...)
-		if err != nil {
-			eG.Capture(g.Error(err, "Error executing query"))
-		} else {
-			ra, _ := res.RowsAffected()
-			g.Trace("RowsAffected: %d", ra)
-			Res.rowsAffected = Res.rowsAffected + ra
+	for _, q := range qs {
+		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			res, err := conn.Self().ExecContext(ctx, sql)
+			if err != nil {
+				eG.Capture(g.Error(err, "Error executing query"))
+			} else {
+				ra, _ := res.RowsAffected()
+				g.Trace("RowsAffected: %d", ra)
+				Res.rowsAffected = Res.rowsAffected + ra
+			}
+			delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+			time.Sleep(time.Duration(delay) * time.Second)
 		}
-		delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
-		time.Sleep(time.Duration(delay) * time.Second)
 	}
 
 	err = eG.Err()
@@ -2760,6 +2762,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		return false, ddlParts, nil
 	}
 
+	// if column is part of index, drop it
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.DropDDL())
+	}
+
 	for _, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
@@ -2849,6 +2856,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		))
 	}
 
+	// re-create index
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.CreateDDL())
+	}
+
 	return true, ddlParts, nil
 }
 
@@ -2862,7 +2874,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 		return ok, err
 	}
 
-	_, err = conn.ExecMulti(strings.Join(ddlParts, ";\n"))
+	_, err = conn.ExecMulti(ddlParts...)
 	if err != nil {
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
@@ -3316,7 +3328,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
-func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) {
+func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	inQuote := false
 	inCommentLine := false
 	inCommentMulti := false
@@ -3332,6 +3344,14 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) 
 
 	inComment := func() bool {
 		return inCommentLine || inCommentMulti
+	}
+
+	// determine if is SQL code block
+	sqlLower := strings.TrimRight(strings.TrimSpace(strings.ToLower(sql)), ";")
+	if strings.HasPrefix(sqlLower, "begin") && strings.HasSuffix(sqlLower, "end") {
+		return []string{sql}
+	} else if strings.Contains(sqlLower, "prepare ") && strings.Contains(sqlLower, "execute ") {
+		return []string{sql}
 	}
 
 	for i := range sql {
@@ -3527,10 +3547,4 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 	}
 
 	return
-}
-
-func quoteColNames(conn Connection, names []string) []string {
-	return lo.Map(names, func(col string, i int) string {
-		return conn.Quote(col)
-	})
 }

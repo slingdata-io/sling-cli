@@ -290,11 +290,15 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	eG := g.ErrorGroup{}
 
 	if t.Config.Source.HasPrimaryKey() {
-		eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		// set true PK only when StarRocks, we don't want to create PKs on target table implicitly
+		if t.Config.Source.Type == dbio.TypeDbStarRocks {
+			eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		}
+		eG.Capture(df.Columns.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", t.Config.Source.PrimaryKey()...))
 	}
 
 	if t.Config.Source.HasUpdateKey() {
-		eG.Capture(df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey))
+		eG.Capture(df.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", t.Config.Source.UpdateKey))
 	}
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {

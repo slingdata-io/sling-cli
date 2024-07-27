@@ -26,6 +26,15 @@ core:
           RAISE;
         END IF;
     END;
+  drop_index: |
+    BEGIN
+      EXECUTE IMMEDIATE 'DROP INDEX {index}';
+    EXCEPTION
+      WHEN OTHERS THEN
+          IF SQLCODE != -1418 THEN -- Error code for "index not found"
+            RAISE;
+          END IF;
+    END;
   create_temporary_table: create global temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: INSERT {options} INTO {table} ({fields}) VALUES ({values})

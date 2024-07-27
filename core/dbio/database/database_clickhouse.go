@@ -88,7 +88,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)

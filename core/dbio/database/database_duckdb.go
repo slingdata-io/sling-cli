@@ -270,8 +270,8 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 }
 
 // ExecContext runs a sql query with context, returns `error`
-func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	return conn.ExecContext(ctx, sql, args...)
+func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	return conn.ExecContext(ctx, strings.Join(sqls, ";\n"))
 }
 
 func (conn *DuckDbConn) setDuckDbFileContext(ctx *g.Context) {

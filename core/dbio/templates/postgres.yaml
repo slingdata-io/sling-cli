@@ -1,7 +1,9 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: drop index if exists {schema}.{index}
   create_table: create table if not exists {table} ({col_types}) {partition_by}
+  create_index: create index if not exists {index} on {table} ({cols})
   create_unique_index: create unique index if not exists {index} on {table} ({cols})
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |

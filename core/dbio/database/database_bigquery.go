@@ -253,14 +253,14 @@ func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
 
 	clusterBy := ""
 	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F("cluster by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)

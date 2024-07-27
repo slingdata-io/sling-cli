@@ -82,6 +82,10 @@ const (
 	UpdateKey       KeyType = "update"
 )
 
+func (kt KeyType) MetadataKey() string {
+	return string(kt) + "_key"
+}
+
 var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, IndexKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
 // ColumnStats holds statistics for a column
@@ -233,14 +237,26 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 		found := false
 		for i, col := range cols {
 			if strings.EqualFold(colName, col.Name) {
-				key := string(keyType) + "_key"
-				col.SetMetadata(key, "true")
+				col.SetMetadata(keyType.MetadataKey(), "true")
 				cols[i] = col
 				found = true
 			}
 		}
 		if !found && !g.In(keyType, ClusterKey, PartitionKey, SortKey) {
 			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+		}
+	}
+	return
+}
+
+// SetMetadata sets metadata for columns
+func (cols Columns) SetMetadata(key, value string, colNames ...string) (err error) {
+	for _, colName := range colNames {
+		for i, col := range cols {
+			if strings.EqualFold(colName, col.Name) {
+				col.SetMetadata(key, value)
+				cols[i] = col
+			}
 		}
 	}
 	return
@@ -833,8 +849,7 @@ func (col *Column) IsKeyType(keyType KeyType) bool {
 	if col.Metadata == nil {
 		return false
 	}
-	key := string(keyType) + "_key"
-	return cast.ToBool(col.Metadata[key])
+	return cast.ToBool(col.Metadata[keyType.MetadataKey()])
 }
 
 func (col *Column) Key() string {

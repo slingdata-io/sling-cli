@@ -56,6 +56,26 @@ func (conn *SQLiteConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
+func (conn *SQLiteConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		indexDDL := strings.ReplaceAll(index.CreateDDL(), table.FDQN(), table.NameQ()) // doesn't like FDQN
+		ddl = ddl + ";\n" + indexDDL
+	}
+
+	return ddl, nil
+}
+
 // GetURL returns the processed URL
 func (conn *SQLiteConn) GetURL(newURL ...string) string {
 	connURL := conn.BaseConn.URL

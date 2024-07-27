@@ -1,6 +1,12 @@
 core:
   drop_table: IF OBJECT_ID(N'{table}', N'U') IS NOT NULL DROP TABLE {table}
   drop_view: IF OBJECT_ID(N'{view}', N'V') IS NOT NULL DROP VIEW {view}
+  drop_index: |
+    if exists (
+      select name
+      from sys.indexes
+      where name = '{name}' and object_id = OBJECT_ID('{table}')
+    ) drop index {index} on {table}
   create_temporary_table: 'create table #{table} ({col_types})'
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |

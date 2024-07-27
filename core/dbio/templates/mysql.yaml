@@ -1,6 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'cannot drop if exists index for mysql' as col1"
   create_table: create table if not exists {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})

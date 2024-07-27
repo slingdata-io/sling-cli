@@ -38,19 +38,23 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
-func (t *Table) SetKeys(pkCols []string, updateCol string, otherKeys TableKeys) error {
+func (t *Table) SetKeys(sourcePKCols []string, updateCol string, otherKeys TableKeys) error {
 	eG := g.ErrorGroup{}
 
 	if len(t.Columns) == 0 {
 		return nil // columns are missing, cannot check
 	}
 
-	if len(pkCols) > 0 {
-		eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, pkCols...))
+	if len(sourcePKCols) > 0 {
+		// set true PK only when StarRocks, we don't want to create PKs on target table implicitly
+		if t.Dialect == dbio.TypeDbStarRocks {
+			eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, sourcePKCols...))
+		}
+		eG.Capture(t.Columns.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", sourcePKCols...))
 	}
 
 	if updateCol != "" {
-		eG.Capture(t.Columns.SetKeys(iop.UpdateKey, updateCol))
+		eG.Capture(t.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", updateCol))
 	}
 
 	if tkMap := otherKeys; tkMap != nil {
@@ -822,29 +826,123 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 	return schemata, nil
 }
 
-func HasVariedCase(text string) bool {
-	hasUpper := false
-	hasLower := false
-	for _, c := range text {
-		if unicode.IsUpper(c) {
-			hasUpper = true
+// AddPrimaryKeyToDDL adds a primary key to the table
+func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, error) {
+
+	if pkCols := columns.GetKeys(iop.PrimaryKey); len(pkCols) > 0 {
+		ddl = strings.TrimSpace(ddl)
+
+		// add pk right before the last parenthesis
+		lastParen := strings.LastIndex(ddl, ")")
+		if lastParen == -1 {
+			return ddl, g.Error("could not find last parenthesis")
 		}
-		if unicode.IsLower(c) {
-			hasLower = true
+
+		prefix := "primary key"
+		switch t.Dialect {
+		case dbio.TypeDbOracle:
+			prefix = g.F("constraint %s_pkey primary key", strings.ToLower(t.Name))
 		}
-		if hasUpper && hasLower {
-			break
-		}
+
+		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
+		ddl = ddl[:lastParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[lastParen:]
 	}
 
-	return hasUpper && hasLower
+	return ddl, nil
 }
 
-func QuoteNames(dialect dbio.Type, names ...string) (newNames []string) {
-	q := GetQualifierQuote(dialect)
-	newNames = make([]string, len(names))
-	for i := range names {
-		newNames[i] = q + strings.ReplaceAll(names[i], q, "") + q
+type TableIndex struct {
+	Name    string
+	Columns iop.Columns
+	Unique  bool
+	Table   *Table
+}
+
+func (ti *TableIndex) CreateDDL() string {
+	dialect := ti.Table.Dialect
+	quotedNames := dialect.QuoteNames(ti.Columns.Names()...)
+
+	if ti.Unique {
+		return g.R(
+			dialect.GetTemplateValue("core.create_unique_index"),
+			"index", dialect.Quote(ti.Name),
+			"table", ti.Table.FDQN(),
+			"cols", strings.Join(quotedNames, ", "),
+		)
 	}
-	return newNames
+
+	return g.R(
+		dialect.GetTemplateValue("core.create_index"),
+		"index", dialect.Quote(ti.Name),
+		"table", ti.Table.FDQN(),
+		"cols", strings.Join(quotedNames, ", "),
+	)
+}
+
+func (ti *TableIndex) DropDDL() string {
+	dialect := ti.Table.Dialect
+
+	return g.R(
+		dialect.GetTemplateValue("core.drop_index"),
+		"index", dialect.Quote(ti.Name),
+		"name", ti.Name,
+		"table", ti.Table.FDQN(),
+		"schema", ti.Table.SchemaQ(),
+	)
+}
+
+func (t *Table) Indexes(columns iop.Columns) (indexes []TableIndex) {
+
+	// TODO: composite column indexes not yet supported
+	// if indexSet := columns.GetKeys(iop.IndexKey); len(indexSet) > 0 {
+
+	// 	// create index name from the first 6 chars of each column name
+	// 	indexNameParts := []string{strings.ToLower(t.Name)}
+	// 	for _, col := range indexSet.Names() {
+	// 		if len(col) < 6 {
+	// 			indexNameParts = append(indexNameParts, col)
+	// 		} else {
+	// 			indexNameParts = append(indexNameParts, col[:6])
+	// 		}
+	// 	}
+
+	// 	index := TableIndex{
+	// 		Name:    strings.Join(indexNameParts, "_"),
+	// 		Columns: indexSet,
+	// 		Unique:  false,
+	// 		Table:   t,
+	// 	}
+
+	// 	indexes = append(indexes, index)
+	// }
+
+	// normal index
+	for _, col := range columns.GetKeys(iop.IndexKey) {
+
+		indexNameParts := []string{strings.ToLower(t.Name), strings.ToLower(col.Name)}
+		index := TableIndex{
+			Name:    strings.Join(indexNameParts, "_"),
+			Columns: iop.Columns{col},
+			Unique:  false,
+			Table:   t,
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	// unique index
+	for _, col := range columns.GetKeys(iop.UniqueKey) {
+
+		indexNameParts := []string{strings.ToLower(t.Name), strings.ToLower(col.Name)}
+		index := TableIndex{
+			Name:    strings.Join(indexNameParts, "_"),
+			Columns: iop.Columns{col},
+			Unique:  true,
+			Table:   t,
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	return
 }

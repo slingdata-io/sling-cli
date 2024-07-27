@@ -265,7 +265,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return g.Error(err, "could not get table columns for schema change")
 			}
 
-			// preseve keys
+			// preserve keys
 			tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 			ok, err := tgtConn.OptimizeTable(&tableTmp, iop.Columns{col}, true)
@@ -439,7 +439,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 					return cnt, g.Error(err, "could not get table columns for optimization")
 				}
 
-				// preseve keys
+				// preserve keys
 				targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns, false)
