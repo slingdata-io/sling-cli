@@ -752,26 +752,7 @@ func (conn *BaseConn) GetGormConn(config *gorm.Config) (*gorm.DB, error) {
 
 // GetTemplateValue returns the value of the path
 func (conn *BaseConn) GetTemplateValue(path string) (value string) {
-
-	prefixes := map[string]map[string]string{
-		"core.":             conn.template.Core,
-		"analysis.":         conn.template.Analysis,
-		"function.":         conn.template.Function,
-		"metadata.":         conn.template.Metadata,
-		"general_type_map.": conn.template.GeneralTypeMap,
-		"native_type_map.":  conn.template.NativeTypeMap,
-		"variable.":         conn.template.Variable,
-	}
-
-	for prefix, dict := range prefixes {
-		if strings.HasPrefix(path, prefix) {
-			key := strings.Replace(path, prefix, "", 1)
-			value = dict[key]
-			break
-		}
-	}
-
-	return value
+	return conn.Type.GetTemplateValue(path)
 }
 
 // LoadTemplates loads the appropriate yaml template
@@ -2126,28 +2107,12 @@ func (conn *BaseConn) bindVar(i int, field string, n int, c int) string {
 
 // Unquote removes quotes to the field name
 func (conn *BaseConn) Unquote(field string) string {
-	q := conn.template.Variable["quote_char"]
-	return strings.ReplaceAll(field, q, "")
+	return conn.Type.Unquote(field)
 }
 
 // Quote adds quotes to the field name
 func (conn *BaseConn) Quote(field string, normalize ...bool) string {
-	Normalize := true
-	if len(normalize) > 0 {
-		Normalize = normalize[0]
-	}
-
-	// always normalize if case is uniform. Why would you quote and not normalize?
-	if !HasVariedCase(field) && Normalize {
-		if g.In(conn.Type, dbio.TypeDbOracle, dbio.TypeDbSnowflake) {
-			field = strings.ToUpper(field)
-		} else {
-			field = strings.ToLower(field)
-		}
-	}
-	q := conn.template.Variable["quote_char"]
-	field = conn.Self().Unquote(field)
-	return q + field + q
+	return conn.Type.Quote(field, normalize...)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2828,9 +2793,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		)
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			QuoteNames(conn.GetType(), table.Columns.Names()...), // add quotes
+			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -2869,9 +2834,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = QuoteNames(conn.GetType(), updatedFields...) // add quotes
+		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
