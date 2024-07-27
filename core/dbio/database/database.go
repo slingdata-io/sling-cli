@@ -2104,39 +2104,6 @@ func (conn *BaseConn) InsertStream(tableFName string, ds *iop.Datastream) (count
 	return
 }
 
-// castDsBoolColumns cast any boolean column values to the db type
-func (conn *BaseConn) castDsBoolColumns(ds *iop.Datastream) *iop.Datastream {
-	// cast any bool column
-	boolCols := []int{}
-	for i, c := range ds.Columns {
-		if c.IsBool() {
-			boolCols = append(boolCols, i)
-		}
-	}
-
-	boolAs := conn.template.Variable["bool_as"]
-	if len(boolCols) > 0 && boolAs != "bool" {
-		newCols := ds.Columns
-		for _, i := range boolCols {
-			newCols[i].Type = iop.ColumnType(boolAs) // the data type for a bool
-		}
-
-		ds = ds.Map(newCols, func(row []interface{}) []interface{} {
-			for _, i := range boolCols {
-				switch boolAs {
-				case "integer", "smallint":
-					row[i] = cast.ToInt(cast.ToBool(row[i]))
-				default:
-					row[i] = cast.ToString(cast.ToBool(row[i]))
-				}
-			}
-			return row
-		})
-	}
-
-	return ds
-}
-
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *BaseConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	count, err = InsertBatchStream(conn.Self(), conn.tx, tableFName, ds)
