@@ -997,18 +997,18 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	}
 
 	sqlTempl := `
-	DELETE FROM {tgt_table} tgt
-	WHERE EXISTS (
-			SELECT 1
-			FROM {src_table} src
-			WHERE {src_tgt_pk_equal}
+	delete from {tgt_table} tgt
+	where exists (
+			select 1
+			from {src_table} src
+			where {src_tgt_pk_equal}
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 	sql = g.R(
 		sqlTempl,

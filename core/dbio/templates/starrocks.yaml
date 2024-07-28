@@ -7,10 +7,10 @@ core:
   modify_column: '{column} {type}'
   update: insert into {table} ({fields}) select {updated_fields} from {table}
   upsert: |
-    INSERT INTO {tgt_table}
+    insert into {tgt_table}
       ({insert_fields})
-    SELECT {src_fields}
-    FROM {src_table} src
+    select {src_fields}
+    from {src_table} src
   rename_column: |
     alter table {table} add column {new_column} {new_type} ;
     insert into {table} ({fields}) select {updated_fields} from {table} ;

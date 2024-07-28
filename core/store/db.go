@@ -78,7 +78,7 @@ func migrate() {
 	Db.Migrator().RenameColumn(&Replication{}, "replication", "config") // rename column for consistency
 
 	// fix bad unique index on Execution.ExecID
-	data, _ := Conn.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
+	data, _ := Conn.Query(`select name from sqlite_master where type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
 	if len(data.Rows) > 0 {
 		Db.Exec(g.F("drop index if exists %s", data.Rows[0][0]))
 	}

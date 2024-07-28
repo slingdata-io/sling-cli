@@ -906,13 +906,13 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT {src_fields} FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select {src_fields} from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields_values})
+		INSERT ({insert_fields}) values  ({src_fields_values})
 	`
 
 	sql = g.R(

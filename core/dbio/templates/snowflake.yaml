@@ -11,9 +11,9 @@ core:
   disable_trigger: ""
   copy_from_stage: |
     COPY INTO {table} ({tgt_columns})
-    FROM ( 
-      SELECT {src_columns}
-      FROM {stage_path} as T
+    from ( 
+      select {src_columns}
+      from {stage_path} as T
     )
     FILE_FORMAT = (
       TYPE = CSV
@@ -28,7 +28,7 @@ core:
     ON_ERROR = ABORT_STATEMENT
   copy_from_s3: |
     COPY INTO {table} 
-    FROM '{s3_path}'
+    from '{s3_path}'
     CREDENTIALS = (
       AWS_KEY_ID = '{aws_access_key_id}'
       AWS_SECRET_KEY = '{aws_secret_access_key}'
@@ -46,7 +46,7 @@ core:
     ON_ERROR = ABORT_STATEMENT
   copy_from_azure: |
     COPY INTO {table} 
-    FROM '{azure_path}'
+    from '{azure_path}'
     CREDENTIALS = (
       AZURE_SAS_TOKEN = '{azure_sas_token}'
     )
@@ -63,7 +63,7 @@ core:
     ON_ERROR = ABORT_STATEMENT
   copy_to_stage: |
     COPY INTO '{stage_path}'
-    FROM ({sql})
+    from ({sql})
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
@@ -75,7 +75,7 @@ core:
     HEADER = TRUE
   copy_to_s3: |
     COPY INTO '{s3_path}'
-    FROM ({sql})
+    from ({sql})
     CREDENTIALS = (
       AWS_KEY_ID = '{aws_access_key_id}'
       AWS_SECRET_KEY = '{aws_secret_access_key}'
@@ -91,7 +91,7 @@ core:
     HEADER = TRUE
   copy_to_azure: |
     COPY INTO '{azure_path}/'
-    FROM ({sql})
+    from ({sql})
     CREDENTIALS = (
       AZURE_SAS_TOKEN = '{azure_sas_token}'
     )

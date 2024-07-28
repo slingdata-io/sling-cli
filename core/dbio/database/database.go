@@ -2135,12 +2135,12 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, fields []string,
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 

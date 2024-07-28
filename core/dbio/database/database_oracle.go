@@ -473,13 +473,13 @@ func (conn *OracleConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT * FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select * from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields})
+		INSERT ({insert_fields}) values  ({src_fields})
 	`
 
 	sql = g.R(
@@ -516,7 +516,7 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, fields []strin
 
 		// for Oracle
 		intos = append(intos, g.R(
-			"INTO {table} ({fields}) VALUES ({values})",
+			"INTO {table} ({fields}) values  ({values})",
 			"table", tableName,
 			"fields", strings.Join(qFields, ", "),
 			"values", strings.Join(values, ","),
@@ -525,7 +525,7 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, fields []strin
 
 	g.Trace("Count of Bind Vars: %d", c)
 	statement := g.R(
-		`INSERT ALL {intosStr} SELECT 1 FROM DUAL`,
+		`INSERT ALL {intosStr} select 1 from DUAL`,
 		"intosStr", strings.Join(intos, "\n"),
 	)
 	return statement

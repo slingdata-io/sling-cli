@@ -51,7 +51,7 @@ metadata:
     select 1
 
   indexes: |
-    SELECT 1
+    select 1
   
   columns_full: |
     with tables as (

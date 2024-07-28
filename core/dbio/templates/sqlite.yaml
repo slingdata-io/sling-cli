@@ -42,14 +42,14 @@ metadata:
     where pk > 0 
   
   indexes: |
-    SELECT DISTINCT
+    select DISTINCT
       sm.name as table_name,
       ii.name as column_name,
       ii.*
-    FROM {{if .schema -}} {schema}. {{- end}}sqlite_master AS sm,
+    from {{if .schema -}} {schema}. {{- end}}sqlite_master AS sm,
         pragma_index_list(sm.name{{if .schema -}}, {schema}{{- end}}) AS il,
         pragma_index_info(il.name{{if .schema -}}, {schema}{{- end}}) AS ii
-    WHERE sm.type='table'
+    where sm.type='table'
       and sm.name='{table}'
     ORDER BY 1;
 

@@ -271,11 +271,11 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	INSERT INTO {tgt_table} as tgt
+	insert into {tgt_table} as tgt
 		({insert_fields}) 
-	SELECT {src_fields}
-	FROM {src_table} as src
-	WHERE true
+	select {src_fields}
+	from {src_table} as src
+	where true
 	ON CONFLICT ({pk_fields})
 	DO UPDATE 
 	SET {set_fields}

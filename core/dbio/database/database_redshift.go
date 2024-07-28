@@ -272,15 +272,15 @@ func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	)
 
 	sqlTempl := `
-	DELETE FROM {tgt_table}
-	USING {src_table}
-	WHERE {src_tgt_pk_equal}
+	delete from {tgt_table}
+	using {src_table}
+	where {src_tgt_pk_equal}
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(

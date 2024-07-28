@@ -278,18 +278,18 @@ func (conn *MySQLConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFie
 	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", tgtT.NameQ()+".")
 
 	sqlTemplate := `
-	DELETE FROM {tgt_table}
-	WHERE EXISTS (
-			SELECT 1
-			FROM {src_table}
-			WHERE {src_tgt_pk_equal}
+	delete from {tgt_table}
+	where exists (
+			select 1
+			from {src_table}
+			where {src_tgt_pk_equal}
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(

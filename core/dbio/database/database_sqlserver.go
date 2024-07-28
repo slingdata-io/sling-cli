@@ -263,7 +263,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 	// transformation to correctly post process quotes, newlines, and delimiter afterwards
 	// https://stackoverflow.com/questions/782353/sql-server-bulk-insert-of-csv-file-with-inconsistent-quotes
-	// reduces performance by ~25%, but is correct, and still 10x faster then INSERT INTO with batch VALUES
+	// reduces performance by ~25%, but is correct, and still 10x faster then insert into with batch VALUES
 	// If we use the parallel way, we gain back the speed by using more power. We also loose order.
 	transf := func(row []interface{}) (nRow []interface{}) {
 		nRow = row
@@ -547,7 +547,7 @@ func (conn *MsSQLServerConn) BcpExport() (err error) {
 	return
 }
 
-// sqlcmd -S localhost -d BcpSampleDB -U sa -P <your_password> -I -Q "SELECT * FROM TestEmployees;"
+// sqlcmd -S localhost -d BcpSampleDB -U sa -P <your_password> -I -Q "select * from TestEmployees;"
 
 // EXPORT
 // bcp TestEmployees out ~/test_export.txt -S localhost -U sa -P <your_password> -d BcpSampleDB -c -t ','
@@ -569,13 +569,13 @@ func (conn *MsSQLServerConn) GenerateUpsertSQL(srcTable string, tgtTable string,
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT *	FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select *	from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields});
+		INSERT ({insert_fields}) values  ({src_fields});
 	`
 
 	sql = g.R(

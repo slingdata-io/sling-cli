@@ -285,12 +285,12 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []s
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 
@@ -304,16 +304,16 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 
 	sqlTempl := `
 	ALTER TABLE {tgt_table}
-	DELETE WHERE ({pk_fields}) in (
-			SELECT {pk_fields}
-			FROM {src_table} src
+	DELETE where ({pk_fields}) in (
+			select {pk_fields}
+			from {src_table} src
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 	sql = g.R(
 		sqlTempl,
