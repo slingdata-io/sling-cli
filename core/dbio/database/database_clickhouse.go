@@ -77,10 +77,10 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
+	ddl, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
-		return sql, g.Error(err)
+		return ddl, g.Error(err)
 	}
 
 	primaryKey := ""
@@ -88,7 +88,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{primary_key}", primaryKey)
+	ddl = strings.ReplaceAll(ddl, "{primary_key}", primaryKey)
 
 	partitionBy := ""
 	if keys, ok := table.Keys[iop.PartitionKey]; ok {
@@ -98,9 +98,9 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
 
-	return strings.TrimSpace(sql), nil
+	return strings.TrimSpace(ddl), nil
 }
 
 // BulkImportStream inserts a stream into a table
