@@ -565,11 +565,12 @@ func (cfg *Config) Prepare() (err error) {
 				words = append(words, m.Group[0])
 			}
 		}
-		// return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
+
 		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
 		for _, word := range words {
 			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
 		}
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	// add md5 of options, so that wee reconnect for various options
@@ -604,6 +605,68 @@ func (cfg *Config) Prepare() (err error) {
 	for key := range cfg.TgtConn.Data {
 		if strings.Contains(key, ":") {
 			g.Warn("target connection %s has an invalid property -> %s", cfg.Target.Conn, key)
+		}
+	}
+
+	// to expand variables for custom SQL
+	fMap, err := cfg.GetFormatMap()
+	if err != nil {
+		return g.Error(err, "could not get format map for sql")
+	}
+
+	// check if referring to a SQL file, and set stream text
+	if cfg.SrcConn.Type.IsDb() {
+
+		sTable, _ := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
+		if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
+			// for incremental, need to put `{incremental_where_cond}` for proper selecting
+			sqlFromFile, err := GetSQLText(cfg.Source.Stream)
+			if err != nil {
+				err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
+				if sTable.Name == "" {
+					return err
+				} else {
+					err = nil // don't return error in case the table full name ends with .sql
+				}
+			} else {
+				cfg.Source.Stream = g.Rm(sqlFromFile, fMap)
+				if cfg.ReplicationStream != nil {
+					cfg.ReplicationStream.SQL = cfg.Source.Stream
+				}
+			}
+		} else if sTable.IsQuery() {
+			cfg.Source.Stream = g.Rm(sTable.SQL, fMap)
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.SQL = cfg.Source.Stream
+			}
+		}
+	}
+
+	// compile pre and post sql
+	if cfg.TgtConn.Type.IsDb() {
+
+		// pre SQL
+		if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
+			sql, err := GetSQLText(*preSQL)
+			if err != nil {
+				return g.Error(err, "could not get pre-sql body")
+			}
+			cfg.Target.Options.PreSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PreSQL = cfg.Target.Options.PreSQL
+			}
+		}
+
+		// post SQL
+		if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
+			sql, err := GetSQLText(*postSQL)
+			if err != nil {
+				return g.Error(err, "could not get post-sql body")
+			}
+			cfg.Target.Options.PostSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PostSQL = cfg.Target.Options.PostSQL
+			}
 		}
 	}
 
@@ -664,6 +727,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	} else if cfg.TgtConn.Type.IsFile() {
 		url := cast.ToString(cfg.Target.Data["url"])
 		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
+	}
+
+	// set on ReplicationStream
+	if cfg.ReplicationStream != nil {
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	return nil
@@ -853,9 +921,10 @@ type Config struct {
 
 	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
-	SrcConn           connection.Connection    `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn           connection.Connection    `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared          bool                     `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
+
+	SrcConn  connection.Connection `json:"-" yaml:"-"`
+	TgtConn  connection.Connection `json:"-" yaml:"-"`
+	Prepared bool                  `json:"-" yaml:"-"`
 
 	IncrementalVal    any    `json:"-" yaml:"-"`
 	IncrementalValStr string `json:"-" yaml:"-"`
@@ -925,14 +994,15 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Type        dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
-	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn        string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
+
+	Data map[string]interface{} `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -984,11 +1054,12 @@ func (s *Source) MD5() string {
 
 // Target is a target of data
 type Target struct {
-	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Type    dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
-	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
-	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn    string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type    dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Object  string         `json:"object,omitempty" yaml:"object,omitempty"`
+	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
+
+	Data map[string]interface{} `json:"-" yaml:"-"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`

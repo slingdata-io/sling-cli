@@ -8,7 +8,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -28,31 +27,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	} else if sTable.Schema == "" {
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
-
-	// check if referring to a SQL file
-	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
-		// for incremental, need to put `{incremental_where_cond}` for proper selecting
-		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
-		if err != nil {
-			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
-			if sTable.Name == "" {
-				return t.df, err
-			} else {
-				err = nil // don't return error in case the table full name ends with .sql
-			}
-		} else {
-			cfg.Source.Stream = sqlFromFile
-			sTable.SQL = sqlFromFile
-		}
-	}
-
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
 
 	// get source columns
 	st := sTable

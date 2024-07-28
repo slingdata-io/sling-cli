@@ -340,19 +340,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// pre SQL
 	if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
 		t.SetProgress("executing pre-sql")
-		sql, err := GetSQLText(*preSQL)
-		if err != nil {
-			err = g.Error(err, "could not get pre-sql body")
-			return cnt, err
-		}
-
-		fMap, err := t.Config.GetFormatMap()
-		if err != nil {
-			err = g.Error(err, "could not get format map for pre-sql")
-			return cnt, err
-		}
-
-		_, err = tgtConn.ExecMulti(g.Rm(sql, fMap))
+		_, err = tgtConn.ExecMulti(*preSQL)
 		if err != nil {
 			err = g.Error(err, "could not execute pre-sql on target")
 			return cnt, err
@@ -522,20 +510,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// post SQL
 	if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
 		t.SetProgress("executing post-sql")
-
-		sql, err := GetSQLText(*postSQL)
-		if err != nil {
-			err = g.Error(err, "could not get post-sql body")
-			return cnt, err
-		}
-
-		fMap, err := t.Config.GetFormatMap()
-		if err != nil {
-			err = g.Error(err, "could not get format map for post-sql")
-			return cnt, err
-		}
-
-		_, err = tgtConn.ExecMulti(g.Rm(sql, fMap))
+		_, err = tgtConn.ExecMulti(*postSQL)
 		if err != nil {
 			err = g.Error(err, "Error executing post-sql")
 			return cnt, err

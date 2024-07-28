@@ -412,6 +412,13 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			cfg.Source.Stream = stream.SQL
 		}
 
+		// prepare config
+		err = cfg.Prepare()
+		if err != nil {
+			err = g.Error(err, "could not prepare stream task: %s", name)
+			return
+		}
+
 		tasks = append(tasks, &cfg)
 	}
 	return
