@@ -635,7 +635,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
-	// clean values for replacing
+	// clean values for replacing, these need to be clean to be used in the object name
 	dateMap := iop.GetISO8601DateMap(time.Now())
 	for k, v := range m {
 		if _, ok := dateMap[k]; ok {
