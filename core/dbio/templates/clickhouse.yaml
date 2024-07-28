@@ -1,8 +1,10 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'indexes not implemented for clickhouse'"
+  create_index: "select 'indexes not implemented for clickhouse'"
   create_schema: create database {schema}
-  create_table: create table {table} ({col_types}) engine=MergeTree {partition_by} ORDER BY tuple()
+  create_table: create table {table} ({col_types}) engine=MergeTree {primary_key} {partition_by} ORDER BY tuple()
   create_temporary_table: create table {table} ({col_types}) engine=Memory
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   alter_columns: alter table {table} modify column {col_ddl}

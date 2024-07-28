@@ -83,6 +83,13 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		return sql, g.Error(err)
 	}
 
+	primaryKey := ""
+	if keyCols := data.Columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
+	}
+	sql = strings.ReplaceAll(sql, "{primary_key}", primaryKey)
+
 	partitionBy := ""
 	if keys, ok := table.Keys[iop.PartitionKey]; ok {
 		// allow custom SQL expression for partitioning
