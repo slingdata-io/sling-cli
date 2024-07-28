@@ -822,6 +822,11 @@ func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
 	fs.SetProp("header", "true")
 	fs.SetProp("format", "csv")
 	fs.SetProp("null_if", `\N`)

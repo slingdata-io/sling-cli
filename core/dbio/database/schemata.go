@@ -690,6 +690,16 @@ func ParseColumnName(text string, dialect dbio.Type) (colName string, err error)
 	return
 }
 
+// getColumnsProp returns the coercedCols from the columns property
+func getColumnsProp(conn Connection) (coerceCols iop.Columns, ok bool) {
+	if coerceColsV := conn.GetProp("columns"); coerceColsV != "" {
+		if err := g.Unmarshal(coerceColsV, &coerceCols); err == nil {
+			return coerceCols, true
+		}
+	}
+	return coerceCols, false
+}
+
 func GetQualifierQuote(dialect dbio.Type) string {
 	quote := `"`
 	switch dialect {

@@ -241,6 +241,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		return
 	}
 
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
 	fs.SetProp("format", "csv")
 	fs.SetProp("delimiter", ",")
 	fs.SetProp("header", "true")
