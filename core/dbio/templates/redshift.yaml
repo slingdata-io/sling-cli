@@ -2,6 +2,8 @@ core:
   create_table: create table {table} ({col_types}) {dist_key} {sort_key}
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'indexes do not apply for redshift'"
+  create_index: "select 'indexes do not apply for redshift'"
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
     insert into {table} ({names})

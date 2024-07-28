@@ -1,6 +1,8 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'indexes do not apply for duckdb'"
+  create_index: "select 'indexes do not apply for duckdb'"
   create_table: create table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}

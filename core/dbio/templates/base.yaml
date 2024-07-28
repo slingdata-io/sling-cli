@@ -2,7 +2,7 @@ core:
   drop_table: drop table {table}
   drop_view: drop view {view}
   drop_schema: drop schema {schema}
-  drop_index: drop index {index}
+  drop_index: "select 'drop_index not implemented'"
   create_schema: create schema {schema}
   create_table: create table {table} ({col_types})
   create_temporary_table: create temporary table {table} ({col_types})
