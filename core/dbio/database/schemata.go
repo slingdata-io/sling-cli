@@ -38,7 +38,10 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
-func (t *Table) SetKeys(sourcePKCols []string, updateCol string, otherKeys TableKeys) error {
+func (t *Table) SetKeys(sourcePKCols []string, updateCol string, tableKeys TableKeys) error {
+	// set keys
+	t.Keys = tableKeys
+
 	eG := g.ErrorGroup{}
 
 	if len(t.Columns) == 0 {
@@ -57,7 +60,7 @@ func (t *Table) SetKeys(sourcePKCols []string, updateCol string, otherKeys Table
 		eG.Capture(t.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", updateCol))
 	}
 
-	if tkMap := otherKeys; tkMap != nil {
+	if tkMap := tableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
 			eG.Capture(t.Columns.SetKeys(tableKey, keys...))
 		}

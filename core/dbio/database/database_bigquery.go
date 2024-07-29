@@ -252,7 +252,10 @@ func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	}
 
 	partitionBy := ""
-	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by %s", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
 		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
