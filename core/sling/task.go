@@ -38,7 +38,7 @@ type TaskExecution struct {
 	prevByteCount uint64
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
 	Output        strings.Builder `json:"-"`
-	OutputLines   chan string
+	OutputLines   chan *g.LogLine
 
 	Replication    *ReplicationConfig `json:"replication"`
 	ProgressHist   []string           `json:"progress_hist"`
@@ -85,11 +85,11 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
-		OutputLines:  make(chan string, 500),
+		OutputLines:  make(chan *g.LogLine, 500),
 	}
 
 	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
-		t.AppendOutput(" -- args: " + args + "\n")
+		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args + "\n"})
 	}
 
 	err := cfg.Prepare()
@@ -210,12 +210,12 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 	return
 }
 
-func (t *TaskExecution) AppendOutput(line string) {
-	t.Output.WriteString(line + "\n") // add new-line char
+func (t *TaskExecution) AppendOutput(ll *g.LogLine) {
+	t.Output.WriteString(ll.Line() + "\n") // add new-line char
 
 	// push line if not full
 	select {
-	case t.OutputLines <- line:
+	case t.OutputLines <- ll:
 	default:
 	}
 }

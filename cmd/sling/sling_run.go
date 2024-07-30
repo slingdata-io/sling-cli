@@ -363,8 +363,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	// set log sink
-	env.LogSink = func(text string) {
-		task.AppendOutput(text)
+	env.LogSink = func(ll *g.LogLine) {
+		task.AppendOutput(ll)
 	}
 
 	sling.StoreInsert(task)       // insert into store
