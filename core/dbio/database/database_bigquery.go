@@ -931,9 +931,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
 	extractor.DisableHeader = false
-	// You can choose to run the task in a specific location for more complex data locality scenarios.
-	// Ex: In this example, source dataset and GCS bucket are in the US.
-	extractor.Location = "US"
+	extractor.Location = conn.Location
 
 	job, err := extractor.Run(conn.Context().Ctx)
 	if err != nil {
