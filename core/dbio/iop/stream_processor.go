@@ -227,7 +227,7 @@ func NewStreamProcessor() *StreamProcessor {
 
 func DefaultStreamConfig() *StreamConfig {
 	return &StreamConfig{
-		EmptyAsNull: true,
+		EmptyAsNull: false,
 		MaxDecimals: -1,
 		Columns:     Columns{},
 		transforms:  map[string][]TransformFunc{},

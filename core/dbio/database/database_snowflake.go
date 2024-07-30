@@ -853,8 +853,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 }
 
 func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
-	if !cast.ToBool(conn.GetProp("empty_as_null")) {
-		sql = strings.ReplaceAll(sql, "EMPTY_FIELD_AS_NULL=TRUE", "EMPTY_FIELD_AS_NULL=FALSE")
+	if cast.ToBool(conn.GetProp("empty_as_null")) {
+		sql = strings.ReplaceAll(sql, "EMPTY_FIELD_AS_NULL = FALSE", "EMPTY_FIELD_AS_NULL = TRUE")
 	}
 	return sql
 }
