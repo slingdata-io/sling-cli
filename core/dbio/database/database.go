@@ -298,7 +298,6 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Add / Extract provided Props
 	for _, propStr := range props {
-		// g.Trace("setting connection prop -> " + propStr)
 		arr := strings.Split(propStr, "=")
 		if len(arr) == 1 && arr[0] != "" {
 			conn.SetProp(arr[0], "")
