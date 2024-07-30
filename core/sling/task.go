@@ -11,7 +11,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -37,8 +36,9 @@ type TaskExecution struct {
 	df            *iop.Dataflow `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
-	lastIncrement time.Time // the time of last row increment (to determine stalling)
-	Output        string    `json:"-"`
+	lastIncrement time.Time       // the time of last row increment (to determine stalling)
+	Output        strings.Builder `json:"-"`
+	OutputLines   chan string
 
 	Replication    *ReplicationConfig `json:"replication"`
 	ProgressHist   []string           `json:"progress_hist"`
@@ -85,24 +85,12 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
+		OutputLines:  make(chan string, 500),
 	}
 
 	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
 		t.AppendOutput(" -- args: " + args + "\n")
 	}
-
-	// stdErr output
-	go func() {
-		env.StdErrChn = make(chan string, 1000)
-
-		for {
-			if t.EndTime != nil {
-				env.StdErrChn = nil
-				break
-			}
-			t.AppendOutput(<-env.StdErrChn) // process output
-		}
-	}()
 
 	err := cfg.Prepare()
 	if err != nil {
@@ -120,10 +108,10 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		// progress bar ticker
 		t.PBar = NewPBar(time.Second)
 		ticker1s := time.NewTicker(1 * time.Second)
-		ticker10s := time.NewTicker(10 * time.Second)
+		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker1s.Stop()
-			defer ticker10s.Stop()
+			defer ticker5s.Stop()
 
 			for {
 				select {
@@ -138,8 +126,8 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
 
-				case <-ticker10s.C:
-					// update rows every 10sec
+				case <-ticker5s.C:
+					// update rows every 5sec
 					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
@@ -222,8 +210,14 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 	return
 }
 
-func (t *TaskExecution) AppendOutput(text string) {
-	t.Output = t.Output + text
+func (t *TaskExecution) AppendOutput(line string) {
+	t.Output.WriteString(line + "\n") // add new-line char
+
+	// push line if not full
+	select {
+	case t.OutputLines <- line:
+	default:
+	}
 }
 
 func (t *TaskExecution) GetBytesString() (s string) {
@@ -318,8 +312,6 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 			}
 		} else if t.Config.Source.HasPrimaryKey() {
 			addRowIDCol = false
-		} else {
-			t.Config.Target.Options.TableKeys = database.TableKeys{}
 		}
 
 		if addRowIDCol {

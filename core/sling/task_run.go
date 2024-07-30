@@ -43,7 +43,6 @@ func init() {
 // Execute runs a Sling task.
 // This may be a file/db to file/db transfer
 func (t *TaskExecution) Execute() error {
-	env.SetLogger()
 
 	done := make(chan struct{})
 	now := time.Now()
@@ -135,24 +134,14 @@ func (t *TaskExecution) Execute() error {
 			eG := g.ErrorGroup{}
 			eG.Add(err)
 			eG.Add(t.Err)
-			t.Err = g.Error(eG.Err(), "execution failed")
+			t.Err = g.Error(eG.Err())
 		} else {
-			t.Err = g.Error(t.Err, "execution failed")
+			t.Err = g.Error(t.Err)
 		}
 	}
 
 	now2 := time.Now()
 	t.EndTime = &now2
-
-	// show help text
-	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode() {
-		env.Println("")
-		env.Println(env.MagentaString(eh))
-		env.Println("")
-	}
-
-	// update into store
-	StoreUpdate(t)
 
 	return t.Err
 }

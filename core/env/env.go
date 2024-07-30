@@ -1,10 +1,8 @@
 package env
 
 import (
-	"bufio"
 	"embed"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"strings"
@@ -23,10 +21,7 @@ var (
 	PlausibleURL   = ""
 	SentryDsn      = ""
 	NoColor        = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
-	OsStdErr       *os.File
-	StderrR        io.ReadCloser
-	StdErrW        *os.File
-	StdErrChn      chan string
+	LogSink        func(t string)
 	TelMap         = g.M("begin_time", time.Now().UnixMicro())
 	TelMux         = sync.Mutex{}
 	HomeDirs       = map[string]string{}
@@ -95,7 +90,7 @@ func SetLogger() {
 	}
 
 	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
-	outputErr := zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "2006-01-02 15:04:05"}
+	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
 	outputOut.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
 	}
@@ -116,9 +111,9 @@ func SetLogger() {
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
-		outputErr = zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "3:04PM"}
+		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM"}
 		if g.IsDebugLow() {
-			outputErr = zerolog.ConsoleWriter{Out: StdErrW, TimeFormat: "2006-01-02 15:04:05"}
+			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
 		}
 		g.ZLogOut = zerolog.New(outputErr).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
@@ -128,37 +123,26 @@ func SetLogger() {
 // InitLogger initializes the g Logger
 func InitLogger() {
 
-	// capture stdErr
-	// OsStdErr = os.Stderr
-	// StdErrW = os.Stderr
-	StderrR, StdErrW, _ = os.Pipe()
-	// os.Stderr = StdErrW
-
-	StderrR2 := io.TeeReader(StderrR, os.Stderr)
+	// set log hook
+	g.SetLogHook(
+		g.NewLogHook(
+			g.DebugLevel,
+			func(le *g.LogEntry) { processLogEntry(le) },
+		),
+	)
 
 	SetLogger()
-
-	if StderrR != nil {
-		StderrReader := bufio.NewReader(StderrR2)
-
-		go func() {
-			buf := make([]byte, 4*1024)
-			for {
-				nr, err := StderrReader.Read(buf)
-				if err == nil && nr > 0 {
-					text := string(buf[0:nr])
-					if StdErrChn != nil {
-						StdErrChn <- text
-					}
-				}
-			}
-		}()
-	}
 }
 
-func Print(text string) { fmt.Fprintf(StdErrW, "%s", text) }
+func Print(text string) {
+	fmt.Fprintf(os.Stderr, "%s", text)
+	processLogEntry(&g.LogEntry{Level: 99, Text: text})
+}
 
-func Println(text string) { fmt.Fprintf(StdErrW, "%s\n", text) }
+func Println(text string) {
+	text = text + "\n"
+	Print(text)
+}
 
 func LoadSlingEnvFile() (ef EnvFile) {
 	ef = LoadEnvFile(HomeDirEnvFile)
@@ -260,4 +244,33 @@ func GetTempFolder() string {
 
 func cleanWindowsPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
+}
+
+func processLogEntry(le *g.LogEntry) {
+	// construct log line like zerolog
+	var timeText, levelPrefix string
+
+	switch le.Level {
+	case zerolog.TraceLevel:
+		levelPrefix = "\x1b[35mTRC\x1b[0m "
+	case zerolog.DebugLevel:
+		levelPrefix = "\x1b[33mDBG\x1b[0m "
+	case zerolog.InfoLevel:
+		levelPrefix = "\x1b[32mINF\x1b[0m "
+	case zerolog.WarnLevel:
+		levelPrefix = "\x1b[31mWRN\x1b[0m "
+	}
+
+	if !le.Time.IsZero() {
+		timeText = g.F(
+			"\x1b[90m%s\x1b[0m ",
+			le.Time.Format("2006-01-02 15:04:05"),
+		)
+	}
+
+	msg := g.F(timeText+levelPrefix+le.Text, le.Args...)
+
+	if LogSink != nil {
+		LogSink(msg)
+	}
 }

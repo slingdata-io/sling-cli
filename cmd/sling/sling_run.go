@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -361,8 +362,13 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		return nil
 	}
 
-	// insert into store for history keeping
-	sling.StoreInsert(task)
+	// set log sink
+	env.LogSink = func(text string) {
+		task.AppendOutput(text)
+	}
+
+	sling.StoreInsert(task)       // insert into store
+	defer sling.StoreUpdate(task) // update into store after
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -375,7 +381,20 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	// run task
 	setTM()
 	err = task.Execute()
+
 	if err != nil {
+
+		if replication != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", env.RedString(g.ErrMsgSimple(err)))
+		}
+
+		// show help text
+		if eh := sling.ErrorHelper(err); eh != "" {
+			env.Println("")
+			env.Println(env.MagentaString(eh))
+			env.Println("")
+		}
+
 		return g.Error(err)
 	}
 
@@ -439,17 +458,12 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
 
+		env.LogSink = nil // clear log sink
+
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		env.SetTelVal("replication_md5", replication.MD5())
 		err = runTask(cfg, &replication)
 		if err != nil {
-			g.Info(env.RedString(err.Error()))
-			if eh := sling.ErrorHelper(err); eh != "" {
-				env.Println("")
-				env.Println(env.MagentaString(eh))
-				env.Println("")
-			}
-
 			eG.Capture(err, cfg.StreamName)
 
 			// if a connection issue, stop

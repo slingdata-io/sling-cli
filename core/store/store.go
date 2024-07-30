@@ -144,7 +144,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
 		Bytes:     bytes,
-		Output:    t.Output,
+		Output:    t.Output.String(),
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
@@ -157,7 +157,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 	if t.Err != nil {
 		err, ok := t.Err.(*g.ErrType)
 		if ok {
-			exec.Err = g.String(err.Full())
+			exec.Err = g.String(err.Debug())
 		} else {
 			exec.Err = g.String(t.Err.Error())
 		}
@@ -294,7 +294,7 @@ func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
 	e := ToExecutionObject(t)
 
 	exec = &Execution{ExecID: t.ExecID, StreamID: e.StreamID, TaskExec: t}
-	err = Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
+	err = Db.Omit("output").Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
 	if err != nil {
 		g.Error(err, "could not select execution from local .sling.db.")
 		return
