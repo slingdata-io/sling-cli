@@ -148,7 +148,7 @@ sling -h
 
 Requirements:
 - Install Go 1.22+ (https://go.dev/doc/install)
-- Install a C compiler (gcc, tdm-gcc, mingw)
+- Install a C compiler ([gcc](https://www.google.com/search?q=install+gcc&oq=install+gcc), [tdm-gcc](https://jmeubank.github.io/tdm-gcc/), [mingw](https://www.google.com/search?q=install+mingw), etc)
 
 #### Linux or Mac
 ```bash
