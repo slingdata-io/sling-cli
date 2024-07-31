@@ -28,7 +28,16 @@ func init() {
 	}
 }
 
-var syncStatus = func(e *Execution) {}
+var syncStatus = func(e *Execution) {
+	// drain channel for now
+	for {
+		select {
+		case <-e.TaskExec.OutputLines:
+		default:
+			return
+		}
+	}
+}
 
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
