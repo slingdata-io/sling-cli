@@ -85,7 +85,7 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
-		OutputLines:  make(chan *g.LogLine, 500),
+		OutputLines:  make(chan *g.LogLine, 5000),
 	}
 
 	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
