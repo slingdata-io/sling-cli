@@ -89,7 +89,7 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 	}
 
 	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
-		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args + "\n"})
+		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 	}
 
 	err := cfg.Prepare()
