@@ -263,10 +263,11 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
 			taskMap["status"] = task.Status
-			taskMap["source_md5"] = task.Config.Source.MD5()
+			taskMap["source_md5"] = task.Config.SrcConnMD5()
 			taskMap["source_type"] = task.Config.SrcConn.Type
-			taskMap["target_md5"] = task.Config.Target.MD5()
+			taskMap["target_md5"] = task.Config.TgtConnMD5()
 			taskMap["target_type"] = task.Config.TgtConn.Type
+			taskMap["stream_id"] = task.Config.StreamID()
 		}
 
 		if projectID != "" {

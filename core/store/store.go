@@ -148,7 +148,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	exec := Execution{
 		ExecID:    t.ExecID,
-		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.StreamName, t.Config.Target.Object),
+		StreamID:  t.Config.StreamID(),
 		Status:    t.Status,
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,

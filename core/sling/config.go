@@ -985,6 +985,18 @@ func (cfg *Config) MD5() string {
 	return g.MD5(payload)
 }
 
+func (cfg *Config) SrcConnMD5() string {
+	return g.MD5(g.Marshal(cfg.SrcConn.Data))
+}
+
+func (cfg *Config) TgtConnMD5() string {
+	return g.MD5(g.Marshal(cfg.TgtConn.Data))
+}
+
+func (cfg *Config) StreamID() string {
+	return g.MD5(cfg.Source.Conn, cfg.Target.Conn, cfg.StreamName, cfg.Target.Object)
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
