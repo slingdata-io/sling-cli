@@ -3219,9 +3219,9 @@ func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
 	sqlLower := strings.ToLower(sql)
 
-	if len(sql) > 3000 {
-		sql = sql[0:3000]
-	}
+	// if len(sql) > 3000 {
+	// 	sql = sql[0:3000]
+	// }
 
 	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
 
