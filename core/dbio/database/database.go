@@ -835,7 +835,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	var colTypes []ColumnType
 	if result != nil {
-		dbColTypes, err := result.ColumnTypes()
+		dbColTypes, err := getColumnTypes(result)
 		if err != nil {
 			queryContext.Cancel()
 			return ds, g.Error(err, "could not get column types")

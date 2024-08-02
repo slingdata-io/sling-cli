@@ -959,3 +959,18 @@ func (t *Table) Indexes(columns iop.Columns) (indexes []TableIndex) {
 
 	return
 }
+
+// getColumnTypes recovers from ColumnTypes panics
+// this can happen in the Microsoft go-mssqldb driver
+// See https://github.com/microsoft/go-mssqldb/issues/79
+func getColumnTypes(result *sqlx.Rows) (dbColTypes []*sql.ColumnType, err error) {
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
+		}
+	}()
+
+	return result.ColumnTypes()
+}

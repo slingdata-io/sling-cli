@@ -579,6 +579,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the source PG Database could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
 		case contains("wrong number of fields"):
 			helpString = "Perhaps setting the delimiter (source_options.delimiter) would help? See https://docs.slingdata.io/sling-cli/run/configuration#source"
+		case contains("not implemented makeGoLangScanType"):
+			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		}
 	}
 	return
