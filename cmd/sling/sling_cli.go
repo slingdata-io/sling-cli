@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/denisbrodbeck/machineid"
 	"github.com/getsentry/sentry-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
@@ -346,7 +345,7 @@ func init() {
 		if projectID == "" {
 			projectID = os.Getenv("GITHUB_REPOSITORY_ID")
 		}
-		machineID, _ = machineid.ProtectedID("sling")
+		machineID = store.GetMachineID()
 		if projectID != "" {
 			machineID = g.MD5(projectID) // hashed
 		}
