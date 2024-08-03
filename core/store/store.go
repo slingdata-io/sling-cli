@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql/driver"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -326,5 +327,18 @@ func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
 	// sync status
 	syncStatus(exec)
 
+	return
+}
+
+// the SHA-1 hash of the very first commit in a Git repository
+func GetRootCommit(dirPath string) (rootCommit string) {
+	// get first sha
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = dirPath
+	out, err := cmd.Output()
+	if err == nil {
+		// in case of multiple root commits, take first line
+		rootCommit = strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
+	}
 	return
 }

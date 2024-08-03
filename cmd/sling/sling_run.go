@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime/debug"
@@ -15,6 +14,7 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
+	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -531,12 +531,8 @@ func setProjectID(cfgPath string) {
 	cfgPath, _ = filepath.Abs(cfgPath)
 
 	if fs, err := os.Stat(cfgPath); err == nil && !fs.IsDir() {
-		// get first sha
-		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
-		cmd.Dir = filepath.Dir(cfgPath)
-		out, err := cmd.Output()
-		if err == nil && projectID == "" {
-			projectID = strings.TrimSpace(string(out))
+		if projectID == "" {
+			projectID = store.GetRootCommit(filepath.Dir(cfgPath))
 		}
 	}
 }
