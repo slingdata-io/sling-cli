@@ -82,6 +82,9 @@ func (conn *BigQueryConn) Init() error {
 	if conn.GetProp("GC_KEY_FILE") == "" {
 		conn.SetProp("GC_KEY_FILE", conn.GetProp("credentialsFile"))
 	}
+	if conn.GetProp("GC_KEY_BODY") == "" {
+		conn.SetProp("GC_KEY_BODY", conn.GetProp("KEY_BODY"))
+	}
 
 	// set MAX_DECIMALS to fix bigquery import for numeric types
 	conn.SetProp("MAX_DECIMALS", "9")
