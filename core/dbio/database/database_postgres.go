@@ -195,6 +195,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					ds.Context.Cancel()
+					g.Warn(g.Marshal(err))
 					g.Trace("error for rec: %s", g.Pretty(batch.Columns.MakeRec(row)))
 					return g.Error(err, "could not execute statement")
 				}
