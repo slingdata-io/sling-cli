@@ -90,11 +90,12 @@ func GetLocalConns(force ...bool) []ConnEntry {
 
 	// env.yaml as an Environment variable
 	if content := os.Getenv("ENV_YAML"); content != "" {
-		m := g.M()
-		err := yaml.Unmarshal([]byte(content), &m)
+		ef, err := env.LoadSlingEnvFileBody(content)
 		if err != nil {
 			g.LogError(g.Error(err, "could not parse ENV_YAML content"))
 		} else {
+			m := g.M()
+			g.JSONConvert(ef, &m)
 			profileConns, err := ReadConnections(m)
 			if !g.LogError(err) {
 				for _, conn := range profileConns {

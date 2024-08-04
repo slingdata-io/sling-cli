@@ -12,6 +12,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
+	"gopkg.in/yaml.v2"
 )
 
 var (
@@ -148,6 +149,11 @@ func LoadSlingEnvFile() (ef EnvFile) {
 	ef = LoadEnvFile(HomeDirEnvFile)
 	Env = &ef
 	Env.TopComment = "# Environment Credentials for Sling CLI\n# See https://docs.slingdata.io/sling-cli/environment\n"
+	return
+}
+
+func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
+	err = yaml.Unmarshal([]byte(body), &ef)
 	return
 }
 
