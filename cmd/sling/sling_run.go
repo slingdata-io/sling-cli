@@ -14,7 +14,6 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
-	"github.com/slingdata-io/sling-cli/core/store"
 
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
@@ -532,7 +531,7 @@ func setProjectID(cfgPath string) {
 
 	if fs, err := os.Stat(cfgPath); err == nil && !fs.IsDir() {
 		if projectID == "" {
-			projectID = store.GetRootCommit(filepath.Dir(cfgPath))
+			projectID = g.GetRootCommit(filepath.Dir(cfgPath))
 		}
 	}
 }
