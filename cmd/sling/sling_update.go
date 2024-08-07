@@ -13,6 +13,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -63,14 +64,21 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	if err != nil {
 		return ok, g.Error(err, "Unable to determine executable path")
 	} else if strings.Contains(execFileName, "homebrew") {
-		g.Warn("Sling was installed with brew, please run `brew upgrade slingdata-io/sling/sling`")
+		if err = upgradeBrew(); err != nil {
+			g.Warn("Could not auto-upgrade, please manually run `brew upgrade slingdata-io/sling/sling`")
+		}
 		return ok, nil
 	} else if strings.Contains(execFileName, "scoop") {
-		g.Warn("Sling was installed with scoop, please run `scoop update sling`")
+		if err = upgradeScoop(); err != nil {
+			g.Warn("Could not auto-upgrade, please manually run `scoop update sling`")
+		}
 		return ok, nil
 	}
 
-	fileStat, _ := os.Stat(execFileName)
+	fileStat, err := os.Stat(execFileName)
+	if err != nil {
+		return ok, g.Error(err, "could not stat %s", execFileName)
+	}
 	fileMode := fileStat.Mode()
 
 	folderPath := path.Join(env.GetTempFolder(), "sling.new")
@@ -116,6 +124,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	err = os.Rename(filePath, execFileName)
 	if err != nil {
 		g.Warn("Unable to rename current binary executable. Try with sudo or admin?")
+		os.Rename(execFileName+".old", execFileName) // undo first rename
 		return ok, err
 	}
 
@@ -125,6 +134,44 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	g.Info("Updated to " + strings.TrimSpace(string(updateVersion)))
 
 	return ok, nil
+}
+
+func upgradeBrew() (err error) {
+	g.Info("Sling was installed with brew. Running `brew update` and `brew upgrade slingdata-io/sling/sling`")
+
+	proc, err := process.NewProc("brew")
+	if err != nil {
+		return g.Error(err, "could not make brew process")
+	}
+	proc.Env = g.KVArrToMap(os.Environ()...)
+	proc.Print = true
+
+	if err = proc.Run("update"); err != nil {
+		return g.Error(err, "could not update brew")
+	}
+
+	if err = proc.Run("upgrade", "slingdata-io/sling/sling"); err != nil {
+		return g.Error(err, "could not upgrade sling via brew")
+	}
+
+	return nil
+}
+
+func upgradeScoop() (err error) {
+	g.Info("Sling was installed with scoop. Running `scoop update sling`")
+
+	proc, err := process.NewProc("scoop")
+	if err != nil {
+		return g.Error(err, "could not make scoop process")
+	}
+	proc.Env = g.KVArrToMap(os.Environ()...)
+	proc.Print = true
+
+	if err = proc.Run("update", "sling"); err != nil {
+		return g.Error(err, "could not update sling via scoop")
+	}
+
+	return nil
 }
 
 func checkUpdate(force bool) {
