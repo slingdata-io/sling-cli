@@ -472,3 +472,29 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 
 	return
 }
+
+func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries []ConnEntry, err error) {
+	m := g.M()
+	if err = g.JSONConvert(ef, &m); err != nil {
+		return entries, g.Error(err)
+	}
+
+	connsMap := map[string]ConnEntry{}
+	profileConns, err := ReadConnections(m)
+	for _, conn := range profileConns {
+		c := ConnEntry{
+			Name:        strings.ToUpper(conn.Info().Name),
+			Description: conn.Type.NameLong(),
+			Source:      sourceName,
+			Connection:  conn,
+		}
+		connsMap[c.Name] = c
+	}
+
+	entries = lo.Values(connsMap)
+	sort.Slice(entries, func(i, j int) bool {
+		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
+	})
+
+	return
+}
