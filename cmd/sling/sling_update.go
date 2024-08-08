@@ -1,10 +1,6 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"io"
-	"log"
 	"os"
 	"path"
 	"runtime"
@@ -99,7 +95,7 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	env.TelMap["downloaded"] = true
 
 	// expand archive
-	err = ExtractTarGz(tazGzFilePath, folderPath)
+	err = g.ExtractTarGz(tazGzFilePath, folderPath)
 	if err != nil {
 		g.Warn("Unable to download update!")
 		return ok, err
@@ -227,61 +223,6 @@ func getSlingPackage() string {
 		slingPackage = "binary"
 	}
 	return slingPackage
-}
-
-func ExtractTarGz(filePath, outFolder string) (err error) {
-	gzipStream, err := os.Open(filePath)
-	if err != nil {
-		return g.Error(err, "could not open file")
-	}
-	uncompressedStream, err := gzip.NewReader(gzipStream)
-	if err != nil {
-		log.Fatal("ExtractTarGz: NewReader failed")
-	}
-
-	tarReader := tar.NewReader(uncompressedStream)
-
-	for {
-		header, err := tarReader.Next()
-
-		if err == io.EOF {
-			break
-		}
-
-		if err != nil {
-			log.Fatalf("ExtractTarGz: Next() failed: %s", err.Error())
-			return g.Error(
-				err,
-				"ExtractTarGz: Next() failed",
-				header.Typeflag,
-				header.Name)
-		}
-
-		outPath := path.Join(outFolder, header.Name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.Mkdir(outPath, 0755); err != nil {
-				log.Fatalf("ExtractTarGz: Mkdir() failed: %s", err.Error())
-			}
-		case tar.TypeReg:
-			outFile, err := os.Create(outPath)
-			if err != nil {
-				log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
-			}
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
-			}
-			outFile.Close()
-
-		default:
-			return g.Error(
-				"ExtractTarGz: uknown type: %s in %s",
-				header.Typeflag,
-				header.Name)
-		}
-	}
-
-	return nil
 }
 
 func printUpdateAvailable() {
