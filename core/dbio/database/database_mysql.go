@@ -67,6 +67,25 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 	return u.DSN
 }
 
+func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return ddl, nil
+}
+
 // BulkInsert
 // Common Error: ERROR 3948 (42000) at line 1: Loading local data is disabled; this must be enabled on both the client and server sides
 // Need to enable on serer side: https://stackoverflow.com/a/60027776
@@ -259,18 +278,18 @@ func (conn *MySQLConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFie
 	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", tgtT.NameQ()+".")
 
 	sqlTemplate := `
-	DELETE FROM {tgt_table}
-	WHERE EXISTS (
-			SELECT 1
-			FROM {src_table}
-			WHERE {src_tgt_pk_equal}
+	delete from {tgt_table}
+	where exists (
+			select 1
+			from {src_table}
+			where {src_tgt_pk_equal}
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(

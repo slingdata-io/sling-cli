@@ -56,6 +56,26 @@ func (conn *SQLiteConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
+func (conn *SQLiteConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		indexDDL := strings.ReplaceAll(index.CreateDDL(), table.FDQN(), table.NameQ()) // doesn't like FDQN
+		ddl = ddl + ";\n" + indexDDL
+	}
+
+	return ddl, nil
+}
+
 // GetURL returns the processed URL
 func (conn *SQLiteConn) GetURL(newURL ...string) string {
 	connURL := conn.BaseConn.URL
@@ -251,11 +271,11 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	INSERT INTO {tgt_table} as tgt
+	insert into {tgt_table} as tgt
 		({insert_fields}) 
-	SELECT {src_fields}
-	FROM {src_table} as src
-	WHERE true
+	select {src_fields}
+	from {src_table} as src
+	where true
 	ON CONFLICT ({pk_fields})
 	DO UPDATE 
 	SET {set_fields}

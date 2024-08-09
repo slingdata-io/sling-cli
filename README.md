@@ -40,13 +40,13 @@ https://github.com/slingdata-io/sling-cli/assets/7671010/e10ee716-1de8-4d53-8eb2
 
 Some key features:
 - Single Binary deployment (built with Go). See [installation](https://docs.slingdata.io/sling-cli/getting-started) page.
-- Use Custom SQL as a stream: `--src-stream='SELECT * from my_table where col1 > 10'`
+- Use Custom SQL as a stream: `--src-stream='select * from my_table where col1 > 10'`
 - Manage / View / Test / Discover your connections with the [`sling conns`](https://docs.slingdata.io/sling-cli/environment#managing-connections) sub-command
 - Use Environment Variable as connections if you prefer (`export MY_PG='postgres//...`)'
 - Provide YAML or JSON configurations (perfect for git version control).
 - Powerful [Replication](https://docs.slingdata.io/sling-cli/run/configuration/replication) logic, to replication many tables with a wildcard (`my_schema.*`).
 - Reads your existing [DBT connections](https://docs.slingdata.io/sling-cli/environment#dbt-profiles-dbt-profiles.yml)
-- Use your environment variable in your YAML / JSON config (`SELECT * from my_table where date = '{date}'`)
+- Use your environment variable in your YAML / JSON config (`select * from my_table where date = '{date}'`)
 - Convenient [Transformations](https://docs.slingdata.io/sling-cli/run/configuration/transformations), such as the `flatten` option, which auto-creates columns from your nested fields.
 - Run Pre & Post SQL commands.
 - many more!
@@ -145,6 +145,10 @@ sling -h
 ```
 
 ### Compiling From Source
+
+Requirements:
+- Install Go 1.22+ (https://go.dev/doc/install)
+- Install a C compiler ([gcc](https://www.google.com/search?q=install+gcc&oq=install+gcc), [tdm-gcc](https://jmeubank.github.io/tdm-gcc/), [mingw](https://www.google.com/search?q=install+mingw), etc)
 
 #### Linux or Mac
 ```bash

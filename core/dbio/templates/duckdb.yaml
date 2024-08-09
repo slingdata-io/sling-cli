@@ -1,6 +1,9 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
   create_table: create table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
@@ -148,3 +151,4 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
+  max_string_type: text

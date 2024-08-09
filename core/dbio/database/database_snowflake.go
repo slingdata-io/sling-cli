@@ -185,7 +185,7 @@ func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 		// allow custom SQL expression for clustering
 		clusterBy = g.F("cluster by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F("cluster by (%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)
@@ -239,6 +239,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 	if err != nil {
 		err = g.Error(err, "Could not get fs client")
 		return
+	}
+
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
 	}
 
 	fs.SetProp("format", "csv")
@@ -848,8 +853,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 }
 
 func (conn *SnowflakeConn) setEmptyAsNull(sql string) string {
-	if !cast.ToBool(conn.GetProp("empty_as_null")) {
-		sql = strings.ReplaceAll(sql, "EMPTY_FIELD_AS_NULL=TRUE", "EMPTY_FIELD_AS_NULL=FALSE")
+	if cast.ToBool(conn.GetProp("empty_as_null")) {
+		sql = strings.ReplaceAll(sql, "EMPTY_FIELD_AS_NULL = FALSE", "EMPTY_FIELD_AS_NULL = TRUE")
 	}
 	return sql
 }
@@ -906,13 +911,13 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT {src_fields} FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select {src_fields} from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields_values})
+		INSERT ({insert_fields}) values  ({src_fields_values})
 	`
 
 	sql = g.R(

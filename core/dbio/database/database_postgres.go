@@ -71,20 +71,29 @@ func (conn *PostgresConn) CopyToStdout(ctx *g.Context, sql string) (stdOutReader
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
+	ddl, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
-		return sql, g.Error(err)
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
 	}
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
 
-	return strings.TrimSpace(sql), nil
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return strings.TrimSpace(ddl), nil
 }
 
 // BulkExportStream uses the bulk dumping (COPY)
@@ -186,6 +195,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					ds.Context.Cancel()
+					g.Warn(g.Marshal(err))
 					g.Trace("error for rec: %s", g.Pretty(batch.Columns.MakeRec(row)))
 					return g.Error(err, "could not execute statement")
 				}

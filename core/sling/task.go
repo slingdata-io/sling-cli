@@ -11,7 +11,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -37,8 +36,9 @@ type TaskExecution struct {
 	df            *iop.Dataflow `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
-	lastIncrement time.Time // the time of last row increment (to determine stalling)
-	Output        string    `json:"-"`
+	lastIncrement time.Time       // the time of last row increment (to determine stalling)
+	Output        strings.Builder `json:"-"`
+	OutputLines   chan *g.LogLine
 
 	Replication    *ReplicationConfig `json:"replication"`
 	ProgressHist   []string           `json:"progress_hist"`
@@ -85,24 +85,12 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		PBar:         NewPBar(time.Second),
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
+		OutputLines:  make(chan *g.LogLine, 5000),
 	}
 
 	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
-		t.AppendOutput(" -- args: " + args + "\n")
+		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 	}
-
-	// stdErr output
-	go func() {
-		env.StdErrChn = make(chan string, 1000)
-
-		for {
-			if t.EndTime != nil {
-				env.StdErrChn = nil
-				break
-			}
-			t.AppendOutput(<-env.StdErrChn) // process output
-		}
-	}()
 
 	err := cfg.Prepare()
 	if err != nil {
@@ -120,10 +108,10 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		// progress bar ticker
 		t.PBar = NewPBar(time.Second)
 		ticker1s := time.NewTicker(1 * time.Second)
-		ticker10s := time.NewTicker(10 * time.Second)
+		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker1s.Stop()
-			defer ticker10s.Stop()
+			defer ticker5s.Stop()
 
 			for {
 				select {
@@ -138,8 +126,8 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 						t.PBar.bar.Set("byteRate", g.F("%s/s", humanize.Bytes(cast.ToUint64(byteRate))))
 					}
 
-				case <-ticker10s.C:
-					// update rows every 10sec
+				case <-ticker5s.C:
+					// update rows every 5sec
 					StoreUpdate(t)
 				default:
 					time.Sleep(100 * time.Millisecond)
@@ -222,8 +210,14 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 	return
 }
 
-func (t *TaskExecution) AppendOutput(text string) {
-	t.Output = t.Output + text
+func (t *TaskExecution) AppendOutput(ll *g.LogLine) {
+	t.Output.WriteString(ll.Line() + "\n") // add new-line char
+
+	// push line if not full
+	select {
+	case t.OutputLines <- ll:
+	default:
+	}
 }
 
 func (t *TaskExecution) GetBytesString() (s string) {
@@ -318,8 +312,6 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 			}
 		} else if t.Config.Source.HasPrimaryKey() {
 			addRowIDCol = false
-		} else {
-			t.Config.Target.Options.TableKeys = database.TableKeys{}
 		}
 
 		if addRowIDCol {
@@ -587,6 +579,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the source PG Database could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
 		case contains("wrong number of fields"):
 			helpString = "Perhaps setting the delimiter (source_options.delimiter) would help? See https://docs.slingdata.io/sling-cli/run/configuration#source"
+		case contains("not implemented makeGoLangScanType"):
+			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		}
 	}
 	return

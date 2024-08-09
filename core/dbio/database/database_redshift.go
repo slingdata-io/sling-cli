@@ -68,14 +68,14 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	distKey := ""
 	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{dist_key}", distKey)
 
 	sortKey := ""
 	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{sort_key}", sortKey)
@@ -180,6 +180,11 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
 	fs.SetProp("format", "csv")
 	fs.SetProp("delimiter", ",")
 	fs.SetProp("header", "true")
@@ -272,15 +277,15 @@ func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	)
 
 	sqlTempl := `
-	DELETE FROM {tgt_table}
-	USING {src_table}
-	WHERE {src_tgt_pk_equal}
+	delete from {tgt_table}
+	using {src_table}
+	where {src_tgt_pk_equal}
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(
@@ -303,7 +308,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		return
 	}
 
-	tgtColumns := quoteColNames(conn, columns.Names())
+	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
 
 	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)

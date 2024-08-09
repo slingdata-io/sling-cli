@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"embed"
 	"strings"
+	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -317,6 +318,7 @@ func (template Template) ToData() (data iop.Dataset) {
 	return
 }
 
+// a cache for templates (so we only read once)
 var typeTemplate = map[Type]Template{}
 
 func (t Type) Template() (template Template, err error) {
@@ -423,4 +425,82 @@ func (t Type) Template() (template Template, err error) {
 	typeTemplate[t] = template
 
 	return template, nil
+}
+
+// Unquote removes quotes to the field name
+func (t Type) Unquote(field string) string {
+	template, _ := t.Template()
+	q := template.Variable["quote_char"]
+	return strings.ReplaceAll(field, q, "")
+}
+
+// Quote adds quotes to the field name
+func (t Type) Quote(field string, normalize ...bool) string {
+	Normalize := true
+	if len(normalize) > 0 {
+		Normalize = normalize[0]
+	}
+
+	template, _ := t.Template()
+	// always normalize if case is uniform. Why would you quote and not normalize?
+	if !hasVariedCase(field) && Normalize {
+		if g.In(t, TypeDbOracle, TypeDbSnowflake) {
+			field = strings.ToUpper(field)
+		} else {
+			field = strings.ToLower(field)
+		}
+	}
+	q := template.Variable["quote_char"]
+	field = t.Unquote(field)
+	return q + field + q
+}
+
+func (t Type) QuoteNames(names ...string) (newNames []string) {
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = t.Quote(names[i])
+	}
+	return newNames
+}
+
+func hasVariedCase(text string) bool {
+	hasUpper := false
+	hasLower := false
+	for _, c := range text {
+		if unicode.IsUpper(c) {
+			hasUpper = true
+		}
+		if unicode.IsLower(c) {
+			hasLower = true
+		}
+		if hasUpper && hasLower {
+			break
+		}
+	}
+
+	return hasUpper && hasLower
+}
+
+func (t Type) GetTemplateValue(path string) (value string) {
+
+	template, _ := t.Template()
+	prefixes := map[string]map[string]string{
+		"core.":             template.Core,
+		"analysis.":         template.Analysis,
+		"function.":         template.Function,
+		"metadata.":         template.Metadata,
+		"general_type_map.": template.GeneralTypeMap,
+		"native_type_map.":  template.NativeTypeMap,
+		"variable.":         template.Variable,
+	}
+
+	for prefix, dict := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			key := strings.Replace(path, prefix, "", 1)
+			value = dict[key]
+			break
+		}
+	}
+
+	return value
 }

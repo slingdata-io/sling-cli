@@ -1,9 +1,10 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'indexes do not apply for bigquery'"
   create_schema: create schema if not exists {schema}
   create_table: create table {table} ({col_types}) {partition_by} {cluster_by}
-  create_index: create index {index} on {table} ({cols})
+  create_index: "select 'indexes do not apply for bigquery'"
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
   # alter_columns: alter table {table} alter column {col_ddl}

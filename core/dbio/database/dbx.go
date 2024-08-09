@@ -187,7 +187,7 @@ func (m *ModelDbX) Insert(db *sqlx.DB, fields ...string) (err error) {
 		placeholders[i] = "?"
 	}
 
-	sql := g.F("INSERT INTO %s (%s) VALUES (%s)", table, strings.Join(fields, ", "), placeholders.Join(", "))
+	sql := g.F("insert into %s (%s) values  (%s)", table, strings.Join(fields, ", "), placeholders.Join(", "))
 	sql = prep(db, sql)
 
 	res, err := db.Exec(sql, values...)
@@ -226,7 +226,7 @@ func (m *ModelDbX) Update(db *sqlx.DB, fields ...string) (err error) {
 		setValues[i] = g.F("%s = ?", fields[i])
 	}
 
-	sql := g.F("UPDATE %s SET %s WHERE %s", table, strings.Join(setValues, ", "), m.whereClause.Clause())
+	sql := g.F("UPDATE %s SET %s where %s", table, strings.Join(setValues, ", "), m.whereClause.Clause())
 	sql = prep(db, sql)
 
 	res, err := db.Exec(sql, append(values, m.whereClause.Args()...)...)
@@ -252,7 +252,7 @@ func (m *ModelDbX) Get(db *sqlx.DB, fields ...string) (err error) {
 	}
 
 	table := m.TableName(m.Ptr)
-	sql := g.F("SELECT %s FROM %s WHERE %s", strings.Join(fields, ", "), table, m.whereClause.Clause())
+	sql := g.F("select %s from %s where %s", strings.Join(fields, ", "), table, m.whereClause.Clause())
 	sql = prep(db, sql)
 
 	rows, err := db.Queryx(sql, m.whereClause.Args()...)
@@ -296,7 +296,7 @@ func (m *ModelDbX) Select(db *sqlx.DB, objPtr interface{}, fields ...string) (er
 	}
 
 	table := m.TableName(m.Ptr)
-	sql := g.F("SELECT %s FROM %s WHERE %s", strings.Join(fields, ", "), table, m.whereClause.Clause())
+	sql := g.F("select %s from %s where %s", strings.Join(fields, ", "), table, m.whereClause.Clause())
 	sql = prep(db, sql)
 	err = db.Select(objPtr, sql, m.whereClause.Args()...)
 	if err != nil {
@@ -319,7 +319,7 @@ func (m *ModelDbX) Delete(db *sqlx.DB) (err error) {
 	if len(m.whereClause) == 0 {
 		return g.Error("did not provide where clause for delete")
 	}
-	sql := g.F("DELETE FROM %s WHERE %s", table, m.whereClause.Clause())
+	sql := g.F("delete from %s where %s", table, m.whereClause.Clause())
 	sql = prep(db, sql)
 	res, err := db.Exec(sql, m.whereClause.Args()...)
 	if err != nil {
@@ -395,7 +395,7 @@ func (x *DbX) Get(o interface{}, fields ...string) (err error) {
 	}
 
 	table := x.TableName(o)
-	sql := g.F("SELECT %s FROM %s WHERE %s", strings.Join(fields, ", "), table, x.whereClause.Clause())
+	sql := g.F("select %s from %s where %s", strings.Join(fields, ", "), table, x.whereClause.Clause())
 	sql = prep(x.db, sql)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -426,7 +426,7 @@ func (x *DbX) Select(o interface{}, fields ...string) (err error) {
 	}
 
 	table := x.TableName(o)
-	sql := g.F("SELECT %s FROM %s WHERE %s", strings.Join(fields, ", "), table, x.whereClause.Clause())
+	sql := g.F("select %s from %s where %s", strings.Join(fields, ", "), table, x.whereClause.Clause())
 	sql = prep(x.db, sql)
 	err = x.db.Select(o, sql, x.whereClause.Args()...)
 	if err != nil {

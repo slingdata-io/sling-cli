@@ -2325,6 +2325,10 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 						ds.Context.CaptureErr(err)
 						return
 					}
+				} else if rowLimit == 0 && br.Counter == 10000000 {
+					// memory can build up when writing a large dataset to a single parquet file
+					// https://github.com/slingdata-io/sling-cli/issues/351
+					g.Warn("writing a large dataset to a single parquet file can cause memory build-up. If memory consumption is high, try writing to multiple parquet files instead of one, with the file_max_rows target option.")
 				}
 			}
 		}

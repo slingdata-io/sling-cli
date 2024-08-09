@@ -310,10 +310,13 @@ func (fs *S3FileSysClient) GetWriter(uri string) (writer io.Writer, err error) {
 		defer pipeR.Close()
 
 		// Upload the file to S3.
+		ServerSideEncryption, SSEKMSKeyId := fs.getEncryptionParams()
 		_, err := uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-			Bucket: aws.String(fs.bucket),
-			Key:    aws.String(key),
-			Body:   pipeR,
+			Bucket:               aws.String(fs.bucket),
+			Key:                  aws.String(key),
+			Body:                 pipeR,
+			ServerSideEncryption: ServerSideEncryption,
+			SSEKMSKeyId:          SSEKMSKeyId,
 		})
 		if err != nil {
 			fs.Context().CaptureErr(g.Error(err, "Error uploading S3 File -> "+key))
@@ -347,10 +350,13 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	}()
 
 	// Upload the file to S3.
+	ServerSideEncryption, SSEKMSKeyId := fs.getEncryptionParams()
 	_, err = uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-		Bucket: aws.String(fs.bucket),
-		Key:    aws.String(key),
-		Body:   pr,
+		Bucket:               aws.String(fs.bucket),
+		Key:                  aws.String(key),
+		Body:                 pr,
+		ServerSideEncryption: ServerSideEncryption,
+		SSEKMSKeyId:          SSEKMSKeyId,
 	})
 	if err != nil {
 		err = g.Error(err, "failed to upload file: "+key)
@@ -358,6 +364,23 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	}
 
 	err = fs.Context().Err()
+
+	return
+}
+
+// getEncryptionParams returns the encryption params if specified
+func (fs *S3FileSysClient) getEncryptionParams() (sse, kmsKeyId *string) {
+	if val := fs.GetProp("encryption_algorithm"); val != "" {
+		if g.In(val, "AES256", "aws:kms", "aws:kms:dsse") {
+			sse = aws.String(val)
+		}
+	}
+
+	if val := fs.GetProp("encryption_kms_key"); val != "" {
+		if sse != nil && g.In(*sse, "aws:kms", "aws:kms:dsse") {
+			kmsKeyId = aws.String(val)
+		}
+	}
 
 	return
 }

@@ -108,7 +108,7 @@ func ParseBit(sp *iop.StreamProcessor, val string) (string, error) {
 }
 
 func Replace0x00(sp *iop.StreamProcessor, val string) (string, error) {
-	return strings.ReplaceAll(val, "\x00", ""), nil // replace the NUL character
+	return strings.ReplaceAll(strings.ReplaceAll(val, "\x00", ""), "\\u0000", "u-0000"), nil // replace the NUL character
 }
 
 /*
