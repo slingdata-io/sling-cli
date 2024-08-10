@@ -7,11 +7,12 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip alien liba
 # Install Oracle Instant Client
 # from https://apextips.blogspot.com/2019/09/installing-oracle-instant-client-on.html
 RUN cd /tmp && \
-  wget https://ocral.nyc3.cdn.digitaloceanspaces.com/sling/public/oracle-instantclient19.3-basiclite-19.3.0.0.0-1.x86_64.rpm && \
-  wget https://ocral.nyc3.cdn.digitaloceanspaces.com/sling/public/oracle-instantclient19.3-devel-19.3.0.0.0-1.x86_64.rpm && \
-  wget https://ocral.nyc3.cdn.digitaloceanspaces.com/sling/public/oracle-instantclient19.3-sqlplus-19.3.0.0.0-1.x86_64.rpm && \
-  wget https://ocral.nyc3.cdn.digitaloceanspaces.com/sling/public/oracle-instantclient19.3-tools-19.3.0.0.0-1.x86_64.rpm && \
+  wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-basiclite-19.3.0.0.0-1.x86_64.rpm && \
+  wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-devel-19.3.0.0.0-1.x86_64.rpm && \
+  wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-sqlplus-19.3.0.0.0-1.x86_64.rpm && \
+  wget https://download.oracle.com/otn_software/linux/instantclient/193000/oracle-instantclient19.3-tools-19.3.0.0.0-1.x86_64.rpm && \
   alien -i oracle-instantclient19.3-*.rpm
+
 
 RUN echo ' \
 # Oracle Client environment
