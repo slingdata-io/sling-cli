@@ -161,7 +161,7 @@ type BaseConn struct {
 	Data        iop.Dataset
 	defaultPort int
 	instance    *Connection
-	context     g.Context
+	context     *g.Context
 	template    dbio.Template
 	schemata    Schemata
 	properties  map[string]string
@@ -436,7 +436,11 @@ func (conn *BaseConn) Init() (err error) {
 }
 
 func (conn *BaseConn) setContext(ctx context.Context, concurrency int) {
-	conn.context = g.NewContext(ctx, concurrency)
+	c := g.NewContext(ctx, concurrency)
+	if conn.context != nil {
+		c.Map = conn.context.Map
+	}
+	conn.context = &c
 }
 
 // Self returns the respective connection Instance
@@ -468,7 +472,7 @@ func (conn *BaseConn) GetType() dbio.Type {
 
 // Context returns the db context
 func (conn *BaseConn) Context() *g.Context {
-	return &conn.context
+	return conn.context
 }
 
 // Schemata returns the Schemata object
@@ -729,17 +733,22 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		conn.Log = conn.Log[1:]
 	}
 
+	// wrap args
+	contextArgs := g.M("conn", conn.GetProp("sling_conn_id"))
+	if len(args) > 0 {
+		contextArgs["query_args"] = args
+	}
 	if strings.Contains(query, noDebugKey) {
 		if !noColor {
 			query = env.CyanString(query)
 		}
-		g.Trace(query, args...)
+		g.Trace(query, contextArgs)
 	} else {
 		if !noColor {
 			query = env.CyanString(CleanSQL(conn, query))
 		}
 		if !cast.ToBool(conn.GetProp("silent")) {
-			g.Debug(query, args...)
+			g.Debug(query, contextArgs)
 		}
 	}
 }
