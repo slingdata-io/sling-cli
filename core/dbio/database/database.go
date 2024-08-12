@@ -748,7 +748,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 			query = env.CyanString(CleanSQL(conn, query))
 		}
 		if !cast.ToBool(conn.GetProp("silent")) {
-			g.Debug(query, contextArgs)
+			g.Debug(query)
 		}
 	}
 }
