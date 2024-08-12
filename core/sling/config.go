@@ -1330,6 +1330,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys
+		if o.TableKeys == nil {
+			o.TableKeys = database.TableKeys{}
+		}
 	}
 }
 
