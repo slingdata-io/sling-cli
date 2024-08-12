@@ -441,7 +441,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		return strings.ReplaceAll(conn.Quote(name), q, "")
 	})
 
-	// default is JSON
+	// default is CSV
 	headers := map[string]string{
 		"expect":  "100-continue",
 		"timeout": "300",
