@@ -13,6 +13,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/jlaffaye/ftp"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
@@ -63,8 +64,12 @@ func (fs *FtpFileSysClient) Connect() (err error) {
 		timeout = 5
 	}
 
-	if fs.GetProp("URL") != "" {
-		u, err := url.Parse(fs.GetProp("URL"))
+	if fs.GetProp("port") == "" {
+		fs.SetProp("port", "21")
+	}
+
+	if fs.GetProp("url") != "" {
+		u, err := url.Parse(fs.GetProp("url"))
 		if err != nil {
 			return g.Error(err, "could not parse SFTP URL")
 		}
@@ -73,28 +78,37 @@ func (fs *FtpFileSysClient) Connect() (err error) {
 		user := u.User.Username()
 		password, _ := u.User.Password()
 		port := cast.ToInt(u.Port())
-		if port == 0 {
-			port = 21
-		}
 
 		if user != "" {
-			fs.SetProp("USER", user)
+			fs.SetProp("user", user)
 		}
 		if password != "" {
-			fs.SetProp("PASSWORD", password)
+			fs.SetProp("password", password)
 		}
 		if host != "" {
-			fs.SetProp("HOST", host)
+			fs.SetProp("host", host)
 		}
 		if port != 0 {
-			fs.SetProp("PORT", cast.ToString(port))
+			fs.SetProp("port", cast.ToString(port))
 		}
 	}
 
-	address := g.F("%s:21", fs.GetProp("host"))
-	if port := fs.GetProp("port"); port != "" {
-		address = g.F("%s:%s", fs.GetProp("host"), fs.GetProp("port"))
+	// via SSH tunnel
+	if sshTunnelURL := fs.GetProp("ssh_tunnel"); sshTunnelURL != "" {
+
+		tunnelPrivateKey := fs.GetProp("ssh_private_key")
+		tunnelPassphrase := fs.GetProp("ssh_passphrase")
+
+		localPort, err := iop.OpenTunnelSSH(fs.GetProp("host"), cast.ToInt(fs.GetProp("port")), sshTunnelURL, tunnelPrivateKey, tunnelPassphrase)
+		if err != nil {
+			return g.Error(err, "could not connect to ssh tunnel server")
+		}
+
+		fs.SetProp("host", "127.0.0.1")
+		fs.SetProp("port", cast.ToString(localPort))
 	}
+
+	address := g.F("%s:%s", fs.GetProp("host"), fs.GetProp("port"))
 
 	options := []ftp.DialOption{
 		ftp.DialWithTimeout(time.Duration(timeout) * time.Second),

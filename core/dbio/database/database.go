@@ -559,23 +559,11 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
-		sshU, err := url.Parse(sshURL)
-		if err != nil {
-			return g.Error(err, "could not parse SSH_TUNNEL URL")
-		}
 
 		connU, err := url.Parse(connURL)
 		if err != nil {
 			return g.Error(err, "could not parse connection URL for SSH forwarding")
 		}
-
-		sshHost := sshU.Hostname()
-		sshPort := cast.ToInt(sshU.Port())
-		if sshPort == 0 {
-			sshPort = 22
-		}
-		sshUser := sshU.User.Username()
-		sshPassword, _ := sshU.User.Password()
 
 		connHost := connU.Hostname()
 		connPort := cast.ToInt(connU.Port())
@@ -587,20 +575,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			)
 		}
 
-		conn.sshClient = &iop.SSHClient{
-			Host:       sshHost,
-			Port:       sshPort,
-			User:       sshUser,
-			Password:   sshPassword,
-			TgtHost:    connHost,
-			TgtPort:    connPort,
-			PrivateKey: conn.GetProp("SSH_PRIVATE_KEY"),
-			Passphrase: conn.GetProp("SSH_PASSPHRASE"),
-		}
-
-		localPort, err := conn.sshClient.OpenPortForward()
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
 		if err != nil {
-			return g.Error(err, "could not connect to ssh server")
+			return g.Error(err, "could not connect to ssh tunnel server")
 		}
 
 		connURL = strings.ReplaceAll(

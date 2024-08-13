@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
@@ -87,10 +89,39 @@ func (fw fakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
 	return fw.w.Write(p)
 }
 
-// Connect initiates the Google Cloud Storage client
+// Connect initiates the S3 client
 func (fs *S3FileSysClient) Connect() (err error) {
 
-	endpoint := fs.GetProp("ENDPOINT")
+	endpoint := fs.GetProp("endpoint")
+
+	// via SSH tunnel
+	if sshTunnelURL := fs.GetProp("ssh_tunnel"); sshTunnelURL != "" {
+
+		endpointU, err := url.Parse(endpoint)
+		if err != nil {
+			return g.Error(err, "could not parse endpoint URL for SSH forwarding")
+		}
+
+		endpointPort := cast.ToInt(endpointU.Port())
+		if endpointPort == 0 {
+			if strings.HasPrefix(endpoint, "https") {
+				endpointPort = 443
+			} else if strings.HasPrefix(endpoint, "http") {
+				endpointPort = 80
+			}
+		}
+
+		tunnelPrivateKey := fs.GetProp("ssh_private_key")
+		tunnelPassphrase := fs.GetProp("ssh_passphrase")
+
+		localPort, err := iop.OpenTunnelSSH(endpointU.Hostname(), endpointPort, sshTunnelURL, tunnelPrivateKey, tunnelPassphrase)
+		if err != nil {
+			return g.Error(err, "could not connect to ssh tunnel server")
+		}
+
+		fs.SetProp("endpoint", "127.0.0.1:"+cast.ToString(localPort))
+	}
+
 	region := fs.GetProp("REGION", "DEFAULT_REGION")
 	if region == "" {
 		region = defaultRegion
