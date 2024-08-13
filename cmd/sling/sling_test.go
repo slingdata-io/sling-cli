@@ -175,7 +175,7 @@ func TestExtract(t *testing.T) {
 
 	printUpdateAvailable()
 
-	err := ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
+	err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
 	g.AssertNoError(t, err)
 }
 
