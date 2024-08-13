@@ -146,6 +146,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
+		case "columns":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Target.Columns)
+			if err != nil {
+				return ok, g.Error(err, "invalid columns -> %s", payload)
+			}
+		case "transforms":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Transforms)
+			if err != nil {
+				return ok, g.Error(err, "invalid transforms -> %s", payload)
+			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
 		case "streams":
@@ -249,7 +261,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
 			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
 			taskOptions["src_format"] = task.Config.Source.Options.Format
-			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
 			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
 			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
 			taskOptions["tgt_format"] = task.Config.Target.Options.Format
@@ -261,6 +272,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
+			taskMap["transforms"] = task.Config.Transforms
 			taskMap["status"] = task.Status
 			taskMap["source_md5"] = task.Config.SrcConnMD5()
 			taskMap["source_type"] = task.Config.SrcConn.Type

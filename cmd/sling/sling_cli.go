@@ -93,6 +93,18 @@ var cliRunFlags = []g.Flag{
 		Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
 	},
 	{
+		Name:        "transforms",
+		ShortName:   "",
+		Type:        "string",
+		Description: "An object/map, or array/list of built-in transforms to apply to records (JSON or YAML).",
+	},
+	{
+		Name:        "columns",
+		ShortName:   "",
+		Type:        "string",
+		Description: "An object/map to specify the type that a column should be cast as (JSON or YAML).",
+	},
+	{
 		Name:        "streams",
 		ShortName:   "",
 		Type:        "string",
@@ -108,7 +120,7 @@ var cliRunFlags = []g.Flag{
 		Name:        "env",
 		ShortName:   "",
 		Type:        "string",
-		Description: "in-line environment variable map to pass in (JSON or YAML).",
+		Description: "in-line environment variable object/map to pass in (JSON or YAML).",
 	},
 	{
 		Name:        "mode",

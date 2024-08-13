@@ -386,9 +386,9 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 
-	if t.Config.Source.Options.Columns != nil {
+	if t.Config.Target.Columns != nil {
 		columns := iop.Columns{}
-		switch colsCasted := t.Config.Source.Options.Columns.(type) {
+		switch colsCasted := t.Config.Target.Columns.(type) {
 		case map[string]any:
 			for colName, colType := range colsCasted {
 				col := iop.Column{
@@ -432,7 +432,7 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 		options["columns"] = g.Marshal(iop.NewColumns(columns...))
 	}
 
-	if transforms := t.Config.Source.Options.Transforms; transforms != nil {
+	if transforms := t.Config.Transforms; transforms != nil {
 		colTransforms := map[string][]string{}
 
 		makeTransformArray := func(val any) []string {
@@ -482,7 +482,7 @@ func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
 			g.Warn("did not handle transforms input: %#v", transforms)
 		}
 
-		for _, transf := range t.Config.Source.Options.extraTransforms {
+		for _, transf := range t.Config.extraTransforms {
 			if _, ok := colTransforms["*"]; !ok {
 				colTransforms["*"] = []string{transf}
 			} else {

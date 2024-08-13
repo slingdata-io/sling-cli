@@ -395,10 +395,12 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 				UpdateKey:   stream.UpdateKey,
 			},
 			Target: Target{
-				Conn:   rd.Target,
-				Object: stream.Object,
+				Conn:    rd.Target,
+				Object:  stream.Object,
+				Columns: stream.Columns,
 			},
 			Mode:              stream.Mode,
+			Transforms:        stream.Transforms,
 			Env:               g.ToMapString(rd.Env),
 			StreamName:        name,
 			ReplicationStream: &stream,
@@ -436,6 +438,8 @@ type ReplicationStreamConfig struct {
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
+	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 
 	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
 }
@@ -467,6 +471,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
+		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
+		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -582,11 +588,15 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	for _, rootNode := range rootMap {
 		if cast.ToString(rootNode.Key) == "defaults" {
+
+			if value, ok := rootNode.Value.(yaml.MapSlice); ok {
+				config.Defaults.Columns = makeColumnsMap(value)
+			}
+
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
-					value, ok := defaultsNode.Value.(yaml.MapSlice)
-					if ok {
-						config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(value)
+					if value, ok := defaultsNode.Value.(yaml.MapSlice); ok {
+						config.Defaults.SourceOptions.Columns = makeColumnsMap(value) // legacy
 					}
 				}
 			}
@@ -608,15 +618,19 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 				if streamsNode.Value == nil {
 					continue
 				}
+
+				if value, ok := streamsNode.Value.(yaml.MapSlice); ok {
+					stream.Columns = makeColumnsMap(value)
+				}
+
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
 					if cast.ToString(streamConfigNode.Key) == "source_options" {
 						if found {
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
-							value, ok := streamConfigNode.Value.(yaml.MapSlice)
-							if ok {
-								stream.SourceOptions.Columns = getSourceOptionsColumns(value)
+							if value, ok := streamConfigNode.Value.(yaml.MapSlice); ok {
+								stream.SourceOptions.Columns = makeColumnsMap(value) // legacy
 							}
 						}
 					}
@@ -628,16 +642,23 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	return
 }
 
-func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[string]any) {
+// sets the map correctly
+func makeColumnsMap(nodes yaml.MapSlice) (columns map[string]any) {
+	found := false
 	columns = map[string]any{}
-	for _, sourceOptionsNode := range sourceOptionsNodes {
-		if cast.ToString(sourceOptionsNode.Key) == "columns" {
-			if slice, ok := sourceOptionsNode.Value.(yaml.MapSlice); ok {
+	for _, node := range nodes {
+		if cast.ToString(node.Key) == "columns" {
+			found = true
+			if slice, ok := node.Value.(yaml.MapSlice); ok {
 				for _, columnNode := range slice {
 					columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
 				}
 			}
 		}
+	}
+
+	if !found {
+		return nil
 	}
 
 	return columns

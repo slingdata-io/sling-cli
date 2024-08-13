@@ -108,6 +108,16 @@ func (cfg *Config) SetDefault() {
 	}
 	cfg.Source.Options.SetDefaults(sourceOptions)
 
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	if g.IsNil(cfg.Target.Columns) && !g.IsNil(cfg.Source.Options.Columns) {
+		cfg.Target.Columns = cfg.Source.Options.Columns // accepts legacy config
+		cfg.Source.Options.Columns = nil
+	}
+	if g.IsNil(cfg.Transforms) && !g.IsNil(cfg.Source.Options.Transforms) {
+		cfg.Transforms = cfg.Source.Options.Transforms // accepts legacy config
+		cfg.Source.Options.Transforms = nil
+	}
+
 	// set target options
 	var targetOptions TargetOptions
 	switch cfg.TgtConn.Type.Kind() {
@@ -148,13 +158,13 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	}
 
 	// set default metadata
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
@@ -913,11 +923,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 // Config is the new config struct
 type Config struct {
-	Source  Source            `json:"source,omitempty" yaml:"source,omitempty"`
-	Target  Target            `json:"target" yaml:"target"`
-	Mode    Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
-	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Source     Source            `json:"source,omitempty" yaml:"source,omitempty"`
+	Target     Target            `json:"target" yaml:"target"`
+	Mode       Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Transforms any               `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Options    ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
+	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
 	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
@@ -933,6 +944,8 @@ type Config struct {
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`
+
+	extraTransforms []string `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -1069,6 +1082,7 @@ type Target struct {
 	Conn    string         `json:"conn,omitempty" yaml:"conn,omitempty"`
 	Type    dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Object  string         `json:"object,omitempty" yaml:"object,omitempty"`
+	Columns any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
 	Data map[string]interface{} `json:"-" yaml:"-"`
@@ -1112,10 +1126,11 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
-	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 
-	extraTransforms []string `json:"-" yaml:"-"`
+	// columns & transforms were moved out of source_options
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	Columns    any `json:"columns,omitempty" yaml:"columns,omitempty"`       // legacy
+	Transforms any `json:"transforms,omitempty" yaml:"transforms,omitempty"` // legacy
 }
 
 // TargetOptions are target connection and stream processing options
@@ -1257,10 +1272,10 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 		o.MaxDecimals = sourceOptions.MaxDecimals
 	}
 	if o.Columns == nil {
-		o.Columns = sourceOptions.Columns
+		o.Columns = sourceOptions.Columns // legacy
 	}
 	if o.Transforms == nil {
-		o.Transforms = sourceOptions.Transforms
+		o.Transforms = sourceOptions.Transforms // legacy
 	}
 
 }
