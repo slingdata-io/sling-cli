@@ -647,7 +647,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		return count, g.Error(err, "Could not Delete: "+gcsPath)
 	}
 
-	df.Defer(func() { filesys.Delete(fs, gcsPath) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+			filesys.Delete(fs, gcsPath)
+		}
+	})
 
 	g.Info("importing into bigquery via google storage")
 
