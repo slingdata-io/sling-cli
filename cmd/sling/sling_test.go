@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -460,7 +461,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				valuesDb := dataDB.ColValues(valCol)
 
 				// clickhouse fails regularly due to some local contention, unable to pin down
-				if g.In(connType, dbio.TypeDbClickhouse, dbio.Type("clickhouse_http")) && len(valuesFile) == 1002 && len(valuesDb) == 1004 {
+				if g.In(connType, dbio.TypeDbClickhouse, dbio.Type("clickhouse_http")) && len(valuesFile) == 1002 && len(valuesDb) == 1004 && runtime.GOOS != "darwin" {
 					continue
 				}
 
