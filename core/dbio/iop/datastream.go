@@ -574,6 +574,7 @@ func (ds *Datastream) SetFields(fields []string) {
 	for i, field := range fields {
 		ds.Columns[i].Name = field
 		ds.Columns[i].Position = i + 1
+		ds.Columns[i].Type = StringType
 	}
 }
 
