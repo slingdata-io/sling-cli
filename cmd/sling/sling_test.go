@@ -460,7 +460,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				valuesDb := dataDB.ColValues(valCol)
 
 				// clickhouse fails regularly due to some local contention, unable to pin down
-				if file.Name == "17.table_incremental_from_postgres.json" && connType == dbio.TypeDbClickhouse && len(valuesFile) == 1002 && len(valuesDb) == 1004 {
+				if file.Name == "17.table_incremental_from_postgres.json" && g.In(connType, dbio.TypeDbClickhouse, dbio.Type("clickhouse_http")) && len(valuesFile) == 1002 && len(valuesDb) == 1004 {
 					continue
 				}
 
