@@ -2303,7 +2303,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 
 	for _, col := range columns {
 		// convert from general type to native type
-		nativeType, err := conn.GetNativeType(col)
+		nativeType, err := conn.Self().GetNativeType(col)
 		if err != nil {
 			return "", g.Error(err, "no native mapping")
 		}

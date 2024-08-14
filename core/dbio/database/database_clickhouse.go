@@ -83,12 +83,14 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		return ddl, g.Error(err)
 	}
 
+	orderBy := "tuple()"
 	primaryKey := ""
 	if keyCols := data.Columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
 		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
+		orderBy = strings.Join(colNames, ", ")
 	}
-	ddl = strings.ReplaceAll(ddl, "{primary_key}", primaryKey)
+	ddl = g.R(ddl, "primary_key", primaryKey, "order_by", orderBy)
 
 	partitionBy := ""
 	if keys, ok := table.Keys[iop.PartitionKey]; ok {
@@ -352,4 +354,16 @@ func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
 		}
 	}
 	return row
+}
+
+func (conn *ClickhouseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	nativeType, err = conn.BaseConn.GetNativeType(col)
+
+	// remove Nullable if part of pk
+	if col.IsKeyType(iop.PrimaryKey) && strings.HasPrefix(nativeType, "Nullable(") {
+		nativeType = strings.TrimPrefix(nativeType, "Nullable(")
+		nativeType = strings.TrimSuffix(nativeType, ")")
+	}
+
+	return nativeType, err
 }
