@@ -563,7 +563,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		isString = true
-		if sp.Config.TrimSpace || !sp.ds.Columns[i].IsString() {
+		if sp.Config.TrimSpace || !col.IsString() {
 			// if colType is not string, and the value is string, we should trim it
 			// in case it comes from a CSV. If it's empty, it should be considered nil
 			sVal = strings.TrimSpace(sVal)
@@ -571,7 +571,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 		if sVal == "" {
 			sp.rowBlankValCnt++
-			if sp.Config.EmptyAsNull || !sp.ds.Columns[i].IsString() {
+			if sp.Config.EmptyAsNull || !col.IsString() {
 				cs.TotalCnt++
 				cs.NullCnt++
 				return nil
