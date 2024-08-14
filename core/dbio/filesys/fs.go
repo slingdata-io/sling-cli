@@ -423,10 +423,14 @@ func (fs *BaseFileSysClient) Props() map[string]string {
 
 func (fs *BaseFileSysClient) GetRefTs() time.Time {
 	var ts time.Time
-	if val := cast.ToInt64(fs.GetProp("SLING_FS_TIMESTAMP")); val != 0 {
-		ts = time.Unix(val, 0)
-		if gte := os.Getenv("SLING_GREATER_THAN_EQUAL"); gte != "" && cast.ToBool(gte) {
-			ts = time.Unix(val, 0).Add(-1 * time.Millisecond)
+	if val := fs.GetProp("SLING_FS_TIMESTAMP"); val != "" {
+		if valInt := cast.ToInt64(val); valInt > 0 {
+			ts = time.Unix(valInt, 0)
+		} else {
+			ts = cast.ToTime(val)
+		}
+		if gte := os.Getenv("SLING_GREATER_THAN_EQUAL"); gte != "" && cast.ToBool(gte) && !ts.IsZero() {
+			ts = ts.Add(-1 * time.Millisecond)
 		}
 	}
 	return ts
