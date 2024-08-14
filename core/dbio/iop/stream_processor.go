@@ -563,7 +563,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		isString = true
-		if sp.Config.TrimSpace {
+		if sp.Config.TrimSpace || !sp.ds.Columns[i].IsString() {
+			// if colType is not string, and the value is string, we should trim it
+			// in case it comes from a CSV. If it's empty, it should be considered nil
 			sVal = strings.TrimSpace(sVal)
 			val = sVal
 		}
@@ -645,6 +647,8 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(sVal))
 			if col.Type == BinaryType {
 				nVal = []byte(sVal)
+			} else if col.Type == JsonType && sVal == "" {
+				nVal = nil // if json, empty should be null
 			} else {
 				nVal = sVal
 			}
