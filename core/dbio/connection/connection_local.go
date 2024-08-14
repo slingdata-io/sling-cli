@@ -387,7 +387,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			url = opt.Pattern
 		}
 
-		if strings.Contains(url, "*") {
+		if strings.Contains(url, "*") || strings.Contains(url, "?") {
 			opt.Pattern = url
 			url = filesys.GetDeepestParent(url)
 			parsePattern()
@@ -412,7 +412,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			// sort alphabetically
 			nodes.Sort()
 			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
-				if len(patterns) == 0 || !strings.Contains(opt.Pattern, "*") {
+				if len(patterns) == 0 || !(strings.Contains(opt.Pattern, "*") || strings.Contains(opt.Pattern, "?")) {
 					return true
 				}
 				for _, gf := range globPatterns {

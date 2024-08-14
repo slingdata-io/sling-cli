@@ -289,7 +289,7 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !strings.Contains(path, "*") {
+	if !strings.Contains(path, "*") && !strings.Contains(path, "?") {
 		return nil, nil
 	}
 
