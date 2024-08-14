@@ -310,7 +310,11 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 					addRowIDCol = false
 				}
 			}
-		} else if t.Config.Source.HasPrimaryKey() {
+		}
+
+		if addRowIDCol && t.Config.Source.HasPrimaryKey() {
+			// set primary key for StarRocks
+			t.Config.Target.Options.TableKeys[iop.PrimaryKey] = t.Config.Source.PrimaryKey()
 			addRowIDCol = false
 		}
 
