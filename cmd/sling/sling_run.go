@@ -1,8 +1,8 @@
 package main
 
 import (
+	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime/debug"
@@ -146,6 +146,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
+		case "columns":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Target.Columns)
+			if err != nil {
+				return ok, g.Error(err, "invalid columns -> %s", payload)
+			}
+		case "transforms":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Transforms)
+			if err != nil {
+				return ok, g.Error(err, "invalid transforms -> %s", payload)
+			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
 		case "streams":
@@ -249,7 +261,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
 			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
 			taskOptions["src_format"] = task.Config.Source.Options.Format
-			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
 			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
 			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
 			taskOptions["tgt_format"] = task.Config.Target.Options.Format
@@ -261,11 +272,13 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
+			taskMap["transforms"] = task.Config.Transforms
 			taskMap["status"] = task.Status
-			taskMap["source_md5"] = task.Config.Source.MD5()
+			taskMap["source_md5"] = task.Config.SrcConnMD5()
 			taskMap["source_type"] = task.Config.SrcConn.Type
-			taskMap["target_md5"] = task.Config.Target.MD5()
+			taskMap["target_md5"] = task.Config.TgtConnMD5()
 			taskMap["target_type"] = task.Config.TgtConn.Type
+			taskMap["stream_id"] = task.Config.StreamID()
 		}
 
 		if projectID != "" {
@@ -361,8 +374,13 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		return nil
 	}
 
-	// insert into store for history keeping
-	sling.StoreInsert(task)
+	// set log sink
+	env.LogSink = func(ll *g.LogLine) {
+		task.AppendOutput(ll)
+	}
+
+	sling.StoreInsert(task)       // insert into store
+	defer sling.StoreUpdate(task) // update into store after
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -375,7 +393,20 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	// run task
 	setTM()
 	err = task.Execute()
+
 	if err != nil {
+
+		if replication != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", env.RedString(g.ErrMsgSimple(err)))
+		}
+
+		// show help text
+		if eh := sling.ErrorHelper(err); eh != "" {
+			env.Println("")
+			env.Println(env.MagentaString(eh))
+			env.Println("")
+		}
+
 		return g.Error(err)
 	}
 
@@ -439,17 +470,12 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
 
+		env.LogSink = nil // clear log sink
+
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		env.SetTelVal("replication_md5", replication.MD5())
 		err = runTask(cfg, &replication)
 		if err != nil {
-			g.Info(env.RedString(err.Error()))
-			if eh := sling.ErrorHelper(err); eh != "" {
-				env.Println("")
-				env.Println(env.MagentaString(eh))
-				env.Println("")
-			}
-
 			eG.Capture(err, cfg.StreamName)
 
 			// if a connection issue, stop
@@ -516,12 +542,8 @@ func setProjectID(cfgPath string) {
 	cfgPath, _ = filepath.Abs(cfgPath)
 
 	if fs, err := os.Stat(cfgPath); err == nil && !fs.IsDir() {
-		// get first sha
-		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
-		cmd.Dir = filepath.Dir(cfgPath)
-		out, err := cmd.Output()
-		if err == nil && projectID == "" {
-			projectID = strings.TrimSpace(string(out))
+		if projectID == "" {
+			projectID = g.GetRootCommit(filepath.Dir(cfgPath))
 		}
 	}
 }

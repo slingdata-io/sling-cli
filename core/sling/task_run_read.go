@@ -8,7 +8,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -28,31 +27,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	} else if sTable.Schema == "" {
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
-
-	// check if referring to a SQL file
-	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
-		// for incremental, need to put `{incremental_where_cond}` for proper selecting
-		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
-		if err != nil {
-			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
-			if sTable.Name == "" {
-				return t.df, err
-			} else {
-				err = nil // don't return error in case the table full name ends with .sql
-			}
-		} else {
-			cfg.Source.Stream = sqlFromFile
-			sTable.SQL = sqlFromFile
-		}
-	}
-
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
 
 	// get source columns
 	st := sTable
@@ -187,7 +161,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
-	// construct SELECT statement for selected fields
+	// construct select statement for selected fields
 	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
 		sTable.SQL = sTable.Select(cfg.Source.Limit(), cfg.Source.Offset(), strings.Split(selectFieldsStr, ",")...)
 	}
@@ -290,11 +264,15 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	eG := g.ErrorGroup{}
 
 	if t.Config.Source.HasPrimaryKey() {
-		eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		// set true PK only when StarRocks, we don't want to create PKs on target table implicitly
+		if t.Config.Source.Type == dbio.TypeDbStarRocks {
+			eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		}
+		eG.Capture(df.Columns.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", t.Config.Source.PrimaryKey()...))
 	}
 
 	if t.Config.Source.HasUpdateKey() {
-		eG.Capture(df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey))
+		eG.Capture(df.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", t.Config.Source.UpdateKey))
 	}
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {

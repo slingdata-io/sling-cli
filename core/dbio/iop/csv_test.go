@@ -154,7 +154,7 @@ func TestISO8601(t *testing.T) {
 	s = "YYYY-MM-DDTHH:mm:ss.s+14:00"
 	assert.Equal(t, "2006-01-02T15:04:05.000+0700", Iso8601ToGoLayout(s), s)
 
-	dateMap := GetISO8601DateMap(time.Unix(1494505756, 0))
+	dateMap := GetISO8601DateMap(time.Unix(1494505756, 0).UTC())
 	str := "/path/{YYYY}/{MM}/{DD}/{HH}:{mm}:{ss}"
 	assert.Equal(t, "/path/2017/05/11/12:29:16", g.Rm(str, dateMap))
 }

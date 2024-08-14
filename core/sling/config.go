@@ -108,6 +108,16 @@ func (cfg *Config) SetDefault() {
 	}
 	cfg.Source.Options.SetDefaults(sourceOptions)
 
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	if g.IsNil(cfg.Target.Columns) && !g.IsNil(cfg.Source.Options.Columns) {
+		cfg.Target.Columns = cfg.Source.Options.Columns // accepts legacy config
+		cfg.Source.Options.Columns = nil
+	}
+	if g.IsNil(cfg.Transforms) && !g.IsNil(cfg.Source.Options.Transforms) {
+		cfg.Transforms = cfg.Source.Options.Transforms // accepts legacy config
+		cfg.Source.Options.Transforms = nil
+	}
+
 	// set target options
 	var targetOptions TargetOptions
 	switch cfg.TgtConn.Type.Kind() {
@@ -148,13 +158,13 @@ func (cfg *Config) SetDefault() {
 	switch cfg.SrcConn.Type {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	}
 
 	// set default metadata
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
@@ -565,11 +575,12 @@ func (cfg *Config) Prepare() (err error) {
 				words = append(words, m.Group[0])
 			}
 		}
-		// return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
+
 		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
 		for _, word := range words {
 			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
 		}
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	// add md5 of options, so that wee reconnect for various options
@@ -607,6 +618,68 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
+	// to expand variables for custom SQL
+	fMap, err := cfg.GetFormatMap()
+	if err != nil {
+		return g.Error(err, "could not get format map for sql")
+	}
+
+	// check if referring to a SQL file, and set stream text
+	if cfg.SrcConn.Type.IsDb() {
+
+		sTable, _ := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
+		if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
+			// for incremental, need to put `{incremental_where_cond}` for proper selecting
+			sqlFromFile, err := GetSQLText(cfg.Source.Stream)
+			if err != nil {
+				err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
+				if sTable.Name == "" {
+					return err
+				} else {
+					err = nil // don't return error in case the table full name ends with .sql
+				}
+			} else {
+				cfg.Source.Stream = g.Rm(sqlFromFile, fMap)
+				if cfg.ReplicationStream != nil {
+					cfg.ReplicationStream.SQL = cfg.Source.Stream
+				}
+			}
+		} else if sTable.IsQuery() {
+			cfg.Source.Stream = g.Rm(sTable.SQL, fMap)
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.SQL = cfg.Source.Stream
+			}
+		}
+	}
+
+	// compile pre and post sql
+	if cfg.TgtConn.Type.IsDb() {
+
+		// pre SQL
+		if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
+			sql, err := GetSQLText(*preSQL)
+			if err != nil {
+				return g.Error(err, "could not get pre-sql body")
+			}
+			cfg.Target.Options.PreSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PreSQL = cfg.Target.Options.PreSQL
+			}
+		}
+
+		// post SQL
+		if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
+			sql, err := GetSQLText(*postSQL)
+			if err != nil {
+				return g.Error(err, "could not get post-sql body")
+			}
+			cfg.Target.Options.PostSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PostSQL = cfg.Target.Options.PostSQL
+			}
+		}
+	}
+
 	// done
 	cfg.Prepared = true
 	return
@@ -635,8 +708,12 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
-	// clean values for replacing
+	// clean values for replacing, these need to be clean to be used in the object name
+	dateMap := iop.GetISO8601DateMap(time.Now())
 	for k, v := range m {
+		if _, ok := dateMap[k]; ok {
+			continue // don't clean the date values
+		}
 		m[k] = iop.CleanName(cast.ToString(v))
 	}
 
@@ -660,6 +737,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	} else if cfg.TgtConn.Type.IsFile() {
 		url := cast.ToString(cfg.Target.Data["url"])
 		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
+	}
+
+	// set on ReplicationStream
+	if cfg.ReplicationStream != nil {
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	return nil
@@ -841,17 +923,19 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 // Config is the new config struct
 type Config struct {
-	Source  Source            `json:"source,omitempty" yaml:"source,omitempty"`
-	Target  Target            `json:"target" yaml:"target"`
-	Mode    Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
-	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Source     Source            `json:"source,omitempty" yaml:"source,omitempty"`
+	Target     Target            `json:"target" yaml:"target"`
+	Mode       Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Transforms any               `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Options    ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
+	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
 	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
-	SrcConn           connection.Connection    `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn           connection.Connection    `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared          bool                     `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
+
+	SrcConn  connection.Connection `json:"-" yaml:"-"`
+	TgtConn  connection.Connection `json:"-" yaml:"-"`
+	Prepared bool                  `json:"-" yaml:"-"`
 
 	IncrementalVal    any    `json:"-" yaml:"-"`
 	IncrementalValStr string `json:"-" yaml:"-"`
@@ -860,6 +944,8 @@ type Config struct {
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`
+
+	extraTransforms []string `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -912,6 +998,18 @@ func (cfg *Config) MD5() string {
 	return g.MD5(payload)
 }
 
+func (cfg *Config) SrcConnMD5() string {
+	return g.MD5(g.Marshal(cfg.SrcConn.Data))
+}
+
+func (cfg *Config) TgtConnMD5() string {
+	return g.MD5(g.Marshal(cfg.TgtConn.Data))
+}
+
+func (cfg *Config) StreamID() string {
+	return g.MD5(cfg.Source.Conn, cfg.Target.Conn, cfg.StreamName, cfg.Target.Object)
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
@@ -921,14 +1019,15 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Type        dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
-	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn        string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
+
+	Data map[string]interface{} `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -980,11 +1079,13 @@ func (s *Source) MD5() string {
 
 // Target is a target of data
 type Target struct {
-	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Type    dbio.Type              `json:"type,omitempty" yaml:"type,omitempty"`
-	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
-	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn    string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type    dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Object  string         `json:"object,omitempty" yaml:"object,omitempty"`
+	Columns any            `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
+
+	Data map[string]interface{} `json:"-" yaml:"-"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
@@ -1025,10 +1126,11 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
-	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 
-	extraTransforms []string `json:"-" yaml:"-"`
+	// columns & transforms were moved out of source_options
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	Columns    any `json:"columns,omitempty" yaml:"columns,omitempty"`       // legacy
+	Transforms any `json:"transforms,omitempty" yaml:"transforms,omitempty"` // legacy
 }
 
 // TargetOptions are target connection and stream processing options
@@ -1170,10 +1272,10 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 		o.MaxDecimals = sourceOptions.MaxDecimals
 	}
 	if o.Columns == nil {
-		o.Columns = sourceOptions.Columns
+		o.Columns = sourceOptions.Columns // legacy
 	}
 	if o.Transforms == nil {
-		o.Transforms = sourceOptions.Transforms
+		o.Transforms = sourceOptions.Transforms // legacy
 	}
 
 }
@@ -1243,6 +1345,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys
+		if o.TableKeys == nil {
+			o.TableKeys = database.TableKeys{}
+		}
 	}
 }
 

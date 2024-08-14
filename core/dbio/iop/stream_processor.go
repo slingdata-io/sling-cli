@@ -227,10 +227,9 @@ func NewStreamProcessor() *StreamProcessor {
 
 func DefaultStreamConfig() *StreamConfig {
 	return &StreamConfig{
-		EmptyAsNull: true,
 		MaxDecimals: -1,
-		Columns:     Columns{},
-		transforms:  map[string][]TransformFunc{},
+		transforms:  nil,
+		Map:         map[string]string{"delimiter": "-1"},
 	}
 }
 
@@ -564,13 +563,15 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		isString = true
-		if sp.Config.TrimSpace {
+		if sp.Config.TrimSpace || !col.IsString() {
+			// if colType is not string, and the value is string, we should trim it
+			// in case it comes from a CSV. If it's empty, it should be considered nil
 			sVal = strings.TrimSpace(sVal)
 			val = sVal
 		}
 		if sVal == "" {
 			sp.rowBlankValCnt++
-			if sp.Config.EmptyAsNull || !sp.ds.Columns[i].IsString() {
+			if sp.Config.EmptyAsNull || !col.IsString() {
 				cs.TotalCnt++
 				cs.NullCnt++
 				return nil
@@ -646,6 +647,8 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(sVal))
 			if col.Type == BinaryType {
 				nVal = []byte(sVal)
+			} else if col.Type == JsonType && sVal == "" {
+				nVal = nil // if json, empty should be null
 			} else {
 				nVal = sVal
 			}

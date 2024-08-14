@@ -270,8 +270,8 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 }
 
 // ExecContext runs a sql query with context, returns `error`
-func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	return conn.ExecContext(ctx, sql, args...)
+func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	return conn.ExecContext(ctx, strings.Join(sqls, ";\n"))
 }
 
 func (conn *DuckDbConn) setDuckDbFileContext(ctx *g.Context) {
@@ -895,26 +895,26 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 
 	// V0.7
 	// sqlTempl := `
-	// INSERT INTO {tgt_table} as tgt
+	// insert into {tgt_table} as tgt
 	// 	({insert_fields})
-	// SELECT {src_fields}
-	// FROM {src_table} as src
-	// WHERE true
+	// select {src_fields}
+	// from {src_table} as src
+	// where true
 	// ON CONFLICT ({pk_fields})
 	// DO UPDATE
 	// SET {set_fields}
 	// `
 
 	sqlTempl := `
-	DELETE FROM {tgt_table} tgt
-	USING {src_table} src
-	WHERE {src_tgt_pk_equal}
+	delete from {tgt_table} tgt
+	using {src_table} src
+	where {src_tgt_pk_equal}
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(

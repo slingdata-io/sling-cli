@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/pkg/sftp"
+	"github.com/spf13/cast"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -330,4 +332,38 @@ func (s *SSHClient) Close() {
 			g.LogError(err)
 		}
 	}
+}
+
+func OpenTunnelSSH(tgtHost string, tgtPort int, tunnelURL, privateKey, passphrase string) (localPort int, err error) {
+
+	sshU, err := url.Parse(tunnelURL)
+	if err != nil {
+		return 0, g.Error(err, "could not parse SSH_TUNNEL URL")
+	}
+
+	sshHost := sshU.Hostname()
+	sshPort := cast.ToInt(sshU.Port())
+	if sshPort == 0 {
+		sshPort = 22
+	}
+	sshUser := sshU.User.Username()
+	sshPassword, _ := sshU.User.Password()
+
+	sshClient := &SSHClient{
+		Host:       sshHost,
+		Port:       sshPort,
+		User:       sshUser,
+		Password:   sshPassword,
+		TgtHost:    tgtHost,
+		TgtPort:    tgtPort,
+		PrivateKey: privateKey,
+		Passphrase: passphrase,
+	}
+
+	localPort, err = sshClient.OpenPortForward()
+	if err != nil {
+		return 0, g.Error(err, "could not connect to ssh server")
+	}
+
+	return
 }

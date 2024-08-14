@@ -54,14 +54,10 @@ func (fs *SftpFileSysClient) GetPath(uri string) (path string, err error) {
 func (fs *SftpFileSysClient) Connect() (err error) {
 
 	if fs.GetProp("PRIVATE_KEY") == "" {
-		if os.Getenv("SSH_PRIVATE_KEY") != "" {
-			fs.SetProp("PRIVATE_KEY", os.Getenv("SSH_PRIVATE_KEY"))
-		} else {
-			defPrivKey := path.Join(g.UserHomeDir(), ".ssh", "id_rsa")
-			if g.PathExists(defPrivKey) {
-				g.Debug("adding default private key (%s) as auth method for SFTP", defPrivKey)
-				fs.SetProp("PRIVATE_KEY", defPrivKey)
-			}
+		defPrivKey := path.Join(g.UserHomeDir(), ".ssh", "id_rsa")
+		if g.PathExists(defPrivKey) {
+			g.Debug("adding default private key (%s) as auth method for SFTP", defPrivKey)
+			fs.SetProp("PRIVATE_KEY", defPrivKey)
 		}
 	}
 
@@ -100,6 +96,21 @@ func (fs *SftpFileSysClient) Connect() (err error) {
 		Password:   fs.GetProp("PASSWORD"),
 		PrivateKey: fs.GetProp("PRIVATE_KEY"), // raw value or path to ssh key file
 		Passphrase: fs.GetProp("PASSPHRASE"),
+	}
+
+	// via SSH tunnel
+	if sshTunnelURL := fs.GetProp("ssh_tunnel"); sshTunnelURL != "" {
+
+		tunnelPrivateKey := fs.GetProp("ssh_private_key")
+		tunnelPassphrase := fs.GetProp("ssh_passphrase")
+
+		localPort, err := iop.OpenTunnelSSH(fs.sshClient.Host, fs.sshClient.Port, sshTunnelURL, tunnelPrivateKey, tunnelPassphrase)
+		if err != nil {
+			return g.Error(err, "could not connect to ssh tunnel server")
+		}
+
+		fs.sshClient.Host = "127.0.0.1"
+		fs.sshClient.Port = localPort
 	}
 
 	err = fs.sshClient.Connect()

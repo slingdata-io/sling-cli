@@ -28,7 +28,16 @@ func init() {
 	}
 }
 
-var syncStatus = func(e *Execution) {}
+var syncStatus = func(e *Execution) {
+	// drain channel for now
+	for {
+		select {
+		case <-e.TaskExec.OutputLines:
+		default:
+			return
+		}
+	}
+}
 
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
@@ -139,12 +148,12 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 
 	exec := Execution{
 		ExecID:    t.ExecID,
-		StreamID:  g.MD5(t.Config.Source.Conn, t.Config.Target.Conn, t.Config.StreamName, t.Config.Target.Object),
+		StreamID:  t.Config.StreamID(),
 		Status:    t.Status,
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
 		Bytes:     bytes,
-		Output:    t.Output,
+		Output:    t.Output.String(),
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
@@ -157,7 +166,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 	if t.Err != nil {
 		err, ok := t.Err.(*g.ErrType)
 		if ok {
-			exec.Err = g.String(err.Full())
+			exec.Err = g.String(err.Debug())
 		} else {
 			exec.Err = g.String(t.Err.Error())
 		}
@@ -294,7 +303,7 @@ func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
 	e := ToExecutionObject(t)
 
 	exec = &Execution{ExecID: t.ExecID, StreamID: e.StreamID, TaskExec: t}
-	err = Db.Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
+	err = Db.Omit("output").Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
 	if err != nil {
 		g.Error(err, "could not select execution from local .sling.db.")
 		return

@@ -90,11 +90,12 @@ func GetLocalConns(force ...bool) []ConnEntry {
 
 	// env.yaml as an Environment variable
 	if content := os.Getenv("ENV_YAML"); content != "" {
-		m := g.M()
-		err := yaml.Unmarshal([]byte(content), &m)
+		ef, err := env.LoadSlingEnvFileBody(content)
 		if err != nil {
 			g.LogError(g.Error(err, "could not parse ENV_YAML content"))
 		} else {
+			m := g.M()
+			g.JSONConvert(ef, &m)
 			profileConns, err := ReadConnections(m)
 			if !g.LogError(err) {
 				for _, conn := range profileConns {
@@ -386,7 +387,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			url = opt.Pattern
 		}
 
-		if strings.Contains(url, "*") {
+		if strings.Contains(url, "*") || strings.Contains(url, "?") {
 			opt.Pattern = url
 			url = filesys.GetDeepestParent(url)
 			parsePattern()
@@ -411,7 +412,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 			// sort alphabetically
 			nodes.Sort()
 			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
-				if len(patterns) == 0 || !strings.Contains(opt.Pattern, "*") {
+				if len(patterns) == 0 || !(strings.Contains(opt.Pattern, "*") || strings.Contains(opt.Pattern, "?")) {
 					return true
 				}
 				for _, gf := range globPatterns {
@@ -468,6 +469,32 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 	}
 
 	ok = true
+
+	return
+}
+
+func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries []ConnEntry, err error) {
+	m := g.M()
+	if err = g.JSONConvert(ef, &m); err != nil {
+		return entries, g.Error(err)
+	}
+
+	connsMap := map[string]ConnEntry{}
+	profileConns, err := ReadConnections(m)
+	for _, conn := range profileConns {
+		c := ConnEntry{
+			Name:        strings.ToUpper(conn.Info().Name),
+			Description: conn.Type.NameLong(),
+			Source:      sourceName,
+			Connection:  conn,
+		}
+		connsMap[c.Name] = c
+	}
+
+	entries = lo.Values(connsMap)
+	sort.Slice(entries, func(i, j int) bool {
+		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
+	})
 
 	return
 }

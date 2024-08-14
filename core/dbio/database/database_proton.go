@@ -90,7 +90,7 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
@@ -290,12 +290,12 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, fields []strin
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 
@@ -309,16 +309,16 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 
 	sqlTempl := `
 	ALTER STREAM {tgt_table}
-	DELETE WHERE ({pk_fields}) in (
-			SELECT {pk_fields}
-			FROM table({src_table}) src
+	DELETE where ({pk_fields}) in (
+			select {pk_fields}
+			from table({src_table}) src
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM table({src_table}) src
+	select {src_fields}
+	from table({src_table}) src
 	`
 	sql = g.R(
 		sqlTempl,

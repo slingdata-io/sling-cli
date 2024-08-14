@@ -77,23 +77,32 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
+	ddl, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
-		return sql, g.Error(err)
+		return ddl, g.Error(err)
 	}
+
+	orderBy := "tuple()"
+	primaryKey := ""
+	if keyCols := data.Columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
+		orderBy = strings.Join(colNames, ", ")
+	}
+	ddl = g.R(ddl, "primary_key", primaryKey, "order_by", orderBy)
 
 	partitionBy := ""
 	if keys, ok := table.Keys[iop.PartitionKey]; ok {
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
 
-	return strings.TrimSpace(sql), nil
+	return strings.TrimSpace(ddl), nil
 }
 
 // BulkImportStream inserts a stream into a table
@@ -285,12 +294,12 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []s
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 
@@ -304,16 +313,16 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 
 	sqlTempl := `
 	ALTER TABLE {tgt_table}
-	DELETE WHERE ({pk_fields}) in (
-			SELECT {pk_fields}
-			FROM {src_table} src
+	DELETE where ({pk_fields}) in (
+			select {pk_fields}
+			from {src_table} src
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 	sql = g.R(
 		sqlTempl,
@@ -345,4 +354,16 @@ func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
 		}
 	}
 	return row
+}
+
+func (conn *ClickhouseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	nativeType, err = conn.BaseConn.GetNativeType(col)
+
+	// remove Nullable if part of pk
+	if col.IsKeyType(iop.PrimaryKey) && strings.HasPrefix(nativeType, "Nullable(") {
+		nativeType = strings.TrimPrefix(nativeType, "Nullable(")
+		nativeType = strings.TrimSuffix(nativeType, ")")
+	}
+
+	return nativeType, err
 }

@@ -1,7 +1,9 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: drop index if exists {schema}.{index}
   create_table: create table if not exists {table} ({col_types}) {partition_by}
+  create_index: create index if not exists {index} on {table} ({cols})
   create_unique_index: create unique index if not exists {index} on {table} ({cols})
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
@@ -19,7 +21,7 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal2}
-  sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
+  sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   modify_column: alter column {column} type {type}
   use_database: SET search_path TO {database}
@@ -30,7 +32,7 @@ metadata:
     select current_database()
     
   databases: |
-    SELECT datname as name FROM pg_database
+    select datname as name from pg_database
 
   schemas: |
     select schema_name
@@ -88,10 +90,10 @@ metadata:
             END
           ELSE null
       END AS scale
-    FROM pg_catalog.pg_class
+    from pg_catalog.pg_class
     INNER JOIN pg_catalog.pg_namespace ON pg_class.relnamespace = pg_namespace.oid
     INNER JOIN pg_catalog.pg_attribute ON pg_class.oid = pg_attribute.attrelid
-    WHERE 1=1
+    where 1=1
       and pg_class.relkind in ('r', 'v', 'm', 'f')
       and pg_namespace.nspname = '{schema}'
       and pg_class.relname = '{table}'
@@ -196,11 +198,11 @@ metadata:
     then 'NOT NULL'
     else 'NULL'
     END as not_null
-    FROM pg_class c,
+    from pg_class c,
     pg_attribute a,
     pg_type t,
     pg_namespace n
-    WHERE  n.nspname = '{schema}' and c.relname = '{table}'
+    where  n.nspname = '{schema}' and c.relname = '{table}'
     AND a.attnum > 0
     AND a.attrelid = c.oid
     AND a.atttypid = t.oid
@@ -224,7 +226,7 @@ metadata:
     from table_ddl
     "
   ddl_view: |
-    SELECT pg_get_viewdef(to_regclass('"{schema}"."{table}"'))::text as ddl
+    select pg_get_viewdef(to_regclass('"{schema}"."{table}"'))::text as ddl
 
   sessions: select *
     from pg_stat_activity
@@ -377,3 +379,4 @@ variable:
   tmp_folder: /tmp
   bind_string: ${c}
   error_filter_table_exists: already exists
+  max_string_type: varchar(65500)

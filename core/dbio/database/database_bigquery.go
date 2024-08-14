@@ -82,6 +82,9 @@ func (conn *BigQueryConn) Init() error {
 	if conn.GetProp("GC_KEY_FILE") == "" {
 		conn.SetProp("GC_KEY_FILE", conn.GetProp("credentialsFile"))
 	}
+	if conn.GetProp("GC_KEY_BODY") == "" {
+		conn.SetProp("GC_KEY_BODY", conn.GetProp("KEY_BODY"))
+	}
 
 	// set MAX_DECIMALS to fix bigquery import for numeric types
 	conn.SetProp("MAX_DECIMALS", "9")
@@ -252,15 +255,18 @@ func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	}
 
 	partitionBy := ""
-	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by %s", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
 
 	clusterBy := ""
 	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F("cluster by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)
@@ -641,7 +647,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		return count, g.Error(err, "Could not Delete: "+gcsPath)
 	}
 
-	df.Defer(func() { filesys.Delete(fs, gcsPath) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+			filesys.Delete(fs, gcsPath)
+		}
+	})
 
 	g.Info("importing into bigquery via google storage")
 
@@ -822,6 +832,11 @@ func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
 	fs.SetProp("header", "true")
 	fs.SetProp("format", "csv")
 	fs.SetProp("null_if", `\N`)
@@ -931,9 +946,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
 	extractor.DisableHeader = false
-	// You can choose to run the task in a specific location for more complex data locality scenarios.
-	// Ex: In this example, source dataset and GCS bucket are in the US.
-	extractor.Location = "US"
+	extractor.Location = conn.Location
 
 	job, err := extractor.Run(conn.Context().Ctx)
 	if err != nil {
@@ -997,18 +1010,18 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	}
 
 	sqlTempl := `
-	DELETE FROM {tgt_table} tgt
-	WHERE EXISTS (
-			SELECT 1
-			FROM {src_table} src
-			WHERE {src_tgt_pk_equal}
+	delete from {tgt_table} tgt
+	where exists (
+			select 1
+			from {src_table} src
+			where {src_tgt_pk_equal}
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 	sql = g.R(
 		sqlTempl,

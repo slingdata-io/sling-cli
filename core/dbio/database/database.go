@@ -78,8 +78,8 @@ type Connection interface {
 	DropView(...string) error
 	Exec(sql string, args ...interface{}) (result sql.Result, err error)
 	ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMulti(sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
+	ExecMulti(sqls ...string) (result sql.Result, err error)
+	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, fields []string, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
@@ -161,7 +161,7 @@ type BaseConn struct {
 	Data        iop.Dataset
 	defaultPort int
 	instance    *Connection
-	context     g.Context
+	context     *g.Context
 	template    dbio.Template
 	schemata    Schemata
 	properties  map[string]string
@@ -298,7 +298,6 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Add / Extract provided Props
 	for _, propStr := range props {
-		// g.Trace("setting connection prop -> " + propStr)
 		arr := strings.Split(propStr, "=")
 		if len(arr) == 1 && arr[0] != "" {
 			conn.SetProp(arr[0], "")
@@ -437,7 +436,11 @@ func (conn *BaseConn) Init() (err error) {
 }
 
 func (conn *BaseConn) setContext(ctx context.Context, concurrency int) {
-	conn.context = g.NewContext(ctx, concurrency)
+	c := g.NewContext(ctx, concurrency)
+	if conn.context != nil {
+		c.Map = conn.context.Map
+	}
+	conn.context = &c
 }
 
 // Self returns the respective connection Instance
@@ -469,7 +472,7 @@ func (conn *BaseConn) GetType() dbio.Type {
 
 // Context returns the db context
 func (conn *BaseConn) Context() *g.Context {
-	return &conn.context
+	return conn.context
 }
 
 // Schemata returns the Schemata object
@@ -556,23 +559,11 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
-		sshU, err := url.Parse(sshURL)
-		if err != nil {
-			return g.Error(err, "could not parse SSH_TUNNEL URL")
-		}
 
 		connU, err := url.Parse(connURL)
 		if err != nil {
 			return g.Error(err, "could not parse connection URL for SSH forwarding")
 		}
-
-		sshHost := sshU.Hostname()
-		sshPort := cast.ToInt(sshU.Port())
-		if sshPort == 0 {
-			sshPort = 22
-		}
-		sshUser := sshU.User.Username()
-		sshPassword, _ := sshU.User.Password()
 
 		connHost := connU.Hostname()
 		connPort := cast.ToInt(connU.Port())
@@ -584,20 +575,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			)
 		}
 
-		conn.sshClient = &iop.SSHClient{
-			Host:       sshHost,
-			Port:       sshPort,
-			User:       sshUser,
-			Password:   sshPassword,
-			TgtHost:    connHost,
-			TgtPort:    connPort,
-			PrivateKey: conn.GetProp("SSH_PRIVATE_KEY"),
-			Passphrase: conn.GetProp("SSH_PASSPHRASE"),
-		}
-
-		localPort, err := conn.sshClient.OpenPortForward()
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
 		if err != nil {
-			return g.Error(err, "could not connect to ssh server")
+			return g.Error(err, "could not connect to ssh tunnel server")
 		}
 
 		connURL = strings.ReplaceAll(
@@ -730,17 +710,22 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		conn.Log = conn.Log[1:]
 	}
 
+	// wrap args
+	contextArgs := g.M("conn", conn.GetProp("sling_conn_id"))
+	if len(args) > 0 {
+		contextArgs["query_args"] = args
+	}
 	if strings.Contains(query, noDebugKey) {
 		if !noColor {
 			query = env.CyanString(query)
 		}
-		g.Trace(query, args...)
+		g.Trace(query, contextArgs)
 	} else {
 		if !noColor {
 			query = env.CyanString(CleanSQL(conn, query))
 		}
 		if !cast.ToBool(conn.GetProp("silent")) {
-			g.Debug(query, args...)
+			g.Debug(query)
 		}
 	}
 }
@@ -752,26 +737,7 @@ func (conn *BaseConn) GetGormConn(config *gorm.Config) (*gorm.DB, error) {
 
 // GetTemplateValue returns the value of the path
 func (conn *BaseConn) GetTemplateValue(path string) (value string) {
-
-	prefixes := map[string]map[string]string{
-		"core.":             conn.template.Core,
-		"analysis.":         conn.template.Analysis,
-		"function.":         conn.template.Function,
-		"metadata.":         conn.template.Metadata,
-		"general_type_map.": conn.template.GeneralTypeMap,
-		"native_type_map.":  conn.template.NativeTypeMap,
-		"variable.":         conn.template.Variable,
-	}
-
-	for prefix, dict := range prefixes {
-		if strings.HasPrefix(path, prefix) {
-			key := strings.Replace(path, prefix, "", 1)
-			value = dict[key]
-			break
-		}
-	}
-
-	return value
+	return conn.Type.GetTemplateValue(path)
 }
 
 // LoadTemplates loads the appropriate yaml template
@@ -855,7 +821,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	var colTypes []ColumnType
 	if result != nil {
-		dbColTypes, err := result.ColumnTypes()
+		dbColTypes, err := getColumnTypes(result)
 		if err != nil {
 			queryContext.Cancel()
 			return ds, g.Error(err, "could not get column types")
@@ -1111,14 +1077,14 @@ func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, 
 }
 
 // ExecMulti runs mutiple sql queries, returns `error`
-func (conn *BaseConn) ExecMulti(sql string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMulti(sqls ...string) (result sql.Result, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		err = g.Error(err, "Could not reconnect")
 		return
 	}
 
-	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sql, args...)
+	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sqls...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
 	}
@@ -1151,22 +1117,24 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 }
 
 // ExecMultiContext runs multiple sql queries with context, returns `error`
-func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
 
 	Res := Result{rowsAffected: 0}
 
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
-		res, err := conn.Self().ExecContext(ctx, sql, args...)
-		if err != nil {
-			eG.Capture(g.Error(err, "Error executing query"))
-		} else {
-			ra, _ := res.RowsAffected()
-			g.Trace("RowsAffected: %d", ra)
-			Res.rowsAffected = Res.rowsAffected + ra
+	for _, q := range qs {
+		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			res, err := conn.Self().ExecContext(ctx, sql)
+			if err != nil {
+				eG.Capture(g.Error(err, "Error executing query"))
+			} else {
+				ra, _ := res.RowsAffected()
+				g.Trace("RowsAffected: %d", ra)
+				Res.rowsAffected = Res.rowsAffected + ra
+			}
+			delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+			time.Sleep(time.Duration(delay) * time.Second)
 		}
-		delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
-		time.Sleep(time.Duration(delay) * time.Second)
 	}
 
 	err = eG.Err()
@@ -2104,39 +2072,6 @@ func (conn *BaseConn) InsertStream(tableFName string, ds *iop.Datastream) (count
 	return
 }
 
-// castDsBoolColumns cast any boolean column values to the db type
-func (conn *BaseConn) castDsBoolColumns(ds *iop.Datastream) *iop.Datastream {
-	// cast any bool column
-	boolCols := []int{}
-	for i, c := range ds.Columns {
-		if c.IsBool() {
-			boolCols = append(boolCols, i)
-		}
-	}
-
-	boolAs := conn.template.Variable["bool_as"]
-	if len(boolCols) > 0 && boolAs != "bool" {
-		newCols := ds.Columns
-		for _, i := range boolCols {
-			newCols[i].Type = iop.ColumnType(boolAs) // the data type for a bool
-		}
-
-		ds = ds.Map(newCols, func(row []interface{}) []interface{} {
-			for _, i := range boolCols {
-				switch boolAs {
-				case "integer", "smallint":
-					row[i] = cast.ToInt(cast.ToBool(row[i]))
-				default:
-					row[i] = cast.ToString(cast.ToBool(row[i]))
-				}
-			}
-			return row
-		})
-	}
-
-	return ds
-}
-
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *BaseConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	count, err = InsertBatchStream(conn.Self(), conn.tx, tableFName, ds)
@@ -2159,28 +2094,12 @@ func (conn *BaseConn) bindVar(i int, field string, n int, c int) string {
 
 // Unquote removes quotes to the field name
 func (conn *BaseConn) Unquote(field string) string {
-	q := conn.template.Variable["quote_char"]
-	return strings.ReplaceAll(field, q, "")
+	return conn.Type.Unquote(field)
 }
 
 // Quote adds quotes to the field name
 func (conn *BaseConn) Quote(field string, normalize ...bool) string {
-	Normalize := true
-	if len(normalize) > 0 {
-		Normalize = normalize[0]
-	}
-
-	// always normalize if case is uniform. Why would you quote and not normalize?
-	if !HasVariedCase(field) && Normalize {
-		if g.In(conn.Type, dbio.TypeDbOracle, dbio.TypeDbSnowflake) {
-			field = strings.ToUpper(field)
-		} else {
-			field = strings.ToLower(field)
-		}
-	}
-	q := conn.template.Variable["quote_char"]
-	field = conn.Self().Unquote(field)
-	return q + field + q
+	return conn.Type.Quote(field, normalize...)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2201,12 +2120,12 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, fields []string,
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 
@@ -2276,7 +2195,7 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 			col.DbType,
 			conn.Type,
 		)
-		// return "", g.Error(err)
+
 		g.Warn(err.Error() + ". Using 'string'")
 		err = nil
 		nativeType = conn.template.GeneralTypeMap["string"]
@@ -2286,14 +2205,21 @@ func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err erro
 	if strings.HasSuffix(nativeType, "()") {
 		length := col.Stats.MaxLen
 		if col.IsString() {
-			if !col.Sourced || length <= 0 {
+			isSourced := col.Sourced && col.DbPrecision > 0
+			if isSourced {
+				// string length was manually provided
+				length = col.DbPrecision
+			} else if length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
 					length = 255
 				}
 			}
 
-			if length > 255 {
+			maxStringType := conn.GetTemplateValue("variable.max_string_type")
+			if !isSourced && maxStringType != "" {
+				nativeType = maxStringType // use specified default
+			} else if length > 255 {
 				// let's make text since high
 				nativeType = conn.template.GeneralTypeMap["text"]
 			} else {
@@ -2377,7 +2303,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 
 	for _, col := range columns {
 		// convert from general type to native type
-		nativeType, err := conn.GetNativeType(col)
+		nativeType, err := conn.Self().GetNativeType(col)
 		if err != nil {
 			return "", g.Error(err, "no native mapping")
 		}
@@ -2821,6 +2747,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		return false, ddlParts, nil
 	}
 
+	// if column is part of index, drop it
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.DropDDL())
+	}
+
 	for _, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
@@ -2854,9 +2785,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		)
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			QuoteNames(conn.GetType(), table.Columns.Names()...), // add quotes
+			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -2895,9 +2826,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = QuoteNames(conn.GetType(), updatedFields...) // add quotes
+		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
@@ -2908,6 +2839,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			"fields", strings.Join(fields, ", "),
 			"updated_fields", strings.Join(updatedFields, ", "),
 		))
+	}
+
+	// re-create index
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.CreateDDL())
 	}
 
 	return true, ddlParts, nil
@@ -2923,7 +2859,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 		return ok, err
 	}
 
-	_, err = conn.ExecMulti(strings.Join(ddlParts, ";\n"))
+	_, err = conn.ExecMulti(ddlParts...)
 	if err != nil {
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
@@ -3269,9 +3205,9 @@ func CleanSQL(conn Connection, sql string) string {
 	sql = strings.TrimSpace(sql)
 	sqlLower := strings.ToLower(sql)
 
-	if len(sql) > 3000 {
-		sql = sql[0:3000]
-	}
+	// if len(sql) > 3000 {
+	// 	sql = sql[0:3000]
+	// }
 
 	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
 
@@ -3377,7 +3313,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
-func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) {
+func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	inQuote := false
 	inCommentLine := false
 	inCommentMulti := false
@@ -3393,6 +3329,14 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) 
 
 	inComment := func() bool {
 		return inCommentLine || inCommentMulti
+	}
+
+	// determine if is SQL code block
+	sqlLower := strings.TrimRight(strings.TrimSpace(strings.ToLower(sql)), ";")
+	if strings.HasPrefix(sqlLower, "begin") && strings.HasSuffix(sqlLower, "end") {
+		return []string{sql}
+	} else if strings.Contains(sqlLower, "prepare ") && strings.Contains(sqlLower, "execute ") {
+		return []string{sql}
 	}
 
 	for i := range sql {
@@ -3588,10 +3532,4 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 	}
 
 	return
-}
-
-func quoteColNames(conn Connection, names []string) []string {
-	return lo.Map(names, func(col string, i int) string {
-		return conn.Quote(col)
-	})
 }
