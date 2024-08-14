@@ -245,6 +245,11 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 	ds.Sp.SetConfig(configMap)
 	ds.config = ds.Sp.Config
 
+	// set columns if empty
+	if len(ds.Columns) == 0 && len(ds.Sp.Config.Columns) > 0 {
+		ds.Columns = ds.Sp.Config.Columns
+	}
+
 	// set metadata
 	if metadata, ok := configMap["metadata"]; ok {
 		ds.SetMetadata(metadata)
