@@ -32,7 +32,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
         
       - name: Get the version
@@ -96,7 +96,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
         
       - name: Configure private token
@@ -124,7 +124,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: true
 
       - name: Configure Pagefile
@@ -159,7 +159,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
 
       - name: Login docker
@@ -203,7 +203,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
 
       - name: Login docker
