@@ -56,10 +56,14 @@ jobs:
       matrix:
         # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
         # runner: [macos-latest, ubuntu-20.04, windows-latest]
-        runner: [self-hosted-mac, ubuntu-16, self-hosted-windows]
+        # runner: [self-hosted-mac, ubuntu-16, self-hosted-windows]
+        runner: [self-hosted-mac, ubuntu-16]
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
 
       - name: Dump context
         env:
@@ -146,4 +150,5 @@ jobs:
       
       - name: Upload to R2
         run: |
-          mc cp "*.tar.gz" R2/sling-public/dev/latest/ 
+          echo "$MC_HOST_R2" > /tmp/r2.test
+          mc cp *.tar.gz R2/sling-public/dev/latest/ 
