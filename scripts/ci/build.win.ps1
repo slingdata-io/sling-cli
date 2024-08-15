@@ -15,16 +15,11 @@ echo "VERSION -> $env:VERSION"
 
 go mod edit -dropreplace='github.com/flarco/g' go.mod
 go mod edit -dropreplace='github.com/slingdata-io/sling' go.mod
+go mod edit -droprequire='github.com/slingdata-io/sling' go.mod
 go mod tidy
 
-(Get-Content core/version.go).replace('dev', "$env:VERSION") | Set-Content core/version.go
-go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$env:PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$env:SENTRY_DSN'" -o sling-win.exe github.com/slingdata-io/sling-cli/cmd/sling
+go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$env:PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$env:SENTRY_DSN'" -o sling.exe github.com/slingdata-io/sling-cli/cmd/sling
 
-.\sling-win.exe --version
-$env:VERSION = (.\sling-win.exe --version).replace('Version: ', '')
-echo "VERSION -> $env:VERSION"
-mkdir -Force -p "dist\$env:VERSION"
-copy .\sling-win.exe dist
-copy .\sling-win.exe "dist\$env:VERSION"
+.\sling.exe --version
 
-echo "$env:VERSION" > "dist\version-win"
+tar -czvf sling_windows_amd64.tar.gz sling.exe

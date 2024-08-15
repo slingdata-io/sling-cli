@@ -8,21 +8,16 @@ mkdir -p $TMPDIR
 echo "Building sling-mac"
 go mod edit -dropreplace='github.com/flarco/g' go.mod
 go mod edit -dropreplace='github.com/slingdata-io/sling' go.mod
+go mod edit -droprequire='github.com/slingdata-io/sling' go.mod
 go mod tidy
 
 export VERSION=$1
 echo "VERSION -> $VERSION"
-sed -i '' "s/dev/$VERSION/g" core/version.go
-GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$SENTRY_DSN'" -o sling-mac cmd/sling/*.go
+GOOS=darwin GOARCH=amd64 go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$SENTRY_DSN'" -o sling cmd/sling/*.go
 
-./sling-mac --version
-VERSION=$(./sling-mac --version | sed 's/Version: //')
-echo "VERSION -> $VERSION"
-mkdir -p dist/$VERSION
-cp sling-mac dist
-cp sling-mac dist/$VERSION
+./sling --version
 
-echo $VERSION > dist/version-mac
+tar -czvf sling_darwin_arm64.tar.gz sling
+tar -czvf sling_darwin_amd64.tar.gz sling
 
-cd dist/$VERSION
-tar -czvf sling.darwin-amd64.tar.gz sling-mac
+echo "DONE"
