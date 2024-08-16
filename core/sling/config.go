@@ -714,6 +714,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if _, ok := dateMap[k]; ok {
 			continue // don't clean the date values
 		}
+		if g.In(k, "run_timestamp") {
+			continue // don't clean those keys, will add an underscore prefix
+		}
 		m[k] = iop.CleanName(cast.ToString(v))
 	}
 
