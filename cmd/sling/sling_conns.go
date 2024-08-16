@@ -106,7 +106,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot parse query")
 			}
 
-			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(strings.ToLower(query), "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
 
 				data, err := dbConn.Query(sQuery.Select(100, 0))
 				if err != nil {
