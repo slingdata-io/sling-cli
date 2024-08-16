@@ -65,6 +65,7 @@ SLING_ROW_CNT=1 sling conns exec postgres "select data_type from information_sch
 
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
+SLING_ROW_CNT=18 sling conns row-count 'public.my_table'
 sling conns discover POSTGRES
 sling conns discover POSTGRES -s 'public.*'
 sling conns discover local

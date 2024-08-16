@@ -272,6 +272,24 @@ var cliConns = &g.CliSC{
 			},
 		},
 		{
+			Name:        "row-count",
+			Description: "determines the row count of a connection's table",
+			PosFlags: []g.Flag{
+				{
+					Name:        "name",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the connection to query",
+				},
+				{
+					Name:        "table",
+					ShortName:   "",
+					Type:        "string",
+					Description: "The name of the table to query",
+				},
+			},
+		},
+		{
 			Name:        "exec",
 			Description: "execute a SQL query on a Database connection",
 			PosFlags: []g.Flag{

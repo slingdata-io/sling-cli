@@ -65,6 +65,48 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			return ok, g.Error(err, "could not set %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
 		g.Info("connection `%s` has been set in %s. Please test with `sling conns test %s`", name, ec.EnvFile.Path, name)
+
+	case "row-count":
+		name := cast.ToString(c.Vals["name"])
+		table := cast.ToString(c.Vals["table"])
+
+		conn, ok := ec.GetConnEntry(name)
+		if !ok {
+			return ok, g.Error("did not find connection %s", name)
+		}
+
+		env.SetTelVal("conn_type", conn.Connection.Type.String())
+
+		if !conn.Connection.Type.IsDb() {
+			return ok, g.Error("cannot execute SQL query on a non-database connection (%s)", conn.Connection.Type)
+		}
+
+		dbConn, err := conn.Connection.AsDatabase()
+		if err != nil {
+			return ok, g.Error(err, "cannot create database connection (%s)", conn.Connection.Type)
+		}
+
+		err = dbConn.Connect()
+		if err != nil {
+			return ok, g.Error(err, "cannot connect to database (%s)", conn.Connection.Type)
+		}
+
+		data, err := dbConn.GetCount(table)
+
+		if err != nil {
+			return ok, g.Error(err, "cannot get row count")
+		}
+
+		if asJSON {
+			fmt.Println(g.Marshal(g.M("count", data)))
+		} else {
+			fmt.Println(g.PrettyTable([]string{"count"}, [][]any{[]any{data}}))
+		}
+
+		if err := testOutput(cast.ToInt64(data), 0); err != nil {
+			return ok, err
+		}
+
 	case "exec":
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
