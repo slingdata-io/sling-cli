@@ -83,7 +83,7 @@ jobs:
           cache: false
         
       - name: Load Secrets
-        uses: flarco/infisical-action@v1
+        uses: flarco/infisical-action@v2
         with:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
