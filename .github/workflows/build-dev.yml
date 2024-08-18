@@ -52,6 +52,7 @@ jobs:
     timeout-minutes: 20
 
     strategy:
+      fail-fast: false
       matrix:
         # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
         # runner: [macos-latest, ubuntu-20.04, windows-latest]
