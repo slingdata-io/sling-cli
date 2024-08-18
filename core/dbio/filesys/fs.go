@@ -1289,7 +1289,7 @@ func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err erro
 	config := ds.GetConfig()
 	config["fields_per_rec"] = "-1" // allow different number of records per line
 	nDs.SetConfig(config)
-	nDs.Defer(func() { os.Remove(filePath) })
+	nDs.Defer(func() { env.RemoveLocalTempFile(filePath) })
 
 	file, err := os.Open(filePath)
 	if err != nil {

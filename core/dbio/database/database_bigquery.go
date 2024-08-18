@@ -648,7 +648,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	}
 
 	df.Defer(func() {
-		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			filesys.Delete(fs, gcsPath)
 		}
 	})

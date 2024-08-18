@@ -329,9 +329,8 @@ func (ds *Datastream) WaitReady() error {
 
 // Defer runs a given function as close of Datastream
 func (ds *Datastream) Defer(f func()) {
-	if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-		ds.deferFuncs = append(ds.deferFuncs, f)
-	}
+	ds.deferFuncs = append(ds.deferFuncs, f)
+
 	if ds.closed { // mutex?
 		for _, f := range ds.deferFuncs {
 			f()
@@ -1399,7 +1398,7 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	parquetPath := path.Join(tempDir, g.NewTsID("parquet.temp")+".parquet")
-	ds.Defer(func() { os.Remove(parquetPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(parquetPath) })
 
 	file, err := os.Create(parquetPath)
 	if err != nil {
@@ -1446,7 +1445,7 @@ func (ds *Datastream) ConsumeAvroReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	avroPath := path.Join(tempDir, g.NewTsID("avro.temp")+".avro")
-	ds.Defer(func() { os.Remove(avroPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(avroPath) })
 
 	file, err := os.Create(avroPath)
 	if err != nil {
@@ -1493,7 +1492,7 @@ func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	sasPath := path.Join(tempDir, g.NewTsID("sas.temp")+".sas7bdat")
-	ds.Defer(func() { os.Remove(sasPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(sasPath) })
 
 	file, err := os.Create(sasPath)
 	if err != nil {
@@ -1558,7 +1557,7 @@ func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]stri
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
-	ds.Defer(func() { os.Remove(excelPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(excelPath) })
 
 	file, err := os.Create(excelPath)
 	if err != nil {

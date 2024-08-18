@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/process"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -60,6 +61,8 @@ func init() {
 	if val := os.Getenv("ERROR_ON_CHECKSUM_FAILURE"); val != "" {
 		os.Setenv("SLING_CHECKSUM_ROWS", "10000")
 	}
+
+	TelMap["parent"] = process.GetParent()
 }
 
 func HomeBinDir() string {
@@ -255,5 +258,19 @@ func cleanWindowsPath(path string) string {
 func processLogEntry(ll *g.LogLine) {
 	if LogSink != nil {
 		LogSink(ll)
+	}
+}
+
+// RemoveLocalTempFile deletes the local file
+func RemoveLocalTempFile(localPath string) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+		os.Remove(localPath)
+	}
+}
+
+// RemoveAllLocalTempFile deletes the local folder
+func RemoveAllLocalTempFile(localPath string) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+		os.RemoveAll(localPath)
 	}
 }

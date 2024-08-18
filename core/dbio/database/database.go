@@ -2477,7 +2477,7 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 				df.Context.Cancel()
 				return
 			}
-			nDs.Defer(func() { os.RemoveAll(file.Node.Path()) })
+			nDs.Defer(func() { env.RemoveAllLocalTempFile(file.Node.Path()) })
 			dsCh <- nDs
 		}
 	}

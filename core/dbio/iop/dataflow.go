@@ -139,7 +139,7 @@ func (df *Dataflow) SetBatchLimit(limit int64) {
 func (df *Dataflow) Defer(f func()) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
-	if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 		df.deferFuncs = append(df.deferFuncs, f)
 	}
 }
