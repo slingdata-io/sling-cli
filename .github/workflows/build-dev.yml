@@ -57,7 +57,7 @@ jobs:
         # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
         # runner: [macos-latest, ubuntu-20.04, windows-latest]
         # runner: [self-hosted-mac, ubuntu-16, self-hosted-windows]
-        runner: [ubuntu-16]
+        runner: [self-hosted-mac, ubuntu-16]
 
     steps:
       - name: Checkout
