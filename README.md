@@ -169,6 +169,14 @@ cd sling-cli
 .\sling --help
 ```
 
+### Automated Dev Builds
+
+Here are the links of the official development builds, which are the latest builds of the upcoming release.
+
+- **Linux (x64)**: https://f.slingdata.io/dev/latest/sling_linux_amd64.tar.gz
+- **Mac (arm64)**: https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz
+- **Windows (x64)**: https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz
+
 ### Installing via Python Wrapper
 
 `pip install sling`
