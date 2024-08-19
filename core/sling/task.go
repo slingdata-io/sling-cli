@@ -386,7 +386,7 @@ func (t *TaskExecution) usingCheckpoint() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 
-func (t *TaskExecution) sourceOptionsMap() (options map[string]any) {
+func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 

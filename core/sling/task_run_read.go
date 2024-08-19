@@ -193,7 +193,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	if t.Config.IncrementalVal != nil {

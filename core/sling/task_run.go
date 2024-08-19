@@ -152,7 +152,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// sets metadata
 	metadata := t.setGetMetadata()
 
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	srcProps := append(
