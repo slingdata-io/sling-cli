@@ -7,4 +7,6 @@ defaults:
   sql: "select *, 'hi' there from {stream_name}"
 
 streams:
-  public.my_table*:
+  public.my_table:
+  public.my_table?:
+  public.my_table_*:

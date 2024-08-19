@@ -131,7 +131,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
-		} else if strings.Contains(name, "*") {
+		} else if strings.Contains(name, "*") || strings.Contains(name, "?") {
 			wildcardNames = append(wildcardNames, name)
 		}
 	}
@@ -208,7 +208,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 			continue
 		}
 
-		if strings.Contains(schemaT.Name, "*") {
+		if strings.Contains(schemaT.Name, "*") || strings.Contains(schemaT.Name, "?") {
 			// get all tables in schema
 			g.Debug("getting tables for %s", wildcardName)
 			data, err := conn.GetTables(schemaT.Schema)

@@ -240,7 +240,7 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 }
 
 func makePathSuffix(key string) string {
-	if !strings.Contains(key, "*") {
+	if !strings.Contains(key, "*") && !strings.Contains(key, "?") {
 		return "*"
 	}
 	return strings.TrimPrefix(key, GetDeepestParent(key))
@@ -319,7 +319,7 @@ func GetDeepestParent(path string) string {
 	parts := strings.Split(path, "/")
 	parentParts := []string{}
 	for i, part := range parts {
-		if strings.Contains(part, "*") {
+		if strings.Contains(part, "*") || strings.Contains(part, "?") {
 			break
 		} else if i == len(parts)-1 {
 			break
