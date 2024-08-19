@@ -474,43 +474,43 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 	// decode File if requested
 	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
 		columnTransforms := makeColumnTransforms(transformsPayload)
-		applied := []Transform{}
+		applied := []string{}
 
 		if ts, ok := columnTransforms["*"]; ok {
 			for _, t := range ts {
 				switch t {
-				case TransformDecodeLatin1:
+				case TransformDecodeLatin1.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_1)
-				case TransformDecodeLatin5:
+				case TransformDecodeLatin5.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_5)
-				case TransformDecodeLatin9:
+				case TransformDecodeLatin9.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_15)
-				case TransformDecodeWindows1250:
+				case TransformDecodeWindows1250.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1250)
-				case TransformDecodeWindows1252:
+				case TransformDecodeWindows1252.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1252)
-				case TransformDecodeUtf16:
+				case TransformDecodeUtf16.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
-				case TransformDecodeUtf8:
+				case TransformDecodeUtf8.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8)
-				case TransformDecodeUtf8Bom:
+				case TransformDecodeUtf8Bom.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
 
-				case TransformEncodeLatin1:
+				case TransformEncodeLatin1.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_1)
-				case TransformEncodeLatin5:
+				case TransformEncodeLatin5.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_5)
-				case TransformEncodeLatin9:
+				case TransformEncodeLatin9.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_15)
-				case TransformEncodeWindows1250:
+				case TransformEncodeWindows1250.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1250)
-				case TransformEncodeWindows1252:
+				case TransformEncodeWindows1252.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1252)
-				case TransformEncodeUtf16:
+				case TransformEncodeUtf16.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF16)
-				case TransformEncodeUtf8:
+				case TransformEncodeUtf8.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8)
-				case TransformEncodeUtf8Bom:
+				case TransformEncodeUtf8Bom.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8BOM)
 
 				default:
@@ -519,7 +519,7 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 				applied = append(applied, t) // delete from transforms, already applied
 			}
 
-			ts = lo.Filter(ts, func(t Transform, i int) bool {
+			ts = lo.Filter(ts, func(t string, i int) bool {
 				return !g.In(t, applied...)
 			})
 			columnTransforms["*"] = ts
