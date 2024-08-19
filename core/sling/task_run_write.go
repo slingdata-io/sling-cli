@@ -223,7 +223,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp)
+	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp, true)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
 		return
@@ -399,7 +399,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
 
-		created, err := createTableIfNotExists(tgtConn, sample, &targetTable)
+		created, err := createTableIfNotExists(tgtConn, sample, &targetTable, false)
 		if err != nil {
 			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return cnt, err

@@ -5,7 +5,6 @@ core:
   drop_index: "select 'drop_index not implemented'"
   create_schema: create schema {schema}
   create_table: create table {table} ({col_types})
-  create_temporary_table: create temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})

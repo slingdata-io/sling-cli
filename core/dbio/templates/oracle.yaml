@@ -35,7 +35,7 @@ core:
             RAISE;
           END IF;
     END;
-  create_temporary_table: create global temporary table {table} ({col_types})
+  # create_temporary_table: create global temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: INSERT {options} INTO {table} ({fields}) values  ({values})
   alter_columns: alter table {table} modify ({col_ddl})

@@ -2318,8 +2318,8 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 
 	createTemplate := conn.template.Core["create_table"]
-	if temporary {
-		createTemplate = conn.template.Core["create_temporary_table"]
+	if ctt := conn.template.Core["create_temporary_table"]; ctt != "" && temporary {
+		createTemplate = ctt
 	}
 
 	if table.DDL != "" {
