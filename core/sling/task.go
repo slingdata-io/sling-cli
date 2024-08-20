@@ -390,110 +390,12 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 
-	if t.Config.Target.Columns != nil {
-		columns := iop.Columns{}
-		switch colsCasted := t.Config.Target.Columns.(type) {
-		case map[string]any:
-			for colName, colType := range colsCasted {
-				col := iop.Column{
-					Name: colName,
-					Type: iop.ColumnType(cast.ToString(colType)),
-				}
-				columns = append(columns, col)
-			}
-		case map[any]any:
-			for colName, colType := range colsCasted {
-				col := iop.Column{
-					Name: cast.ToString(colName),
-					Type: iop.ColumnType(cast.ToString(colType)),
-				}
-				columns = append(columns, col)
-			}
-		case []map[string]any:
-			for _, colItem := range colsCasted {
-				col := iop.Column{}
-				g.Unmarshal(g.Marshal(colItem), &col)
-				columns = append(columns, col)
-			}
-		case []any:
-			for _, colItem := range colsCasted {
-				col := iop.Column{}
-				g.Unmarshal(g.Marshal(colItem), &col)
-				columns = append(columns, col)
-			}
-		case iop.Columns:
-			columns = colsCasted
-		default:
-			g.Warn("Config.Source.Options.Columns not handled: %T", t.Config.Source.Options.Columns)
-		}
-
-		// parse length, precision, scale
-		for i := range columns {
-			columns[i].SetLengthPrecisionScale()
-		}
-
+	if columns := t.Config.ColumnsPrepared(); len(columns) > 0 {
 		// set as string so that StreamProcessor parses it
-		options["columns"] = g.Marshal(iop.NewColumns(columns...))
+		options["columns"] = g.Marshal(columns)
 	}
 
-	if transforms := t.Config.Transforms; transforms != nil {
-		colTransforms := map[string][]string{}
-
-		makeTransformArray := func(val any) []string {
-			switch tVal := val.(type) {
-			case []any:
-				transformsArray := make([]string, len(tVal))
-				for i := range tVal {
-					transformsArray[i] = cast.ToString(tVal[i])
-				}
-				return transformsArray
-			case []string:
-				return tVal
-			default:
-				g.Warn("did not handle transforms value input: %#v", val)
-			}
-			return nil
-		}
-
-		switch tVal := transforms.(type) {
-		case []any, []string:
-			colTransforms["*"] = makeTransformArray(tVal)
-		case map[string]any:
-			for k, v := range tVal {
-				colTransforms[k] = makeTransformArray(v)
-			}
-		case map[any]any:
-			for k, v := range tVal {
-				colTransforms[cast.ToString(k)] = makeTransformArray(v)
-			}
-		case map[string][]string:
-			for k, v := range tVal {
-				colTransforms[k] = makeTransformArray(v)
-			}
-		case map[string][]any:
-			for k, v := range tVal {
-				colTransforms[k] = makeTransformArray(v)
-			}
-		case map[any][]string:
-			for k, v := range tVal {
-				colTransforms[cast.ToString(k)] = makeTransformArray(v)
-			}
-		case map[any][]any:
-			for k, v := range tVal {
-				colTransforms[cast.ToString(k)] = makeTransformArray(v)
-			}
-		default:
-			g.Warn("did not handle transforms input: %#v", transforms)
-		}
-
-		for _, transf := range t.Config.extraTransforms {
-			if _, ok := colTransforms["*"]; !ok {
-				colTransforms["*"] = []string{transf}
-			} else {
-				colTransforms["*"] = append(colTransforms["*"], transf)
-			}
-		}
-
+	if colTransforms := t.Config.TransformsPrepared(); len(colTransforms) > 0 {
 		// set as string so that StreamProcessor parses it
 		options["transforms"] = g.Marshal(colTransforms)
 	}

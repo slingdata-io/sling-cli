@@ -166,6 +166,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.SQL = sTable.Select(cfg.Source.Limit(), cfg.Source.Offset(), strings.Split(selectFieldsStr, ",")...)
 	}
 
+	// set constraints
+	for _, col := range cfg.ColumnsPrepared() {
+		if c := sTable.Columns.GetColumn(col.Name); c != nil {
+			sTable.Columns[c.Position-1].Constraint = col.Constraint
+		}
+	}
+
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
 		err = g.Error(err, "Could not BulkExportFlow")
