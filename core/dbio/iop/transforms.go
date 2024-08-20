@@ -289,7 +289,7 @@ var (
 			if len(location) == 0 {
 				return g.Error("param for 'set_timezone' should be the a compatible IANA Time Zone")
 			}
-			loc, err := time.LoadLocation(cast.ToString(location[0]))
+			loc, err := time.LoadLocation(strings.Trim(cast.ToString(location[0]), `"'`))
 			if err != nil {
 				return g.Error(err, "could not load timezone (%s), should be the a compatible IANA Time Zone", location[0])
 			}
