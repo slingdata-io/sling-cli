@@ -34,6 +34,9 @@ jobs:
         id: get_version
         run: |
           VERSION="${GITHUB_REF##*/}.dev"
+          DATE=$(date +%F)
+          VERSION=$(echo $VERSION | sed 's/v//')
+          VERSION="$VERSION/$DATE"
           echo "VERSION -> $VERSION"
           echo ::set-output name=VERSION::$VERSION
 
