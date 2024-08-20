@@ -869,7 +869,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 			return ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
-				FetchedType:      fetchedColumns.GetColumn(ct.Name()).Type,
+				FetchedColumn:    fetchedColumns.GetColumn(ct.Name()),
 				Length:           cast.ToInt(length),
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
@@ -1343,8 +1343,11 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
-		if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && colType.FetchedType != "" {
-			col.Type = colType.FetchedType
+		if fc := colType.FetchedColumn; fc != nil {
+			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && fc.Type != "" {
+				col.Type = fc.Type
+			}
+			col.Constraint = fc.Constraint
 		}
 
 		col.Stats.MaxLen = colType.Length

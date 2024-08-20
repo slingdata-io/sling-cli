@@ -254,6 +254,13 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 	if metadata, ok := configMap["metadata"]; ok {
 		ds.SetMetadata(metadata)
 	}
+
+	// parse constraint func after unmarshal
+	for i := range ds.Columns {
+		if ds.Columns[i].Constraint != nil {
+			ds.Columns[i].Constraint.parse()
+		}
+	}
 }
 
 // GetConfig get config

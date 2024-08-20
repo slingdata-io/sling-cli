@@ -1177,8 +1177,13 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	sp.rowBlankValCnt = 0
 	sp.rowChecksum = make([]uint64, len(row))
 	for i, val := range row {
-		// fmt.Printf("| (%s) %#v", columns[i].Type, val)
-		row[i] = sp.CastVal(i, val, &columns[i])
+		col := &columns[i]
+		row[i] = sp.CastVal(i, val, col)
+
+		// evaluate constraint
+		if col.Constraint != nil {
+			col.EvaluateConstraint(row[i], sp)
+		}
 	}
 
 	for len(row) < len(columns) {

@@ -528,7 +528,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 type ColumnType struct {
 	Name             string
 	DatabaseTypeName string
-	FetchedType      iop.ColumnType
+	FetchedColumn    *iop.Column
 	Length           int
 	Precision        int
 	Scale            int

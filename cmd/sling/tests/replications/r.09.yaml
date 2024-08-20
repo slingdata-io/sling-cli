@@ -4,9 +4,11 @@ target: sqlite
 defaults:
   mode: full-refresh
   object: 'main.pg_{stream_table}'
-  sql: "select *, 'hi' there from {stream_name}"
+  sql: "select *, 'hi' there from {stream_name} limit 10"
 
 streams:
   public.my_table:
   public.my_table?:
   public.my_table_*:
+    columns:
+      there: string | value_len = 3

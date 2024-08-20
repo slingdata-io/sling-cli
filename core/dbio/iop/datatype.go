@@ -15,10 +15,11 @@ import (
 
 var (
 	// RemoveTrailingDecZeros removes the trailing zeros in CastToString
-	RemoveTrailingDecZeros = false
-	SampleSize             = 900
-	replacePattern         = regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean header fields
-	regexFirstDigit        = *regexp.MustCompile(`^\d`)
+	RemoveTrailingDecZeros    = false
+	SampleSize                = 900
+	replacePattern            = regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean header fields
+	regexFirstDigit           = *regexp.MustCompile(`^\d`)
+	parseConstraintExpression = func(string) (ConstraintEvalFunc, error) { return nil, nil }
 )
 
 // Column represents a schemata column
@@ -39,7 +40,8 @@ type Column struct {
 	Description string `json:"description,omitempty"`
 	FileURI     string `json:"file_uri,omitempty"`
 
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Constraint *ColumnConstraint `json:"constraint,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // Columns represent many columns
@@ -65,6 +67,15 @@ const (
 	TimeType       ColumnType = "time"
 	TimezType      ColumnType = "timez"
 )
+
+type ConstraintEvalFunc func(value any) bool
+
+type ColumnConstraint struct {
+	Expression string             `json:"expression,omitempty"`
+	Errors     []string           `json:"errors,omitempty"`
+	FailCnt    uint64             `json:"fail_cnt,omitempty"`
+	EvalFunc   ConstraintEvalFunc `json:"-"`
+}
 
 type KeyType string
 
@@ -313,6 +324,7 @@ func (cols Columns) Clone() (newCols Columns) {
 			Schema:      col.Schema,
 			Database:    col.Database,
 			Metadata:    col.Metadata,
+			Constraint:  col.Constraint,
 		}
 	}
 	return newCols
@@ -583,10 +595,10 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 }
 
 // GetColumn returns the matched Col
-func (cols Columns) GetColumn(name string) Column {
-	colsMap := map[string]Column{}
+func (cols Columns) GetColumn(name string) *Column {
+	colsMap := map[string]*Column{}
 	for _, col := range cols {
-		colsMap[strings.ToLower(col.Name)] = col
+		colsMap[strings.ToLower(col.Name)] = &col
 	}
 	return colsMap[strings.ToLower(name)]
 }
@@ -798,6 +810,24 @@ func MakeRowsChan() chan []any {
 
 const regexExtractPrecisionScale = `[a-zA-Z]+ *\( *(\d+) *(, *\d+)* *\)`
 
+func (col *Column) SetConstraint() {
+	parts := strings.Split(string(col.Type), "|")
+	if len(parts) != 2 {
+		return
+	}
+
+	// fix type value
+	col.Type = ColumnType(strings.TrimSpace(parts[0]))
+
+	cc := &ColumnConstraint{
+		Expression: strings.TrimSpace(parts[1]),
+	}
+	cc.parse()
+	if cc.EvalFunc != nil {
+		col.Constraint = cc
+	}
+}
+
 // SetLengthPrecisionScale parse length, precision, scale
 func (col *Column) SetLengthPrecisionScale() {
 	colType := strings.TrimSpace(string(col.Type))
@@ -834,6 +864,21 @@ func (col *Column) SetLengthPrecisionScale() {
 
 		if col.DbPrecision > 0 || col.Stats.MaxLen > 0 {
 			col.Sourced = true
+		}
+	}
+}
+
+// EvaluateConstraint evaluates a value against the constraint function
+func (col *Column) EvaluateConstraint(value any, sp *StreamProcessor) {
+	if c := col.Constraint; c.EvalFunc != nil && !c.EvalFunc(value) {
+		c.FailCnt++
+		if c.FailCnt <= 10 {
+			errMsg := g.F("constraint failure for column '%s', at row number %d, for value: %s", col.Name, sp.N, cast.ToString(value))
+			g.Warn(errMsg)
+			c.Errors = append(c.Errors, errMsg)
+			if os.Getenv("SLING_ON_CONSTRAINT_FAILURE") == "abort" {
+				sp.ds.Context.CaptureErr(g.Error(errMsg))
+			}
 		}
 	}
 }
@@ -1037,4 +1082,14 @@ func isDate(t *time.Time) bool {
 
 func isUTC(t *time.Time) bool {
 	return t != nil && t.Location().String() == "UTC"
+}
+
+// parse parses the constraint expression and sets the function
+func (cc *ColumnConstraint) parse() {
+	var err error
+	cc.EvalFunc, err = parseConstraintExpression(cc.Expression)
+	if err != nil {
+		g.Warn(err.Error())
+		return
+	}
 }

@@ -481,6 +481,10 @@ func (df *Dataflow) SyncStats() {
 			if colStats.MaxDecLen > dfCols[i].Stats.MaxDecLen {
 				dfCols[i].Stats.MaxDecLen = colStats.MaxDecLen
 			}
+
+			if col.Constraint != nil {
+				dfCols[i].Constraint.FailCnt = dfCols[i].Constraint.FailCnt + col.Constraint.FailCnt
+			}
 		}
 	}
 
