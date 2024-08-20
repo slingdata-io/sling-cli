@@ -140,7 +140,7 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
           
-          .\mc.exe cp *.tar.gz R2/sling-public/dev/latest/ 
+          .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/ 
 
       - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
