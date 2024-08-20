@@ -133,22 +133,19 @@ jobs:
         if: runner.os == 'windows'
         run: .\scripts\ci\build.win.ps1 $env:VERSION
 
-      - name: Set up MinIO Client (Windows)
+      - name: Upload to R2 (Windows)
         if: runner.os == 'windows'
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
           Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
-          $currentDirPath = $(Get-Location).Path
-          $env:GITHUB_PATH="$env:GITHUB_PATH;$currentDirPath"
+          
+          .\mc.exe cp *.tar.gz R2/sling-public/dev/latest/ 
 
-      - name: Set up MinIO Client (Unix)
+      - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
         run: |
           name=$(uname -s | tr "[:upper:]" "[:lower:]")
           wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
-          echo "$PWD" >> $GITHUB_PATH
-      
-      - name: Upload to R2
-        run: |
-          mc cp *.tar.gz R2/sling-public/dev/latest/ 
+
+          ./mc cp *.tar.gz R2/sling-public/dev/latest/ 
