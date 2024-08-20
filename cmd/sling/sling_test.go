@@ -737,7 +737,7 @@ streams:
     primary_key: col3
     update_key: col2
     source_options:
-			columns: { pro: 'decimal(10,4)' }
+			columns: { pro: 'decimal(10,4)', pro2: 'string' }
       trim_space: true
       delimiter: "|"
 			transforms: [trim_space]
@@ -808,7 +808,7 @@ streams:
 		assert.Equal(t, "col2", config.Source.UpdateKey)
 		assert.Equal(t, g.Bool(true), config.Source.Options.TrimSpace)
 		assert.Equal(t, "|", config.Source.Options.Delimiter)
-		assert.Equal(t, `{"pro":"decimal(10,4)"}`, g.Marshal(config.Target.Columns))
+		assert.Equal(t, "[{\"name\":\"pro\",\"type\":\"decimal(10,4)\"},{\"name\":\"pro2\",\"type\":\"string\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))
 
 		assert.Equal(t, `"my_schema2"."table2"`, config.Target.Object)
@@ -829,7 +829,7 @@ streams:
 		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
 		assert.EqualValues(t, g.String(""), config.Target.Options.PostSQL)
 		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
-		assert.Equal(t, `{"id":"string(100)"}`, g.Marshal(config.Target.Columns))
+		assert.Equal(t, "[{\"name\":\"id\",\"type\":\"string(100)\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))
 	}
 

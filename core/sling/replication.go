@@ -590,13 +590,13 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		if cast.ToString(rootNode.Key) == "defaults" {
 
 			if value, ok := rootNode.Value.(yaml.MapSlice); ok {
-				config.Defaults.Columns = makeColumnsMap(value)
+				config.Defaults.Columns = makeColumns(value)
 			}
 
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
 					if value, ok := defaultsNode.Value.(yaml.MapSlice); ok {
-						config.Defaults.SourceOptions.Columns = makeColumnsMap(value) // legacy
+						config.Defaults.SourceOptions.Columns = makeColumns(value) // legacy
 					}
 				}
 			}
@@ -620,7 +620,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 				}
 
 				if value, ok := streamsNode.Value.(yaml.MapSlice); ok {
-					stream.Columns = makeColumnsMap(value)
+					stream.Columns = makeColumns(value)
 				}
 
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
@@ -630,7 +630,7 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
 							if value, ok := streamConfigNode.Value.(yaml.MapSlice); ok {
-								stream.SourceOptions.Columns = makeColumnsMap(value) // legacy
+								stream.SourceOptions.Columns = makeColumns(value) // legacy
 							}
 						}
 					}
@@ -642,16 +642,16 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	return
 }
 
-// sets the map correctly
-func makeColumnsMap(nodes yaml.MapSlice) (columns map[string]any) {
+// sets the columns correctly and keep the order
+func makeColumns(nodes yaml.MapSlice) (columns []any) {
 	found := false
-	columns = map[string]any{}
 	for _, node := range nodes {
 		if cast.ToString(node.Key) == "columns" {
 			found = true
 			if slice, ok := node.Value.(yaml.MapSlice); ok {
 				for _, columnNode := range slice {
-					columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
+					col := g.M("name", cast.ToString(columnNode.Key), "type", cast.ToString(columnNode.Value))
+					columns = append(columns, col)
 				}
 			}
 		}
