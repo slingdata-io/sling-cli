@@ -311,6 +311,7 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Init
 	conn.SetProp("orig_url", OrigURL)
+	conn.SetProp("orig_prop_keys", g.Marshal(lo.Keys(conn.Base().properties))) // used when caching conn
 
 	if val := conn.GetProp("concurrency"); val != "" {
 		concurrency = cast.ToInt(val)
@@ -519,6 +520,27 @@ func (conn *BaseConn) PropArrExclude(exclude ...string) []string {
 	}
 	conn.context.Mux.Unlock()
 	return props
+}
+
+// ReplaceProps used when reusing a connection
+// since the provided props can change, this is used
+// to delete old original props and set new ones
+func (conn *BaseConn) ReplaceProps(newProps map[string]string) {
+	oldPropKeys := []string{}
+
+	g.Unmarshal(conn.GetProp("orig_prop_keys"), oldPropKeys)
+
+	conn.context.Mux.Lock()
+	for _, k := range oldPropKeys {
+		delete(conn.properties, k)
+	}
+
+	// set new props
+	for k, v := range newProps {
+		conn.properties[k] = v
+	}
+
+	conn.context.Mux.Unlock()
 }
 
 // Props returns a map properties
