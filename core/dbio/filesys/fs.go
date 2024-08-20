@@ -520,10 +520,6 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		Cfg = cfg[0]
 	}
 
-	// if fs.GetProp("url") == "" {
-	// 	fs.SetProp("url", url)
-	// }
-
 	if strings.HasSuffix(strings.ToLower(url), ".zip") {
 		localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 		if err != nil {
@@ -550,7 +546,6 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		// delete zip file
 		Delete(localFs, zipPath)
 
-		// TODO: handle multiple files, yielding multiple schemas
 		nodes := dbio.NewFileNodes(nodeMaps)
 		df, err = GetDataflow(localFs.Self(), nodes, Cfg)
 		if err != nil {
