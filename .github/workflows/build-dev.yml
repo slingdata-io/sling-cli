@@ -131,7 +131,6 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'windows'
-        shell: pwsh
         run: .\scripts\ci\build.win.ps1 $env:VERSION
 
       - name: Set up MinIO Client (Windows)
