@@ -131,6 +131,7 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'windows'
+        shell: pwsh
         run: .\scripts\ci\build.win.ps1 $env:VERSION
 
       - name: Set up MinIO Client (Windows)
@@ -138,7 +139,7 @@ jobs:
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          wget "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile mc.exe
+          Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
           $currentDirPath = $(Get-Location).Path
           $env:GITHUB_PATH="$env:GITHUB_PATH;$currentDirPath"
 
