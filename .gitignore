@@ -37,3 +37,4 @@ wails.json
 
 cmd/sling/build/
 cmd/sling/frontend
+.cursorignore
