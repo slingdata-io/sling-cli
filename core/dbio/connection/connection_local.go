@@ -27,12 +27,23 @@ type ConnEntry struct {
 	Connection  Connection `json:"connection"`
 }
 
+type ConnEntries []ConnEntry
+
+func (ce ConnEntries) Get(name string) ConnEntry {
+	for _, conn := range ce {
+		if strings.EqualFold(conn.Name, name) {
+			return conn
+		}
+	}
+	return ConnEntry{}
+}
+
 var (
-	localConns   []ConnEntry
+	localConns   ConnEntries
 	localConnsTs time.Time
 )
 
-func GetLocalConns(force ...bool) []ConnEntry {
+func GetLocalConns(force ...bool) ConnEntries {
 	if len(force) > 0 && force[0] {
 		// force refresh
 	} else if time.Since(localConnsTs).Seconds() < 10 {
@@ -473,7 +484,7 @@ func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, no
 	return
 }
 
-func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries []ConnEntry, err error) {
+func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries ConnEntries, err error) {
 	m := g.M()
 	if err = g.JSONConvert(ef, &m); err != nil {
 		return entries, g.Error(err)
