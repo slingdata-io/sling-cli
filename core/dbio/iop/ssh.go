@@ -92,7 +92,32 @@ func (s *SSHClient) Connect() (err error) {
 	// allow all supported cyphers
 	config.Ciphers = append(
 		config.Ciphers,
-		[]string{"arcfour256", "arcfour128", "arcfour", "aes128-cbc", "3des-cbc"}...,
+		`arcfour256`,
+		`arcfour128`,
+		`arcfour`,
+		`aes128-cbc`,
+		`3des-cbc`,
+		`diffie-hellman-group-exchange-sha256`,
+	)
+
+	config.KeyExchanges = append(
+		config.KeyExchanges,
+		`rsa-sha2-256-cert-v01@openssh.com`,
+		`rsa-sha2-512-cert-v01@openssh.com`,
+		`ssh-rsa-cert-v01@openssh.com`,
+		`ssh-dss-cert-v01@openssh.com`,
+		`ecdsa-sha2-nistp256-cert-v01@openssh.com`,
+		`ecdsa-sha2-nistp384-cert-v01@openssh.com`, `ecdsa-sha2-nistp521-cert-v01@openssh.com`, `ssh-ed25519-cert-v01@openssh.com`,
+		`diffie-hellman-group-exchange-sha256`,
+		`diffie-hellman-group-exchange-sha1`,
+		`ecdsa-sha2-nistp256`,
+		`ecdsa-sha2-nistp384`,
+		`ecdsa-sha2-nistp521`,
+		`rsa-sha2-256`,
+		`rsa-sha2-512`,
+		`ssh-rsa`,
+		`ssh-dss`,
+		`ssh-ed25519`,
 	)
 
 	s.config = &ssh.ClientConfig{
