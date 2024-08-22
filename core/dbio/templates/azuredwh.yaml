@@ -312,6 +312,7 @@ function:
   sleep: waitfor delay '00:00:{seconds}.000'
   checksum_string: datalength({field})
   checksum_integer: 'CAST({field} as bigint)'
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_boolean: datalength({field})
   checksum_json: datalength(replace({field}, ' ', ''))
   checksum_date: (CAST(DATEDIFF(ss, '01-01-1970 00:00:00', {field}) as bigint) * 1000000)

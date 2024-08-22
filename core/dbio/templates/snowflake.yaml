@@ -479,6 +479,7 @@ function:
   str_utf8: "{ field }"
   string_type: string
   cast_to_string: '{field}::string'
+  cast_to_text: '{field}::string'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: call SYSTEM$WAIT({seconds})

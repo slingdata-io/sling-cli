@@ -348,6 +348,7 @@ function:
   string_type: varchar
   cast_as: cast({field} as {type})
   cast_to_string: cast({field} as varchar)
+  cast_to_text: cast({field} as varchar)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   checksum_string: length({field})

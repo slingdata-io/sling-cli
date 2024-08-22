@@ -294,6 +294,7 @@ function:
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   sleep: waitfor delay '00:00:{seconds}.000'
   checksum_string: datalength({field})
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: datalength({field})
   checksum_json: datalength(replace({field}, ' ', ''))

@@ -296,6 +296,7 @@ routine:
 function:
   truncate_f: trunc({field})
   truncate_datef: trunc({field})
+  cast_to_text: 'cast({field} as varchar(4000))'
   str_utf8: convert({field},'US7ASCII','WE8ISO8859P1')
   date_to_int: to_number(to_char({field}, 'j'))
   number_to_int: round({field}, 0)

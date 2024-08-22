@@ -145,6 +145,7 @@ function:
   checksum_datetime: CAST((epoch({field}) || substr(strftime('%f',{field}),4) ) as bigint)
   checksum_decimal: 'abs(cast({field} as bigint))'
   checksum_boolean: 'length({field}::string)'
+  cast_to_text: 'cast({field} as text)'
 
 variable:
   bool_as: integer

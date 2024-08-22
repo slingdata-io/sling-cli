@@ -313,6 +313,7 @@ function:
   truncate_f: round({field}, 2, 1)
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   sleep: waitfor delay '00:00:{seconds}.000'
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_string: datalength({field})
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: len({field})
