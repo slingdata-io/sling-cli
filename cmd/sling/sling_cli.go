@@ -353,20 +353,19 @@ func init() {
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
 
-	if telemetry {
-		if projectID == "" {
-			projectID = os.Getenv("GITHUB_REPOSITORY_ID")
-		}
-		machineID = store.GetMachineID()
-		if projectID != "" {
-			machineID = g.MD5(projectID) // hashed
-		}
+	if projectID == "" {
+		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
 	}
 }
 
 func Track(event string, props ...map[string]interface{}) {
 	if !telemetry || core.Version == "dev" {
 		return
+	}
+
+	machineID = store.GetMachineID()
+	if projectID != "" {
+		machineID = g.MD5(projectID) // hashed
 	}
 
 	properties := g.M(
