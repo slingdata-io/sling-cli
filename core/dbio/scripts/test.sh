@@ -4,7 +4,7 @@ set -e  # exit on error
 export DEBUG=''
 
 cd iop
-go test -run 'TestParseDate|TestDetectDelimiter|TestFIX'
+go test -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints'
 cd -
 
 cd database

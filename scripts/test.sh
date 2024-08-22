@@ -13,6 +13,7 @@ cd -
 
 cd core/sling
 go test -run 'TestTransformMsUUID'
+go test -run 'TestCheck'
 cd -
 
 ## test cli commands
@@ -78,7 +79,8 @@ sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.co
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
 SLING_STREAM_CNT=14 sling run -r cmd/sling/tests/replications/r.07.yaml
 SLING_STREAM_CNT=4 sling run -r cmd/sling/tests/replications/r.08.yaml
-SLING_CONSTRAINT_FAILS=2 SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
+# SLING_CONSTRAINT_FAILS=2 SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
+SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
 YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 sling run -r cmd/sling/tests/replications/r.12.yaml
 
