@@ -29,7 +29,7 @@
   </a>
 </p>
 
-Sling is a passion project turned into a free CLI Product which offers an easy solution to create and maintain high volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
+Sling is a passion project turned into a free CLI Product which offers an easy solution to create and maintain small to medium volume data pipelines using the Extract & Load (EL) approach. It focuses on data movement between:
 
 * Database to Database
 * File System to Database
