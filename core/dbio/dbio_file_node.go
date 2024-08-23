@@ -204,7 +204,7 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 	scheme := u.U.Scheme
 	host = u.Hostname()
 
-	path = strings.TrimPrefix(u.U.Path, "/")
+	path = strings.TrimPrefix(uri, g.F("%s://%s/", scheme, u.U.Host))
 	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
 
 	if scheme == "" || host == "" {

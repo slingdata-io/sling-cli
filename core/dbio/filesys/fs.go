@@ -257,6 +257,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
 		if strings.Contains(uri, "://") && err == nil {
+			path = strings.TrimPrefix(uri, u.U.Scheme+"://")
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
@@ -270,6 +271,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
 		if strings.Contains(uri, "://") && err == nil {
+			path = strings.TrimPrefix(uri, u.U.Scheme+"://")
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()

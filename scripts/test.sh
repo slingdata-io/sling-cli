@@ -6,14 +6,15 @@ shopt -s expand_aliases
 # export _DEBUG=LOW
 # export _DEBUG_CALLER_LEVEL=2
 cd cmd/sling
-go test -run 'TestReplicationDefaults'
-go test -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
-SKIP_CLICKHOUSE=TRUE go test -parallel 4 -timeout 15m -run TestSuiteDatabase
+go test -v -run 'TestReplicationDefaults'
+go test -v -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
+SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 15m -run TestSuiteDatabase
 cd -
 
 cd core/sling
-go test -run 'TestTransformMsUUID'
-go test -run 'TestCheck'
+go test -v -run 'TestTransformMsUUID'
+go test -v -run 'TestReplication'
+go test -v -run 'TestCheck'
 cd -
 
 ## test cli commands

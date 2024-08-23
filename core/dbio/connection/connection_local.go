@@ -1,7 +1,6 @@
 package connection
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -10,11 +9,9 @@ import (
 	"time"
 
 	"github.com/flarco/g"
-	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
-	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -273,21 +270,22 @@ func (ec *EnvConns) List() (fields []string, rows [][]any) {
 	return fields, rows
 }
 
-type DiscoverOptions struct {
-	Pattern     string `json:"pattern,omitempty"`
-	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
-	Recursive   bool   `json:"recursive,omitempty"`
-	Discover    bool
-}
-
 func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
-	opt.Discover = true
-	_, nodes, schemata, err = ec.testDiscover(name, opt)
+	conn, ok1 := ec.GetConnEntry(name)
+	if !ok1 || name == "" {
+		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+	}
+
+	_, nodes, schemata, err = conn.Connection.Discover(opt)
 	return
 }
 
 func (ec *EnvConns) Test(name string) (ok bool, err error) {
-	ok, _, _, err = ec.testDiscover(name, &DiscoverOptions{})
+	conn, ok1 := ec.GetConnEntry(name)
+	if !ok1 || name == "" {
+		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+	}
+	ok, err = conn.Connection.Test()
 	return
 }
 
@@ -298,214 +296,5 @@ func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 	}
 
 	conn, ok = conns[strings.ToLower(name)]
-	return
-}
-
-func (ec *EnvConns) testDiscover(name string, opt *DiscoverOptions) (ok bool, nodes dbio.FileNodes, schemata database.Schemata, err error) {
-
-	patterns := []string{}
-	globPatterns := []glob.Glob{}
-
-	parsePattern := func() {
-		if opt.Pattern != "" {
-			patterns = []string{}
-			globPatterns = []glob.Glob{}
-			for _, f := range strings.Split(opt.Pattern, ",") {
-				patterns = append(patterns, f)
-				gc, err := glob.Compile(f)
-				if err == nil {
-					globPatterns = append(globPatterns, gc)
-				}
-			}
-		}
-	}
-
-	parsePattern()
-
-	if opt.Pattern != "" && len(patterns) == 1 {
-		if strings.Contains(opt.Pattern, "**") || strings.Contains(opt.Pattern, "*/*") {
-			opt.Recursive = true
-		}
-	}
-
-	conn, ok1 := ec.GetConnEntry(name)
-	if !ok1 || name == "" {
-		return ok, nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
-	}
-
-	switch {
-
-	case conn.Connection.Type.IsDb():
-		dbConn, err := conn.Connection.AsDatabase()
-		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not initiate %s", name)
-		}
-		err = dbConn.Connect()
-		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
-		}
-		defer dbConn.Close()
-
-		if opt.Discover {
-			var table database.Table
-			if opt.Pattern != "" {
-				table, _ = database.ParseTableName(opt.Pattern, dbConn.GetType())
-				if strings.Contains(table.Schema, "*") {
-					table.Schema = ""
-				}
-				if strings.Contains(table.Name, "*") {
-					table.Name = ""
-				}
-			}
-			g.Debug("database discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "schema", table.Schema, "table", table.Name, "column_level", opt.ColumnLevel)))
-
-			schemata, err = dbConn.GetSchemata(table.Schema, table.Name)
-			if err != nil {
-				return ok, nodes, schemata, g.Error(err, "could not discover %s", name)
-			}
-
-			if opt.ColumnLevel {
-				g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
-				if len(schemata.Columns()) <= 10 {
-					g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
-				}
-			} else {
-				g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
-				if len(schemata.Tables()) <= 10 {
-					g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
-				}
-			}
-
-			// apply filter
-			if len(patterns) > 0 {
-				schemata = schemata.Filtered(opt.ColumnLevel, patterns...)
-			}
-		}
-
-	case conn.Connection.Type.IsFile():
-		fileClient, err := conn.Connection.AsFile()
-		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not initiate %s", name)
-		}
-		err = fileClient.Init(context.Background())
-		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
-		}
-		defer fileClient.Close()
-
-		url := conn.Connection.URL()
-		if opt.Pattern != "" {
-			url = opt.Pattern
-		}
-
-		if strings.Contains(url, "*") || strings.Contains(url, "?") {
-			opt.Pattern = url
-			url = filesys.GetDeepestParent(url)
-			parsePattern()
-		}
-
-		g.Debug("file discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "url", url, "column_level", opt.ColumnLevel, "recursive", opt.Recursive)))
-		if opt.Recursive {
-			nodes, err = fileClient.ListRecursive(url)
-		} else {
-			nodes, err = fileClient.List(url)
-		}
-		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", name)
-		}
-		g.Debug("unfiltered nodes returned: %d", len(nodes))
-		if len(nodes) <= 10 {
-			g.Debug(g.Marshal(nodes.Paths()))
-		}
-
-		// apply filter
-		if opt.Discover {
-			// sort alphabetically
-			nodes.Sort()
-			nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
-				if len(patterns) == 0 || !(strings.Contains(opt.Pattern, "*") || strings.Contains(opt.Pattern, "?")) {
-					return true
-				}
-				for _, gf := range globPatterns {
-					if gf.Match(n.Path()) {
-						return true
-					}
-				}
-				return false
-			})
-
-			// if single file, get columns of file content
-			if opt.ColumnLevel {
-				ctx := g.NewContext(fileClient.Context().Ctx, 5)
-
-				getColumns := func(i int) {
-					defer ctx.Wg.Read.Done()
-					node := nodes[i]
-
-					df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
-					if err != nil {
-						ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
-						return
-					}
-
-					// discard rows, just need columns
-					for stream := range df.StreamCh {
-						for range stream.Rows() {
-						}
-					}
-
-					// get columns
-					nodes[i].Columns = df.Columns
-				}
-
-				for i := range nodes {
-					ctx.Wg.Read.Add()
-					go getColumns(i)
-
-					if i+1 >= 15 {
-						g.Warn("limiting the number of read ops for files (15 files already read)")
-						break
-					}
-				}
-				ctx.Wg.Read.Wait()
-
-				if err = ctx.Err(); err != nil {
-					return ok, nodes, schemata, g.Error(err, "could not read files")
-				}
-			}
-		}
-
-	default:
-		return ok, nodes, schemata, g.Error("Unhandled connection type: %s", conn.Connection.Type)
-	}
-
-	ok = true
-
-	return
-}
-
-func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries ConnEntries, err error) {
-	m := g.M()
-	if err = g.JSONConvert(ef, &m); err != nil {
-		return entries, g.Error(err)
-	}
-
-	connsMap := map[string]ConnEntry{}
-	profileConns, err := ReadConnections(m)
-	for _, conn := range profileConns {
-		c := ConnEntry{
-			Name:        strings.ToUpper(conn.Info().Name),
-			Description: conn.Type.NameLong(),
-			Source:      sourceName,
-			Connection:  conn,
-		}
-		connsMap[c.Name] = c
-	}
-
-	entries = lo.Values(connsMap)
-	sort.Slice(entries, func(i, j int) bool {
-		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
-	})
-
 	return
 }

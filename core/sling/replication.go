@@ -159,11 +159,11 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	}
 
 	if c.Connection.Type.IsDb() {
-		return rd.ProcessWildcardsDatabase(c, wildcardNames)
+		return rd.ProcessWildcardsDatabase(c.Connection, wildcardNames)
 	}
 
 	if c.Connection.Type.IsFile() {
-		return rd.ProcessWildcardsFile(c, wildcardNames)
+		return rd.ProcessWildcardsFile(c.Connection, wildcardNames)
 	}
 
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
@@ -189,11 +189,11 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 	})
 }
 
-func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
+func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, wildcardNames []string) (err error) {
 
-	g.DebugLow("processing wildcards for %s", rd.Source)
+	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(wildcardNames))
 
-	conn, err := c.Connection.AsDatabase()
+	conn, err := c.AsDatabase(true)
 	if err != nil {
 		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = conn.Connect(); err != nil {
@@ -201,61 +201,49 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 	}
 
 	for _, wildcardName := range wildcardNames {
-		schemaT, err := database.ParseTableName(wildcardName, c.Connection.Type)
+		schemaT, err := database.ParseTableName(wildcardName, c.Type)
 		if err != nil {
 			return g.Error(err, "could not parse stream name: %s", wildcardName)
 		} else if schemaT.Schema == "" {
 			continue
 		}
 
-		if strings.Contains(schemaT.Name, "*") || strings.Contains(schemaT.Name, "?") {
-			// get all tables in schema
-			g.Debug("getting tables for %s", wildcardName)
-			data, err := conn.GetTables(schemaT.Schema)
-			if err != nil {
-				return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
-			}
-
-			gc, err := glob.Compile(strings.ToLower(schemaT.Name))
-			if err != nil {
-				return g.Error(err, "could not parse pattern: %s", schemaT.Name)
-			}
-
-			for _, row := range data.Rows {
-				table := database.Table{
-					Schema:  schemaT.Schema,
-					Name:    cast.ToString(row[0]),
-					Dialect: conn.GetType(),
-				}
-
-				// add to stream map
-				if gc.Match(strings.ToLower(table.Name)) {
-
-					streamName, streamConfig, found := rd.GetStream(table.FullName())
-					if found {
-						// keep in step with order, delete and add again
-						rd.DeleteStream(streamName)
-						rd.AddStream(table.FullName(), streamConfig)
-						continue
-					}
-
-					cfg := rd.Streams[wildcardName]
-					rd.AddStream(table.FullName(), cfg)
-				}
-			}
-
-			// delete * from stream map
-			rd.DeleteStream(wildcardName)
-
+		// get all tables in schema
+		g.Debug("getting tables for %s", wildcardName)
+		ok, _, schemata, err := c.Discover(&connection.DiscoverOptions{Pattern: wildcardName})
+		if err != nil {
+			return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
+		} else if !ok {
+			return g.Error("could not get tables for schema: %s", schemaT.Schema)
 		}
+
+		for _, table := range schemata.Tables() {
+
+			// add to stream map
+			streamName, streamConfig, found := rd.GetStream(table.FullName())
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(table.FullName(), streamConfig)
+				continue
+			}
+
+			cfg := rd.Streams[wildcardName]
+			rd.AddStream(table.FullName(), cfg)
+			g.Debug("wildcard '%s' matched stream => %s", wildcardName, table.FullName())
+		}
+
+		// delete * from stream map
+		rd.DeleteStream(wildcardName)
+
 	}
 	return
 }
 
-func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildcardNames []string) (err error) {
-	g.DebugLow("processing wildcards for %s", rd.Source)
+func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, wildcardNames []string) (err error) {
+	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(wildcardNames))
 
-	fs, err := c.Connection.AsFile()
+	fs, err := c.AsFile(true)
 	if err != nil {
 		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = fs.Init(context.Background()); err != nil {
@@ -263,23 +251,37 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	}
 
 	for _, wildcardName := range wildcardNames {
-		nodes, err := fs.ListRecursive(wildcardName)
+
+		ok, nodes, _, err := c.Discover(&connection.DiscoverOptions{Pattern: wildcardName})
 		if err != nil {
-			return g.Error(err, "could not list %s", wildcardName)
+			return g.Error(err, "could not get files for schema: %s", wildcardName)
+		} else if !ok {
+			return g.Error("could not get files for schema: %s", wildcardName)
 		}
 
 		added := 0
 		for _, node := range nodes {
-			streamName, streamConfig, found := rd.GetStream(node.URI)
+			streamName, streamConfig, found := rd.GetStream(node.Path())
 			if found {
 				// keep in step with order, delete and add again
 				rd.DeleteStream(streamName)
-				rd.AddStream(node.URI, streamConfig)
+				rd.AddStream(node.Path(), streamConfig)
 				continue
 			}
 
-			rd.AddStream(node.URI, rd.Streams[wildcardName])
+			// check uri, add as path
+			streamName, streamConfig, found = rd.GetStream(node.URI)
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(node.Path(), streamConfig) // add as path
+				continue
+			}
+
+			// add path
+			rd.AddStream(node.Path(), rd.Streams[wildcardName])
 			added++
+			g.Debug("wildcard '%s' matched stream => %s", wildcardName, node.Path())
 		}
 
 		// delete from stream map

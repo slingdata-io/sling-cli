@@ -207,7 +207,9 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, er
 			Size:    cast.ToUint64(stat.Size()),
 			IsDir:   stat.IsDir(),
 		}
-		nodes.Add(node)
+		if pattern == nil {
+			nodes.Add(node)
+		}
 		if !stat.IsDir() {
 			return
 		}
