@@ -8,9 +8,9 @@ import (
 )
 
 func TestDuckDb(t *testing.T) {
-	duck := NewDuckDb(context.Background())
 
 	t.Run("ExecMultiContext", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
 		result, err := duck.ExecMultiContext(
 			context.Background(),
 			"create table test (id int, name varchar)",
@@ -26,6 +26,7 @@ func TestDuckDb(t *testing.T) {
 	})
 
 	t.Run("ExecContext with erroneous query", func(t *testing.T) {
+		duck := NewDuckDb(context.Background())
 		_, err := duck.Exec("SELECT * FROM non_existent_table")
 
 		assert.Error(t, err)
@@ -70,6 +71,44 @@ func TestDuckDb(t *testing.T) {
 
 		// Clean up: drop the test table
 		_, err = duck.Exec("DROP TABLE export_test")
+		assert.NoError(t, err)
+	})
+	t.Run("Query", func(t *testing.T) {
+		duck := NewDuckDb(context.Background(), "path=/tmp/test.db")
+
+		// Create a test table and insert some data
+		_, err := duck.ExecMultiContext(
+			context.Background(),
+			"CREATE or replace TABLE query_test (id INT, name VARCHAR, age INT)",
+			"INSERT INTO query_test VALUES (1, 'Alice', 30),(2, 'Bob', 25),(3, 'Charlie', 35)",
+		)
+		assert.NoError(t, err)
+
+		// Test the Query function
+		data, err := duck.Query("SELECT * FROM query_test ORDER BY id")
+		assert.NoError(t, err)
+		assert.NotNil(t, data)
+
+		// Verify the queried data
+		assert.Equal(t, 3, len(data.Rows))
+
+		// Check the content of the first row
+		assert.Equal(t, int64(1), data.Rows[0][0])
+		assert.Equal(t, "Alice", data.Rows[0][1])
+		assert.Equal(t, int64(30), data.Rows[0][2])
+
+		// Check the content of the last row
+		assert.Equal(t, int64(3), data.Rows[2][0])
+		assert.Equal(t, "Charlie", data.Rows[2][1])
+		assert.Equal(t, int64(35), data.Rows[2][2])
+
+		// Verify column names
+		expectedColumns := []string{"id", "name", "age"}
+		actualColumns := data.GetFields()
+		assert.Equal(t, expectedColumns, actualColumns)
+
+		// Clean up: drop the test table
+		_, err = duck.Exec("DROP TABLE query_test")
 		assert.NoError(t, err)
 	})
 }

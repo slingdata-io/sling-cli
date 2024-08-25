@@ -52,6 +52,7 @@ type FileSysClient interface {
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
 	GetPath(uri string) (path string, err error)
+	Query(uri, sql string) (data iop.Dataset, err error)
 
 	delete(path string) (err error)
 	setDf(df *iop.Dataflow)
@@ -183,6 +184,8 @@ const (
 	FileTypeAvro      FileType = "avro"
 	FileTypeSAS       FileType = "sas7bdat"
 	FileTypeJsonLines FileType = "jsonlines"
+	FileTypeIceberg   FileType = "iceberg"
+	FileTypeDelta     FileType = "delta"
 )
 
 var AllFileType = []struct {
@@ -386,6 +389,94 @@ func (fs *BaseFileSysClient) Buckets() (paths []string, err error) {
 // Prefix returns the url prefix
 func (fs *BaseFileSysClient) Prefix(suffix ...string) string {
 	return fs.Self().Prefix(suffix...)
+}
+
+// Query queries the file system via duckdb
+func (fs *BaseFileSysClient) Query(uri, sql string) (data iop.Dataset, err error) {
+	duck := iop.NewDuckDb(fs.context.Ctx)
+
+	err = duck.Open()
+	if err != nil {
+		return data, g.Error(err, "could not open duckdb")
+	}
+
+	// add credentials to the query
+
+	// map from sling to duckdb
+	var secretKeyMap map[string]string
+	secretProps := []string{}
+	scopeScheme := fs.FsType().String()
+
+	switch fs.FsType() {
+	case dbio.TypeFileS3:
+		secretKeyMap = map[string]string{
+			"ACCESS_KEY_ID":     "KEY_ID",
+			"SECRET_ACCESS_KEY": "SECRET",
+			"BUCKET":            "SCOPE",
+			"REGION":            "REGION",
+			"SESSION_TOKEN":     "SESSION_TOKEN",
+			"ENDPOINT":          "ENDPOINT",
+		}
+
+		if strings.Contains(fs.GetProp("endpoint"), "r2.cloudflarestorage.com") {
+			accountID := strings.Split(fs.GetProp("endpoint"), ".")[0]
+			secretProps = append(secretProps, "ACCOUNT_ID "+accountID)
+			secretProps = append(secretProps, "TYPE R2")
+			scopeScheme = "r2"
+			sql = strings.ReplaceAll(sql, "s3://", "r2://")
+		} else {
+			secretProps = append(secretProps, "TYPE S3")
+		}
+
+	case dbio.TypeFileGoogle:
+		secretKeyMap = map[string]string{
+			"ACCESS_KEY_ID":     "KEY_ID",
+			"SECRET_ACCESS_KEY": "SECRET",
+		}
+		secretProps = append(secretProps, "TYPE GCS")
+		scopeScheme = "gcs"
+		sql = strings.ReplaceAll(sql, "gs://", "gcs://")
+
+	case dbio.TypeFileAzure:
+		secretKeyMap = map[string]string{
+			"CONN_STR": "CONNECTION_STRING",
+			"ACCOUNT":  "ACCOUNT_NAME",
+		}
+		secretProps = append(secretProps, "TYPE AZURE")
+
+	case dbio.TypeFileLocal:
+		// nothing to do
+
+	default:
+		return data, g.Error("unknown file system type for querying")
+	}
+
+	// populate secret props and make secret sql
+	if len(secretProps) > 0 {
+		for slingKey, duckdbKey := range secretKeyMap {
+			if val := fs.GetProp(slingKey); val != "" {
+				if duckdbKey == "SCOPE" {
+					val = scopeScheme + "://" + val
+				}
+				duckdbVal := "'" + val + "'" // add quotes
+				secretProps = append(secretProps, g.F("%s %s", duckdbKey, duckdbVal))
+			}
+		}
+		secretSQL := g.R(
+			"create secret {name} ({key_vals})",
+			"name", strings.ToUpper(fs.GetProp("name")),
+			"key_vals", strings.Join(secretProps, ",\n  "),
+		)
+
+		sql = secretSQL + sql
+	}
+
+	data, err = duck.Query(sql)
+	if err != nil {
+		return data, g.Error(err, "could not query duckdb")
+	}
+
+	return
 }
 
 // GetProp returns the value of a property

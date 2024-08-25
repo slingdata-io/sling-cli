@@ -8,7 +8,7 @@ go test -v -run 'TestConnection'
 cd -
 
 cd iop
-go test -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints'
+go test -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb'
 cd -
 
 cd database

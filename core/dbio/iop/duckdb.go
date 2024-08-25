@@ -320,6 +320,24 @@ done:
 	return
 }
 
+func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data Dataset, err error) {
+	return duck.QueryContext(context.Background(), sql, options...)
+}
+
+func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
+	ds, err := duck.Export(ctx, sql, options...)
+	if err != nil {
+		return data, g.Error(err, "could not export data")
+	}
+
+	data, err = ds.Collect(0)
+	if err != nil {
+		return data, g.Error(err, "could not collect data")
+	}
+
+	return
+}
+
 func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
 	queryCtx := g.NewContext(ctx)
 
