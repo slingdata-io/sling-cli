@@ -243,12 +243,12 @@ func TestFileSysLocalParquet(t *testing.T) {
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
 
-	df1, err := fs.ReadDataflow("test/test1/parquet")
+	df1, err := fs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 
 	data1, err := df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 1018, len(data1.Rows))
+	assert.EqualValues(t, 1036, len(data1.Rows))
 	assert.EqualValues(t, 7, len(data1.Columns))
 	// g.Info(g.Marshal(data1.Columns.Types()))
 
@@ -257,6 +257,45 @@ func TestFileSysLocalParquet(t *testing.T) {
 
 	_, err = WriteDataflow(fs, df2, "file:///tmp/parquet.test.parquet")
 	assert.NoError(t, err)
+
+	// Verify column types in the new parquet file
+	reader, err := os.Open("/tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	parquetReader, err := iop.NewParquetArrowReader(reader, nil)
+	assert.NoError(t, err)
+
+	columns := parquetReader.Columns()
+	if !assert.Equal(t, 7, len(columns)) {
+		return
+	}
+
+	expectedTypes := map[string]iop.ColumnType{
+		"id":         iop.BigIntType,
+		"first_name": iop.StringType,
+		"last_name":  iop.StringType,
+		"email":      iop.StringType,
+		"rating":     iop.DecimalType,
+		"date":       iop.DateType,
+		"target":     iop.BoolType,
+		"create_dt":  iop.DatetimeType,
+	}
+
+	for _, col := range columns {
+		expectedType, exists := expectedTypes[col.Name]
+		assert.True(t, exists, "Unexpected column: %s", col.Name)
+		assert.Equal(t, expectedType, col.Type, "Mismatched type for column %s", col.Name)
+	}
+
+	// Verify data
+	df3, err := fs.ReadDataflow("file:///tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+
+	data3, err := df3.Collect()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1036, len(data3.Rows))
+	assert.EqualValues(t, 7, len(data3.Columns))
 
 }
 
