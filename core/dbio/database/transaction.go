@@ -11,6 +11,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -131,7 +132,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		if strings.Contains(q, noDebugKey) && !g.IsDebugLow() {
 			err = g.Error(err, "Error executing query")
 		} else {
-			err = g.Error(err, "Error executing: "+CleanSQL(t.Conn, q))
+			err = g.Error(err, "Error executing: "+env.Clean(t.Conn.Props(), q))
 		}
 	}
 

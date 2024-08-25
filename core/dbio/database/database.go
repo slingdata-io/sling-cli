@@ -190,7 +190,7 @@ var (
 
 	tempCloudStorageFolder = "sling_temp"
 
-	noDebugKey = " /* nD */"
+	noDebugKey = env.NoDebugKey
 
 	connPool = Pool{Dbs: map[string]*sqlx.DB{}, DuckDbs: map[string]*DuckDbConn{}}
 	usePool  = os.Getenv("USE_POOL") == "TRUE"
@@ -659,7 +659,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 						}
 					}
 				}
-				return g.Error(err, "could not connect to database"+CleanSQL(conn, msg))
+				return g.Error(err, "could not connect to database"+env.Clean(conn.Props(), msg))
 			}
 		}
 
@@ -722,8 +722,6 @@ func (conn *BaseConn) Close() error {
 
 // LogSQL logs a query for debugging
 func (conn *BaseConn) LogSQL(query string, args ...any) {
-	noColor := g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
-
 	query = strings.TrimSpace(query)
 	query = strings.TrimSuffix(query, ";")
 
@@ -732,24 +730,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		conn.Log = conn.Log[1:]
 	}
 
-	// wrap args
-	contextArgs := g.M("conn", conn.GetProp("sling_conn_id"))
-	if len(args) > 0 {
-		contextArgs["query_args"] = args
-	}
-	if strings.Contains(query, noDebugKey) {
-		if !noColor {
-			query = env.CyanString(query)
-		}
-		g.Trace(query, contextArgs)
-	} else {
-		if !noColor {
-			query = env.CyanString(CleanSQL(conn, query))
-		}
-		if !cast.ToBool(conn.GetProp("silent")) {
-			g.Debug(query)
-		}
-	}
+	env.LogSQL(conn.Props(), query, args...)
 }
 
 // GetGormConn returns the gorm db connection
@@ -1132,7 +1113,7 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		if strings.Contains(q, noDebugKey) {
 			err = g.Error(err, "Error executing query [tx: %t]", conn.tx != nil)
 		} else {
-			err = g.Error(err, "Error executing [tx: %t] %s", conn.tx != nil, CleanSQL(conn, q))
+			err = g.Error(err, "Error executing [tx: %t] %s", conn.tx != nil, env.Clean(conn.Props(), q))
 		}
 	}
 	return
@@ -2210,89 +2191,7 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
-
-	nativeType, ok := conn.template.GeneralTypeMap[string(col.Type)]
-	if !ok {
-		err = g.Error(
-			"No native type mapping defined for col '%s', with type '%s' ('%s') for '%s'",
-			col.Name,
-			col.Type,
-			col.DbType,
-			conn.Type,
-		)
-
-		g.Warn(err.Error() + ". Using 'string'")
-		err = nil
-		nativeType = conn.template.GeneralTypeMap["string"]
-	}
-
-	// Add precision as needed
-	if strings.HasSuffix(nativeType, "()") {
-		length := col.Stats.MaxLen
-		if col.IsString() {
-			isSourced := col.Sourced && col.DbPrecision > 0
-			if isSourced {
-				// string length was manually provided
-				length = col.DbPrecision
-			} else if length <= 0 {
-				length = col.Stats.MaxLen * 2
-				if length < 255 {
-					length = 255
-				}
-			}
-
-			maxStringType := conn.GetTemplateValue("variable.max_string_type")
-			if !isSourced && maxStringType != "" {
-				nativeType = maxStringType // use specified default
-			} else if length > 255 {
-				// let's make text since high
-				nativeType = conn.template.GeneralTypeMap["text"]
-			} else {
-				nativeType = strings.ReplaceAll(
-					nativeType,
-					"()",
-					fmt.Sprintf("(%d)", length),
-				)
-			}
-		} else if col.IsInteger() {
-			if !col.Sourced && length < ddlDefDecLength {
-				length = ddlDefDecLength
-			}
-			nativeType = strings.ReplaceAll(
-				nativeType,
-				"()",
-				fmt.Sprintf("(%d)", length),
-			)
-		}
-	} else if strings.Contains(nativeType, "(,)") {
-
-		precision := col.DbPrecision
-		scale := col.DbScale
-
-		if !col.Sourced || col.DbPrecision == 0 {
-			scale = lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
-			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-			scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
-			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-				scale = maxDecimals
-			}
-
-			precision = lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
-			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-			precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
-
-			minPrecision := col.Stats.MaxLen + scale
-			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
-		}
-
-		nativeType = strings.ReplaceAll(
-			nativeType,
-			"(,)",
-			fmt.Sprintf("(%d,%d)", precision, scale),
-		)
-	}
-
-	return
+	return col.GetNativeType(conn.GetType())
 }
 
 // GenerateDDL genrate a DDL based on a dataset
@@ -3225,36 +3124,6 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 	return
 }
 
-// CleanSQL removes creds from the query
-func CleanSQL(conn Connection, sql string) string {
-	sql = strings.TrimSpace(sql)
-	sqlLower := strings.ToLower(sql)
-
-	// if len(sql) > 3000 {
-	// 	sql = sql[0:3000]
-	// }
-
-	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
-
-	switch {
-	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
-		return sql
-	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
-		return sql
-	case startsWith("select *"):
-		return sql
-	}
-
-	for k, v := range conn.Props() {
-		if strings.TrimSpace(v) == "" {
-			continue
-		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
-			sql = strings.ReplaceAll(sql, v, "***")
-		}
-	}
-	return sql
-}
-
 func CopyFromS3(conn Connection, tableFName, s3Path string) (err error) {
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
@@ -3280,7 +3149,7 @@ func CopyFromS3(conn Connection, tableFName, s3Path string) (err error) {
 	g.Debug("url: " + s3Path)
 	_, err = conn.Exec(sql)
 	if err != nil {
-		return g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return nil
@@ -3330,7 +3199,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 	conn.SetProp("azure_sas_token", azToken)
 	_, err = conn.Exec(sql)
 	if err != nil {
-		return g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return nil

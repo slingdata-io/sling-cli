@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -1092,4 +1095,91 @@ func (cc *ColumnConstraint) parse() {
 		g.Warn(err.Error())
 		return
 	}
+}
+
+// GetNativeType returns the native column type from generic
+func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
+	template, _ := t.Template()
+	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
+	if !ok {
+		err = g.Error(
+			"No native type mapping defined for col '%s', with type '%s' ('%s') for '%s'",
+			col.Name,
+			col.Type,
+			col.DbType,
+			t,
+		)
+
+		g.Warn(err.Error() + ". Using 'string'")
+		err = nil
+		nativeType = template.GeneralTypeMap["string"]
+	}
+
+	// Add precision as needed
+	if strings.HasSuffix(nativeType, "()") {
+		length := col.Stats.MaxLen
+		if col.IsString() {
+			isSourced := col.Sourced && col.DbPrecision > 0
+			if isSourced {
+				// string length was manually provided
+				length = col.DbPrecision
+			} else if length <= 0 {
+				length = col.Stats.MaxLen * 2
+				if length < 255 {
+					length = 255
+				}
+			}
+
+			maxStringType := template.Value("variable.max_string_type")
+			if !isSourced && maxStringType != "" {
+				nativeType = maxStringType // use specified default
+			} else if length > 255 {
+				// let's make text since high
+				nativeType = template.GeneralTypeMap["text"]
+			} else {
+				nativeType = strings.ReplaceAll(
+					nativeType,
+					"()",
+					fmt.Sprintf("(%d)", length),
+				)
+			}
+		} else if col.IsInteger() {
+			if !col.Sourced && length < env.DdlDefDecLength {
+				length = env.DdlDefDecLength
+			}
+			nativeType = strings.ReplaceAll(
+				nativeType,
+				"()",
+				fmt.Sprintf("(%d)", length),
+			)
+		}
+	} else if strings.Contains(nativeType, "(,)") {
+
+		precision := col.DbPrecision
+		scale := col.DbScale
+
+		if !col.Sourced || col.DbPrecision == 0 {
+			scale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
+			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
+			scale = lo.Ternary(scale > env.DdlMaxDecScale, env.DdlMaxDecScale, scale)
+			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
+				scale = maxDecimals
+			}
+
+			precision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, env.DdlMinDecLength, col.DbPrecision)
+			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+			precision = lo.Ternary(precision > env.DdlMaxDecLength, env.DdlMaxDecLength, precision)
+
+			minPrecision := col.Stats.MaxLen + scale
+			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+		}
+
+		nativeType = strings.ReplaceAll(
+			nativeType,
+			"(,)",
+			fmt.Sprintf("(%d,%d)", precision, scale),
+		)
+	}
+
+	return
 }

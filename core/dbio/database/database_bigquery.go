@@ -231,7 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 			err = g.Error(err, "Error executing query")
 			return
 		} else {
-			err = g.Error(err, "Error executing "+CleanSQL(conn, sql))
+			err = g.Error(err, "Error executing "+env.Clean(conn.Props(), sql))
 			return
 		}
 	} else {

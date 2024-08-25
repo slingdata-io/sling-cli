@@ -690,7 +690,7 @@ func (conn *MsSQLServerConn) CopyFromAzure(tableFName, azPath string) (count uin
 	_, err = conn.Exec(sql)
 	if err != nil {
 		conn.SetProp("azToken", azToken)
-		return 0, g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return 0, g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return 0, nil
