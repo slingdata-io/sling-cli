@@ -3,6 +3,7 @@ package filesys
 import (
 	"context"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -34,6 +35,13 @@ func (fs *AzureFileSysClient) Init(ctx context.Context) (err error) {
 	for _, key := range g.ArrStr("ACCOUNT", "CONN_STR", "SAS_SVC_URL") {
 		if fs.GetProp(key) == "" {
 			fs.SetProp(key, fs.GetProp("AZURE_"+key))
+		}
+	}
+
+	// service principal keys that need to be set in env var
+	for _, key := range g.ArrStr("CLIENT_ID", "TENANT_ID", "CLIENT_CERTIFICATE_PATH", "CLIENT_CERTIFICATE_PASSWORD") {
+		if val := fs.GetProp(key); val != "" {
+			os.Setenv("AZURE_"+key, val)
 		}
 	}
 
