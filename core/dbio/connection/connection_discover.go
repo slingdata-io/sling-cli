@@ -8,7 +8,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -61,7 +60,7 @@ type DiscoverOptions struct {
 	Recursive   bool   `json:"recursive,omitempty"`
 }
 
-func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes dbio.FileNodes, schemata database.Schemata, err error) {
+func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.FileNodes, schemata database.Schemata, err error) {
 
 	patterns := []string{}
 	globPatterns := []glob.Glob{}
@@ -173,7 +172,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes dbio.FileNod
 		// apply filter
 		// sort alphabetically
 		nodes.Sort()
-		nodes = lo.Filter(nodes, func(n dbio.FileNode, i int) bool {
+		nodes = lo.Filter(nodes, func(n filesys.FileNode, i int) bool {
 			if len(patterns) == 0 || !(strings.Contains(opt.Pattern, "*") || strings.Contains(opt.Pattern, "?")) {
 				return true
 			}

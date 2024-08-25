@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -237,7 +236,7 @@ func (fs *LocalFileSysClient) Write(uri string, reader io.Reader) (bw int64, err
 }
 
 // List lists the file in given directory path
-func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *LocalFileSysClient) List(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -246,7 +245,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 
 	s, err := os.Stat(path)
 	if err == nil && (!s.IsDir() || !strings.HasSuffix(path, "/")) {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + path,
 			Updated: s.ModTime().Unix(),
 			Size:    cast.ToUint64(s.Size()),
@@ -273,7 +272,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 
 	for _, file := range files {
 		fInfo, _ := file.Info()
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + path + "/" + file.Name(),
 			Updated: fInfo.ModTime().Unix(),
 			Size:    cast.ToUint64(fInfo.Size()),
@@ -286,7 +285,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 }
 
 // ListRecursive lists the file in given directory path recursively
-func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -306,7 +305,7 @@ func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 			return err
 		}
 		subPath = strings.ReplaceAll(subPath, `\`, "/")
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + subPath,
 			Updated: info.ModTime().Unix(),
 			Size:    cast.ToUint64(info.Size()),

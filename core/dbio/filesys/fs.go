@@ -42,8 +42,8 @@ type FileSysClient interface {
 	GetDatastream(path string) (ds *iop.Datastream, err error)
 	GetWriter(path string) (writer io.Writer, err error)
 	Buckets() (paths []string, err error)
-	List(path string) (paths dbio.FileNodes, err error)
-	ListRecursive(path string) (paths dbio.FileNodes, err error)
+	List(path string) (paths FileNodes, err error)
+	ListRecursive(path string) (paths FileNodes, err error)
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
@@ -287,7 +287,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	connType, _, path, err := dbio.ParseURL(uri)
+	connType, _, path, err := ParseURLType(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func makeGlob(uri string) (*glob.Glob, error) {
 
 // ParseURL parses a URL
 func ParseURL(uri string) (host, path string, err error) {
-	_, host, path, err = dbio.ParseURL(uri)
+	_, host, path, err = ParseURLType(uri)
 	path = strings.TrimRight(path, makePathSuffix(path))
 	return
 }
@@ -548,7 +548,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		// delete zip file
 		Delete(localFs, zipPath)
 
-		nodes := dbio.NewFileNodes(nodeMaps)
+		nodes := NewFileNodes(nodeMaps)
 		df, err = GetDataflow(localFs.Self(), nodes, Cfg)
 		if err != nil {
 			return df, g.Error(err, "Error making dataflow")
@@ -634,7 +634,7 @@ func (fs *BaseFileSysClient) GetReaders(paths ...string) (readers []io.Reader, e
 
 type FileReady struct {
 	Columns iop.Columns
-	Node    dbio.FileNode
+	Node    FileNode
 	BytesW  int64
 	BatchID string
 }
@@ -701,7 +701,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 			bw0, err := fsClient.Write(partURL, reader)
 			bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
-			node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+			node := FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
 			fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
 
 			if err != nil {
@@ -914,7 +914,7 @@ type FileStreamConfig struct {
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
-func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
+func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
 	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
@@ -1126,7 +1126,7 @@ func isFiletype(fileType FileType, paths ...string) bool {
 	return len(paths) == cnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, limit int) (ds *iop.Datastream, err error) {
+func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -1239,14 +1239,6 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 			err = ds.ConsumeJsonReader(pipeR)
 		case FileTypeXml:
 			err = ds.ConsumeXmlReader(pipeR)
-		case FileTypeParquet:
-			err = ds.ConsumeParquetReader(pipeR)
-		case FileTypeAvro:
-			err = ds.ConsumeAvroReader(pipeR)
-		case FileTypeSAS:
-			err = ds.ConsumeSASReader(pipeR)
-		case FileTypeExcel:
-			err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
 		case FileTypeCsv:
 			err = ds.ConsumeCsvReader(pipeR)
 		default:

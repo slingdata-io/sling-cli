@@ -927,7 +927,7 @@ func (i *Info) IsURL() bool {
 
 // SchemeType returns the correct scheme of the url
 func SchemeType(url string) dbio.Type {
-	if t, _, _, err := dbio.ParseURL(url); err == nil {
+	if t, _, _, err := filesys.ParseURLType(url); err == nil {
 		return t
 	}
 

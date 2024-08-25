@@ -9,7 +9,6 @@ import (
 	gcstorage "cloud.google.com/go/storage"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
@@ -168,7 +167,7 @@ func (fs *GoogleFileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List returns the list of objects
-func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *GoogleFileSysClient) List(uri string) (nodes FileNodes, err error) {
 	key, err := fs.GetPath(uri)
 	if err != nil {
 		return
@@ -209,7 +208,7 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 		baseKeys[baseKey]++
 
 		if baseKeys[baseKey] == 1 {
-			node := dbio.FileNode{
+			node := FileNode{
 				URI:   g.F("%s%s", fs.Prefix("/"), baseKey),
 				IsDir: len(parts) >= len(keyArr)+1,
 			}
@@ -228,7 +227,7 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes dbio.FileNodes, err error
 }
 
 // ListRecursive returns the list of objects recursively
-func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	key, err := fs.GetPath(uri)
 	if err != nil {
 		return
@@ -259,7 +258,7 @@ func (fs *GoogleFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, 
 			continue
 		}
 
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s/%s", fs.Prefix(), attrs.Name),
 			Size:    cast.ToUint64(attrs.Size),
 			Created: attrs.Created.Unix(),

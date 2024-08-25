@@ -14,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -246,7 +247,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				files.Sort()
 
 				fields := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
-				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
+				rows := lo.Map(files, func(file filesys.FileNode, i int) []any {
 					fileType := lo.Ternary(file.IsDir, "directory", "file")
 
 					lastUpdated := "-"

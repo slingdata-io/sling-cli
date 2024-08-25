@@ -12,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -270,7 +271,7 @@ func (ec *EnvConns) List() (fields []string, rows [][]any) {
 	return fields, rows
 }
 
-func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes dbio.FileNodes, schemata database.Schemata, err error) {
+func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, err error) {
 	conn, ok1 := ec.GetConnEntry(name)
 	if !ok1 || name == "" {
 		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
