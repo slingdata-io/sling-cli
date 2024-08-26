@@ -177,7 +177,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 				return true
 			}
 			for _, gf := range globPatterns {
-				if gf.Match(n.Path()) {
+				if gf.Match(strings.TrimSuffix(n.Path(), "/")) {
 					return true
 				}
 			}

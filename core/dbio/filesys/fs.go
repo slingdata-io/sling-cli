@@ -471,8 +471,8 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) 
 	ds.Metadata.StreamURL.Value = uri
 	ds.SetConfig(fs.Props())
 
-	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-	if string(fileFormat) == "" {
+	fileFormat := Cfg.Format
+	if fileFormat == FileTypeNone {
 		fileFormat = InferFileFormat(uri)
 	}
 
@@ -1040,15 +1040,21 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 			return // done
 		}
 
-		for _, path := range nodes.URIs() {
-			if strings.HasSuffix(path, "/") {
-				g.DebugLow("skipping %s because is not file", path)
-				continue
+		for _, node := range nodes {
+			uri := node.URI
+			if strings.HasSuffix(uri, "/") {
+				// allow iceberg/delta tables to be read as directories
+				if g.In(cfg.Format, FileTypeIceberg, FileTypeDelta) {
+					uri = strings.TrimSuffix(uri, "/") // remove trailing slash
+				} else {
+					g.DebugLow("skipping %s because is not file", uri)
+					continue
+				}
 			}
 
-			ds, err := fs.GetDatastream(path, cfg)
+			ds, err := fs.GetDatastream(uri, cfg)
 			if err != nil {
-				df.Context.CaptureErr(g.Error(err, "Unable to process "+path))
+				df.Context.CaptureErr(g.Error(err, "Unable to process "+uri))
 				return
 			}
 			pushDatastream(ds)
@@ -1162,7 +1168,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 }
 
 func isFiletype(fileType FileType, paths ...string) bool {
-	cnt := 0
+	fileCnt := 0
 	dirCnt := 0
 
 	ext := fileType.Ext()
@@ -1173,10 +1179,10 @@ func isFiletype(fileType FileType, paths ...string) bool {
 		}
 
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
-			cnt++
+			fileCnt++
 		}
 	}
-	return len(paths) == cnt+dirCnt
+	return fileCnt > 0 && len(paths) == fileCnt+dirCnt
 }
 
 func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {

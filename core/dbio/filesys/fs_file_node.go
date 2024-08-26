@@ -100,7 +100,7 @@ func (fns *FileNodes) AddWhere(pattern *glob.Glob, after int64, ns ...FileNode) 
 		} else if ns[i].IsDir && !strings.HasSuffix(n.URI, "/") {
 			ns[i].URI = n.URI + "/"
 		}
-		if pattern == nil || (*pattern).Match(n.Path()) {
+		if pattern == nil || (*pattern).Match(strings.TrimSuffix(n.Path(), "/")) {
 			if after == 0 || ns[i].Updated == 0 || ns[i].Updated > after {
 				nodes = append(nodes, ns[i])
 			}
