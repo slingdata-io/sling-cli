@@ -118,11 +118,18 @@ func (rd ReplicationConfig) Normalize(n string) string {
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	hasWildcard := func(name string) bool {
+		return strings.Contains(name, "*") || strings.Contains(name, "?")
+	}
+
 	wildcardNames := []string{}
 	for name, stream := range rd.Streams {
 		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams)
 		if stream != nil && stream.Single != nil {
 			if *stream.Single {
+				if hasWildcard(name) {
+					g.Warn("wildcard cannot be used with `single: true` for stream: %s", name)
+				}
 				continue
 			}
 		} else if rd.Defaults.Single != nil && *rd.Defaults.Single {
@@ -131,7 +138,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
-		} else if strings.Contains(name, "*") || strings.Contains(name, "?") {
+		} else if hasWildcard(name) {
 			wildcardNames = append(wildcardNames, name)
 		}
 	}
