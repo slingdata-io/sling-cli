@@ -10,6 +10,10 @@ core:
   insert_option: ""
   modify_column: 'alter {column} type {type}'
 
+  iceberg_scan: select {fields} from iceberg_scan('{uri}', allow_moved_paths = true)
+  delta_scan: select {fields} from delta_scan('{uri}')
+  parquet_scan: select {fields} from parquet_scan('{uri}')
+
 
 metadata:
   databases: PRAGMA database_list

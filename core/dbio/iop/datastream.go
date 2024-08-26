@@ -1427,6 +1427,65 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	return ds.ConsumeParquetReaderSeeker(file)
 }
 
+// ConsumeParquetReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	p, err := NewParquetReaderDuckDb(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create ParquetDuckDb")
+	}
+
+	ds, err = p.Duck.Stream(p.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read parquet rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { p.Close() })
+
+	return
+}
+
+// ConsumeIcebergReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeIcebergReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+
+	i, err := NewIcebergReader(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create IcebergDuckDb")
+	}
+
+	ds, err = i.Duck.Stream(i.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read iceberg rows")
+	}
+
+	ds.Defer(func() { i.Close() })
+
+	return
+}
+
+// ConsumeDeltaReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeDeltaReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	d, err := NewDeltaReader(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create DeltaReader")
+	}
+
+	ds, err = d.Duck.Stream(d.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read delta rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { d.Close() })
+
+	return
+}
+
 // ConsumeAvroReaderSeeker uses the provided reader to stream rows
 func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) {
 	a, err := NewAvroStream(reader, Columns{})

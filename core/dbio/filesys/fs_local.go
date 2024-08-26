@@ -96,7 +96,12 @@ func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err error) {
+func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := FileStreamConfig{}
+	if len(cfg) > 0 {
+		Cfg = cfg[0]
+	}
+
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -116,12 +121,10 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 	ds.SetConfig(fs.Props())
 
 	// set selectFields for pruning at source
-	selectFields := []string{}
-	g.Unmarshal(fs.GetProp("selectFields"), &selectFields)
-	ds.Columns = iop.NewColumnsFromFields(selectFields...)
+	ds.Columns = iop.NewColumnsFromFields(Cfg.Select...)
 
-	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-	if string(fileFormat) == "" {
+	fileFormat := Cfg.Format
+	if fileFormat == FileTypeNone {
 		fileFormat = InferFileFormat(path)
 	}
 
@@ -139,6 +142,22 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 		fs.Context().Wg.Read.Add()
 
 		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
+
+		// no reader for iceberg, delta, duckdb will handle it
+		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+			file.Close() // no need to keep the file open
+
+			switch fileFormat {
+			case FileTypeIceberg:
+				err = ds.ConsumeIcebergReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			case FileTypeDelta:
+				err = ds.ConsumeDeltaReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			}
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
+			}
+			return
+		}
 
 		switch fileFormat {
 		case FileTypeJson, FileTypeJsonLines:

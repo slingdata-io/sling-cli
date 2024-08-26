@@ -8,7 +8,7 @@ go test -v -run 'TestConnection'
 cd -
 
 cd iop
-go test -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb'
+go test -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConstraints|TestDuckDb|TestParquetDuckDb|TestIcebergReader|TestDeltaReader'
 cd -
 
 cd database
@@ -19,7 +19,7 @@ go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName'
 cd -
 
 cd filesys
-go test -v -run 'TestFileSysLocalCsv|TestFileSysLocalJson|TestFileSysLocalParquet|TestFileSysLocalFormat|TestFileSysGoogle|TestFileSysS3|TestFileSysAzure|TestFileSysSftp|TestFileSysFtp|TestExcel'
+go test -v -run 'TestFileSysLocalCsv|TestFileSysLocalJson|TestFileSysLocalParquet|TestFileSysLocalFormat|TestFileSysGoogle|TestFileSysS3|TestFileSysAzure|TestFileSysSftp|TestFileSysFtp|TestExcel|TestFileSysLocalIceberg|TestFileSysLocalDelta'
 cd -
 
 # cd saas

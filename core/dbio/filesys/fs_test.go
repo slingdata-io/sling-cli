@@ -299,6 +299,84 @@ func TestFileSysLocalParquet(t *testing.T) {
 
 }
 
+func TestFileSysLocalIceberg(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/lineitem_iceberg"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeIceberg})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 51793, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"l_orderkey", iop.IntegerType},
+		{"l_partkey", iop.IntegerType},
+		{"l_suppkey", iop.IntegerType},
+		{"l_linenumber", iop.IntegerType},
+		{"l_quantity", iop.IntegerType},
+		{"l_extendedprice", iop.DecimalType},
+		{"l_discount", iop.DecimalType},
+		{"l_tax", iop.DecimalType},
+		{"l_returnflag", iop.StringType},
+		{"l_linestatus", iop.StringType},
+		{"l_shipdate", iop.DateType},
+		{"l_commitdate", iop.DateType},
+		{"l_receiptdate", iop.DateType},
+		{"l_shipinstruct", iop.StringType},
+		{"l_shipmode", iop.StringType},
+		{"l_comment", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
+}
+
+func TestFileSysLocalDelta(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/delta"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeDelta})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 5, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"first_name", iop.StringType},
+		{"last_name", iop.StringType},
+		{"country", iop.StringType},
+		{"continent", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
+}
+
 func TestFileSysLocalLargeParquet01(t *testing.T) {
 	t.Parallel()
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)

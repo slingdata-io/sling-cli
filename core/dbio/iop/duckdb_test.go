@@ -33,7 +33,7 @@ func TestDuckDb(t *testing.T) {
 		assert.Contains(t, err.Error(), "non_existent_table")
 	})
 
-	t.Run("Export", func(t *testing.T) {
+	t.Run("Stream", func(t *testing.T) {
 
 		duck := NewDuckDb(context.Background(), "path=/tmp/test.db")
 
@@ -46,7 +46,7 @@ func TestDuckDb(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Test the Export function
-		ds, err := duck.Export(
+		ds, err := duck.StreamContext(
 			context.Background(),
 			"SELECT * FROM export_test ORDER BY id",
 		)
@@ -73,6 +73,7 @@ func TestDuckDb(t *testing.T) {
 		_, err = duck.Exec("DROP TABLE export_test")
 		assert.NoError(t, err)
 	})
+
 	t.Run("Query", func(t *testing.T) {
 		duck := NewDuckDb(context.Background(), "path=/tmp/test.db")
 

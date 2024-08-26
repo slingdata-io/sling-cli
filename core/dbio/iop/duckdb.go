@@ -27,17 +27,21 @@ var (
 	DuckDbVersion      = "1.0.0"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
+	duckDbSOFMarker    = "___start_of_duckdb_result___"
 	duckDbEOFMarker    = "___end_of_duckdb_result___"
 )
 
-// DuckDb is a Duck DB copmute layer
+// DuckDb is a Duck DB compute layer
 type DuckDb struct {
 	Context       *g.Context
 	Proc          *process.Proc
 	StdinWriter   io.Writer
 	isInteractive bool
+	extensions    []string
+	secrets       []string
 }
 
+// NewDuckDb creates a new DuckDb instance with the given context and properties
 func NewDuckDb(ctx context.Context, props ...string) *DuckDb {
 	Ctx := g.NewContext(ctx)
 	duck := &DuckDb{Context: &Ctx}
@@ -50,15 +54,18 @@ func NewDuckDb(ctx context.Context, props ...string) *DuckDb {
 	return duck
 }
 
+// SetProp sets a property for the DuckDb instance
 func (duck *DuckDb) SetProp(key string, value string) {
 	duck.Context.Map.Set(key, value)
 }
 
+// GetProp retrieves a property value for the DuckDb instance
 func (duck *DuckDb) GetProp(key string) string {
 	val, _ := duck.Context.Map.Get(key)
 	return cast.ToString(val)
 }
 
+// Props returns all properties of the DuckDb instance as a map
 func (duck *DuckDb) Props() map[string]string {
 	props := map[string]string{}
 	m := duck.Context.Map.Items()
@@ -68,6 +75,124 @@ func (duck *DuckDb) Props() map[string]string {
 	return props
 }
 
+// AddExtension adds an extension to the DuckDb instance if it's not already present
+func (duck *DuckDb) AddExtension(extension string) {
+	if !lo.Contains(duck.extensions, extension) {
+		duck.extensions = append(duck.extensions, extension)
+	}
+}
+
+// PrepareFsSecretAndURI prepares the secret configuration from the fs_props and modifies the URI if necessary
+// for different storage types (S3, Google Cloud Storage, Azure Blob Storage).
+// It returns the modified URI string.
+//
+// The function handles the following storage types:
+// - Local files: Removes the "file://" prefix
+// - S3: Configures AWS credentials and handles Cloudflare R2 storage
+// - Google Cloud Storage: Sets up GCS credentials
+// - Azure Blob Storage: Configures Azure connection string or account name
+//
+// It uses the DuckDb instance's properties to populate the secret configuration.
+func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
+	scheme := dbio.Type(strings.Split(uri, "://")[0])
+
+	fsProps := map[string]string{}
+	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
+
+	// uppercase all the keys
+	for _, k := range lo.Keys(fsProps) {
+		fsProps[strings.ToUpper(k)] = fsProps[k]
+		if k != strings.ToUpper(k) {
+			delete(fsProps, k)
+		}
+	}
+
+	var secretKeyMap map[string]string
+	secretProps := []string{}
+	scopeScheme := scheme.String()
+
+	switch scheme {
+	case dbio.TypeFileLocal:
+		return strings.TrimPrefix(uri, "file://")
+
+	case dbio.TypeFileS3:
+		secretKeyMap = map[string]string{
+			"ACCESS_KEY_ID":     "KEY_ID",
+			"SECRET_ACCESS_KEY": "SECRET",
+			"BUCKET":            "SCOPE",
+			"REGION":            "REGION",
+			"SESSION_TOKEN":     "SESSION_TOKEN",
+			"ENDPOINT":          "ENDPOINT",
+		}
+
+		if strings.Contains(fsProps["endpoint"], "r2.cloudflarestorage.com") {
+			accountID := strings.Split(fsProps["endpoint"], ".")[0]
+			secretProps = append(secretProps, "ACCOUNT_ID "+accountID)
+			secretProps = append(secretProps, "TYPE R2")
+			scopeScheme = "r2"
+			uri = strings.ReplaceAll(uri, "s3://", "r2://")
+		} else {
+			secretProps = append(secretProps, "TYPE S3")
+		}
+
+	case dbio.TypeFileGoogle:
+		secretKeyMap = map[string]string{
+			"ACCESS_KEY_ID":     "KEY_ID",
+			"SECRET_ACCESS_KEY": "SECRET",
+		}
+		secretProps = append(secretProps, "TYPE GCS")
+		scopeScheme = "gcs"
+		uri = strings.ReplaceAll(uri, "gs://", "gcs://")
+
+	case dbio.TypeFileAzure:
+		secretKeyMap = map[string]string{
+			"CONN_STR": "CONNECTION_STRING",
+			"ACCOUNT":  "ACCOUNT_NAME",
+		}
+		secretProps = append(secretProps, "TYPE AZURE")
+	}
+
+	// populate secret props and make secret sql
+	if len(secretProps) > 0 {
+		for slingKey, duckdbKey := range secretKeyMap {
+			if val := fsProps[slingKey]; val != "" {
+				if duckdbKey == "SCOPE" {
+					val = scopeScheme + "://" + val
+				}
+				duckdbVal := "'" + val + "'" // add quotes
+				secretProps = append(secretProps, g.F("%s %s", duckdbKey, duckdbVal))
+			}
+		}
+
+		secretSQL := g.R(
+			"create or replace secret {name} ({key_vals})",
+			"name", scopeScheme,
+			"key_vals", strings.Join(secretProps, ",\n  "),
+		)
+
+		duck.secrets = append(duck.secrets, secretSQL)
+	}
+
+	return uri
+}
+
+// getLoadExtensionSQL generates SQL statements to load extensions
+func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
+	for _, extension := range duck.extensions {
+		sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+	}
+	return
+}
+
+// getCreateSecretSQL generates SQL statements to create secrets
+func (duck *DuckDb) getCreateSecretSQL() (sql string) {
+	for _, secret := range duck.secrets {
+		sql += fmt.Sprintf(";%s;", secret)
+	}
+	return
+}
+
+// Open initializes the DuckDb connection
 func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 	bin, err := EnsureBinDuckDB(duck.GetProp("duckdb_version"))
@@ -100,11 +225,8 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return g.Error(err, "could not init connection")
 	}
 
-	// init extensions
-	_, err = duck.Exec("INSTALL json; LOAD json;" + env.NoDebugKey)
-	if err != nil {
-		return g.Error(err, "could not init extensions")
-	}
+	// default extensions
+	duck.AddExtension("json")
 
 	// set as interactive
 	duck.isInteractive = cast.ToBool(duck.GetProp("interactive"))
@@ -146,6 +268,7 @@ func (duck *DuckDb) Close() error {
 	return nil
 }
 
+// Exec executes a SQL query and returns the result
 func (duck *DuckDb) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
 
 	result, err = duck.ExecContext(duck.Context.Ctx, sql, args...)
@@ -155,7 +278,7 @@ func (duck *DuckDb) Exec(sql string, args ...interface{}) (result sql.Result, er
 	return
 }
 
-// ExecContext runs a sql query with context, returns `error`
+// ExecMultiContext executes multiple SQL queries with context and returns the result
 func (duck *DuckDb) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
 	return duck.ExecContext(ctx, strings.Join(sqls, ";\n"))
 }
@@ -183,8 +306,14 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 		}
 	}
 
+	extensionsSQL := duck.getLoadExtensionSQL()
+	secretSQL := duck.getCreateSecretSQL()
+
 	// submit sql to stdin
 	stdinLines := []string{
+		extensionsSQL + ";",
+		secretSQL + ";",
+		g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
 		".changes on",
 		sql + ";",
 		".changes off",
@@ -193,12 +322,18 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 
 	if !showChanges {
 		stdinLines = []string{
+			extensionsSQL + ";",
+			secretSQL + ";",
+			g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
 			sql + ";",
 			g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
 		}
 	}
-	g.Warn(g.Marshal(stdinLines))
-	_, err = duck.Proc.StdinWriter.Write([]byte(strings.Join(stdinLines, "\n")))
+
+	sqls := strings.Join(stdinLines, "\n")
+	// g.Warn(sqls)
+
+	_, err = duck.Proc.StdinWriter.Write([]byte(sqls))
 	if err != nil {
 		return g.Error(err, "Failed to write to stdin")
 	}
@@ -222,6 +357,7 @@ func (duck *DuckDb) closeStdinAndWait() (err error) {
 	return nil
 }
 
+// ExecContext executes a SQL query with context and returns the result
 func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 	if duck.GetProp("connected") != "true" {
 		if err = duck.Open(); err != nil {
@@ -281,6 +417,7 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 	return result, nil
 }
 
+// waitForExec waits for the execution of a SQL query and returns the result
 func (duck *DuckDb) waitForExec(ctx context.Context) (result sql.Result, err error) {
 	// Extract total changes from stdout
 	var lastLength int
@@ -320,12 +457,14 @@ done:
 	return
 }
 
+// Query runs a sql query, returns `Dataset`
 func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data Dataset, err error) {
 	return duck.QueryContext(context.Background(), sql, options...)
 }
 
+// QueryContext runs a sql query with context, returns `Dataset`
 func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
-	ds, err := duck.Export(ctx, sql, options...)
+	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
 		return data, g.Error(err, "could not export data")
 	}
@@ -335,10 +474,24 @@ func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map
 		return data, g.Error(err, "could not collect data")
 	}
 
+	ds.Close() // ensure defers are run
+
 	return
 }
 
-func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+// Stream runs a sql query, returns `Datastream`
+func (duck *DuckDb) Stream(sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+	return duck.StreamContext(duck.Context.Ctx, sql, options...)
+}
+
+// StreamContext runs a sql query with context, returns `Datastream`
+func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+	if duck.GetProp("connected") != "true" {
+		if err = duck.Open(); err != nil {
+			return nil, g.Error(err, "Could not open DuckDB connection")
+		}
+	}
+
 	queryCtx := g.NewContext(ctx)
 
 	opts := g.M()
@@ -346,14 +499,9 @@ func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[strin
 		opts = options[0]
 	}
 
-	fetchedColumns := Columns{}
-	if val, ok := opts["columns"].(Columns); ok {
-		fetchedColumns = val
-
-		// set as sourced
-		for i := range fetchedColumns {
-			fetchedColumns[i].Sourced = true
-		}
+	columns, err := duck.QueryColumns(sql)
+	if err != nil {
+		return nil, g.Error(err, "could not get columns")
 	}
 
 	// do not capture stdout, use scanner instead
@@ -362,6 +510,7 @@ func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[strin
 	stderrBuf := &bytes.Buffer{}
 
 	// Set up the scanner to write to the pipe
+	started := false
 	done := false
 	duck.Proc.SetScanner(func(stderr bool, line string) {
 		if done {
@@ -374,7 +523,9 @@ func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[strin
 
 		if stderr {
 			stderrBuf.WriteString(line + "\n")
-		} else if line != "" {
+		} else if !started && strings.Contains(line, duckDbSOFMarker) {
+			started = true
+		} else if line != "" && started {
 			_, err := stdOutWriter.Write([]byte(line + "\n"))
 			if err != nil {
 				queryCtx.CaptureErr(g.Error(err, "Failed to write to stdout pipe"))
@@ -392,8 +543,15 @@ func (duck *DuckDb) Export(ctx context.Context, sql string, options ...map[strin
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
 
-	ds = NewDatastreamContext(queryCtx.Ctx, fetchedColumns)
-	ds.SafeInference = true
+	ds = NewDatastreamContext(queryCtx.Ctx, columns)
+
+	if cds, ok := opts["datastream"]; ok {
+		// if provided, use it
+		ds = cds.(*Datastream)
+		ds.Columns = columns
+	}
+
+	ds.Inferred = true
 	ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
 	ds.SetConfig(duck.Props())
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
@@ -428,20 +586,7 @@ func (duck *DuckDb) Import(tableFName string, ds *Datastream) (count uint64, err
 	return ds.Count, nil
 }
 
-func (duck *DuckDb) generateCsvColumns(columns Columns) (colStr string) {
-	// {'FlightDate': 'DATE', 'UniqueCarrier': 'VARCHAR', 'OriginCityName': 'VARCHAR', 'DestCityName': 'VARCHAR'}
-	colsArr := make([]string, len(columns))
-	for i, col := range columns {
-		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb)
-		if err != nil {
-			g.Warn(err.Error())
-		}
-		colsArr[i] = g.F("'%s':'%s'", col.Name, nativeType)
-	}
-
-	return "{" + strings.Join(colsArr, ", ") + "}"
-}
-
+// Quote quotes a column name
 func (duck *DuckDb) Quote(col string) (qName string) {
 	qName = `"` + col + `"`
 	return
@@ -557,4 +702,111 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 	}
 
 	return binPath, nil
+}
+
+// DuckDBTypeToColumnType converts a DuckDB type to a ColumnType
+func DuckDBTypeToColumnType(duckDBType string) ColumnType {
+	// Normalize the input by converting to uppercase and trimming spaces
+	duckDBType = strings.TrimSpace(strings.ToUpper(duckDBType))
+
+	// Extract the base type for types with parameters
+	baseType := strings.Split(duckDBType, "(")[0]
+
+	switch baseType {
+	case "BIGINT", "INT8", "LONG", "UBIGINT":
+		return BigIntType
+	case "BIT", "BITSTRING":
+		return BinaryType
+	case "BLOB", "BYTEA", "BINARY", "VARBINARY":
+		return BinaryType
+	case "BOOLEAN", "BOOL", "LOGICAL":
+		return BoolType
+	case "DATE":
+		return DateType
+	case "DECIMAL", "NUMERIC":
+		return DecimalType
+	case "DOUBLE", "FLOAT8":
+		return FloatType
+	case "FLOAT", "FLOAT4", "REAL":
+		return FloatType
+	case "HUGEINT", "UHUGEINT":
+		return BigIntType
+	case "INTEGER", "INT4", "INT", "SIGNED", "UINTEGER":
+		return IntegerType
+	case "INTERVAL":
+		return StringType // No direct mapping, using StringType
+	case "SMALLINT", "INT2", "SHORT", "USMALLINT":
+		return SmallIntType
+	case "TIME":
+		return TimeType
+	case "TIMESTAMP WITH TIME ZONE":
+		return TimestampzType
+	case "TIMESTAMP":
+		return TimestampType
+	case "TINYINT", "INT1", "UTINYINT":
+		return SmallIntType
+	case "ARRAY", "LIST", "MAP", "STRUCT", "UNION":
+		return JsonType
+	case "UUID":
+		return StringType // No direct mapping, using StringType
+	case "VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING":
+		return StringType
+	default:
+		return StringType // Default to StringType for unknown types
+	}
+}
+
+func (duck *DuckDb) QueryColumns(query string) (columns Columns, err error) {
+	// prevent infinite loop
+	if strings.HasPrefix(query, "describe ") {
+		return columns, nil
+	}
+
+	data, err := duck.Query("describe " + query)
+	if err != nil {
+		return nil, g.Error(err, "could not describe query")
+	}
+
+	for k, rec := range data.Records() {
+		var col Column
+
+		col.Name = cast.ToString(rec["column_name"])
+		col.DbType = cast.ToString(rec["column_type"])
+		col.Type = DuckDBTypeToColumnType(cast.ToString(rec["column_type"]))
+		col.Position = k + 1
+
+		columns = append(columns, col)
+	}
+
+	if len(columns) == 0 {
+		return nil, g.Error("no columns found")
+	}
+
+	return
+}
+
+func (duck *DuckDb) MakeScanSelectQuery(scanFunc, uri string, fields []string, limit uint64) (sql string) {
+	if len(fields) == 0 || fields[0] == "*" {
+		fields = []string{"*"}
+	} else {
+		fields = dbio.TypeDbDuckDb.QuoteNames(fields...)
+	}
+
+	templ := dbio.TypeDbDuckDb.GetTemplateValue("core." + scanFunc)
+	if templ == "" {
+		templ = "select {fields} from {scanFunc}('{uri}')"
+	}
+
+	sql = g.R(
+		templ,
+		"fields", strings.Join(fields, ","),
+		"scanFunc", scanFunc,
+		"uri", uri,
+	)
+
+	if limit > 0 {
+		sql += fmt.Sprintf(" limit %d", limit)
+	}
+
+	return sql
 }
