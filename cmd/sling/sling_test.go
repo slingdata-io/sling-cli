@@ -777,6 +777,11 @@ streams:
 	}
 
 	if !assert.GreaterOrEqual(t, len(taskConfigs), 5) {
+		streams := []string{}
+		for _, task := range taskConfigs {
+			streams = append(streams, task.StreamName)
+		}
+		g.Warn(g.F("streams: %#v", streams))
 		return
 	}
 
@@ -848,8 +853,8 @@ streams:
 		// Fifth Stream: file://tests/files/*.csv
 		// wildcard expanded
 		config := taskConfigs[4]
-		assert.True(t, strings.HasPrefix(config.Source.Stream, "file://tests/files/"))
-		assert.NotEqual(t, config.Source.Stream, "file://tests/files/*.csv")
+		assert.True(t, strings.HasPrefix(config.Source.Stream, "tests/files/"))
+		assert.NotEqual(t, config.Source.Stream, "tests/files/*.csv")
 		assert.Equal(t, `"my_schema3"."table3"`, config.Target.Object)
 		// g.Info(g.Pretty(config))
 	}

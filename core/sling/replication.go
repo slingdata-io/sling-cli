@@ -12,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -258,8 +259,15 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, wildc
 	}
 
 	for _, wildcardName := range wildcardNames {
+		path := wildcardName
+		if strings.Contains(wildcardName, "://") {
+			_, path, err = filesys.ParseURL(wildcardName)
+			if err != nil {
+				return g.Error(err, "could not parse wildcard: %s", wildcardName)
+			}
+		}
 
-		ok, nodes, _, err := c.Discover(&connection.DiscoverOptions{Pattern: wildcardName})
+		ok, nodes, _, err := c.Discover(&connection.DiscoverOptions{Pattern: path})
 		if err != nil {
 			return g.Error(err, "could not get files for schema: %s", wildcardName)
 		} else if !ok {
