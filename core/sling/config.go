@@ -491,7 +491,7 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	} else {
 		if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
-			fc, err := cfg.TgtConn.AsFile()
+			fc, err := cfg.TgtConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -547,7 +547,7 @@ func (cfg *Config) Prepare() (err error) {
 	} else {
 		if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			fc, err := cfg.SrcConn.AsFile()
+			fc, err := cfg.SrcConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -828,7 +828,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		uri := cfg.SrcConn.URL()
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		fc, err := cfg.SrcConn.AsFile()
+		fc, err := cfg.SrcConn.AsFile(true)
 		if err != nil {
 			return m, g.Error(err, "could not init source conn as file")
 		}
