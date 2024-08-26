@@ -213,6 +213,10 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		args = append(args, path)
 	}
 
+	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
+		duck.Proc.Env["motherduck_token"] = motherduckToken
+	}
+
 	duck.Proc.SetArgs(args...)
 
 	duck.SetProp("connected", "true")
@@ -764,6 +768,7 @@ func DuckDBTypeToColumnType(duckDBType string) ColumnType {
 	}
 }
 
+// Describe returns the columns of a query
 func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	// prevent infinite loop
 	if strings.HasPrefix(query, "describe ") {

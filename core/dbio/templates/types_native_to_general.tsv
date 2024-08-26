@@ -112,6 +112,7 @@ duckdb	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
 duckdb	text	text	col_text text	TRUE	TRUE	A small non-binary string
 duckdb	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
 duckdb	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+duckdb	timestamp with time zone	timestampz	col_timestampz timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
 duckdb	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)
 duckdb	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
 duckdb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
