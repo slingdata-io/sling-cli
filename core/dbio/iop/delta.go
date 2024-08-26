@@ -32,7 +32,7 @@ func (d *DeltaReader) Columns() (Columns, error) {
 	}
 
 	var err error
-	d.columns, err = d.Duck.QueryColumns(d.MakeSelectQuery(nil, 0))
+	d.columns, err = d.Duck.Describe(d.MakeSelectQuery(nil, 0))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}

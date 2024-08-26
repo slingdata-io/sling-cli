@@ -32,7 +32,7 @@ func (i *IcebergReader) Columns() (Columns, error) {
 	}
 
 	var err error
-	i.columns, err = i.Duck.QueryColumns(i.MakeSelectQuery(nil, 0))
+	i.columns, err = i.Duck.Describe(i.MakeSelectQuery(nil, 0))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}

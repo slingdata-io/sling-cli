@@ -31,7 +31,7 @@ func (p *ParquetDuckDb) Columns() (Columns, error) {
 	// query := fmt.Sprintf("SELECT path_in_schema as column_name, type as column_type, column_id, num_values, total_uncompressed_size FROM parquet_metadata('%s') order by column_id", p.URI)
 
 	var err error
-	p.columns, err = p.Duck.QueryColumns(p.MakeSelectQuery(nil, 0))
+	p.columns, err = p.Duck.Describe(p.MakeSelectQuery(nil, 0))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}

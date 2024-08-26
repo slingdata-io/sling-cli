@@ -330,6 +330,14 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 		}
 	}
 
+	// combine props with fs_props for proper masking
+	propsCombined := map[string]string{}
+	g.Unmarshal(duck.GetProp("fs_props"), &propsCombined)
+	for k, v := range duck.Props() {
+		propsCombined[k] = v
+	}
+	env.LogSQL(propsCombined, sql)
+
 	sqls := strings.Join(stdinLines, "\n")
 	// g.Warn(sqls)
 
@@ -499,7 +507,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		opts = options[0]
 	}
 
-	columns, err := duck.QueryColumns(sql)
+	columns, err := duck.Describe(sql)
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
@@ -756,13 +764,13 @@ func DuckDBTypeToColumnType(duckDBType string) ColumnType {
 	}
 }
 
-func (duck *DuckDb) QueryColumns(query string) (columns Columns, err error) {
+func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	// prevent infinite loop
 	if strings.HasPrefix(query, "describe ") {
 		return columns, nil
 	}
 
-	data, err := duck.Query("describe " + query)
+	data, err := duck.Query("describe " + query + env.NoDebugKey)
 	if err != nil {
 		return nil, g.Error(err, "could not describe query")
 	}
