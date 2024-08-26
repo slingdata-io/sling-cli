@@ -2,7 +2,6 @@ package filesys
 
 import (
 	"bytes"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -238,22 +237,6 @@ func TestFileSysLocalJson(t *testing.T) {
 	assert.EqualValues(t, 20, len(data2.Rows))
 	assert.GreaterOrEqual(t, 9, len(data2.Columns))
 
-}
-
-// Define structs to match your XML structure
-type Root struct {
-	XMLName  xml.Name  `xml:"root"`
-	Elements []Element `xml:"element"`
-}
-
-type Element struct {
-	CreateDt  string  `xml:"create_dt"`
-	Email     string  `xml:"email"`
-	FirstName string  `xml:"first_name"`
-	ID        int     `xml:"id"`
-	LastName  string  `xml:"last_name"`
-	Rating    float64 `xml:"rating"`
-	Target    bool    `xml:"target"`
 }
 
 func TestFileSysLocalXml(t *testing.T) {
