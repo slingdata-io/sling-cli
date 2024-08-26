@@ -2,6 +2,7 @@ package filesys
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	arrowParquet "github.com/apache/arrow/go/v16/parquet"
 	"github.com/apache/arrow/go/v16/parquet/compress"
+	"github.com/clbanning/mxj/v2"
 	"github.com/flarco/g/net"
 	"github.com/linkedin/goavro/v2"
 	"github.com/parquet-go/parquet-go"
@@ -235,6 +237,37 @@ func TestFileSysLocalJson(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 20, len(data2.Rows))
 	assert.GreaterOrEqual(t, 9, len(data2.Columns))
+
+}
+
+// Define structs to match your XML structure
+type Root struct {
+	XMLName  xml.Name  `xml:"root"`
+	Elements []Element `xml:"element"`
+}
+
+type Element struct {
+	CreateDt  string  `xml:"create_dt"`
+	Email     string  `xml:"email"`
+	FirstName string  `xml:"first_name"`
+	ID        int     `xml:"id"`
+	LastName  string  `xml:"last_name"`
+	Rating    float64 `xml:"rating"`
+	Target    bool    `xml:"target"`
+}
+
+func TestFileSysLocalXml(t *testing.T) {
+
+	fileBytes, err := os.ReadFile("test/test1/xml/test1.1.xml")
+	assert.NoError(t, err)
+
+	var payload any
+	mv, err := mxj.NewMapXml(fileBytes)
+	assert.NoError(t, err)
+	payload = mv.Old()
+
+	assert.NotNil(t, payload, "Payload should not be nil")
+	g.Debug("payload: %s", g.Marshal(payload))
 
 }
 

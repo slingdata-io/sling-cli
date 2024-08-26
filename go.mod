@@ -17,6 +17,7 @@ require (
 	github.com/apache/arrow/go/v16 v16.1.0
 	github.com/aws/aws-sdk-go v1.51.11
 	github.com/c-bata/go-prompt v0.2.6
+	github.com/clbanning/mxj/v2 v2.7.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
