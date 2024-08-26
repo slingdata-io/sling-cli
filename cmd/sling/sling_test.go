@@ -317,7 +317,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
-		runOneTask(t, file, connType)
+		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
+			runOneTask(t, file, connType)
+		})
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
 			testContext.Cancel()

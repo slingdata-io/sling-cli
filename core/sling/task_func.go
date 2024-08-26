@@ -236,10 +236,25 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["date_layout"]),
 		)
 	} else if colType.IsDatetime() {
-		cfg.IncrementalValStr = g.R(
-			srcConnVarMap["timestamp_layout_str"],
-			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
-		)
+		// set timestampz_layout_str and timestampz_layout if missing
+		if _, ok := srcConnVarMap["timestampz_layout_str"]; !ok {
+			srcConnVarMap["timestampz_layout_str"] = srcConnVarMap["timestamp_layout_str"]
+		}
+		if _, ok := srcConnVarMap["timestampz_layout"]; !ok {
+			srcConnVarMap["timestampz_layout"] = srcConnVarMap["timestamp_layout"]
+		}
+
+		if colType == iop.TimestampzType {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestampz_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestampz_layout"]),
+			)
+		} else {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestamp_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
+			)
+		}
 	} else if colType.IsNumber() {
 		cfg.IncrementalValStr = cast.ToString(cfg.IncrementalVal)
 	} else {

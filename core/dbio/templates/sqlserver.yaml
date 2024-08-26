@@ -324,6 +324,13 @@ function:
 
 
 variable:
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestamp_layout_str: "cast('{value}' as datetime2)"
+
+  # https://stackoverflow.com/a/17867687/2295355
+  timestampz_layout_str: "ToDateTimeOffset('{value}')"
+  timestampz_layout: "2006-01-02 15:04:05.000000', '-07:00"
+  
   bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000
