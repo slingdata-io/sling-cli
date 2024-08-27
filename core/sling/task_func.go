@@ -187,7 +187,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	// get target columns to match update-key
 	// in case column casing needs adjustment
 	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
-	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol.Name != "" {
+	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
 		return // target table does not exist

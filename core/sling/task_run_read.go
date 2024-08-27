@@ -79,7 +79,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		// get source columns to match update-key
 		// in case column casing needs adjustment
 		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey)
-		if updateCol.Name != "" {
+		if updateCol != nil && updateCol.Name != "" {
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
 

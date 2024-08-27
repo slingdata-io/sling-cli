@@ -2510,7 +2510,9 @@ func (it *Iterator) BelowEqualIncrementalVal() bool {
 		// no incremental val or col
 		return false
 	} else if it.incrementalColI == -1 {
-		it.incrementalColI = it.ds.Columns.GetColumn(it.incrementalCol).Position - 1
+		if col := it.ds.Columns.GetColumn(it.incrementalCol); col != nil {
+			it.incrementalColI = col.Position - 1
+		}
 	}
 
 	if it.incrementalColI == -1 || it.incrementalColI > len(it.ds.Columns) {
