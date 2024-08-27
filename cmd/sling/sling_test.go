@@ -549,7 +549,7 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
-	// testSuite(t, dbio.TypeDbSQLServer)
+	testSuite(t, dbio.TypeDbSQLServer)
 	testSuite(t, dbio.Type("sqlserver_bcp"))
 }
 
