@@ -2,7 +2,7 @@ FROM ubuntu:focal
 
 RUN groupadd -r sling && useradd -r -g sling sling
 
-RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl && \
+RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg2 && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists /var/cache/apt
 
