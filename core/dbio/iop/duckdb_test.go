@@ -35,7 +35,7 @@ func TestDuckDb(t *testing.T) {
 
 	t.Run("Stream", func(t *testing.T) {
 
-		duck := NewDuckDb(context.Background(), "path=/tmp/test.db")
+		duck := NewDuckDb(context.Background(), "path=/tmp/test.duckdb")
 
 		// Create a test table and insert some data
 		_, err := duck.ExecMultiContext(

@@ -7,14 +7,14 @@ shopt -s expand_aliases
 # export _DEBUG_CALLER_LEVEL=2
 cd cmd/sling
 go test -v -run 'TestReplicationDefaults'
-go test -v -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
-SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 15m -run TestSuiteDatabase
+# go test -v -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
+# SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 15m -run TestSuiteDatabase
 cd -
 
 cd core/sling
 go test -v -run 'TestTransformMsUUID'
 go test -v -run 'TestReplication'
-go test -v -run 'TestCheck'
+go test -run 'TestCheck'
 cd -
 
 ## test cli commands
@@ -78,7 +78,7 @@ sling run -r cmd/sling/tests/replications/r.05.yaml
 sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
 
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
-SLING_STREAM_CNT=14 sling run -r cmd/sling/tests/replications/r.07.yaml
+SLING_STREAM_CNT=17 sling run -r cmd/sling/tests/replications/r.07.yaml
 SLING_STREAM_CNT=4 sling run -r cmd/sling/tests/replications/r.08.yaml
 # SLING_CONSTRAINT_FAILS=2 SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
 SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml

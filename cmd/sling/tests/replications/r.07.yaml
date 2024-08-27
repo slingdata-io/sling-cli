@@ -1,4 +1,4 @@
-source: local://
+source: LOCAL
 target: SQLITE
 
 defaults:
