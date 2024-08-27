@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/process"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -27,6 +28,15 @@ var (
 	TelMux         = sync.Mutex{}
 	HomeDirs       = map[string]string{}
 	envMux         = sync.Mutex{}
+	NoDebugKey     = " /* nD */"
+)
+
+const (
+	DdlDefDecLength = 20
+	DdlMinDecLength = 24
+	DdlMaxDecScale  = 24
+	DdlMaxDecLength = 38
+	DdlMinDecScale  = 6
 )
 
 //go:embed *
@@ -60,6 +70,8 @@ func init() {
 	if val := os.Getenv("ERROR_ON_CHECKSUM_FAILURE"); val != "" {
 		os.Setenv("SLING_CHECKSUM_ROWS", "10000")
 	}
+
+	TelMap["parent"] = process.GetParent()
 }
 
 func HomeBinDir() string {
@@ -256,4 +268,81 @@ func processLogEntry(ll *g.LogLine) {
 	if LogSink != nil {
 		LogSink(ll)
 	}
+}
+
+// RemoveLocalTempFile deletes the local file
+func RemoveLocalTempFile(localPath string) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+		os.Remove(localPath)
+	}
+}
+
+// RemoveAllLocalTempFile deletes the local folder
+func RemoveAllLocalTempFile(localPath string) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+		os.RemoveAll(localPath)
+	}
+}
+
+func WriteTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
+	sqlPath = path.Join(GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
+
+	err = os.WriteFile(sqlPath, []byte(sql), 0777)
+	if err != nil {
+		return "", g.Error(err, "could not create temp sql")
+	}
+
+	return
+}
+
+func LogSQL(props map[string]string, query string, args ...any) {
+	noColor := g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+
+	query = strings.TrimSpace(query)
+	query = strings.TrimSuffix(query, ";")
+
+	// wrap args
+	contextArgs := g.M("conn", props["sling_conn_id"])
+	if len(args) > 0 {
+		contextArgs["query_args"] = args
+	}
+	if strings.Contains(query, NoDebugKey) {
+		if !noColor {
+			query = CyanString(query)
+		}
+		g.Trace(query, contextArgs)
+	} else {
+		if !noColor {
+			query = CyanString(Clean(props, query))
+		}
+		if !cast.ToBool(props["silent"]) {
+			g.Debug(query)
+		}
+	}
+}
+
+// Clean removes creds from a log line
+func Clean(props map[string]string, line string) string {
+	line = strings.TrimSpace(line)
+	sqlLower := strings.ToLower(line)
+
+	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
+
+	switch {
+	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
+		return line
+	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
+		return line
+	case startsWith("select *"):
+		return line
+	}
+
+	for k, v := range props {
+		if strings.TrimSpace(v) == "" {
+			continue
+		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
+			line = strings.ReplaceAll(line, v, "***")
+		}
+	}
+	return line
 }

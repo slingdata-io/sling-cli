@@ -3,6 +3,7 @@ package filesys
 import (
 	"context"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -13,7 +14,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 )
 
@@ -35,6 +35,13 @@ func (fs *AzureFileSysClient) Init(ctx context.Context) (err error) {
 	for _, key := range g.ArrStr("ACCOUNT", "CONN_STR", "SAS_SVC_URL") {
 		if fs.GetProp(key) == "" {
 			fs.SetProp(key, fs.GetProp("AZURE_"+key))
+		}
+	}
+
+	// service principal keys that need to be set in env var
+	for _, key := range g.ArrStr("CLIENT_ID", "TENANT_ID", "CLIENT_CERTIFICATE_PATH", "CLIENT_CERTIFICATE_PASSWORD") {
+		if val := fs.GetProp(key); val != "" {
+			os.Setenv("AZURE_"+key, val)
 		}
 	}
 
@@ -143,7 +150,7 @@ func (fs *AzureFileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List list objects in path
-func (fs *AzureFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *AzureFileSysClient) List(uri string) (nodes FileNodes, err error) {
 	key, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -189,7 +196,7 @@ func (fs *AzureFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 			baseKeys[baseKey]++
 
 			if baseKeys[baseKey] == 1 {
-				node := dbio.FileNode{
+				node := FileNode{
 					URI:   g.F("%s%s", fs.Prefix("/"), baseKey),
 					IsDir: len(parts) >= len(keyArr)+1,
 				}
@@ -209,7 +216,7 @@ func (fs *AzureFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 }
 
 // ListRecursive list objects in path
-func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	key, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -244,7 +251,7 @@ func (fs *AzureFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 			blobName := *blob.Name
 
 			lastModified := blob.Properties.LastModified
-			file := dbio.FileNode{
+			file := FileNode{
 				URI:     g.F("%s/%s", fs.Prefix(), blobName),
 				Created: blob.Properties.CreationTime.Unix(),
 				Updated: lastModified.Unix(),

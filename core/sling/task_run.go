@@ -152,7 +152,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// sets metadata
 	metadata := t.setGetMetadata()
 
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	srcProps := append(
@@ -160,15 +160,17 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		g.MapToKVArr(g.ToMapString(options))...,
 	)
 
-	// look for conn in cache
-	if conn, ok := connPool[t.Config.SrcConn.Hash()]; ok {
-		return conn, nil
-	}
-
 	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
+	}
+
+	// look for conn in cache
+	if c, ok := connPool[t.Config.SrcConn.Hash()]; ok {
+		// update properties
+		c.Base().ReplaceProps(conn.Props())
+		return c, nil
 	}
 
 	// cache connection is using replication from CLI
@@ -191,10 +193,6 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 }
 
 func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connection, err error) {
-	// look for conn in cache
-	if conn, ok := connPool[t.Config.TgtConn.Hash()]; ok {
-		return conn, nil
-	}
 
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
@@ -207,6 +205,13 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
+	}
+
+	// look for conn in cache
+	if c, ok := connPool[t.Config.TgtConn.Hash()]; ok {
+		// update properties
+		c.Base().ReplaceProps(conn.Props())
+		return c, nil
 	}
 
 	// cache connection is using replication from CLI

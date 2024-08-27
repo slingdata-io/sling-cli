@@ -65,6 +65,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
+	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
@@ -317,7 +318,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
 		}
-		runOneTask(t, file, connType)
+		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
+			runOneTask(t, file, connType)
+		})
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
 			testContext.Cancel()
@@ -547,6 +550,7 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
+	testSuite(t, dbio.Type("sqlserver_bcp"))
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
@@ -737,7 +741,7 @@ streams:
     primary_key: col3
     update_key: col2
     source_options:
-			columns: { pro: 'decimal(10,4)' }
+			columns: { pro: 'decimal(10,4)', pro2: 'string' }
       trim_space: true
       delimiter: "|"
 			transforms: [trim_space]
@@ -775,6 +779,11 @@ streams:
 	}
 
 	if !assert.GreaterOrEqual(t, len(taskConfigs), 5) {
+		streams := []string{}
+		for _, task := range taskConfigs {
+			streams = append(streams, task.StreamName)
+		}
+		g.Warn(g.F("streams: %#v", streams))
 		return
 	}
 
@@ -808,7 +817,7 @@ streams:
 		assert.Equal(t, "col2", config.Source.UpdateKey)
 		assert.Equal(t, g.Bool(true), config.Source.Options.TrimSpace)
 		assert.Equal(t, "|", config.Source.Options.Delimiter)
-		assert.Equal(t, `{"pro":"decimal(10,4)"}`, g.Marshal(config.Target.Columns))
+		assert.Equal(t, "[{\"name\":\"pro\",\"type\":\"decimal(10,4)\"},{\"name\":\"pro2\",\"type\":\"string\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))
 
 		assert.Equal(t, `"my_schema2"."table2"`, config.Target.Object)
@@ -829,7 +838,7 @@ streams:
 		assert.EqualValues(t, g.Int64(0), config.Target.Options.FileMaxRows)
 		assert.EqualValues(t, g.String(""), config.Target.Options.PostSQL)
 		assert.EqualValues(t, true, config.ReplicationStream.Disabled)
-		assert.Equal(t, `{"id":"string(100)"}`, g.Marshal(config.Target.Columns))
+		assert.Equal(t, "[{\"name\":\"id\",\"type\":\"string(100)\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))
 	}
 
@@ -846,8 +855,8 @@ streams:
 		// Fifth Stream: file://tests/files/*.csv
 		// wildcard expanded
 		config := taskConfigs[4]
-		assert.True(t, strings.HasPrefix(config.Source.Stream, "file://tests/files/"))
-		assert.NotEqual(t, config.Source.Stream, "file://tests/files/*.csv")
+		assert.True(t, strings.HasPrefix(config.Source.Stream, "tests/files/"))
+		assert.NotEqual(t, config.Source.Stream, "tests/files/*.csv")
 		assert.Equal(t, `"my_schema3"."table3"`, config.Target.Object)
 		// g.Info(g.Pretty(config))
 	}

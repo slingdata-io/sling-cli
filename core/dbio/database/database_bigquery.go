@@ -231,7 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 			err = g.Error(err, "Error executing query")
 			return
 		} else {
-			err = g.Error(err, "Error executing "+CleanSQL(conn, sql))
+			err = g.Error(err, "Error executing "+env.Clean(conn.Props(), sql))
 			return
 		}
 	} else {
@@ -648,7 +648,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	}
 
 	df.Defer(func() {
-		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			filesys.Delete(fs, gcsPath)
 		}
 	})

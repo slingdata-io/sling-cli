@@ -39,11 +39,11 @@ type FileSysClient interface {
 	FsType() dbio.Type
 	GetReader(path string) (reader io.Reader, err error)
 	GetReaders(paths ...string) (readers []io.Reader, err error)
-	GetDatastream(path string) (ds *iop.Datastream, err error)
+	GetDatastream(path string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error)
 	GetWriter(path string) (writer io.Writer, err error)
 	Buckets() (paths []string, err error)
-	List(path string) (paths dbio.FileNodes, err error)
-	ListRecursive(path string) (paths dbio.FileNodes, err error)
+	List(path string) (paths FileNodes, err error)
+	ListRecursive(path string) (paths FileNodes, err error)
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
@@ -52,6 +52,7 @@ type FileSysClient interface {
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
 	GetPath(uri string) (path string, err error)
+	Query(uri, sql string) (data iop.Dataset, err error)
 
 	delete(path string) (err error)
 	setDf(df *iop.Dataflow)
@@ -183,6 +184,8 @@ const (
 	FileTypeAvro      FileType = "avro"
 	FileTypeSAS       FileType = "sas7bdat"
 	FileTypeJsonLines FileType = "jsonlines"
+	FileTypeIceberg   FileType = "iceberg"
+	FileTypeDelta     FileType = "delta"
 )
 
 var AllFileType = []struct {
@@ -240,7 +243,7 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 }
 
 func makePathSuffix(key string) string {
-	if !strings.Contains(key, "*") {
+	if !strings.Contains(key, "*") && !strings.Contains(key, "?") {
 		return "*"
 	}
 	return strings.TrimPrefix(key, GetDeepestParent(key))
@@ -257,6 +260,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
 		if strings.Contains(uri, "://") && err == nil {
+			path = strings.TrimPrefix(uri, u.U.Scheme+"://")
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
@@ -270,6 +274,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 		path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
 		u, err := net.NewURL(uri)
 		if strings.Contains(uri, "://") && err == nil {
+			path = strings.TrimPrefix(uri, u.U.Scheme+"://")
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
@@ -285,7 +290,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 }
 
 func makeGlob(uri string) (*glob.Glob, error) {
-	connType, _, path, err := dbio.ParseURL(uri)
+	connType, _, path, err := ParseURLType(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +315,7 @@ func makeGlob(uri string) (*glob.Glob, error) {
 
 // ParseURL parses a URL
 func ParseURL(uri string) (host, path string, err error) {
-	_, host, path, err = dbio.ParseURL(uri)
+	_, host, path, err = ParseURLType(uri)
 	path = strings.TrimRight(path, makePathSuffix(path))
 	return
 }
@@ -319,7 +324,7 @@ func GetDeepestParent(path string) string {
 	parts := strings.Split(path, "/")
 	parentParts := []string{}
 	for i, part := range parts {
-		if strings.Contains(part, "*") {
+		if strings.Contains(part, "*") || strings.Contains(part, "?") {
 			break
 		} else if i == len(parts)-1 {
 			break
@@ -386,6 +391,23 @@ func (fs *BaseFileSysClient) Prefix(suffix ...string) string {
 	return fs.Self().Prefix(suffix...)
 }
 
+// Query queries the file system via duckdb
+func (fs *BaseFileSysClient) Query(uri, sql string) (data iop.Dataset, err error) {
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fs.Props())})
+	duck := iop.NewDuckDb(fs.context.Ctx, props...)
+	duck.AddExtension("iceberg")
+	duck.AddExtension("delta")
+
+	_ = duck.PrepareFsSecretAndURI(uri)
+
+	data, err = duck.Query(sql)
+	if err != nil {
+		return data, g.Error(err, "could not query duckdb")
+	}
+
+	return
+}
+
 // GetProp returns the value of a property
 func (fs *BaseFileSysClient) GetProp(key string, keys ...string) string {
 	fs.context.Mux.Lock()
@@ -437,17 +459,21 @@ func (fs *BaseFileSysClient) GetRefTs() time.Time {
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, err error) {
+func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := FileStreamConfig{} // infinite
+	if len(cfg) > 0 {
+		Cfg = cfg[0]
+	}
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
 	ds.SafeInference = true
 	ds.SetMetadata(fs.GetProp("METADATA"))
-	ds.Metadata.StreamURL.Value = urlStr
+	ds.Metadata.StreamURL.Value = uri
 	ds.SetConfig(fs.Props())
 
-	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-	if string(fileFormat) == "" {
-		fileFormat = InferFileFormat(urlStr)
+	fileFormat := Cfg.Format
+	if fileFormat == FileTypeNone {
+		fileFormat = InferFileFormat(uri)
 	}
 
 	go func() {
@@ -463,8 +489,24 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		g.Debug("reading datastream from %s [format=%s]", urlStr, fileFormat)
-		reader, err := fs.Self().GetReader(urlStr)
+		g.Debug("reading datastream from %s [format=%s]", uri, fileFormat)
+
+		// no reader needed for iceberg, delta, duckdb will handle it
+		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+			switch fileFormat {
+			case FileTypeIceberg:
+				err = ds.ConsumeIcebergReader(uri, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			case FileTypeDelta:
+				err = ds.ConsumeDeltaReader(uri, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			}
+
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", uri))
+			}
+			return
+		}
+
+		reader, err := fs.Self().GetReader(uri)
 		if err != nil {
 			ds.Context.CaptureErr(g.Error(err, "error getting reader"))
 			return
@@ -505,7 +547,7 @@ func (fs *BaseFileSysClient) GetDatastream(urlStr string) (ds *iop.Datastream, e
 		}
 
 		if err != nil {
-			ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", urlStr))
+			ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", uri))
 		}
 
 	}()
@@ -520,9 +562,9 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		Cfg = cfg[0]
 	}
 
-	// if fs.GetProp("url") == "" {
-	// 	fs.SetProp("url", url)
-	// }
+	if Cfg.Format == FileTypeNone {
+		Cfg.Format = FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	}
 
 	if strings.HasSuffix(strings.ToLower(url), ".zip") {
 		localFs, err := NewFileSysClient(dbio.TypeFileLocal)
@@ -550,8 +592,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		// delete zip file
 		Delete(localFs, zipPath)
 
-		// TODO: handle multiple files, yielding multiple schemas
-		nodes := dbio.NewFileNodes(nodeMaps)
+		nodes := NewFileNodes(nodeMaps)
 		df, err = GetDataflow(localFs.Self(), nodes, Cfg)
 		if err != nil {
 			return df, g.Error(err, "Error making dataflow")
@@ -563,12 +604,18 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 		return df, nil
 	}
 
-	g.Trace("listing path: %s", url)
-	nodes, err := fs.Self().ListRecursive(url)
-	if err != nil {
-		err = g.Error(err, "Error getting paths")
-		return
+	var nodes FileNodes
+	if g.In(Cfg.Format, FileTypeIceberg, FileTypeDelta) {
+		nodes = FileNodes{FileNode{URI: url}}
+	} else {
+		g.Trace("listing path: %s", url)
+		nodes, err = fs.Self().ListRecursive(url)
+		if err != nil {
+			err = g.Error(err, "Error getting paths")
+			return
+		}
 	}
+
 	df, err = GetDataflow(fs.Self(), nodes, Cfg)
 	if err != nil {
 		err = g.Error(err, "error getting dataflow")
@@ -637,7 +684,7 @@ func (fs *BaseFileSysClient) GetReaders(paths ...string) (readers []io.Reader, e
 
 type FileReady struct {
 	Columns iop.Columns
-	Node    dbio.FileNode
+	Node    FileNode
 	BytesW  int64
 	BatchID string
 }
@@ -704,7 +751,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 			bw0, err := fsClient.Write(partURL, reader)
 			bID := lo.Ternary(batchR.Batch != nil, batchR.Batch.ID(), "")
-			node := dbio.FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
+			node := FileNode{URI: partURL, Size: cast.ToUint64(bw0)}
 			fileReadyChn <- FileReady{batchR.Columns, node, bw0, bID}
 
 			if err != nil {
@@ -914,11 +961,15 @@ func Delete(fs FileSysClient, uri string) (err error) {
 type FileStreamConfig struct {
 	Limit  int
 	Select []string
+	Format FileType
 }
 
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
-func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
-	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
+	if cfg.Format == FileTypeNone {
+		cfg.Format = FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	}
+
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -927,7 +978,6 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 	df = iop.NewDataflowContext(fs.Context().Ctx, cfg.Limit)
 	dsCh := make(chan *iop.Datastream)
 	fs.setDf(df)
-	fs.SetProp("selectFields", g.Marshal(cfg.Select))
 
 	go func() {
 		defer close(dsCh)
@@ -936,7 +986,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
-			skipSelect := g.In(fs.GetProp("FORMAT"), string(FileTypeParquet))
+			skipSelect := g.In(cfg.Format, FileTypeParquet, FileTypeIceberg, FileTypeDelta)
 			if len(cfg.Select) > 1 && !skipSelect {
 				cols := iop.NewColumnsFromFields(cfg.Select...)
 				fm := ds.Columns.FieldMap(true)
@@ -957,7 +1007,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			}
 		}
 
-		if allowMerging && (fileFormat.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...)) {
+		if allowMerging && (cfg.Format.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, FileTypeJson, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -968,7 +1018,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			return // done
 		}
 
-		if allowMerging && (fileFormat == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...)) {
+		if allowMerging && (cfg.Format == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, FileTypeXml, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -980,7 +1030,7 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 		}
 
 		// csvs
-		if allowMerging && (fileFormat == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
+		if allowMerging && (cfg.Format == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, FileTypeCsv, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -990,15 +1040,21 @@ func GetDataflow(fs FileSysClient, nodes dbio.FileNodes, cfg FileStreamConfig) (
 			return // done
 		}
 
-		for _, path := range nodes.URIs() {
-			if strings.HasSuffix(path, "/") {
-				g.DebugLow("skipping %s because is not file", path)
-				continue
+		for _, node := range nodes {
+			uri := node.URI
+			if strings.HasSuffix(uri, "/") {
+				// allow iceberg/delta tables to be read as directories
+				if g.In(cfg.Format, FileTypeIceberg, FileTypeDelta) {
+					uri = strings.TrimSuffix(uri, "/") // remove trailing slash
+				} else {
+					g.DebugLow("skipping %s because is not file", uri)
+					continue
+				}
 			}
 
-			ds, err := fs.GetDatastream(path)
+			ds, err := fs.GetDatastream(uri, cfg)
 			if err != nil {
-				df.Context.CaptureErr(g.Error(err, "Unable to process "+path))
+				df.Context.CaptureErr(g.Error(err, "Unable to process "+uri))
 				return
 			}
 			pushDatastream(ds)
@@ -1112,7 +1168,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 }
 
 func isFiletype(fileType FileType, paths ...string) bool {
-	cnt := 0
+	fileCnt := 0
 	dirCnt := 0
 
 	ext := fileType.Ext()
@@ -1123,13 +1179,13 @@ func isFiletype(fileType FileType, paths ...string) bool {
 		}
 
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
-			cnt++
+			fileCnt++
 		}
 	}
-	return len(paths) == cnt+dirCnt
+	return fileCnt > 0 && len(paths) == fileCnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, limit int) (ds *iop.Datastream, err error) {
+func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -1242,14 +1298,6 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes dbio.FileNodes, lim
 			err = ds.ConsumeJsonReader(pipeR)
 		case FileTypeXml:
 			err = ds.ConsumeXmlReader(pipeR)
-		case FileTypeParquet:
-			err = ds.ConsumeParquetReader(pipeR)
-		case FileTypeAvro:
-			err = ds.ConsumeAvroReader(pipeR)
-		case FileTypeSAS:
-			err = ds.ConsumeSASReader(pipeR)
-		case FileTypeExcel:
-			err = ds.ConsumeExcelReader(pipeR, fs.Client().properties)
 		case FileTypeCsv:
 			err = ds.ConsumeCsvReader(pipeR)
 		default:
@@ -1289,7 +1337,7 @@ func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err erro
 	config := ds.GetConfig()
 	config["fields_per_rec"] = "-1" // allow different number of records per line
 	nDs.SetConfig(config)
-	nDs.Defer(func() { os.Remove(filePath) })
+	nDs.Defer(func() { env.RemoveLocalTempFile(filePath) })
 
 	file, err := os.Open(filePath)
 	if err != nil {

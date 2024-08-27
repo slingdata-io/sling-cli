@@ -276,7 +276,14 @@ func (pw *ParquetWriter) WriteRec(row []any) error {
 	return nil
 }
 
-func (pw *ParquetWriter) writeBuffer() error {
+func (pw *ParquetWriter) writeBuffer() (err error) {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error("panic occurred! %s\n%s", r, string(debug.Stack()))
+		}
+	}()
+
 	if len(pw.recBuffer) > 0 {
 		_, err := pw.WriterMap.Write(pw.recBuffer)
 		if err != nil {

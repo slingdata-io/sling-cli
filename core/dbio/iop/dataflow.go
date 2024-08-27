@@ -139,7 +139,7 @@ func (df *Dataflow) SetBatchLimit(limit int64) {
 func (df *Dataflow) Defer(f func()) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
-	if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 		df.deferFuncs = append(df.deferFuncs, f)
 	}
 }
@@ -480,6 +480,10 @@ func (df *Dataflow) SyncStats() {
 			}
 			if colStats.MaxDecLen > dfCols[i].Stats.MaxDecLen {
 				dfCols[i].Stats.MaxDecLen = colStats.MaxDecLen
+			}
+
+			if col.Constraint != nil {
+				dfCols[i].Constraint.FailCnt = dfCols[i].Constraint.FailCnt + col.Constraint.FailCnt
 			}
 		}
 	}

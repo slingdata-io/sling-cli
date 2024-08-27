@@ -735,9 +735,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	})
 
 	doPut := func(file filesys.FileReady) (stageFilePath string) {
-		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-			defer os.Remove(file.Node.Path())
-		}
+		defer func() { env.RemoveLocalTempFile(file.Node.Path()) }()
 		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
 		err = conn.StagePUT(file.Node.URI, stageFolderPath)
 		if err != nil {

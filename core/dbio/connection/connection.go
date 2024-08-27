@@ -50,6 +50,9 @@ type Connection struct {
 	Type    dbio.Type              `json:"type,omitempty"`
 	Data    map[string]interface{} `json:"data,omitempty"`
 	context *g.Context             `json:"-"`
+
+	File     filesys.FileSysClient
+	Database database.Connection
 }
 
 // NewConnection creates a new connection
@@ -244,19 +247,57 @@ func (c *Connection) URL() string {
 	return url
 }
 
-func (c *Connection) AsDatabase() (database.Connection, error) {
+// Close closes the connection
+func (c *Connection) Close() error {
+	if c.Database != nil {
+		return c.Database.Close()
+	}
+
+	if c.File != nil {
+		return c.File.Close()
+	}
+	return nil
+}
+
+func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
+
+	if len(cache) > 0 && cache[0] {
+		if c.Database == nil {
+			c.Database, err = database.NewConnContext(
+				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+			)
+			if err != nil {
+				return
+			}
+		}
+		return c.Database, nil
+	}
+
 	return database.NewConnContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
-func (c *Connection) AsFile() (filesys.FileSysClient, error) {
+func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error) {
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
+
+	if len(cache) > 0 && cache[0] {
+		if c.File == nil {
+			c.File, err = filesys.NewFileSysClientFromURLContext(
+				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+			)
+			if err != nil {
+				return
+			}
+		}
+		return c.File, nil
+	}
+
 	return filesys.NewFileSysClientFromURLContext(
 		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
@@ -282,11 +323,6 @@ func (c *Connection) setFromEnv() {
 			}
 		}
 	}
-}
-
-// Close closes the connection
-func (c *Connection) Close() error {
-	return nil
 }
 
 // ConnSetDatabase returns a new connection with the specified
@@ -891,7 +927,7 @@ func (i *Info) IsURL() bool {
 
 // SchemeType returns the correct scheme of the url
 func SchemeType(url string) dbio.Type {
-	if t, _, _, err := dbio.ParseURL(url); err == nil {
+	if t, _, _, err := filesys.ParseURLType(url); err == nil {
 		return t
 	}
 

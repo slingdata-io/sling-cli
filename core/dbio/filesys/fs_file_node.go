@@ -1,4 +1,4 @@
-package dbio
+package filesys
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/gobwas/glob"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -24,8 +25,8 @@ type FileNode struct {
 	Columns  iop.Columns `json:"columns,omitempty"`
 	Children FileNodes   `json:"children,omitempty"`
 
-	typ  Type   // cached type
-	path string // cached path
+	typ  dbio.Type // cached type
+	path string    // cached path
 }
 
 func (fn *FileNode) Name() string {
@@ -37,13 +38,13 @@ func (fn *FileNode) Name() string {
 }
 
 // Type return the file type
-func (fn *FileNode) Type() Type {
+func (fn *FileNode) Type() dbio.Type {
 
 	if fn.typ.String() != "" {
 		return fn.typ
 	}
 
-	fType, _, _, err := ParseURL(fn.URI)
+	fType, _, _, err := ParseURLType(fn.URI)
 	if g.LogError(err) {
 		return ""
 	}
@@ -60,12 +61,12 @@ func (fn *FileNode) Path() string {
 		return fn.path
 	}
 
-	fType, _, path, err := ParseURL(fn.URI)
+	fType, _, path, err := ParseURLType(fn.URI)
 	if g.LogError(err) {
 		return ""
 	}
 
-	if fType == TypeFileAzure {
+	if fType == dbio.TypeFileAzure {
 		pathContainer := strings.Split(path, "/")[0]
 
 		// remove container
@@ -99,7 +100,7 @@ func (fns *FileNodes) AddWhere(pattern *glob.Glob, after int64, ns ...FileNode) 
 		} else if ns[i].IsDir && !strings.HasSuffix(n.URI, "/") {
 			ns[i].URI = n.URI + "/"
 		}
-		if pattern == nil || (*pattern).Match(n.Path()) {
+		if pattern == nil || (*pattern).Match(strings.TrimSuffix(n.Path(), "/")) {
 			if after == 0 || ns[i].Updated == 0 || ns[i].Updated > after {
 				nodes = append(nodes, ns[i])
 			}
@@ -191,9 +192,9 @@ func (fns FileNodes) Columns() map[string]iop.Column {
 }
 
 // ParseURL parses a URL
-func ParseURL(uri string) (uType Type, host string, path string, err error) {
+func ParseURLType(uri string) (uType dbio.Type, host string, path string, err error) {
 	if strings.HasPrefix(uri, "file://") {
-		return TypeFileLocal, "", strings.TrimPrefix(uri, "file://"), nil
+		return dbio.TypeFileLocal, "", strings.TrimPrefix(uri, "file://"), nil
 	}
 
 	u, err := net.NewURL(uri)
@@ -204,7 +205,7 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 	scheme := u.U.Scheme
 	host = u.Hostname()
 
-	path = strings.TrimPrefix(u.U.Path, "/")
+	path = strings.TrimPrefix(uri, g.F("%s://%s/", scheme, u.U.Host))
 	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
 
 	if scheme == "" || host == "" {
@@ -213,12 +214,12 @@ func ParseURL(uri string) (uType Type, host string, path string, err error) {
 
 	// handle azure blob
 	if scheme == "https" && strings.HasSuffix(host, ".blob.core.windows.net") {
-		return TypeFileAzure, host, path, nil
+		return dbio.TypeFileAzure, host, path, nil
 	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
-		return TypeFileHTTP, host, path, nil
+		return dbio.TypeFileHTTP, host, path, nil
 	}
 
-	uType, ok := ValidateType(scheme)
+	uType, ok := dbio.ValidateType(scheme)
 	if !ok {
 		err = errors.New("unrecognized url type: " + scheme)
 	}

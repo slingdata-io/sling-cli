@@ -418,7 +418,7 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
+	} else if len(filters) == 1 && (strings.Contains(filters[0], "*") || strings.Contains(filters[0], "?")) {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -471,7 +471,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
+	} else if len(filters) == 1 && (strings.Contains(filters[0], "*") || strings.Contains(filters[0], "?")) {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -528,7 +528,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 type ColumnType struct {
 	Name             string
 	DatabaseTypeName string
-	FetchedType      iop.ColumnType
+	FetchedColumn    *iop.Column
 	Length           int
 	Precision        int
 	Scale            int

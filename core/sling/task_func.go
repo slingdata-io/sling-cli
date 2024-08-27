@@ -50,7 +50,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
-func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table) (created bool, err error) {
+func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table, temp bool) (created bool, err error) {
 
 	// check table existence
 	exists, err := database.TableExists(conn, table.FullName())
@@ -66,7 +66,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	table.DDL, err = conn.GenerateDDL(*table, data, false)
+	table.DDL, err = conn.GenerateDDL(*table, data, temp)
 	if err != nil {
 		return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 	}
@@ -187,7 +187,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 	// get target columns to match update-key
 	// in case column casing needs adjustment
 	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
-	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol.Name != "" {
+	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
 		return // target table does not exist
@@ -236,10 +236,25 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["date_layout"]),
 		)
 	} else if colType.IsDatetime() {
-		cfg.IncrementalValStr = g.R(
-			srcConnVarMap["timestamp_layout_str"],
-			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
-		)
+		// set timestampz_layout_str and timestampz_layout if missing
+		if _, ok := srcConnVarMap["timestampz_layout_str"]; !ok {
+			srcConnVarMap["timestampz_layout_str"] = srcConnVarMap["timestamp_layout_str"]
+		}
+		if _, ok := srcConnVarMap["timestampz_layout"]; !ok {
+			srcConnVarMap["timestampz_layout"] = srcConnVarMap["timestamp_layout"]
+		}
+
+		if colType == iop.TimestampzType {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestampz_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestampz_layout"]),
+			)
+		} else {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestamp_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
+			)
+		}
 	} else if colType.IsNumber() {
 		cfg.IncrementalValStr = cast.ToString(cfg.IncrementalVal)
 	} else {

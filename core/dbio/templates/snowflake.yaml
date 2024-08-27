@@ -3,6 +3,7 @@ core:
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for snowflake'"
   create_table: create table {table} ({col_types}) {cluster_by}
+  create_temporary_table: create transient table {table} ({col_types}) {cluster_by}
   create_index: "select 'indexes do not apply for snowflake'"
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
@@ -478,6 +479,7 @@ function:
   str_utf8: "{ field }"
   string_type: string
   cast_to_string: '{field}::string'
+  cast_to_text: '{field}::string'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: call SYSTEM$WAIT({seconds})

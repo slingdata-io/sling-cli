@@ -7,7 +7,6 @@ core:
       from sys.indexes
       where name = '{name}' and object_id = OBJECT_ID('{table}')
     ) drop index {index} on {table}
-  create_temporary_table: 'create table #{table} ({col_types})'
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
     insert into {table} ({names})
@@ -314,6 +313,7 @@ function:
   truncate_f: round({field}, 2, 1)
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   sleep: waitfor delay '00:00:{seconds}.000'
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_string: datalength({field})
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: len({field})
@@ -324,6 +324,13 @@ function:
 
 
 variable:
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestamp_layout_str: "cast('{value}' as datetime2)"
+
+  # https://stackoverflow.com/a/17867687/2295355
+  timestampz_layout_str: "ToDateTimeOffset('{value}')"
+  timestampz_layout: "2006-01-02 15:04:05.000000', '-07:00"
+  
   bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000

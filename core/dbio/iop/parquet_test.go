@@ -8,6 +8,7 @@ import (
 	"github.com/flarco/g"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParquetRead1(t *testing.T) {
@@ -315,4 +316,46 @@ func TestParquetDecimal(t *testing.T) {
 	g.Info("correctDecValues => %s", g.Marshal(correctDecValues))
 	// check file with core/dbio/scripts/check_parquet.py
 
+}
+
+func TestParquetDuckDb(t *testing.T) {
+	// Initialize ParquetDuckDb
+	testFile := "test/test1.parquet"
+	p, err := NewParquetReaderDuckDb(testFile)
+	assert.NoError(t, err)
+	if !assert.NotNil(t, p) {
+		return
+	}
+
+	// Test Columns method
+	columns, err := p.Columns()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, columns)
+
+	// Check if columns are correctly parsed
+	expectedColumns := []struct {
+		name     string
+		dataType ColumnType
+	}{
+		{"id", BigIntType},
+		{"first_name", StringType},
+		{"last_name", StringType},
+		{"email", StringType},
+		{"target", BoolType},
+		{"create_dt", TimestampzType},
+		{"date", TimestampzType},
+		{"rating", DecimalType},
+		{"code", DecimalType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, columns[i].Type, "Column type should match for: %s", columns[i].Name)
+		}
+	}
+	// Test Close method
+	err = p.Close()
+	assert.NoError(t, err)
 }

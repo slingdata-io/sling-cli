@@ -25,6 +25,7 @@ var (
 	updateVersion     = ""
 	rowCount          = int64(0)
 	totalBytes        = uint64(0)
+	constraintFails   = uint64(0)
 	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
 )
 
@@ -237,7 +238,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 
 	// test count/bytes if need
-	err = testOutput(rowCount, totalBytes)
+	err = testOutput(rowCount, totalBytes, constraintFails)
 
 	return ok, err
 }
@@ -418,6 +419,16 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		totalBytes = totalBytes + inBytes
 	}
 
+	// warn constrains
+	if df := task.Df(); df != nil {
+		for _, col := range df.Columns {
+			if c := col.Constraint; c != nil && c.FailCnt > 0 {
+				g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
+				constraintFails = constraintFails + c.FailCnt
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -548,7 +559,7 @@ func setProjectID(cfgPath string) {
 	}
 }
 
-func testOutput(rowCnt int64, totalBytes uint64) error {
+func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	if expected := os.Getenv("SLING_ROW_CNT"); expected != "" {
 
 		if strings.HasPrefix(expected, ">") {
@@ -576,6 +587,21 @@ func testOutput(rowCnt int64, totalBytes uint64) error {
 
 		if totalBytes != cast.ToUint64(expected) {
 			return g.Error("Expected %d bytes, got %d", cast.ToInt(expected), totalBytes)
+		}
+	}
+
+	if expected := os.Getenv("SLING_CONSTRAINT_FAILS"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToUint64(strings.TrimPrefix(expected, ">"))
+			if constraintFails <= atLeast {
+				return g.Error("Expected at least %d constraint failures, got %d", atLeast+1, constraintFails)
+			}
+			return nil
+		}
+
+		if constraintFails != cast.ToUint64(expected) {
+			return g.Error("Expected %d constraint failures, got %d", cast.ToInt(expected), constraintFails)
 		}
 	}
 

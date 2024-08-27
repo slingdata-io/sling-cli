@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/pkg/sftp"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -135,7 +134,7 @@ func (fs *SftpFileSysClient) Close() error {
 }
 
 // List list objects in path
-func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
+func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
@@ -145,7 +144,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 	var files []os.FileInfo
 	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
 	if err == nil && (!stat.IsDir() || !strings.HasSuffix(path, "/")) {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s", fs.Prefix("/"), path),
 			Updated: stat.ModTime().Unix(),
 			Size:    cast.ToUint64(stat.Size()),
@@ -170,7 +169,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 	}
 
 	for _, file := range files {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
 			Updated: file.ModTime().Unix(),
 			Size:    cast.ToUint64(file.Size()),
@@ -183,7 +182,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 }
 
 // ListRecursive list objects in path recursively
-func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -201,13 +200,15 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, er
 	var files []os.FileInfo
 	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
 	if err == nil {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s", fs.Prefix("/"), path),
 			Updated: stat.ModTime().Unix(),
 			Size:    cast.ToUint64(stat.Size()),
 			IsDir:   stat.IsDir(),
 		}
-		nodes.Add(node)
+		if pattern == nil {
+			nodes.Add(node)
+		}
 		if !stat.IsDir() {
 			return
 		}
@@ -220,7 +221,7 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, er
 	}
 
 	for _, file := range files {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), path+"/", file.Name()),
 			Updated: file.ModTime().Unix(),
 			Size:    cast.ToUint64(file.Size()),

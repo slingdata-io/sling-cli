@@ -254,6 +254,13 @@ func (ds *Datastream) SetConfig(configMap map[string]string) {
 	if metadata, ok := configMap["metadata"]; ok {
 		ds.SetMetadata(metadata)
 	}
+
+	// parse constraint func after unmarshal
+	for i := range ds.Columns {
+		if ds.Columns[i].Constraint != nil {
+			ds.Columns[i].Constraint.parse()
+		}
+	}
 }
 
 // GetConfig get config
@@ -329,9 +336,8 @@ func (ds *Datastream) WaitReady() error {
 
 // Defer runs a given function as close of Datastream
 func (ds *Datastream) Defer(f func()) {
-	if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-		ds.deferFuncs = append(ds.deferFuncs, f)
-	}
+	ds.deferFuncs = append(ds.deferFuncs, f)
+
 	if ds.closed { // mutex?
 		for _, f := range ds.deferFuncs {
 			f()
@@ -475,43 +481,43 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 	// decode File if requested
 	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
 		columnTransforms := makeColumnTransforms(transformsPayload)
-		applied := []Transform{}
+		applied := []string{}
 
 		if ts, ok := columnTransforms["*"]; ok {
 			for _, t := range ts {
 				switch t {
-				case TransformDecodeLatin1:
+				case TransformDecodeLatin1.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_1)
-				case TransformDecodeLatin5:
+				case TransformDecodeLatin5.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_5)
-				case TransformDecodeLatin9:
+				case TransformDecodeLatin9.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_15)
-				case TransformDecodeWindows1250:
+				case TransformDecodeWindows1250.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1250)
-				case TransformDecodeWindows1252:
+				case TransformDecodeWindows1252.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1252)
-				case TransformDecodeUtf16:
+				case TransformDecodeUtf16.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
-				case TransformDecodeUtf8:
+				case TransformDecodeUtf8.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8)
-				case TransformDecodeUtf8Bom:
+				case TransformDecodeUtf8Bom.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
 
-				case TransformEncodeLatin1:
+				case TransformEncodeLatin1.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_1)
-				case TransformEncodeLatin5:
+				case TransformEncodeLatin5.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_5)
-				case TransformEncodeLatin9:
+				case TransformEncodeLatin9.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_15)
-				case TransformEncodeWindows1250:
+				case TransformEncodeWindows1250.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1250)
-				case TransformEncodeWindows1252:
+				case TransformEncodeWindows1252.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1252)
-				case TransformEncodeUtf16:
+				case TransformEncodeUtf16.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF16)
-				case TransformEncodeUtf8:
+				case TransformEncodeUtf8.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8)
-				case TransformEncodeUtf8Bom:
+				case TransformEncodeUtf8Bom.Name:
 					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8BOM)
 
 				default:
@@ -520,7 +526,7 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 				applied = append(applied, t) // delete from transforms, already applied
 			}
 
-			ts = lo.Filter(ts, func(t Transform, i int) bool {
+			ts = lo.Filter(ts, func(t string, i int) bool {
 				return !g.In(t, applied...)
 			})
 			columnTransforms["*"] = ts
@@ -1399,7 +1405,7 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	parquetPath := path.Join(tempDir, g.NewTsID("parquet.temp")+".parquet")
-	ds.Defer(func() { os.Remove(parquetPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(parquetPath) })
 
 	file, err := os.Create(parquetPath)
 	if err != nil {
@@ -1419,6 +1425,65 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	}
 
 	return ds.ConsumeParquetReaderSeeker(file)
+}
+
+// ConsumeParquetReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	p, err := NewParquetReaderDuckDb(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create ParquetDuckDb")
+	}
+
+	ds, err = p.Duck.Stream(p.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read parquet rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { p.Close() })
+
+	return
+}
+
+// ConsumeIcebergReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeIcebergReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+
+	i, err := NewIcebergReader(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create IcebergDuckDb")
+	}
+
+	ds, err = i.Duck.Stream(i.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read iceberg rows")
+	}
+
+	ds.Defer(func() { i.Close() })
+
+	return
+}
+
+// ConsumeDeltaReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeDeltaReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+
+	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	d, err := NewDeltaReader(uri, props...)
+	if err != nil {
+		return g.Error(err, "could not create DeltaReader")
+	}
+
+	ds, err = d.Duck.Stream(d.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read delta rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { d.Close() })
+
+	return
 }
 
 // ConsumeAvroReaderSeeker uses the provided reader to stream rows
@@ -1446,7 +1511,7 @@ func (ds *Datastream) ConsumeAvroReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	avroPath := path.Join(tempDir, g.NewTsID("avro.temp")+".avro")
-	ds.Defer(func() { os.Remove(avroPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(avroPath) })
 
 	file, err := os.Create(avroPath)
 	if err != nil {
@@ -1493,7 +1558,7 @@ func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	sasPath := path.Join(tempDir, g.NewTsID("sas.temp")+".sas7bdat")
-	ds.Defer(func() { os.Remove(sasPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(sasPath) })
 
 	file, err := os.Create(sasPath)
 	if err != nil {
@@ -1558,7 +1623,7 @@ func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]stri
 	// need to write to temp file prior
 	tempDir := env.GetTempFolder()
 	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
-	ds.Defer(func() { os.Remove(excelPath) })
+	ds.Defer(func() { env.RemoveLocalTempFile(excelPath) })
 
 	file, err := os.Create(excelPath)
 	if err != nil {
@@ -2445,7 +2510,9 @@ func (it *Iterator) BelowEqualIncrementalVal() bool {
 		// no incremental val or col
 		return false
 	} else if it.incrementalColI == -1 {
-		it.incrementalColI = it.ds.Columns.GetColumn(it.incrementalCol).Position - 1
+		if col := it.ds.Columns.GetColumn(it.incrementalCol); col != nil {
+			it.incrementalColI = col.Position - 1
+		}
 	}
 
 	if it.incrementalColI == -1 || it.incrementalColI > len(it.ds.Columns) {

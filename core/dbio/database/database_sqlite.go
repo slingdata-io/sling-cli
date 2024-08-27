@@ -296,17 +296,6 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	return
 }
 
-func writeTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
-	sqlPath = path.Join(env.GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
-
-	err = os.WriteFile(sqlPath, []byte(sql), 0777)
-	if err != nil {
-		return "", g.Error(err, "could not create temp sql")
-	}
-
-	return
-}
-
 func (conn *SQLiteConn) setHttpURL() (err error) {
 
 	httpURL := conn.GetProp("http_url")
@@ -482,7 +471,7 @@ func EnsureBinSQLite() (binPath string, err error) {
 			return "", g.Error(err, "Error unzipping sqlite zip")
 		}
 
-		nodes := dbio.NewFileNodes(nodeMaps)
+		nodes := filesys.NewFileNodes(nodeMaps)
 		for _, pathVal := range nodes.URIs() {
 			pathVal = strings.TrimPrefix(pathVal, "file://")
 			if strings.HasSuffix(pathVal, "sqlite3") || strings.HasSuffix(pathVal, "sqlite3.exe") {

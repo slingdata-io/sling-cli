@@ -491,7 +491,7 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	} else {
 		if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
-			fc, err := cfg.TgtConn.AsFile()
+			fc, err := cfg.TgtConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -547,7 +547,7 @@ func (cfg *Config) Prepare() (err error) {
 	} else {
 		if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			fc, err := cfg.SrcConn.AsFile()
+			fc, err := cfg.SrcConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -714,6 +714,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if _, ok := dateMap[k]; ok {
 			continue // don't clean the date values
 		}
+		if g.In(k, "run_timestamp") {
+			continue // don't clean those keys, will add an underscore prefix
+		}
 		m[k] = iop.CleanName(cast.ToString(v))
 	}
 
@@ -825,7 +828,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		uri := cfg.SrcConn.URL()
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		fc, err := cfg.SrcConn.AsFile()
+		fc, err := cfg.SrcConn.AsFile(true)
 		if err != nil {
 			return m, g.Error(err, "could not init source conn as file")
 		}
@@ -961,6 +964,123 @@ func (cfg *Config) ReplicationMode() bool {
 // IgnoreExisting returns true target_options.ignore_existing is true
 func (cfg *Config) IgnoreExisting() bool {
 	return cfg.Target.Options.IgnoreExisting != nil && *cfg.Target.Options.IgnoreExisting
+}
+
+// ColumnsPrepared returns the prepared columns
+func (cfg *Config) ColumnsPrepared() (columns iop.Columns) {
+
+	if cfg.Target.Columns != nil {
+		switch colsCasted := cfg.Target.Columns.(type) {
+		case map[string]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: colName,
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
+		case map[any]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: cast.ToString(colName),
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
+		case []map[string]any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case []any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case iop.Columns:
+			columns = colsCasted
+		default:
+			g.Warn("Config.Source.Options.Columns not handled: %T", cfg.Source.Options.Columns)
+		}
+
+		// parse constraint, length, precision, scale
+		for i := range columns {
+			columns[i].SetConstraint()
+			columns[i].SetLengthPrecisionScale()
+		}
+
+		// set as string so that StreamProcessor parses it
+		columns = iop.NewColumns(columns...)
+	}
+
+	return
+}
+
+// TransformsPrepared returns the transforms columns
+func (cfg *Config) TransformsPrepared() (colTransforms map[string][]string) {
+
+	if transforms := cfg.Transforms; transforms != nil {
+		colTransforms = map[string][]string{}
+
+		makeTransformArray := func(val any) []string {
+			switch tVal := val.(type) {
+			case []any:
+				transformsArray := make([]string, len(tVal))
+				for i := range tVal {
+					transformsArray[i] = cast.ToString(tVal[i])
+				}
+				return transformsArray
+			case []string:
+				return tVal
+			default:
+				g.Warn("did not handle transforms value input: %#v", val)
+			}
+			return nil
+		}
+
+		switch tVal := transforms.(type) {
+		case []any, []string:
+			colTransforms["*"] = makeTransformArray(tVal)
+		case map[string]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[string][]string:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[string][]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any][]string:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[any][]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		default:
+			g.Warn("did not handle transforms input: %#v", transforms)
+		}
+
+		for _, transf := range cfg.extraTransforms {
+			if _, ok := colTransforms["*"]; !ok {
+				colTransforms["*"] = []string{transf}
+			} else {
+				colTransforms["*"] = append(colTransforms["*"], transf)
+			}
+		}
+
+	}
+	return
 }
 
 // Value return json value, implement driver.Valuer interface

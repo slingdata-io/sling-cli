@@ -44,26 +44,26 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	TrimSpace         bool                       `json:"trim_space"`
-	EmptyAsNull       bool                       `json:"empty_as_null"`
-	Header            bool                       `json:"header"`
-	Compression       string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string                     `json:"null_if"`
-	NullAs            string                     `json:"null_as"`
-	DatetimeFormat    string                     `json:"datetime_format"`
-	SkipBlankLines    bool                       `json:"skip_blank_lines"`
-	Delimiter         string                     `json:"delimiter"`
-	Escape            string                     `json:"escape"`
-	FileMaxRows       int64                      `json:"file_max_rows"`
-	BatchLimit        int64                      `json:"batch_limit"`
-	MaxDecimals       int                        `json:"max_decimals"`
-	Flatten           bool                       `json:"flatten"`
-	FieldsPerRec      int                        `json:"fields_per_rec"`
-	Jmespath          string                     `json:"jmespath"`
-	BoolAsInt         bool                       `json:"-"`
-	Columns           Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        map[string][]TransformFunc // array of transform functions to apply
-	maxDecimalsFormat string                     `json:"-"`
+	TrimSpace         bool                   `json:"trim_space"`
+	EmptyAsNull       bool                   `json:"empty_as_null"`
+	Header            bool                   `json:"header"`
+	Compression       string                 `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf            string                 `json:"null_if"`
+	NullAs            string                 `json:"null_as"`
+	DatetimeFormat    string                 `json:"datetime_format"`
+	SkipBlankLines    bool                   `json:"skip_blank_lines"`
+	Delimiter         string                 `json:"delimiter"`
+	Escape            string                 `json:"escape"`
+	FileMaxRows       int64                  `json:"file_max_rows"`
+	BatchLimit        int64                  `json:"batch_limit"`
+	MaxDecimals       int                    `json:"max_decimals"`
+	Flatten           bool                   `json:"flatten"`
+	FieldsPerRec      int                    `json:"fields_per_rec"`
+	Jmespath          string                 `json:"jmespath"`
+	BoolAsInt         bool                   `json:"-"`
+	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms        map[string][]Transform // array of transform functions to apply
+	maxDecimalsFormat string                 `json:"-"`
 
 	Map map[string]string `json:"-"`
 }
@@ -114,8 +114,6 @@ func NewTransformers() Transformers {
 		EncodeWindows1252: charmap.Windows1252.NewEncoder(),
 	}
 }
-
-type TransformFunc func(*StreamProcessor, string) (string, error)
 
 // NewStreamProcessor returns a new StreamProcessor
 func NewStreamProcessor() *StreamProcessor {
@@ -327,21 +325,44 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 }
 
-func makeColumnTransforms(transformsPayload string) map[string][]Transform {
-	columnTransforms := map[string][]Transform{}
+func makeColumnTransforms(transformsPayload string) map[string][]string {
+	columnTransforms := map[string][]string{}
 	g.Unmarshal(transformsPayload, &columnTransforms)
 	return columnTransforms
 }
 
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	columnTransforms := makeColumnTransforms(transformsPayload)
-	sp.Config.transforms = map[string][]TransformFunc{}
+	sp.Config.transforms = map[string][]Transform{}
 	for key, names := range columnTransforms {
-		sp.Config.transforms[key] = []TransformFunc{}
+		sp.Config.transforms[key] = []Transform{}
 		for _, name := range names {
-			f, ok := Transforms[name]
+			t, ok := TransformsMap[name]
 			if ok {
-				sp.Config.transforms[key] = append(sp.Config.transforms[key], f)
+				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
+			} else if n := strings.TrimSpace(string(name)); strings.Contains(n, "(") && strings.HasSuffix(n, ")") {
+				// parse transform with a parameter
+				parts := strings.Split(string(name), "(")
+				if len(parts) != 2 {
+					g.Warn("invalid transform: '%s'", name)
+					continue
+				}
+				tName := parts[0]
+				param := strings.TrimSuffix(parts[1], ")")
+				if t, ok := TransformsMap[tName]; ok {
+					if t.makeFunc == nil {
+						g.Warn("makeFunc not found for transform '%s'. Please contact support", tName)
+						continue
+					}
+					err := t.makeFunc(&t, param)
+					if err != nil {
+						g.Warn("invalid parameter for transform '%s' (%s)", tName, err.Error())
+					} else {
+						sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
+					}
+				} else {
+					g.Warn("did find find transform with params named: '%s'", tName)
+				}
 			} else {
 				g.Warn("did find find transform named: '%s'", name)
 			}
@@ -474,56 +495,6 @@ func (sp *StreamProcessor) commitChecksum() {
 	}
 }
 
-func (sp *StreamProcessor) EncodingTransform(t Transform, val string) (newVal string, err error) {
-
-	switch t {
-	case TransformReplaceAccents:
-		newVal, _, err = transform.String(sp.transformers.Accent, val)
-
-	case TransformDecodeLatin1:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_1, val)
-	case TransformDecodeLatin5:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_5, val)
-	case TransformDecodeLatin9:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_15, val)
-	case TransformDecodeWindows1250:
-		newVal, _, err = transform.String(sp.transformers.DecodeWindows1250, val)
-	case TransformDecodeWindows1252:
-		newVal, _, err = transform.String(sp.transformers.DecodeWindows1252, val)
-	case TransformDecodeUtf16:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF16, val)
-	case TransformDecodeUtf8:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF8, val)
-	case TransformDecodeUtf8Bom:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF8BOM, val)
-
-	case TransformEncodeLatin1:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_1, val)
-	case TransformEncodeLatin5:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_5, val)
-	case TransformEncodeLatin9:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_15, val)
-	case TransformEncodeWindows1250:
-		newVal, _, err = transform.String(sp.transformers.EncodeWindows1250, val)
-	case TransformEncodeWindows1252:
-		newVal, _, err = transform.String(sp.transformers.EncodeWindows1252, val)
-	case TransformEncodeUtf16:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF16, val)
-	case TransformEncodeUtf8:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF8, val)
-	case TransformEncodeUtf8Bom:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF8BOM, val)
-	default:
-		return val, nil
-	}
-
-	if err != nil {
-		return val, err
-	}
-
-	return newVal, nil
-}
-
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessVal'
@@ -583,6 +554,10 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 	}
 
+	// get transforms
+	key := strings.ToLower(col.Name)
+	transforms := append(sp.Config.transforms[key], sp.Config.transforms["*"]...)
+
 	switch {
 	case col.Type.IsString():
 		if sVal == "" && val != nil {
@@ -594,15 +569,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		// apply transforms
-		key := strings.ToLower(col.Name)
-		if transforms, ok := sp.Config.transforms[key]; ok {
-			for _, t := range transforms {
-				sVal, _ = t(sp, sVal)
-			}
-		}
-		if transforms, ok := sp.Config.transforms["*"]; ok {
-			for _, t := range transforms {
-				sVal, _ = t(sp, sVal)
+		for _, t := range transforms {
+			if t.FuncString != nil {
+				sVal, _ = t.FuncString(sp, sVal)
 			}
 		}
 
@@ -802,10 +771,6 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
-			// sp.unrecognizedDate = g.F(
-			// 	"N: %d, ind: %d, val: %s", sp.N, i, cast.ToString(val),
-			// )
-			// sp.warn = true
 			sp.ds.ChangeColumn(i, StringType)
 			cs.StringCnt++
 			sVal = cast.ToString(val)
@@ -816,6 +781,17 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			cs.NullCnt++
 			sp.rowBlankValCnt++
 		} else {
+			// apply transforms
+			for _, t := range transforms {
+				if t.FuncTime != nil {
+					_ = t.FuncTime(sp, &dVal)
+				}
+
+				// column needs to be set to timestampz
+				if t.Name == "set_timezone" && col.Type != TimestampzType {
+					sp.ds.ChangeColumn(i, TimestampzType)
+				}
+			}
 			nVal = dVal
 			if isDate(&dVal) {
 				cs.DateCnt++
@@ -1201,8 +1177,13 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	sp.rowBlankValCnt = 0
 	sp.rowChecksum = make([]uint64, len(row))
 	for i, val := range row {
-		// fmt.Printf("| (%s) %#v", columns[i].Type, val)
-		row[i] = sp.CastVal(i, val, &columns[i])
+		col := &columns[i]
+		row[i] = sp.CastVal(i, val, col)
+
+		// evaluate constraint
+		if col.Constraint != nil {
+			col.EvaluateConstraint(row[i], sp)
+		}
 	}
 
 	for len(row) < len(columns) {

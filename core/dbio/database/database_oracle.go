@@ -381,14 +381,19 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 	for _, col := range ds.Columns {
 		expr := ""
 		colName := conn.Quote(col.Name)
-		if col.Type == "datetime" || col.Type == "date" {
+		if col.Type == iop.DatetimeType || col.Type == iop.DateType {
 			expr = fmt.Sprintf(
 				`"TO_DATE(:%s, 'YYYY-MM-DD HH24:MI:SS')"`,
 				strings.ToUpper(col.Name),
 			)
-		} else if col.Type == "timestamp" || col.Type == "timestampz" {
+		} else if col.Type == iop.TimestampType {
 			expr = fmt.Sprintf(
 				`"TO_TIMESTAMP(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6')"`,
+				strings.ToUpper(col.Name),
+			)
+		} else if col.Type == iop.TimestampzType {
+			expr = fmt.Sprintf(
+				`"TO_TIMESTAMP_TZ(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')"`,
 				strings.ToUpper(col.Name),
 			)
 		} else if col.IsString() {
@@ -433,15 +438,19 @@ func sqlLoadCsvReader(ds *iop.Datastream) (*io.PipeReader, *struct{ cols map[int
 					pu.cols[i] = i
 				}
 
-				if ds.Columns[i].Type == "datetime" || ds.Columns[i].Type == "date" {
+				if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.DateType {
 					// casting unsafely, but has been determined by ParseString
 					// convert to Oracle Time format
 					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
 					valS = val.(time.Time).Format("2006-01-02 15:04:05")
-				} else if ds.Columns[i].Type == "timestamp" {
+				} else if ds.Columns[i].Type == iop.TimestampType {
 					// convert to Oracle Timestamp format
 					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
-					valS = val.(time.Time).Format("2006-01-02 15:04:05.000")
+					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000")
+				} else if ds.Columns[i].Type == iop.TimestampzType {
+					// convert to Oracle Timestamp format
+					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
+					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000 -07:00")
 				}
 				row[i] = valS
 			}

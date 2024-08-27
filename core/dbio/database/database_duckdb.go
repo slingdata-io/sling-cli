@@ -38,7 +38,6 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "1.0.0"
 var DuckDbUseTempFile = false
 var DuckDbMux = sync.Mutex{}
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
@@ -157,118 +156,6 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
-// EnsureBinDuckDB ensures duckdb binary exists
-// if missing, downloads and uses
-func EnsureBinDuckDB(version string) (binPath string, err error) {
-
-	if version == "" {
-		if val := os.Getenv("DUCKDB_VERSION"); val != "" {
-			version = val
-		} else {
-			version = DuckDbVersion
-		}
-	}
-
-	// use specified path to duckdb binary
-	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
-		if !g.PathExists(envPath) {
-			return "", g.Error("duckdb binary not found: %s", envPath)
-		}
-		return envPath, nil
-	}
-
-	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
-		DuckDbUseTempFile = cast.ToBool(useTempFile)
-	} else if g.In(version, "0.8.0", "0.8.1") {
-		// there is a bug with stdin stream in 0.8.1.
-		// Out of Memory Error
-		DuckDbUseTempFile = true
-	}
-
-	folderPath := path.Join(env.HomeBinDir(), "duckdb", version)
-	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
-	binPath = path.Join(folderPath, "duckdb"+extension)
-	found := g.PathExists(binPath)
-
-	checkVersion := func() (bool, error) {
-
-		out, err := exec.Command(binPath, "-version").Output()
-		if err != nil {
-			return false, g.Error(err, "could not get version for duckdb")
-		}
-
-		if strings.HasPrefix(string(out), "v"+version) {
-			return true, nil
-		}
-
-		return false, nil
-	}
-
-	// TODO: check version if found
-	if found {
-		ok, err := checkVersion()
-		if err != nil {
-			return "", g.Error(err, "error checking version for duckdb")
-		}
-		found = ok // so it can re-download if mismatch
-	}
-
-	if !found {
-		// we need to download it ourselves
-		var downloadURL string
-		zipPath := path.Join(g.UserHomeDir(), "duckdb.zip")
-		defer os.Remove(zipPath)
-
-		switch runtime.GOOS + "/" + runtime.GOARCH {
-
-		case "windows/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-amd64.zip"
-
-		case "windows/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-i386.zip"
-
-		case "darwin/386", "darwin/arm", "darwin/arm64", "darwin/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-osx-universal.zip"
-
-		case "linux/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-i386.zip"
-
-		case "linux/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
-
-		case "linux/aarch64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-aarch64.zip"
-
-		default:
-			return "", g.Error("OS %s/%s not handled", runtime.GOOS, runtime.GOARCH)
-		}
-
-		downloadURL = g.R(downloadURL, "version", version)
-
-		g.Info("downloading duckdb %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
-		err = net.DownloadFile(downloadURL, zipPath)
-		if err != nil {
-			return "", g.Error(err, "Unable to download duckdb binary")
-		}
-
-		paths, err := iop.Unzip(zipPath, folderPath)
-		if err != nil {
-			return "", g.Error(err, "Error unzipping duckdb zip")
-		}
-
-		if !g.PathExists(binPath) {
-			return "", g.Error("cannot find %s, paths are: %s", binPath, g.Marshal(paths))
-		}
-	}
-
-	_, err = checkVersion()
-	if err != nil {
-		return "", g.Error(err, "error checking version for duckdb")
-	}
-
-	return binPath, nil
-}
-
 // ExecContext runs a sql query with context, returns `error`
 func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
 	return conn.ExecContext(ctx, strings.Join(sqls, ";\n"))
@@ -345,12 +232,12 @@ func (b *duckDbBuffer) Bytes() []byte {
 
 func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *exec.Cmd, sqlPath string, err error) {
 
-	bin, err := EnsureBinDuckDB(conn.GetProp("duckdb_version"))
+	bin, err := iop.EnsureBinDuckDB(conn.GetProp("duckdb_version"))
 	if err != nil {
 		return cmd, "", g.Error(err, "could not get duckdb binary")
 	}
 
-	sqlPath, err = writeTempSQL(sql)
+	sqlPath, err = env.WriteTempSQL(sql)
 	if err != nil {
 		return cmd, "", g.Error(err, "could not create temp sql file for duckdb")
 	}
@@ -424,6 +311,16 @@ func (r duckDbResult) RowsAffected() (int64, error) {
 	return cast.ToInt64(r.TotalRows), nil
 }
 
+// submitToCmdStdin submits SQL to the DuckDB process via stdin in interactive mode
+// It handles the submission of SQL, detection of query completion, and management of output streams
+// Parameters:
+//   - ctx: The context for the operation
+//   - sql: The SQL query to be executed
+//
+// Returns:
+//   - stdOutReader: A reader for the standard output of the command
+//   - stderrBuf: A buffer containing any error output
+//   - err: Any error encountered during the process
 func (conn *DuckDbConn) submitToCmdStdin(ctx context.Context, sql string) (stdOutReader io.ReadCloser, stderrBuf *bytes.Buffer, err error) {
 	// submit to stdin
 	sql = strings.TrimLeft(strings.TrimSpace(sql), ";")

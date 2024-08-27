@@ -3,12 +3,12 @@ package dbio
 import (
 	"bufio"
 	"embed"
+	"encoding/csv"
+	"io"
 	"strings"
 	"unicode"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
@@ -303,21 +303,6 @@ func (template Template) Value(path string) (value string) {
 	return value
 }
 
-// ToData convert is dataset
-func (template Template) ToData() (data iop.Dataset) {
-	columns := []string{"key", "value"}
-	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
-	data.Rows = append(data.Rows, []interface{}{"core", template.Core})
-	data.Rows = append(data.Rows, []interface{}{"analysis", template.Analysis})
-	data.Rows = append(data.Rows, []interface{}{"function", template.Function})
-	data.Rows = append(data.Rows, []interface{}{"metadata", template.Metadata})
-	data.Rows = append(data.Rows, []interface{}{"general_type_map", template.GeneralTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"native_type_map", template.NativeTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"variable", template.Variable})
-
-	return
-}
-
 // a cache for templates (so we only read once)
 var typeTemplate = map[Type]Template{}
 
@@ -383,22 +368,41 @@ func (t Type) Template() (template Template, err error) {
 		return template, g.Error(err, `cannot open types_native_to_general`)
 	}
 
-	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
-	TypesNativeCSV.Delimiter = '\t'
-	TypesNativeCSV.NoDebug = true
+	csvReader := csv.NewReader(bufio.NewReader(TypesNativeFile))
+	csvReader.Comma = '\t'
 
-	data, err := TypesNativeCSV.Read()
+	var records []map[string]string
+
+	// Read header
+	header, err := csvReader.Read()
 	if err != nil {
-		return template, g.Error(err, `TypesNativeCSV.Read()`)
+		return template, g.Error(err, "failed to read header from types_native_to_general.tsv")
 	}
 
-	for _, rec := range data.Records() {
+	// Read records
+	for {
+		row, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return template, g.Error(err, "failed to read row from types_native_to_general.tsv")
+		}
+
+		record := make(map[string]string)
+		for i, value := range row {
+			record[header[i]] = value
+		}
+		records = append(records, record)
+	}
+
+	for _, rec := range records {
 		if rec["database"] == t.String() {
-			nt := strings.TrimSpace(cast.ToString(rec["native_type"]))
-			gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-			s := strings.TrimSpace(cast.ToString(rec["stats_allowed"]))
-			template.NativeTypeMap[nt] = cast.ToString(gt)
-			template.NativeStatsMap[nt] = cast.ToBool(s)
+			nt := strings.TrimSpace(rec["native_type"])
+			gt := strings.TrimSpace(rec["general_type"])
+			s := strings.TrimSpace(rec["stats_allowed"])
+			template.NativeTypeMap[nt] = gt
+			template.NativeStatsMap[nt] = s == "true"
 		}
 	}
 
@@ -407,18 +411,36 @@ func (t Type) Template() (template Template, err error) {
 		return template, g.Error(err, `cannot open types_general_to_native`)
 	}
 
-	TypesGeneralCSV := iop.CSV{Reader: bufio.NewReader(TypesGeneralFile)}
-	TypesGeneralCSV.Delimiter = '\t'
-	TypesGeneralCSV.NoDebug = true
+	csvReader = csv.NewReader(bufio.NewReader(TypesGeneralFile))
+	csvReader.Comma = '\t'
 
-	data, err = TypesGeneralCSV.Read()
+	// Read header
+	header, err = csvReader.Read()
 	if err != nil {
-		return template, g.Error(err, `TypesGeneralCSV.Read()`)
+		return template, g.Error(err, "failed to read header from types_general_to_native.tsv")
 	}
 
-	for _, rec := range data.Records() {
-		gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-		template.GeneralTypeMap[gt] = cast.ToString(rec[t.String()])
+	// Read records
+	records = []map[string]string{} // reset
+	for {
+		row, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return template, g.Error(err, "failed to read row from types_general_to_native.tsv")
+		}
+
+		record := make(map[string]string)
+		for i, value := range row {
+			record[header[i]] = value
+		}
+		records = append(records, record)
+	}
+
+	for _, rec := range records {
+		gt := strings.TrimSpace(rec["general_type"])
+		template.GeneralTypeMap[gt] = rec[t.String()]
 	}
 
 	// cache

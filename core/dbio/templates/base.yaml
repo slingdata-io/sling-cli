@@ -5,7 +5,6 @@ core:
   drop_index: "select 'drop_index not implemented'"
   create_schema: create schema {schema}
   create_table: create table {table} ({col_types})
-  create_temporary_table: create temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
@@ -349,6 +348,7 @@ function:
   string_type: varchar
   cast_as: cast({field} as {type})
   cast_to_string: cast({field} as varchar)
+  cast_to_text: cast({field} as varchar)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   checksum_string: length({field})
@@ -369,6 +369,7 @@ variable:
   date_layout: '2006-01-02'
   timestamp_layout_str: "'{value}'"
   timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000 -0700'
   error_filter_table_exists: already
   bool_as: bool
 

@@ -30,9 +30,11 @@ cmd/sling/tests/suite/
 cmd/sling/tests/replications/r.test.yaml
 
 *..go
+*__test.go
 
 appicon.png
 wails.json
 
 cmd/sling/build/
 cmd/sling/frontend
+.cursorignore

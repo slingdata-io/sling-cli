@@ -12,7 +12,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/jlaffaye/ftp"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -161,7 +160,7 @@ func (fs *FtpFileSysClient) Reconnect(reason string) {
 }
 
 // List list objects in path
-func (fs *FtpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
+func (fs *FtpFileSysClient) List(url string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(url)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+url)
@@ -181,7 +180,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
 				path = strings.TrimSuffix(path, "/")
 			}
 		}
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), path, file.Name),
 			Updated: file.Time.Unix(),
 			Size:    file.Size,
@@ -214,7 +213,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
 			}
 		}
 
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), path, file.Name),
 			Size:    file.Size,
 			Updated: file.Time.Unix(),
@@ -230,7 +229,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
 }
 
 // ListRecursive list objects in path recursively
-func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
+func (fs *FtpFileSysClient) ListRecursive(url string) (nodes FileNodes, err error) {
 
 	path, err := fs.GetPath(url)
 	if err != nil {
@@ -261,7 +260,7 @@ func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err
 				filePath = strings.TrimSuffix(filePath, "/")
 			}
 		}
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), filePath, file.Name),
 			Updated: file.Time.Unix(),
 			Size:    file.Size,
@@ -293,7 +292,7 @@ func (fs *FtpFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err
 			}
 		}
 
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     g.F("%s%s%s", fs.Prefix("/"), path, file.Name),
 			Size:    file.Size,
 			Updated: file.Time.Unix(),

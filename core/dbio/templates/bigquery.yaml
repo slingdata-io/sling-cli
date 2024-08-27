@@ -389,6 +389,7 @@ function:
   str_utf8: '{ field }'
   string_type: string
   cast_to_string: cast({field} as string)
+  cast_to_text: cast({field} as string)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   checksum_date: cast(unix_micros(cast({field} as timestamp)) as numeric)

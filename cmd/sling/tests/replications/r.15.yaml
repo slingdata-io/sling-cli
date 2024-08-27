@@ -1,0 +1,17 @@
+source: aws_s3
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+streams:
+  
+  sling_test/*iceberg:
+    source_options:
+      format: iceberg
+    object: public.sling_test_{stream_file_name}
+
+  sling_test/delta:
+    source_options:
+      format: delta
+    object: public.sling_test_{stream_file_name}

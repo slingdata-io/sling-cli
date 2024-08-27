@@ -10,7 +10,6 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
 
@@ -64,7 +63,7 @@ func (fs *HTTPFileSysClient) Connect() (err error) {
 
 // Prefix returns the url prefix
 func (fs *HTTPFileSysClient) Prefix(suffix ...string) string {
-	_, host, _, _ := dbio.ParseURL(fs.GetProp("url"))
+	_, host, _, _ := ParseURLType(fs.GetProp("url"))
 	scheme := lo.Ternary(fs.isHttps, "https", "http")
 	return g.F("%s://%s/", scheme, host)
 }
@@ -120,10 +119,10 @@ func (fs *HTTPFileSysClient) delete(path string) (err error) {
 }
 
 // List lists all urls on the page
-func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) {
+func (fs *HTTPFileSysClient) List(url string) (nodes FileNodes, err error) {
 
 	if strings.HasPrefix(url, "https://docs.google.com/spreadsheets/d") {
-		return dbio.FileNodes{{URI: url}}, nil
+		return FileNodes{{URI: url}}, nil
 	}
 
 	url = strings.TrimSuffix(url, "/")
@@ -136,7 +135,7 @@ func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 	if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		// We have no easy way of determining if the url is a page with link
 		// or if the url is a body of data. Fow now, return url if not "text/html"
-		nodes.Add(dbio.FileNode{URI: url})
+		nodes.Add(FileNode{URI: url})
 		return
 	}
 
@@ -160,9 +159,9 @@ func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 		link, ok := s.Attr("href")
 		if ok {
 			if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
-				nodes.Add(dbio.FileNode{URI: link})
+				nodes.Add(FileNode{URI: link})
 			} else {
-				nodes.Add(dbio.FileNode{URI: urlParent + "/" + link})
+				nodes.Add(FileNode{URI: urlParent + "/" + link})
 			}
 		}
 	})
@@ -170,7 +169,7 @@ func (fs *HTTPFileSysClient) List(url string) (nodes dbio.FileNodes, err error) 
 }
 
 // ListRecursive lists all urls on the page
-func (fs *HTTPFileSysClient) ListRecursive(url string) (nodes dbio.FileNodes, err error) {
+func (fs *HTTPFileSysClient) ListRecursive(url string) (nodes FileNodes, err error) {
 	return fs.List(url)
 }
 

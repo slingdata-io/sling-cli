@@ -481,9 +481,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		defer loadCtx.Wg.Write.Done()
 		g.Debug("loading %s [%s] %s", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
-		if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
-			defer os.Remove(localFile.Node.Path())
-		}
+		defer func() { env.RemoveLocalTempFile(localFile.Node.Path()) }()
+
 		reader, err := os.Open(localFile.Node.Path())
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.Node.Path()))

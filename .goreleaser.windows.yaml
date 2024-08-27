@@ -21,8 +21,10 @@ builds:
 
     goarch:
       - amd64
+    
     goos:
       - windows
+    
     ldflags:
       - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}'"
 

@@ -67,6 +67,8 @@ const (
 	ExecStatusSkipped ExecStatus = "skipped"
 	// ExecStatusStalled = stalled (when still heartbeating, but rows are unchanged for a while)
 	ExecStatusStalled ExecStatus = "stalled"
+	// ExecStatusWarning = warning
+	ExecStatusWarning ExecStatus = "warning"
 )
 
 var AllExecStatus = []struct {

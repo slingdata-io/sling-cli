@@ -331,6 +331,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		filePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
+
 		if err != nil {
 			os.Remove(filePath)
 			err = g.Error(err, "Error csv.WriteStream(ds) to "+filePath)
@@ -339,7 +340,8 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 			return 0, g.Error(err)
 		} else if csvRowCnt == 0 {
 			// no data from source
-			return 0, nil
+			os.Remove(filePath)
+			continue
 		}
 
 		ds.Context.Wg.Write.Add()
@@ -690,7 +692,7 @@ func (conn *MsSQLServerConn) CopyFromAzure(tableFName, azPath string) (count uin
 	_, err = conn.Exec(sql)
 	if err != nil {
 		conn.SetProp("azToken", azToken)
-		return 0, g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return 0, g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return 0, nil

@@ -1,0 +1,154 @@
+name: Build Dev
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
+
+env:
+  GOPRIVATE: github.com/slingdata-io/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, ubuntu-16]
+    timeout-minutes: 5
+
+    outputs:
+      VERSION: ${{ steps.get_version.outputs.VERSION }}
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.22"
+          cache: false
+        
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION="${GITHUB_REF##*/}.dev"
+          DATE=$(date +%F)
+          VERSION=$(echo $VERSION | sed 's/v//')
+          VERSION="$VERSION/$DATE"
+          echo "VERSION -> $VERSION"
+          echo ::set-output name=VERSION::$VERSION
+
+      - id: step1
+        name: Build
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          bash scripts/build.sh
+          echo ::set-output name=version::$VERSION
+  
+  release:
+    if: "! (contains(github.event.inputs.build_only, 'true'))"
+    needs: [build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
+        # runner: [macos-latest, ubuntu-20.04, windows-latest]
+        runner: [self-hosted-mac, ubuntu-16, self-hosted-windows]
+        # runner: [self-hosted-mac, ubuntu-16]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+
+      - name: Dump context
+        env:
+          JOB_CONTEXT: ${{ toJson(job) }}
+          MATRIX_CONTEXT: ${{ toJson(matrix) }}
+          RUNNER_CONTEXT: ${{ toJson(runner) }}
+        run: |
+          echo "JOB_CONTEXT -> $JOB_CONTEXT"
+          echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
+          echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
+          echo "VERSION -> $VERSION"
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.22"
+          cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
+
+      - name: Configure private token (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        
+      - name: Configure private token (Linux)
+        if: runner.os == 'linux'
+        run: |
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+        
+      - name: Configure private token (Windows)
+        if: runner.os == 'windows'
+        run: |
+          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
+          git config --global url."$url".insteadOf "https://github.com/"
+      
+      - name: Build Sling (Linux)
+        env:
+          VERSION: ${{ needs.build.outputs.VERSION }}
+        if: runner.os == 'linux'
+        run: bash scripts/ci/build.linux.sh $VERSION
+
+      - name: Build Sling (Mac)
+        env:
+          VERSION: ${{ needs.build.outputs.VERSION }}
+        if: runner.os == 'macOS'
+        run: bash scripts/ci/build.mac.sh $VERSION
+
+
+      - name: Configure Pagefile (Windows)
+        if: runner.os == 'windows'
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+            minimum-size: 16GB
+            maximum-size: 16GB
+            disk-root: "C:"
+
+      - name: Build Sling (Windows)
+        env:
+          VERSION: ${{ needs.build.outputs.VERSION }}
+        if: runner.os == 'windows'
+        run: .\scripts\ci\build.win.ps1 $env:VERSION
+
+      - name: Upload to R2 (Windows)
+        if: runner.os == 'windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
+          
+          .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/ 
+
+      - name: Upload to R2 (Unix)
+        if: runner.os != 'windows'
+        run: |
+          name=$(uname -s | tr "[:upper:]" "[:lower:]")
+          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
+
+          ./mc cp *.tar.gz R2/sling-public/dev/latest/ 

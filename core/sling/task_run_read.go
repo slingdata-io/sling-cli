@@ -79,7 +79,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		// get source columns to match update-key
 		// in case column casing needs adjustment
 		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey)
-		if updateCol.Name != "" {
+		if updateCol != nil && updateCol.Name != "" {
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
 
@@ -112,6 +112,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			if updateCol.IsDate() || isOracleDate {
 				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.Type == iop.TimestampzType {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestampz_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
 			} else if updateCol.IsDatetime() {
@@ -166,6 +170,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.SQL = sTable.Select(cfg.Source.Limit(), cfg.Source.Offset(), strings.Split(selectFieldsStr, ",")...)
 	}
 
+	// set constraints
+	for _, col := range cfg.ColumnsPrepared() {
+		if c := sTable.Columns.GetColumn(col.Name); c != nil {
+			sTable.Columns[c.Position-1].Constraint = col.Constraint
+		}
+	}
+
 	df, err = srcConn.BulkExportFlow(sTable)
 	if err != nil {
 		err = g.Error(err, "Could not BulkExportFlow")
@@ -193,7 +204,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	if t.Config.IncrementalVal != nil {
@@ -222,6 +233,9 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		}
 
 		fsCfg := filesys.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		if ffmt := cfg.Source.Options.Format; ffmt != nil {
+			fsCfg.Format = *ffmt
+		}
 		df, err = fs.ReadDataflow(uri, fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)

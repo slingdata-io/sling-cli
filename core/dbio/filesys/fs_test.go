@@ -11,6 +11,7 @@ import (
 
 	arrowParquet "github.com/apache/arrow/go/v16/parquet"
 	"github.com/apache/arrow/go/v16/parquet/compress"
+	"github.com/clbanning/mxj/v2"
 	"github.com/flarco/g/net"
 	"github.com/linkedin/goavro/v2"
 	"github.com/parquet-go/parquet-go"
@@ -238,17 +239,32 @@ func TestFileSysLocalJson(t *testing.T) {
 
 }
 
+func TestFileSysLocalXml(t *testing.T) {
+
+	fileBytes, err := os.ReadFile("test/test1/xml/test1.1.xml")
+	assert.NoError(t, err)
+
+	var payload any
+	mv, err := mxj.NewMapXml(fileBytes)
+	assert.NoError(t, err)
+	payload = mv.Old()
+
+	assert.NotNil(t, payload, "Payload should not be nil")
+	g.Debug("payload: %s", g.Marshal(payload))
+
+}
+
 func TestFileSysLocalParquet(t *testing.T) {
 	t.Parallel()
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
 
-	df1, err := fs.ReadDataflow("test/test1/parquet")
+	df1, err := fs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 
 	data1, err := df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 1018, len(data1.Rows))
+	assert.EqualValues(t, 1036, len(data1.Rows))
 	assert.EqualValues(t, 7, len(data1.Columns))
 	// g.Info(g.Marshal(data1.Columns.Types()))
 
@@ -258,6 +274,123 @@ func TestFileSysLocalParquet(t *testing.T) {
 	_, err = WriteDataflow(fs, df2, "file:///tmp/parquet.test.parquet")
 	assert.NoError(t, err)
 
+	// Verify column types in the new parquet file
+	reader, err := os.Open("/tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	parquetReader, err := iop.NewParquetArrowReader(reader, nil)
+	assert.NoError(t, err)
+
+	columns := parquetReader.Columns()
+	if !assert.Equal(t, 7, len(columns)) {
+		return
+	}
+
+	expectedTypes := map[string]iop.ColumnType{
+		"id":         iop.BigIntType,
+		"first_name": iop.StringType,
+		"last_name":  iop.StringType,
+		"email":      iop.StringType,
+		"rating":     iop.DecimalType,
+		"date":       iop.DateType,
+		"target":     iop.BoolType,
+		"create_dt":  iop.DatetimeType,
+	}
+
+	for _, col := range columns {
+		expectedType, exists := expectedTypes[col.Name]
+		assert.True(t, exists, "Unexpected column: %s", col.Name)
+		assert.Equal(t, expectedType, col.Type, "Mismatched type for column %s", col.Name)
+	}
+
+	// Verify data
+	df3, err := fs.ReadDataflow("file:///tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+
+	data3, err := df3.Collect()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1036, len(data3.Rows))
+	assert.EqualValues(t, 7, len(data3.Columns))
+
+}
+
+func TestFileSysLocalIceberg(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/lineitem_iceberg"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeIceberg})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 51793, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"l_orderkey", iop.IntegerType},
+		{"l_partkey", iop.IntegerType},
+		{"l_suppkey", iop.IntegerType},
+		{"l_linenumber", iop.IntegerType},
+		{"l_quantity", iop.IntegerType},
+		{"l_extendedprice", iop.DecimalType},
+		{"l_discount", iop.DecimalType},
+		{"l_tax", iop.DecimalType},
+		{"l_returnflag", iop.StringType},
+		{"l_linestatus", iop.StringType},
+		{"l_shipdate", iop.DateType},
+		{"l_commitdate", iop.DateType},
+		{"l_receiptdate", iop.DateType},
+		{"l_shipinstruct", iop.StringType},
+		{"l_shipmode", iop.StringType},
+		{"l_comment", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
+}
+
+func TestFileSysLocalDelta(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/delta"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeDelta})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 5, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"first_name", iop.StringType},
+		{"last_name", iop.StringType},
+		{"country", iop.StringType},
+		{"continent", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
 }
 
 func TestFileSysLocalLargeParquet01(t *testing.T) {

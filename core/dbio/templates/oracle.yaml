@@ -35,7 +35,7 @@ core:
             RAISE;
           END IF;
     END;
-  create_temporary_table: create global temporary table {table} ({col_types})
+  # create_temporary_table: create global temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: INSERT {options} INTO {table} ({fields}) values  ({values})
   alter_columns: alter table {table} modify ({col_ddl})
@@ -296,6 +296,7 @@ routine:
 function:
   truncate_f: trunc({field})
   truncate_datef: trunc({field})
+  cast_to_text: 'cast({field} as varchar(4000))'
   str_utf8: convert({field},'US7ASCII','WE8ISO8859P1')
   date_to_int: to_number(to_char({field}, 'j'))
   number_to_int: round({field}, 0)
@@ -316,4 +317,6 @@ variable:
   batch_rows: 20
   date_layout_str: TO_DATE('{value}', 'YYYY-MM-DD HH24:MI:SS') # DATE in oracle has a time component
   timestamp_layout_str: TO_TIMESTAMP('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6')
+  timestampz_layout: "2006-01-02 15:04:05.000000 -07:00"
+  timestampz_layout_str: TO_TIMESTAMP_TZ('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')
   max_string_type: varchar(4000)

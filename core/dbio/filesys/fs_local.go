@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -97,7 +96,12 @@ func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err error) {
+func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := FileStreamConfig{}
+	if len(cfg) > 0 {
+		Cfg = cfg[0]
+	}
+
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -117,12 +121,10 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 	ds.SetConfig(fs.Props())
 
 	// set selectFields for pruning at source
-	selectFields := []string{}
-	g.Unmarshal(fs.GetProp("selectFields"), &selectFields)
-	ds.Columns = iop.NewColumnsFromFields(selectFields...)
+	ds.Columns = iop.NewColumnsFromFields(Cfg.Select...)
 
-	fileFormat := FileType(cast.ToString(fs.GetProp("FORMAT")))
-	if string(fileFormat) == "" {
+	fileFormat := Cfg.Format
+	if fileFormat == FileTypeNone {
 		fileFormat = InferFileFormat(path)
 	}
 
@@ -140,6 +142,22 @@ func (fs *LocalFileSysClient) GetDatastream(uri string) (ds *iop.Datastream, err
 		fs.Context().Wg.Read.Add()
 
 		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
+
+		// no reader for iceberg, delta, duckdb will handle it
+		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+			file.Close() // no need to keep the file open
+
+			switch fileFormat {
+			case FileTypeIceberg:
+				err = ds.ConsumeIcebergReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			case FileTypeDelta:
+				err = ds.ConsumeDeltaReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			}
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
+			}
+			return
+		}
 
 		switch fileFormat {
 		case FileTypeJson, FileTypeJsonLines:
@@ -237,7 +255,7 @@ func (fs *LocalFileSysClient) Write(uri string, reader io.Reader) (bw int64, err
 }
 
 // List lists the file in given directory path
-func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *LocalFileSysClient) List(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -246,7 +264,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 
 	s, err := os.Stat(path)
 	if err == nil && (!s.IsDir() || !strings.HasSuffix(path, "/")) {
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + path,
 			Updated: s.ModTime().Unix(),
 			Size:    cast.ToUint64(s.Size()),
@@ -273,7 +291,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 
 	for _, file := range files {
 		fInfo, _ := file.Info()
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + path + "/" + file.Name(),
 			Updated: fInfo.ModTime().Unix(),
 			Size:    cast.ToUint64(fInfo.Size()),
@@ -286,7 +304,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes dbio.FileNodes, err error)
 }
 
 // ListRecursive lists the file in given directory path recursively
-func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
@@ -306,7 +324,7 @@ func (fs *LocalFileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, e
 			return err
 		}
 		subPath = strings.ReplaceAll(subPath, `\`, "/")
-		node := dbio.FileNode{
+		node := FileNode{
 			URI:     "file://" + subPath,
 			Updated: info.ModTime().Unix(),
 			Size:    cast.ToUint64(info.Size()),
