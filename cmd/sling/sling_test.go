@@ -65,6 +65,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
+	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
@@ -548,7 +549,8 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbSQLServer)
+	// testSuite(t, dbio.TypeDbSQLServer)
+	testSuite(t, dbio.Type("sqlserver_bcp"))
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
