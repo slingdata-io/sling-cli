@@ -11,7 +11,7 @@ smallint	number(5)	smallint	smallint	smallint	smallint	smallint	smallint	smallin
 string	varchar()	varchar()	varchar()	varchar()	nvarchar()	nvarchar()	nvarchar()	varchar()	varchar()	text	string	Nullable(String)	varchar()	varchar()	varchar()	varchar	nullable(string)
 text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)	varchar	nullable(string)
 timestamp	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp_ntz	text	timestamp	Nullable(DateTime64(6))	timestamp	timestamp	datetime	timestamp	nullable(datetime64(6))
-timestampz	timestamp(9)	timestamptz	datetime(6)	datetime(6)	datetimeoffset	datetimeoffset	datetimeoffset	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime	timestamp with time zone	nullable(datetime64(6))
+timestampz	timestamp(9) with time zone	timestamptz	datetime(6)	datetime(6)	datetimeoffset	datetimeoffset	datetimeoffset	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime	timestamp with time zone	nullable(datetime64(6))
 float	float	double precision	double	double	float	float	float	double precision	float	real	float64	Nullable(Float64)	float	float	double	double	nullable(float64)
 time	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)
 timez	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)

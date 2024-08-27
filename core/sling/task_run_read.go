@@ -114,6 +114,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.Type == iop.TimestampzType {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestampz_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
 			} else if updateCol.IsDatetime() {
 				timestampTemplate := srcConn.GetTemplateValue("variable.timestamp_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
