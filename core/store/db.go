@@ -108,6 +108,10 @@ func settings() {
 }
 
 func GetMachineID() string {
+	if Db == nil {
+		machineID, _ := machineid.ProtectedID("sling")
+		return machineID
+	}
 	s := &Setting{Key: "machine-id"}
 	Db.First(&s)
 	return s.Value
