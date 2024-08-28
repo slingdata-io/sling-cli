@@ -112,7 +112,7 @@ func GetMachineID() string {
 		machineID, _ := machineid.ProtectedID("sling")
 		return machineID
 	}
-	s := &Setting{Key: "machine-id"}
+	s := Setting{Key: "machine-id"}
 	Db.First(&s)
 	return s.Value
 }
