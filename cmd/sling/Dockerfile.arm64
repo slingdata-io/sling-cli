@@ -30,9 +30,11 @@ COPY --chown=sling:sling sling /usr/local/bin/sling
 RUN chmod 755 /usr/local/bin/sling
 
 # Switch to non-root user
+RUN mkdir -p /home/sling && chmod 755 /home/sling && chown sling:sling /home/sling
 USER sling
 
 # Final ENV updates
+ENV DBUS_SESSION_BUS_ADDRESS="/dev/null"
 ENV ORACLE_HOME="/opt/oracle/instantclient_19_19"
 ENV LD_LIBRARY_PATH="/opt/oracle/instantclient_19_19"
 ENV PATH="${PATH}:/usr/local/go/bin:/root/go/bin:/opt/oracle/instantclient_19_19:/opt/mssql-tools18/bin"
