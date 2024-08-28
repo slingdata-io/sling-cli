@@ -264,7 +264,8 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
 
-	if len(cache) > 0 && cache[0] {
+	// default cache to true
+	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
 		if c.Database == nil {
 			c.Database, err = database.NewConnContext(
 				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
@@ -286,7 +287,8 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
 
-	if len(cache) > 0 && cache[0] {
+	// default cache to true
+	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
 		if c.File == nil {
 			c.File, err = filesys.NewFileSysClientFromURLContext(
 				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
