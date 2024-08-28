@@ -225,6 +225,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, w
 			return g.Error("could not get tables for schema: %s", schemaT.Schema)
 		}
 
+		streamsAdded := []string{}
 		for _, table := range schemata.Tables() {
 
 			// add to stream map
@@ -238,8 +239,9 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, w
 
 			cfg := rd.Streams[wildcardName]
 			rd.AddStream(table.FullName(), cfg)
-			g.Debug("wildcard '%s' matched stream => %s", wildcardName, table.FullName())
+			streamsAdded = append(streamsAdded, table.FullName())
 		}
+		g.Debug("wildcard '%s' matched %d streams => %+v", wildcardName, len(streamsAdded), streamsAdded)
 
 		// delete * from stream map
 		rd.DeleteStream(wildcardName)
@@ -274,7 +276,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, wildc
 			return g.Error("could not get files for schema: %s", wildcardName)
 		}
 
-		added := 0
+		streamsAdded := []string{}
 		for _, node := range nodes {
 			streamName, streamConfig, found := rd.GetStream(node.Path())
 			if found {
@@ -295,16 +297,13 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, wildc
 
 			// add path
 			rd.AddStream(node.Path(), rd.Streams[wildcardName])
-			added++
-			g.Debug("wildcard '%s' matched stream => %s", wildcardName, node.Path())
+			streamsAdded = append(streamsAdded, node.Path())
 		}
+		g.Debug("wildcard '%s' matched %d streams => %+v", wildcardName, len(streamsAdded), streamsAdded)
 
 		// delete from stream map
 		rd.DeleteStream(wildcardName)
 
-		if added == 0 {
-			g.Debug("0 streams added for %#v (nodes=%d)", wildcardName, len(nodes))
-		}
 	}
 
 	return

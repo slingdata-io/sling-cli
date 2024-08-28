@@ -26,7 +26,6 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
-		defer dbConn.Close()
 	case c.Type.IsFile():
 		fileClient, err := c.AsFile()
 		if err != nil {
@@ -36,7 +35,6 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
-		defer fileClient.Close()
 
 		url := c.URL()
 
@@ -97,7 +95,6 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
-		defer dbConn.Close()
 
 		var table database.Table
 		if opt.Pattern != "" {
@@ -142,7 +139,6 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
-		defer fileClient.Close()
 
 		url := c.URL()
 		if opt.Pattern != "" {

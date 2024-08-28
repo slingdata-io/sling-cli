@@ -277,6 +277,7 @@ func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes filesys.F
 		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 
+	defer conn.Connection.Close()
 	_, nodes, schemata, err = conn.Connection.Discover(opt)
 	return
 }
@@ -286,6 +287,7 @@ func (ec *EnvConns) Test(name string) (ok bool, err error) {
 	if !ok1 || name == "" {
 		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
+	defer conn.Connection.Close()
 	ok, err = conn.Connection.Test()
 	return
 }
