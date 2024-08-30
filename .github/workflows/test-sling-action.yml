@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      LOCAL: '{type: local, url: file:///tmp}'
-      SQLITE: 'sqlite://./test.db'
+      LOCAL: LOCAL
+      SQLITE: sqlite:///tmp/test.db
 
     steps:
       - uses: actions/checkout@v2

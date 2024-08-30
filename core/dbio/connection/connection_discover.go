@@ -49,7 +49,7 @@ func (c *Connection) Test() (ok bool, err error) {
 		}
 	}
 
-	return
+	return true, nil
 }
 
 type DiscoverOptions struct {
