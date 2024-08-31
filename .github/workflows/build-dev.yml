@@ -93,33 +93,51 @@ jobs:
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           use_system_python: true
 
-      - name: Configure private token (Mac)
-        if: runner.os == 'macOS'
+      - name: Get MC Client (Unix)
+        if: runner.os != 'windows'
         run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Linux)
-        if: runner.os == 'linux'
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Windows)
+          name=$(uname -s | tr "[:upper:]" "[:lower:]")
+          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
+
+      - name: Get MC Client (Windows)
         if: runner.os == 'windows'
         run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
+
+      - name: Prep
+        if: runner.os != 'windows'
+        run: |
+          name=$(uname -s | tr "[:upper:]" "[:lower:]")
+          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
       
       - name: Build Sling (Linux)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'linux'
-        run: bash scripts/ci/build.linux.sh $VERSION
+        run: |
+          # Configure private token (Linux)
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+          # Prep
+          mc cp R2/sling/bin/sling_prep/sling_prep_linux_amd64 . && chmod +x sling_prep_linux_amd64 && ./sling_prep_linux_amd64
+
+          # build
+          bash scripts/ci/build.linux.sh $VERSION
 
       - name: Build Sling (Mac)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'macOS'
-        run: bash scripts/ci/build.mac.sh $VERSION
+        run: |
+          # Configure private token (Mac)
+          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+
+          # Prep
+          mc cp R2/sling/bin/sling_prep/sling_prep_darwin_arm64 . && chmod +x sling_prep_darwin_arm64 && ./sling_prep_darwin_arm64
+
+          # build
+          bash scripts/ci/build.mac.sh $VERSION
 
 
       - name: Configure Pagefile (Windows)
@@ -134,21 +152,23 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'windows'
-        run: .\scripts\ci\build.win.ps1 $env:VERSION
+        run: |
+          # Configure private token (Windows)
+          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
+          git config --global url."$url".insteadOf "https://github.com/"
+
+          # Prep
+          .\mc.exe cp R2/sling/bin/sling_prep/sling_prep_windows_amd64.exe .
+          .\sling_prep_windows_amd64.exe
+
+          # Build
+          .\scripts\ci\build.win.ps1 $env:VERSION
 
       - name: Upload to R2 (Windows)
         if: runner.os == 'windows'
         shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
-          
-          .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/ 
+        run: .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/  
 
       - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
-        run: |
-          name=$(uname -s | tr "[:upper:]" "[:lower:]")
-          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
-
-          ./mc cp *.tar.gz R2/sling-public/dev/latest/ 
+        run: ./mc cp *.tar.gz R2/sling-public/dev/latest/ 
