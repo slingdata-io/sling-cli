@@ -83,7 +83,7 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 		// Test MakeSelectQuery method with all fields
 		allFields := []string{"*"}
 		limit := uint64(0) // No limit
-		query := d.MakeSelectQuery(allFields, limit)
+		query := d.MakeSelectQuery(allFields, limit, "", nil)
 		expectedQuery := g.F("select * from delta_scan('%s')", d.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query for all fields")
 
@@ -111,7 +111,7 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 		// Test MakeSelectQuery method
 		fields := []string{"first_name", "last_name", "country"}
 		limit := uint64(10)
-		query := d.MakeSelectQuery(fields, limit)
+		query := d.MakeSelectQuery(fields, limit, "", nil)
 		expectedQuery := g.F("select \"first_name\",\"last_name\",\"country\" from delta_scan('%s') limit 10", d.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query")
 

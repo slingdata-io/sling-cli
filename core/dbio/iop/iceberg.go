@@ -32,7 +32,7 @@ func (i *IcebergReader) Columns() (Columns, error) {
 	}
 
 	var err error
-	i.columns, err = i.Duck.Describe(i.MakeSelectQuery(nil, 0))
+	i.columns, err = i.Duck.Describe(i.MakeSelectQuery(nil, 0, "", nil))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
@@ -43,6 +43,6 @@ func (i *IcebergReader) Close() error {
 	return i.Duck.Close()
 }
 
-func (i *IcebergReader) MakeSelectQuery(fields []string, limit uint64) string {
-	return i.Duck.MakeScanSelectQuery("iceberg_scan", i.URI, fields, limit)
+func (i *IcebergReader) MakeSelectQuery(fields []string, limit uint64, incrementalKey string, incrementalValue any) string {
+	return i.Duck.MakeScanSelectQuery("iceberg_scan", i.URI, fields, incrementalKey, incrementalValue, limit)
 }

@@ -75,9 +75,13 @@ type schemaChg struct {
 }
 
 type FileStreamConfig struct {
-	Limit  int
-	Select []string
-	Format dbio.FileType
+	Limit             int               `json:"limit"`
+	Select            []string          `json:"select"`
+	Format            dbio.FileType     `json:"format"`
+	IncrementalKey    string            `json:"incremental_key"`
+	IncrementalVal    any               `json:"incremental_val"`
+	IncrementalValStr string            `json:"incremental_val_str"`
+	Props             map[string]string `json:"props"`
 }
 
 type KeyValue struct {
@@ -1435,15 +1439,16 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig) (err error) {
 
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	props := g.MapToKVArr(sc.Props)
 	p, err := NewParquetReaderDuckDb(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create ParquetDuckDb")
 	}
 
-	ds, err = p.Duck.Stream(p.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := p.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	ds, err = p.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
@@ -1455,15 +1460,15 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, fields []string, li
 }
 
 // ConsumeIcebergReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeIcebergReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
-
+func (ds *Datastream) ConsumeIcebergReader(uri string, sc FileStreamConfig) (err error) {
+	props := g.MapToKVArr(sc.Props)
 	i, err := NewIcebergReader(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create IcebergDuckDb")
 	}
 
-	ds, err = i.Duck.Stream(i.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := i.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	ds, err = i.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read iceberg rows")
 	}
@@ -1474,15 +1479,16 @@ func (ds *Datastream) ConsumeIcebergReader(uri string, fields []string, limit ui
 }
 
 // ConsumeDeltaReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeDeltaReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+func (ds *Datastream) ConsumeDeltaReader(uri string, sc FileStreamConfig) (err error) {
 
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
+	props := g.MapToKVArr(sc.Props)
 	d, err := NewDeltaReader(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create DeltaReader")
 	}
 
-	ds, err = d.Duck.Stream(d.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := d.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	ds, err = d.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read delta rows")
 	}

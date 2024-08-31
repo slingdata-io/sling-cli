@@ -798,24 +798,30 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	return
 }
 
-func (duck *DuckDb) MakeScanSelectQuery(scanFunc, uri string, fields []string, limit uint64) (sql string) {
+func (duck *DuckDb) MakeScanSelectQuery(scanFunc, uri string, fields []string, incrementalKey string, incrementalValue any, limit uint64) (sql string) {
 	if len(fields) == 0 || fields[0] == "*" {
 		fields = []string{"*"}
 	} else {
 		fields = dbio.TypeDbDuckDb.QuoteNames(fields...)
 	}
 
-	templ := dbio.TypeDbDuckDb.GetTemplateValue("core." + scanFunc)
-	if templ == "" {
-		templ = "select {fields} from {scanFunc}('{uri}')"
+	where := ""
+	if incrementalKey != "" && incrementalValue != nil {
+		where = fmt.Sprintf("where %s > %v", dbio.TypeDbDuckDb.Quote(incrementalKey), incrementalValue)
 	}
 
-	sql = g.R(
+	templ := dbio.TypeDbDuckDb.GetTemplateValue("core." + scanFunc)
+	if templ == "" {
+		templ = "select {fields} from {scanFunc}('{uri}') {where}"
+	}
+
+	sql = strings.TrimSpace(g.R(
 		templ,
 		"fields", strings.Join(fields, ","),
 		"scanFunc", scanFunc,
 		"uri", uri,
-	)
+		"where", where,
+	))
 
 	if limit > 0 {
 		sql += fmt.Sprintf(" limit %d", limit)

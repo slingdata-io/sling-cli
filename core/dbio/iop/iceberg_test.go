@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/flarco/g"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
 )
@@ -21,8 +23,8 @@ func TestIcebergReaderLocal(t *testing.T) {
 	testIcebergReader(t, i)
 
 	// Test Close method
-	// err = i.Close()
-	// assert.NoError(t, err)
+	err = i.Close()
+	assert.NoError(t, err)
 }
 
 func TestIcebergReaderS3(t *testing.T) {
@@ -96,7 +98,7 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 		// Test MakeSelectQuery method with all fields
 		allFields := []string{"*"}
 		limit := uint64(0) // No limit
-		query := i.MakeSelectQuery(allFields, limit)
+		query := i.MakeSelectQuery(allFields, limit, "", nil)
 		expectedQuery := fmt.Sprintf("select * from iceberg_scan('%s', allow_moved_paths = true)", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query for all fields")
 
@@ -123,7 +125,7 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 		// Test MakeSelectQuery method
 		fields := []string{"l_orderkey", "l_quantity", "l_shipdate"}
 		limit := uint64(10)
-		query := i.MakeSelectQuery(fields, limit)
+		query := i.MakeSelectQuery(fields, limit, "", nil)
 		expectedQuery := fmt.Sprintf("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\" from iceberg_scan('%s', allow_moved_paths = true) limit 10", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query")
 
@@ -138,6 +140,44 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 			assert.NotEmpty(t, data.Rows, "Query should return non-empty result")
 			assert.Equal(t, 3, len(data.Columns), "Result should have 3 columns")
 			assert.Equal(t, 10, len(data.Rows), "Result should have at most 10 rows")
+		}
+	})
+
+	t.Run("Test MakeSelectQuery with incremental key and value", func(t *testing.T) {
+		// Test MakeSelectQuery method with incremental key and value
+		fields := []string{"l_orderkey", "l_quantity", "l_shipdate", "l_commitdate"}
+		limit := uint64(0) // No limit
+		incrementalKey := "l_commitdate"
+		incrementalValue := "'1996-01-01'"
+		query := i.MakeSelectQuery(fields, limit, incrementalKey, incrementalValue)
+		expectedQuery := fmt.Sprintf("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\",\"l_commitdate\" from iceberg_scan('%s', allow_moved_paths = true) where \"l_commitdate\" > '1996-01-01'", i.URI)
+		assert.Equal(t, expectedQuery, query, "Generated query should match expected query with incremental key and value")
+
+		// Test actual query execution
+		ds, err := i.Duck.Stream(query)
+		assert.NoError(t, err, "Streaming query should not produce an error")
+		assert.NotNil(t, ds, "Datastream should not be nil")
+
+		if ds != nil {
+			data, err := ds.Collect(0)
+			assert.NoError(t, err, "Collecting data should not produce an error")
+			assert.NotEmpty(t, data.Rows, "Query should return non-empty result")
+			assert.Equal(t, 4, len(data.Columns), "Result should have 4 columns")
+
+			// Verify column names
+			expectedColumnNames := []string{"l_orderkey", "l_quantity", "l_shipdate", "l_commitdate"}
+			for i, expectedName := range expectedColumnNames {
+				assert.Equal(t, expectedName, data.Columns[i].Name, "Column name should match")
+			}
+
+			// Verify that all returned rows have l_commitdate > '1996-01-01'
+			for _, row := range data.Rows {
+				commitDate := cast.ToTime(row[3])
+				assert.NoError(t, err, "Parsing commit date should not produce an error")
+				if !assert.True(t, commitDate.After(time.Date(1996, 1, 1, 0, 0, 0, 0, time.UTC)), "All returned rows should have l_commitdate > '1996-01-01'") {
+					break
+				}
+			}
 		}
 	})
 

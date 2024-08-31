@@ -232,7 +232,13 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		fsCfg := iop.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		fsCfg := iop.FileStreamConfig{
+			Select:            cfg.Source.Select,
+			Limit:             cfg.Source.Limit(),
+			IncrementalKey:    cfg.Source.UpdateKey,
+			IncrementalVal:    cfg.IncrementalVal,
+			IncrementalValStr: cfg.IncrementalValStr,
+		}
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {
 			fsCfg.Format = *ffmt
 		}

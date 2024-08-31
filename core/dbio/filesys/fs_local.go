@@ -147,12 +147,14 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 		// no reader for iceberg, delta, duckdb will handle it
 		if g.In(fileFormat, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 			file.Close() // no need to keep the file open
-
+			Cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
 			switch fileFormat {
 			case dbio.FileTypeIceberg:
-				err = ds.ConsumeIcebergReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+				err = ds.ConsumeIcebergReader("file://"+path, Cfg)
 			case dbio.FileTypeDelta:
-				err = ds.ConsumeDeltaReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+				err = ds.ConsumeDeltaReader("file://"+path, Cfg)
+			case dbio.FileTypeParquet:
+				err = ds.ConsumeParquetReaderDuckDb("file://"+path, Cfg)
 			}
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
