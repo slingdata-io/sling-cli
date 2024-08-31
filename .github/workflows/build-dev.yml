@@ -164,12 +164,14 @@ jobs:
         if: runner.os == 'windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          
           # Configure private token (Windows)
           $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
           git config --global url."$url".insteadOf "https://github.com/"
 
           # Prep
-          .\mc.exe cp R2/sling/bin/sling_prep/sling_prep_windows_amd64.exe .
+          mc.exe cp R2/sling/bin/sling_prep/sling_prep_windows_amd64.exe .
           .\sling_prep_windows_amd64.exe
 
           # Build
