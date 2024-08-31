@@ -65,6 +65,13 @@ SLING_ROW_CNT=2 sling conns exec postgres "select column_name from information_s
 SLING_LOADED_AT_COLUMN='timestamp' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
 SLING_ROW_CNT=1 sling conns exec postgres "select data_type from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name = '_sling_loaded_at' and data_type like 'timestamp%'" # _sling_loaded_at should be a timestamp
 
+# Test connection and check for "success" in stderr
+if ! stderr=$(sling conns test AWS_S3 2>&1 >/dev/null) || ! echo "$stderr" | grep -q "success"; then
+    echo "Error: AWS_S connection test failed or 'success' not found in output"
+    echo "Stderr output: $stderr"
+    exit 1
+fi
+
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
 sling conns discover POSTGRES
