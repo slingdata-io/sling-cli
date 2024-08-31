@@ -98,18 +98,13 @@ jobs:
         run: |
           name=$(uname -s | tr "[:upper:]" "[:lower:]")
           wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
+          echo "$PWD" >> $GITHUB_PATH
 
       - name: Get MC Client (Windows)
         if: runner.os == 'windows'
         run: |
           $ProgressPreference = 'SilentlyContinue'
           Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
-
-      - name: Prep
-        if: runner.os != 'windows'
-        run: |
-          name=$(uname -s | tr "[:upper:]" "[:lower:]")
-          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
       
       - name: Build Sling (Linux)
         env:
@@ -120,7 +115,8 @@ jobs:
           git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
 
           # Prep
-          mc cp R2/sling/bin/sling_prep/sling_prep_linux_amd64 . && chmod +x sling_prep_linux_amd64 && ./sling_prep_linux_amd64
+          mc cp R2/sling/bin/sling_prep/sling_prep_linux_amd64 . && chmod +x sling_prep_linux_amd64
+          ./sling_prep_linux_amd64
 
           # build
           bash scripts/ci/build.linux.sh $VERSION
@@ -134,7 +130,8 @@ jobs:
           git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
 
           # Prep
-          mc cp R2/sling/bin/sling_prep/sling_prep_darwin_arm64 . && chmod +x sling_prep_darwin_arm64 && ./sling_prep_darwin_arm64
+          mc cp R2/sling/bin/sling_prep/sling_prep_darwin_arm64 . && chmod +x sling_prep_darwin_arm64
+          ./sling_prep_darwin_arm64
 
           # build
           bash scripts/ci/build.mac.sh $VERSION
