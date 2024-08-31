@@ -125,12 +125,9 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 	wildcardNames := []string{}
 	for name, stream := range rd.Streams {
-		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams)
+		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams), will be expand while reading
 		if stream != nil && stream.Single != nil {
 			if *stream.Single {
-				if hasWildcard(name) {
-					g.Warn("wildcard cannot be used with `single: true` for stream: %s", name)
-				}
 				continue
 			}
 		} else if rd.Defaults.Single != nil && *rd.Defaults.Single {
