@@ -15,9 +15,9 @@ if (!(Get-Command mc.exe -ErrorAction SilentlyContinue)) {
 }
 
 # Determine the architecture
-$ARCH = (Get-WmiObject Win32_Processor).Architecture
+$ARCH = (Get-CimInstance -ClassName Win32_Processor).Architecture
 
-if ($ARCH -eq 9) {
+if ($ARCH -eq 5) {
     Write-Host "Detected ARM64 architecture"
     mc cp R2/sling/bin/sling_prep/sling_prep_windows_arm64.exe .
     .\sling_prep_windows_arm64.exe
