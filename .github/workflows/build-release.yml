@@ -99,9 +99,8 @@ jobs:
           go-version: "1.22"
           cache: false
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.mac.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -134,10 +133,12 @@ jobs:
             maximum-size: 16GB
             disk-root: "C:"
         
-      - name: Configure private token
+      - name: Configure private token & Prep
+        shell: pwsh
         run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
+          $ErrorActionPreference = "Stop"
+
+          .\scripts\ci\prep.win.ps1
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -166,9 +167,8 @@ jobs:
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -210,9 +210,8 @@ jobs:
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3

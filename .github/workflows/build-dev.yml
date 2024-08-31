@@ -92,44 +92,14 @@ jobs:
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           use_system_python: true
-
-      - name: Get MC Client (Unix)
-        if: runner.os != 'windows'
-        run: |
-          # Check if MC is already available
-          if ! command -v mc &> /dev/null
-          then
-              echo "MC not found in path. Downloading..."
-              name=$(uname -s | tr "[:upper:]" "[:lower:]")
-              wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
-              echo "$PWD" >> $GITHUB_PATH
-          else
-              echo "MC already in path"
-          fi
-
-      - name: Get MC Client (Windows)
-        if: runner.os == 'windows'
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          if (!(Get-Command mc.exe -ErrorAction SilentlyContinue)) {
-              Write-Output "MC not found in path. Downloading..."
-              Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
-              $env:PATH += ";$PWD"
-          } else {
-              Write-Output "MC already in path"
-          }
       
       - name: Build Sling (Linux)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'linux'
         run: |
-          # Configure private token (Linux)
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-
           # Prep
-          mc cp R2/sling/bin/sling_prep/sling_prep_linux_amd64 . && chmod +x sling_prep_linux_amd64
-          ./sling_prep_linux_amd64
+          bash scripts/ci/prep.linux.sh
 
           # build
           bash scripts/ci/build.linux.sh $VERSION
@@ -139,12 +109,8 @@ jobs:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'macOS'
         run: |
-          # Configure private token (Mac)
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-
           # Prep
-          mc cp R2/sling/bin/sling_prep/sling_prep_darwin_arm64 . && chmod +x sling_prep_darwin_arm64
-          ./sling_prep_darwin_arm64
+          bash scripts/ci/prep.mac.sh
 
           # build
           bash scripts/ci/build.mac.sh $VERSION
@@ -166,13 +132,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           
-          # Configure private token (Windows)
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
-
           # Prep
-          mc.exe cp R2/sling/bin/sling_prep/sling_prep_windows_amd64.exe .
-          .\sling_prep_windows_amd64.exe
+          .\scripts\ci\prep.win.ps1
 
           # Build
           .\scripts\ci\build.win.ps1 $env:VERSION
