@@ -36,7 +36,13 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	paths, err = fs.ListRecursive("test/test1/csv/*.csv")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.csv")
+
+	paths, err = fs.ListRecursive("test/test1/csv/test?.?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.1.csv")
 
 	// Test Delete, Write, Read
 	testPath := "test/fs.test"
@@ -837,7 +843,16 @@ func TestFileSysS3(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral-data-1/test/*.test")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 
 	paths, err = fs.ListRecursive("test")
 	assert.NoError(t, err)
@@ -936,6 +951,14 @@ func TestFileSysAzure(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
 
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
+
 	assert.Equal(t, testString, string(testBytes))
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
@@ -1010,6 +1033,14 @@ func TestFileSysGoogle(t *testing.T) {
 	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test/*1")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 
 	paths, err = fs.ListRecursive("test/*1")
 	assert.NoError(t, err)
@@ -1113,7 +1144,17 @@ func TestFileSysSftp(t *testing.T) {
 
 	paths, err = fs.ListRecursive(root + "/tmp/test/*1")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/test?")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/test??")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 0)
 
 	paths, err = fs.ListRecursive("tmp/test")
 	assert.NoError(t, err)
@@ -1217,6 +1258,15 @@ func TestFileSysFtp(t *testing.T) {
 	paths, err = fs.ListRecursive(root + "/test/*.csv")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/test?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/test??")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 0)
 
 	paths, err = fs.ListRecursive(root + "/test/*.1csv")
 	assert.NoError(t, err)
