@@ -26,3 +26,8 @@ if ($ARCH -eq 5) {
     mc cp R2/sling/bin/sling_prep/sling_prep_windows_amd64.exe .
     .\sling_prep_windows_amd64.exe
 }
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error: Last command exited with non-zero status code: $LASTEXITCODE"
+    exit 1
+}
