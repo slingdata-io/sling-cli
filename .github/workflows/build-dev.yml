@@ -182,4 +182,4 @@ jobs:
 
       - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
-        run: ./mc cp *.tar.gz R2/sling-public/dev/latest/ 
+        run: mc cp *.tar.gz R2/sling-public/dev/latest/ 
