@@ -143,7 +143,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		"10:00:00", // timez_type
 	})
 
-	for _, format := range []FileType{FileTypeJson, FileTypeJsonLines, FileTypeCsv, FileTypeParquet} {
+	for _, format := range []dbio.FileType{dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeCsv, dbio.FileTypeParquet} {
 		if t.Failed() {
 			break
 		}
@@ -328,7 +328,7 @@ func TestFileSysLocalIceberg(t *testing.T) {
 
 	// Test reading Iceberg metadata
 	path := "test/lineitem_iceberg"
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeIceberg})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Format: dbio.FileTypeIceberg})
 	assert.NoError(t, err)
 
 	data, err := df.Collect()
@@ -373,7 +373,7 @@ func TestFileSysLocalDelta(t *testing.T) {
 
 	// Test reading Iceberg metadata
 	path := "test/delta"
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeDelta})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Format: dbio.FileTypeDelta})
 	assert.NoError(t, err)
 
 	data, err := df.Collect()
@@ -806,7 +806,7 @@ func TestFileSysLarge(t *testing.T) {
 
 	return
 
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Limit: 10000})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Limit: 10000})
 	assert.NoError(t, err)
 
 	for ds := range df.StreamCh {
@@ -901,7 +901,7 @@ func TestFileSysS3(t *testing.T) {
 
 	// eventual consistency
 	time.Sleep(2 * time.Second) // wait to s3 files to write on AWS side
-	df3, err := fs.ReadDataflow(writeFolderPath, FileStreamConfig{Limit: 1})
+	df3, err := fs.ReadDataflow(writeFolderPath, iop.FileStreamConfig{Limit: 1})
 	assert.NoError(t, err)
 
 	data2, err := iop.MergeDataflow(df3).Collect(int(df3.Limit))

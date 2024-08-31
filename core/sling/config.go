@@ -1234,7 +1234,7 @@ type SourceOptions struct {
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
-	Format         *filesys.FileType   `json:"format,omitempty" yaml:"format,omitempty"`
+	Format         *dbio.FileType      `json:"format,omitempty" yaml:"format,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
 	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
@@ -1263,7 +1263,7 @@ type TargetOptions struct {
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
 	FileMaxBytes     *int64              `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
-	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
+	Format           dbio.FileType       `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
@@ -1321,7 +1321,7 @@ var TargetFileOptionsDefault = TargetOptions{
 		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_BYTES"))),
 		g.Int64(0),
 	),
-	Format:         filesys.FileTypeNone,
+	Format:         dbio.FileTypeNone,
 	UseBulk:        g.Bool(true),
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
@@ -1411,7 +1411,7 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
-	if o.Format == filesys.FileTypeNone {
+	if o.Format == dbio.FileTypeNone {
 		o.Format = targetOptions.Format
 	}
 	if o.Concurrency == 0 {

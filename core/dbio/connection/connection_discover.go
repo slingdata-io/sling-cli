@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -188,7 +189,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 				defer ctx.Wg.Read.Done()
 				node := nodes[i]
 
-				df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
+				df, err := fileClient.ReadDataflow(node.URI, iop.FileStreamConfig{Limit: 100})
 				if err != nil {
 					ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
 					return

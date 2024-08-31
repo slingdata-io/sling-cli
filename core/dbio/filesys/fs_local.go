@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -96,8 +97,8 @@ func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
-	Cfg := FileStreamConfig{}
+func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := iop.FileStreamConfig{}
 	if len(cfg) > 0 {
 		Cfg = cfg[0]
 	}
@@ -124,7 +125,7 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 	ds.Columns = iop.NewColumnsFromFields(Cfg.Select...)
 
 	fileFormat := Cfg.Format
-	if fileFormat == FileTypeNone {
+	if fileFormat == dbio.FileTypeNone {
 		fileFormat = InferFileFormat(path)
 	}
 
@@ -144,13 +145,13 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
 
 		// no reader for iceberg, delta, duckdb will handle it
-		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+		if g.In(fileFormat, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 			file.Close() // no need to keep the file open
 
 			switch fileFormat {
-			case FileTypeIceberg:
+			case dbio.FileTypeIceberg:
 				err = ds.ConsumeIcebergReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
-			case FileTypeDelta:
+			case dbio.FileTypeDelta:
 				err = ds.ConsumeDeltaReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
 			}
 			if err != nil {
@@ -160,19 +161,19 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 		}
 
 		switch fileFormat {
-		case FileTypeJson, FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReader(bufio.NewReader(file))
-		case FileTypeXml:
+		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(bufio.NewReader(file))
-		case FileTypeParquet:
+		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReaderSeeker(file)
-		case FileTypeAvro:
+		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReaderSeeker(file)
-		case FileTypeSAS:
+		case dbio.FileTypeSAS:
 			err = ds.ConsumeSASReaderSeeker(file)
-		case FileTypeExcel:
+		case dbio.FileTypeExcel:
 			err = ds.ConsumeExcelReaderSeeker(file, fs.properties)
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		default:
 			g.Warn("LocalFileSysClient | File Format not recognized: %s. Using CSV parsing", fileFormat)

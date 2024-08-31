@@ -39,14 +39,14 @@ type FileSysClient interface {
 	FsType() dbio.Type
 	GetReader(path string) (reader io.Reader, err error)
 	GetReaders(paths ...string) (readers []io.Reader, err error)
-	GetDatastream(path string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error)
+	GetDatastream(path string, cfg ...iop.FileStreamConfig) (ds *iop.Datastream, err error)
 	GetWriter(path string) (writer io.Writer, err error)
 	Buckets() (paths []string, err error)
 	List(path string) (paths FileNodes, err error)
 	ListRecursive(path string) (paths FileNodes, err error)
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
-	ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error)
+	ReadDataflow(url string, cfg ...iop.FileStreamConfig) (df *iop.Dataflow, err error)
 	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
@@ -172,57 +172,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	}
 }
 
-type FileType string
-
-const (
-	FileTypeNone      FileType = ""
-	FileTypeCsv       FileType = "csv"
-	FileTypeXml       FileType = "xml"
-	FileTypeExcel     FileType = "xlsx"
-	FileTypeJson      FileType = "json"
-	FileTypeParquet   FileType = "parquet"
-	FileTypeAvro      FileType = "avro"
-	FileTypeSAS       FileType = "sas7bdat"
-	FileTypeJsonLines FileType = "jsonlines"
-	FileTypeIceberg   FileType = "iceberg"
-	FileTypeDelta     FileType = "delta"
-)
-
-var AllFileType = []struct {
-	Value  FileType
-	TSName string
-}{
-	{FileTypeNone, "FileTypeNone"},
-	{FileTypeCsv, "FileTypeCsv"},
-	{FileTypeXml, "FileTypeXml"},
-	{FileTypeExcel, "FileTypeExcel"},
-	{FileTypeJson, "FileTypeJson"},
-	{FileTypeParquet, "FileTypeParquet"},
-	{FileTypeAvro, "FileTypeAvro"},
-	{FileTypeSAS, "FileTypeSAS"},
-	{FileTypeJsonLines, "FileTypeJsonLines"},
-}
-
-func (ft FileType) Ext() string {
-	switch ft {
-	case FileTypeJsonLines:
-		return ".jsonl"
-	default:
-		return "." + string(ft)
-	}
-}
-
-func (ft FileType) IsJson() bool {
-	switch ft {
-	case FileTypeJson, FileTypeJsonLines:
-		return true
-	}
-	return false
-}
-
 // PeekFileType peeks into the file to try determine the file type
 // CSV is the default
-func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) {
+func PeekFileType(reader io.Reader) (ft dbio.FileType, reader2 io.Reader, err error) {
 
 	data, reader2, err := g.Peek(reader, 0)
 	if err != nil {
@@ -232,11 +184,11 @@ func PeekFileType(reader io.Reader) (ft FileType, reader2 io.Reader, err error) 
 
 	peekStr := strings.TrimSpace(string(data))
 	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") {
-		ft = FileTypeJson
+		ft = dbio.FileTypeJson
 	} else if strings.HasPrefix(peekStr, "<") {
-		ft = FileTypeXml
+		ft = dbio.FileTypeXml
 	} else {
-		ft = FileTypeCsv
+		ft = dbio.FileTypeCsv
 	}
 
 	return
@@ -459,8 +411,8 @@ func (fs *BaseFileSysClient) GetRefTs() time.Time {
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
-	Cfg := FileStreamConfig{} // infinite
+func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := iop.FileStreamConfig{} // infinite
 	if len(cfg) > 0 {
 		Cfg = cfg[0]
 	}
@@ -472,7 +424,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) 
 	ds.SetConfig(fs.Props())
 
 	fileFormat := Cfg.Format
-	if fileFormat == FileTypeNone {
+	if fileFormat == dbio.FileTypeNone {
 		fileFormat = InferFileFormat(uri)
 	}
 
@@ -492,11 +444,11 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) 
 		g.Debug("reading datastream from %s [format=%s]", uri, fileFormat)
 
 		// no reader needed for iceberg, delta, duckdb will handle it
-		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+		if g.In(fileFormat, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 			switch fileFormat {
-			case FileTypeIceberg:
+			case dbio.FileTypeIceberg:
 				err = ds.ConsumeIcebergReader(uri, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
-			case FileTypeDelta:
+			case dbio.FileTypeDelta:
 				err = ds.ConsumeDeltaReader(uri, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
 			}
 
@@ -527,19 +479,19 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) 
 		}
 
 		switch fileFormat {
-		case FileTypeJson:
+		case dbio.FileTypeJson:
 			err = ds.ConsumeJsonReader(reader)
-		case FileTypeXml:
+		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(reader)
-		case FileTypeParquet:
+		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReader(reader)
-		case FileTypeAvro:
+		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReader(reader)
-		case FileTypeSAS:
+		case dbio.FileTypeSAS:
 			err = ds.ConsumeSASReader(reader)
-		case FileTypeExcel:
+		case dbio.FileTypeExcel:
 			err = ds.ConsumeExcelReader(reader, fs.properties)
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(reader)
 		default:
 			g.Warn("GetDatastream | File Format not recognized: %s. Using CSV parsing", fileFormat)
@@ -556,14 +508,14 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) 
 }
 
 // ReadDataflow read
-func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (df *iop.Dataflow, err error) {
-	Cfg := FileStreamConfig{} // infinite
+func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfig) (df *iop.Dataflow, err error) {
+	Cfg := iop.FileStreamConfig{} // infinite
 	if len(cfg) > 0 {
 		Cfg = cfg[0]
 	}
 
-	if Cfg.Format == FileTypeNone {
-		Cfg.Format = FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	if Cfg.Format == dbio.FileTypeNone {
+		Cfg.Format = dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	}
 
 	if strings.HasSuffix(strings.ToLower(url), ".zip") {
@@ -605,7 +557,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...FileStreamConfig) (
 	}
 
 	var nodes FileNodes
-	if g.In(Cfg.Format, FileTypeIceberg, FileTypeDelta) {
+	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 		nodes = FileNodes{FileNode{URI: url}}
 	} else {
 		g.Trace("listing path: %s", url)
@@ -696,7 +648,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
 	concurrency := cast.ToInt(fs.GetProp("CONCURRENCY"))
 	compression := iop.CompressorType(strings.ToLower(fs.GetProp("COMPRESSION")))
-	fileFormat := FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	fileRowLimit := cast.ToInt(fs.GetProp("FILE_MAX_ROWS"))
 	fileBytesLimit := cast.ToInt64(fs.GetProp("FILE_MAX_BYTES")) // uncompressed file size
 	fileExt := cast.ToString(fs.GetProp("FILE_EXTENSION"))
@@ -712,7 +664,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		concurrency = runtime.NumCPU()
 	}
 
-	if fileFormat == FileTypeNone {
+	if fileFormat == dbio.FileTypeNone {
 		fileFormat = InferFileFormat(url)
 	}
 
@@ -790,7 +742,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			}
 
 			compressor := iop.NewCompressor(compression)
-			if fileFormat == FileTypeParquet {
+			if fileFormat == dbio.FileTypeParquet {
 				compressor = iop.NewCompressor("none") // compression is done internally
 			} else {
 				subPartURL = subPartURL + compressor.Suffix()
@@ -805,35 +757,35 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		}
 
 		switch fileFormat {
-		case FileTypeJson:
+		case dbio.FileTypeJson:
 			for reader := range ds.NewJsonReaderChnl(fileRowLimit, fileBytesLimit) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
 				if err != nil {
 					break
 				}
 			}
-		case FileTypeJsonLines:
+		case dbio.FileTypeJsonLines:
 			for reader := range ds.NewJsonLinesReaderChnl(fileRowLimit, fileBytesLimit) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
 				if err != nil {
 					break
 				}
 			}
-		case FileTypeParquet:
+		case dbio.FileTypeParquet:
 			for reader := range ds.NewParquetReaderChnl(fileRowLimit, fileBytesLimit, compression) {
 				err := processReader(reader)
 				if err != nil {
 					break
 				}
 			}
-		case FileTypeExcel:
+		case dbio.FileTypeExcel:
 			for reader := range ds.NewExcelReaderChnl(fileRowLimit, fileBytesLimit, fs.GetProp("sheet")) {
 				err := processReader(reader)
 				if err != nil {
 					break
 				}
 			}
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			if useBufferedStream {
 				// faster, but dangerous. Holds data in memory
 				for reader := range ds.NewCsvBufferReaderChnl(fileRowLimit, fileBytesLimit) {
@@ -958,16 +910,10 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	return nil
 }
 
-type FileStreamConfig struct {
-	Limit  int
-	Select []string
-	Format FileType
-}
-
 // GetDataflow returns a dataflow from specified paths in specified FileSysClient
-func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *iop.Dataflow, err error) {
-	if cfg.Format == FileTypeNone {
-		cfg.Format = FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (df *iop.Dataflow, err error) {
+	if cfg.Format == dbio.FileTypeNone {
+		cfg.Format = dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	}
 
 	if len(nodes) == 0 {
@@ -986,7 +932,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
-			skipSelect := g.In(cfg.Format, FileTypeParquet, FileTypeIceberg, FileTypeDelta)
+			skipSelect := g.In(cfg.Format, dbio.FileTypeParquet, dbio.FileTypeIceberg, dbio.FileTypeDelta)
 			if len(cfg.Select) > 1 && !skipSelect {
 				cols := iop.NewColumnsFromFields(cfg.Select...)
 				fm := ds.Columns.FieldMap(true)
@@ -1007,8 +953,8 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 			}
 		}
 
-		if allowMerging && (cfg.Format.IsJson() || isFiletype(FileTypeJson, nodes.URIs()...) || isFiletype(FileTypeJsonLines, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, FileTypeJson, nodes, cfg.Limit)
+		if allowMerging && (cfg.Format.IsJson() || isFiletype(dbio.FileTypeJson, nodes.URIs()...) || isFiletype(dbio.FileTypeJsonLines, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, dbio.FileTypeJson, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1018,8 +964,8 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 			return // done
 		}
 
-		if allowMerging && (cfg.Format == FileTypeXml || isFiletype(FileTypeXml, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, FileTypeXml, nodes, cfg.Limit)
+		if allowMerging && (cfg.Format == dbio.FileTypeXml || isFiletype(dbio.FileTypeXml, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, dbio.FileTypeXml, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1030,8 +976,8 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 		}
 
 		// csvs
-		if allowMerging && (cfg.Format == FileTypeCsv || isFiletype(FileTypeCsv, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, FileTypeCsv, nodes, cfg.Limit)
+		if allowMerging && (cfg.Format == dbio.FileTypeCsv || isFiletype(dbio.FileTypeCsv, nodes.URIs()...)) {
+			ds, err := MergeReaders(fs, dbio.FileTypeCsv, nodes, cfg.Limit)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1044,7 +990,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg FileStreamConfig) (df *i
 			uri := node.URI
 			if strings.HasSuffix(uri, "/") {
 				// allow iceberg/delta tables to be read as directories
-				if g.In(cfg.Format, FileTypeIceberg, FileTypeDelta) {
+				if g.In(cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 					uri = strings.TrimSuffix(uri, "/") // remove trailing slash
 				} else {
 					g.DebugLow("skipping %s because is not file", uri)
@@ -1167,7 +1113,7 @@ func TestFsPermissions(fs FileSysClient, pathURL string) (err error) {
 	return
 }
 
-func isFiletype(fileType FileType, paths ...string) bool {
+func isFiletype(fileType dbio.FileType, paths ...string) bool {
 	fileCnt := 0
 	dirCnt := 0
 
@@ -1185,7 +1131,7 @@ func isFiletype(fileType FileType, paths ...string) bool {
 	return fileCnt > 0 && len(paths) == fileCnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {
+func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -1263,15 +1209,15 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit in
 
 	}()
 
-	if g.In(fileType, FileTypeCsv, FileTypeJson, FileTypeJsonLines, FileTypeXml) {
+	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeXml) {
 		pipeW.Close()
 
 		switch fileType {
-		case FileTypeJson, FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReaderChl(readerChn, false)
-		case FileTypeXml:
+		case dbio.FileTypeXml:
 			err = ds.ConsumeJsonReaderChl(readerChn, true)
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReaderChl(readerChn)
 		}
 
@@ -1294,11 +1240,11 @@ func MergeReaders(fs FileSysClient, fileType FileType, nodes FileNodes, limit in
 		}()
 
 		switch fileType {
-		case FileTypeJson, FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReader(pipeR)
-		case FileTypeXml:
+		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(pipeR)
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(pipeR)
 		default:
 			return ds, g.Error("unrecognized fileType (%s) for MergeReaders", fileType)
@@ -1354,10 +1300,10 @@ func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err erro
 	return nDs, nil
 }
 
-func InferFileFormat(path string) FileType {
+func InferFileFormat(path string) dbio.FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
-	for _, fileType := range []FileType{FileTypeJsonLines, FileTypeJson, FileTypeXml, FileTypeParquet, FileTypeAvro, FileTypeSAS, FileTypeExcel} {
+	for _, fileType := range []dbio.FileType{dbio.FileTypeJsonLines, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
 		ext := fileType.Ext()
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType
@@ -1365,5 +1311,5 @@ func InferFileFormat(path string) FileType {
 	}
 
 	// default is csv
-	return FileTypeCsv
+	return dbio.FileTypeCsv
 }

@@ -23,6 +23,7 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/text/transform"
 
@@ -71,6 +72,12 @@ type schemaChg struct {
 	ChangedType  ColumnType
 	Added        bool
 	AddedCols    Columns
+}
+
+type FileStreamConfig struct {
+	Limit  int
+	Select []string
+	Format dbio.FileType
 }
 
 type KeyValue struct {
