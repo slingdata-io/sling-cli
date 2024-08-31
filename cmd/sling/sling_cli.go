@@ -201,7 +201,7 @@ var cliUpdate = &g.CliSC{
 var cliConns = &g.CliSC{
 	Name:                  "conns",
 	Singular:              "local connection",
-	Description:           "Manage local connections in the sling env file",
+	Description:           "Manage and interact with local connections",
 	AdditionalHelpPrepend: "\nSee more details at https://docs.slingdata.io/sling-cli/",
 	SubComs: []*g.CliSC{
 		{
