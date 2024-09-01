@@ -1,51 +1,50 @@
 n	test_name	rows	bytes	streams	fails	output_contains	command
 1	Simple sling command					Slings data from a data source to a data target.	sling
 2	Run sling command					Execute a run	sling run
-3	Run sling with Excel source					wrote 1317 rows	sling run --src-stream file://core/dbio/filesys/test/test.excel2.xlsx --tgt-object file://test.xlsx
-4	Run sling with CSV source and POSTGRES target						cat cmd/sling/tests/files/test1.1.csv | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
-5	Run sling with CSV source and POSTGRES target						sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
-6	Run sling with CSV source and MSSQL target						sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options 'use_bulk: false'
-7	Run sling with CSV source and custom options						sling run --src-stream file://cmd/sling/tests/files/test4.csv --src-options '{ delimiter: "|", escape: "\\" }' --stdout > /dev/null
-8	Run sling with gzipped CSV source and POSTGRES target						cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
-9	Run sling with gzipped CSV source and MYSQL target						sling run --src-stream 'file://cmd/sling/tests/files/test1.1.csv.gz' --tgt-conn MYSQL --tgt-object mysql.my_table --mode full-refresh --tgt-options 'use_bulk: false'
-10	Run sling with JSON source and POSTGRES target						cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
-11	Run sling with JSON source and POSTGRES target						sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
+3	Run sling with Excel source	1317				wrote 1317 rows	sling run --src-stream file://core/dbio/filesys/test/test.excel2.xlsx --tgt-object file://test.xlsx
+4	Run sling with CSV source and POSTGRES target	18					cat cmd/sling/tests/files/test1.1.csv | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
+5	Run sling with CSV source and POSTGRES target	18					sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
+6	Run sling with CSV source and MSSQL target	18					sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options 'use_bulk: false'
+7	Run sling with CSV source and custom options	4					"sling run --src-stream file://cmd/sling/tests/files/test4.csv --src-options '{ delimiter: ""|"", escape: ""\\"" }' --stdout > /dev/null"
+8	Run sling with gzipped CSV source and POSTGRES target	18					cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
+9	Run sling with gzipped CSV source and MYSQL target	18					sling run --src-stream 'file://cmd/sling/tests/files/test1.1.csv.gz' --tgt-conn MYSQL --tgt-object mysql.my_table --mode full-refresh --tgt-options 'use_bulk: false'
+10	Run sling with JSON source and POSTGRES target	1					"cat cmd/sling/tests/files/test3.json | sling run --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh"
+11	Run sling with JSON source and POSTGRES target	1					"sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh"
 12	Run sling with CSV source and no header	2					sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
-13	Run sling with echo input and empty allowed		6				echo 'a,b,c' | SLING_ALLOW_EMPTY=true sling  run --tgt-object file:///tmp/test.csv
-14	Run sling with POSTGRES source and CSV output						sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
-15	Run sling with POSTGRES source and CSV target						sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
-16	Run sling with POSTGRES source and select columns						sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
-17	Run sling with POSTGRES source and exclude columns						sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
-18	Run sling with gzipped CSV source and POSTGRES target with ignore existing	0					cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options 'ignore_existing: true'
-19	Run sling with POSTGRES source and CSV target with ignore existing	0					sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options 'ignore_existing: true'
-20	Run sling with binary CSV source and POSTGRES target						sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
-21	Execute SQL command on POSTGRES	1					sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"
-22	Run sling with JSON source and custom columns						SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
-23	Execute SQL command to select distinct stream URL	4					sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"
-24	Execute SQL command to select stream URL by row number	3					sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names
-25	Execute SQL command to check column names	2					sling conns exec postgres "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name like '_sling%'" # should not have _sling_loaded_at
-26	Run sling with JSON source and timestamp column						SLING_LOADED_AT_COLUMN='timestamp' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
-27	Execute SQL command to check data type of timestamp column	1					sling conns exec postgres "select data_type from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name = '_sling_loaded_at' and data_type like 'timestamp%'" # _sling_loaded_at should be a timestamp
-28	Test POSTGRES connection						sling conns test POSTGRES
-29	Execute SQL command to count rows in POSTGRES table						sling conns exec POSTGRES 'select count(1) from public.my_table'
-30	Discover POSTGRES connections						sling conns discover POSTGRES
-31	Discover POSTGRES connections with schema filter						sling conns discover POSTGRES -s 'public.*'
-32	Discover local connections						sling conns discover local -p '.'
-33	Discover Prometheus connections with columns						sling conns discover prometheus --columns > /dev/null
-34	Discover Prometheus connections with columns						sling conns discover prometheus --columns > /dev/null
-35	Run sling with Prometheus source and custom query						sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
-36	Run sling with replication configuration 05						sling run -r cmd/sling/tests/replications/r.05.yaml
-37	Run sling with replication configuration 05 and streams						sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
-38	Run sling with replication configuration 06	3		3			sling run -r cmd/sling/tests/replications/r.06.yaml
-39	Run sling with replication configuration 07	17		17			sling run -r cmd/sling/tests/replications/r.07.yaml
-40	Run sling with replication configuration 08			4			sling run -r cmd/sling/tests/replications/r.08.yaml
-41	Run sling with replication configuration 09 and constraints			>1			# SLING_CONSTRAINT_FAILS=2 sling run -r cmd/sling/tests/replications/r.09.yaml
-42	Run sling with replication configuration 09			>1			sling run -r cmd/sling/tests/replications/r.09.yaml
-43	Run sling with replication configuration 11 and year parameter						YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
-44	Run sling with replication configuration 12						sling run -r cmd/sling/tests/replications/r.12.yaml
-45	Run sling with replication configuration 15			2			sling run -r cmd/sling/tests/replications/r.15.yaml
-46	Run sling with replication configuration 14						sling run -r cmd/sling/tests/replications/r.14.yaml
-47	Run sling with replication configuration 14	0					sling run -r cmd/sling/tests/replications/r.14.yaml
-48	Run sling with task configuration						sling run -c cmd/sling/tests/task.yaml
-49	Run sling with Parquet source						sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
-50	Run sling with empty input						echo '' | sling run --stdout
+13	Run sling with echo input and empty allowed	0	6			execution succeeded	echo 'a,b,c' | SLING_ALLOW_EMPTY=true sling  run --tgt-object file:///tmp/test.csv
+14	Run sling with POSTGRES source and CSV output	18					sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
+15	Run sling with POSTGRES source and CSV target	18					sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
+16	Run sling with POSTGRES source and select columns	2					sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
+17	Run sling with POSTGRES source and exclude columns	2					sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
+18	Run sling with gzipped CSV source and POSTGRES target with ignore existing	0				execution succeeded	cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options 'ignore_existing: true'
+19	Run sling with POSTGRES source and CSV target with ignore existing	0				execution succeeded	sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options 'ignore_existing: true'
+20	Run sling with binary CSV source and POSTGRES target	1					sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
+21	Execute SQL command on POSTGRES	1				1	"sling conns exec postgres ""select 1 from ""postgres"".""public"".""my_table_bytes"" where byte_val::bytea::text like '%89504e470d0a1a0a0000000d%'"""
+22	Run sling with JSON source and custom columns	2019					SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+23	Execute SQL command to select distinct stream URL	4				_SLING_STREAM_URL	"sling conns exec postgres ""select distinct _sling_stream_url from public.many_jsons"""
+24	Execute SQL command to select stream URL by row number	3				_SLING_STREAM_URL	"sling conns exec postgres ""select _sling_stream_url from public.many_jsons where _sling_row_num = 18"" # should show different file names"
+25	Execute SQL command to check column names	2				_sling_row_num|_sling_stream_url	"sling conns exec postgres ""select column_name from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name like '_sling%'"" # should not have _sling_loaded_at"
+26	Run sling with JSON source and timestamp column	2019					SLING_LOADED_AT_COLUMN='timestamp' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+27	Execute SQL command to check data type of timestamp column	1				timestamp with time zone	"sling conns exec postgres ""select data_type from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name = '_sling_loaded_at' and data_type like 'timestamp%'"" # _sling_loaded_at should be a timestamp"
+28	Test POSTGRES connection					success!	sling conns test POSTGRES
+29	Execute SQL command to count rows in POSTGRES table	18				success!	sling conns exec POSTGRES 'select count(1) from public.my_table'
+30	Discover POSTGRES connections					information_schema	sling conns discover POSTGRES
+31	Discover POSTGRES connections with schema filter					information_schema	sling conns discover POSTGRES -s 'public.*'
+32	Discover local connections					directory	sling conns discover local -p '.'
+33	Discover Prometheus connections with columns						sling conns discover prometheus --columns
+34	Run sling with Prometheus source and custom query					quantile	"sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {""start"": ""now-2M""}' --stdout  -d"
+35	Run sling with replication configuration 05			12			sling run -r cmd/sling/tests/replications/r.05.yaml
+36	Run sling with replication configuration 05 and streams			2			sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
+37	Run sling with replication configuration 06	3		3			sling run -r cmd/sling/tests/replications/r.06.yaml
+38	Run sling with replication configuration 07	17		17			sling run -r cmd/sling/tests/replications/r.07.yaml
+39	Run sling with replication configuration 08			4			sling run -r cmd/sling/tests/replications/r.08.yaml
+40	Run sling with replication configuration 09 and constraints			>1			# SLING_CONSTRAINT_FAILS=2 sling run -r cmd/sling/tests/replications/r.09.yaml
+41	Run sling with replication configuration 09			>1			sling run -r cmd/sling/tests/replications/r.09.yaml
+42	Run sling with replication configuration 11 and year parameter						YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
+43	Run sling with replication configuration 12						sling run -r cmd/sling/tests/replications/r.12.yaml
+44	Run sling with replication configuration 15			2			sling run -r cmd/sling/tests/replications/r.15.yaml
+45	Run sling with replication configuration 14						sling run -r cmd/sling/tests/replications/r.14.yaml
+46	Run sling with replication configuration 14	0					sling run -r cmd/sling/tests/replications/r.14.yaml
+47	Run sling with task configuration						sling run -c cmd/sling/tests/task.yaml
+48	Run sling with Parquet source						sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
+49	Run sling with empty input						echo '' | sling run --stdout
