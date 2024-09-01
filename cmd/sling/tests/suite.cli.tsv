@@ -31,7 +31,7 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 30	Discover POSTGRES connections					information_schema	sling conns discover POSTGRES
 31	Discover POSTGRES connections with schema filter					information_schema	sling conns discover POSTGRES -s 'public.*'
 32	Discover local connections					directory	sling conns discover local -p '.'
-33	Discover Prometheus connections with columns						sling conns discover prometheus --columns
+33	Discover Prometheus connections with columns				gauge		sling conns discover prometheus --columns
 34	Run sling with Prometheus source and custom query					quantile	"sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {""start"": ""now-2M""}' --stdout  -d"
 35	Run sling with replication configuration 05			12			sling run -r cmd/sling/tests/replications/r.05.yaml
 36	Run sling with replication configuration 05 and streams			2			sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
