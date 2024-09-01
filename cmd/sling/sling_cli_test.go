@@ -3,7 +3,6 @@ package main_test
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/csv"
 	"io"
 	"os"
 	"strings"
@@ -36,25 +35,12 @@ func TestCLI(t *testing.T) {
 
 	// Load tests from suite.cli.tsv
 	filePath := "tests/suite.cli.tsv"
-	file, err := os.Open(filePath)
-	if err != nil {
-		t.Fatalf("Failed to open suite.cli.tsv: %v", err)
-	}
-
-	reader := csv.NewReader(file)
-	reader.Comma = '\t'
-	reader.LazyQuotes = true // Allow lazy quotes
-	records, err := reader.ReadAll()
-	if err != nil {
-		t.Fatalf("Failed to read suite.cli.tsv: %v", err)
-	}
-	file.Close()
-
-	// rewrite correctly for displaying in Github
 	dataT, err := iop.ReadCsv(filePath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
+
+	// rewrite correctly for displaying in Github
 	c := iop.CSV{Path: filePath, Delimiter: '\t'}
 	c.WriteStream(dataT.Stream())
 
@@ -71,19 +57,49 @@ func TestCLI(t *testing.T) {
 		OutputContains []string
 	}
 
+	// get test numbers from env
+	testNumbers := []int{}
+	tns := os.Getenv("TESTS")
+	if tns != "" {
+		for _, tn := range strings.Split(tns, ",") {
+			if strings.HasSuffix(tn, "+") {
+				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
+
+				for _, rec := range dataT.RecordsString() {
+					n := cast.ToInt(rec["n"])
+					if n < start {
+						continue
+					}
+					testNumbers = append(testNumbers, n)
+				}
+			} else if parts := strings.Split(tn, "-"); len(parts) == 2 {
+				start := cast.ToInt(parts[0])
+				end := cast.ToInt(parts[1])
+				for testNumber := start; testNumber <= end; testNumber++ {
+					testNumbers = append(testNumbers, testNumber)
+				}
+			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
+				testNumbers = append(testNumbers, testNumber)
+			}
+		}
+	}
+
 	tests := []testCase{}
-	for _, record := range records[1:] { // Skip header row
+	for _, record := range dataT.RecordsString() {
 		tc := testCase{
-			Number:         cast.ToInt(record[0]),
-			Name:           record[1],
-			Command:        record[7],
+			Number:         cast.ToInt(record["n"]),
+			Name:           record["test_name"],
+			Command:        record["command"],
 			Env:            map[string]string{},
 			Err:            false,
-			Rows:           record[2],
-			Bytes:          record[3],
-			Streams:        record[4],
-			Fails:          record[5],
-			OutputContains: strings.Split(record[6], ","),
+			Rows:           record["rows"],
+			Bytes:          record["bytes"],
+			Streams:        record["streams"],
+			Fails:          record["fails"],
+			OutputContains: strings.Split(record["output_contains"], "|"),
+		}
+		if len(testNumbers) > 0 && !g.In(tc.Number, testNumbers...) {
+			continue
 		}
 
 		if tc.Rows != "" {
