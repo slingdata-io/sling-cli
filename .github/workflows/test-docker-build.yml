@@ -68,7 +68,7 @@ jobs:
 
       - name: Post Tests
         run: |
-          dist/sling_darwin_arm64/sling conns discover local
+          dist/sling_darwin_arm64/sling conns discover local -p '.'
 
   build-scoop:
     runs-on: windows-latest
@@ -108,7 +108,7 @@ jobs:
       - name: Post Tests
         shell: pwsh
         run: |
-          .\dist\sling_windows_amd64\sling.exe conns discover local
+          .\dist\sling_windows_amd64\sling.exe conns discover local -p '.'
 
   build-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
@@ -143,7 +143,7 @@ jobs:
 
       - name: Post Tests
         run: |
-          dist/sling_linux_arm64/sling conns discover local
+          dist/sling_linux_arm64/sling conns discover local -p '.'
 
   build-linux-amd64:
     # runs-on: ubuntu-20.04
@@ -179,4 +179,4 @@ jobs:
 
       - name: Post Tests
         run: |
-          dist/sling_linux_amd64/sling conns discover local
+          dist/sling_linux_amd64/sling conns discover local -p '.'

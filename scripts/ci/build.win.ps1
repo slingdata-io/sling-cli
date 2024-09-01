@@ -22,6 +22,6 @@ go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSI
 
 .\sling.exe --version
 
-.\sling.exe conns discover local
+.\sling.exe conns discover local -p '.'
 
 tar -czvf sling_windows_amd64.tar.gz sling.exe
