@@ -9,10 +9,10 @@ streams:
   sling_test/*iceberg:
     source_options:
       format: iceberg
-      limit: {iceberg_limit}
+      limit: '{iceberg_limit}'
     object: public.sling_test_{stream_file_name}
     update_key: l_commitdate
-    mode: {iceberg_mode} # if blank, defaults to full-refresh
+    mode: '{iceberg_mode}' # if blank, defaults to full-refresh
 
   sling_test/delta:
     source_options:
