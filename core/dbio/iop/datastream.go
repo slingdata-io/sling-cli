@@ -75,13 +75,12 @@ type schemaChg struct {
 }
 
 type FileStreamConfig struct {
-	Limit             int               `json:"limit"`
-	Select            []string          `json:"select"`
-	Format            dbio.FileType     `json:"format"`
-	IncrementalKey    string            `json:"incremental_key"`
-	IncrementalVal    any               `json:"incremental_val"`
-	IncrementalValStr string            `json:"incremental_val_str"`
-	Props             map[string]string `json:"props"`
+	Limit            int               `json:"limit"`
+	Select           []string          `json:"select"`
+	Format           dbio.FileType     `json:"format"`
+	IncrementalKey   string            `json:"incremental_key"`
+	IncrementalValue string            `json:"incremental_value"`
+	Props            map[string]string `json:"props"`
 }
 
 type KeyValue struct {
@@ -1447,7 +1446,7 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig
 		return g.Error(err, "could not create ParquetDuckDb")
 	}
 
-	sql := p.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	sql := p.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValue)
 	ds, err = p.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
@@ -1467,7 +1466,7 @@ func (ds *Datastream) ConsumeIcebergReader(uri string, sc FileStreamConfig) (err
 		return g.Error(err, "could not create IcebergDuckDb")
 	}
 
-	sql := i.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	sql := i.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValue)
 	ds, err = i.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read iceberg rows")
@@ -1487,7 +1486,7 @@ func (ds *Datastream) ConsumeDeltaReader(uri string, sc FileStreamConfig) (err e
 		return g.Error(err, "could not create DeltaReader")
 	}
 
-	sql := d.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValStr)
+	sql := d.MakeSelectQuery(sc.Select, cast.ToUint64(sc.Limit), sc.IncrementalKey, sc.IncrementalValue)
 	ds, err = d.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read delta rows")

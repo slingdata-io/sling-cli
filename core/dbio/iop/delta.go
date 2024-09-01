@@ -32,7 +32,7 @@ func (d *DeltaReader) Columns() (Columns, error) {
 	}
 
 	var err error
-	d.columns, err = d.Duck.Describe(d.MakeSelectQuery(nil, 0, "", nil))
+	d.columns, err = d.Duck.Describe(d.MakeSelectQuery(nil, 0, "", ""))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
@@ -43,6 +43,6 @@ func (d *DeltaReader) Close() error {
 	return d.Duck.Close()
 }
 
-func (d *DeltaReader) MakeSelectQuery(fields []string, limit uint64, incrementalKey string, incrementalValue any) string {
+func (d *DeltaReader) MakeSelectQuery(fields []string, limit uint64, incrementalKey, incrementalValue string) string {
 	return d.Duck.MakeScanSelectQuery("delta_scan", d.URI, fields, incrementalKey, incrementalValue, limit)
 }

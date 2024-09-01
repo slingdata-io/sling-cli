@@ -86,7 +86,7 @@ func (t *TaskExecution) Execute() error {
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
-		g.Debug("using: %s", g.Marshal(g.M("columns", t.Config.Target.Columns, "transforms", t.Config.Transforms)))
+		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
@@ -364,14 +364,9 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
-		varMap := map[string]string{
-			"date_layout":          "2006-01-02",
-			"date_layout_str":      "{value}",
-			"timestamp_layout":     "2006-01-02 15:04:05.000 -07",
-			"timestamp_layout_str": "{value}",
-		}
 
-		if err = getIncrementalValue(t.Config, tgtConn, varMap); err != nil {
+		template, _ := dbio.TypeDbDuckDb.Template()
+		if err = getIncrementalValue(t.Config, tgtConn, template.Variable); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}

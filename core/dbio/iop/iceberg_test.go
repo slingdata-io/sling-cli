@@ -98,7 +98,7 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 		// Test MakeSelectQuery method with all fields
 		allFields := []string{"*"}
 		limit := uint64(0) // No limit
-		query := i.MakeSelectQuery(allFields, limit, "", nil)
+		query := i.MakeSelectQuery(allFields, limit, "", "")
 		expectedQuery := fmt.Sprintf("select * from iceberg_scan('%s', allow_moved_paths = true)", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query for all fields")
 
@@ -125,7 +125,7 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 		// Test MakeSelectQuery method
 		fields := []string{"l_orderkey", "l_quantity", "l_shipdate"}
 		limit := uint64(10)
-		query := i.MakeSelectQuery(fields, limit, "", nil)
+		query := i.MakeSelectQuery(fields, limit, "", "")
 		expectedQuery := fmt.Sprintf("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\" from iceberg_scan('%s', allow_moved_paths = true) limit 10", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query")
 
