@@ -146,3 +146,34 @@ jobs:
       - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
         run: mc cp *.tar.gz R2/sling-public/dev/latest/ 
+
+      - name: Purge Cache (Linux)
+        if: runner.os == 'linux'
+        run: |
+          curl 'https://api.cloudflare.com/client/v4/zones/c4605fd9cf8ddcd00671858bbd16ffac/purge_cache' \
+          -H "X-Auth-Key: $CF_AUTH_KEY" \
+          -H "X-Auth-Email: $CF_AUTH_EMAIL" \
+          --data-raw '{"files":["https://f.slingdata.io/dev/latest/sling_linux_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_linux_arm64.tar.gz"]}'
+
+      - name: Purge Cache (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          curl 'https://api.cloudflare.com/client/v4/zones/c4605fd9cf8ddcd00671858bbd16ffac/purge_cache' \
+          -H "X-Auth-Key: $CF_AUTH_KEY" \
+          -H "X-Auth-Email: $CF_AUTH_EMAIL" \
+          --data-raw '{"files":["https://f.slingdata.io/dev/latest/sling_darwin_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz"]}'
+
+      - name: Purge Cache (Windows)
+        if: runner.os == 'windows'
+        shell: pwsh
+        run: |
+          $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+          Invoke-WebRequest -UseBasicParsing -Uri "https://api.cloudflare.com/client/v4/zones/c4605fd9cf8ddcd00671858bbd16ffac/purge_cache" `
+          -Method "POST" `
+          -WebSession $session `
+          -Headers @{
+            "X-Auth-Key"="$CF_AUTH_KEY"
+            "X-Auth-Email"="$CF_AUTH_EMAIL"
+          } `
+          -ContentType "application/json" `
+          -Body "{`"files`":[`"https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz`"]}"
