@@ -603,13 +603,17 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		if cast.ToString(rootNode.Key) == "defaults" {
 
 			if value, ok := rootNode.Value.(yaml.MapSlice); ok {
-				config.Defaults.Columns = makeColumns(value)
+				if cols := makeColumns(value); cols != nil {
+					config.Defaults.Columns = cols
+				}
 			}
 
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
 					if value, ok := defaultsNode.Value.(yaml.MapSlice); ok {
-						config.Defaults.SourceOptions.Columns = makeColumns(value) // legacy
+						if cols := makeColumns(value); cols != nil {
+							config.Defaults.SourceOptions.Columns = cols // legacy
+						}
 					}
 				}
 			}
@@ -633,7 +637,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 				}
 
 				if value, ok := streamsNode.Value.(yaml.MapSlice); ok {
-					stream.Columns = makeColumns(value)
+					if cols := makeColumns(value); cols != nil {
+						stream.Columns = cols
+					}
 				}
 
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
@@ -643,7 +649,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
 							if value, ok := streamConfigNode.Value.(yaml.MapSlice); ok {
-								stream.SourceOptions.Columns = makeColumns(value) // legacy
+								if cols := makeColumns(value); cols != nil {
+									stream.SourceOptions.Columns = cols // legacy
+								}
 							}
 						}
 					}
