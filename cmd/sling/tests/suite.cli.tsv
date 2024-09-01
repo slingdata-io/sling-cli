@@ -42,8 +42,8 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 41	Run sling with replication configuration 09			>1			sling run -r cmd/sling/tests/replications/r.09.yaml
 42	Run sling with replication configuration 11 and year parameter			3		test1k/2005	YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 43	Run sling with replication configuration 12			1			sling run -r cmd/sling/tests/replications/r.12.yaml
-44	Run sling with replication configuration 15			2		100 rows	ICEBERG_LIMIT=100 sling run -r cmd/sling/tests/replications/r.15.yaml # iceberg & delta
-45	Run sling with replication configuration 15 incremental			1		incremental	ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
+44	Run sling with replication configuration 15			2		100 rows	sling run -r cmd/sling/tests/replications/r.15.yaml # iceberg & delta
+45	Run sling with replication configuration 15 incremental	>0		1		incremental	ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
 46	Run sling with replication configuration 14			2			sling run -r cmd/sling/tests/replications/r.14.yaml
 47	Run sling with replication configuration 14	0					sling run -r cmd/sling/tests/replications/r.14.yaml # file incremental. Second run should have no new rows
 48	Run sling with task configuration	24					sling run -c cmd/sling/tests/task.yaml
