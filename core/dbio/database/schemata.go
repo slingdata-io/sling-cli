@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"runtime/debug"
 	"strings"
 	"unicode"
@@ -39,6 +40,19 @@ var PartitionByColumn = func(conn Connection, table Table, c string, p int) ([]T
 
 func (t *Table) IsQuery() bool {
 	return t.SQL != ""
+}
+
+func (t *Table) MarshalJSON() ([]byte, error) {
+	type Alias Table
+	return json.Marshal(&struct {
+		*Alias
+		FullName string `json:"full_name"`
+		FDQN     string `json:"fdqn"`
+	}{
+		Alias:    (*Alias)(t),
+		FullName: t.FullName(),
+		FDQN:     t.FDQN(),
+	})
 }
 
 func (t *Table) SetKeys(sourcePKCols []string, updateCol string, tableKeys TableKeys) error {
