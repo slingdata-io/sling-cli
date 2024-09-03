@@ -514,7 +514,7 @@ func TestSuiteDatabaseMariaDB(t *testing.T) {
 
 func TestSuiteDatabaseOracle(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbOracle, "1-21") // for some reason 22-discover hangs.
+	testSuite(t, dbio.TypeDbOracle) // for some reason 22-discover hangs.
 }
 
 // func TestSuiteDatabaseBigTable(t *testing.T) {
@@ -909,9 +909,9 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	conn := connMap[connType]
 
 	opt := connection.DiscoverOptions{
-		Pattern:     cfg.Target.Object,
-		ColumnLevel: cast.ToBool(cfg.Env["column_level"]),
-		Recursive:   cast.ToBool(cfg.Env["recursive"]),
+		Pattern:   cfg.Target.Object,
+		Level:     database.SchemataLevel(cast.ToString(cfg.Env["level"])),
+		Recursive: cast.ToBool(cfg.Env["recursive"]),
 	}
 
 	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
@@ -947,42 +947,68 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsDb() {
+		schemas := lo.Values(schemata.Database().Schemas)
 		tables := lo.Values(schemata.Tables())
 		columns := iop.Columns(lo.Values(schemata.Columns()))
 		if valRowCount > 0 {
-			if opt.ColumnLevel {
-				assert.Equal(t, valRowCount, len(columns), columns.Names())
-			} else {
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Equal(t, valRowCount, len(schemas), lo.Keys(schemata.Database().Schemas))
+			case d.SchemataLevelTable:
 				assert.Equal(t, valRowCount, len(tables), lo.Keys(schemata.Tables()))
+			case d.SchemataLevelColumn:
+				assert.Equal(t, valRowCount, len(columns), columns.Names())
 			}
 		} else {
-			assert.Greater(t, len(tables), 0)
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Greater(t, len(schemas), 0)
+			case d.SchemataLevelTable:
+				assert.Greater(t, len(tables), 0)
+			case d.SchemataLevelColumn:
+				assert.Greater(t, len(columns), 0)
+			}
 		}
 
 		if valRowCountMin > -1 {
-			if opt.ColumnLevel {
-				assert.Greater(t, len(columns), valRowCountMin)
-			} else {
-				assert.Greater(t, len(tables), valRowCountMin)
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Greater(t, len(schemas), valRowCountMin, lo.Keys(schemata.Database().Schemas))
+			case d.SchemataLevelTable:
+				assert.Greater(t, len(tables), valRowCountMin, lo.Keys(schemata.Tables()))
+			case d.SchemataLevelColumn:
+				assert.Greater(t, len(columns), valRowCountMin, columns.Names())
 			}
 		}
 
 		if len(containsMap) > 0 {
-			resultType := "tables"
-
-			if opt.ColumnLevel {
-				resultType = "columns"
-				for _, col := range columns {
+			var resultType string
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				resultType = "schemas"
+				for _, schema := range schemas {
 					for word := range containsMap {
-						if strings.EqualFold(word, col.Name) {
+						if strings.EqualFold(word, schema.Name) {
 							containsMap[word] = true
 						}
 					}
 				}
-			} else {
+
+			case d.SchemataLevelTable:
+				resultType = "tables"
 				for _, table := range tables {
 					for word := range containsMap {
 						if strings.EqualFold(word, table.Name) {
+							containsMap[word] = true
+						}
+					}
+				}
+
+			case d.SchemataLevelColumn:
+				resultType = "columns"
+				for _, col := range columns {
+					for word := range containsMap {
+						if strings.EqualFold(word, col.Name) {
 							containsMap[word] = true
 						}
 					}
@@ -1025,7 +1051,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		columns := iop.Columns(lo.Values(files.Columns()))
 
 		if valRowCount > 0 {
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				assert.Equal(t, valRowCount, len(files[0].Columns), g.Marshal(files[0].Columns.Names()))
 			} else {
 				assert.Equal(t, valRowCount, len(files), g.Marshal(files.Paths()))
@@ -1033,7 +1059,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		}
 
 		if valRowCountMin > -1 {
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				assert.Greater(t, len(files[0].Columns), valRowCountMin)
 			} else {
 				assert.Greater(t, len(files), valRowCountMin)
@@ -1043,7 +1069,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		if len(containsMap) > 0 {
 			resultType := "files"
 
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				resultType = "columns"
 				for _, col := range columns {
 					for word := range containsMap {

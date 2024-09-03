@@ -497,7 +497,7 @@ func EnsureBinSQLite() (binPath string, err error) {
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+func (conn *SQLiteConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 	schemata := Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,
@@ -522,21 +522,31 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 	ctx := g.NewContext(conn.context.Ctx, 5)
 	currDatabase := "main"
 
-	getOneSchemata := func(values map[string]interface{}) {
+	getOneSchemata := func(values map[string]interface{}) error {
 		defer ctx.Wg.Read.Done()
 
-		schemaData, err := conn.SubmitTemplate(
-			"single", conn.template.Metadata, "schemata",
-			values,
-		)
+		var data iop.Dataset
+		var err error
+		switch level {
+		case SchemataLevelSchema:
+			data.Columns = iop.NewColumnsFromFields("schema_name")
+			data.Append([]any{values["schema"]})
+		case SchemataLevelTable:
+			data, err = conn.GetTablesAndViews(cast.ToString(values["schema"]))
+		case SchemataLevelColumn:
+			data, err = conn.SubmitTemplate(
+				"single", conn.template.Metadata, "schemata",
+				values,
+			)
+		}
 		if err != nil {
-			ctx.CaptureErr(g.Error(err, "Could not GetSchemata for "+schemaName))
+			return g.Error(err, "Could not get schemata at %s level", level)
 		}
 
 		defer ctx.Unlock()
 		ctx.Lock()
 
-		for _, rec := range schemaData.Records() {
+		for _, rec := range data.Records() {
 			schemaName = cast.ToString(rec["schema_name"])
 			tableName := cast.ToString(rec["table_name"])
 			columnName := cast.ToString(rec["column_name"])
@@ -562,40 +572,48 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 			}
 
 			schema := Schema{
-				Name:   schemaName,
-				Tables: map[string]Table{},
-			}
-
-			table := Table{
-				Name:     tableName,
-				Schema:   schemaName,
+				Name:     schemaName,
 				Database: currDatabase,
-				IsView:   cast.ToBool(rec["is_view"]),
-				Columns:  iop.Columns{},
-				Dialect:  dbio.TypeDbSQLite,
+				Tables:   map[string]Table{},
 			}
 
 			if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
 				schema = schemas[strings.ToLower(schema.Name)]
 			}
 
-			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
-				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			var table Table
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				table = Table{
+					Name:     tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					IsView:   cast.ToBool(rec["is_view"]),
+					Columns:  iop.Columns{},
+					Dialect:  dbio.TypeDbSQLite,
+				}
+
+				if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+					table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+				}
 			}
 
-			column := iop.Column{
-				Name:     columnName,
-				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
-				Table:    tableName,
-				Schema:   schemaName,
-				Database: currDatabase,
-				Position: cast.ToInt(schemaData.Sp.ProcessVal(rec["position"])),
-				DbType:   dataType,
+			if level == SchemataLevelColumn {
+				column := iop.Column{
+					Name:     columnName,
+					Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+					Table:    tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					Position: cast.ToInt(data.Sp.ProcessVal(rec["position"])),
+					DbType:   dataType,
+				}
+
+				table.Columns = append(table.Columns, column)
 			}
 
-			table.Columns = append(table.Columns, column)
-
-			schema.Tables[strings.ToLower(tableName)] = table
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				schema.Tables[strings.ToLower(tableName)] = table
+			}
 			schemas[strings.ToLower(schema.Name)] = schema
 		}
 
@@ -603,6 +621,8 @@ func (conn *SQLiteConn) GetSchemata(schemaName string, tableNames ...string) (Sc
 			Name:    currDatabase,
 			Schemas: schemas,
 		}
+
+		return nil
 	}
 
 	for _, schemaName := range schemaNames {

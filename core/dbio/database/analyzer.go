@@ -84,7 +84,7 @@ func (da *DataAnalyzer) GetSchemata(force bool) (err error) {
 
 	for _, schema := range da.Options.SchemaNames {
 		g.Info("getting schemata for %s", schema)
-		schemata, err := da.Conn.GetSchemata(schema, "")
+		schemata, err := da.Conn.GetSchemata(SchemataLevelTable, schema, "")
 		if err != nil {
 			return g.Error(err, "could not get schemata")
 		}

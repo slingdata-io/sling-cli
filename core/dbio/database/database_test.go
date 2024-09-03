@@ -593,7 +593,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	}
 
 	// Test Schemata
-	schemata, err := conn.GetSchemata(db.schema, "")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, db.schema, "")
 	g.AssertNoError(t, err)
 	sData := schemata.Database().Schemas[strings.ToLower(db.schema)]
 	assert.Equal(t, strings.ToLower(db.schema), strings.ToLower(sData.Name))
@@ -1258,7 +1258,7 @@ func testSnowflakeAuth(t *testing.T) {
 	// g.AssertNoError(t, err)
 	// g.Debug("got %d columns", len(data.Rows))
 
-	schemata, err := conn.GetSchemata("", "")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, "", "")
 	g.AssertNoError(t, err)
 	g.Debug("found %d tables totalling %d columns", len(schemata.Tables()), len(schemata.Columns()))
 
@@ -1275,7 +1275,7 @@ func TestSchemataAll(t *testing.T) {
 	err = conn.Connect()
 	g.AssertNoError(t, err)
 
-	schemata, err := conn.GetSchemata("public", "place_vw")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, "public", "place_vw")
 	// schemata, err := GetSchemataAll(conn)
 	g.AssertNoError(t, err)
 	g.P(schemata)

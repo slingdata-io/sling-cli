@@ -273,8 +273,9 @@ func (db *Database) Columns() map[string]iop.Column {
 
 // Schema represents a schemata schema
 type Schema struct {
-	Name   string           `json:"name"`
-	Tables map[string]Table `json:"tables"`
+	Name     string           `json:"name"`
+	Database string           `json:"database"`
+	Tables   map[string]Table `json:"tables"`
 }
 
 func (schema *Schema) Columns() map[string]iop.Column {
@@ -301,6 +302,14 @@ func (schema *Schema) ToData() (data iop.Dataset) {
 	}
 	return
 }
+
+type SchemataLevel string
+
+const (
+	SchemataLevelSchema SchemataLevel = "schema"
+	SchemataLevelTable  SchemataLevel = "table"
+	SchemataLevelColumn SchemataLevel = "column"
+)
 
 // Schemata contains the full schema for a connection
 type Schemata struct {
@@ -739,7 +748,7 @@ func GetTablesSchemata(conn Connection, tableNames ...string) (schemata Schemata
 
 		// pull down schemata
 		names := lo.Map(tables, func(t Table, i int) string { return t.Name })
-		newSchemata, err := conn.GetSchemata(schema, names...)
+		newSchemata, err := conn.GetSchemata(SchemataLevelColumn, schema, names...)
 		if err != nil {
 			g.Warn("could not obtain schemata for schema: %s. %s", schema, err)
 			return

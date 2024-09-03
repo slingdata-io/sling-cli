@@ -485,7 +485,7 @@ func (conn *PrometheusConn) GetTables(schema string) (data iop.Dataset, err erro
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *PrometheusConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+func (conn *PrometheusConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 	database := conn.Type.String()
 	schemata := Schemata{
 		Databases: map[string]Database{},
@@ -518,39 +518,43 @@ func (conn *PrometheusConn) GetSchemata(schemaName string, tableNames ...string)
 		Dialect:  conn.GetType(),
 	}
 
-	for key, metadata := range metadataMap {
-		columnName := key
-		colType := ""
-		colDescription := ""
-		if len(metadata) > 0 {
-			colType = string(metadata[0].Type)
-			colDescription = string(metadata[0].Help)
+	if level == SchemataLevelColumn {
+		for key, metadata := range metadataMap {
+			columnName := key
+			colType := ""
+			colDescription := ""
+			if len(metadata) > 0 {
+				colType = string(metadata[0].Type)
+				colDescription = string(metadata[0].Help)
+			}
+
+			column := iop.Column{
+				Name:        columnName,
+				Type:        iop.BigIntType,
+				Table:       tableName,
+				Schema:      schemaName,
+				Database:    database,
+				Position:    len(table.Columns) + 1,
+				DbType:      colType,
+				Description: colDescription,
+			}
+
+			table.Columns = append(table.Columns, column)
 		}
 
-		column := iop.Column{
-			Name:        columnName,
-			Type:        iop.BigIntType,
-			Table:       tableName,
-			Schema:      schemaName,
-			Database:    database,
-			Position:    len(table.Columns) + 1,
-			DbType:      colType,
-			Description: colDescription,
+		sort.Slice(table.Columns, func(i, j int) bool {
+			return table.Columns[i].Name < table.Columns[j].Name
+		})
+
+		// set position after sorting
+		for i := range table.Columns {
+			table.Columns[i].Position = i + 1
 		}
-
-		table.Columns = append(table.Columns, column)
 	}
 
-	sort.Slice(table.Columns, func(i, j int) bool {
-		return table.Columns[i].Name < table.Columns[j].Name
-	})
-
-	// set position after sorting
-	for i := range table.Columns {
-		table.Columns[i].Position = i + 1
+	if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+		schema.Tables[strings.ToLower(tableName)] = table
 	}
-
-	schema.Tables[strings.ToLower(tableName)] = table
 	schemas[strings.ToLower(schema.Name)] = schema
 
 	schemata.Databases[strings.ToLower(database)] = Database{

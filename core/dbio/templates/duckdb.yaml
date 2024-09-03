@@ -26,18 +26,19 @@ metadata:
     order by schema_name
 
   tables: |
-    select table_name
+    select table_schema as schema_name, table_name, 'false' as is_view
     from information_schema.tables
     where table_type = 'BASE TABLE'
-      and table_schema = '{schema}'
-    order by table_name
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
 
 
   views: |
-    select table_name
+    select table_schema as schema_name, table_name, 'true' as is_view
     from information_schema.tables
     where table_type in ('VIEW')
-      and table_schema = '{schema}'
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
 
   columns: |
     select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale

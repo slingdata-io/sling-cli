@@ -463,6 +463,10 @@ func (conn *BigQueryConn) StreamRowsContext(ctx context.Context, sql string, opt
 
 // Close closes the connection
 func (conn *BigQueryConn) Close() error {
+	if conn.Client == nil {
+		return nil
+	}
+
 	err := conn.Client.Close()
 	if err != nil {
 		return err
@@ -1075,8 +1079,7 @@ func (conn *BigQueryConn) GetSchemas() (iop.Dataset, error) {
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
-
+func (conn *BigQueryConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 	schemata := Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,
@@ -1105,18 +1108,28 @@ func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (
 
 	getOneSchemata := func(values map[string]interface{}) error {
 		defer ctx.Wg.Read.Done()
-		schemaData, err := conn.SubmitTemplate(
-			"single", conn.template.Metadata, "schemata",
-			values,
-		)
+
+		var data iop.Dataset
+		switch level {
+		case SchemataLevelSchema:
+			data.Columns = iop.NewColumnsFromFields("schema_name")
+			data.Append([]any{values["schema"]})
+		case SchemataLevelTable:
+			data, err = conn.GetTablesAndViews(schemaName)
+		case SchemataLevelColumn:
+			data, err = conn.SubmitTemplate(
+				"single", conn.template.Metadata, "schemata",
+				values,
+			)
+		}
 		if err != nil {
-			return g.Error(err, "Could not GetSchemata for "+schemaName)
+			return g.Error(err, "Could not get schemata at %s level", level)
 		}
 
 		defer ctx.Unlock()
 		ctx.Lock()
 
-		for _, rec := range schemaData.Records() {
+		for _, rec := range data.Records() {
 			schemaName = cast.ToString(rec["schema_name"])
 			tableName := cast.ToString(rec["table_name"])
 			columnName := cast.ToString(rec["column_name"])
@@ -1151,40 +1164,48 @@ func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (
 			}
 
 			schema := Schema{
-				Name:   schemaName,
-				Tables: map[string]Table{},
-			}
-
-			table := Table{
-				Name:     tableName,
-				Schema:   schemaName,
+				Name:     schemaName,
 				Database: currDatabase,
-				IsView:   cast.ToBool(rec["is_view"]),
-				Columns:  iop.Columns{},
-				Dialect:  dbio.TypeDbBigQuery,
+				Tables:   map[string]Table{},
 			}
 
 			if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
 				schema = schemas[strings.ToLower(schema.Name)]
 			}
 
-			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
-				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			var table Table
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				table = Table{
+					Name:     tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					IsView:   cast.ToBool(rec["is_view"]),
+					Columns:  iop.Columns{},
+					Dialect:  dbio.TypeDbBigQuery,
+				}
+
+				if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+					table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+				}
 			}
 
-			column := iop.Column{
-				Name:     columnName,
-				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
-				Table:    tableName,
-				Schema:   schemaName,
-				Database: currDatabase,
-				Position: cast.ToInt(schemaData.Sp.ProcessVal(rec["position"])),
-				DbType:   dataType,
+			if level == SchemataLevelColumn {
+				column := iop.Column{
+					Name:     columnName,
+					Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+					Table:    tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					Position: cast.ToInt(data.Sp.ProcessVal(rec["position"])),
+					DbType:   dataType,
+				}
+
+				table.Columns = append(table.Columns, column)
 			}
 
-			table.Columns = append(table.Columns, column)
-
-			schema.Tables[strings.ToLower(tableName)] = table
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				schema.Tables[strings.ToLower(tableName)] = table
+			}
 			schemas[strings.ToLower(schema.Name)] = schema
 		}
 
@@ -1196,7 +1217,7 @@ func (conn *BigQueryConn) GetSchemata(schemaName string, tableNames ...string) (
 	}
 
 	for _, dataset := range datasets {
-		g.Debug("getting schemata for %s", dataset)
+		g.Debug("getting schemata for %s at %s level", dataset, level)
 		values := g.M("schema", dataset)
 
 		if len(tableNames) > 0 && !(tableNames[0] == "" && len(tableNames) == 1) {

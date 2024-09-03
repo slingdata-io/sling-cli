@@ -312,7 +312,7 @@ func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) 
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+func (conn *MongoDBConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 	currDatabase := dbio.TypeDbMongoDB.String()
 	schemata := Schemata{
 		Databases: map[string]Database{},
@@ -339,53 +339,60 @@ func (conn *MongoDBConn) GetSchemata(schemaName string, tableNames ...string) (S
 			dataType := "json"
 
 			schema := Schema{
-				Name:   schemaName,
-				Tables: map[string]Table{},
-			}
-
-			table := Table{
-				Name:     tableName,
-				Schema:   schemaName,
+				Name:     schemaName,
 				Database: currDatabase,
-				IsView:   false,
-				Columns:  iop.Columns{},
-				Dialect:  conn.GetType(),
+				Tables:   map[string]Table{},
 			}
 
 			if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
 				schema = schemas[strings.ToLower(schema.Name)]
 			}
 
-			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
-				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
-			}
-
-			column := iop.Column{
-				Name:     columnName,
-				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
-				Table:    tableName,
-				Schema:   schemaName,
-				Database: currDatabase,
-				Position: 1,
-				DbType:   dataType,
-			}
-
-			table.Columns = append(table.Columns, column)
-
-			if g.In(tableName, tableNames...) {
-				columns, err := conn.GetSQLColumns(table)
-				if err != nil {
-					return schemata, g.Error(err, "could not get columns")
+			var table Table
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				table = Table{
+					Name:     tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					IsView:   false,
+					Columns:  iop.Columns{},
+					Dialect:  conn.GetType(),
 				}
-				for i := range columns {
-					columns[i].Database = table.Database
-				}
-				if len(columns) > 0 {
-					table.Columns = columns
+
+				if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+					table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
 				}
 			}
 
-			schema.Tables[strings.ToLower(tableName)] = table
+			if level == SchemataLevelColumn {
+				column := iop.Column{
+					Name:     columnName,
+					Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+					Table:    tableName,
+					Schema:   schemaName,
+					Database: currDatabase,
+					Position: 1,
+					DbType:   dataType,
+				}
+
+				table.Columns = append(table.Columns, column)
+
+				if g.In(tableName, tableNames...) {
+					columns, err := conn.GetSQLColumns(table)
+					if err != nil {
+						return schemata, g.Error(err, "could not get columns")
+					}
+					for i := range columns {
+						columns[i].Database = table.Database
+					}
+					if len(columns) > 0 {
+						table.Columns = columns
+					}
+				}
+			}
+			if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+				schema.Tables[strings.ToLower(tableName)] = table
+			}
 			schemas[strings.ToLower(schema.Name)] = schema
 		}
 

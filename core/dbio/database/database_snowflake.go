@@ -980,24 +980,43 @@ func (conn *SnowflakeConn) GetSchemas() (data iop.Dataset, err error) {
 
 // GetTables returns tables
 func (conn *SnowflakeConn) GetTables(schema string) (data iop.Dataset, err error) {
-	// fields: [table_name]
+	// fields: [schema_name, table_name]
 	data1, err := conn.BaseConn.GetTables(schema)
 	if err != nil {
 		return data1, err
 	}
+	data = data1.Pick("schema_name", "name")
+	data.Columns[0].Name = "SCHEMA_NAME"
+	data.Columns[1].Name = "TABLE_NAME"
 
-	return data1.Pick("name"), nil
+	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
+
+	for i := range data.Rows {
+		data.Rows[i] = append(data.Rows[i], false)
+	}
+
+	return data, nil
 }
 
 // GetTables returns tables
 func (conn *SnowflakeConn) GetViews(schema string) (data iop.Dataset, err error) {
-	// fields: [table_name]
+	// fields: [schema_name, table_name]
 	data1, err := conn.BaseConn.GetViews(schema)
 	if err != nil {
 		return data1, err
 	}
 
-	return data1.Pick("table_name"), nil
+	data = data1.Pick("schema_name", "name")
+	data.Columns[0].Name = "SCHEMA_NAME"
+	data.Columns[1].Name = "TABLE_NAME"
+
+	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
+
+	for i := range data.Rows {
+		data.Rows[i] = append(data.Rows[i], true)
+	}
+
+	return data, nil
 }
 
 // CastColumnForSelect casts to the correct target column type

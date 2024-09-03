@@ -41,16 +41,16 @@ metadata:
     order by schema_name
     
   tables: |
-    select table_name
+    select '{schema}' as schema_name, table_name, 'false' as is_view
     from `{schema}`.INFORMATION_SCHEMA.TABLES
     where table_type = 'BASE TABLE'
-    order by table_name
+    order by table_schema, table_name
     
   views: |
-    select table_name
+    select '{schema}' as schema_name, table_name, 'true' as is_view
     from `{schema}`.INFORMATION_SCHEMA.TABLES
     where table_type = 'VIEW'
-    order by table_name
+    order by table_schema, table_name
 
   columns: |
     select column_name, data_type

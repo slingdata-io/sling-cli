@@ -96,9 +96,10 @@ type Connection interface {
 	GetPrimaryKeys(string) (iop.Dataset, error)
 	GetProp(string) string
 	GetSchemas() (iop.Dataset, error)
-	GetSchemata(schemaName string, tableNames ...string) (Schemata, error)
+	GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error)
 	GetSQLColumns(table Table) (columns iop.Columns, err error)
 	GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error)
+	GetTablesAndViews(string) (iop.Dataset, error)
 	GetTables(string) (iop.Dataset, error)
 	GetTemplateValue(path string) (value string)
 	GetType() dbio.Type
@@ -1228,7 +1229,7 @@ func (conn *BaseConn) SubmitTemplate(level string, templateMap map[string]string
 	template = strings.TrimSpace(template) + noDebugKey
 	sql, err := conn.ProcessTemplate(level, template, values)
 	if err != nil {
-		err = g.Error("error processing template")
+		err = g.Error(err, "error processing template")
 		return
 	}
 	return conn.Self().Query(sql)
@@ -1278,6 +1279,33 @@ func (conn *BaseConn) CurrentDatabase() (dbName string, err error) {
 func (conn *BaseConn) GetDatabases() (iop.Dataset, error) {
 	// fields: [name]
 	return conn.SubmitTemplate("single", conn.template.Metadata, "databases", g.M())
+}
+
+// GetTablesAndViews returns tables/views for given schema
+func (conn *BaseConn) GetTablesAndViews(schema string) (iop.Dataset, error) {
+	// fields: [table_name]
+	dataTables, err := conn.SubmitTemplate(
+		"single", conn.template.Metadata, "tables",
+		g.M("schema", schema),
+	)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	dataViews, err := conn.SubmitTemplate(
+		"single", conn.template.Metadata, "views",
+		g.M("schema", schema),
+	)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	// combine
+	for _, row := range dataViews.Rows {
+		dataTables.Append(row)
+	}
+
+	return dataTables, nil
 }
 
 // GetTables returns tables for given schema
@@ -1736,7 +1764,7 @@ func (conn *BaseConn) Import(data iop.Dataset, tableName string) error {
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 
 	schemata := Schemata{
 		Databases: map[string]Database{},
@@ -1766,17 +1794,28 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		currDatabase = cast.ToString(currDbData.FirstVal())
 	}
 
-	schemaData, err := conn.SubmitTemplate(
-		"single", conn.template.Metadata, "schemata",
-		values,
-	)
+	var data iop.Dataset
+	switch level {
+	case SchemataLevelSchema:
+		data, err = conn.GetSchemas()
+	case SchemataLevelTable:
+		data, err = conn.GetTablesAndViews(schemaName)
+	case SchemataLevelColumn:
+		data, err = conn.SubmitTemplate(
+			"single", conn.template.Metadata, "schemata",
+			values,
+		)
+	}
+	if err != nil {
+		return schemata, g.Error(err, "Could not get schemata at %s level", level)
+	}
 
 	if err != nil {
 		return schemata, g.Error(err, "Could not GetSchemata for "+schemaName)
 	}
 
 	schemas := map[string]Schema{}
-	for _, rec := range schemaData.Records() {
+	for _, rec := range data.Records() {
 		schemaName = cast.ToString(rec["schema_name"])
 		tableName := cast.ToString(rec["table_name"])
 		columnName := cast.ToString(rec["column_name"])
@@ -1801,40 +1840,49 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		}
 
 		schema := Schema{
-			Name:   schemaName,
-			Tables: map[string]Table{},
-		}
-
-		table := Table{
-			Name:     tableName,
-			Schema:   schemaName,
+			Name:     schemaName,
 			Database: currDatabase,
-			IsView:   cast.ToBool(rec["is_view"]),
-			Columns:  iop.Columns{},
-			Dialect:  conn.GetType(),
+			Tables:   map[string]Table{},
 		}
 
 		if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
 			schema = schemas[strings.ToLower(schema.Name)]
 		}
 
-		if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
-			table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+		var table Table
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			table = Table{
+				Name:     tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				IsView:   cast.ToBool(rec["is_view"]),
+				Columns:  iop.Columns{},
+				Dialect:  conn.GetType(),
+			}
+
+			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			}
 		}
 
-		column := iop.Column{
-			Name:     columnName,
-			Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
-			Table:    tableName,
-			Schema:   schemaName,
-			Database: currDatabase,
-			Position: cast.ToInt(schemaData.Sp.ProcessVal(rec["position"])),
-			DbType:   dataType,
+		if level == SchemataLevelColumn {
+			column := iop.Column{
+				Name:     columnName,
+				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+				Table:    tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				Position: cast.ToInt(data.Sp.ProcessVal(rec["position"])),
+				DbType:   dataType,
+			}
+
+			table.Columns = append(table.Columns, column)
 		}
 
-		table.Columns = append(table.Columns, column)
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			schema.Tables[strings.ToLower(tableName)] = table
+		}
 
-		schema.Tables[strings.ToLower(tableName)] = table
 		schemas[strings.ToLower(schema.Name)] = schema
 	}
 
