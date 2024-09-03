@@ -134,8 +134,8 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			}
 		}
 
-		// apply filter
-		if len(patterns) > 0 {
+		// apply filter if table is not specified
+		if len(patterns) > 0 && table.Name == "" {
 			schemata = schemata.Filtered(opt.Level == database.SchemataLevelColumn, patterns...)
 		}
 
