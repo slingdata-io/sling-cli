@@ -541,6 +541,7 @@ const (
 	FileTypeJsonLines FileType = "jsonlines"
 	FileTypeIceberg   FileType = "iceberg"
 	FileTypeDelta     FileType = "delta"
+	FileTypeRaw       FileType = "raw"
 )
 
 var AllFileType = []struct {
@@ -556,6 +557,9 @@ var AllFileType = []struct {
 	{FileTypeAvro, "FileTypeAvro"},
 	{FileTypeSAS, "FileTypeSAS"},
 	{FileTypeJsonLines, "FileTypeJsonLines"},
+	{FileTypeIceberg, "FileTypeIceberg"},
+	{FileTypeDelta, "FileTypeDelta"},
+	{FileTypeRaw, "FileTypeRaw"},
 }
 
 func (ft FileType) Ext() string {
