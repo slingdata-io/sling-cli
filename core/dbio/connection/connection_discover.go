@@ -24,7 +24,7 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = dbConn.Connect()
+		err = dbConn.Connect(10)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
@@ -33,7 +33,10 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = fileClient.Init(context.Background())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		err = fileClient.Init(ctx)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
