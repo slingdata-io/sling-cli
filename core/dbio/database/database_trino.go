@@ -32,26 +32,6 @@ func (conn *TrinoConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
-	// register client to skip tls
-	skipTLSClient := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-				DualStack: true,
-			}).DialContext,
-			MaxIdleConns:          10,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-	trino.RegisterCustomClient("skip_tls", skipTLSClient)
-
 	return conn.BaseConn.Init()
 }
 
@@ -79,6 +59,30 @@ func (conn *TrinoConn) ConnString() string {
 		if val := conn.GetProp(key); val != "" {
 			configMap[new_key] = val
 		}
+	}
+
+	if cast.ToBool(conn.GetProp("skip_tls")) {
+
+		// register client to skip tls
+		skipTLSClient := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+					DualStack: true,
+				}).DialContext,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+		trino.RegisterCustomClient("skip_tls", skipTLSClient)
+		configMap["CustomClientName"] = "skip_tls"
 	}
 
 	URI := g.F(
