@@ -165,7 +165,7 @@ func GetLocalConns(force ...bool) ConnEntries {
 			}
 		}
 
-		if conn.Type.NameLong() == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP {
+		if conn.Type.NameLong() == "" || conn.Info().Type == dbio.TypeUnknown || conn.Info().Type == dbio.TypeFileHTTP || string(conn.Info().Type) == "https" {
 			continue
 		}
 
