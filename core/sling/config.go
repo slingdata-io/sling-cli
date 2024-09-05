@@ -1119,11 +1119,11 @@ func (cfg *Config) MD5() string {
 }
 
 func (cfg *Config) SrcConnMD5() string {
-	return g.MD5(g.Marshal(cfg.SrcConn.Data))
+	return g.MD5(cfg.SrcConn.URL())
 }
 
 func (cfg *Config) TgtConnMD5() string {
-	return g.MD5(g.Marshal(cfg.TgtConn.Data))
+	return g.MD5(cfg.TgtConn.URL())
 }
 
 func (cfg *Config) StreamID() string {
@@ -1185,9 +1185,6 @@ func (s *Source) MD5() string {
 		g.M("conn", s.Conn),
 		g.M("type", s.Type),
 		g.M("stream", s.Stream),
-		g.M("primary_key", s.PrimaryKeyI),
-		g.M("update_key", s.UpdateKey),
-		g.M("options", s.Options),
 	})
 
 	if strings.Contains(s.Conn, "://") {
@@ -1216,7 +1213,6 @@ func (t *Target) MD5() string {
 		g.M("conn", t.Conn),
 		g.M("type", t.Type),
 		g.M("object", t.Object),
-		g.M("options", t.Options),
 	})
 
 	if strings.Contains(t.Conn, "://") {
