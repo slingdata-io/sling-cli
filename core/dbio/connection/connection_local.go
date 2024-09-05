@@ -298,6 +298,22 @@ func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 		conns[strings.ToLower(conn.Name)] = conn
 	}
 
+	// get connection from envfile (may be provided via body)
+	m := g.M()
+	g.JSONConvert(ec.EnvFile, &m)
+	profileConns, err := ReadConnections(m)
+	if err == nil {
+		for _, conn := range profileConns {
+			c := ConnEntry{
+				Name:        strings.ToUpper(conn.Info().Name),
+				Description: conn.Type.NameLong(),
+				Source:      name + " env yaml",
+				Connection:  conn,
+			}
+			conns[strings.ToLower(c.Name)] = c
+		}
+	}
+
 	conn, ok = conns[strings.ToLower(name)]
 	return
 }
