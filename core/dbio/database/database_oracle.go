@@ -403,20 +403,21 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 	for _, col := range ds.Columns {
 		expr := ""
 		colName := conn.Quote(col.Name)
+		colNameEscaped := strings.ReplaceAll(colName, `"`, `\"`)
 		if col.Type == iop.DatetimeType || col.Type == iop.DateType {
 			expr = fmt.Sprintf(
 				`"TO_DATE(:%s, 'YYYY-MM-DD HH24:MI:SS')"`,
-				strings.ToUpper(col.Name),
+				colNameEscaped,
 			)
 		} else if col.Type == iop.TimestampType {
 			expr = fmt.Sprintf(
 				`"TO_TIMESTAMP(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6')"`,
-				strings.ToUpper(col.Name),
+				colNameEscaped,
 			)
 		} else if col.Type == iop.TimestampzType {
 			expr = fmt.Sprintf(
 				`"TO_TIMESTAMP_TZ(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')"`,
-				strings.ToUpper(col.Name),
+				colNameEscaped,
 			)
 		} else if col.IsString() {
 			expr = g.F("char(400000) NULLIF %s=BLANKS", colName)
