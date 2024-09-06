@@ -332,7 +332,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	err = proc.Run()
 
 	// Delete ctrl file
-	defer os.Remove(ctlPath)
+	defer func() { env.RemoveLocalTempFile(ctlPath) }()
 
 	if err != nil {
 		err = g.Error(

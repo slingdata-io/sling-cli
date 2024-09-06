@@ -301,7 +301,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 		defer ds.Context.Wg.Write.Done()
 
 		// delete csv
-		defer os.Remove(filePath)
+		defer func() { env.RemoveLocalTempFile(filePath) }()
 
 		_, err := conn.BcpImportFile(tableFName, filePath)
 		ds.Context.CaptureErr(err)
