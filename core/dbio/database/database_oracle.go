@@ -310,7 +310,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 
 	if runtime.GOOS == "windows" {
 		dataPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.data.temp")+".csv")
-		logPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.log.temp")+".csv")
+		logPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.log.temp"))
 
 		file, err := os.Create(dataPath)
 		if err != nil {
@@ -326,6 +326,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		}
 
 		defer func() { env.RemoveLocalTempFile(dataPath) }()
+		defer func() { env.RemoveLocalTempFile(logPath) }()
 	}
 
 	proc := exec.Command(
