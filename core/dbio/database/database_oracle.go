@@ -277,15 +277,8 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		return
 	}
 
-	file, err := os.CreateTemp(env.GetTempFolder(), "oracle."+tableFName+".*.sqlldr.ctl")
-	if err != nil {
-		err = g.Error(err, "Error opening temp file")
-		return
-	}
-
-	ctlPath := file.Name()
-
 	// write to ctlPath
+	ctlPath := path.Join(env.GetTempFolder(), g.NewTsID("oracle.data.sqlldr")+".ctl")
 	ctlStr := g.R(
 		conn.BaseConn.GetTemplateValue("core.sqlldr"),
 		"table", tableFName,
