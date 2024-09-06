@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -230,8 +229,6 @@ func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	_, err = exec.LookPath("sqlldr")
 	if err != nil {
 		g.Trace("sqlldr not found in path. Using cursor...")
-		return conn.BaseConn.InsertBatchStream(tableFName, ds)
-	} else if runtime.GOOS == "windows" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	} else if conn.GetProp("allow_bulk_import") != "true" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
