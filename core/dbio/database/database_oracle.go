@@ -8,9 +8,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
+	"runtime"
 	"strings"
 	"time"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -228,7 +231,7 @@ func (conn *OracleConn) SubmitTemplate(level string, templateMap map[string]stri
 func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	_, err = exec.LookPath("sqlldr")
 	if err != nil {
-		g.Trace("sqlldr not found in path. Using cursor...")
+		g.Debug("sqlldr not found in path. Using cursor...")
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	} else if conn.GetProp("allow_bulk_import") != "true" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
@@ -306,22 +309,50 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		password, hostPort, sid,
 	)
 
+	dataPath := "/dev/stdin"
+	logPath := "/dev/stdout"
+
+	// the columns that need post-updates
+	postUpdates := cmap.New[int]()
+
+	if runtime.GOOS == "windows" {
+		dataPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.data.temp")+".csv")
+		logPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.log.temp")+".csv")
+
+		file, err := os.Create(dataPath)
+		if err != nil {
+			err = g.Error(err, "could not create temp file")
+			return 0, err
+		}
+
+		g.Debug("writing to temp csv file: %s", dataPath)
+		err = conn.writeCsv(ds, file, &postUpdates)
+		if err != nil {
+			err = g.Error(err, "could not write to temp file")
+			return 0, err
+		}
+
+		defer func() { env.RemoveLocalTempFile(dataPath) }()
+	}
+
 	proc := exec.Command(
 		"sqlldr",
 		credHost,
 		"control="+ctlPath,
 		"discardmax=0",
 		"errors=0",
-		"data=/dev/stdin",
-		"log=/dev/stdout",
-		"bad=/dev/stderr",
+		"data="+dataPath,
+		"log="+logPath,
+		"bad="+logPath,
 	)
 
 	ds.SetConfig(conn.Props())
-	stdIn, pu := sqlLoadCsvReader(ds)
 	proc.Stderr = &stderr
 	proc.Stdout = &stdout
-	proc.Stdin = stdIn
+
+	if runtime.GOOS != "windows" {
+		proc.Stdin = conn.sqlLoadCsvReader(ds, &postUpdates)
+	}
 
 	// run and wait for finish
 	cmdStr := strings.ReplaceAll(strings.Join(proc.Args, " "), credHost, "****")
@@ -348,7 +379,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 
 	// transformation to correctly post process quotes, newlines, and delimiter afterwards
 	setCols := []string{}
-	for c := range pu.cols {
+	for _, c := range postUpdates.Items() {
 		col := ds.Columns[c]
 		colName := conn.Quote(col.Name)
 		expr := fmt.Sprintf(
@@ -403,70 +434,75 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 
 // sqlLoadCsvReader creates a Reader with with a newline checker
 // for SQLoad.
-func sqlLoadCsvReader(ds *iop.Datastream) (*io.PipeReader, *struct{ cols map[int]int }) {
-	pu := &struct{ cols map[int]int }{map[int]int{}}
+func (conn *OracleConn) sqlLoadCsvReader(ds *iop.Datastream, pu *cmap.ConcurrentMap[string, int]) (r *io.PipeReader) {
 	pipeR, pipeW := io.Pipe()
 
 	go func() {
-		c := uint64(0) // local counter
-		w := csv.NewWriter(pipeW)
-
-		_, err := w.Write(ds.Columns.Names())
+		defer pipeW.Close()
+		err := conn.writeCsv(ds, pipeW, pu)
 		if err != nil {
-			ds.Context.CaptureErr(g.Error(err, "Error writing ds.Fields"))
-			ds.Context.Cancel()
-			pipeW.Close()
+			return
 		}
-
-		for row0 := range ds.Rows() {
-			c++
-			// convert to csv string
-			row := make([]string, len(row0))
-			for i, val := range row0 {
-				if val == nil {
-					row[i] = ""
-					continue
-				}
-
-				valS := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
-				if strings.Contains(valS, "\n") {
-					valS = strings.ReplaceAll(valS, "\r", "")
-					valS = strings.ReplaceAll(valS, "\n", `~/N/~`)
-					pu.cols[i] = i
-				}
-
-				if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.DateType {
-					// casting unsafely, but has been determined by ParseString
-					// convert to Oracle Time format
-					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
-					valS = val.(time.Time).Format("2006-01-02 15:04:05")
-				} else if ds.Columns[i].Type == iop.TimestampType {
-					// convert to Oracle Timestamp format
-					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
-					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000")
-				} else if ds.Columns[i].Type == iop.TimestampzType {
-					// convert to Oracle Timestamp format
-					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
-					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000 -07:00")
-				}
-				row[i] = valS
-			}
-
-			_, err = w.Write(row)
-			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error w.Write(row)"))
-				ds.Context.Cancel()
-				break
-			}
-			w.Flush()
-
-		}
-		ds.SetEmpty()
-
-		pipeW.Close()
 	}()
 
-	return pipeR, pu
+	return pipeR
+}
+
+func (conn *OracleConn) writeCsv(ds *iop.Datastream, writer io.Writer, pu *cmap.ConcurrentMap[string, int]) (err error) {
+
+	w := csv.NewWriter(writer)
+
+	_, err = w.Write(ds.Columns.Names())
+	if err != nil {
+		ds.Context.CaptureErr(g.Error(err, "Error writing ds.Fields"))
+		ds.Context.Cancel()
+		return
+	}
+
+	for row0 := range ds.Rows() {
+		// convert to csv string
+		row := make([]string, len(row0))
+		for i, val := range row0 {
+			if val == nil {
+				row[i] = ""
+				continue
+			}
+
+			valS := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+			if strings.Contains(valS, "\n") {
+				valS = strings.ReplaceAll(valS, "\r", "")
+				valS = strings.ReplaceAll(valS, "\n", `~/N/~`)
+				pu.Set(cast.ToString(i), i)
+			}
+
+			if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.DateType {
+				// casting unsafely, but has been determined by ParseString
+				// convert to Oracle Time format
+				val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
+				valS = val.(time.Time).Format("2006-01-02 15:04:05")
+			} else if ds.Columns[i].Type == iop.TimestampType {
+				// convert to Oracle Timestamp format
+				val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
+				valS = val.(time.Time).Format("2006-01-02 15:04:05.000000")
+			} else if ds.Columns[i].Type == iop.TimestampzType {
+				// convert to Oracle Timestamp format
+				val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
+				valS = val.(time.Time).Format("2006-01-02 15:04:05.000000 -07:00")
+			}
+			row[i] = valS
+		}
+
+		_, err = w.Write(row)
+		if err != nil {
+			ds.Context.CaptureErr(g.Error(err, "Error w.Write(row)"))
+			ds.Context.Cancel()
+			return
+		}
+		w.Flush()
+
+	}
+
+	return
 }
 
 // GenerateUpsertSQL generates the upsert SQL

@@ -707,7 +707,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 		cmd, sqlPath, err := conn.getCmd(ds.Context, sql, cast.ToBool(conn.GetProp("read_only")))
 		if err != nil {
-			os.Remove(csvPath)
+			env.RemoveLocalTempFile(csvPath)
 			return count, g.Error(err, "could not get cmd duckdb")
 		}
 

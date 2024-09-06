@@ -226,7 +226,7 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 	// return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	_, err = exec.LookPath("bcp")
 	if err != nil {
-		g.Trace("bcp not found in path. Using cursor...")
+		g.Debug("bcp not found in path. Using cursor...")
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	} else if conn.GetProp("allow_bulk_import") != "true" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
