@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type IcebergReader struct {
@@ -44,6 +45,6 @@ func (i *IcebergReader) Close() error {
 }
 
 func (r *IcebergReader) MakeQuery(sc FileStreamConfig) string {
-	sql := r.Duck.MakeScanQuery("iceberg_scanner", r.URI, sc)
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeIceberg, r.URI, sc)
 	return sql
 }

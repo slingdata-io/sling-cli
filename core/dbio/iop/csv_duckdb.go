@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 )
 
@@ -68,7 +69,7 @@ func (r *CsvDuckDb) MakeQuery(fsc FileStreamConfig) string {
 		quote = `"`
 	}
 
-	sql := r.Duck.MakeScanQuery("csv_scanner", r.URI, fsc)
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeCsv, r.URI, fsc)
 
 	sql = g.R(sql, "delim", r.sc.Delimiter)
 	sql = g.R(sql, "header", cast.ToString(r.sc.Header))

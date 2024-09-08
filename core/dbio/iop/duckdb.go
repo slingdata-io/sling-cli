@@ -792,13 +792,29 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	}
 
 	if len(columns) == 0 {
-		return nil, g.Error("no columns found")
+		return nil, g.Error("no columns found for: %s", query)
 	}
 
 	return
 }
 
-func (duck *DuckDb) MakeScanQuery(scanFunc, uri string, fsc FileStreamConfig) (sql string) {
+func (duck *DuckDb) GetScannerFunc(format dbio.FileType) (scanFunc string) {
+
+	switch format {
+	case dbio.FileTypeDelta:
+		scanFunc = "delta_scanner"
+	case dbio.FileTypeIceberg:
+		scanFunc = "iceberg_scanner"
+	case dbio.FileTypeParquet:
+		scanFunc = "parquet_scanner"
+	case dbio.FileTypeCsv:
+		scanFunc = "csv_scanner"
+	}
+
+	return
+}
+
+func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStreamConfig) (sql string) {
 
 	where := ""
 	incrementalWhereCond := "1=1"
@@ -812,14 +828,19 @@ func (duck *DuckDb) MakeScanQuery(scanFunc, uri string, fsc FileStreamConfig) (s
 		where = g.F("where %s", incrementalWhereCond)
 	}
 
-	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + scanFunc)
+	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(format))
 	if fsc.SQL != "" {
-		return g.R(
+		sql = g.R(
 			g.R(fsc.SQL, "stream_scanner", streamScanner),
 			"incremental_where_cond", incrementalWhereCond,
 			"incremental_value", fsc.IncrementalValue,
 			"uri", uri,
 		)
+
+		if fsc.Limit > 0 {
+			sql = g.F("select * from ( %s ) as t limit %d", sql, fsc.Limit)
+		}
+		return sql
 	}
 
 	fields := fsc.Select

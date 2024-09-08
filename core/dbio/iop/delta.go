@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type DeltaReader struct {
@@ -44,6 +45,6 @@ func (r *DeltaReader) Close() error {
 }
 
 func (r *DeltaReader) MakeQuery(sc FileStreamConfig) string {
-	sql := r.Duck.MakeScanQuery("delta_scanner", r.URI, sc)
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeDelta, r.URI, sc)
 	return sql
 }

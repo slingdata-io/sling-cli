@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type ParquetDuckDb struct {
@@ -43,6 +44,6 @@ func (r *ParquetDuckDb) Close() error {
 }
 
 func (r *ParquetDuckDb) MakeQuery(sc FileStreamConfig) string {
-	sql := r.Duck.MakeScanQuery("parquet_scanner", r.URI, sc)
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeParquet, r.URI, sc)
 	return sql
 }
