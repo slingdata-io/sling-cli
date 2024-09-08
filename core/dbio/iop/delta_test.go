@@ -82,8 +82,7 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 	t.Run("Test MakeSelectQuery all and query execution", func(t *testing.T) {
 		// Test MakeSelectQuery method with all fields
 		allFields := []string{"*"}
-		limit := uint64(0) // No limit
-		query := d.MakeSelectQuery(allFields, limit, "", "")
+		query := d.MakeQuery(FileStreamConfig{Select: allFields})
 		expectedQuery := g.F("select * from delta_scan('%s')", d.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query for all fields")
 
@@ -110,8 +109,8 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 	t.Run("Test MakeSelectQuery limited and query execution", func(t *testing.T) {
 		// Test MakeSelectQuery method
 		fields := []string{"first_name", "last_name", "country"}
-		limit := uint64(10)
-		query := d.MakeSelectQuery(fields, limit, "", "")
+		limit := 10
+		query := d.MakeQuery(FileStreamConfig{Select: fields, Limit: limit})
 		expectedQuery := g.F("select \"first_name\",\"last_name\",\"country\" from delta_scan('%s') limit 10", d.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query")
 
@@ -127,5 +126,14 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 			assert.Equal(t, 3, len(data.Columns), "Result should have 3 columns")
 			assert.Equal(t, 5, len(data.Rows), "Result should have at most 10 rows")
 		}
+	})
+
+	t.Run("Test FormatQuery", func(t *testing.T) {
+		// Test FormatQuery method
+		inputSQL := "SELECT * FROM {stream_scanner} WHERE column1 > 10"
+		expectedSQL := g.F("SELECT * FROM delta_scan('%s') WHERE column1 > 10", d.URI)
+
+		formattedSQL := d.MakeQuery(FileStreamConfig{SQL: inputSQL})
+		assert.Equal(t, expectedSQL, formattedSQL, "Formatted query should match expected query")
 	})
 }

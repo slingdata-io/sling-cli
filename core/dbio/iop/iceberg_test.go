@@ -97,9 +97,8 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 	t.Run("Test MakeSelectQuery all and query execution", func(t *testing.T) {
 		// Test MakeSelectQuery method with all fields
 		allFields := []string{"*"}
-		limit := uint64(0) // No limit
-		query := i.MakeSelectQuery(allFields, limit, "", "")
-		expectedQuery := fmt.Sprintf("select * from iceberg_scan('%s', allow_moved_paths = true)", i.URI)
+		query := i.MakeQuery(FileStreamConfig{Select: allFields})
+		expectedQuery := g.F("select * from iceberg_scan('%s', allow_moved_paths = true)", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query for all fields")
 
 		// Test actual query execution
@@ -124,9 +123,9 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 	t.Run("Test MakeSelectQuery limited and query execution", func(t *testing.T) {
 		// Test MakeSelectQuery method
 		fields := []string{"l_orderkey", "l_quantity", "l_shipdate"}
-		limit := uint64(10)
-		query := i.MakeSelectQuery(fields, limit, "", "")
-		expectedQuery := fmt.Sprintf("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\" from iceberg_scan('%s', allow_moved_paths = true) limit 10", i.URI)
+		limit := 10
+		query := i.MakeQuery(FileStreamConfig{Select: fields, Limit: limit})
+		expectedQuery := g.F("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\" from iceberg_scan('%s', allow_moved_paths = true) limit 10", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query")
 
 		// Test actual query execution
@@ -146,10 +145,9 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 	t.Run("Test MakeSelectQuery with incremental key and value", func(t *testing.T) {
 		// Test MakeSelectQuery method with incremental key and value
 		fields := []string{"l_orderkey", "l_quantity", "l_shipdate", "l_commitdate"}
-		limit := uint64(0) // No limit
 		incrementalKey := "l_commitdate"
 		incrementalValue := "'1996-01-01'"
-		query := i.MakeSelectQuery(fields, limit, incrementalKey, incrementalValue)
+		query := i.MakeQuery(FileStreamConfig{Select: fields, IncrementalKey: incrementalKey, IncrementalValue: incrementalValue})
 		expectedQuery := fmt.Sprintf("select \"l_orderkey\",\"l_quantity\",\"l_shipdate\",\"l_commitdate\" from iceberg_scan('%s', allow_moved_paths = true) where \"l_commitdate\" > '1996-01-01'", i.URI)
 		assert.Equal(t, expectedQuery, query, "Generated query should match expected query with incremental key and value")
 
@@ -179,6 +177,15 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 				}
 			}
 		}
+	})
+
+	t.Run("Test FormatQuery", func(t *testing.T) {
+		// Test FormatQuery method
+		inputSQL := "SELECT * FROM {stream_scanner} WHERE column1 > 10"
+		expectedSQL := g.F("SELECT * FROM iceberg_scan('%s', allow_moved_paths = true) WHERE column1 > 10", i.URI)
+
+		formattedSQL := i.MakeQuery(FileStreamConfig{SQL: inputSQL})
+		assert.Equal(t, expectedSQL, formattedSQL, "Formatted query should match expected query")
 	})
 
 }

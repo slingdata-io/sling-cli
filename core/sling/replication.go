@@ -403,6 +403,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			Source: Source{
 				Conn:        rd.Source,
 				Stream:      name,
+				SQL:         stream.SQL,
 				Select:      stream.Select,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
@@ -422,10 +423,6 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 		// so that the next stream does not retain previous pointer values
 		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
 		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
-
-		if stream.SQL != "" {
-			cfg.Source.Stream = stream.SQL
-		}
 
 		// prepare config
 		err = cfg.Prepare()

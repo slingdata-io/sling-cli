@@ -109,10 +109,13 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 		return
 	}
 
-	file, err := os.Open(path)
-	if err != nil {
-		err = g.Error(err, "Unable to open "+path)
-		return nil, err
+	var file *os.File
+	if !Cfg.ShouldUseDuckDB() {
+		file, err = os.Open(path)
+		if err != nil {
+			err = g.Error(err, "Unable to open "+path)
+			return nil, err
+		}
 	}
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
@@ -124,9 +127,8 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 	// set selectFields for pruning at source
 	ds.Columns = iop.NewColumnsFromFields(Cfg.Select...)
 
-	fileFormat := Cfg.Format
-	if fileFormat == dbio.FileTypeNone {
-		fileFormat = InferFileFormat(path)
+	if Cfg.Format == dbio.FileTypeNone {
+		Cfg.Format = InferFileFormat(path)
 	}
 
 	go func() {
@@ -142,13 +144,13 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
+		g.Debug("reading datastream from %s [format=%s]", path, Cfg.Format)
 
 		// no reader for iceberg, delta, duckdb will handle it
-		if g.In(fileFormat, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
+		if Cfg.ShouldUseDuckDB() {
 			file.Close() // no need to keep the file open
 			Cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
-			switch fileFormat {
+			switch Cfg.Format {
 			case dbio.FileTypeIceberg:
 				err = ds.ConsumeIcebergReader("file://"+path, Cfg)
 			case dbio.FileTypeDelta:
@@ -162,7 +164,7 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 			return
 		}
 
-		switch fileFormat {
+		switch Cfg.Format {
 		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReader(bufio.NewReader(file))
 		case dbio.FileTypeXml:
@@ -178,7 +180,7 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		default:
-			g.Warn("LocalFileSysClient | File Format not recognized: %s. Using CSV parsing", fileFormat)
+			g.Warn("LocalFileSysClient | File Format not recognized: %s. Using CSV parsing", Cfg.Format)
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		}
 

@@ -19,6 +19,16 @@ streams:
       format: delta
     object: public.sling_test_{stream_file_name}
 
+  delta_sql:
+    sql: select last_name from delta_scan('s3://{source_bucket}/sling_test/delta')
+    source_options:
+      format: delta
+    object: public.sling_test_delta_sql
+
+  test/parquet/test1.parquet:
+    sql: select id, first_name from {stream_scanner} where id != '100'
+    object: public.sling_test_parquet_sql
+
 env:
   iceberg_limit: $ICEBERG_LIMIT
   iceberg_mode: $ICEBERG_MODE

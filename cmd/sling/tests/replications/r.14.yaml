@@ -12,3 +12,14 @@ defaults:
 streams:
   cmd/sling/tests/files/test1.csv:
   cmd/sling/tests/files/test1.upsert.csv:
+
+  cmd/sling/tests/files/parquet/test1.parquet:
+    sql: select id, first_name from {stream_scanner}
+    object: public.sling_test_parquet_sql
+
+  parquet_sql:
+    mode: full-refresh
+    sql: select id, first_name from parquet_scan('cmd/sling/tests/files/parquet/test1.parquet')
+    source_options:
+      format: parquet
+    object: public.sling_test_parquet_sql

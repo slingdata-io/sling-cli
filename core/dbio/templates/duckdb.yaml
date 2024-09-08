@@ -152,6 +152,11 @@ function:
   checksum_boolean: 'length({field}::string)'
   cast_to_text: 'cast({field} as text)'
 
+  iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
+  delta_scanner: delta_scan('{uri}')
+  parquet_scanner: parquet_scan('{uri}')
+  csv_scanner: read_csv('{uri}')
+
 variable:
   bool_as: integer
   bind_string: ${c}

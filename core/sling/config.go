@@ -541,6 +541,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Stream = strings.ReplaceAll(cfg.Source.Stream, `\`, `/`) // windows path fix
 	}
 
+	// set sql to stream if source conn is db
+	if cfg.SrcConn.Type.IsDb() && cfg.Source.SQL != "" {
+		cfg.Source.Stream = strings.TrimSpace(cfg.Source.SQL)
+	}
+
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
@@ -623,6 +628,9 @@ func (cfg *Config) Prepare() (err error) {
 	if err != nil {
 		return g.Error(err, "could not get format map for sql")
 	}
+
+	// sql prop
+	cfg.Source.SQL = g.Rm(cfg.Source.SQL, fMap)
 
 	// check if referring to a SQL file, and set stream text
 	if cfg.SrcConn.Type.IsDb() {
@@ -1143,6 +1151,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	SQL         string         `json:"sql,omitempty" yaml:"stream,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`

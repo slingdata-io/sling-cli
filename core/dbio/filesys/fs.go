@@ -423,9 +423,8 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 	ds.Metadata.StreamURL.Value = uri
 	ds.SetConfig(fs.Props())
 
-	fileFormat := Cfg.Format
-	if fileFormat == dbio.FileTypeNone {
-		fileFormat = InferFileFormat(uri)
+	if Cfg.Format == dbio.FileTypeNone {
+		Cfg.Format = InferFileFormat(uri)
 	}
 
 	go func() {
@@ -441,12 +440,12 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		g.Debug("reading datastream from %s [format=%s]", uri, fileFormat)
+		g.Debug("reading datastream from %s [format=%s]", uri, Cfg.Format)
 
 		// no reader needed for iceberg, delta, duckdb will handle it
-		if g.In(fileFormat, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
+		if Cfg.ShouldUseDuckDB() {
 			Cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
-			switch fileFormat {
+			switch Cfg.Format {
 			case dbio.FileTypeIceberg:
 				err = ds.ConsumeIcebergReader(uri, Cfg)
 			case dbio.FileTypeDelta:
@@ -481,7 +480,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		switch fileFormat {
+		switch Cfg.Format {
 		case dbio.FileTypeJson:
 			err = ds.ConsumeJsonReader(reader)
 		case dbio.FileTypeXml:
@@ -497,7 +496,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(reader)
 		default:
-			g.Warn("GetDatastream | File Format not recognized: %s. Using CSV parsing", fileFormat)
+			g.Warn("GetDatastream | File Format not recognized: %s. Using CSV parsing", Cfg.Format)
 			err = ds.ConsumeCsvReader(reader)
 		}
 
@@ -519,6 +518,9 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 
 	if Cfg.Format == dbio.FileTypeNone {
 		Cfg.Format = dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+		if Cfg.Format == dbio.FileTypeNone {
+			Cfg.Format = InferFileFormat(url, dbio.FileTypeNone)
+		}
 	}
 
 	if strings.HasSuffix(strings.ToLower(url), ".zip") {
@@ -560,7 +562,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	}
 
 	var nodes FileNodes
-	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
+	if Cfg.ShouldUseDuckDB() {
 		nodes = FileNodes{FileNode{URI: url}}
 	} else {
 		g.Trace("listing path: %s", url)
@@ -1303,7 +1305,7 @@ func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err erro
 	return nDs, nil
 }
 
-func InferFileFormat(path string) dbio.FileType {
+func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
 	for _, fileType := range []dbio.FileType{dbio.FileTypeJsonLines, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
@@ -1311,6 +1313,10 @@ func InferFileFormat(path string) dbio.FileType {
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType
 		}
+	}
+
+	if len(defaults) > 0 {
+		return defaults[0]
 	}
 
 	// default is csv
