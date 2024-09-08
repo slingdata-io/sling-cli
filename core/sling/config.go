@@ -631,6 +631,9 @@ func (cfg *Config) Prepare() (err error) {
 
 	// sql prop
 	cfg.Source.SQL = g.Rm(cfg.Source.SQL, fMap)
+	if cfg.ReplicationStream != nil {
+		cfg.ReplicationStream.SQL = cfg.Source.SQL
+	}
 
 	// check if referring to a SQL file, and set stream text
 	if cfg.SrcConn.Type.IsDb() {
@@ -884,6 +887,22 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 				cast.ToString(m["stream_file_name"]),
 				"_"+cast.ToString(m["stream_file_ext"]),
 			)
+		}
+
+		// duckdb sql on files, make `stream_scanner`
+		if cfg.Source.SQL != "" {
+			// get file format in order to match scanner
+			fileFormat := dbio.FileTypeNone
+			if cfg.Source.Options != nil && cfg.Source.Options.Format != nil {
+				fileFormat = *cfg.Source.Options.Format
+			}
+			if fileFormat == dbio.FileTypeNone {
+				fileFormat = filesys.InferFileFormat(uri, dbio.FileTypeNone)
+			}
+
+			duck := iop.NewDuckDb(context.Background())
+			streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
+			m["stream_scanner"] = g.R(streamScanner, "uri", uri)
 		}
 	}
 
