@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/spf13/cast"
 )
 
 type IcebergReader struct {
@@ -46,11 +44,6 @@ func (i *IcebergReader) Close() error {
 }
 
 func (r *IcebergReader) MakeQuery(sc FileStreamConfig) string {
-	if sql := sc.SQL; sql != "" {
-		scannerFunc := dbio.TypeDbDuckDb.GetTemplateValue("function.iceberg_scanner")
-		sql = g.R(sql, "stream_scanner", scannerFunc)
-		sql = g.R(sql, "uri", r.URI)
-		return sql
-	}
-	return r.Duck.MakeScanSelectQuery("iceberg_scan", r.URI, sc.Select, sc.IncrementalKey, sc.IncrementalValue, cast.ToUint64(sc.Limit))
+	sql := r.Duck.MakeScanQuery("iceberg_scanner", r.URI, sc)
+	return sql
 }

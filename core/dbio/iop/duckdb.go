@@ -798,33 +798,51 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	return
 }
 
-func (duck *DuckDb) MakeScanSelectQuery(scanFunc, uri string, fields []string, incrementalKey, incrementalValue string, limit uint64) (sql string) {
+func (duck *DuckDb) MakeScanQuery(scanFunc, uri string, fsc FileStreamConfig) (sql string) {
+
+	where := ""
+	incrementalWhereCond := "1=1"
+
+	if fsc.IncrementalValue == "" {
+		fsc.IncrementalValue = "null"
+	}
+
+	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
+		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
+		where = g.F("where %s", incrementalWhereCond)
+	}
+
+	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + scanFunc)
+	if fsc.SQL != "" {
+		return g.R(
+			g.R(fsc.SQL, "stream_scanner", streamScanner),
+			"incremental_where_cond", incrementalWhereCond,
+			"incremental_value", fsc.IncrementalValue,
+			"uri", uri,
+		)
+	}
+
+	fields := fsc.Select
 	if len(fields) == 0 || fields[0] == "*" {
 		fields = []string{"*"}
 	} else {
 		fields = dbio.TypeDbDuckDb.QuoteNames(fields...)
 	}
 
-	where := ""
-	if incrementalKey != "" && incrementalValue != "" {
-		where = fmt.Sprintf("where %s > %s", dbio.TypeDbDuckDb.Quote(incrementalKey), incrementalValue)
-	}
-
-	templ := dbio.TypeDbDuckDb.GetTemplateValue("core." + scanFunc)
-	if templ == "" {
-		templ = "select {fields} from {scanFunc}('{uri}') {where}"
+	selectStreamScanner := dbio.TypeDbDuckDb.GetTemplateValue("core.select_stream_scanner")
+	if selectStreamScanner == "" {
+		selectStreamScanner = "select {fields} from {stream_scanner} {where}"
 	}
 
 	sql = strings.TrimSpace(g.R(
-		templ,
+		g.R(selectStreamScanner, "stream_scanner", streamScanner),
 		"fields", strings.Join(fields, ","),
-		"scanFunc", scanFunc,
 		"uri", uri,
 		"where", where,
 	))
 
-	if limit > 0 {
-		sql += fmt.Sprintf(" limit %d", limit)
+	if fsc.Limit > 0 {
+		sql += fmt.Sprintf(" limit %d", fsc.Limit)
 	}
 
 	return sql

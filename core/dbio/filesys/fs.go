@@ -452,6 +452,8 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 				err = ds.ConsumeDeltaReader(uri, Cfg)
 			case dbio.FileTypeParquet:
 				err = ds.ConsumeParquetReaderDuckDb(uri, Cfg)
+			case dbio.FileTypeCsv:
+				err = ds.ConsumeCsvReaderDuckDb(uri, Cfg)
 			}
 
 			if err != nil {
@@ -933,11 +935,11 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 	go func() {
 		defer close(dsCh)
 
-		allowMerging := strings.ToLower(os.Getenv("SLING_MERGE_READERS")) != "false"
+		allowMerging := strings.ToLower(os.Getenv("SLING_MERGE_READERS")) != "false" && !cfg.ShouldUseDuckDB()
 
 		pushDatastream := func(ds *iop.Datastream) {
 			// use selected fields only when not parquet
-			skipSelect := g.In(cfg.Format, dbio.FileTypeParquet, dbio.FileTypeIceberg, dbio.FileTypeDelta)
+			skipSelect := g.In(cfg.Format, dbio.FileTypeParquet, dbio.FileTypeIceberg, dbio.FileTypeDelta) || cfg.ShouldUseDuckDB()
 			if len(cfg.Select) > 1 && !skipSelect {
 				cols := iop.NewColumnsFromFields(cfg.Select...)
 				fm := ds.Columns.FieldMap(true)

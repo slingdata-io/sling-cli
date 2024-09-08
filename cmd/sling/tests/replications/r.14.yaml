@@ -17,6 +17,11 @@ streams:
     sql: select id, first_name from {stream_scanner}
     object: public.sling_test_parquet_sql
 
+  cmd/sling/tests/files/test2.csv:
+    mode: full-refresh
+    sql: select first_name, email from {stream_scanner}
+    object: public.sling_test_csv_sql
+
   parquet_sql:
     mode: full-refresh
     sql: select id, first_name from parquet_scan('cmd/sling/tests/files/parquet/test1.parquet')

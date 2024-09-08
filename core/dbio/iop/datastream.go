@@ -85,7 +85,7 @@ type FileStreamConfig struct {
 }
 
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
-	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || (sc.Format == dbio.FileTypeParquet && sc.SQL != "")
+	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
 }
 
 type KeyValue struct {
@@ -1495,6 +1495,27 @@ func (ds *Datastream) ConsumeDeltaReader(uri string, sc FileStreamConfig) (err e
 	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read delta rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { r.Close() })
+
+	return
+}
+
+// ConsumeCsvReaderDuckDb uses the provided reader to stream rows
+func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (err error) {
+
+	props := g.MapToKVArr(sc.Props)
+	r, err := NewCsvReaderDuckDb(uri, ds.config, props...)
+	if err != nil {
+		return g.Error(err, "could not create CsvReaderDuckDb")
+	}
+
+	sql := r.MakeQuery(sc)
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read csv rows")
 	}
 
 	ds.Inferred = true

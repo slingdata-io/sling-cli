@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/spf13/cast"
 )
 
 type ParquetDuckDb struct {
@@ -40,15 +38,11 @@ func (r *ParquetDuckDb) Columns() (Columns, error) {
 	return r.columns, nil
 }
 
-func (p *ParquetDuckDb) Close() error {
-	return p.Duck.Close()
+func (r *ParquetDuckDb) Close() error {
+	return r.Duck.Close()
 }
+
 func (r *ParquetDuckDb) MakeQuery(sc FileStreamConfig) string {
-	if sql := sc.SQL; sql != "" {
-		scannerFunc := dbio.TypeDbDuckDb.GetTemplateValue("function.parquet_scanner")
-		sql = g.R(sql, "stream_scanner", scannerFunc)
-		sql = g.R(sql, "uri", r.URI)
-		return sql
-	}
-	return r.Duck.MakeScanSelectQuery("parquet_scan", r.URI, sc.Select, sc.IncrementalKey, sc.IncrementalValue, cast.ToUint64(sc.Limit))
+	sql := r.Duck.MakeScanQuery("parquet_scanner", r.URI, sc)
+	return sql
 }

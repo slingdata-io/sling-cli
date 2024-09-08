@@ -9,10 +9,7 @@ core:
   truncate_table: delete from {table}
   insert_option: ""
   modify_column: 'alter {column} type {type}'
-
-  iceberg_scan: select {fields} from iceberg_scan('{uri}', allow_moved_paths = true) {where}
-  delta_scan: select {fields} from delta_scan('{uri}') {where}
-  parquet_scan: select {fields} from parquet_scan('{uri}') {where}
+  select_stream_scanner: select {fields} from {stream_scanner} {where}
 
 
 metadata:
@@ -155,7 +152,8 @@ function:
   iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
   delta_scanner: delta_scan('{uri}')
   parquet_scanner: parquet_scan('{uri}')
-  csv_scanner: read_csv('{uri}')
+  # csv_scanner: read_csv('{uri}', delim='{delim}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{nullstr}')
+  csv_scanner: read_csv('{uri}', delim='{delim}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{nullstr}')
 
 variable:
   bool_as: integer

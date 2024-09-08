@@ -157,6 +157,8 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 				err = ds.ConsumeDeltaReader("file://"+path, Cfg)
 			case dbio.FileTypeParquet:
 				err = ds.ConsumeParquetReaderDuckDb("file://"+path, Cfg)
+			case dbio.FileTypeCsv:
+				err = ds.ConsumeCsvReaderDuckDb("file://"+path, Cfg)
 			}
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
