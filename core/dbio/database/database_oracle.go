@@ -470,12 +470,12 @@ func (conn *OracleConn) writeCsv(ds *iop.Datastream, writer io.Writer, pu *cmap.
 				pu.Set(cast.ToString(i), i)
 			}
 
-			if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.DateType {
+			if ds.Columns[i].Type == iop.DateType {
 				// casting unsafely, but has been determined by ParseString
 				// convert to Oracle Time format
 				val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
 				valS = val.(time.Time).Format("2006-01-02 15:04:05")
-			} else if ds.Columns[i].Type == iop.TimestampType {
+			} else if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.TimestampType {
 				// convert to Oracle Timestamp format
 				val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
 				valS = val.(time.Time).Format("2006-01-02 15:04:05.000000")
