@@ -12,6 +12,8 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -462,7 +464,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		"-d", database,
 		"-t", ",",
 		"-m", "1",
-		"-c",
+		"-w",
 		"-q",
 		"-b", cast.ToString(batchSize),
 		"-F", "2",
@@ -698,11 +700,48 @@ func (conn *MsSQLServerConn) CopyFromAzure(tableFName, azPath string) (count uin
 	return 0, nil
 }
 
+// writeCsvWithoutQuotes writes a CSV file without quotes
+// It takes the following parameters:
+//   - path: the file path where the CSV will be written
+//   - batch: an iop.Batch containing the data to be written
+//   - limit: the maximum number of rows to write (0 for no limit)
+//
+// The function returns:
+//   - cnt: the number of rows written
+//   - err: any error encountered during the process
+//
+// The function performs the following steps:
+// 1. Creates a new file at the specified path
+// 2. Sets up a UTF-16LE encoder and writer
+// 3. Writes the UTF-16LE Byte Order Mark (BOM)
+// 4. Writes the header row using column names from the batch
+// 5. Iterates through the batch rows, writing each as a CSV line
+// 6. Handles data type conversions using a Sp (StreamProcessor) object
+// 7. Uses platform-specific newline characters
+// 8. Writes data without surrounding quotes, separating fields with commas
+//
+// Note: This function is specifically designed for SQL Server bulk import
+// operations, which require UTF-16LE encoding and no quoting of fields.
 func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64, err error) {
 	file, err := os.Create(path)
 	if err != nil {
 		return cnt, err
 	}
+	defer file.Close()
+
+	// Create a UTF-16LE encoder
+	encoder := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewEncoder()
+
+	// Create a writer that transforms UTF-8 to UTF-16LE
+	writer := transform.NewWriter(file, encoder)
+	defer writer.Close()
+
+	// Write the BOM (Byte Order Mark) for UTF-16LE
+	_, err = writer.Write([]byte{0xFF, 0xFE})
+	if err != nil {
+		return cnt, g.Error(err, "could not write BOM to file")
+	}
+
 	fields := batch.Columns.Names()
 
 	newLine := "\n"
@@ -710,33 +749,33 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 		newLine = "\r\n"
 	}
 
-	_, err = file.Write([]byte(strings.Join(fields, ",") + newLine))
+	// Write header
+	_, err = writer.Write([]byte(strings.Join(fields, ",") + newLine))
 	if err != nil {
 		return cnt, g.Error(err, "could not write header to file")
 	}
 
 	Sp := batch.Ds().Sp
-	Sp.SetConfig(map[string]string{"datetime_format": "2006-01-02 15:04:05.000"})
+	timestampLayout := dbio.TypeDbSQLServer.GetTemplateValue("variable.timestamp_layout")
+	Sp.SetConfig(map[string]string{"datetime_format": timestampLayout})
+
 	for row0 := range batch.Rows {
 		cnt++
 		row := make([]string, len(row0))
 		for i, val := range row0 {
 			row[i] = Sp.CastToString(i, val, batch.Columns[i].Type)
 		}
-		_, err = file.Write([]byte(strings.Join(row, ",") + newLine))
+
+		// Write row
+		_, err = writer.Write([]byte(strings.Join(row, ",") + newLine))
 		if err != nil {
 			return cnt, g.Error(err, "could not write row to file")
 		}
 
 		if batch.Count == int64(limit) {
 			batch.Close()
-			continue
+			break
 		}
-
-	}
-	err = file.Close()
-	if err != nil {
-		return cnt, g.Error(err, "could not close file")
 	}
 
 	return cnt, nil
