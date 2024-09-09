@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
 	"os"
@@ -201,7 +202,14 @@ func (cfg *Config) SetDefault() {
 }
 
 // Unmarshal parse a configuration file path or config text
-func (cfg *Config) Unmarshal(cfgStr string) error {
+func (cfg *Config) Unmarshal(cfgStr string) (err error) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(r, "Panic occurred while unmarshalling config")
+		}
+	}()
+
 	// expand variables
 	cfgStr = expandEnvVars(cfgStr)
 
@@ -219,7 +227,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		}
 	}
 
-	err := yaml.Unmarshal(cfgBytes, cfg)
+	err = yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
 		if errStat != nil && !strings.Contains(cfgStr, "\n") && !strings.Contains(cfgStr, ": ") {
 			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
@@ -1159,9 +1167,10 @@ func (cfg *Config) StreamID() string {
 
 // ConfigOptions are configuration options
 type ConfigOptions struct {
-	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
-	StdIn  bool `json:"-"`                                        // whether stdin is passed
-	StdOut bool `json:"stdout,omitempty" yaml:"stdout,omitempty"` // whether to output to stdout
+	Debug   bool `json:"debug,omitempty" yaml:"debug,omitempty"`
+	StdIn   bool `json:"-"`                                          // whether stdin is passed
+	StdOut  bool `json:"stdout,omitempty" yaml:"stdout,omitempty"`   // whether to output to stdout
+	Dataset bool `json:"dataset,omitempty" yaml:"dataset,omitempty"` // whether to output to dataset
 }
 
 // Source is a source of data
@@ -1170,7 +1179,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	SQL         string         `json:"sql,omitempty" yaml:"stream,omitempty"`
+	SQL         string         `json:"sql,omitempty" yaml:"sql,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`

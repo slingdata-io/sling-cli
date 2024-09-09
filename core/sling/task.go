@@ -34,6 +34,7 @@ type TaskExecution struct {
 	Progress  string     `json:"progress"`
 
 	df            *iop.Dataflow `json:"-"`
+	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
@@ -244,6 +245,11 @@ func (t *TaskExecution) GetCount() (count uint64) {
 // Df return the dataflow object
 func (t *TaskExecution) Df() *iop.Dataflow {
 	return t.df
+}
+
+// Data return the dataset object
+func (t *TaskExecution) Data() *iop.Dataset {
+	return t.data
 }
 
 // GetRate return the speed of flow (rows / sec and bytes / sec)
