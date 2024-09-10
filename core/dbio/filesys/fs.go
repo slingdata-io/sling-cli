@@ -677,7 +677,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 	url = strings.TrimSuffix(NormalizeURI(fs, url), "/")
 
-	singleFile := fileRowLimit == 0 && fileBytesLimit == 0 && len(df.Streams) == 1
+	singleFile := fileRowLimit == 0 && fileBytesLimit == 0
 
 	// parse file partitioning notation (*), determine single-file vs folder mode
 	parts := strings.Split(url, "/")
@@ -841,15 +841,28 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	partCnt := 1
+
+	var streamCh chan *iop.Datastream
+	if singleFile {
+		// merge dataflow streams into one stream
+		streamCh = make(chan *iop.Datastream)
+		go func() {
+			streamCh <- iop.MergeDataflow(df)
+			close(streamCh)
+		}()
+	} else {
+		streamCh = df.StreamCh
+	}
+
 	// for ds := range df.MakeStreamCh(true) {
-	for ds := range df.StreamCh {
+	for ds := range streamCh {
 
 		partURL := fmt.Sprintf("%s/part.%02d", url, partCnt)
 		if singleFile {
 			partURL = url
 		}
 
-		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v]", partURL, fileRowLimit, fileBytesLimit, compression, concurrency, useBufferedStream, fileFormat)
+		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, fileRowLimit, fileBytesLimit, compression, concurrency, useBufferedStream, fileFormat, singleFile)
 
 		df.Context.Wg.Read.Add()
 		ds.SetConfig(fs.Props()) // pass options
@@ -907,7 +920,7 @@ func Delete(fs FileSysClient, uri string) (err error) {
 	}
 
 	err = fs.delete(uri)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "exist") {
 		if g.IsDebugLow() {
 			g.Warn("could not delete path %s\n%s", uri, err.Error())
 		}

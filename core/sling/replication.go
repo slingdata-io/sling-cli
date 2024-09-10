@@ -424,6 +424,15 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
 		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
 
+		// if single file target, set file_row_limit and file_bytes_limit
+		if stream.Single != nil && *stream.Single {
+			if cfg.Target.Options == nil {
+				cfg.Target.Options = &TargetOptions{}
+			}
+			cfg.Target.Options.FileMaxBytes = g.Int64(0)
+			cfg.Target.Options.FileMaxRows = g.Int64(0)
+		}
+
 		// prepare config
 		err = cfg.Prepare()
 		if err != nil {
