@@ -404,12 +404,12 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 		expr := ""
 		colName := conn.Quote(col.Name)
 		colNameEscaped := strings.ReplaceAll(colName, `"`, `\"`)
-		if col.Type == iop.DatetimeType || col.Type == iop.DateType {
+		if col.Type == iop.DateType {
 			expr = fmt.Sprintf(
 				`"TO_DATE(:%s, 'YYYY-MM-DD HH24:MI:SS')"`,
 				colNameEscaped,
 			)
-		} else if col.Type == iop.TimestampType {
+		} else if col.Type == iop.DatetimeType || col.Type == iop.TimestampType {
 			expr = fmt.Sprintf(
 				`"TO_TIMESTAMP(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6')"`,
 				colNameEscaped,
