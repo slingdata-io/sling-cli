@@ -126,7 +126,8 @@ func (conn *OracleConn) ConnString() string {
 		"trace_file":        "trace file",
 	}
 
-	options := map[string]string{}
+	// infinite timeout by default
+	options := map[string]string{"TIMEOUT": "0"}
 
 	for key, new_key := range propMapping {
 		if val := conn.GetProp(key); val != "" {
