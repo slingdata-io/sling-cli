@@ -62,8 +62,30 @@ func (conn *SnowflakeConn) Init() error {
 		gosnowflake.CustomJSONDecoderEnabled = cast.ToBool(val)
 	}
 
-	if kp := conn.GetProp("private_key_path"); kp != "" {
-		encPK, err := getEncodedPrivateKey(kp, conn.GetProp("private_key_passphrase"))
+	if keyPath := conn.GetProp("private_key_path"); keyPath != "" {
+		if !g.PathExists(keyPath) {
+			return g.Error("private_key_path does not exists (%s)", keyPath)
+		}
+
+		pemBytes, err := os.ReadFile(keyPath)
+		if err != nil {
+			return g.Error(err)
+		}
+
+		conn.SetProp("private_key", string(pemBytes))
+	}
+
+	if pk := conn.GetProp("private_key"); pk != "" {
+		// if provided as file path
+		if g.PathExists(pk) {
+			pemBytes, err := os.ReadFile(pk)
+			if err != nil {
+				return g.Error(err)
+			}
+			pk = string(pemBytes)
+		}
+
+		encPK, err := getEncodedPrivateKey(pk, conn.GetProp("private_key_passphrase"))
 		if err != nil {
 			return g.Error(err, "could not get encoded private key")
 		}
@@ -130,18 +152,8 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 	return err
 }
 
-func getEncodedPrivateKey(keyPath, passphrase string) (epk string, err error) {
-	if !g.PathExists(keyPath) {
-		err = g.Error("private_key_path does not exists (%s)", keyPath)
-		return
-	}
-
-	pemBytes, err := os.ReadFile(keyPath)
-	if err != nil {
-		return "", g.Error(err)
-	}
-
-	block, _ := pem.Decode(pemBytes)
+func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
+	block, _ := pem.Decode([]byte(pemStr))
 	key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(passphrase))
 	if err != nil {
 		return "", g.Error(err, "could not parse key")
