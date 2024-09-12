@@ -278,8 +278,8 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 // CopyToS3 exports a query to an S3 location
 func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) {
 
-	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
-	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID")
+	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY", "SECRET_ACCESS_KEY")
 	if AwsID == "" || AwsAccessKey == "" {
 		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' to copy to S3 from snowflake")
 		return
@@ -305,7 +305,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 
 	}
 
-	s3Bucket := conn.GetProp("AWS_BUCKET")
+	s3Bucket := conn.GetProp("AWS_BUCKET", "BUCKET")
 	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")

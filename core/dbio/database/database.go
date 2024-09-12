@@ -94,7 +94,7 @@ type Connection interface {
 	GetIndexes(string) (iop.Dataset, error)
 	GetNativeType(col iop.Column) (nativeType string, err error)
 	GetPrimaryKeys(string) (iop.Dataset, error)
-	GetProp(string) string
+	GetProp(...string) string
 	GetSchemas() (iop.Dataset, error)
 	GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error)
 	GetSQLColumns(table Table) (columns iop.Columns, err error)
@@ -488,11 +488,15 @@ func (conn *BaseConn) Template() dbio.Template {
 }
 
 // GetProp returns the value of a property
-func (conn *BaseConn) GetProp(key string) string {
+func (conn *BaseConn) GetProp(key ...string) string {
 	conn.context.Mux.Lock()
-	val := conn.properties[strings.ToLower(key)]
-	conn.context.Mux.Unlock()
-	return val
+	defer conn.context.Mux.Unlock()
+	for _, k := range key {
+		if val, ok := conn.properties[strings.ToLower(k)]; ok {
+			return val
+		}
+	}
+	return ""
 }
 
 // SetProp sets the value of a property
@@ -2973,7 +2977,7 @@ func (conn *BaseConn) Info() (ci ConnInfo) {
 
 func (conn *BaseConn) credsProvided(provider string) bool {
 	if provider == "AWS" {
-		if conn.GetProp("AWS_SECRET_ACCESS_KEY") != "" || conn.GetProp("AWS_ACCESS_KEY_ID") != "" {
+		if conn.GetProp("AWS_SECRET_ACCESS_KEY", "SECRET_ACCESS_KEY") != "" || conn.GetProp("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID") != "" {
 			return true
 		}
 	}
