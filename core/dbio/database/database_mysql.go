@@ -64,6 +64,44 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 	// add parseTime
 	u.Query().Add("parseTime", "true")
 
+	// param keys from https://github.com/go-sql-driver/mysql?tab=readme-ov-file#parameters
+	paramKeyMapping := map[string]string{
+		"allow_all_files":             "allowAllFiles",
+		"allow_cleartext_passwords":   "allowCleartextPasswords",
+		"allow_fallback_to_plaintext": "allowFallbackToPlaintext",
+		"allow_native_passwords":      "allowNativePasswords",
+		"allow_old_passwords":         "allowOldPasswords",
+		"charset":                     "charset",
+		"check_conn_liveness":         "checkConnLiveness",
+		"collation":                   "collation",
+		"client_found_rows":           "clientFoundRows",
+		"columns_with_alias":          "columnsWithAlias",
+		"interpolate_params":          "interpolateParams",
+		"loc":                         "loc",
+		"time_truncate":               "timeTruncate",
+		"max_allowed_packet":          "maxAllowedPacket",
+		"multi_statements":            "multiStatements",
+		"parse_time":                  "parseTime",
+		"read_timeout":                "readTimeout",
+		"reject_read_only":            "rejectReadOnly",
+		"server_pub_key":              "serverPubKey",
+		"timeout":                     "timeout",
+		"tls":                         "tls",
+		"write_timeout":               "writeTimeout",
+		"connection_attributes":       "connectionAttributes",
+	}
+
+	for key, libKey := range paramKeyMapping {
+		if val := conn.GetProp(key); val != "" {
+			u.Query().Add(libKey, val)
+		}
+		if libKey != key {
+			if val := conn.GetProp(libKey); val != "" {
+				u.Query().Add(libKey, val)
+			}
+		}
+	}
+
 	return u.DSN
 }
 
