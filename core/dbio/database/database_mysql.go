@@ -61,9 +61,6 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 		return connURL
 	}
 
-	// add parseTime
-	u.Query().Add("parseTime", "true")
-
 	// param keys from https://github.com/go-sql-driver/mysql?tab=readme-ov-file#parameters
 	paramKeyMapping := map[string]string{
 		"allow_all_files":             "allowAllFiles",
@@ -91,15 +88,24 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 		"connection_attributes":       "connectionAttributes",
 	}
 
+	query := u.Query()
 	for key, libKey := range paramKeyMapping {
 		if val := conn.GetProp(key); val != "" {
-			u.Query().Add(libKey, val)
+			query.Set(libKey, val)
 		}
 		if libKey != key {
 			if val := conn.GetProp(libKey); val != "" {
-				u.Query().Add(libKey, val)
+				query.Set(libKey, val)
 			}
 		}
+	}
+
+	// reconstruct the url
+	u.RawQuery = query.Encode()
+	u, err = dburl.Parse(u.String())
+	if err != nil {
+		g.LogError(err, "could not parse MySQL URL")
+		return connURL
 	}
 
 	return u.DSN
