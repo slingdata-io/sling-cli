@@ -290,7 +290,7 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, fields []strin
 	}
 
 	statement := g.R(
-		"insert into {table} ({fields}) values  {values}",
+		"insert into {table} ({fields}) values {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
