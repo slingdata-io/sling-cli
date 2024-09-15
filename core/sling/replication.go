@@ -325,15 +325,9 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 
 	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
-	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, rd.Source, rd.Target)
 
 	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
 		return tasks, err
-	}
-
-	if streamCnt == 0 {
-		g.Warn("Did not match any streams. Exiting.")
-		return
 	}
 
 	for _, name := range rd.StreamsOrdered() {
