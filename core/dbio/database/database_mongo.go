@@ -245,7 +245,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 						// fix Object ID
 						it.Row[i] = strings.TrimSuffix(
 							strings.TrimPrefix(
-								cast.ToString(it.Row[0]), `ObjectID("`,
+								cast.ToString(it.Row[i]), `ObjectID("`,
 							), `")`,
 						)
 					case primitive.DateTime:
