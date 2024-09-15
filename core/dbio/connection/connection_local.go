@@ -36,6 +36,35 @@ func (ce ConnEntries) Get(name string) ConnEntry {
 	return ConnEntry{}
 }
 
+func (ce ConnEntries) List() (fields []string, rows [][]any) {
+	fields = []string{"Conn Name", "Conn Type", "Source"}
+	for _, conn := range ce {
+		rows = append(rows, []any{conn.Name, conn.Description, conn.Source})
+	}
+	return fields, rows
+}
+
+func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, err error) {
+	conn := ce.Get(name)
+	if name == "" {
+		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+	}
+
+	defer conn.Connection.Close()
+	_, nodes, schemata, err = conn.Connection.Discover(opt)
+	return
+}
+
+func (ce ConnEntries) Test(name string) (ok bool, err error) {
+	conn := ce.Get(name)
+	if name == "" {
+		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+	}
+	defer conn.Connection.Close()
+	ok, err = conn.Connection.Test()
+	return
+}
+
 var (
 	localConns   ConnEntries
 	localConnsTs time.Time
@@ -204,11 +233,12 @@ func LocalFileConnEntry() ConnEntry {
 	}
 }
 
-type EnvConns struct {
+type EnvFileConns struct {
+	Name    string
 	EnvFile *env.EnvFile
 }
 
-func (ec *EnvConns) Set(name string, kvMap map[string]any) (err error) {
+func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 
 	if name == "" {
 		return g.Error("name is blank")
@@ -242,7 +272,7 @@ func (ec *EnvConns) Set(name string, kvMap map[string]any) (err error) {
 	return
 }
 
-func (ec *EnvConns) Unset(name string) (err error) {
+func (ec *EnvFileConns) Unset(name string) (err error) {
 	if name == "" {
 		return g.Error("name is blank")
 	}
@@ -262,52 +292,46 @@ func (ec *EnvConns) Unset(name string) (err error) {
 	return
 }
 
-func (ec *EnvConns) List() (fields []string, rows [][]any) {
-	conns := GetLocalConns(true)
-	fields = []string{"Conn Name", "Conn Type", "Source"}
-	for _, conn := range conns {
-		rows = append(rows, []any{conn.Name, conn.Description, conn.Source})
-	}
-	return fields, rows
-}
-
-func (ec *EnvConns) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, err error) {
-	conn, ok1 := ec.GetConnEntry(name)
-	if !ok1 || name == "" {
-		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {
+	m := g.M()
+	if err = g.JSONConvert(ec.EnvFile, &m); err != nil {
+		return entries, g.Error(err)
 	}
 
-	defer conn.Connection.Close()
-	_, nodes, schemata, err = conn.Connection.Discover(opt)
-	return
-}
-
-func (ec *EnvConns) Test(name string) (ok bool, err error) {
-	conn, ok1 := ec.GetConnEntry(name)
-	if !ok1 || name == "" {
-		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
-	}
-	defer conn.Connection.Close()
-	ok, err = conn.Connection.Test()
-	return
-}
-
-func (ec *EnvConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
-	conns := map[string]ConnEntry{}
-	for _, conn := range GetLocalConns() {
-		conns[strings.ToLower(conn.Name)] = conn
-	}
-
-	// get connection from envfile (may be provided via body)
-	if ec.EnvFile != nil {
-		entries, err := EnvFileConnectionEntries(*ec.EnvFile, "provided env.yaml")
-		if err == nil {
-			for _, entry := range entries {
-				conns[strings.ToLower(entry.Name)] = entry
-			}
+	connsMap := map[string]ConnEntry{}
+	profileConns, err := ReadConnections(m)
+	for _, conn := range profileConns {
+		c := ConnEntry{
+			Name:        strings.ToUpper(conn.Info().Name),
+			Description: conn.Type.NameLong(),
+			Source:      ec.Name,
+			Connection:  conn,
 		}
+		if c.Source == "" {
+			c.Source = "provided env.yaml"
+		}
+		connsMap[c.Name] = c
 	}
 
-	conn, ok = conns[strings.ToLower(name)]
+	entries = lo.Values(connsMap)
+	sort.Slice(entries, func(i, j int) bool {
+		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
+	})
+
 	return
+}
+
+// GetConnEntry get connection from envfile (may be provided via body)
+func (ec *EnvFileConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
+	if ec.EnvFile == nil {
+		return
+	}
+
+	entries, err := ec.ConnectionEntries()
+	if err != nil {
+		return
+	}
+
+	conn = entries.Get(name)
+	return conn, conn.Name != ""
 }

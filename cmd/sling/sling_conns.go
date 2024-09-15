@@ -26,8 +26,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	ok = true
 
 	ef := env.LoadSlingEnvFile()
-	ec := connection.EnvConns{EnvFile: &ef}
+	ec := connection.EnvFileConns{EnvFile: &ef}
 	asJSON := os.Getenv("SLING_OUTPUT") == "json"
+
+	entries := connection.GetLocalConns()
 
 	env.SetTelVal("task_start_time", time.Now())
 	defer func() {
@@ -71,8 +73,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
 		name := cast.ToString(c.Vals["name"])
-		conn, ok := ec.GetConnEntry(name)
-		if !ok {
+		conn := entries.Get(name)
+		if conn.Name == "" {
 			return ok, g.Error("did not find connection %s", name)
 		}
 
@@ -155,7 +157,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 	case "list":
-		fields, rows := ec.List()
+		fields, rows := entries.List()
 		if asJSON {
 			fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
 		} else {
@@ -165,12 +167,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	case "test":
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
-		if conn, ok := ec.GetConnEntry(name); ok {
+		if conn := entries.Get(name); conn.Name != "" {
 			env.SetTelVal("conn_type", conn.Connection.Type.String())
 			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
 		}
 
-		ok, err = ec.Test(name)
+		ok, err = entries.Test(name)
 		if err != nil {
 			err = g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
