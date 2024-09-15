@@ -244,7 +244,7 @@ func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *
 
 	dbPath, err := conn.dbPath()
 	if err != nil {
-		os.Remove(sqlPath)
+		env.RemoveLocalTempFile(sqlPath)
 		err = g.Error(err, "could not get duckdb file path")
 		return
 	}
@@ -413,6 +413,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	}
 
 	conn.LogSQL(sql, args...)
+	g.Trace(cmd.String())
 
 	var out []byte
 	conn.setDuckDbFileCmd(cmd)
@@ -431,7 +432,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 
 		out, err = cmd.Output()
 
-		os.Remove(sqlPath) // delete sql temp file
+		env.RemoveLocalTempFile(sqlPath) // delete sql temp file
 	}
 
 	conn.unlockFileContext(fileContext)
@@ -487,7 +488,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	if err != nil {
 		return ds, g.Error(err, "could not get cmd duckdb")
 	}
-	defer func() { os.Remove(sqlPath) }()
+	defer func() { env.RemoveLocalTempFile(sqlPath) }()
 
 	opts := getQueryOptions(options)
 	fetchedColumns := iop.Columns{}
@@ -503,6 +504,7 @@ func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, optio
 	conn.LogSQL(sql)
 
 	cmd.Args = append(cmd.Args, "-csv", "-nullvalue", `\N\`)
+	g.Trace(cmd.String())
 
 	conn.setDuckDbFileCmd(cmd)
 	fileContext, _ := conn.getDuckDbFileContext()
@@ -706,7 +708,7 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		conn.LogSQL(sql)
 
 		cmd, sqlPath, err := conn.getCmd(ds.Context, sql, cast.ToBool(conn.GetProp("read_only")))
-		if err != nil {
+		if err != nil && csvPath != "/dev/stdin" {
 			env.RemoveLocalTempFile(csvPath)
 			return count, g.Error(err, "could not get cmd duckdb")
 		}
@@ -734,9 +736,9 @@ func (conn *DuckDbConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		conn.unlockFileContext(fileContext)
 
 		if csvPath != "/dev/stdin" {
-			os.Remove(csvPath) // delete csv file
+			env.RemoveLocalTempFile(csvPath) // delete csv file
 		}
-		os.Remove(sqlPath) // delete sql temp file
+		env.RemoveLocalTempFile(sqlPath) // delete sql temp file
 
 		stderrVal := stderrBuf.String()
 		if err != nil {
