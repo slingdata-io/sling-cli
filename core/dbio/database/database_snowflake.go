@@ -270,7 +270,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		return
 	}
 	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
-	df.Defer(func() { filesys.Delete(fs, filePath) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(fs, filePath)
+		}
+	})
 
 	return
 }
@@ -502,7 +506,11 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 		return count, g.Error(err, "Could not Delete: "+s3Path)
 	}
 
-	df.Defer(func() { filesys.Delete(s3Fs, s3Path) }) // cleanup
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(s3Fs, s3Path)
+		}
+	}) // cleanup
 
 	g.Info("writing to s3 for snowflake import")
 	s3Fs.SetProp("null_as", `\N`)
@@ -572,7 +580,11 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 		return count, g.Error(err, "Could not Delete: "+azPath)
 	}
 
-	df.Defer(func() { filesys.Delete(azFs, azPath) }) // cleanup
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(azFs, azPath)
+		}
+	}) // cleanup
 
 	g.Info("writing to azure for snowflake import")
 	azFs.SetProp("null_as", `\N`)

@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -197,7 +198,11 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
-	df.Defer(func() { filesys.Delete(fs, s3Path) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(fs, s3Path)
+		}
+	})
 
 	return
 }
@@ -230,7 +235,11 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		return count, g.Error(err, "Could not Delete: "+s3Path)
 	}
 
-	df.Defer(func() { filesys.Delete(s3Fs, s3Path) }) // cleanup
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(s3Fs, s3Path)
+		}
+	}) // cleanup
 
 	g.Info("writing to s3 for redshift import")
 	s3Fs.SetProp("null_as", `\N`)

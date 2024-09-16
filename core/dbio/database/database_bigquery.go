@@ -566,7 +566,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
 
-	df.Defer(func() { filesys.Delete(fs, localPath) })
+	df.Defer(func() { env.RemoveLocalTempFile(localPath) })
 
 	g.Info("importing into bigquery via local storage")
 
@@ -858,7 +858,11 @@ func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
-	df.Defer(func() { filesys.Delete(fs, gsURL) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(fs, gsURL)
+		}
+	})
 
 	return
 }
