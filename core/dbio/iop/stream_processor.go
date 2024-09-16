@@ -164,6 +164,8 @@ func NewStreamProcessor() *StreamProcessor {
 		"2006-01-02 15:04:05.000000",
 		"2006-01-02T15:04:05.000Z",
 		"2006-01-02T15:04:05.000000Z",
+		"2006-01-02 15:04:05.000 Z",    // snowflake export format
+		"2006-01-02 15:04:05.000000 Z", // snowflake export format
 		"02-Jan-06",
 		"02-Jan-06 15:04:05",
 		"02-Jan-06 03:04:05 PM",
