@@ -1,17 +1,17 @@
-general_type	oracle	postgres	mysql	mariadb	sqlserver	azuresql	azuredwh	redshift	snowflake	sqlite	bigquery	clickhouse	duckdb	motherduck	starrocks	trino
-bigint	number(19)	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	int64	Nullable(Int64)	bigint	bigint	bigint	bigint
-binary	varbinary()	bytea	varbinary	varbinary	varbinary	varbinary	varbinary	varchar(65535)	binary	blob	bytes	Nullable(String)	binary	binary	varbinary	varbinary
-bool	varchar(5)	bool	char(5)	char(5)	varchar(5)	varchar(5)	varchar(5)	bool	boolean	boolean	bool	Nullable(String)	bool	bool	char(5)	boolean
-date	date	date	date	date	date	date	date	date	date	text	date	Nullable(Date)	date	date	date	date
-datetime	datetime	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp	text	datetime	Nullable(DateTime64(6))	datetime	datetime	datetime	timestamp
-decimal	number(,)	numeric	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	real	numeric	Nullable(Decimal(,))	decimal(,)	decimal(,)	decimal(,)	decimal(,)
-integer	number(10)	integer	integer	integer	integer	integer	integer	integer	integer	integer	int64	Nullable(Int64)	integer	integer	bigint	integer
-json	clob	jsonb	json	json	nvarchar(max)	nvarchar(65535)	nvarchar(max)	varchar(65535)	variant	json	json	Nullable(String)	json	json	json	json
-smallint	number(5)	smallint	smallint	smallint	smallint	smallint	smallint	smallint	smallint	integer	int64	Nullable(Int32)	smallint	smallint	smallint	smallint
-string	varchar(4000)	varchar(65500)	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	varchar	text	string	Nullable(String)	string	string	varchar(65533)	varchar
-text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)	varchar
-timestamp	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp_ntz	text	timestamp	Nullable(DateTime64(6))	timestamp	timestamp	datetime	timestamp
-timestampz	timestamp(9)	timestamptz	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime	timestamp with time zone
-float	float	double precision	double	double	float	float	float	double precision	float	real	float64	Nullable(Float64)	float	float	double	double
-time	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar
-timez	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar
+general_type	oracle	postgres	mysql	mariadb	sqlserver	azuresql	azuredwh	redshift	snowflake	sqlite	bigquery	clickhouse	duckdb	motherduck	starrocks	trino	proton
+bigint	number(19)	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	bigint	int64	Nullable(Int64)	bigint	bigint	bigint	bigint	nullable(int64)
+binary	varbinary()	bytea	varbinary	varbinary	varbinary	varbinary	varbinary	varchar(65535)	binary	blob	bytes	Nullable(String)	binary	binary	varbinary	varbinary	nullable(string)
+bool	varchar(5)	bool	char(5)	char(5)	varchar(5)	varchar(5)	varchar(5)	bool	boolean	boolean	bool	Nullable(String)	bool	bool	char(5)	boolean	nullable(string)
+date	date	date	date	date	date	date	date	date	date	text	date	Nullable(Date)	date	date	date	date	nullable(date)
+datetime	datetime	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp	text	datetime	Nullable(DateTime64(6))	datetime	datetime	datetime	timestamp	nullable(datetime64(6))
+decimal	number(,)	numeric	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	decimal(,)	real	numeric	Nullable(Decimal(,))	decimal(,)	decimal(,)	decimal(,)	decimal(,)	nullable(decimal(,))
+integer	number(10)	integer	integer	integer	integer	integer	integer	integer	integer	integer	int64	Nullable(Int64)	integer	integer	bigint	integer	nullable(int64)
+json	clob	jsonb	json	json	nvarchar(max)	nvarchar(65535)	nvarchar(max)	varchar(65535)	variant	json	json	Nullable(String)	json	json	json	json	nullable(string)
+smallint	number(5)	smallint	smallint	smallint	smallint	smallint	smallint	smallint	smallint	integer	int64	Nullable(Int32)	smallint	smallint	smallint	smallint	nullable(int32)
+string	varchar()	varchar()	varchar()	varchar()	nvarchar()	nvarchar()	nvarchar()	varchar()	varchar()	text	string	Nullable(String)	varchar()	varchar()	varchar()	varchar	nullable(string)
+text	clob	text	mediumtext	mediumtext	nvarchar(max)	nvarchar(max)	nvarchar(max)	varchar(65535)	text	text	string	Nullable(String)	text	text	varchar(65533)	varchar	nullable(string)
+timestamp	timestamp(9)	timestamp	datetime(6)	datetime(6)	datetime2	datetime2	datetime2	timestamp	timestamp_ntz	text	timestamp	Nullable(DateTime64(6))	timestamp	timestamp	datetime	timestamp	nullable(datetime64(6))
+timestampz	timestamp(9) with time zone	timestamptz	datetime(6)	datetime(6)	datetimeoffset	datetimeoffset	datetimeoffset	timestamptz	timestamp_tz	text	timestamp	Nullable(DateTime64(6))	timestamptz	timestamptz	datetime	timestamp with time zone	nullable(datetime64(6))
+float	float	double precision	double	double	float	float	float	double precision	float	real	float64	Nullable(Float64)	float	float	double	double	nullable(float64)
+time	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)
+timez	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)

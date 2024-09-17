@@ -32,7 +32,7 @@ type SQLiteConn struct {
 	URL string
 }
 
-const SQLiteVersion = "3.41.0"
+var SQLiteVersion = "3.41"
 
 // Init initiates the object
 func (conn *SQLiteConn) Init() error {
@@ -48,7 +48,32 @@ func (conn *SQLiteConn) Init() error {
 		return g.Error(err, "could not set http url")
 	}
 
+	// set version for windows
+	if runtime.GOOS == "windows" {
+		SQLiteVersion = "3.44"
+	}
+
 	return conn.BaseConn.Init()
+}
+
+func (conn *SQLiteConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		indexDDL := strings.ReplaceAll(index.CreateDDL(), table.FDQN(), table.NameQ()) // doesn't like FDQN
+		ddl = ddl + ";\n" + indexDDL
+	}
+
+	return ddl, nil
 }
 
 // GetURL returns the processed URL
@@ -246,11 +271,11 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	INSERT INTO {tgt_table} as tgt
+	insert into {tgt_table} as tgt
 		({insert_fields}) 
-	SELECT {src_fields}
-	FROM {src_table} as src
-	WHERE true
+	select {src_fields}
+	from {src_table} as src
+	where true
 	ON CONFLICT ({pk_fields})
 	DO UPDATE 
 	SET {set_fields}
@@ -267,17 +292,6 @@ func (conn *SQLiteConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
 		"insert_fields", upsertMap["insert_fields"],
 	)
-
-	return
-}
-
-func writeTempSQL(sql string, filePrefix ...string) (sqlPath string, err error) {
-	sqlPath = path.Join(env.GetTempFolder(), g.NewTsID(filePrefix...)+".sql")
-
-	err = os.WriteFile(sqlPath, []byte(sql), 0777)
-	if err != nil {
-		return "", g.Error(err, "could not create temp sql")
-	}
 
 	return
 }
@@ -379,9 +393,9 @@ func EnsureBinSQLite() (binPath string, err error) {
 		return envPath, nil
 	}
 
-	folderPath := path.Join(env.HomeBinDir(), "sqlite")
+	folderPath := path.Join(env.HomeBinDir(), "sqlite", SQLiteVersion)
 	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
-	binPath = path.Join(env.HomeBinDir(), "sqlite", "sqlite3"+extension)
+	binPath = path.Join(folderPath, "sqlite3"+extension)
 	found := g.PathExists(binPath)
 
 	defaultBin := func(name string) (string, error) {
@@ -457,7 +471,7 @@ func EnsureBinSQLite() (binPath string, err error) {
 			return "", g.Error(err, "Error unzipping sqlite zip")
 		}
 
-		nodes := dbio.NewFileNodes(nodeMaps)
+		nodes := filesys.NewFileNodes(nodeMaps)
 		for _, pathVal := range nodes.URIs() {
 			pathVal = strings.TrimPrefix(pathVal, "file://")
 			if strings.HasSuffix(pathVal, "sqlite3") || strings.HasSuffix(pathVal, "sqlite3.exe") {

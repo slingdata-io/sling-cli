@@ -34,7 +34,7 @@ func init() {
 	// we need a webserver to get the pprof webserver
 	if cast.ToBool(os.Getenv("SLING_PPROF")) {
 		go func() {
-			g.Trace("Starting pprof webserver @ localhost:6060")
+			g.Debug("Starting pprof webserver @ localhost:6060")
 			g.LogError(http.ListenAndServe("localhost:6060", nil))
 		}()
 	}
@@ -43,7 +43,6 @@ func init() {
 // Execute runs a Sling task.
 // This may be a file/db to file/db transfer
 func (t *TaskExecution) Execute() error {
-	env.SetLogger()
 
 	done := make(chan struct{})
 	now := time.Now()
@@ -87,6 +86,7 @@ func (t *TaskExecution) Execute() error {
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
+		g.Debug("using: %s", g.Marshal(g.M("columns", t.Config.Target.Columns, "transforms", t.Config.Transforms)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
@@ -135,24 +135,14 @@ func (t *TaskExecution) Execute() error {
 			eG := g.ErrorGroup{}
 			eG.Add(err)
 			eG.Add(t.Err)
-			t.Err = g.Error(eG.Err(), "execution failed")
+			t.Err = g.Error(eG.Err())
 		} else {
-			t.Err = g.Error(t.Err, "execution failed")
+			t.Err = g.Error(t.Err)
 		}
 	}
 
 	now2 := time.Now()
 	t.EndTime = &now2
-
-	// show help text
-	if eh := ErrorHelper(t.Err); eh != "" && !t.Config.ReplicationMode {
-		env.Println("")
-		env.Println(env.MagentaString(eh))
-		env.Println("")
-	}
-
-	// update into store
-	StoreUpdate(t)
 
 	return t.Err
 }
@@ -162,7 +152,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// sets metadata
 	metadata := t.setGetMetadata()
 
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	srcProps := append(
@@ -170,20 +160,28 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 		g.MapToKVArr(g.ToMapString(options))...,
 	)
 
-	// look for conn in cache
-	if conn, ok := connPool[t.Config.SrcConn.Hash()]; ok {
-		return conn, nil
-	}
-
 	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
+	// look for conn in cache
+	if c, ok := connPool[t.Config.SrcConn.Hash()]; ok {
+		// update properties
+		c.Base().ReplaceProps(conn.Props())
+		return c, nil
+	}
+
 	// cache connection is using replication from CLI
 	if t.isUsingPool() {
 		connPool[t.Config.SrcConn.Hash()] = conn
+	}
+
+	err = conn.Connect()
+	if err != nil {
+		err = g.Error(err, "Could not connect to source connection")
+		return
 	}
 
 	// set read_only if sqlite / duckdb since it's a source
@@ -195,10 +193,6 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 }
 
 func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connection, err error) {
-	// look for conn in cache
-	if conn, ok := connPool[t.Config.TgtConn.Hash()]; ok {
-		return conn, nil
-	}
 
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
@@ -213,9 +207,22 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 		return
 	}
 
+	// look for conn in cache
+	if c, ok := connPool[t.Config.TgtConn.Hash()]; ok {
+		// update properties
+		c.Base().ReplaceProps(conn.Props())
+		return c, nil
+	}
+
 	// cache connection is using replication from CLI
 	if t.isUsingPool() {
 		connPool[t.Config.TgtConn.Hash()] = conn
+	}
+
+	err = conn.Connect()
+	if err != nil {
+		err = g.Error(err, "Could not connect to target connection")
+		return
 	}
 
 	// set bulk
@@ -349,14 +356,28 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
 
+	// check if table exists by getting target columns
+	// only pull if ignore_existing is specified (don't need columns yet otherwise)
+	if t.Config.IgnoreExisting() {
+		if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
+
 	if t.usingCheckpoint() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
-		varMap := map[string]string{} // should always be number
+		varMap := map[string]string{
+			"date_layout":          "2006-01-02",
+			"date_layout_str":      "{value}",
+			"timestamp_layout":     "2006-01-02 15:04:05.000 -07",
+			"timestamp_layout_str": "{value}",
+		}
 		t.Config.IncrementalVal, err = getIncrementalValue(t.Config, tgtConn, srcConn, varMap)
-		if err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, srcConn, varMap); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -370,8 +391,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -417,8 +438,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != "" {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -495,7 +516,12 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
-	pullTargetTableColumns(t.Config, tgtConn, false)
+	if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
+		if t.Config.IgnoreExisting() {
+			g.Debug("not writing since table exists at %s (ignore_existing=true)", t.Config.Target.Object)
+			return nil
+		}
+	}
 
 	// get watermark
 	if t.usingCheckpoint() {

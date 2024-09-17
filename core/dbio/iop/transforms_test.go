@@ -5,17 +5,18 @@ import (
 	"testing"
 
 	"github.com/flarco/g"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNonPrintable(t *testing.T) {
 	chars := []string{"\x00", "\u00A0", " ", "\t", "\n", "\x01"}
 	for _, char := range chars {
-		g.Info("%#v => %d => %#v => %#v", char, char[0], char[0], ReplaceNonPrintable(char))
+		g.Info("%#v => %d => %#v => %#v", char, char[0], char[0], Transforms.ReplaceNonPrintable(char))
 	}
 	uints := []uint8{0, 1, 2, 3, 49, 127, 160}
 	for _, uintVal := range uints {
-		g.Warn("%#v => %d => %#v", string(uintVal), uintVal, ReplaceNonPrintable(string(uintVal)))
+		g.Warn("%#v => %d => %#v", string(uintVal), uintVal, Transforms.ReplaceNonPrintable(string(uintVal)))
 	}
 }
 
@@ -28,7 +29,7 @@ func TestFIX(t *testing.T) {
 		"8=FIX.4.09=12835=D34=249=TW52=20060102-15:04:0556=ISLD115=116=CS128=MG129=CB11=ID21=338=10040=w54=155=INTC60=20060102-15:04:0510=123",
 	}
 	for i, message := range messages {
-		fixMap, err := ParseFIX(message)
+		fixMap, err := Transforms.ParseFIXMap(message)
 		g.LogFatal(err)
 
 		switch i {
@@ -59,4 +60,11 @@ func TestDecode(t *testing.T) {
 		}
 		g.Info("%#v, %#v, %d", string(r), r, r)
 	}
+}
+
+func TestTransformMsUUID(t *testing.T) {
+	uuidBytes := []byte{0x78, 0x56, 0x34, 0x12, 0x34, 0x12, 0x34, 0x12, 0x12, 0x34, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc}
+	sp := NewStreamProcessor()
+	val, _ := Transforms.ParseMsUUID(sp, cast.ToString(uuidBytes))
+	assert.Equal(t, "12345678-1234-1234-1234-123456789abc", val)
 }

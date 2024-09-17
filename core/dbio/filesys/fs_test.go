@@ -11,6 +11,7 @@ import (
 
 	arrowParquet "github.com/apache/arrow/go/v16/parquet"
 	"github.com/apache/arrow/go/v16/parquet/compress"
+	"github.com/clbanning/mxj/v2"
 	"github.com/flarco/g/net"
 	"github.com/linkedin/goavro/v2"
 	"github.com/parquet-go/parquet-go"
@@ -33,7 +34,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://./fs_test.go")
 
-	paths, err = fs.ListRecursive(".")
+	paths, err = fs.ListRecursive("test/test1/csv/*.csv")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.csv")
 
@@ -59,7 +60,7 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	paths, err = fs.ListRecursive(".")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, "./"+testPath)
+	assert.NotContains(t, paths.URIs(), "./"+testPath)
 
 	// Test datastream
 	fs.SetProp("datetime_format", "02-01-2006 15:04:05.000")
@@ -148,7 +149,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		fs.SetProp("header", "false")
 		df2, _ := fs.ReadDataflow("test/test2/test2.1.noheader.csv")
-		_, err = fs2.WriteDataflow(df2, g.F("test/test_write/%s.test", formatS))
+		_, err = WriteDataflow(fs2, df2, g.F("test/test_write/%s.test", formatS))
 		assert.NoError(t, err, formatS)
 		df3, err := fs2.ReadDataflow(g.F("test/test_write/%s.test", formatS))
 		g.LogError(err)
@@ -163,7 +164,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		fs.SetProp("header", "false")
 		df2, _ = fs.ReadDataflow("test/test2/test2.1.noheader.csv")
-		_, err = fs2.WriteDataflow(df2, g.F("test/test_write/%s.folder", formatS))
+		_, err = WriteDataflow(fs2, df2, g.F("test/test_write/%s.folder", formatS))
 		assert.NoError(t, err, formatS)
 		df3, err = fs2.ReadDataflow(g.F("test/test_write/%s.folder", formatS))
 		assert.NoError(t, err, formatS)
@@ -176,7 +177,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		assert.NoError(t, err, formatS)
 		df4, err := iop.MakeDataFlow(data.Stream())
 		assert.NoError(t, err, formatS)
-		_, err = fs3.WriteDataflow(df4, g.F("test/test_write/%s.type.test", formatS))
+		_, err = WriteDataflow(fs3, df4, g.F("test/test_write/%s.type.test", formatS))
 		assert.NoError(t, err, formatS)
 		df5, err := fs2.ReadDataflow(g.F("test/test_write/%s.type.test", formatS))
 		assert.NoError(t, err, formatS)
@@ -238,26 +239,158 @@ func TestFileSysLocalJson(t *testing.T) {
 
 }
 
+func TestFileSysLocalXml(t *testing.T) {
+
+	fileBytes, err := os.ReadFile("test/test1/xml/test1.1.xml")
+	assert.NoError(t, err)
+
+	var payload any
+	mv, err := mxj.NewMapXml(fileBytes)
+	assert.NoError(t, err)
+	payload = mv.Old()
+
+	assert.NotNil(t, payload, "Payload should not be nil")
+	g.Debug("payload: %s", g.Marshal(payload))
+
+}
+
 func TestFileSysLocalParquet(t *testing.T) {
 	t.Parallel()
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
 
-	df1, err := fs.ReadDataflow("test/test1/parquet")
+	df1, err := fs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 
 	data1, err := df1.Collect()
 	assert.NoError(t, err)
-	assert.EqualValues(t, 1018, len(data1.Rows))
+	assert.EqualValues(t, 1036, len(data1.Rows))
 	assert.EqualValues(t, 7, len(data1.Columns))
 	// g.Info(g.Marshal(data1.Columns.Types()))
 
 	df2, err := iop.MakeDataFlow(data1.Stream())
 	assert.NoError(t, err)
 
-	_, err = fs.WriteDataflow(df2, "file:///tmp/parquet.test.parquet")
+	_, err = WriteDataflow(fs, df2, "file:///tmp/parquet.test.parquet")
 	assert.NoError(t, err)
 
+	// Verify column types in the new parquet file
+	reader, err := os.Open("/tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	parquetReader, err := iop.NewParquetArrowReader(reader, nil)
+	assert.NoError(t, err)
+
+	columns := parquetReader.Columns()
+	if !assert.Equal(t, 7, len(columns)) {
+		return
+	}
+
+	expectedTypes := map[string]iop.ColumnType{
+		"id":         iop.BigIntType,
+		"first_name": iop.StringType,
+		"last_name":  iop.StringType,
+		"email":      iop.StringType,
+		"rating":     iop.DecimalType,
+		"date":       iop.DateType,
+		"target":     iop.BoolType,
+		"create_dt":  iop.DatetimeType,
+	}
+
+	for _, col := range columns {
+		expectedType, exists := expectedTypes[col.Name]
+		assert.True(t, exists, "Unexpected column: %s", col.Name)
+		assert.Equal(t, expectedType, col.Type, "Mismatched type for column %s", col.Name)
+	}
+
+	// Verify data
+	df3, err := fs.ReadDataflow("file:///tmp/parquet.test.parquet")
+	assert.NoError(t, err)
+
+	data3, err := df3.Collect()
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1036, len(data3.Rows))
+	assert.EqualValues(t, 7, len(data3.Columns))
+
+}
+
+func TestFileSysLocalIceberg(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/lineitem_iceberg"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeIceberg})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 51793, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"l_orderkey", iop.IntegerType},
+		{"l_partkey", iop.IntegerType},
+		{"l_suppkey", iop.IntegerType},
+		{"l_linenumber", iop.IntegerType},
+		{"l_quantity", iop.IntegerType},
+		{"l_extendedprice", iop.DecimalType},
+		{"l_discount", iop.DecimalType},
+		{"l_tax", iop.DecimalType},
+		{"l_returnflag", iop.StringType},
+		{"l_linestatus", iop.StringType},
+		{"l_shipdate", iop.DateType},
+		{"l_commitdate", iop.DateType},
+		{"l_receiptdate", iop.DateType},
+		{"l_shipinstruct", iop.StringType},
+		{"l_shipmode", iop.StringType},
+		{"l_comment", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
+}
+
+func TestFileSysLocalDelta(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	// Test reading Iceberg metadata
+	path := "test/delta"
+	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeDelta})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 5, len(data.Rows))
+
+	expectedColumns := []struct {
+		name     string
+		dataType iop.ColumnType
+	}{
+		{"first_name", iop.StringType},
+		{"last_name", iop.StringType},
+		{"country", iop.StringType},
+		{"continent", iop.StringType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, data.Columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, data.Columns[i].Type, "Column type should match for: %s", data.Columns[i].Name)
+		}
+	}
 }
 
 func TestFileSysLocalLargeParquet01(t *testing.T) {
@@ -275,7 +408,7 @@ func TestFileSysLocalLargeParquet01(t *testing.T) {
 	config, err := parquet.NewWriterConfig()
 	g.LogFatal(err)
 
-	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns))
+	config.Schema = parquet.NewSchema("", iop.NewRecNode(df1.Columns, false))
 
 	fw := parquet.NewWriter(f, config)
 
@@ -348,9 +481,6 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 	for ds := range df1.StreamCh {
 		for batch := range ds.BatchChan {
 			for row := range batch.Rows {
-				if batch.Count > 10000 {
-					continue
-				}
 				err = pw.WriteRow(row)
 				g.LogFatal(err)
 			}
@@ -359,6 +489,81 @@ func TestFileSysLocalLargeParquet1(t *testing.T) {
 
 	err = pw.Close()
 	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func TestFileSysLocalLargeParquet3(t *testing.T) {
+	t.Parallel()
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	assert.NoError(t, err)
+
+	filePath := "/tmp/test.3.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriterMap(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	for ds := range df1.StreamCh {
+		for batch := range ds.BatchChan {
+			for row := range batch.Rows {
+				err = pw.WriteRec(row)
+				g.LogFatal(err)
+			}
+		}
+	}
+
+	err = pw.Close()
+	assert.NoError(t, err)
+
+	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
+	g.Info("wrote %d in %f secs", df1.Count(), duration)
+}
+
+func BenchmarkFileSysLocalLargeParquet1(b *testing.B) {
+	fs, err := NewFileSysClient(dbio.TypeFileLocal)
+	g.LogError(err)
+
+	df1, err := fs.ReadDataflow("./test/dataset1M.csv")
+	g.LogError(err)
+
+	filePath := "/tmp/test.1.parquet"
+	f, err := os.Create(filePath)
+	g.LogFatal(err)
+
+	pw, err := iop.NewParquetWriter(f, df1.Columns, &parquet.Snappy)
+	g.LogFatal(err)
+
+	g.Info("writing to %s with OldParquet", filePath)
+
+	start := time.Now()
+	var rows [][]any
+	ds := <-df1.StreamCh
+	batch := <-ds.BatchChan
+	for row := range batch.Rows {
+		if batch.Count > 100 {
+			break
+		}
+		rows = append(rows, row)
+	}
+
+	for n := 0; n < b.N; n++ {
+		for _, row := range rows {
+			err = pw.WriteRow(row)
+			g.LogFatal(err)
+		}
+	}
+
+	err = pw.Close()
+	g.LogError(err)
 
 	duration := float64(int64(time.Since(start).Seconds()*100)) / 100
 	g.Info("wrote %d in %f secs", df1.Count(), duration)
@@ -526,7 +731,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	paths, err = fs.ListRecursive("s3://ocral/test/")
 	assert.NoError(t, err)
@@ -552,7 +757,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 	// assert.EqualValues(t, 3, len(df2.Streams))
 
 	writeFolderPath := "s3://ocral/test.fs.write"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -560,7 +765,7 @@ func TestFileSysDOSpaces(t *testing.T) {
 	df2, err = localFs.ReadDataflow("test/test1/csv")
 	assert.NoError(t, err)
 	writeFolderPath = "s3://ocral/test.fs.write.json"
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -630,7 +835,15 @@ func TestFileSysS3(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), "s3://ocral-data-1/test/")
 
-	paths, err = fs.ListRecursive("s3://ocral-data-1/")
+	paths, err = fs.ListRecursive("s3://ocral-data-1/test/*.test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*.test")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
 
@@ -648,7 +861,7 @@ func TestFileSysS3(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral-data-1/")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// Test concurrent writing from datastream
 
@@ -666,7 +879,7 @@ func TestFileSysS3(t *testing.T) {
 
 	fs.SetProp("header", "true")
 	fs.SetProp("FILE_MAX_BYTES", "20000")
-	_, err = fs.WriteDataflow(df2, writeFolderPath)
+	_, err = WriteDataflow(fs, df2, writeFolderPath)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 	assert.EqualValues(t, 1, len(df2.Streams))
@@ -696,7 +909,7 @@ func TestFileSysAzure(t *testing.T) {
 	assert.NotEmpty(t, buckets)
 
 	testString := "abcde"
-	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test1"
+	testPath := "https://flarcostorage.blob.core.windows.net/testcont/test/test1"
 	reader := strings.NewReader(testString)
 	bw, err := fs.Write(testPath, reader)
 	_ = bw
@@ -711,13 +924,25 @@ func TestFileSysAzure(t *testing.T) {
 	testBytes, err := io.ReadAll(reader2)
 	assert.NoError(t, err)
 
+	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net/testcont/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	assert.Equal(t, testString, string(testBytes))
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
+	paths, err = fs.ListRecursive("https://flarcostorage.blob.core.windows.net")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -733,7 +958,7 @@ func TestFileSysAzure(t *testing.T) {
 	err = Delete(fs, writeFolderPath)
 	assert.NoError(t, err)
 
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -782,12 +1007,24 @@ func TestFileSysGoogle(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test")
+	paths, err = fs.ListRecursive("gs://flarco_us_bucket/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -800,7 +1037,7 @@ func TestFileSysGoogle(t *testing.T) {
 
 	writeFolderPath := "gs://flarco_us_bucket/test"
 	fs.SetProp("header", "true")
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -812,6 +1049,27 @@ func TestFileSysGoogle(t *testing.T) {
 	data2, err := df3.Collect()
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, len(data2.Rows))
+}
+
+func TestFileSysNormalizeURI(t *testing.T) {
+	url := "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}"
+	fs, err := NewFileSysClient(dbio.TypeFileSftp, "URL="+url)
+	assert.NoError(t, err)
+	if t.Failed() {
+		return
+	}
+
+	u := url
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}"
+	assert.Equal(t, u, NormalizeURI(fs, u))
+
+	u = "path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222/path/to/write/{stream_file_name}", NormalizeURI(fs, u))
+
+	u = "/path/to/write/{stream_file_name}"
+	assert.Equal(t, "sftp://sling.uri.test:2222//path/to/write/{stream_file_name}", NormalizeURI(fs, u))
 }
 
 func TestFileSysSftp(t *testing.T) {
@@ -830,7 +1088,7 @@ func TestFileSysSftp(t *testing.T) {
 	root := os.Getenv("SSH_TEST_PASSWD_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "sftp://" + rootU.Hostname()
+	root = g.F("sftp://%s:22", rootU.Hostname())
 
 	testString := "abcde"
 	testPath := root + "/tmp/test/test1"
@@ -849,12 +1107,28 @@ func TestFileSysSftp(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
+	paths, err := fs.ListRecursive(root + "/tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("tmp/test/*1")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
 	err = Delete(fs, testPath)
 	assert.NoError(t, err)
 
-	paths, err := fs.ListRecursive(root + "/tmp/test")
+	paths, err = fs.ListRecursive(root + "/tmp/test")
 	assert.NoError(t, err)
-	assert.NotContains(t, paths, testPath)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
@@ -867,7 +1141,7 @@ func TestFileSysSftp(t *testing.T) {
 
 	writeFolderPath := root + "/tmp/test"
 	fs.SetProp("header", "true")
-	_, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	_, err = WriteDataflow(fs, df2, writeFolderPath+"/*.csv")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 1036, df2.Count())
 
@@ -897,15 +1171,14 @@ func TestFileSysFtp(t *testing.T) {
 	root := os.Getenv("FTP_TEST_URL")
 	rootU, err := net.NewURL(root)
 	assert.NoError(t, err)
-	root = "ftp://" + rootU.Hostname()
+	root = "ftp://" + rootU.Hostname() + ":" + rootU.U.Port()
 
 	csvBytes, err := os.ReadFile("test/test1/csv/test1.csv")
 	if !g.AssertNoError(t, err) {
 		return
 	}
-
 	testString := string(csvBytes)
-	testPath := root + "/test1.csv"
+	testPath := root + "/test/test1.csv"
 	reader := strings.NewReader(testString)
 	_, err = fs.Write(testPath, reader)
 	g.AssertNoError(t, err)
@@ -920,9 +1193,34 @@ func TestFileSysFtp(t *testing.T) {
 
 	assert.Equal(t, testString, string(testBytes))
 
-	return
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	assert.NoError(t, err)
+	paths, err := fs.ListRecursive(root + "/")
+	g.LogError(err)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Contains(t, paths.URIs(), testPath)
 
-	// FIXME: test fail with `229 Extended Passive mode OK (|||30005|)`
+	paths, err = fs.ListRecursive(root + "/")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/*.1csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	df3, err := fs.ReadDataflow(testPath)
 	if !g.AssertNoError(t, err) {
@@ -931,16 +1229,21 @@ func TestFileSysFtp(t *testing.T) {
 
 	data2, err := df3.Collect()
 	g.AssertNoError(t, err)
-	assert.EqualValues(t, 1036, len(data2.Rows))
+	assert.EqualValues(t, 1000, len(data2.Rows))
 
-	return
+	// reconnect to list, or it will error
+	fs, err = NewFileSysClient(
+		dbio.TypeFileFtp,
+		"URL="+os.Getenv("FTP_TEST_URL"),
+	)
+	g.AssertNoError(t, err)
 
-	// err = Delete(fs, testPath)
-	// g.AssertNoError(t, err)
+	err = Delete(fs, testPath)
+	g.AssertNoError(t, err)
 
-	// paths, err := fs.ListRecursive(root + "/home/test/test")
-	// assert.NoError(t, err)
-	// assert.NotContains(t, paths, testPath)
+	paths, err = fs.ListRecursive(root + "/test/*.csv")
+	assert.NoError(t, err)
+	assert.NotContains(t, paths.URIs(), testPath)
 
 	// localFs, err := NewFileSysClient(dbio.TypeFileLocal)
 	// assert.NoError(t, err)
@@ -951,7 +1254,7 @@ func TestFileSysFtp(t *testing.T) {
 	// // assert.EqualValues(t, 3, len(df2.Streams))
 
 	// writeFolderPath := root + "/home/test/test"
-	// _, err = fs.WriteDataflow(df2, writeFolderPath+"/*.csv")
+	// _, err = WriteDataflow(fs,df2, writeFolderPath+"/*.csv")
 	// assert.NoError(t, err)
 	// assert.EqualValues(t, 1036, df2.Count())
 }
@@ -1025,3 +1328,65 @@ func testManyCSV(t *testing.T) {
 		}
 	}
 }
+
+// func TestPatterns(t *testing.T) {
+
+// 	// local
+// 	// s3
+// 	// google
+// 	// azure
+// 	// sftp
+// 	// ftp
+
+// 	type test struct {
+// 		pattern  string // the input glob pattern
+// 		expected int    // number of files expected
+// 	}
+
+// 	type input struct {
+// 		Type  dbio.Type
+// 		Props []string
+// 		Tests []test
+// 	}
+
+// 	inputs := []input{
+// 		{
+// 			dbio.TypeFileLocal,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileFtp,
+// 			[]string{"URL=" + os.Getenv("FTP_TEST_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileSftp,
+// 			[]string{"URL=" + os.Getenv("SSH_TEST_PASSWD_URL")},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileGoogle,
+// 			[]string{"BUCKET=flarco_us_bucket"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileAzure,
+// 			[]string{"container=testcont"},
+// 			[]test{},
+// 		},
+// 		{
+// 			dbio.TypeFileS3,
+// 			[]string{},
+// 			[]test{},
+// 		},
+// 	}
+
+// 	for _, input := range inputs {
+// 		fs, err := NewFileSysClient(input.Type, input.Props...)
+// 		if !g.AssertNoError(t, err) {
+// 			return
+// 		}
+// 	}
+
+// }

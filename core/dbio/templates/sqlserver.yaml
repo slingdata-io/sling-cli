@@ -1,7 +1,12 @@
 core:
   drop_table: IF OBJECT_ID(N'{table}', N'U') IS NOT NULL DROP TABLE {table}
   drop_view: IF OBJECT_ID(N'{view}', N'V') IS NOT NULL DROP VIEW {view}
-  create_temporary_table: 'create table #{table} ({col_types})'
+  drop_index: |
+    if exists (
+      select name
+      from sys.indexes
+      where name = '{name}' and object_id = OBJECT_ID('{table}')
+    ) drop index {index} on {table}
   replace: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do update set {set_fields}
   replace_temp: |
     insert into {table} ({names})
@@ -10,7 +15,9 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal}
-  limit: select top {limit} * from ( {sql} ) as t
+  limit: select top {limit} {fields} from {table}
+  limit_offset: select top {limit} * from ( select {fields} from {table} order by 1 offset {offset} rows) as t
+  limit_sql: select top {limit} * from ( {sql} ) as t
   insert: insert into {table} ({cols}) values ({values})
   insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
   insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing
@@ -19,12 +26,12 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal2}
-  sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
+  sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   rename_column: EXEC sp_rename '{table}.{column}', '{new_column}', 'COLUMN'
   bulk_insert: |
     BULK INSERT {table}
-    FROM '/dev/stdin'
+    from '/dev/stdin'
     WITH (
       BATCHSIZE = 5000,
       ERRORFILE = '/dev/stderr',
@@ -88,13 +95,13 @@ metadata:
     SELECT
       ind.name as index_name,
       col.name as column_name
-    FROM sys.indexes ind
+    from sys.indexes ind
     INNER JOIN sys.index_columns ic ON ind.object_id = ic.object_id
       and ind.index_id = ic.index_id
     INNER JOIN sys.columns col ON ic.object_id = col.object_id
       and ic.column_id = col.column_id
     INNER JOIN sys.tables t ON ind.object_id = t.object_id
-    WHERE schema_name(t.schema_id) = '{schema}' and t.name = '{table}'
+    where schema_name(t.schema_id) = '{schema}' and t.name = '{table}'
       AND ind.is_primary_key = 0
       AND ind.is_unique = 0
       AND ind.is_unique_constraint = 0
@@ -306,6 +313,7 @@ function:
   truncate_f: round({field}, 2, 1)
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   sleep: waitfor delay '00:00:{seconds}.000'
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_string: datalength({field})
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: len({field})
@@ -316,8 +324,16 @@ function:
 
 
 variable:
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestamp_layout_str: "cast('{value}' as datetime2)"
+
+  # https://stackoverflow.com/a/17867687/2295355
+  timestampz_layout_str: "ToDateTimeOffset('{value}')"
+  timestampz_layout: "2006-01-02 15:04:05.000000', '-07:00"
+  
   bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000
   bool_as: string
   error_filter_table_exists: already
+  max_string_type: nvarchar(max)

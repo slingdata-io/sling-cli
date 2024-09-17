@@ -12,6 +12,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -87,6 +88,8 @@ func (conn *MongoDBConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to ping mongo server")
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 
@@ -97,6 +100,8 @@ func (conn *MongoDBConn) Close() error {
 	if err != nil {
 		return g.Error(err, "Failed to disconnect")
 	}
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	return nil
 }
 
@@ -147,13 +152,9 @@ func (conn *MongoDBConn) ExecContext(ctx context.Context, sql string, args ...in
 	return nil, g.Error("ExecContext not implemented on MongoConn")
 }
 
-func (conn *MongoDBConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return
-	}
-
-	options, _ := g.UnmarshalMap(tables[0].SQL)
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, tables[0].FullName(), options)
+func (conn *MongoDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	options, _ := g.UnmarshalMap(table.SQL)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.FullName(), options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}
@@ -220,8 +221,12 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	}
 
 	ds = iop.NewDatastreamContext(queryContext.Ctx, nil)
-	// js := iop.NewJSONStream(ds, cur, true, conn.GetProp("jmespath"))
-	js := iop.NewJSONStream(ds, cur, true, conn.GetProp("jmespath"))
+
+	flatten := true
+	if val := conn.GetProp("flatten"); val != "" {
+		flatten = cast.ToBool(val)
+	}
+	js := iop.NewJSONStream(ds, cur, flatten, conn.GetProp("jmespath"))
 	js.HasMapPayload = true
 
 	limit := cast.ToUint64(Limit)
@@ -234,13 +239,24 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 		for cur.Next(queryContext.Ctx) {
 			if js.NextFunc(it) {
-				// fix Object ID
-				it.Row[0] = strings.TrimSuffix(
-					strings.TrimPrefix(
-						cast.ToString(it.Row[0]), `ObjectID("`,
-					), `")`,
-				)
-
+				for i, val := range it.Row {
+					switch vt := val.(type) {
+					case primitive.ObjectID:
+						// fix Object ID
+						it.Row[i] = strings.TrimSuffix(
+							strings.TrimPrefix(
+								cast.ToString(it.Row[0]), `ObjectID("`,
+							), `")`,
+						)
+					case primitive.DateTime:
+						it.Row[i] = vt.Time()
+					case primitive.Timestamp:
+						it.Row[i] = time.Unix(cast.ToInt64(vt.T), 0)
+					case primitive.A:
+						// Array
+						it.Row[i] = g.Marshal(vt)
+					}
+				}
 				return true
 			}
 		}
@@ -251,6 +267,7 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	ds.NoDebug = strings.Contains(collectionName, noDebugKey)
 	ds.SetMetadata(conn.GetProp("METADATA"))
 	ds.SetConfig(conn.Props())
+	ds.Defer(func() { cur.Close(queryContext.Ctx) }) // close cursor when done
 
 	err = ds.Start()
 	if err != nil {

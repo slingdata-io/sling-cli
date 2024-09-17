@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/denisbrodbeck/machineid"
 	"github.com/getsentry/sentry-go"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
@@ -94,6 +93,18 @@ var cliRunFlags = []g.Flag{
 		Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
 	},
 	{
+		Name:        "transforms",
+		ShortName:   "",
+		Type:        "string",
+		Description: "An object/map, or array/list of built-in transforms to apply to records (JSON or YAML).",
+	},
+	{
+		Name:        "columns",
+		ShortName:   "",
+		Type:        "string",
+		Description: "An object/map to specify the type that a column should be cast as (JSON or YAML).",
+	},
+	{
 		Name:        "streams",
 		ShortName:   "",
 		Type:        "string",
@@ -109,7 +120,7 @@ var cliRunFlags = []g.Flag{
 		Name:        "env",
 		ShortName:   "",
 		Type:        "string",
-		Description: "in-line environment variable map to pass in (JSON or YAML).",
+		Description: "in-line environment variable object/map to pass in (JSON or YAML).",
 	},
 	{
 		Name:        "mode",
@@ -122,6 +133,12 @@ var cliRunFlags = []g.Flag{
 		ShortName:   "l",
 		Type:        "string",
 		Description: "The maximum number of rows to pull.",
+	},
+	{
+		Name:        "offset",
+		ShortName:   "o",
+		Type:        "string",
+		Description: "The number of rows to offset by.",
 	},
 	{
 		Name:        "iterate",
@@ -336,20 +353,19 @@ func init() {
 	cliRun.Make().Add()
 	cliUpdate.Make().Add()
 
-	if telemetry {
-		if projectID == "" {
-			projectID = os.Getenv("GITHUB_REPOSITORY_ID")
-		}
-		machineID, _ = machineid.ProtectedID("sling")
-		if projectID != "" {
-			machineID = g.MD5(projectID) // hashed
-		}
+	if projectID == "" {
+		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
 	}
 }
 
 func Track(event string, props ...map[string]interface{}) {
 	if !telemetry || core.Version == "dev" {
 		return
+	}
+
+	machineID = store.GetMachineID()
+	if projectID != "" {
+		machineID = g.MD5(projectID) // hashed
 	}
 
 	properties := g.M(
@@ -444,6 +460,8 @@ func main() {
 		g.SentryFlush(time.Second * 2)
 	}
 	time.Sleep(50 * time.Millisecond) // so logger can flush
+
+	os.Exit(exitCode)
 }
 
 func cliInit(done chan struct{}) int {

@@ -14,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -106,9 +107,9 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot parse query")
 			}
 
-			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(query, "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(strings.ToLower(query), "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
 
-				data, err := dbConn.Query(sQuery.Select(100))
+				data, err := dbConn.Query(sQuery.Select(100, 0))
 				if err != nil {
 					return ok, g.Error(err, "cannot execute query")
 				}
@@ -148,7 +149,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("successful! duration: %d seconds.", end.Unix()-start.Unix())
 		}
 
-		if err := testRowCnt(totalAffected); err != nil {
+		if err := testOutput(totalAffected, 0, 0); err != nil {
 			return ok, err
 		}
 
@@ -170,7 +171,16 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		ok, err = ec.Test(name)
 		if err != nil {
-			return ok, g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+			err = g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+		}
+
+		if asJSON {
+			fmt.Println(g.Marshal(g.M("success", err == nil, "error", g.ErrMsg(err))))
+			return
+		}
+
+		if err != nil {
+			return ok, err
 		} else if ok {
 			g.Info("success!") // successfully connected
 		}
@@ -210,13 +220,13 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 					fmt.Println(columns.PrettyTable(true))
 				}
 			} else {
-				fields := []string{"#", "Schema", "Name", "Type", "Columns"}
+				fields := []string{"#", "Database", "Schema", "Name", "Type", "Columns"}
 				rows := lo.Map(tables, func(table database.Table, i int) []any {
 					tableType := lo.Ternary(table.IsView, "view", "table")
 					if table.Dialect.DBNameUpperCase() {
 						tableType = strings.ToUpper(tableType)
 					}
-					return []any{i + 1, table.Schema, table.Name, tableType, len(table.Columns)}
+					return []any{i + 1, table.Database, table.Schema, table.Name, tableType, len(table.Columns)}
 				})
 				if asJSON {
 					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
@@ -237,7 +247,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				files.Sort()
 
 				fields := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
-				rows := lo.Map(files, func(file dbio.FileNode, i int) []any {
+				rows := lo.Map(files, func(file filesys.FileNode, i int) []any {
 					fileType := lo.Ternary(file.IsDir, "directory", "file")
 
 					lastUpdated := "-"

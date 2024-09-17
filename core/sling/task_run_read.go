@@ -8,7 +8,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
-	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -28,31 +27,6 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	} else if sTable.Schema == "" {
 		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
-
-	// check if referring to a SQL file
-	if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
-		// for incremental, need to put `{incremental_where_cond}` for proper selecting
-		sqlFromFile, err := GetSQLText(cfg.Source.Stream)
-		if err != nil {
-			err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
-			if sTable.Name == "" {
-				return t.df, err
-			} else {
-				err = nil // don't return error in case the table full name ends with .sql
-			}
-		} else {
-			cfg.Source.Stream = sqlFromFile
-			sTable.SQL = sqlFromFile
-		}
-	}
-
-	// expand variables for custom SQL
-	fMap, err := t.Config.GetFormatMap()
-	if err != nil {
-		err = g.Error(err, "could not get format map for sql")
-		return t.df, err
-	}
-	sTable.SQL = g.Rm(sTable.SQL, fMap)
 
 	// get source columns
 	st := sTable
@@ -105,12 +79,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		// get source columns to match update-key
 		// in case column casing needs adjustment
 		updateCol := sTable.Columns.GetColumn(cfg.Source.UpdateKey)
-		if updateCol.Name != "" {
+		if updateCol != nil && updateCol.Name != "" {
 			cfg.Source.UpdateKey = updateCol.Name // overwrite with correct casing
 		}
 
 		// select only records that have been modified after last max value
-		if cfg.IncrementalVal != "" {
+		if cfg.IncrementalVal != nil {
 			// if primary key is defined, use greater than or equal
 			// in case that many timestamp values are the same and
 			// IncrementalVal has been truncated in target database system
@@ -119,13 +93,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"value", cfg.IncrementalVal,
+				"value", cfg.IncrementalValStr,
 				"gt", greaterThan,
 			)
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}
 			// this will be null when target table does not exists
-			cfg.IncrementalVal = "null"
+			cfg.IncrementalValStr = "null"
 		}
 
 		if t.Config.Mode == BackfillMode {
@@ -138,6 +112,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			if updateCol.IsDate() || isOracleDate {
 				timestampTemplate := srcConn.GetTemplateValue("variable.date_layout_str")
+				startValue = g.R(timestampTemplate, "value", startValue)
+				endValue = g.R(timestampTemplate, "value", endValue)
+			} else if updateCol.Type == iop.TimestampzType {
+				timestampTemplate := srcConn.GetTemplateValue("variable.timestampz_layout_str")
 				startValue = g.R(timestampTemplate, "value", startValue)
 				endValue = g.R(timestampTemplate, "value", endValue)
 			} else if updateCol.IsDatetime() {
@@ -175,21 +153,28 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"incremental_value", cfg.IncrementalVal,
+				"incremental_value", cfg.IncrementalValStr,
 			)
 		}
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
-		srcConn.SetProp("start_time", t.Config.IncrementalVal)
+		srcConn.SetProp("start_time", t.Config.IncrementalValStr)
 	}
 
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
-	// construct SELECT statement for selected fields
+	// construct select statement for selected fields
 	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
-		sTable.SQL = sTable.Select(cfg.Source.Limit(), strings.Split(selectFieldsStr, ",")...)
+		sTable.SQL = sTable.Select(cfg.Source.Limit(), cfg.Source.Offset(), strings.Split(selectFieldsStr, ",")...)
+	}
+
+	// set constraints
+	for _, col := range cfg.ColumnsPrepared() {
+		if c := sTable.Columns.GetColumn(col.Name); c != nil {
+			sTable.Columns[c.Position-1].Constraint = col.Constraint
+		}
 	}
 
 	df, err = srcConn.BulkExportFlow(sTable)
@@ -219,12 +204,23 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
-	options := t.sourceOptionsMap()
+	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
+
+	if t.Config.IncrementalVal != nil {
+		// file stream incremental mode
+		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
+			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
+			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+		} else {
+			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey
+			options["SLING_INCREMENTAL_VAL"] = t.Config.IncrementalVal
+			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+		}
+	}
 
 	if uri := cfg.SrcConn.URL(); uri != "" {
 		// construct props by merging with options
-		options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()),
 			g.MapToKVArr(g.ToMapString(options))...,
@@ -237,6 +233,9 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		}
 
 		fsCfg := filesys.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		if ffmt := cfg.Source.Options.Format; ffmt != nil {
+			fsCfg.Format = *ffmt
+		}
 		df, err = fs.ReadDataflow(uri, fsCfg)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysReadDataflow for %s", cfg.SrcConn.Type)
@@ -279,11 +278,15 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	eG := g.ErrorGroup{}
 
 	if t.Config.Source.HasPrimaryKey() {
-		eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		// set true PK only when StarRocks, we don't want to create PKs on target table implicitly
+		if t.Config.Source.Type == dbio.TypeDbStarRocks {
+			eG.Capture(df.Columns.SetKeys(iop.PrimaryKey, t.Config.Source.PrimaryKey()...))
+		}
+		eG.Capture(df.Columns.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", t.Config.Source.PrimaryKey()...))
 	}
 
 	if t.Config.Source.HasUpdateKey() {
-		eG.Capture(df.Columns.SetKeys(iop.UpdateKey, t.Config.Source.UpdateKey))
+		eG.Capture(df.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", t.Config.Source.UpdateKey))
 	}
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {

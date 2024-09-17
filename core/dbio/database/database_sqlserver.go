@@ -48,6 +48,16 @@ func (conn *MsSQLServerConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
+	// https://github.com/slingdata-io/sling-cli/issues/310
+	// If both a portNumber and instanceName are used, the portNumber will take precedence and the instanceName will be ignored.
+	// therefore, if instanceName is provided, don't set a defaultPort
+	if u, err := dburl.Parse(conn.URL); err == nil {
+		if instanceName := strings.TrimPrefix(u.Path, "/"); instanceName != "" {
+			// set as 0 so BaseConn.Init won't inject port number
+			conn.BaseConn.defaultPort = 0
+		}
+	}
+
 	return conn.BaseConn.Init()
 }
 
@@ -178,6 +188,26 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
+func (conn *MsSQLServerConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	table.Columns = data.Columns
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return ddl, nil
+}
+
 // BulkImportFlow bulk import flow
 func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
@@ -233,7 +263,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 	// transformation to correctly post process quotes, newlines, and delimiter afterwards
 	// https://stackoverflow.com/questions/782353/sql-server-bulk-insert-of-csv-file-with-inconsistent-quotes
-	// reduces performance by ~25%, but is correct, and still 10x faster then INSERT INTO with batch VALUES
+	// reduces performance by ~25%, but is correct, and still 10x faster then insert into with batch VALUES
 	// If we use the parallel way, we gain back the speed by using more power. We also loose order.
 	transf := func(row []interface{}) (nRow []interface{}) {
 		nRow = row
@@ -301,6 +331,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		filePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
+
 		if err != nil {
 			os.Remove(filePath)
 			err = g.Error(err, "Error csv.WriteStream(ds) to "+filePath)
@@ -309,7 +340,8 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 			return 0, g.Error(err)
 		} else if csvRowCnt == 0 {
 			// no data from source
-			return 0, nil
+			os.Remove(filePath)
+			continue
 		}
 
 		ds.Context.Wg.Write.Add()
@@ -517,7 +549,7 @@ func (conn *MsSQLServerConn) BcpExport() (err error) {
 	return
 }
 
-// sqlcmd -S localhost -d BcpSampleDB -U sa -P <your_password> -I -Q "SELECT * FROM TestEmployees;"
+// sqlcmd -S localhost -d BcpSampleDB -U sa -P <your_password> -I -Q "select * from TestEmployees;"
 
 // EXPORT
 // bcp TestEmployees out ~/test_export.txt -S localhost -U sa -P <your_password> -d BcpSampleDB -c -t ','
@@ -539,13 +571,13 @@ func (conn *MsSQLServerConn) GenerateUpsertSQL(srcTable string, tgtTable string,
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT *	FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select *	from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields});
+		INSERT ({insert_fields}) values  ({src_fields});
 	`
 
 	sql = g.R(
@@ -572,7 +604,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 		"https://%s.blob.core.windows.net/%s/%s-%s",
 		conn.GetProp("AZURE_ACCOUNT"),
 		conn.GetProp("AZURE_CONTAINER"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -660,7 +692,7 @@ func (conn *MsSQLServerConn) CopyFromAzure(tableFName, azPath string) (count uin
 	_, err = conn.Exec(sql)
 	if err != nil {
 		conn.SetProp("azToken", azToken)
-		return 0, g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return 0, g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return 0, nil

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
@@ -204,6 +205,14 @@ func BenchmarkProcessValBlank(b *testing.B) {
 	}
 }
 
+func BenchmarkDecimalToString(b *testing.B) {
+	val, _ := decimal.NewFromString("1234456.789")
+	for n := 0; n < b.N; n++ {
+		// val.String() // much slower
+		val.NumDigits()
+	}
+}
+
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkCastToString'
 func BenchmarkCastToStringTime(b *testing.B) {
 	sp := NewStreamProcessor()
@@ -264,6 +273,13 @@ func BenchmarkIsDate(b *testing.B) {
 	t := time.Now()
 	for n := 0; n < b.N; n++ {
 		isDate(&t)
+	}
+}
+
+func BenchmarkIsUTC(b *testing.B) {
+	t := time.Now()
+	for n := 0; n < b.N; n++ {
+		isUTC(&t)
 	}
 }
 
@@ -345,4 +361,14 @@ func TestParseString(t *testing.T) {
 	sp := NewStreamProcessor()
 	val := sp.ParseString("1697104406")
 	assert.Equal(t, int64(1697104406), val)
+
+	val = sp.ParseString("2024-04-24 14:49:58")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
+	val = sp.ParseString("2024-04-24 13:49:58.000000 -03")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
+	val = sp.ParseString("2024-05-05 09:10:09.000000 -07")
+	g.P(val)
+	g.P(cast.ToTime(val).Location().String() == "UTC")
 }

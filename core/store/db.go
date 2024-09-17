@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/denisbrodbeck/machineid"
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
@@ -23,8 +24,13 @@ var (
 func InitDB() {
 	var err error
 
+	if Db != nil {
+		// already initiated
+		return
+	}
+
 	dbURL := g.F("sqlite://%s/.sling.db?cache=shared&mode=rwc&_journal_mode=WAL", env.HomeDir)
-	Conn, err = database.NewConn(dbURL)
+	Conn, err = database.NewConn(dbURL, "silent=true")
 	if err != nil {
 		g.Debug("could not initialize local .sling.db. %s", err.Error())
 		return
@@ -48,6 +54,7 @@ func InitDB() {
 		&Execution{},
 		&Task{},
 		&Replication{},
+		&Setting{},
 	}
 
 	// manual migrations
@@ -65,6 +72,9 @@ func InitDB() {
 			return
 		}
 	}
+
+	// settings
+	settings()
 }
 
 func migrate() {
@@ -73,8 +83,36 @@ func migrate() {
 	Db.Migrator().RenameColumn(&Replication{}, "replication", "config") // rename column for consistency
 
 	// fix bad unique index on Execution.ExecID
-	data, _ := Conn.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
+	data, _ := Conn.Query(`select name from sqlite_master where type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
 	if len(data.Rows) > 0 {
 		Db.Exec(g.F("drop index if exists %s", data.Rows[0][0]))
 	}
+}
+
+type Setting struct {
+	Key   string `json:"key" gorm:"primaryKey"`
+	Value string `json:"value"`
+}
+
+func settings() {
+	// ProtectedID returns a hashed version of the machine ID in a cryptographically secure way,
+	// using a fixed, application-specific key.
+	// Internally, this function calculates HMAC-SHA256 of the application ID, keyed by the machine ID.
+	machineID, _ := machineid.ProtectedID("sling")
+	if machineID == "" {
+		// generate random id then
+		machineID = "m." + g.RandString(g.AlphaRunesLower+g.NumericRunes, 62)
+	}
+
+	Db.Create(&Setting{"machine-id", machineID})
+}
+
+func GetMachineID() string {
+	if Db == nil {
+		machineID, _ := machineid.ProtectedID("sling")
+		return machineID
+	}
+	s := Setting{Key: "machine-id"}
+	Db.First(&s)
+	return s.Value
 }

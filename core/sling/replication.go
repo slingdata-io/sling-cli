@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/flarco/g"
@@ -13,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
+	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -26,6 +26,12 @@ type ReplicationConfig struct {
 
 	streamsOrdered []string
 	originalCfg    string
+	maps           replicationConfigMaps // raw maps for validation
+}
+
+type replicationConfigMaps struct {
+	Defaults map[string]any
+	Streams  map[string]map[string]any
 }
 
 // OriginalCfg returns original config
@@ -33,8 +39,8 @@ func (rd *ReplicationConfig) OriginalCfg() string {
 	return rd.originalCfg
 }
 
-// MD5 returns a md5 hash of the config
-func (rd *ReplicationConfig) MD5() string {
+// JSON returns json payload
+func (rd *ReplicationConfig) JSON() string {
 	payload := g.Marshal([]any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
@@ -54,7 +60,12 @@ func (rd *ReplicationConfig) MD5() string {
 		payload = strings.ReplaceAll(payload, g.Marshal(rd.Target), g.Marshal(cleanTarget))
 	}
 
-	return g.MD5(payload)
+	return payload
+}
+
+// MD5 returns a md5 hash of the json payload
+func (rd *ReplicationConfig) MD5() string {
+	return g.MD5(rd.OriginalCfg())
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
@@ -64,16 +75,7 @@ func (rd *ReplicationConfig) Scan(value interface{}) error {
 
 // Value return json value, implement driver.Valuer interface
 func (rd ReplicationConfig) Value() (driver.Value, error) {
-	if rd.OriginalCfg() != "" {
-		return []byte(rd.OriginalCfg()), nil
-	}
-
-	jBytes, err := json.Marshal(rd)
-	if err != nil {
-		return nil, g.Error(err, "could not marshal")
-	}
-
-	return jBytes, err
+	return []byte(rd.JSON()), nil
 }
 
 // StreamsOrdered returns the stream names as ordered in the YAML file
@@ -117,11 +119,27 @@ func (rd ReplicationConfig) Normalize(n string) string {
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	hasWildcard := func(name string) bool {
+		return strings.Contains(name, "*") || strings.Contains(name, "?")
+	}
+
 	wildcardNames := []string{}
-	for name := range rd.Streams {
+	for name, stream := range rd.Streams {
+		// if specified, treat wildcard as single stream (don't expand wildcard into individual streams)
+		if stream != nil && stream.Single != nil {
+			if *stream.Single {
+				if hasWildcard(name) {
+					g.Warn("wildcard cannot be used with `single: true` for stream: %s", name)
+				}
+				continue
+			}
+		} else if rd.Defaults.Single != nil && *rd.Defaults.Single {
+			continue
+		}
+
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
-		} else if strings.Contains(name, "*") {
+		} else if hasWildcard(name) {
 			wildcardNames = append(wildcardNames, name)
 		}
 	}
@@ -137,17 +155,23 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	if !ok {
 		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
 			c = connection.LocalFileConnEntry()
+		} else if strings.Contains(rd.Source, "://") {
+			c.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
+			if err != nil {
+				return
+			}
 		} else {
+			g.Error("did not find connection for wildcards: %s", rd.Source)
 			return
 		}
 	}
 
 	if c.Connection.Type.IsDb() {
-		return rd.ProcessWildcardsDatabase(c, wildcardNames)
+		return rd.ProcessWildcardsDatabase(c.Connection, wildcardNames)
 	}
 
 	if c.Connection.Type.IsFile() {
-		return rd.ProcessWildcardsFile(c, wildcardNames)
+		return rd.ProcessWildcardsFile(c.Connection, wildcardNames)
 	}
 
 	return g.Error("invalid connection for wildcards: %s", rd.Source)
@@ -158,6 +182,12 @@ func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig)
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
+
+	// add to streams map if not found
+	if _, found := rd.maps.Streams[key]; !found {
+		mapEntry, _ := g.UnmarshalMap(g.Marshal(cfg))
+		rd.maps.Streams[key] = mapEntry
+	}
 }
 
 func (rd *ReplicationConfig) DeleteStream(key string) {
@@ -167,11 +197,11 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 	})
 }
 
-func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wildcardNames []string) (err error) {
+func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, wildcardNames []string) (err error) {
 
-	g.DebugLow("processing wildcards for %s", rd.Source)
+	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(wildcardNames))
 
-	conn, err := c.Connection.AsDatabase()
+	conn, err := c.AsDatabase(true)
 	if err != nil {
 		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = conn.Connect(); err != nil {
@@ -179,61 +209,51 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.ConnEntry, wi
 	}
 
 	for _, wildcardName := range wildcardNames {
-		schemaT, err := database.ParseTableName(wildcardName, c.Connection.Type)
+		schemaT, err := database.ParseTableName(wildcardName, c.Type)
 		if err != nil {
 			return g.Error(err, "could not parse stream name: %s", wildcardName)
 		} else if schemaT.Schema == "" {
 			continue
 		}
 
-		if strings.Contains(schemaT.Name, "*") {
-			// get all tables in schema
-			g.Debug("getting tables for %s", wildcardName)
-			data, err := conn.GetTables(schemaT.Schema)
-			if err != nil {
-				return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
-			}
-
-			gc, err := glob.Compile(strings.ToLower(schemaT.Name))
-			if err != nil {
-				return g.Error(err, "could not parse pattern: %s", schemaT.Name)
-			}
-
-			for _, row := range data.Rows {
-				table := database.Table{
-					Schema:  schemaT.Schema,
-					Name:    cast.ToString(row[0]),
-					Dialect: conn.GetType(),
-				}
-
-				// add to stream map
-				if gc.Match(strings.ToLower(table.Name)) {
-
-					streamName, streamConfig, found := rd.GetStream(table.FullName())
-					if found {
-						// keep in step with order, delete and add again
-						rd.DeleteStream(streamName)
-						rd.AddStream(table.FullName(), streamConfig)
-						continue
-					}
-
-					cfg := rd.Streams[wildcardName]
-					rd.AddStream(table.FullName(), cfg)
-				}
-			}
-
-			// delete * from stream map
-			rd.DeleteStream(wildcardName)
-
+		// get all tables in schema
+		g.Debug("getting tables for %s", wildcardName)
+		ok, _, schemata, err := c.Discover(&connection.DiscoverOptions{Pattern: wildcardName})
+		if err != nil {
+			return g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
+		} else if !ok {
+			return g.Error("could not get tables for schema: %s", schemaT.Schema)
 		}
+
+		streamsAdded := []string{}
+		for _, table := range schemata.Tables() {
+
+			// add to stream map
+			streamName, streamConfig, found := rd.GetStream(table.FullName())
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(table.FullName(), streamConfig)
+				continue
+			}
+
+			cfg := rd.Streams[wildcardName]
+			rd.AddStream(table.FullName(), cfg)
+			streamsAdded = append(streamsAdded, table.FullName())
+		}
+		g.Debug("wildcard '%s' matched %d streams => %+v", wildcardName, len(streamsAdded), streamsAdded)
+
+		// delete * from stream map
+		rd.DeleteStream(wildcardName)
+
 	}
 	return
 }
 
-func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildcardNames []string) (err error) {
-	g.DebugLow("processing wildcards for %s", rd.Source)
+func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, wildcardNames []string) (err error) {
+	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(wildcardNames))
 
-	fs, err := c.Connection.AsFile()
+	fs, err := c.AsFile(true)
 	if err != nil {
 		return g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = fs.Init(context.Background()); err != nil {
@@ -241,41 +261,184 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.ConnEntry, wildca
 	}
 
 	for _, wildcardName := range wildcardNames {
-		nodes, err := fs.ListRecursive(wildcardName)
-		if err != nil {
-			return g.Error(err, "could not list %s", wildcardName)
+		path := wildcardName
+		if strings.Contains(wildcardName, "://") {
+			_, path, err = filesys.ParseURL(wildcardName)
+			if err != nil {
+				return g.Error(err, "could not parse wildcard: %s", wildcardName)
+			}
 		}
 
-		added := 0
+		ok, nodes, _, err := c.Discover(&connection.DiscoverOptions{Pattern: path})
+		if err != nil {
+			return g.Error(err, "could not get files for schema: %s", wildcardName)
+		} else if !ok {
+			return g.Error("could not get files for schema: %s", wildcardName)
+		}
+
+		streamsAdded := []string{}
 		for _, node := range nodes {
-			streamName, streamConfig, found := rd.GetStream(node.URI)
+			streamName, streamConfig, found := rd.GetStream(node.Path())
 			if found {
 				// keep in step with order, delete and add again
 				rd.DeleteStream(streamName)
-				rd.AddStream(node.URI, streamConfig)
+				rd.AddStream(node.Path(), streamConfig)
 				continue
 			}
 
-			newCfg := ReplicationStreamConfig{}
-			g.Unmarshal(g.Marshal(rd.Streams[wildcardName]), &newCfg) // copy config over
-			rd.Streams[node.URI] = &newCfg
-			rd.streamsOrdered = append(rd.streamsOrdered, node.URI)
-			added++
+			// check uri, add as path
+			streamName, streamConfig, found = rd.GetStream(node.URI)
+			if found {
+				// keep in step with order, delete and add again
+				rd.DeleteStream(streamName)
+				rd.AddStream(node.Path(), streamConfig) // add as path
+				continue
+			}
+
+			// add path
+			rd.AddStream(node.Path(), rd.Streams[wildcardName])
+			streamsAdded = append(streamsAdded, node.Path())
 		}
+		g.Debug("wildcard '%s' matched %d streams => %+v", wildcardName, len(streamsAdded), streamsAdded)
 
 		// delete from stream map
 		rd.DeleteStream(wildcardName)
 
-		if added == 0 {
-			g.Debug("0 streams added for %#v (nodes=%d)", wildcardName, len(nodes))
-		}
 	}
 
 	return
 }
 
-// TODO: Compile
-func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []Config, err error) {
+// Compile compiles the replication into tasks
+func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []*Config, err error) {
+
+	err = rd.ProcessWildcards()
+	if err != nil {
+		return tasks, g.Error(err, "could not process streams using wildcard")
+	}
+
+	// clean up selectStreams
+	matchedStreams := map[string]*ReplicationStreamConfig{}
+	for _, selectStream := range selectStreams {
+		for key, val := range rd.MatchStreams(selectStream) {
+			key = rd.Normalize(key)
+			matchedStreams[key] = val
+		}
+	}
+
+	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
+	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, rd.Source, rd.Target)
+
+	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
+		return tasks, err
+	}
+
+	if streamCnt == 0 {
+		g.Warn("Did not match any streams. Exiting.")
+		return
+	}
+
+	for _, name := range rd.StreamsOrdered() {
+
+		_, matched := matchedStreams[rd.Normalize(name)]
+		if len(selectStreams) > 0 && !matched {
+			g.Trace("skipping stream %s since it is not selected", name)
+			continue
+		}
+
+		stream := ReplicationStreamConfig{}
+		if rd.Streams[name] != nil {
+			stream = *rd.Streams[name]
+		}
+		SetStreamDefaults(name, &stream, rd)
+
+		if stream.Object == "" {
+			return tasks, g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
+		}
+
+		// config overwrite
+		if cfgOverwrite != nil {
+			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
+				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
+				stream.Mode = cfgOverwrite.Mode
+			}
+
+			if cfgOverwrite.Source.Options.Limit != nil && stream.SourceOptions.Limit != cfgOverwrite.Source.Options.Limit {
+				if stream.SourceOptions.Limit != nil {
+					g.Debug("stream limit overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Limit, *cfgOverwrite.Source.Options.Limit)
+				}
+				stream.SourceOptions.Limit = cfgOverwrite.Source.Options.Limit
+			}
+
+			if cfgOverwrite.Source.Options.Offset != nil && stream.SourceOptions.Offset != cfgOverwrite.Source.Options.Offset {
+				if stream.SourceOptions.Offset != nil {
+					g.Debug("stream offset overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Offset, *cfgOverwrite.Source.Options.Offset)
+				}
+				stream.SourceOptions.Offset = cfgOverwrite.Source.Options.Offset
+			}
+
+			if cfgOverwrite.Source.UpdateKey != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
+				if stream.UpdateKey != "" {
+					g.Debug("stream update_key overwritten for `%s`: %s => %s", name, stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
+				}
+				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
+			}
+
+			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
+				if stream.PrimaryKeyI != nil {
+					g.Debug("stream primary_key overwritten for `%s`: %#v => %#v", name, stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
+				}
+				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
+			}
+
+			if newRange := cfgOverwrite.Source.Options.Range; newRange != nil {
+				if stream.SourceOptions.Range == nil || *stream.SourceOptions.Range != *newRange {
+					if stream.SourceOptions.Range != nil && *stream.SourceOptions.Range != "" {
+						g.Debug("stream range overwritten for `%s`: %s => %s", name, *stream.SourceOptions.Range, *newRange)
+					}
+					stream.SourceOptions.Range = newRange
+				}
+			}
+		}
+
+		cfg := Config{
+			Source: Source{
+				Conn:        rd.Source,
+				Stream:      name,
+				Select:      stream.Select,
+				PrimaryKeyI: stream.PrimaryKey(),
+				UpdateKey:   stream.UpdateKey,
+			},
+			Target: Target{
+				Conn:    rd.Target,
+				Object:  stream.Object,
+				Columns: stream.Columns,
+			},
+			Mode:              stream.Mode,
+			Transforms:        stream.Transforms,
+			Env:               g.ToMapString(rd.Env),
+			StreamName:        name,
+			ReplicationStream: &stream,
+		}
+
+		// so that the next stream does not retain previous pointer values
+		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
+		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
+
+		if stream.SQL != "" {
+			cfg.Source.Stream = stream.SQL
+		}
+
+		// prepare config
+		err = cfg.Prepare()
+		if err != nil {
+			err = g.Error(err, "could not prepare stream task: %s", name)
+			return
+		}
+
+		tasks = append(tasks, &cfg)
+	}
 	return
 }
 
@@ -290,6 +453,9 @@ type ReplicationStreamConfig struct {
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
+	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 
 	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
 }
@@ -303,29 +469,35 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
-func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
+func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
 
-	if len(stream.Schedule) == 0 {
-		stream.Schedule = replicationCfg.Defaults.Schedule
+	streamMap, ok := replicationCfg.maps.Streams[name]
+	if !ok {
+		streamMap = g.M()
 	}
-	if stream.PrimaryKeyI == nil {
-		stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI
+
+	// the keys to check if provided in map
+	defaultSet := map[string]func(){
+		"mode":        func() { stream.Mode = replicationCfg.Defaults.Mode },
+		"object":      func() { stream.Object = replicationCfg.Defaults.Object },
+		"select":      func() { stream.Select = replicationCfg.Defaults.Select },
+		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
+		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
+		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
+		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
+		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
+		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
+		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
+		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
 	}
-	if string(stream.Mode) == "" {
-		stream.Mode = replicationCfg.Defaults.Mode
+
+	for key, setFunc := range defaultSet {
+		if _, found := streamMap[key]; !found {
+			setFunc() // if not found, set default
+		}
 	}
-	if stream.UpdateKey == "" {
-		stream.UpdateKey = replicationCfg.Defaults.UpdateKey
-	}
-	if stream.Object == "" {
-		stream.Object = replicationCfg.Defaults.Object
-	}
-	if stream.SQL == "" {
-		stream.SQL = replicationCfg.Defaults.SQL
-	}
-	if len(stream.Select) == 0 {
-		stream.Select = replicationCfg.Defaults.Select
-	}
+
+	// set default options
 	if stream.SourceOptions == nil {
 		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
 	} else if replicationCfg.Defaults.SourceOptions != nil {
@@ -341,6 +513,10 @@ func SetStreamDefaults(stream *ReplicationStreamConfig, replicationCfg Replicati
 
 // UnmarshalReplication converts a yaml file to a replication
 func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err error) {
+
+	// set base values when erroring
+	config.originalCfg = replicYAML
+	config.Env = map[string]any{}
 
 	m := g.M()
 	err = yaml.Unmarshal([]byte(replicYAML), &m)
@@ -392,10 +568,16 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		return
 	}
 
+	maps := replicationConfigMaps{}
+	g.Unmarshal(g.Marshal(defaults), &maps.Defaults)
+	g.Unmarshal(g.Marshal(streams), &maps.Streams)
+
 	config = ReplicationConfig{
-		Source: cast.ToString(source),
-		Target: cast.ToString(target),
-		Env:    Env,
+		Source:      cast.ToString(source),
+		Target:      cast.ToString(target),
+		Env:         Env,
+		maps:        maps,
+		originalCfg: replicYAML, // set originalCfg
 	}
 
 	// parse defaults
@@ -422,11 +604,15 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 
 	for _, rootNode := range rootMap {
 		if cast.ToString(rootNode.Key) == "defaults" {
+
+			if value, ok := rootNode.Value.(yaml.MapSlice); ok {
+				config.Defaults.Columns = makeColumns(value)
+			}
+
 			for _, defaultsNode := range rootNode.Value.(yaml.MapSlice) {
 				if cast.ToString(defaultsNode.Key) == "source_options" {
-					value, ok := defaultsNode.Value.(yaml.MapSlice)
-					if ok {
-						config.Defaults.SourceOptions.Columns = getSourceOptionsColumns(value)
+					if value, ok := defaultsNode.Value.(yaml.MapSlice); ok {
+						config.Defaults.SourceOptions.Columns = makeColumns(value) // legacy
 					}
 				}
 			}
@@ -448,15 +634,19 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 				if streamsNode.Value == nil {
 					continue
 				}
+
+				if value, ok := streamsNode.Value.(yaml.MapSlice); ok {
+					stream.Columns = makeColumns(value)
+				}
+
 				for _, streamConfigNode := range streamsNode.Value.(yaml.MapSlice) {
 					if cast.ToString(streamConfigNode.Key) == "source_options" {
 						if found {
 							if stream.SourceOptions == nil {
 								g.Unmarshal(g.Marshal(config.Defaults.SourceOptions), stream.SourceOptions)
 							}
-							value, ok := streamConfigNode.Value.(yaml.MapSlice)
-							if ok {
-								stream.SourceOptions.Columns = getSourceOptionsColumns(value)
+							if value, ok := streamConfigNode.Value.(yaml.MapSlice); ok {
+								stream.SourceOptions.Columns = makeColumns(value) // legacy
 							}
 						}
 					}
@@ -465,28 +655,32 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		}
 	}
 
-	// set originalCfg
-	config.originalCfg = g.Marshal(config)
-
 	return
 }
 
-func getSourceOptionsColumns(sourceOptionsNodes yaml.MapSlice) (columns map[string]any) {
-	columns = map[string]any{}
-	for _, sourceOptionsNode := range sourceOptionsNodes {
-		if cast.ToString(sourceOptionsNode.Key) == "columns" {
-			if slice, ok := sourceOptionsNode.Value.(yaml.MapSlice); ok {
+// sets the columns correctly and keep the order
+func makeColumns(nodes yaml.MapSlice) (columns []any) {
+	found := false
+	for _, node := range nodes {
+		if cast.ToString(node.Key) == "columns" {
+			found = true
+			if slice, ok := node.Value.(yaml.MapSlice); ok {
 				for _, columnNode := range slice {
-					columns[cast.ToString(columnNode.Key)] = cast.ToString(columnNode.Value)
+					col := g.M("name", cast.ToString(columnNode.Key), "type", cast.ToString(columnNode.Value))
+					columns = append(columns, col)
 				}
 			}
 		}
 	}
 
+	if !found {
+		return nil
+	}
+
 	return columns
 }
 
-func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error) {
+func LoadReplicationConfigFromFile(cfgPath string) (config ReplicationConfig, err error) {
 	cfgFile, err := os.Open(cfgPath)
 	if err != nil {
 		err = g.Error(err, "Unable to open replication path: "+cfgPath)
@@ -499,18 +693,53 @@ func LoadReplicationConfig(cfgPath string) (config ReplicationConfig, err error)
 		return
 	}
 
-	config, err = UnmarshalReplication(string(cfgBytes))
+	config, err = LoadReplicationConfig(string(cfgBytes))
+	if err != nil {
+		return
+	}
+
+	// set config path
+	config.Env["SLING_CONFIG_PATH"] = cfgPath
+
+	return
+}
+
+func LoadReplicationConfig(content string) (config ReplicationConfig, err error) {
+	config, err = UnmarshalReplication(content)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 		return
 	}
 
-	// get file path
-	fp, err := filepath.Abs(cfgPath)
-	if err != nil {
-		fp = cfgPath
-	}
-	config.Env["SLING_CONFIG_PATH"] = fp
-
 	return
+}
+
+// IsJSONorYAML detects a JSON or YAML payload
+func IsJSONorYAML(payload string) bool {
+	if strings.HasPrefix(payload, "{") && strings.HasSuffix(payload, "}") {
+		return true
+	}
+	if strings.Contains(payload, ":") && strings.Contains(payload, "\n") &&
+		(strings.Contains(payload, "'") || strings.Contains(payload, `"`)) {
+		return true
+	}
+	return false
+}
+
+func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
+	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToInt(strings.TrimPrefix(expected, ">"))
+			if streamCnt <= atLeast {
+				return g.Error("Expected at least %d streams, got %d => %s", atLeast, streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+			}
+			return nil
+		}
+
+		if streamCnt != cast.ToInt(expected) {
+			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+		}
+	}
+	return nil
 }

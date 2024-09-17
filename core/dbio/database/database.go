@@ -24,7 +24,6 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
-	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -58,7 +57,7 @@ type Connection interface {
 	BaseURL() string
 	Begin(options ...*sql.TxOptions) error
 	BeginContext(ctx context.Context, options ...*sql.TxOptions) error
-	BulkExportFlow(tables ...Table) (*iop.Dataflow, error)
+	BulkExportFlow(table Table) (*iop.Dataflow, error)
 	BulkExportStream(table Table) (*iop.Datastream, error)
 	BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error)
 	BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error)
@@ -79,8 +78,8 @@ type Connection interface {
 	DropView(...string) error
 	Exec(sql string, args ...interface{}) (result sql.Result, err error)
 	ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMulti(sql string, args ...interface{}) (result sql.Result, err error)
-	ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error)
+	ExecMulti(sqls ...string) (result sql.Result, err error)
+	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, fields []string, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
@@ -126,7 +125,6 @@ type Connection interface {
 	RunAnalysis(string, map[string]interface{}) (iop.Dataset, error)
 	Schemata() Schemata
 	Self() Connection
-	setContext(ctx context.Context, concurrency int)
 	SetProp(string, string)
 	StreamRecords(sql string) (<-chan map[string]interface{}, error)
 	StreamRows(sql string, options ...map[string]interface{}) (*iop.Datastream, error)
@@ -163,7 +161,7 @@ type BaseConn struct {
 	Data        iop.Dataset
 	defaultPort int
 	instance    *Connection
-	context     g.Context
+	context     *g.Context
 	template    dbio.Template
 	schemata    Schemata
 	properties  map[string]string
@@ -190,18 +188,22 @@ var (
 	ddlMaxDecLength = 38
 	ddlMinDecScale  = 6
 
-	filePathStorageSlug = "temp"
+	tempCloudStorageFolder = "sling_temp"
 
-	noDebugKey = " /* nD */"
+	noDebugKey = env.NoDebugKey
 
 	connPool = Pool{Dbs: map[string]*sqlx.DB{}, DuckDbs: map[string]*DuckDbConn{}}
 	usePool  = os.Getenv("USE_POOL") == "TRUE"
 )
 
 func init() {
-	if os.Getenv("FILEPATH_SLUG") != "" {
-		filePathStorageSlug = os.Getenv("FILEPATH_SLUG")
+	if os.Getenv("SLING_TEMP_CLOUD_FOLDER") != "" || os.Getenv("FILEPATH_SLUG") != "" {
+		tempCloudStorageFolder = os.Getenv("SLING_TEMP_CLOUD_FOLDER")
+		if tempCloudStorageFolder == "" {
+			tempCloudStorageFolder = os.Getenv("FILEPATH_SLUG") // legacy
+		}
 	}
+
 }
 
 // NewConn return the most proper connection for a given database
@@ -291,11 +293,11 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
-	conn.setContext(ctx, concurrency)
+
+	conn.Base().setContext(ctx, concurrency)
 
 	// Add / Extract provided Props
 	for _, propStr := range props {
-		// g.Trace("setting connection prop -> " + propStr)
 		arr := strings.Split(propStr, "=")
 		if len(arr) == 1 && arr[0] != "" {
 			conn.SetProp(arr[0], "")
@@ -309,6 +311,13 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 
 	// Init
 	conn.SetProp("orig_url", OrigURL)
+	conn.SetProp("orig_prop_keys", g.Marshal(lo.Keys(conn.Base().properties))) // used when caching conn
+
+	if val := conn.GetProp("concurrency"); val != "" {
+		concurrency = cast.ToInt(val)
+		conn.Base().setContext(ctx, concurrency)
+	}
+
 	err = conn.Init()
 
 	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
@@ -384,8 +393,7 @@ func (conn *BaseConn) GetURL(newURL ...string) string {
 // Init initiates the connection object & add default port if missing
 func (conn *BaseConn) Init() (err error) {
 	if conn.instance == nil {
-		var instance Connection
-		instance = conn
+		instance := Connection(conn)
 		conn.instance = &instance
 	}
 
@@ -429,7 +437,11 @@ func (conn *BaseConn) Init() (err error) {
 }
 
 func (conn *BaseConn) setContext(ctx context.Context, concurrency int) {
-	conn.context = g.NewContext(ctx, concurrency)
+	c := g.NewContext(ctx, concurrency)
+	if conn.context != nil {
+		c.Map = conn.context.Map
+	}
+	conn.context = &c
 }
 
 // Self returns the respective connection Instance
@@ -461,7 +473,7 @@ func (conn *BaseConn) GetType() dbio.Type {
 
 // Context returns the db context
 func (conn *BaseConn) Context() *g.Context {
-	return &conn.context
+	return conn.context
 }
 
 // Schemata returns the Schemata object
@@ -494,13 +506,41 @@ func (conn *BaseConn) SetProp(key string, val string) {
 
 // PropArr returns an array of properties
 func (conn *BaseConn) PropArr() []string {
+	return conn.PropArrExclude() // don't exclude any key
+}
+
+func (conn *BaseConn) PropArrExclude(exclude ...string) []string {
 	props := []string{}
 	conn.context.Mux.Lock()
 	for k, v := range conn.properties {
+		if g.In(k, exclude...) {
+			continue
+		}
 		props = append(props, g.F("%s=%s", k, v))
 	}
 	conn.context.Mux.Unlock()
 	return props
+}
+
+// ReplaceProps used when reusing a connection
+// since the provided props can change, this is used
+// to delete old original props and set new ones
+func (conn *BaseConn) ReplaceProps(newProps map[string]string) {
+	oldPropKeys := []string{}
+
+	g.Unmarshal(conn.GetProp("orig_prop_keys"), oldPropKeys)
+
+	conn.context.Mux.Lock()
+	for _, k := range oldPropKeys {
+		delete(conn.properties, k)
+	}
+
+	// set new props
+	for k, v := range newProps {
+		conn.properties[k] = v
+	}
+
+	conn.context.Mux.Unlock()
 }
 
 // Props returns a map properties
@@ -541,23 +581,11 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
-		sshU, err := url.Parse(sshURL)
-		if err != nil {
-			return g.Error(err, "could not parse SSH_TUNNEL URL")
-		}
 
 		connU, err := url.Parse(connURL)
 		if err != nil {
 			return g.Error(err, "could not parse connection URL for SSH forwarding")
 		}
-
-		sshHost := sshU.Hostname()
-		sshPort := cast.ToInt(sshU.Port())
-		if sshPort == 0 {
-			sshPort = 22
-		}
-		sshUser := sshU.User.Username()
-		sshPassword, _ := sshU.User.Password()
 
 		connHost := connU.Hostname()
 		connPort := cast.ToInt(connU.Port())
@@ -569,20 +597,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			)
 		}
 
-		conn.sshClient = &iop.SSHClient{
-			Host:       sshHost,
-			Port:       sshPort,
-			User:       sshUser,
-			Password:   sshPassword,
-			TgtHost:    connHost,
-			TgtPort:    connPort,
-			PrivateKey: conn.GetProp("SSH_PRIVATE_KEY"),
-			Passphrase: conn.GetProp("SSH_PASSPHRASE"),
-		}
-
-		localPort, err := conn.sshClient.OpenPortForward()
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
 		if err != nil {
-			return g.Error(err, "could not connect to ssh server")
+			return g.Error(err, "could not connect to ssh tunnel server")
 		}
 
 		connURL = strings.ReplaceAll(
@@ -606,7 +623,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
 
-			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			if !cast.ToBool(conn.GetProp("silent")) {
+				g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -640,7 +659,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 						}
 					}
 				}
-				return g.Error(err, "could not connect to database"+CleanSQL(conn, msg))
+				return g.Error(err, "could not connect to database"+env.Clean(conn.Props(), msg))
 			}
 		}
 
@@ -671,7 +690,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 func reconnectIfClosed(conn Connection) (err error) {
 	// g.Warn("connected => %s", conn.GetProp("connected"))
 	if conn.GetProp("connected") != "true" {
-		g.Debug("connection was closed, reconnecting")
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug("connection was closed, reconnecting")
+		}
 		err = conn.Self().Connect()
 		if err != nil {
 			err = g.Error(err, "Could not connect")
@@ -687,7 +708,7 @@ func (conn *BaseConn) Close() error {
 	if conn.db != nil {
 		err = conn.db.Close()
 		conn.db = nil
-		if err == nil {
+		if err == nil && !cast.ToBool(conn.GetProp("silent")) {
 			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 	}
@@ -701,8 +722,6 @@ func (conn *BaseConn) Close() error {
 
 // LogSQL logs a query for debugging
 func (conn *BaseConn) LogSQL(query string, args ...any) {
-	noColor := g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
-
 	query = strings.TrimSpace(query)
 	query = strings.TrimSuffix(query, ";")
 
@@ -711,17 +730,7 @@ func (conn *BaseConn) LogSQL(query string, args ...any) {
 		conn.Log = conn.Log[1:]
 	}
 
-	if strings.Contains(query, noDebugKey) {
-		if !noColor {
-			query = env.CyanString(query)
-		}
-		g.Trace(query, args...)
-	} else {
-		if !noColor {
-			query = env.CyanString(CleanSQL(conn, query))
-		}
-		g.Debug(query, args...)
-	}
+	env.LogSQL(conn.Props(), query, args...)
 }
 
 // GetGormConn returns the gorm db connection
@@ -731,26 +740,7 @@ func (conn *BaseConn) GetGormConn(config *gorm.Config) (*gorm.DB, error) {
 
 // GetTemplateValue returns the value of the path
 func (conn *BaseConn) GetTemplateValue(path string) (value string) {
-
-	prefixes := map[string]map[string]string{
-		"core.":             conn.template.Core,
-		"analysis.":         conn.template.Analysis,
-		"function.":         conn.template.Function,
-		"metadata.":         conn.template.Metadata,
-		"general_type_map.": conn.template.GeneralTypeMap,
-		"native_type_map.":  conn.template.NativeTypeMap,
-		"variable.":         conn.template.Variable,
-	}
-
-	for prefix, dict := range prefixes {
-		if strings.HasPrefix(path, prefix) {
-			key := strings.Replace(path, prefix, "", 1)
-			value = dict[key]
-			break
-		}
-	}
-
-	return value
+	return conn.Type.GetTemplateValue(path)
 }
 
 // LoadTemplates loads the appropriate yaml template
@@ -772,7 +762,7 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(table.Select(0), g.M("columns", table.Columns))
+	return conn.Self().StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -834,7 +824,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 	var colTypes []ColumnType
 	if result != nil {
-		dbColTypes, err := result.ColumnTypes()
+		dbColTypes, err := getColumnTypes(result)
 		if err != nil {
 			queryContext.Cancel()
 			return ds, g.Error(err, "could not get column types")
@@ -860,7 +850,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 			return ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
-				FetchedType:      fetchedColumns.GetColumn(ct.Name()).Type,
+				FetchedColumn:    fetchedColumns.GetColumn(ct.Name()),
 				Length:           cast.ToInt(length),
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
@@ -947,7 +937,10 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
-					colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					// only add transform parse_uuid if parse_ms_uuid is not specified
+					if !lo.Contains(vals, "parse_ms_uuid") {
+						colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					}
 				} else {
 					colTransforms[key] = []string{"parse_uuid"}
 				}
@@ -1087,14 +1080,14 @@ func (conn *BaseConn) Exec(sql string, args ...interface{}) (result sql.Result, 
 }
 
 // ExecMulti runs mutiple sql queries, returns `error`
-func (conn *BaseConn) ExecMulti(sql string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMulti(sqls ...string) (result sql.Result, err error) {
 	err = reconnectIfClosed(conn)
 	if err != nil {
 		err = g.Error(err, "Could not reconnect")
 		return
 	}
 
-	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sql, args...)
+	result, err = conn.Self().ExecMultiContext(conn.Context().Ctx, sqls...)
 	if err != nil {
 		err = g.Error(err, "Could not execute SQL")
 	}
@@ -1120,29 +1113,31 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 		if strings.Contains(q, noDebugKey) {
 			err = g.Error(err, "Error executing query [tx: %t]", conn.tx != nil)
 		} else {
-			err = g.Error(err, "Error executing [tx: %t] %s", conn.tx != nil, CleanSQL(conn, q))
+			err = g.Error(err, "Error executing [tx: %t] %s", conn.tx != nil, env.Clean(conn.Props(), q))
 		}
 	}
 	return
 }
 
 // ExecMultiContext runs multiple sql queries with context, returns `error`
-func (conn *BaseConn) ExecMultiContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
 
 	Res := Result{rowsAffected: 0}
 
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
-		res, err := conn.Self().ExecContext(ctx, sql, args...)
-		if err != nil {
-			eG.Capture(g.Error(err, "Error executing query"))
-		} else {
-			ra, _ := res.RowsAffected()
-			g.Trace("RowsAffected: %d", ra)
-			Res.rowsAffected = Res.rowsAffected + ra
+	for _, q := range qs {
+		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			res, err := conn.Self().ExecContext(ctx, sql)
+			if err != nil {
+				eG.Capture(g.Error(err, "Error executing query"))
+			} else {
+				ra, _ := res.RowsAffected()
+				g.Trace("RowsAffected: %d", ra)
+				Res.rowsAffected = Res.rowsAffected + ra
+			}
+			delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
+			time.Sleep(time.Duration(delay) * time.Second)
 		}
-		delay := cast.ToInt64(conn.GetTemplateValue("variable.multi_exec_delay"))
-		time.Sleep(time.Duration(delay) * time.Second)
 	}
 
 	err = eG.Err()
@@ -1329,8 +1324,11 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
-		if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && colType.FetchedType != "" {
-			col.Type = colType.FetchedType
+		if fc := colType.FetchedColumn; fc != nil {
+			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && fc.Type != "" {
+				col.Type = fc.Type
+			}
+			col.Constraint = fc.Constraint
 		}
 
 		col.Stats.MaxLen = colType.Length
@@ -1417,7 +1415,7 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(1)
+	limitSQL := table.Select(1, 0)
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
@@ -1529,6 +1527,14 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	}
 
 	columns = SQLColumns(colTypes, conn)
+
+	// add table info
+	for i := range columns {
+		columns[i].Database = table.Database
+		columns[i].Schema = table.Schema
+		columns[i].Table = table.Name
+	}
+
 	table.Columns = columns
 
 	if len(columns) == 0 {
@@ -2072,39 +2078,6 @@ func (conn *BaseConn) InsertStream(tableFName string, ds *iop.Datastream) (count
 	return
 }
 
-// castDsBoolColumns cast any boolean column values to the db type
-func (conn *BaseConn) castDsBoolColumns(ds *iop.Datastream) *iop.Datastream {
-	// cast any bool column
-	boolCols := []int{}
-	for i, c := range ds.Columns {
-		if c.IsBool() {
-			boolCols = append(boolCols, i)
-		}
-	}
-
-	boolAs := conn.template.Variable["bool_as"]
-	if len(boolCols) > 0 && boolAs != "bool" {
-		newCols := ds.Columns
-		for _, i := range boolCols {
-			newCols[i].Type = iop.ColumnType(boolAs) // the data type for a bool
-		}
-
-		ds = ds.Map(newCols, func(row []interface{}) []interface{} {
-			for _, i := range boolCols {
-				switch boolAs {
-				case "integer", "smallint":
-					row[i] = cast.ToInt(cast.ToBool(row[i]))
-				default:
-					row[i] = cast.ToString(cast.ToBool(row[i]))
-				}
-			}
-			return row
-		})
-	}
-
-	return ds
-}
-
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *BaseConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	count, err = InsertBatchStream(conn.Self(), conn.tx, tableFName, ds)
@@ -2127,28 +2100,12 @@ func (conn *BaseConn) bindVar(i int, field string, n int, c int) string {
 
 // Unquote removes quotes to the field name
 func (conn *BaseConn) Unquote(field string) string {
-	q := conn.template.Variable["quote_char"]
-	return strings.ReplaceAll(field, q, "")
+	return conn.Type.Unquote(field)
 }
 
 // Quote adds quotes to the field name
 func (conn *BaseConn) Quote(field string, normalize ...bool) string {
-	Normalize := true
-	if len(normalize) > 0 {
-		Normalize = normalize[0]
-	}
-
-	// always normalize if case is uniform. Why would you quote and not normalize?
-	if !HasVariedCase(field) && Normalize {
-		if g.In(conn.Type, dbio.TypeDbOracle, dbio.TypeDbSnowflake) {
-			field = strings.ToUpper(field)
-		} else {
-			field = strings.ToLower(field)
-		}
-	}
-	q := conn.template.Variable["quote_char"]
-	field = conn.Self().Unquote(field)
-	return q + field + q
+	return conn.Type.Quote(field, normalize...)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2169,12 +2126,12 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, fields []string,
 	}
 
 	statement := g.R(
-		"INSERT INTO {table} ({fields}) VALUES {values}",
+		"insert into {table} ({fields}) values  {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
 	)
-	g.Trace("insert statement: "+strings.Split(statement, ") VALUES ")[0]+")"+" x %d", numRows)
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
 	return statement
 }
 
@@ -2234,82 +2191,7 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
-
-	nativeType, ok := conn.template.GeneralTypeMap[string(col.Type)]
-	if !ok {
-		err = g.Error(
-			"No native type mapping defined for col '%s', with type '%s' ('%s') for '%s'",
-			col.Name,
-			col.Type,
-			col.DbType,
-			conn.Type,
-		)
-		// return "", g.Error(err)
-		g.Warn(err.Error() + ". Using 'string'")
-		err = nil
-		nativeType = conn.template.GeneralTypeMap["string"]
-	}
-
-	// Add precision as needed
-	if strings.HasSuffix(nativeType, "()") {
-		length := col.Stats.MaxLen
-		if col.IsString() {
-			if !col.Sourced || length <= 0 {
-				length = col.Stats.MaxLen * 2
-				if length < 255 {
-					length = 255
-				}
-			}
-
-			if length > 255 {
-				// let's make text since high
-				nativeType = conn.template.GeneralTypeMap["text"]
-			} else {
-				nativeType = strings.ReplaceAll(
-					nativeType,
-					"()",
-					fmt.Sprintf("(%d)", length),
-				)
-			}
-		} else if col.IsInteger() {
-			if !col.Sourced && length < ddlDefDecLength {
-				length = ddlDefDecLength
-			}
-			nativeType = strings.ReplaceAll(
-				nativeType,
-				"()",
-				fmt.Sprintf("(%d)", length),
-			)
-		}
-	} else if strings.Contains(nativeType, "(,)") {
-
-		precision := col.DbPrecision
-		scale := col.DbScale
-
-		if !col.Sourced || col.DbPrecision == 0 {
-			scale = lo.Ternary(col.DbScale < ddlMinDecScale, ddlMinDecScale, col.DbScale)
-			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-			scale = lo.Ternary(scale > ddlMaxDecScale, ddlMaxDecScale, scale)
-			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-				scale = maxDecimals
-			}
-
-			precision = lo.Ternary(col.DbPrecision < ddlMinDecLength, ddlMinDecLength, col.DbPrecision)
-			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-			precision = lo.Ternary(precision > ddlMaxDecLength, ddlMaxDecLength, precision)
-
-			minPrecision := col.Stats.MaxLen + scale
-			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
-		}
-
-		nativeType = strings.ReplaceAll(
-			nativeType,
-			"(,)",
-			fmt.Sprintf("(%d,%d)", precision, scale),
-		)
-	}
-
-	return
+	return col.GetNativeType(conn.GetType())
 }
 
 // GenerateDDL genrate a DDL based on a dataset
@@ -2345,7 +2227,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 
 	for _, col := range columns {
 		// convert from general type to native type
-		nativeType, err := conn.GetNativeType(col)
+		nativeType, err := conn.Self().GetNativeType(col)
 		if err != nil {
 			return "", g.Error(err, "no native mapping")
 		}
@@ -2360,8 +2242,8 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	}
 
 	createTemplate := conn.template.Core["create_table"]
-	if temporary {
-		createTemplate = conn.template.Core["create_temporary_table"]
+	if ctt := conn.template.Core["create_temporary_table"]; ctt != "" && temporary {
+		createTemplate = ctt
 	}
 
 	if table.DDL != "" {
@@ -2421,11 +2303,11 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 }
 
 // BulkExportFlow creates a dataflow from a sql query
-func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+func (conn *BaseConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 
 	g.Trace("BulkExportFlow not implemented for %s", conn.GetType())
 	if UseBulkExportFlowCSV {
-		return conn.BulkExportFlowCSV(tables...)
+		return conn.BulkExportFlowCSV(table)
 	}
 
 	df = iop.NewDataflowContext(conn.Context().Ctx)
@@ -2435,8 +2317,7 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 	go func() {
 		defer close(dsCh)
 		dss := []*iop.Datastream{}
-
-		for _, table := range tables {
+		for _, table := range []Table{table} {
 			ds, err := conn.Self().BulkExportStream(table)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Error running query"))
@@ -2465,12 +2346,9 @@ func (conn *BaseConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err err
 }
 
 // BulkExportFlowCSV creates a dataflow from a sql query, using CSVs
-func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
-	}
+func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err error) {
 
-	columns, err := conn.Self().GetSQLColumns(tables[0])
+	columns, err := conn.Self().GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
@@ -2523,7 +2401,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 				df.Context.Cancel()
 				return
 			}
-			nDs.Defer(func() { os.RemoveAll(file.Node.Path()) })
+			nDs.Defer(func() { env.RemoveAllLocalTempFile(file.Node.Path()) })
 			dsCh <- nDs
 		}
 	}
@@ -2532,7 +2410,7 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 
 	go func() {
 		defer df.Close()
-		for i, table := range tables {
+		for i, table := range []Table{table} {
 			pathPart := fmt.Sprintf("%s/sql%02d", folderPath, i+1)
 			df.Context.Wg.Read.Add()
 			go unload(table, pathPart)
@@ -2550,7 +2428,6 @@ func (conn *BaseConn) BulkExportFlowCSV(tables ...Table) (df *iop.Dataflow, err 
 		return df, g.Error(err)
 	}
 
-	g.Debug("Unloading to %s", folderPath)
 	df.AddColumns(columns, true) // overwrite types so we don't need to infer
 	df.Inferred = true
 
@@ -2794,6 +2671,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		return false, ddlParts, nil
 	}
 
+	// if column is part of index, drop it
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.DropDDL())
+	}
+
 	for _, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
@@ -2827,9 +2709,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		)
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			QuoteNames(conn.GetType(), table.Columns.Names()...), // add quotes
+			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -2868,9 +2750,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = QuoteNames(conn.GetType(), fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = QuoteNames(conn.GetType(), updatedFields...) // add quotes
+		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
@@ -2881,6 +2763,11 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			"fields", strings.Join(fields, ", "),
 			"updated_fields", strings.Join(updatedFields, ", "),
 		))
+	}
+
+	// re-create index
+	for _, index := range table.Indexes(colsChanging) {
+		ddlParts = append(ddlParts, index.CreateDDL())
 	}
 
 	return true, ddlParts, nil
@@ -2896,7 +2783,7 @@ func (conn *BaseConn) OptimizeTable(table *Table, newColumns iop.Columns, isTemp
 		return ok, err
 	}
 
-	_, err = conn.ExecMulti(strings.Join(ddlParts, ";\n"))
+	_, err = conn.ExecMulti(ddlParts...)
 	if err != nil {
 		return false, g.Error(err, "could not alter columns on table "+table.FullName())
 	}
@@ -3096,7 +2983,7 @@ func settingMppBulkImportFlow(conn Connection, compressor iop.CompressorType) {
 		conn.SetProp("FILE_MAX_BYTES", "50000000")
 	}
 
-	compr := strings.ToUpper(conn.GetProp("COMPRESSION"))
+	compr := strings.ToLower(conn.GetProp("COMPRESSION"))
 	if g.In(compr, "", string(iop.AutoCompressorType)) {
 		conn.SetProp("COMPRESSION", string(compressor))
 	}
@@ -3130,6 +3017,11 @@ func (conn *BaseConn) AddMissingColumns(table Table, newCols iop.Columns) (ok bo
 		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "could not add column %s to table %s", col.Name, table.FullName())
+		}
+
+		if g.In(conn.GetType(), dbio.TypeDbBigQuery) {
+			// avoid rate limit error
+			time.Sleep(2 * time.Second)
 		}
 	}
 
@@ -3232,36 +3124,6 @@ func TestPermissions(conn Connection, tableName string) (err error) {
 	return
 }
 
-// CleanSQL removes creds from the query
-func CleanSQL(conn Connection, sql string) string {
-	sql = strings.TrimSpace(sql)
-	sqlLower := strings.ToLower(sql)
-
-	if len(sql) > 3000 {
-		sql = sql[0:3000]
-	}
-
-	startsWith := func(p string) bool { return strings.HasPrefix(sqlLower, p) }
-
-	switch {
-	case startsWith("drop "), startsWith("create "), startsWith("insert into"), startsWith("select count"):
-		return sql
-	case startsWith("alter table "), startsWith("update "), startsWith("alter table "), startsWith("update "):
-		return sql
-	case startsWith("select *"):
-		return sql
-	}
-
-	for k, v := range conn.Props() {
-		if strings.TrimSpace(v) == "" {
-			continue
-		} else if g.In(k, "password", "access_key_id", "secret_access_key", "session_token", "aws_access_key_id", "aws_secret_access_key", "ssh_private_key", "ssh_passphrase", "sas_svc_url", "conn_str") {
-			sql = strings.ReplaceAll(sql, v, "***")
-		}
-	}
-	return sql
-}
-
 func CopyFromS3(conn Connection, tableFName, s3Path string) (err error) {
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
@@ -3287,7 +3149,7 @@ func CopyFromS3(conn Connection, tableFName, s3Path string) (err error) {
 	g.Debug("url: " + s3Path)
 	_, err = conn.Exec(sql)
 	if err != nil {
-		return g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return nil
@@ -3337,7 +3199,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 	conn.SetProp("azure_sas_token", azToken)
 	_, err = conn.Exec(sql)
 	if err != nil {
-		return g.Error(err, "SQL Error:\n"+CleanSQL(conn, sql))
+		return g.Error(err, "SQL Error:\n"+env.Clean(conn.Props(), sql))
 	}
 
 	return nil
@@ -3345,7 +3207,7 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
-func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) {
+func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	inQuote := false
 	inCommentLine := false
 	inCommentMulti := false
@@ -3361,6 +3223,14 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls g.Strings) 
 
 	inComment := func() bool {
 		return inCommentLine || inCommentMulti
+	}
+
+	// determine if is SQL code block
+	sqlLower := strings.TrimRight(strings.TrimSpace(strings.ToLower(sql)), ";")
+	if strings.HasPrefix(sqlLower, "begin") && strings.HasSuffix(sqlLower, "end") {
+		return []string{sql}
+	} else if strings.Contains(sqlLower, "prepare ") && strings.Contains(sqlLower, "execute ") {
+		return []string{sql}
 	}
 
 	for i := range sql {
@@ -3556,10 +3426,4 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 	}
 
 	return
-}
-
-func quoteColNames(conn Connection, names []string) []string {
-	return lo.Map(names, func(col string, i int) string {
-		return conn.Quote(col)
-	})
 }

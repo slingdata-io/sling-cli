@@ -6,9 +6,15 @@ shopt -s expand_aliases
 # export _DEBUG=LOW
 # export _DEBUG_CALLER_LEVEL=2
 cd cmd/sling
-go test -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
-SKIP_CLICKHOUSE=TRUE go test -parallel 4 -timeout 15m -run TestSuiteDatabase
+go test -v -run 'TestReplicationDefaults'
+go test -v -parallel 3 -run 'TestSuiteFile|TestSuiteDatabaseClickhouse'
+SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 15m -run TestSuiteDatabase
+cd -
 
+cd core/sling
+go test -v -run 'TestTransformMsUUID'
+go test -v -run 'TestReplication'
+go test -run 'TestCheck'
 cd -
 
 ## test cli commands
@@ -33,12 +39,17 @@ cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" -
 sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh
 
 SLING_ROW_CNT=2 sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
+echo 'a,b,c' | SLING_ALLOW_EMPTY=true SLING_TOTAL_BYTES=6 sling  run --tgt-object file:///tmp/test.csv
 
 # test various cli commands / flags
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
 sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select 'id' -l 2
 sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select '-id' -l 2
+
+# test ignore_existing, should write 0 rows
+cat cmd/sling/tests/files/test1.1.csv.gz | SLING_ROW_CNT=0 sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options 'ignore_existing: true'
+SLING_ROW_CNT=0 sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options 'ignore_existing: true'
 
 # test binary
 sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes
@@ -49,6 +60,10 @@ SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=t
 SLING_ROW_CNT=4 sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"
 SLING_ROW_CNT=3 sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names
 SLING_ROW_CNT=2 sling conns exec postgres "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name like '_sling%'" # should not have _sling_loaded_at
+
+# test _sling_loaded_at as timestamp
+SLING_LOADED_AT_COLUMN='timestamp' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+SLING_ROW_CNT=1 sling conns exec postgres "select data_type from information_schema.columns where table_schema = 'public' and table_name = 'many_jsons' and column_name = '_sling_loaded_at' and data_type like 'timestamp%'" # _sling_loaded_at should be a timestamp
 
 sling conns test POSTGRES
 sling conns exec POSTGRES 'select count(1) from public.my_table'
@@ -63,11 +78,17 @@ sling run -r cmd/sling/tests/replications/r.05.yaml
 sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
 
 SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.06.yaml
-SLING_STREAM_CNT=13 sling run -r cmd/sling/tests/replications/r.07.yaml
-SLING_STREAM_CNT=3 sling run -r cmd/sling/tests/replications/r.08.yaml
-SLING_STREAM_CNT=">0" sling run -r cmd/sling/tests/replications/r.09.yaml
+SLING_STREAM_CNT=17 sling run -r cmd/sling/tests/replications/r.07.yaml
+SLING_STREAM_CNT=4 sling run -r cmd/sling/tests/replications/r.08.yaml
+# SLING_CONSTRAINT_FAILS=2 SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
+SLING_STREAM_CNT=">1" sling run -r cmd/sling/tests/replications/r.09.yaml
 YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 sling run -r cmd/sling/tests/replications/r.12.yaml
+SLING_STREAM_CNT=2 sling run -r cmd/sling/tests/replications/r.15.yaml
+
+# file incremental. Second run should have no new rows
+sling run -r cmd/sling/tests/replications/r.14.yaml
+SLING_ROW_CNT=0 sling run -r cmd/sling/tests/replications/r.14.yaml
 
 sling run -c cmd/sling/tests/task.yaml
 

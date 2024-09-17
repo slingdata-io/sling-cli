@@ -187,6 +187,11 @@ func (p *ParquetArrowReader) Columns() Columns {
 			col.Sourced = false
 		}
 
+		// clean DbType
+		if parts := strings.Split(col.DbType, "("); len(parts) > 1 {
+			col.DbType = parts[0]
+		}
+
 		cols[i] = col
 	}
 
@@ -576,7 +581,7 @@ func (p *ParquetArrowWriter) Columns() Columns {
 }
 
 func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
-	rep := parquet.Repetitions.Undefined
+	rep := parquet.Repetitions.Required
 	fields := make([]schema.Node, len(p.Columns()))
 	for i, col := range p.Columns() {
 		fields[i], _ = schema.NewPrimitiveNode(col.Name, rep, parquetMapPhysicalType[col.Type], -1, 12)
@@ -618,7 +623,7 @@ func (p *ParquetArrowWriter) makeSchema() (s *schema.Schema, err error) {
 		fields[i] = node
 	}
 
-	node, _ := schema.NewGroupNode("schema", parquet.Repetitions.Required, fields, -1)
+	node, _ := schema.NewGroupNode("schema", parquet.Repetitions.Optional, fields, -1)
 	return schema.NewSchema(node), nil
 }
 
@@ -713,6 +718,10 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 	case *file.ByteArrayColumnChunkWriter:
 		values := make([]parquet.ByteArray, len(colValuesBatch))
 		for i, val := range colValuesBatch {
+			if val == nil {
+				values[i] = nil // still does not write null
+				continue
+			}
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
 				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.ByteArray, 16)
@@ -725,6 +734,10 @@ func (p *ParquetArrowWriter) writeColumnValues(col *Column, writer file.ColumnCh
 		values := make([]parquet.FixedLenByteArray, len(colValuesBatch))
 
 		for i, val := range colValuesBatch {
+			if val == nil {
+				values[i] = nil // still does not write null
+				continue
+			}
 			valS := cast.ToString(val)
 			if col.Type == DecimalType {
 				values[i] = StringToDecimalByteArray(valS, p.decNumScale[col.Position-1], parquet.Types.FixedLenByteArray, 16)

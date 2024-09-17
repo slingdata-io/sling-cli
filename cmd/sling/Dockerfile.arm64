@@ -1,22 +1,15 @@
 FROM --platform=linux/arm64 ubuntu:focal
 
-RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 postgresql-client wget curl gnupg && \
-  apt clean && \
-  rm -rf /var/lib/apt/lists /var/cache/apt
+RUN groupadd -r sling && useradd -r -g sling sling
 
+RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y libaio1 postgresql-client wget curl && apt clean && rm -rf /var/lib/apt/lists /var/cache/apt
+  
 # Install Oracle Instant Client
-# from https://www.oracle.com/database/technologies/instant-client/linux-arm-aarch64-downloads.html
 RUN cd /tmp && \
-  wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linux-arm64.zip && \
-  wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-sdk-linux-arm64.zip && \
-  wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-sqlplus-linux-arm64.zip && \
-  wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-tools-linux-arm64.zip && \
-  unzip instantclient-basiclite-linux-arm64.zip && \
-  unzip instantclient-sdk-linux-arm64.zip && \
-  unzip instantclient-sqlplus-linux-arm64.zip && \
-  unzip instantclient-tools-linux-arm64.zip && \
-  mkdir -p /opt/oracle/ && \
-  mv instantclient_19_19 /opt/oracle/ && \
+  wget https://f.slingdata.io/oracle_client_arm64.tar.gz && \
+  tar -xf oracle_client_arm64.tar.gz && \
+  rm -f oracle_client_arm64.tar.gz && \
+  mkdir -p /opt/oracle && mv instantclient_19_19 /opt/oracle/ && \
   echo /opt/oracle/instantclient_19_19 > /etc/ld.so.conf.d/oracle-instantclient.conf
 
 RUN echo ' \
@@ -27,27 +20,25 @@ export PATH="$PATH:$ORACLE_HOME" \
 ' >> /root/.bashrc && \
   ldconfig
 
-## Install mssql-tools
-## from https://docs.microsoft.com/en-us/sql/linux/sql-server-linux-setup-tools?view=sql-server-ver15#ubuntu
-# RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+## Install Sql Server BCP
+# RUN curl https://packages.microsoft.com/keys/microsoft.asc | tee /etc/apt/trusted.gpg.d/microsoft.asc
+# RUN curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | tee /etc/apt/sources.list.d/mssql-release.list
+# RUN apt update || true && DEBIAN_FRONTEND=noninteractive apt install -y mssql-tools18 && apt clean && rm -rf /var/lib/apt/lists /var/cache/apt
 
-# RUN curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | tee /etc/apt/sources.list.d/msprod.list
-
-# DNS fails in next apt update
-# RUN echo 'nameserver 8.8.8.8 \
-#   nameserver 8.8.4.4' > /etc/resolv.conf
-
-# RUN export ACCEPT_EULA=y && apt update || true && apt install -y mssql-tools unixodbc-dev && \
-#   apt clean && \
-#   rm -rf /var/lib/apt/lists /var/cache/apt
-
-# RUN echo ' \
-# export PATH="$PATH:/opt/mssql-tools/bin"' >> /root/.bashrc
-
-ENV PATH="${PATH}:/usr/local/go/bin:/root/go/bin:/opt/mssql-tools/bin:/opt/oracle/instantclient_19_19"
-
-ENV SLING_PACKAGE="DOCKER"
-ADD sling /usr/local/bin/sling
+# Copy sling binary
+COPY --chown=sling:sling sling /usr/local/bin/sling
 RUN chmod 755 /usr/local/bin/sling
+
+# Switch to non-root user
+RUN mkdir -p /home/sling && chmod 755 /home/sling && chown sling:sling /home/sling
+USER sling
+
+# Final ENV updates
+ENV DBUS_SESSION_BUS_ADDRESS="/dev/null"
+ENV ORACLE_HOME="/opt/oracle/instantclient_19_19"
+ENV LD_LIBRARY_PATH="/opt/oracle/instantclient_19_19"
+ENV PATH="${PATH}:/usr/local/go/bin:/root/go/bin:/opt/oracle/instantclient_19_19:/opt/mssql-tools18/bin"
+ENV SLING_PACKAGE="DOCKER"
+
 
 ENTRYPOINT ["sling"]

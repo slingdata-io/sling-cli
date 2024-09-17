@@ -19,7 +19,7 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal2}
-  sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
+  sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   modify_column: alter column {column} type {type}
   use_database: SET SESSION catalog.name = {database}
@@ -151,11 +151,11 @@ metadata:
     then 'NOT NULL'
     else 'NULL'
     END as not_null
-    FROM pg_class c,
+    from pg_class c,
     pg_attribute a,
     pg_type t,
     pg_namespace n
-    WHERE  n.nspname = '{schema}' and c.relname = '{table}'
+    where  n.nspname = '{schema}' and c.relname = '{table}'
     AND a.attnum > 0
     AND a.attrelid = c.oid
     AND a.atttypid = t.oid
@@ -179,7 +179,7 @@ metadata:
     from table_ddl
     "
   ddl_view: |
-    SELECT pg_get_viewdef(to_regclass('"{schema}"."{table}"'))::text as ddl
+    select pg_get_viewdef(to_regclass('"{schema}"."{table}"'))::text as ddl
 
   sessions: select *
     from pg_stat_activity

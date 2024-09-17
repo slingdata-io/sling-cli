@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -42,6 +41,17 @@ const (
 	BackfillMode Mode = "backfill"
 )
 
+var AllMode = []struct {
+	Value  Mode
+	TSName string
+}{
+	{FullRefreshMode, "FullRefreshMode"},
+	{IncrementalMode, "IncrementalMode"},
+	{TruncateMode, "TruncateMode"},
+	{SnapshotMode, "SnapshotMode"},
+	{BackfillMode, "BackfillMode"},
+}
+
 // ColumnCasing is the casing method to use
 type ColumnCasing string
 
@@ -50,6 +60,15 @@ const (
 	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
 	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
 )
+
+var AllColumnCasing = []struct {
+	Value  ColumnCasing
+	TSName string
+}{
+	{SourceColumnCasing, "SourceColumnCasing"},
+	{TargetColumnCasing, "TargetColumnCasing"},
+	{SnakeColumnCasing, "SnakeColumnCasing"},
+}
 
 // NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg *Config, err error) {
@@ -89,6 +108,16 @@ func (cfg *Config) SetDefault() {
 	}
 	cfg.Source.Options.SetDefaults(sourceOptions)
 
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	if g.IsNil(cfg.Target.Columns) && !g.IsNil(cfg.Source.Options.Columns) {
+		cfg.Target.Columns = cfg.Source.Options.Columns // accepts legacy config
+		cfg.Source.Options.Columns = nil
+	}
+	if g.IsNil(cfg.Transforms) && !g.IsNil(cfg.Source.Options.Transforms) {
+		cfg.Transforms = cfg.Source.Options.Transforms // accepts legacy config
+		cfg.Source.Options.Transforms = nil
+	}
+
 	// set target options
 	var targetOptions TargetOptions
 	switch cfg.TgtConn.Type.Kind() {
@@ -118,19 +147,24 @@ func (cfg *Config) SetDefault() {
 	case dbio.TypeDbClickhouse, dbio.TypeDbProton:
 		cfg.Source.Options.MaxDecimals = g.Int(11)
 		cfg.Target.Options.MaxDecimals = g.Int(11)
+		if cfg.Target.Options.BatchLimit == nil {
+			// set default batch_limit to limit memory usage. Bug in clickhouse driver?
+			// see https://github.com/ClickHouse/clickhouse-go/issues/1293
+			cfg.Target.Options.BatchLimit = g.Int64(100000)
+		}
 	}
 
 	// set default transforms
 	switch cfg.SrcConn.Type {
 	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
 		// parse_bit for MySQL
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	}
 
 	// set default metadata
 	switch {
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.Source.Options.extraTransforms = append(cfg.Source.Options.extraTransforms, "parse_bit")
+		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		// cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05"
@@ -147,7 +181,11 @@ func (cfg *Config) SetDefault() {
 	}
 
 	if val := os.Getenv("SLING_LOADED_AT_COLUMN"); val != "" {
-		cfg.MetadataLoadedAt = g.Bool(cast.ToBool(val))
+		if cast.ToBool(val) || val == "unix" || val == "timestamp" {
+			cfg.MetadataLoadedAt = g.Bool(true)
+		} else {
+			cfg.MetadataLoadedAt = g.Bool(false)
+		}
 	}
 	if val := os.Getenv("SLING_STREAM_URL_COLUMN"); val != "" {
 		cfg.MetadataStreamURL = cast.ToBool(val)
@@ -213,12 +251,8 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 	}
 
 	// add config path
-	if g.PathExists(cfgStr) && !cfg.ReplicationMode {
-		fp, err := filepath.Abs(cfgStr)
-		if err != nil {
-			fp = cfgStr
-		}
-		cfg.Env["SLING_CONFIG_PATH"] = fp
+	if g.PathExists(cfgStr) && !cfg.ReplicationMode() {
+		cfg.Env["SLING_CONFIG_PATH"] = cfgStr
 	}
 
 	return nil
@@ -307,12 +341,15 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = DbToDb
 	} else if srcFileProvided && tgtDbProvided {
 		Type = FileToDB
+		if cfg.MetadataLoadedAt == nil {
+			cfg.MetadataLoadedAt = g.Bool(true) // default when source is file
+		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
 	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
 		Type = FileToFile
-	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != "" {
-		cfg.Target.Object = cfg.Target.Options.PostSQL
+	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
+		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
 	}
 
@@ -404,6 +441,9 @@ func (cfg *Config) Prepare() (err error) {
 		}
 		return g.Error("invalid target connection (blank or not found)")
 	}
+	if !cfg.Options.StdOut && cfg.Target.Conn != "" && cfg.Target.Object == "" {
+		return g.Error("invalid target object (blank or not found)")
+	}
 
 	if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
 		os.Setenv("DEBUG", "LOW")
@@ -452,7 +492,7 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	} else {
 		if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
-			fc, err := cfg.TgtConn.AsFile()
+			fc, err := cfg.TgtConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -508,7 +548,7 @@ func (cfg *Config) Prepare() (err error) {
 	} else {
 		if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			fc, err := cfg.SrcConn.AsFile()
+			fc, err := cfg.SrcConn.AsFile(true)
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -536,17 +576,22 @@ func (cfg *Config) Prepare() (err error) {
 				words = append(words, m.Group[0])
 			}
 		}
-		// return g.Error("unformatted target object name: %s", strings.Join(words, ", "))
+
 		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
 		for _, word := range words {
 			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
 		}
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	// add md5 of options, so that wee reconnect for various options
 	// see variable `connPool`
 	cfg.SrcConn.Data["_source_options_md5"] = g.MD5(g.Marshal(cfg.Source.Options))
 	cfg.TgtConn.Data["_target_options_md5"] = g.MD5(g.Marshal(cfg.Target.Options))
+
+	// set conn types
+	cfg.Source.Type = cfg.SrcConn.Type
+	cfg.Target.Type = cfg.TgtConn.Type
 
 	// validate table keys
 	if tkMap := cfg.Target.Options.TableKeys; tkMap != nil {
@@ -571,6 +616,68 @@ func (cfg *Config) Prepare() (err error) {
 	for key := range cfg.TgtConn.Data {
 		if strings.Contains(key, ":") {
 			g.Warn("target connection %s has an invalid property -> %s", cfg.Target.Conn, key)
+		}
+	}
+
+	// to expand variables for custom SQL
+	fMap, err := cfg.GetFormatMap()
+	if err != nil {
+		return g.Error(err, "could not get format map for sql")
+	}
+
+	// check if referring to a SQL file, and set stream text
+	if cfg.SrcConn.Type.IsDb() {
+
+		sTable, _ := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
+		if connection.SchemeType(cfg.Source.Stream).IsFile() && g.PathExists(strings.TrimPrefix(cfg.Source.Stream, "file://")) {
+			// for incremental, need to put `{incremental_where_cond}` for proper selecting
+			sqlFromFile, err := GetSQLText(cfg.Source.Stream)
+			if err != nil {
+				err = g.Error(err, "Could not get getSQLText for: "+cfg.Source.Stream)
+				if sTable.Name == "" {
+					return err
+				} else {
+					err = nil // don't return error in case the table full name ends with .sql
+				}
+			} else {
+				cfg.Source.Stream = g.Rm(sqlFromFile, fMap)
+				if cfg.ReplicationStream != nil {
+					cfg.ReplicationStream.SQL = cfg.Source.Stream
+				}
+			}
+		} else if sTable.IsQuery() {
+			cfg.Source.Stream = g.Rm(sTable.SQL, fMap)
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.SQL = cfg.Source.Stream
+			}
+		}
+	}
+
+	// compile pre and post sql
+	if cfg.TgtConn.Type.IsDb() {
+
+		// pre SQL
+		if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
+			sql, err := GetSQLText(*preSQL)
+			if err != nil {
+				return g.Error(err, "could not get pre-sql body")
+			}
+			cfg.Target.Options.PreSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PreSQL = cfg.Target.Options.PreSQL
+			}
+		}
+
+		// post SQL
+		if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
+			sql, err := GetSQLText(*postSQL)
+			if err != nil {
+				return g.Error(err, "could not get post-sql body")
+			}
+			cfg.Target.Options.PostSQL = g.String(g.Rm(sql, fMap))
+			if cfg.ReplicationStream != nil {
+				cfg.ReplicationStream.TargetOptions.PostSQL = cfg.Target.Options.PostSQL
+			}
 		}
 	}
 
@@ -602,6 +709,18 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		return g.Error(err, "could not get formatting variables")
 	}
 
+	// clean values for replacing, these need to be clean to be used in the object name
+	dateMap := iop.GetISO8601DateMap(time.Now())
+	for k, v := range m {
+		if _, ok := dateMap[k]; ok {
+			continue // don't clean the date values
+		}
+		if g.In(k, "run_timestamp") {
+			continue // don't clean those keys, will add an underscore prefix
+		}
+		m[k] = iop.CleanName(cast.ToString(v))
+	}
+
 	// replace placeholders
 	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
 
@@ -609,7 +728,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// normalize casing of object names
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
-			return g.Error(err, "could not get parse target table name")
+			return g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return g.Error("invalid table name: %s", table.Raw)
 		}
 		cfg.Target.Object = table.FullName()
 	}
@@ -620,6 +741,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 	} else if cfg.TgtConn.Type.IsFile() {
 		url := cast.ToString(cfg.Target.Data["url"])
 		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
+	}
+
+	// set on ReplicationStream
+	if cfg.ReplicationStream != nil {
+		cfg.ReplicationStream.Object = cfg.Target.Object
 	}
 
 	return nil
@@ -664,10 +790,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		if table.Schema != "" {
-			m["stream_schema"] = strings.ToLower(table.Schema)
+			m["stream_schema"] = table.Schema
 		}
 		if table.Name != "" {
-			m["stream_table"] = strings.ToLower(table.Name)
+			m["stream_table"] = table.Name
 		}
 
 		if cfg.StreamName != "" {
@@ -681,6 +807,8 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse target table name")
+		} else if table.IsQuery() {
+			return m, g.Error("invalid table name: %s", table.Raw)
 		}
 
 		m["object_schema"] = table.Schema
@@ -701,7 +829,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		uri := cfg.SrcConn.URL()
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
 
-		fc, err := cfg.SrcConn.AsFile()
+		fc, err := cfg.SrcConn.AsFile(true)
 		if err != nil {
 			return m, g.Error(err, "could not init source conn as file")
 		}
@@ -799,28 +927,161 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 // Config is the new config struct
 type Config struct {
-	Source  Source            `json:"source,omitempty" yaml:"source,omitempty"`
-	Target  Target            `json:"target" yaml:"target"`
-	Mode    Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Options ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
-	Env     map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	Source     Source            `json:"source,omitempty" yaml:"source,omitempty"`
+	Target     Target            `json:"target" yaml:"target"`
+	Mode       Mode              `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Transforms any               `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Options    ConfigOptions     `json:"options,omitempty" yaml:"options,omitempty"`
+	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 
-	StreamName      string                `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
-	SrcConn         connection.Connection `json:"_src_conn,omitempty" yaml:"_src_conn,omitempty"`
-	TgtConn         connection.Connection `json:"_tgt_conn,omitempty" yaml:"_tgt_conn,omitempty"`
-	Prepared        bool                  `json:"_prepared,omitempty" yaml:"_prepared,omitempty"`
-	IncrementalVal  string                `json:"-" yaml:"-"`
-	ReplicationMode bool                  `json:"-" yaml:"-"`
+	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
+	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
+
+	SrcConn  connection.Connection `json:"-" yaml:"-"`
+	TgtConn  connection.Connection `json:"-" yaml:"-"`
+	Prepared bool                  `json:"-" yaml:"-"`
+
+	IncrementalVal    any    `json:"-" yaml:"-"`
+	IncrementalValStr string `json:"-" yaml:"-"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`
+
+	extraTransforms []string `json:"-" yaml:"-"`
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
 func (cfg *Config) Scan(value interface{}) error {
 	return g.JSONScanner(cfg, value)
+}
+
+// ReplicationMode returns true for replication mode
+func (cfg *Config) ReplicationMode() bool {
+	return cfg.ReplicationStream != nil
+}
+
+// IgnoreExisting returns true target_options.ignore_existing is true
+func (cfg *Config) IgnoreExisting() bool {
+	return cfg.Target.Options.IgnoreExisting != nil && *cfg.Target.Options.IgnoreExisting
+}
+
+// ColumnsPrepared returns the prepared columns
+func (cfg *Config) ColumnsPrepared() (columns iop.Columns) {
+
+	if cfg.Target.Columns != nil {
+		switch colsCasted := cfg.Target.Columns.(type) {
+		case map[string]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: colName,
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
+		case map[any]any:
+			for colName, colType := range colsCasted {
+				col := iop.Column{
+					Name: cast.ToString(colName),
+					Type: iop.ColumnType(cast.ToString(colType)),
+				}
+				columns = append(columns, col)
+			}
+		case []map[string]any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case []any:
+			for _, colItem := range colsCasted {
+				col := iop.Column{}
+				g.Unmarshal(g.Marshal(colItem), &col)
+				columns = append(columns, col)
+			}
+		case iop.Columns:
+			columns = colsCasted
+		default:
+			g.Warn("Config.Source.Options.Columns not handled: %T", cfg.Source.Options.Columns)
+		}
+
+		// parse constraint, length, precision, scale
+		for i := range columns {
+			columns[i].SetConstraint()
+			columns[i].SetLengthPrecisionScale()
+		}
+
+		// set as string so that StreamProcessor parses it
+		columns = iop.NewColumns(columns...)
+	}
+
+	return
+}
+
+// TransformsPrepared returns the transforms columns
+func (cfg *Config) TransformsPrepared() (colTransforms map[string][]string) {
+
+	if transforms := cfg.Transforms; transforms != nil {
+		colTransforms = map[string][]string{}
+
+		makeTransformArray := func(val any) []string {
+			switch tVal := val.(type) {
+			case []any:
+				transformsArray := make([]string, len(tVal))
+				for i := range tVal {
+					transformsArray[i] = cast.ToString(tVal[i])
+				}
+				return transformsArray
+			case []string:
+				return tVal
+			default:
+				g.Warn("did not handle transforms value input: %#v", val)
+			}
+			return nil
+		}
+
+		switch tVal := transforms.(type) {
+		case []any, []string:
+			colTransforms["*"] = makeTransformArray(tVal)
+		case map[string]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[string][]string:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[string][]any:
+			for k, v := range tVal {
+				colTransforms[k] = makeTransformArray(v)
+			}
+		case map[any][]string:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		case map[any][]any:
+			for k, v := range tVal {
+				colTransforms[cast.ToString(k)] = makeTransformArray(v)
+			}
+		default:
+			g.Warn("did not handle transforms input: %#v", transforms)
+		}
+
+		for _, transf := range cfg.extraTransforms {
+			if _, ok := colTransforms["*"]; !ok {
+				colTransforms["*"] = []string{transf}
+			} else {
+				colTransforms["*"] = append(colTransforms["*"], transf)
+			}
+		}
+
+	}
+	return
 }
 
 // Value return json value, implement driver.Valuer interface
@@ -858,6 +1119,18 @@ func (cfg *Config) MD5() string {
 	return g.MD5(payload)
 }
 
+func (cfg *Config) SrcConnMD5() string {
+	return g.MD5(g.Marshal(cfg.SrcConn.Data))
+}
+
+func (cfg *Config) TgtConnMD5() string {
+	return g.MD5(g.Marshal(cfg.TgtConn.Data))
+}
+
+func (cfg *Config) StreamID() string {
+	return g.MD5(cfg.Source.Conn, cfg.Target.Conn, cfg.StreamName, cfg.Target.Object)
+}
+
 // ConfigOptions are configuration options
 type ConfigOptions struct {
 	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
@@ -867,15 +1140,15 @@ type ConfigOptions struct {
 
 // Source is a source of data
 type Source struct {
-	Conn        string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Stream      string                 `json:"stream,omitempty" yaml:"stream,omitempty"`
-	Select      []string               `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	PrimaryKeyI any                    `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
-	UpdateKey   string                 `json:"update_key,omitempty" yaml:"update_key,omitempty"`
-	Options     *SourceOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn        string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
+	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
+	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
+	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	columns iop.Columns `json:"-" yaml:"-"`
+	Data map[string]interface{} `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -887,6 +1160,13 @@ func (s *Source) Limit() int {
 		return 0
 	}
 	return *s.Options.Limit
+}
+
+func (s *Source) Offset() int {
+	if s.Options.Offset == nil {
+		return 0
+	}
+	return *s.Options.Offset
 }
 
 func (s *Source) HasUpdateKey() bool {
@@ -904,6 +1184,7 @@ func (s *Source) PrimaryKey() []string {
 func (s *Source) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", s.Conn),
+		g.M("type", s.Type),
 		g.M("stream", s.Stream),
 		g.M("primary_key", s.PrimaryKeyI),
 		g.M("update_key", s.UpdateKey),
@@ -919,10 +1200,13 @@ func (s *Source) MD5() string {
 
 // Target is a target of data
 type Target struct {
-	Conn    string                 `json:"conn,omitempty" yaml:"conn,omitempty"`
-	Object  string                 `json:"object,omitempty" yaml:"object,omitempty"`
-	Options *TargetOptions         `json:"options,omitempty" yaml:"options,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Conn    string         `json:"conn,omitempty" yaml:"conn,omitempty"`
+	Type    dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
+	Object  string         `json:"object,omitempty" yaml:"object,omitempty"`
+	Columns any            `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
+
+	Data map[string]interface{} `json:"-" yaml:"-"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
@@ -931,6 +1215,7 @@ type Target struct {
 func (t *Target) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", t.Conn),
+		g.M("type", t.Type),
 		g.M("object", t.Object),
 		g.M("options", t.Options),
 	})
@@ -961,10 +1246,12 @@ type SourceOptions struct {
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
-	Columns        any                 `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Transforms     any                 `json:"transforms,omitempty" yaml:"transforms,omitempty"`
+	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 
-	extraTransforms []string `json:"-" yaml:"-"`
+	// columns & transforms were moved out of source_options
+	// https://github.com/slingdata-io/sling-cli/issues/348
+	Columns    any `json:"columns,omitempty" yaml:"columns,omitempty"`       // legacy
+	Transforms any `json:"transforms,omitempty" yaml:"transforms,omitempty"` // legacy
 }
 
 // TargetOptions are target connection and stream processing options
@@ -972,22 +1259,24 @@ type TargetOptions struct {
 	Header           *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Compression      *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Concurrency      int                 `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
+	BatchLimit       *int64              `json:"batch_limit,omitempty" yaml:"batch_limit,omitempty"`
 	DatetimeFormat   string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
-	FileMaxRows      int64               `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
-	FileMaxBytes     int64               `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
+	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
+	FileMaxBytes     *int64              `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
 	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
+	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	TableDDL  string             `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	PreSQL    string             `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL   string             `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	TableDDL  *string            `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	PreSQL    *string            `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL   *string            `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
@@ -1015,7 +1304,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	Header: g.Bool(true),
 	Compression: lo.Ternary(
 		os.Getenv("COMPRESSION") != "",
-		iop.CompressorTypePtr(iop.CompressorType(os.Getenv("COMPRESSION"))),
+		iop.CompressorTypePtr(iop.CompressorType(strings.ToLower(os.Getenv("COMPRESSION")))),
 		iop.CompressorTypePtr(iop.AutoCompressorType),
 	),
 	Concurrency: lo.Ternary(
@@ -1025,13 +1314,13 @@ var TargetFileOptionsDefault = TargetOptions{
 	),
 	FileMaxRows: lo.Ternary(
 		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_ROWS"))),
+		g.Int64(0),
 	),
 	FileMaxBytes: lo.Ternary(
 		os.Getenv("FILE_MAX_BYTES") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_BYTES")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_BYTES"))),
+		g.Int64(0),
 	),
 	Format:         filesys.FileTypeNone,
 	UseBulk:        g.Bool(true),
@@ -1045,8 +1334,8 @@ var TargetFileOptionsDefault = TargetOptions{
 var TargetDBOptionsDefault = TargetOptions{
 	FileMaxRows: lo.Ternary(
 		os.Getenv("FILE_MAX_ROWS") != "",
-		cast.ToInt64(os.Getenv("FILE_MAX_ROWS")),
-		0,
+		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_ROWS"))),
+		g.Int64(0),
 	),
 	UseBulk:          g.Bool(true),
 	AddNewColumns:    g.Bool(true),
@@ -1104,10 +1393,10 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 		o.MaxDecimals = sourceOptions.MaxDecimals
 	}
 	if o.Columns == nil {
-		o.Columns = sourceOptions.Columns
+		o.Columns = sourceOptions.Columns // legacy
 	}
 	if o.Transforms == nil {
-		o.Transforms = sourceOptions.Transforms
+		o.Transforms = sourceOptions.Transforms // legacy
 	}
 
 }
@@ -1129,20 +1418,32 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Concurrency == 0 {
 		o.Concurrency = targetOptions.Concurrency
 	}
-	if o.FileMaxRows == 0 {
+	if o.BatchLimit == nil {
+		o.BatchLimit = targetOptions.BatchLimit
+	}
+	if o.FileMaxRows == nil {
 		o.FileMaxRows = targetOptions.FileMaxRows
 	}
-	if o.FileMaxBytes == 0 {
+	if o.FileMaxBytes == nil {
 		o.FileMaxBytes = targetOptions.FileMaxBytes
 	}
 	if o.UseBulk == nil {
 		o.UseBulk = targetOptions.UseBulk
 	}
-	if o.PreSQL == "" {
+	if o.IgnoreExisting == nil {
+		o.IgnoreExisting = targetOptions.IgnoreExisting
+	}
+	if o.PreSQL == nil {
 		o.PreSQL = targetOptions.PreSQL
 	}
-	if o.PostSQL == "" {
+	if o.PostSQL == nil {
 		o.PostSQL = targetOptions.PostSQL
+	}
+	if o.TableTmp == "" {
+		o.TableTmp = targetOptions.TableTmp
+	}
+	if o.TableDDL == nil {
+		o.TableDDL = targetOptions.TableDDL
 	}
 	if o.AdjustColumnType == nil {
 		o.AdjustColumnType = targetOptions.AdjustColumnType
@@ -1165,20 +1466,38 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys
+		if o.TableKeys == nil {
+			o.TableKeys = database.TableKeys{}
+		}
 	}
 }
 
 func castKeyArray(keyI any) (key []string) {
 	switch keyV := keyI.(type) {
+	case nil:
+		return []string{}
 	case []string:
+		if keyV == nil {
+			return []string{}
+		}
 		return keyV
 	case string:
+		if keyV == "" {
+			return []string{}
+		}
 		return []string{keyV}
 	case *string:
+		if keyV == nil || *keyV == "" {
+			return []string{}
+		}
 		return []string{*keyV}
 	case []any:
 		for _, v := range keyV {
-			key = append(key, cast.ToString(v))
+			val := cast.ToString(v)
+			if val == "" {
+				continue
+			}
+			key = append(key, val)
 		}
 		return key
 	}

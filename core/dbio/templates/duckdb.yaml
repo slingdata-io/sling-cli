@@ -1,11 +1,18 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
   create_table: create table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
   insert_option: ""
   modify_column: 'alter {column} type {type}'
+
+  iceberg_scan: select {fields} from iceberg_scan('{uri}', allow_moved_paths = true)
+  delta_scan: select {fields} from delta_scan('{uri}')
+  parquet_scan: select {fields} from parquet_scan('{uri}')
 
 
 metadata:
@@ -139,12 +146,14 @@ analysis:
 
 function:
   sleep: select sqlite3_sleep({seconds}*1000)
-  checksum_datetime: CAST((epoch({field}) || substr(strftime('%f',{field}),4) ) as bigint)
+  checksum_datetime: CAST((epoch({field}) || substr(strftime({field}, '%f'),4) ) as bigint)
   checksum_decimal: 'abs(cast({field} as bigint))'
   checksum_boolean: 'length({field}::string)'
+  cast_to_text: 'cast({field} as text)'
 
 variable:
   bool_as: integer
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
+  max_string_type: text

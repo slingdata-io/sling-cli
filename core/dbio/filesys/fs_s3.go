@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -21,7 +22,7 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
-	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
@@ -87,10 +88,39 @@ func (fw fakeWriterAt) WriteAt(p []byte, offset int64) (n int, err error) {
 	return fw.w.Write(p)
 }
 
-// Connect initiates the Google Cloud Storage client
+// Connect initiates the S3 client
 func (fs *S3FileSysClient) Connect() (err error) {
 
-	endpoint := fs.GetProp("ENDPOINT")
+	endpoint := fs.GetProp("endpoint")
+
+	// via SSH tunnel
+	if sshTunnelURL := fs.GetProp("ssh_tunnel"); sshTunnelURL != "" {
+
+		endpointU, err := url.Parse(endpoint)
+		if err != nil {
+			return g.Error(err, "could not parse endpoint URL for SSH forwarding")
+		}
+
+		endpointPort := cast.ToInt(endpointU.Port())
+		if endpointPort == 0 {
+			if strings.HasPrefix(endpoint, "https") {
+				endpointPort = 443
+			} else if strings.HasPrefix(endpoint, "http") {
+				endpointPort = 80
+			}
+		}
+
+		tunnelPrivateKey := fs.GetProp("ssh_private_key")
+		tunnelPassphrase := fs.GetProp("ssh_passphrase")
+
+		localPort, err := iop.OpenTunnelSSH(endpointU.Hostname(), endpointPort, sshTunnelURL, tunnelPrivateKey, tunnelPassphrase)
+		if err != nil {
+			return g.Error(err, "could not connect to ssh tunnel server")
+		}
+
+		fs.SetProp("endpoint", "127.0.0.1:"+cast.ToString(localPort))
+	}
+
 	region := fs.GetProp("REGION", "DEFAULT_REGION")
 	if region == "" {
 		region = defaultRegion
@@ -310,10 +340,13 @@ func (fs *S3FileSysClient) GetWriter(uri string) (writer io.Writer, err error) {
 		defer pipeR.Close()
 
 		// Upload the file to S3.
+		ServerSideEncryption, SSEKMSKeyId := fs.getEncryptionParams()
 		_, err := uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-			Bucket: aws.String(fs.bucket),
-			Key:    aws.String(key),
-			Body:   pipeR,
+			Bucket:               aws.String(fs.bucket),
+			Key:                  aws.String(key),
+			Body:                 pipeR,
+			ServerSideEncryption: ServerSideEncryption,
+			SSEKMSKeyId:          SSEKMSKeyId,
 		})
 		if err != nil {
 			fs.Context().CaptureErr(g.Error(err, "Error uploading S3 File -> "+key))
@@ -347,10 +380,13 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	}()
 
 	// Upload the file to S3.
+	ServerSideEncryption, SSEKMSKeyId := fs.getEncryptionParams()
 	_, err = uploader.UploadWithContext(fs.Context().Ctx, &s3manager.UploadInput{
-		Bucket: aws.String(fs.bucket),
-		Key:    aws.String(key),
-		Body:   pr,
+		Bucket:               aws.String(fs.bucket),
+		Key:                  aws.String(key),
+		Body:                 pr,
+		ServerSideEncryption: ServerSideEncryption,
+		SSEKMSKeyId:          SSEKMSKeyId,
 	})
 	if err != nil {
 		err = g.Error(err, "failed to upload file: "+key)
@@ -358,6 +394,23 @@ func (fs *S3FileSysClient) Write(uri string, reader io.Reader) (bw int64, err er
 	}
 
 	err = fs.Context().Err()
+
+	return
+}
+
+// getEncryptionParams returns the encryption params if specified
+func (fs *S3FileSysClient) getEncryptionParams() (sse, kmsKeyId *string) {
+	if val := fs.GetProp("encryption_algorithm"); val != "" {
+		if g.In(val, "AES256", "aws:kms", "aws:kms:dsse") {
+			sse = aws.String(val)
+		}
+	}
+
+	if val := fs.GetProp("encryption_kms_key"); val != "" {
+		if sse != nil && g.In(*sse, "aws:kms", "aws:kms:dsse") {
+			kmsKeyId = aws.String(val)
+		}
+	}
 
 	return
 }
@@ -378,7 +431,7 @@ func (fs *S3FileSysClient) Buckets() (paths []string, err error) {
 }
 
 // List lists the file in given directory path
-func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *S3FileSysClient) List(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		return
@@ -408,12 +461,12 @@ func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
 	// return whatever objects partially match the beginning
 	for _, n := range nodes {
 		if !strings.HasSuffix(n.URI, "/") && path == n.Path() {
-			return dbio.FileNodes{n}, err
+			return FileNodes{n}, err
 		}
 	}
 
 	prefix := strings.TrimSuffix(path, "/") + "/"
-	nodes2 := dbio.FileNodes{}
+	nodes2 := FileNodes{}
 	for _, p := range nodes {
 		if strings.HasPrefix(p.Path(), prefix) {
 			nodes2 = append(nodes2, p)
@@ -428,7 +481,7 @@ func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
 		}
 	} else {
 		// exclude the input path if folder and is part of result (happens for digital-ocean
-		nodes2 = lo.Filter(nodes2, func(n dbio.FileNode, i int) bool { return !(n.IsDir && n.Path() == path) })
+		nodes2 = lo.Filter(nodes2, func(n FileNode, i int) bool { return !(n.IsDir && n.Path() == path) })
 	}
 	return nodes2, err
 }
@@ -436,7 +489,7 @@ func (fs *S3FileSysClient) List(uri string) (nodes dbio.FileNodes, err error) {
 // ListRecursive lists the file in given directory path recusively
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/directory`
-func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err error) {
+func (fs *S3FileSysClient) ListRecursive(uri string) (nodes FileNodes, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		return
@@ -459,7 +512,7 @@ func (fs *S3FileSysClient) ListRecursive(uri string) (nodes dbio.FileNodes, err 
 	return fs.doList(svc, input, fs.Prefix("/"), pattern)
 }
 
-func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string, pattern *glob.Glob) (nodes dbio.FileNodes, err error) {
+func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlPrefix string, pattern *glob.Glob) (nodes FileNodes, err error) {
 	maxItems := lo.Ternary(recursiveLimit == 0, 10000, recursiveLimit)
 	result, err := svc.ListObjectsV2WithContext(fs.Context().Ctx, input)
 	if err != nil {
@@ -474,7 +527,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 	for {
 
 		for _, cp := range result.CommonPrefixes {
-			nodes.Add(dbio.FileNode{URI: urlPrefix + *cp.Prefix, IsDir: true})
+			nodes.Add(FileNode{URI: urlPrefix + *cp.Prefix, IsDir: true})
 		}
 
 		for _, obj := range result.Contents {
@@ -482,7 +535,7 @@ func (fs *S3FileSysClient) doList(svc *s3.S3, input *s3.ListObjectsV2Input, urlP
 				continue
 			}
 
-			node := dbio.FileNode{
+			node := FileNode{
 				URI:     urlPrefix + *obj.Key,
 				Updated: obj.LastModified.Unix(),
 				Size:    cast.ToUint64(*obj.Size),

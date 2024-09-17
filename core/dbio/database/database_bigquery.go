@@ -82,6 +82,9 @@ func (conn *BigQueryConn) Init() error {
 	if conn.GetProp("GC_KEY_FILE") == "" {
 		conn.SetProp("GC_KEY_FILE", conn.GetProp("credentialsFile"))
 	}
+	if conn.GetProp("GC_KEY_BODY") == "" {
+		conn.SetProp("GC_KEY_BODY", conn.GetProp("KEY_BODY"))
+	}
 
 	// set MAX_DECIMALS to fix bigquery import for numeric types
 	conn.SetProp("MAX_DECIMALS", "9")
@@ -228,7 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 			err = g.Error(err, "Error executing query")
 			return
 		} else {
-			err = g.Error(err, "Error executing "+CleanSQL(conn, sql))
+			err = g.Error(err, "Error executing "+env.Clean(conn.Props(), sql))
 			return
 		}
 	} else {
@@ -252,15 +255,18 @@ func (conn *BigQueryConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	}
 
 	partitionBy := ""
-	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+	if keys, ok := table.Keys[iop.PartitionKey]; ok {
+		// allow custom SQL expression for partitioning
+		partitionBy = g.F("partition by %s", strings.Join(keys, ", "))
+	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
 
 	clusterBy := ""
 	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F("cluster by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)
@@ -632,7 +638,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	gcsPath := fmt.Sprintf(
 		"gs://%s/%s/%s.csv",
 		gcBucket,
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -641,7 +647,11 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		return count, g.Error(err, "Could not Delete: "+gcsPath)
 	}
 
-	df.Defer(func() { filesys.Delete(fs, gcsPath) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(fs, gcsPath)
+		}
+	})
 
 	g.Info("importing into bigquery via google storage")
 
@@ -797,22 +807,20 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 }
 
 // BulkExportFlow reads in bulk
-func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
+func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	if conn.GetProp("GC_BUCKET") == "" {
 		g.Warn("No GCS Bucket was provided, pulling from cursor (which may be slower for big datasets). ")
-		return conn.BaseConn.BulkExportFlow(tables...)
-	} else if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
+		return conn.BaseConn.BulkExportFlow(table)
 	}
 
 	// get columns
-	columns, err := conn.GetSQLColumns(tables[0])
+	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
 	}
 
-	gsURL, err := conn.Unload(tables...)
+	gsURL, err := conn.Unload(table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
@@ -824,13 +832,20 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("header", "false")
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
+	fs.SetProp("header", "true")
 	fs.SetProp("format", "csv")
+	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 
 	// setting empty_as_null=true. no way to export with proper null_marker.
-	// Parquet export doesn't support JSON types
+	// gcsRef.NullMarker = `\N` does not work, not way to do so in EXPORT DATA OPTIONS
+	// Also, Parquet export doesn't support JSON types
 	fs.SetProp("empty_as_null", "true")
 
 	df, err = fs.ReadDataflow(gsURL)
@@ -838,9 +853,6 @@ func (conn *BigQueryConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		err = g.Error(err, "Could not read "+gsURL)
 		return
 	}
-
-	// need to set columns so they match the source table
-	// df.MergeColumns(columns, df.Columns.Sourced()) // overwrite types so we don't need to infer
 
 	df.Defer(func() { filesys.Delete(fs, gsURL) })
 
@@ -878,7 +890,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
-	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, filePathStorageSlug, cast.ToString(g.Now()))
+	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(gsFs, gsPath)
 
@@ -914,8 +926,8 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 }
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
-	if true || table.IsQuery() || table.IsView {
-		return conn.ExportToGCS(table.Select(0), gcsURI)
+	if table.IsQuery() || table.IsView {
+		return conn.ExportToGCS(table.Select(0, 0), gcsURI)
 	}
 
 	client, err := conn.getNewClient()
@@ -924,23 +936,17 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	}
 	defer client.Close()
 
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsURI = gcsURI + ".gz"
-	}
 	gcsRef := bigquery.NewGCSReference(gcsURI)
 	gcsRef.FieldDelimiter = ","
 	gcsRef.AllowQuotedNewlines = true
 	gcsRef.Quote = `"`
-	if strings.ToUpper(conn.GetProp("COMPRESSION")) == "GZIP" {
-		gcsRef.Compression = bigquery.Gzip
-	}
+	// gcsRef.NullMarker = `\N` // does not work for export, only importing
+	gcsRef.Compression = bigquery.Gzip
 	gcsRef.MaxBadRecords = 0
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
 	extractor.DisableHeader = false
-	// You can choose to run the task in a specific location for more complex data locality scenarios.
-	// Ex: In this example, source dataset and GCS bucket are in the US.
-	extractor.Location = "US"
+	extractor.Location = conn.Location
 
 	job, err := extractor.Run(conn.Context().Ctx)
 	if err != nil {
@@ -951,7 +957,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 		return g.Error(err, "Error in task.Wait")
 	}
 	if err := status.Err(); err != nil {
-		if strings.Contains(err.Error(), "it is currently a VIEW") {
+		if strings.Contains(err.Error(), "it is currently a VIEW") || strings.Contains(err.Error(), "it currently has type VIEW") {
 			table.IsView = true
 			return conn.CopyToGCS(table, gcsURI)
 		}
@@ -983,6 +989,10 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
 	case srcCol.IsString() && tgtCol.IsDate():
 		selectStr = g.F("cast(%s as date) as %s", qName, qName)
+	case !strings.EqualFold(srcCol.DbType, "datetime") && strings.EqualFold(tgtCol.DbType, "datetime"):
+		selectStr = g.F("cast(%s as datetime) as %s", qName, qName)
+	case !strings.EqualFold(srcCol.DbType, "timestamp") && strings.EqualFold(tgtCol.DbType, "timestamp"):
+		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
 	default:
 		selectStr = qName
 	}
@@ -1000,18 +1010,18 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	}
 
 	sqlTempl := `
-	DELETE FROM {tgt_table} tgt
-	WHERE EXISTS (
-			SELECT 1
-			FROM {src_table} src
-			WHERE {src_tgt_pk_equal}
+	delete from {tgt_table} tgt
+	where exists (
+			select 1
+			from {src_table} src
+			where {src_tgt_pk_equal}
 	)
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 	sql = g.R(
 		sqlTempl,

@@ -50,7 +50,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
-		bw, err = fs.WriteDataflow(df, uri)
+		bw, err = filesys.WriteDataflow(fs, df, uri)
 		if err != nil {
 			err = g.Error(err, "Could not FileSysWriteDataflow")
 			return cnt, err
@@ -129,7 +129,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		return 0, g.Error(err, "could not parse object table name")
 	}
-	targetTable.DDL = cfg.Target.Options.TableDDL
+
+	if cfg.Target.Options.TableDDL != nil {
+		targetTable.DDL = *cfg.Target.Options.TableDDL
+	}
 	targetTable.DDL = g.R(targetTable.DDL, "object_name", targetTable.Raw, "table", targetTable.Raw)
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
@@ -220,12 +223,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return
 	}
 
-	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp)
+	_, err = createTableIfNotExists(tgtConn, sampleData, &tableTmp, true)
 	if err != nil {
 		err = g.Error(err, "could not create temp table "+tableTmp.FullName())
 		return
 	}
-	cfg.Target.Options.TableDDL = tableTmp.DDL
+	cfg.Target.Options.TableDDL = g.String(tableTmp.DDL)
 	cfg.Target.TmpTableCreated = true
 	df.Columns = sampleData.Columns
 	setStage("4 - load-into-temp")
@@ -262,7 +265,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 				return g.Error(err, "could not get table columns for schema change")
 			}
 
-			// preseve keys
+			// preserve keys
 			tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 			ok, err := tgtConn.OptimizeTable(&tableTmp, iop.Columns{col}, true)
@@ -305,6 +308,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	df.Unpause() // to create DDL and set column change functions
 	t.SetProgress("streaming data")
+
+	// set batch size if specified
+	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
+		df.SetBatchLimit(*batchLimit)
+	}
+
 	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
 	if err != nil {
 		tgtConn.Rollback()
@@ -329,21 +338,9 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// pre SQL
-	if preSQL := cfg.Target.Options.PreSQL; preSQL != "" {
+	if preSQL := cfg.Target.Options.PreSQL; preSQL != nil && *preSQL != "" {
 		t.SetProgress("executing pre-sql")
-		preSQL, err = GetSQLText(preSQL)
-		if err != nil {
-			err = g.Error(err, "could not get pre-sql body")
-			return cnt, err
-		}
-
-		fMap, err := t.Config.GetFormatMap()
-		if err != nil {
-			err = g.Error(err, "could not get format map for pre-sql")
-			return cnt, err
-		}
-
-		_, err = tgtConn.ExecMulti(g.Rm(preSQL, fMap))
+		_, err = tgtConn.ExecMulti(*preSQL)
 		if err != nil {
 			err = g.Error(err, "could not execute pre-sql on target")
 			return cnt, err
@@ -361,14 +358,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		df.Inferred = !cfg.sourceIsFile() // re-infer is source is file
 		df.SyncStats()
 
-		// Checksum Comparison, data quality. Limit to 10k, cause sums get too high
-		if df.Count() <= 10000 {
+		// Checksum Comparison, data quality. Limit to env var SLING_CHECKSUM_ROWS, cause sums get too high
+		if val := cast.ToUint64(os.Getenv("SLING_CHECKSUM_ROWS")); val > 0 && df.Count() <= val {
 			err = tgtConn.CompareChecksums(tableTmp.FullName(), df.Columns)
 			if err != nil {
-				if os.Getenv("ERROR_ON_CHECKSUM_FAILURE") != "" {
-					return
-				}
-				g.Trace(g.ErrMsgSimple(err))
+				return
 			}
 		}
 	}
@@ -405,7 +399,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		sample.Rows = df.Buffer
 		sample.Inferred = true // already inferred with SyncStats
 
-		created, err := createTableIfNotExists(tgtConn, sample, &targetTable)
+		created, err := createTableIfNotExists(tgtConn, sample, &targetTable, false)
 		if err != nil {
 			err = g.Error(err, "could not create table "+targetTable.FullName())
 			return cnt, err
@@ -433,7 +427,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 					return cnt, g.Error(err, "could not get table columns for optimization")
 				}
 
-				// preseve keys
+				// preserve keys
 				targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 				ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns, false)
@@ -514,24 +508,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// post SQL
-	if postSQL := cfg.Target.Options.PostSQL; postSQL != "" {
+	if postSQL := cfg.Target.Options.PostSQL; postSQL != nil && *postSQL != "" {
 		t.SetProgress("executing post-sql")
-
-		postSQL, err = GetSQLText(postSQL)
+		_, err = tgtConn.ExecMulti(*postSQL)
 		if err != nil {
-			err = g.Error(err, "Error executing Target.PostSQL. Could not get getSQLText for: "+cfg.Target.Options.PostSQL)
-			return cnt, err
-		}
-
-		fMap, err := t.Config.GetFormatMap()
-		if err != nil {
-			err = g.Error(err, "could not get format map for post-sql")
-			return cnt, err
-		}
-
-		_, err = tgtConn.ExecMulti(g.Rm(postSQL, fMap))
-		if err != nil {
-			err = g.Error(err, "Error executing Target.PostSQL")
+			err = g.Error(err, "Error executing post-sql")
 			return cnt, err
 		}
 	}

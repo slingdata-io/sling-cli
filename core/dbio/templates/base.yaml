@@ -2,17 +2,19 @@ core:
   drop_table: drop table {table}
   drop_view: drop view {view}
   drop_schema: drop schema {schema}
+  drop_index: "select 'drop_index not implemented'"
   create_schema: create schema {schema}
   create_table: create table {table} ({col_types})
-  create_temporary_table: create temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
-  limit: |
+  limit: select {fields} from {table} limit {limit} offset {offset}
+  limit_offset: select {fields} from {table} limit {limit}
+  limit_sql: |
     select * from (
       {sql}
-    ) as t limit {limit}
+    ) as t limit {limit} offset {offset}
   insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from {src_table}
   truncate_table: truncate table {table}
   alter_columns: alter table {table} {col_ddl}
@@ -346,6 +348,7 @@ function:
   string_type: varchar
   cast_as: cast({field} as {type})
   cast_to_string: cast({field} as varchar)
+  cast_to_text: cast({field} as varchar)
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   checksum_string: length({field})
@@ -365,7 +368,8 @@ variable:
   date_layout_str: "'{value}'"
   date_layout: '2006-01-02'
   timestamp_layout_str: "'{value}'"
-  timestamp_layout: '2006-01-02 15:04:05.000'
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000 -0700'
   error_filter_table_exists: already
   bool_as: bool
 

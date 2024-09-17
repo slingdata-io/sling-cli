@@ -1,17 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
 
-	"github.com/samber/lo"
 	"gopkg.in/yaml.v2"
 
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -20,15 +20,21 @@ import (
 )
 
 var (
-	projectID     = os.Getenv("SLING_PROJECT_ID")
-	updateMessage = ""
-	updateVersion = ""
-	rowCount      = int64(0)
+	projectID         = os.Getenv("SLING_PROJECT_ID")
+	updateMessage     = ""
+	updateVersion     = ""
+	rowCount          = int64(0)
+	totalBytes        = uint64(0)
+	constraintFails   = uint64(0)
+	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
 	ok = true
-	cfg := &sling.Config{}
+	cfg := &sling.Config{
+		Source: sling.Source{Options: &sling.SourceOptions{}},
+		Target: sling.Target{Options: &sling.TargetOptions{}},
+	}
 	replicationCfgPath := ""
 	taskCfgStr := ""
 	showExamples := false
@@ -92,10 +98,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Source.UpdateKey = cast.ToString(v)
 
 		case "limit":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Limit = g.Int(cast.ToInt(v))
+
+		case "offset":
+			cfg.Source.Options.Offset = g.Int(cast.ToInt(v))
 
 		case "iterate":
 			if cast.ToString(v) == "infinite" {
@@ -106,9 +112,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error("invalid value for `iterate`")
 			}
 		case "range":
-			if cfg.Source.Options == nil {
-				cfg.Source.Options = &sling.SourceOptions{}
-			}
 			cfg.Source.Options.Range = g.String(cast.ToString(v))
 
 		case "tgt-object", "tgt-table", "tgt-file":
@@ -144,6 +147,18 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Options.StdOut = cast.ToBool(v)
 		case "mode":
 			cfg.Mode = sling.Mode(cast.ToString(v))
+		case "columns":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Target.Columns)
+			if err != nil {
+				return ok, g.Error(err, "invalid columns -> %s", payload)
+			}
+		case "transforms":
+			payload := cast.ToString(v)
+			err = yaml.Unmarshal([]byte(payload), &cfg.Transforms)
+			if err != nil {
+				return ok, g.Error(err, "invalid transforms -> %s", payload)
+			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
 		case "streams":
@@ -222,8 +237,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		g.Info("Iteration #%d", itNumber)
 	}
 
-	// test count if need
-	err = testRowCnt(rowCount)
+	// test count/bytes if need
+	err = testOutput(rowCount, totalBytes, constraintFails)
 
 	return ok, err
 }
@@ -247,7 +262,6 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskOptions["src_has_update_key"] = task.Config.Source.HasUpdateKey()
 			taskOptions["src_flatten"] = task.Config.Source.Options.Flatten
 			taskOptions["src_format"] = task.Config.Source.Options.Format
-			taskOptions["src_transforms"] = task.Config.Source.Options.Transforms
 			taskOptions["tgt_file_max_rows"] = task.Config.Target.Options.FileMaxRows
 			taskOptions["tgt_file_max_bytes"] = task.Config.Target.Options.FileMaxBytes
 			taskOptions["tgt_format"] = task.Config.Target.Options.Format
@@ -259,11 +273,13 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
+			taskMap["transforms"] = task.Config.Transforms
 			taskMap["status"] = task.Status
-			taskMap["source_md5"] = task.Config.Source.MD5()
+			taskMap["source_md5"] = task.Config.SrcConnMD5()
 			taskMap["source_type"] = task.Config.SrcConn.Type
-			taskMap["target_md5"] = task.Config.Target.MD5()
+			taskMap["target_md5"] = task.Config.TgtConnMD5()
 			taskMap["target_type"] = task.Config.TgtConn.Type
+			taskMap["stream_id"] = task.Config.StreamID()
 		}
 
 		if projectID != "" {
@@ -300,6 +316,11 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskStats["rows_in_bytes"] = inBytes
 			taskStats["rows_out_bytes"] = outBytes
 
+			if memRAM, _ := mem.VirtualMemory(); memRAM != nil {
+				taskStats["mem_used"] = memRAM.Used
+				taskStats["mem_total"] = memRAM.Total
+			}
+
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
@@ -332,6 +353,16 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	setProjectID(cfg.Env["SLING_CONFIG_PATH"])
 	cfg.Env["SLING_PROJECT_ID"] = projectID
 
+	// set working directory path
+	if val := cfg.Env["SLING_WORK_PATH"]; val != "" {
+		if err = os.Chdir(val); err != nil {
+			err = g.Error(err, "could not set working directory: %s", val)
+			return
+		}
+	} else {
+		cfg.Env["SLING_WORK_PATH"], _ = os.Getwd()
+	}
+
 	// set logging
 	if val := cfg.Env["SLING_LOGGING"]; val != "" {
 		os.Setenv("SLING_LOGGING", val)
@@ -344,8 +375,13 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		return nil
 	}
 
-	// insert into store for history keeping
-	sling.StoreInsert(task)
+	// set log sink
+	env.LogSink = func(ll *g.LogLine) {
+		task.AppendOutput(ll)
+	}
+
+	sling.StoreInsert(task)       // insert into store
+	defer sling.StoreUpdate(task) // update into store after
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -358,11 +394,40 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	// run task
 	setTM()
 	err = task.Execute()
+
 	if err != nil {
+
+		if replication != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", env.RedString(g.ErrMsgSimple(err)))
+		}
+
+		// show help text
+		if eh := sling.ErrorHelper(err); eh != "" {
+			env.Println("")
+			env.Println(env.MagentaString(eh))
+			env.Println("")
+		}
+
 		return g.Error(err)
 	}
 
 	rowCount = rowCount + int64(task.GetCount())
+	inBytes, outBytes := task.GetBytes()
+	if inBytes == 0 {
+		totalBytes = totalBytes + outBytes
+	} else {
+		totalBytes = totalBytes + inBytes
+	}
+
+	// warn constrains
+	if df := task.Df(); df != nil {
+		for _, col := range df.Columns {
+			if c := col.Constraint; c != nil && c.FailCnt > 0 {
+				g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
+				constraintFails = constraintFails + c.FailCnt
+			}
+		}
+	}
 
 	return nil
 }
@@ -370,139 +435,73 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
-	replication, err := sling.LoadReplicationConfig(cfgPath)
+	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
 	if err != nil {
-		return g.Error(err, "Error parsing replication config")
-	}
-
-	err = replication.ProcessWildcards()
-	if err != nil {
-		return g.Error(err, "could not process streams using wildcard")
-	}
-
-	// clean up selectStreams
-	matchedStreams := map[string]*sling.ReplicationStreamConfig{}
-	for _, selectStream := range selectStreams {
-		for key, val := range replication.MatchStreams(selectStream) {
-			key = replication.Normalize(key)
-			matchedStreams[key] = val
+		if sling.IsJSONorYAML(cfgPath) {
+			replication, err = sling.LoadReplicationConfig(cfgPath) // is JSON
+		} else if r, e := lookupReplication(cfgPath); r.OriginalCfg() != "" {
+			replication, err = r, e
+		}
+		if err != nil {
+			return g.Error(err, "Error parsing replication config")
 		}
 	}
 
-	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(replication.Streams))
-	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(replication.Streams))
-	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
-
-	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(replication.Streams)); err != nil {
-		return err
+	taskConfigs, err := replication.Compile(cfgOverwrite, selectStreams...)
+	if err != nil {
+		return g.Error(err, "Error compiling replication config")
 	}
 
-	if streamCnt == 0 {
-		g.Warn("Did not match any streams. Exiting.")
-		return
-	}
-
-	streamsOrdered := replication.StreamsOrdered()
 	eG := g.ErrorGroup{}
-	succcess := 0
-	errors := make([]error, len(streamsOrdered))
+	successes := 0
+
+	// get final stream count
+	streamCnt := 0
+	for _, cfg := range taskConfigs {
+		if cfg.ReplicationStream.Disabled {
+			continue
+		}
+		streamCnt++
+	}
 
 	counter := 0
-	for i, name := range streamsOrdered {
+	for _, cfg := range taskConfigs {
 		if interrupted {
 			break
 		}
 
-		_, matched := matchedStreams[replication.Normalize(name)]
-		if len(selectStreams) > 0 && !matched {
-			g.Trace("skipping stream %s since it is not selected", name)
-			continue
-		}
 		counter++
-
-		stream := sling.ReplicationStreamConfig{}
-		if replication.Streams[name] != nil {
-			stream = *replication.Streams[name]
-		}
-		sling.SetStreamDefaults(&stream, replication)
-
-		if stream.Object == "" {
-			return g.Error("need to specify `object`. Please see https://docs.slingdata.io/sling-cli for help.")
-		}
-
-		// config overwrite
-		if cfgOverwrite != nil {
-			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
-				g.Debug("stream mode overwritten: %s => %s", stream.Mode, cfgOverwrite.Mode)
-				stream.Mode = cfgOverwrite.Mode
-			}
-			if string(cfgOverwrite.Source.UpdateKey) != "" && stream.UpdateKey != cfgOverwrite.Source.UpdateKey {
-				g.Debug("stream update_key overwritten: %s => %s", stream.UpdateKey, cfgOverwrite.Source.UpdateKey)
-				stream.UpdateKey = cfgOverwrite.Source.UpdateKey
-			}
-			if cfgOverwrite.Source.PrimaryKeyI != nil && stream.PrimaryKeyI != cfgOverwrite.Source.PrimaryKeyI {
-				g.Debug("stream primary_key overwritten: %#v => %#v", stream.PrimaryKeyI, cfgOverwrite.Source.PrimaryKeyI)
-				stream.PrimaryKeyI = cfgOverwrite.Source.PrimaryKeyI
-			}
-		}
-
-		cfg := sling.Config{
-			Source: sling.Source{
-				Conn:        replication.Source,
-				Stream:      name,
-				Select:      stream.Select,
-				PrimaryKeyI: stream.PrimaryKey(),
-				UpdateKey:   stream.UpdateKey,
-			},
-			Target: sling.Target{
-				Conn:   replication.Target,
-				Object: stream.Object,
-			},
-			Mode:            stream.Mode,
-			ReplicationMode: true,
-			Env:             g.ToMapString(replication.Env),
-			StreamName:      name,
-		}
-
-		// so that the next stream does not retain previous pointer values
-		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
-		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
-
-		if stream.SQL != "" {
-			cfg.Source.Stream = stream.SQL
-		}
 
 		println()
 
-		if stream.Disabled {
-			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, name)
+		if cfg.ReplicationStream.Disabled {
+			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, cfg.StreamName)
 			continue
 		} else {
-			g.Info("[%d / %d] running stream %s", counter, streamCnt, name)
+			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
+
+		env.LogSink = nil // clear log sink
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		env.SetTelVal("replication_md5", replication.MD5())
-		err = runTask(&cfg, &replication)
+		err = runTask(cfg, &replication)
 		if err != nil {
-			g.Info(env.RedString(err.Error()))
-			if eh := sling.ErrorHelper(err); eh != "" {
-				env.Println("")
-				env.Println(env.MagentaString(eh))
-				env.Println("")
-			}
+			eG.Capture(err, cfg.StreamName)
 
-			errors[i] = g.Error(err, "error for stream %s", name)
-			eG.Capture(err, streamsOrdered[i])
+			// if a connection issue, stop
+			if e, ok := err.(*g.ErrType); ok && strings.Contains(e.Debug(), "Could not connect to ") {
+				break
+			}
 		} else {
-			succcess++
+			successes++
 		}
 	}
 
 	println()
 	delta := time.Since(startTime)
 
-	successStr := env.GreenString(g.F("%d Successes", succcess))
+	successStr := env.GreenString(g.F("%d Successes", successes))
 	failureStr := g.F("%d Failures", len(eG.Errors))
 	if len(eG.Errors) > 0 {
 		failureStr = env.RedString(failureStr)
@@ -547,30 +546,26 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 
 // setProjectID attempts to get the first sha of the repo
 func setProjectID(cfgPath string) {
-	if cfgPath == "" {
+	if cfgPath == "" && !strings.HasPrefix(cfgPath, "{") {
 		return
 	}
 
 	cfgPath, _ = filepath.Abs(cfgPath)
 
 	if fs, err := os.Stat(cfgPath); err == nil && !fs.IsDir() {
-		// get first sha
-		cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
-		cmd.Dir = filepath.Dir(cfgPath)
-		out, err := cmd.Output()
-		if err == nil && projectID == "" {
-			projectID = strings.TrimSpace(string(out))
+		if projectID == "" {
+			projectID = g.GetRootCommit(filepath.Dir(cfgPath))
 		}
 	}
 }
 
-func testRowCnt(rowCnt int64) error {
+func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	if expected := os.Getenv("SLING_ROW_CNT"); expected != "" {
 
 		if strings.HasPrefix(expected, ">") {
 			atLeast := cast.ToInt64(strings.TrimPrefix(expected, ">"))
 			if rowCnt <= atLeast {
-				return g.Error("Expected at least %d rows, got %d", atLeast, rowCnt)
+				return g.Error("Expected at least %d rows, got %d", atLeast+1, rowCnt)
 			}
 			return nil
 		}
@@ -579,23 +574,36 @@ func testRowCnt(rowCnt int64) error {
 			return g.Error("Expected %d rows, got %d", cast.ToInt(expected), rowCnt)
 		}
 	}
-	return nil
-}
 
-func testStreamCnt(streamCnt int, matchedStreams, inputStreams []string) error {
-	if expected := os.Getenv("SLING_STREAM_CNT"); expected != "" {
+	if expected := os.Getenv("SLING_TOTAL_BYTES"); expected != "" {
 
 		if strings.HasPrefix(expected, ">") {
-			atLeast := cast.ToInt(strings.TrimPrefix(expected, ">"))
-			if streamCnt <= atLeast {
-				return g.Error("Expected at least %d streams, got %d => %s", atLeast, streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+			atLeast := cast.ToUint64(strings.TrimPrefix(expected, ">"))
+			if totalBytes <= atLeast {
+				return g.Error("Expected at least %d bytes, got %d", atLeast+1, totalBytes)
 			}
 			return nil
 		}
 
-		if streamCnt != cast.ToInt(expected) {
-			return g.Error("Expected %d streams, got %d => %s", cast.ToInt(expected), streamCnt, g.Marshal(append(matchedStreams, inputStreams...)))
+		if totalBytes != cast.ToUint64(expected) {
+			return g.Error("Expected %d bytes, got %d", cast.ToInt(expected), totalBytes)
 		}
 	}
+
+	if expected := os.Getenv("SLING_CONSTRAINT_FAILS"); expected != "" {
+
+		if strings.HasPrefix(expected, ">") {
+			atLeast := cast.ToUint64(strings.TrimPrefix(expected, ">"))
+			if constraintFails <= atLeast {
+				return g.Error("Expected at least %d constraint failures, got %d", atLeast+1, constraintFails)
+			}
+			return nil
+		}
+
+		if constraintFails != cast.ToUint64(expected) {
+			return g.Error("Expected %d constraint failures, got %d", cast.ToInt(expected), constraintFails)
+		}
+	}
+
 	return nil
 }

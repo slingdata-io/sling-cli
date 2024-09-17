@@ -101,8 +101,23 @@ func (df *Dataflow) CleanUp() {
 	}
 }
 
+// StreamConfig get the first Sp config
+func (df *Dataflow) StreamConfig() (cfg *StreamConfig) {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	for _, ds := range df.Streams {
+		return ds.config
+	}
+	return DefaultStreamConfig()
+}
+
 // SetConfig set the Sp config
 func (df *Dataflow) SetConfig(cfg *StreamConfig) {
+	// don't overwrite transforms if not provided
+	if cfg.transforms == nil {
+		cfg.transforms = df.StreamConfig().transforms
+	}
+
 	df.mux.Lock()
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
@@ -110,13 +125,13 @@ func (df *Dataflow) SetConfig(cfg *StreamConfig) {
 	}
 }
 
-// ResetConfig resets the Sp config, so that, for example,
-// delimiter settings are not carried through.
-func (df *Dataflow) ResetConfig() {
+// SetBatchLimit set the ds.Batch.Limit
+func (df *Dataflow) SetBatchLimit(limit int64) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
-		ds.Sp.ResetConfig()
+		ds.Sp.Config.BatchLimit = limit
+		ds.CurrentBatch.Limit = limit
 	}
 }
 
@@ -124,7 +139,7 @@ func (df *Dataflow) ResetConfig() {
 func (df *Dataflow) Defer(f func()) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
-	if !cast.ToBool(os.Getenv("KEEP_TEMP_FILES")) {
+	if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 		df.deferFuncs = append(df.deferFuncs, f)
 	}
 }
@@ -424,24 +439,9 @@ func (df *Dataflow) SyncStats() {
 
 	// for some reason, df.Columns remains the same as the first ds.Columns
 	// need to recreate them, reassign from dfCols
-	dfCols := Columns{}
-	for _, col := range df.Columns {
-		dfCols = append(dfCols, Column{
-			Name:        col.Name,
-			Type:        col.Type,
-			Description: col.Description,
-			Position:    col.Position,
-			DbType:      col.DbType,
-			DbPrecision: col.DbPrecision,
-			DbScale:     col.DbScale,
-			Sourced:     col.Sourced,
-			goType:      col.goType,
-			Table:       col.Table,
-			Schema:      col.Schema,
-			Database:    col.Database,
-			Stats:       ColumnStats{MaxLen: col.Stats.MaxLen}, // keep manual column length spec
-			Metadata:    col.Metadata,
-		})
+	dfCols := df.Columns.Clone()
+	for i, col := range dfCols {
+		dfCols[i].Stats = ColumnStats{MaxLen: col.Stats.MaxLen} // keep manual column length spec
 	}
 
 	for _, ds := range df.Streams {
@@ -466,6 +466,7 @@ func (df *Dataflow) SyncStats() {
 			dfCols[i].Stats.BoolCnt = dfCols[i].Stats.BoolCnt + colStats.BoolCnt
 			dfCols[i].Stats.DateCnt = dfCols[i].Stats.DateCnt + colStats.DateCnt
 			dfCols[i].Stats.DateTimeCnt = dfCols[i].Stats.DateTimeCnt + colStats.DateTimeCnt
+			dfCols[i].Stats.DateTimeZCnt = dfCols[i].Stats.DateTimeZCnt + colStats.DateTimeZCnt
 			dfCols[i].Stats.Checksum = dfCols[i].Stats.Checksum + colStats.Checksum
 
 			if colStats.Min < dfCols[i].Stats.Min {
@@ -479,6 +480,10 @@ func (df *Dataflow) SyncStats() {
 			}
 			if colStats.MaxDecLen > dfCols[i].Stats.MaxDecLen {
 				dfCols[i].Stats.MaxDecLen = colStats.MaxDecLen
+			}
+
+			if col.Constraint != nil {
+				dfCols[i].Constraint.FailCnt = dfCols[i].Constraint.FailCnt + col.Constraint.FailCnt
 			}
 		}
 	}

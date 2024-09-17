@@ -68,14 +68,14 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	distKey := ""
 	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{dist_key}", distKey)
 
 	sortKey := ""
 	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{sort_key}", sortKey)
@@ -98,7 +98,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 
 		defer conn.Context().Wg.Write.Done()
 
-		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0), "\n", " "), "'", "''")
+		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0, 0), "\n", " "), "'", "''")
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],
@@ -124,7 +124,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), filePathStorageSlug, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()))
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
@@ -155,19 +155,20 @@ func (conn *RedshiftConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 }
 
 // BulkExportFlow reads in bulk
-func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err error) {
-	if len(tables) == 0 {
-		return df, g.Error("no table/query provided")
+func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
+	if conn.GetProp("AWS_BUCKET") == "" {
+		g.Warn("using cursor to export. Please set AWS creds for Sling to use the Redshift UNLOAD function (for bigger datasets). See https://docs.slingdata.io/connections/database-connections/redshift")
+		return conn.BaseConn.BulkExportFlow(table)
 	}
 
-	columns, err := conn.GetSQLColumns(tables[0])
+	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
 		err = g.Error(err, "Could not get columns.")
 		return
 	}
 
 	unloadCtx := g.NewContext(conn.Context().Ctx)
-	s3Path, err := conn.Unload(&unloadCtx, tables...)
+	s3Path, err := conn.Unload(&unloadCtx, table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
@@ -179,8 +180,15 @@ func (conn *RedshiftConn) BulkExportFlow(tables ...Table) (df *iop.Dataflow, err
 		return
 	}
 
-	fs.SetProp("header", "false")
+	// set column coercion if specified
+	if coerceCols, ok := getColumnsProp(conn); ok {
+		columns.Coerce(coerceCols, true)
+	}
+
 	fs.SetProp("format", "csv")
+	fs.SetProp("delimiter", ",")
+	fs.SetProp("header", "true")
+	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 	df, err = fs.ReadDataflow(s3Path)
@@ -207,7 +215,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	s3Path := fmt.Sprintf(
 		"s3://%s/%s/%s",
 		conn.GetProp("AWS_BUCKET"),
-		filePathStorageSlug,
+		tempCloudStorageFolder,
 		tableFName,
 	)
 
@@ -226,7 +234,7 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 
 	g.Info("writing to s3 for redshift import")
 	s3Fs.SetProp("null_as", `\N`)
-	bw, err := s3Fs.WriteDataflow(df, s3Path)
+	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
@@ -269,15 +277,15 @@ func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	)
 
 	sqlTempl := `
-	DELETE FROM {tgt_table}
-	USING {src_table}
-	WHERE {src_tgt_pk_equal}
+	delete from {tgt_table}
+	using {src_table}
+	where {src_tgt_pk_equal}
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(
@@ -300,7 +308,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		return
 	}
 
-	tgtColumns := quoteColNames(conn, columns.Names())
+	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
 
 	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)
@@ -321,6 +329,22 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	}
 
 	return 0, nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
 
 func (conn *RedshiftConn) setEmptyAsNull(sql string) string {

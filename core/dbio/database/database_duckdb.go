@@ -38,7 +38,6 @@ type DuckDbConn struct {
 	stdErrInteractive *duckDbBuffer  // For interactive mode
 }
 
-var DuckDbVersion = "0.10.0"
 var DuckDbUseTempFile = false
 var DuckDbMux = sync.Mutex{}
 var DuckDbFileContext = map[string]*g.Context{} // so that collision doesn't happen
@@ -123,6 +122,8 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.Mux.Unlock()
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
 	conn.SetProp("connected", "true")
 
 	_, err = conn.Exec("select 1" + noDebugKey)
@@ -155,121 +156,9 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 	return nil
 }
 
-// EnsureBinDuckDB ensures duckdb binary exists
-// if missing, downloads and uses
-func EnsureBinDuckDB(version string) (binPath string, err error) {
-
-	if version == "" {
-		if val := os.Getenv("DUCKDB_VERSION"); val != "" {
-			version = val
-		} else {
-			version = DuckDbVersion
-		}
-	}
-
-	// use specified path to duckdb binary
-	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
-		if !g.PathExists(envPath) {
-			return "", g.Error("duckdb binary not found: %s", envPath)
-		}
-		return envPath, nil
-	}
-
-	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
-		DuckDbUseTempFile = cast.ToBool(useTempFile)
-	} else if g.In(version, "0.8.0", "0.8.1") {
-		// there is a bug with stdin stream in 0.8.1.
-		// Out of Memory Error
-		DuckDbUseTempFile = true
-	}
-
-	folderPath := path.Join(env.HomeBinDir(), "duckdb", version)
-	extension := lo.Ternary(runtime.GOOS == "windows", ".exe", "")
-	binPath = path.Join(folderPath, "duckdb"+extension)
-	found := g.PathExists(binPath)
-
-	checkVersion := func() (bool, error) {
-
-		out, err := exec.Command(binPath, "-version").Output()
-		if err != nil {
-			return false, g.Error(err, "could not get version for duckdb")
-		}
-
-		if strings.HasPrefix(string(out), "v"+version) {
-			return true, nil
-		}
-
-		return false, nil
-	}
-
-	// TODO: check version if found
-	if found {
-		ok, err := checkVersion()
-		if err != nil {
-			return "", g.Error(err, "error checking version for duckdb")
-		}
-		found = ok // so it can re-download if mismatch
-	}
-
-	if !found {
-		// we need to download it ourselves
-		var downloadURL string
-		zipPath := path.Join(g.UserHomeDir(), "duckdb.zip")
-		defer os.Remove(zipPath)
-
-		switch runtime.GOOS + "/" + runtime.GOARCH {
-
-		case "windows/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-amd64.zip"
-
-		case "windows/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-windows-i386.zip"
-
-		case "darwin/386", "darwin/arm", "darwin/arm64", "darwin/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-osx-universal.zip"
-
-		case "linux/386":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-i386.zip"
-
-		case "linux/amd64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
-
-		case "linux/aarch64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-aarch64.zip"
-
-		default:
-			return "", g.Error("OS %s/%s not handled", runtime.GOOS, runtime.GOARCH)
-		}
-
-		downloadURL = g.R(downloadURL, "version", version)
-
-		g.Info("downloading duckdb %s for %s/%s", version, runtime.GOOS, runtime.GOARCH)
-		err = net.DownloadFile(downloadURL, zipPath)
-		if err != nil {
-			return "", g.Error(err, "Unable to download duckdb binary")
-		}
-
-		paths, err := iop.Unzip(zipPath, folderPath)
-		if err != nil {
-			return "", g.Error(err, "Error unzipping duckdb zip")
-		}
-
-		if !g.PathExists(binPath) {
-			return "", g.Error("cannot find %s, paths are: %s", binPath, g.Marshal(paths))
-		}
-	}
-
-	_, err = checkVersion()
-	if err != nil {
-		return "", g.Error(err, "error checking version for duckdb")
-	}
-
-	return binPath, nil
-}
-
 // ExecContext runs a sql query with context, returns `error`
-func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	return conn.ExecContext(ctx, sql, args...)
+func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error) {
+	return conn.ExecContext(ctx, strings.Join(sqls, ";\n"))
 }
 
 func (conn *DuckDbConn) setDuckDbFileContext(ctx *g.Context) {
@@ -343,12 +232,12 @@ func (b *duckDbBuffer) Bytes() []byte {
 
 func (conn *DuckDbConn) getCmd(ctx *g.Context, sql string, readOnly bool) (cmd *exec.Cmd, sqlPath string, err error) {
 
-	bin, err := EnsureBinDuckDB(conn.GetProp("duckdb_version"))
+	bin, err := iop.EnsureBinDuckDB(conn.GetProp("duckdb_version"))
 	if err != nil {
 		return cmd, "", g.Error(err, "could not get duckdb binary")
 	}
 
-	sqlPath, err = writeTempSQL(sql)
+	sqlPath, err = env.WriteTempSQL(sql)
 	if err != nil {
 		return cmd, "", g.Error(err, "could not create temp sql file for duckdb")
 	}
@@ -422,6 +311,16 @@ func (r duckDbResult) RowsAffected() (int64, error) {
 	return cast.ToInt64(r.TotalRows), nil
 }
 
+// submitToCmdStdin submits SQL to the DuckDB process via stdin in interactive mode
+// It handles the submission of SQL, detection of query completion, and management of output streams
+// Parameters:
+//   - ctx: The context for the operation
+//   - sql: The SQL query to be executed
+//
+// Returns:
+//   - stdOutReader: A reader for the standard output of the command
+//   - stderrBuf: A buffer containing any error output
+//   - err: Any error encountered during the process
 func (conn *DuckDbConn) submitToCmdStdin(ctx context.Context, sql string) (stdOutReader io.ReadCloser, stderrBuf *bytes.Buffer, err error) {
 	// submit to stdin
 	sql = strings.TrimLeft(strings.TrimSpace(sql), ";")
@@ -546,7 +445,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	if err != nil || strings.Contains(stderr.String(), "Error: ") {
 		errText := g.F("could not exec SQL for duckdb: %s\n%s\n%s", string(out), stderr.String(), sql)
 		if strings.Contains(errText, "version number") {
-			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.6.0\n" + errText
+			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.9.0\n" + errText
 		} else if strings.Contains(errText, "Could not set lock") {
 			return result, g.Error("File Lock Error.\n" + errText)
 		} else if err == nil {
@@ -556,7 +455,7 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 	} else if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() != 0 {
 		errText := g.F("could not exec SQL for duckdb: %s\n%s\n%s", string(out), stderr.String(), sql)
 		if strings.Contains(errText, "version number") {
-			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.6.0\n" + errText
+			errText = "Please set the DuckDB version with environment variable DUCKDB_VERSION. Example: DUCKDB_VERSION=0.9.0\n" + errText
 		}
 		if conn.GetType() == dbio.TypeDbMotherDuck && string(out)+stderr.String() == "" && cmd.ProcessState.ExitCode() == 1 {
 			errText = "Perhaps your Motherduck token needs to be renewed?"
@@ -709,6 +608,8 @@ func (conn *DuckDbConn) Close() error {
 	conn.cmdInteractive = nil
 
 	conn.unlockFileContext(fileContext)
+
+	g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 
 	return nil
 }
@@ -891,26 +792,26 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 
 	// V0.7
 	// sqlTempl := `
-	// INSERT INTO {tgt_table} as tgt
+	// insert into {tgt_table} as tgt
 	// 	({insert_fields})
-	// SELECT {src_fields}
-	// FROM {src_table} as src
-	// WHERE true
+	// select {src_fields}
+	// from {src_table} as src
+	// where true
 	// ON CONFLICT ({pk_fields})
 	// DO UPDATE
 	// SET {set_fields}
 	// `
 
 	sqlTempl := `
-	DELETE FROM {tgt_table} tgt
-	USING {src_table} src
-	WHERE {src_tgt_pk_equal}
+	delete from {tgt_table} tgt
+	using {src_table} src
+	where {src_tgt_pk_equal}
 	;
 
-	INSERT INTO {tgt_table}
+	insert into {tgt_table}
 		({insert_fields})
-	SELECT {src_fields}
-	FROM {src_table} src
+	select {src_fields}
+	from {src_table} src
 	`
 
 	sql = g.R(
@@ -926,4 +827,20 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	)
 
 	return
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/flarco/g"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParquetRead1(t *testing.T) {
@@ -41,7 +42,7 @@ func TestParquetWrite1(t *testing.T) {
 
 	config, err := parquet.NewWriterConfig()
 	g.LogFatal(err)
-	config.Schema = parquet.NewSchema("test", NewRecNode(cols))
+	config.Schema = parquet.NewSchema("test", NewRecNode(cols, false))
 	// config.Compression = &snappy.Codec{}
 
 	file, err := os.CreateTemp(env.GetTempFolder(), "")
@@ -109,6 +110,147 @@ func TestParquetWrite2(t *testing.T) {
 
 }
 
+func TestParquetWrite3(t *testing.T) {
+	// parquet.Node
+	// parquet.NewSchema("test", node)
+
+	file, err := os.CreateTemp(env.GetTempFolder(), "*.parquet")
+	g.Info(file.Name())
+	g.LogFatal(err)
+
+	type Row struct {
+		Col1 *int `parquet:",,optional"`
+		Col2 int
+		Col3 *time.Time `parquet:",,optional"`
+	}
+	w := parquet.NewGenericWriter[Row](file)
+
+	now := time.Now()
+	rows := []Row{
+		{Col1: g.Int(1), Col2: 0, Col3: &now},
+		{Col1: nil, Col2: 1, Col3: nil},
+		{Col1: g.Int(10), Col2: 4, Col3: nil},
+	}
+
+	_, err = w.Write(rows)
+	g.LogFatal(err)
+
+	err = w.Close()
+	g.LogFatal(err)
+
+	err = file.Close()
+	g.LogFatal(err)
+
+}
+
+func BenchmarkParquetWrite3(b *testing.B) {
+	// parquet.Node
+	// parquet.NewSchema("test", node)
+
+	file, err := os.CreateTemp(env.GetTempFolder(), "*.parquet")
+	g.Info(file.Name())
+	g.LogFatal(err)
+
+	type Row struct {
+		Col1 *int `parquet:",,optional"`
+		Col2 int
+		Col3 *time.Time `parquet:",,optional"`
+	}
+	w := parquet.NewGenericWriter[Row](file)
+
+	now := time.Now()
+	rows := []Row{
+		{Col1: g.Int(1), Col2: 0, Col3: &now},
+		{Col1: nil, Col2: 1, Col3: nil},
+		{Col1: g.Int(10), Col2: 4, Col3: nil},
+	}
+
+	for n := 0; n < b.N; n++ {
+		_, err = w.Write(rows)
+		g.LogFatal(err)
+	}
+
+	err = w.Close()
+	g.LogFatal(err)
+
+	err = file.Close()
+	g.LogFatal(err)
+
+}
+
+func TestParquetWrite4(t *testing.T) {
+
+	file, err := os.CreateTemp(env.GetTempFolder(), "*.parquet")
+	g.Info(file.Name())
+	g.LogFatal(err)
+
+	config, err := parquet.NewWriterConfig()
+	g.LogFatal(err)
+
+	columns := NewColumns(
+		Column{Name: "col_int1", Type: IntegerType},
+		Column{Name: "col_int2", Type: IntegerType},
+		Column{Name: "col_time", Type: TimestampType},
+	)
+	config.Schema = getParquetSchema(columns, true)
+	config.Compression = &parquet.Snappy
+
+	w := parquet.NewGenericWriter[map[string]any](file, config)
+
+	now := time.Now()
+	rows := []map[string]any{
+		{"col_int1": 1, "col_int2": 0, "col_time": now},
+		{"col_int1": nil, "col_int2": 1, "col_time": nil},
+	}
+	_, err = w.Write(rows)
+	g.LogFatal(err)
+
+	err = w.Close()
+	g.LogFatal(err)
+
+	err = file.Close()
+	g.LogFatal(err)
+
+}
+
+// 4 times slower than BenchmarkParquetWrite3 when using map, but fast enough
+func BenchmarkParquetWrite4(b *testing.B) {
+
+	file, err := os.CreateTemp(env.GetTempFolder(), "*.parquet")
+	g.Info(file.Name())
+	g.LogFatal(err)
+
+	config, err := parquet.NewWriterConfig()
+	g.LogFatal(err)
+
+	columns := NewColumns(
+		Column{Name: "col_int1", Type: IntegerType},
+		Column{Name: "col_int2", Type: IntegerType},
+		Column{Name: "col_time", Type: TimestampType},
+	)
+	config.Schema = getParquetSchema(columns, true)
+	config.Compression = &parquet.Snappy
+
+	w := parquet.NewGenericWriter[map[string]any](file, config)
+
+	now := time.Now()
+	rows := []map[string]any{
+		{"col_int1": 1, "col_int2": 0, "col_time": now},
+		{"col_int1": nil, "col_int2": 1, "col_time": nil},
+	}
+
+	for n := 0; n < b.N; n++ {
+		_, err = w.Write(rows)
+		g.LogFatal(err)
+	}
+
+	err = w.Close()
+	g.LogFatal(err)
+
+	err = file.Close()
+	g.LogFatal(err)
+}
+
 func TestParquet(t *testing.T) {
 	file, err := os.Open("/tmp/test.parquet")
 	g.LogFatal(err)
@@ -142,7 +284,7 @@ func TestParquetDecimal(t *testing.T) {
 		}...,
 	)
 
-	config.Schema = getParquetSchema(columns)
+	config.Schema = getParquetSchema(columns, false)
 
 	fw := parquet.NewWriter(file, config)
 
@@ -174,4 +316,46 @@ func TestParquetDecimal(t *testing.T) {
 	g.Info("correctDecValues => %s", g.Marshal(correctDecValues))
 	// check file with core/dbio/scripts/check_parquet.py
 
+}
+
+func TestParquetDuckDb(t *testing.T) {
+	// Initialize ParquetDuckDb
+	testFile := "test/test1.parquet"
+	p, err := NewParquetReaderDuckDb(testFile)
+	assert.NoError(t, err)
+	if !assert.NotNil(t, p) {
+		return
+	}
+
+	// Test Columns method
+	columns, err := p.Columns()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, columns)
+
+	// Check if columns are correctly parsed
+	expectedColumns := []struct {
+		name     string
+		dataType ColumnType
+	}{
+		{"id", BigIntType},
+		{"first_name", StringType},
+		{"last_name", StringType},
+		{"email", StringType},
+		{"target", BoolType},
+		{"create_dt", TimestampzType},
+		{"date", TimestampzType},
+		{"rating", DecimalType},
+		{"code", DecimalType},
+	}
+
+	if assert.Equal(t, len(expectedColumns), len(columns), "Number of columns should match") {
+
+		for i, expected := range expectedColumns {
+			assert.Equal(t, expected.name, columns[i].Name, "Column name should match")
+			assert.Equal(t, expected.dataType, columns[i].Type, "Column type should match for: %s", columns[i].Name)
+		}
+	}
+	// Test Close method
+	err = p.Close()
+	assert.NoError(t, err)
 }

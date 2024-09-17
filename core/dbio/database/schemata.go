@@ -1,11 +1,14 @@
 package database
 
 import (
+	"database/sql"
+	"runtime/debug"
 	"strings"
 	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
+	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -25,28 +28,42 @@ type Table struct {
 	Keys     TableKeys   `json:"keys,omitempty"`
 
 	Raw string `json:"raw"`
+
+	limit, offset int
+}
+
+var PartitionByOffset = func(conn Connection, table Table, l int) ([]Table, error) { return []Table{table}, nil }
+var PartitionByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
+	return []Table{table}, nil
 }
 
 func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
-func (t *Table) SetKeys(pkCols []string, updateCol string, otherKeys TableKeys) error {
+func (t *Table) SetKeys(sourcePKCols []string, updateCol string, tableKeys TableKeys) error {
+	// set keys
+	t.Keys = tableKeys
+
 	eG := g.ErrorGroup{}
 
 	if len(t.Columns) == 0 {
 		return nil // columns are missing, cannot check
 	}
 
-	if len(pkCols) > 0 {
-		eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, pkCols...))
+	if len(sourcePKCols) > 0 {
+		// set true PK only when StarRocks, we don't want to create PKs on target table implicitly
+		if t.Dialect == dbio.TypeDbStarRocks {
+			eG.Capture(t.Columns.SetKeys(iop.PrimaryKey, sourcePKCols...))
+		}
+		eG.Capture(t.Columns.SetMetadata(iop.PrimaryKey.MetadataKey(), "source", sourcePKCols...))
 	}
 
 	if updateCol != "" {
-		eG.Capture(t.Columns.SetKeys(iop.UpdateKey, updateCol))
+		eG.Capture(t.Columns.SetMetadata(iop.UpdateKey.MetadataKey(), "source", updateCol))
 	}
 
-	if tkMap := otherKeys; tkMap != nil {
+	if tkMap := tableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
 			eG.Capture(t.Columns.SetKeys(tableKey, keys...))
 		}
@@ -107,6 +124,23 @@ func (t *Table) FDQN() string {
 	return strings.Join(fdqnArr, ".")
 }
 
+func (t *Table) Clone() Table {
+	return Table{
+		Name:     t.Name,
+		Schema:   t.Schema,
+		Database: t.Database,
+		IsView:   t.IsView,
+		SQL:      t.SQL,
+		DDL:      t.DDL,
+		Dialect:  t.Dialect,
+		Columns:  t.Columns,
+		Keys:     t.Keys,
+		Raw:      t.Raw,
+		limit:    t.limit,
+		offset:   t.offset,
+	}
+}
+
 func (t *Table) ColumnsMap() map[string]iop.Column {
 	columns := map[string]iop.Column{}
 	for _, column := range t.Columns {
@@ -116,7 +150,12 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(limit int, fields ...string) (sql string) {
+func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+
+	// set to internal value if not specified
+	limit = lo.Ternary(limit == 0, t.limit, limit)
+	offset = lo.Ternary(offset == 0, t.offset, offset)
+
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
@@ -146,45 +185,56 @@ func (t *Table) Select(limit int, fields ...string) (sql string) {
 		return q + strings.ReplaceAll(f, q, "") + q
 	})
 
+	template, err := t.Dialect.Template()
+	if err != nil {
+		return
+	}
+
+	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
-			fieldsStr := strings.Join(fields, ", ")
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
 		} else {
 			sql = t.SQL
 		}
 	} else {
-		fieldsStr := "*"
-		if len(fields) > 0 {
-			fieldsStr = strings.Join(fields, ", ")
-		}
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
 	if limit > 0 {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
-		} else {
-			template, err := t.Dialect.Template()
-			g.LogError(err)
-
+		} else if t.IsQuery() {
 			sql = g.R(
-				template.Core["limit"],
+				template.Core["limit_sql"],
 				"sql", sql,
 				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
+			)
+		} else {
+			key := lo.Ternary(offset > 0, "limit_offset", "limit")
+			sql = g.R(
+				template.Core[key],
+				"fields", fieldsStr,
+				"table", t.FDQN(),
+				"limit", cast.ToString(limit),
+				"offset", cast.ToString(offset),
 			)
 		}
 	}
 
 	if isSQLServer {
-		// move the inner "order by" clause to outside
+		// add offset after "order by"
 		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
 		if !startsWith && len(matches) == 1 {
 			orderBy := matches[0].Full
-			sql = strings.ReplaceAll(sql, orderBy, "")
-			sql = sql + orderBy
+			newOrderBy := strings.ReplaceAll(matches[0].Full, " asc", "  asc") // to not match again
+			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", newOrderBy, offset))
 		}
 	}
+
+	// replace any provided placeholders
+	sql = g.R(sql, "{limit}", cast.ToString(limit), "{offset}", cast.ToString(offset))
 
 	return
 }
@@ -368,7 +418,7 @@ func (s *Schemata) filterTables(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
+	} else if len(filters) == 1 && (strings.Contains(filters[0], "*") || strings.Contains(filters[0], "?")) {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -421,7 +471,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 	var gc *glob.Glob
 	if len(filters) == 0 {
 		return *s
-	} else if len(filters) == 1 && strings.Contains(filters[0], "*") {
+	} else if len(filters) == 1 && (strings.Contains(filters[0], "*") || strings.Contains(filters[0], "?")) {
 		val, err := glob.Compile(strings.ToLower(filters[0]))
 		if err == nil {
 			gc = &val
@@ -478,7 +528,7 @@ func (s *Schemata) filterColumns(filters ...string) (ns Schemata) {
 type ColumnType struct {
 	Name             string
 	DatabaseTypeName string
-	FetchedType      iop.ColumnType
+	FetchedColumn    *iop.Column
 	Length           int
 	Precision        int
 	Scale            int
@@ -490,13 +540,13 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	table.Dialect = dialect
 	table.Raw = text
 
+	quote := GetQualifierQuote(dialect)
+
 	textLower := strings.ToLower(text)
-	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) {
+	if strings.Contains(textLower, "select") && strings.Contains(textLower, "from") && (strings.Contains(text, " ") || strings.Contains(text, "\n")) && !strings.Contains(text, quote) {
 		table.SQL = strings.TrimSpace(text)
 		return
 	}
-
-	quote := GetQualifierQuote(dialect)
 
 	inQuote := false
 	words := []string{}
@@ -556,7 +606,7 @@ func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {
 	}
 
 	if len(words) == 0 {
-		err = g.Error("invalid table name")
+		err = g.Error("invalid table name: %s", text)
 		return
 	} else if len(words) == 1 {
 		table.Name = words[0]
@@ -644,6 +694,16 @@ func ParseColumnName(text string, dialect dbio.Type) (colName string, err error)
 	}
 
 	return
+}
+
+// getColumnsProp returns the coercedCols from the columns property
+func getColumnsProp(conn Connection) (coerceCols iop.Columns, ok bool) {
+	if coerceColsV := conn.GetProp("columns"); coerceColsV != "" {
+		if err := g.Unmarshal(coerceColsV, &coerceCols); err == nil {
+			return coerceCols, true
+		}
+	}
+	return coerceCols, false
 }
 
 func GetQualifierQuote(dialect dbio.Type) string {
@@ -782,29 +842,138 @@ func GetSchemataAll(conn Connection) (schemata Schemata, err error) {
 	return schemata, nil
 }
 
-func HasVariedCase(text string) bool {
-	hasUpper := false
-	hasLower := false
-	for _, c := range text {
-		if unicode.IsUpper(c) {
-			hasUpper = true
+// AddPrimaryKeyToDDL adds a primary key to the table
+func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, error) {
+
+	if pkCols := columns.GetKeys(iop.PrimaryKey); len(pkCols) > 0 {
+		ddl = strings.TrimSpace(ddl)
+
+		// add pk right before the last parenthesis
+		lastParen := strings.LastIndex(ddl, ")")
+		if lastParen == -1 {
+			return ddl, g.Error("could not find last parenthesis")
 		}
-		if unicode.IsLower(c) {
-			hasLower = true
+
+		prefix := "primary key"
+		switch t.Dialect {
+		case dbio.TypeDbOracle:
+			prefix = g.F("constraint %s_pkey primary key", strings.ToLower(t.Name))
 		}
-		if hasUpper && hasLower {
-			break
-		}
+
+		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
+		ddl = ddl[:lastParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[lastParen:]
 	}
 
-	return hasUpper && hasLower
+	return ddl, nil
 }
 
-func QuoteNames(dialect dbio.Type, names ...string) (newNames []string) {
-	q := GetQualifierQuote(dialect)
-	newNames = make([]string, len(names))
-	for i := range names {
-		newNames[i] = q + strings.ReplaceAll(names[i], q, "") + q
+type TableIndex struct {
+	Name    string
+	Columns iop.Columns
+	Unique  bool
+	Table   *Table
+}
+
+func (ti *TableIndex) CreateDDL() string {
+	dialect := ti.Table.Dialect
+	quotedNames := dialect.QuoteNames(ti.Columns.Names()...)
+
+	if ti.Unique {
+		return g.R(
+			dialect.GetTemplateValue("core.create_unique_index"),
+			"index", dialect.Quote(ti.Name),
+			"table", ti.Table.FDQN(),
+			"cols", strings.Join(quotedNames, ", "),
+		)
 	}
-	return newNames
+
+	return g.R(
+		dialect.GetTemplateValue("core.create_index"),
+		"index", dialect.Quote(ti.Name),
+		"table", ti.Table.FDQN(),
+		"cols", strings.Join(quotedNames, ", "),
+	)
+}
+
+func (ti *TableIndex) DropDDL() string {
+	dialect := ti.Table.Dialect
+
+	return g.R(
+		dialect.GetTemplateValue("core.drop_index"),
+		"index", dialect.Quote(ti.Name),
+		"name", ti.Name,
+		"table", ti.Table.FDQN(),
+		"schema", ti.Table.SchemaQ(),
+	)
+}
+
+func (t *Table) Indexes(columns iop.Columns) (indexes []TableIndex) {
+
+	// TODO: composite column indexes not yet supported
+	// if indexSet := columns.GetKeys(iop.IndexKey); len(indexSet) > 0 {
+
+	// 	// create index name from the first 6 chars of each column name
+	// 	indexNameParts := []string{strings.ToLower(t.Name)}
+	// 	for _, col := range indexSet.Names() {
+	// 		if len(col) < 6 {
+	// 			indexNameParts = append(indexNameParts, col)
+	// 		} else {
+	// 			indexNameParts = append(indexNameParts, col[:6])
+	// 		}
+	// 	}
+
+	// 	index := TableIndex{
+	// 		Name:    strings.Join(indexNameParts, "_"),
+	// 		Columns: indexSet,
+	// 		Unique:  false,
+	// 		Table:   t,
+	// 	}
+
+	// 	indexes = append(indexes, index)
+	// }
+
+	// normal index
+	for _, col := range columns.GetKeys(iop.IndexKey) {
+
+		indexNameParts := []string{strings.ToLower(t.Name), strings.ToLower(col.Name)}
+		index := TableIndex{
+			Name:    strings.Join(indexNameParts, "_"),
+			Columns: iop.Columns{col},
+			Unique:  false,
+			Table:   t,
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	// unique index
+	for _, col := range columns.GetKeys(iop.UniqueKey) {
+
+		indexNameParts := []string{strings.ToLower(t.Name), strings.ToLower(col.Name)}
+		index := TableIndex{
+			Name:    strings.Join(indexNameParts, "_"),
+			Columns: iop.Columns{col},
+			Unique:  true,
+			Table:   t,
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	return
+}
+
+// getColumnTypes recovers from ColumnTypes panics
+// this can happen in the Microsoft go-mssqldb driver
+// See https://github.com/microsoft/go-mssqldb/issues/79
+func getColumnTypes(result *sqlx.Rows) (dbColTypes []*sql.ColumnType, err error) {
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
+		}
+	}()
+
+	return result.ColumnTypes()
 }

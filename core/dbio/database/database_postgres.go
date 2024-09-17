@@ -71,20 +71,29 @@ func (conn *PostgresConn) CopyToStdout(ctx *g.Context, sql string) (stdOutReader
 }
 
 // GenerateDDL generates a DDL based on a dataset
-func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
-	sql, err = conn.BaseConn.GenerateDDL(table, data, temporary)
+func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
+	ddl, err = conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
-		return sql, g.Error(err)
+		return ddl, g.Error(err)
+	}
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
 	}
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := quoteColNames(conn, keyCols.Names())
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
+	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
 
-	return strings.TrimSpace(sql), nil
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = ddl + ";\n" + index.CreateDDL()
+	}
+
+	return strings.TrimSpace(ddl), nil
 }
 
 // BulkExportStream uses the bulk dumping (COPY)
@@ -92,15 +101,15 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 	_, err = exec.LookPath("psql")
 	if err != nil {
 		g.Trace("psql not found in path. Using cursor...")
-		return conn.StreamRows(table.Select(0), g.M("columns", table.Columns))
+		return conn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
 	}
 
 	if conn.BaseConn.GetProp("allow_bulk_export") != "true" {
-		return conn.StreamRows(table.Select(0), g.M("columns", table.Columns))
+		return conn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
 	}
 
 	copyCtx := g.NewContext(conn.Context().Ctx)
-	stdOutReader, err := conn.CopyToStdout(&copyCtx, table.Select(0))
+	stdOutReader, err := conn.CopyToStdout(&copyCtx, table.Select(0, 0))
 	if err != nil {
 		return ds, err
 	}
@@ -186,6 +195,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					ds.Context.Cancel()
+					g.Warn(g.Marshal(err))
 					g.Trace("error for rec: %s", g.Pretty(batch.Columns.MakeRec(row)))
 					return g.Error(err, "could not execute statement")
 				}
@@ -193,6 +203,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 			err = stmt.Close()
 			if err != nil {
+				g.Warn("%#v", err)
 				return g.Error(err, "could not close statement")
 			}
 
@@ -230,6 +241,10 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case srcCol.IsBool() && tgtCol.IsInteger():
 		selectStr = g.F("%s::int as %s", qName, qName)
+	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
+		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	default:
 		selectStr = qName
 	}

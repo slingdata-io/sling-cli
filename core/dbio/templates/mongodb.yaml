@@ -6,7 +6,7 @@ core:
 variable:
   tmp_folder: /tmp
   timestamp_layout_str: 'ISODate("{value}")'
-  timestamp_layout: '2006-01-02T15:04:05.000Z'
+  timestamp_layout: '2006-01-02T15:04:05.000000Z'
   date_layout_str: 'ISODate(("{value}")'
   date_layout: '2006-01-02'
   error_filter_table_exists: already

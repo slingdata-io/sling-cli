@@ -50,7 +50,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	return created, nil
 }
 
-func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table) (created bool, err error) {
+func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table, temp bool) (created bool, err error) {
 
 	// check table existence
 	exists, err := database.TableExists(conn, table.FullName())
@@ -66,7 +66,7 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 		return false, g.Error(err, "Error checking & creating schema "+table.Schema)
 	}
 
-	table.DDL, err = conn.GenerateDDL(*table, data, false)
+	table.DDL, err = conn.GenerateDDL(*table, data, temp)
 	if err != nil {
 		return false, g.Error(err, "Could not generate DDL for "+table.FullName())
 	}
@@ -81,15 +81,6 @@ func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *d
 	}
 
 	return true, nil
-}
-
-func pullSourceTableColumns(cfg *Config, srcConn database.Connection, table string) (cols iop.Columns, err error) {
-	cfg.Source.columns, err = srcConn.GetColumns(table)
-	if err != nil {
-		err = g.Error(err, "could not get column list for "+table)
-		return
-	}
-	return cfg.Source.columns, nil
 }
 
 func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
@@ -197,7 +188,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConn datab
 	// in case column casing needs adjustment
 	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
 	updateCol := targetCols.GetColumn(tgtUpdateKey)
-	if updateCol.Name != "" {
+	if updateCol.Name != "" && updateCol != nil {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
 		return // target table does not exist
@@ -219,18 +210,19 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConn datab
 			strings.Contains(errMsg, "invalid object") {
 			// table does not exists, will be create later
 			// set val to blank for full load
-			return "", nil
+			return nil
 		}
 		err = g.Error(err, "could not get max value for "+tgtUpdateKey)
 		return
 	}
-	if len(data.Rows) == 0 {
+	if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
 		// table is empty
 		// set val to blank for full load
-		return "", nil
+		return nil
 	}
 
-	value := data.Rows[0][0]
+	// set null for empty value (e.g. if target table exists but is empty)
+	cfg.IncrementalVal = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
 	colType := data.Columns[0].Type
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
@@ -238,18 +230,33 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConn datab
 	if colType.IsDate() || isOracleDate {
 		val = g.R(
 			srcConnVarMap["date_layout_str"],
-			"value", cast.ToTime(value).Format(srcConnVarMap["date_layout"]),
+			"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["date_layout"]),
 		)
 	} else if colType.IsDatetime() {
-		val = g.R(
-			srcConnVarMap["timestamp_layout_str"],
-			"value", cast.ToTime(value).Format(srcConnVarMap["timestamp_layout"]),
-		)
+		// set timestampz_layout_str and timestampz_layout if missing
+		if _, ok := srcConnVarMap["timestampz_layout_str"]; !ok {
+			srcConnVarMap["timestampz_layout_str"] = srcConnVarMap["timestamp_layout_str"]
+		}
+		if _, ok := srcConnVarMap["timestampz_layout"]; !ok {
+			srcConnVarMap["timestampz_layout"] = srcConnVarMap["timestamp_layout"]
+		}
+
+		if colType == iop.TimestampzType {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestampz_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestampz_layout"]),
+			)
+		} else {
+			cfg.IncrementalValStr = g.R(
+				srcConnVarMap["timestamp_layout_str"],
+				"value", cast.ToTime(cfg.IncrementalVal).Format(srcConnVarMap["timestamp_layout"]),
+			)
+		}
 	} else if colType.IsNumber() {
-		val = cast.ToString(value)
+		cfg.IncrementalValStr = cast.ToString(cfg.IncrementalVal)
 	} else {
-		val = strings.ReplaceAll(cast.ToString(value), `'`, `''`)
-		val = `'` + val + `'`
+		cfg.IncrementalValStr = strings.ReplaceAll(cast.ToString(cfg.IncrementalVal), `'`, `''`)
+		cfg.IncrementalValStr = `'` + cfg.IncrementalValStr + `'`
 	}
 
 	return

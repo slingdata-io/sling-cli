@@ -1,6 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'cannot drop if exists index for mysql' as col1"
   create_table: create table if not exists {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
@@ -375,6 +376,7 @@ routine:
 function:
   replace: replace({string_expr}, {to_replace}, {replacement})
   str_utf8: '{ field }'
+  cast_to_text: 'cast({field} as mediumtext)'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: select sleep({seconds})
@@ -388,6 +390,7 @@ variable:
   ddl_col: 1
   batch_rows: 500
   bool_as: integer
+  max_string_type: mediumtext
 
 error_filter:
   table_not_exist: exist

@@ -32,7 +32,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
         
       - name: Get the version
@@ -62,91 +62,6 @@ jobs:
           echo $VERSION
           VERSION=$(/__/bin/sling --version | sed 's/Version: //')
           echo ::set-output name=version::$VERSION
-
-  release:
-    if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-
-    strategy:
-      fail-fast: true
-      matrix:
-        # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
-        runner: [macos-latest, ubuntu-20.04, windows-latest]
-        # runner: [self-hosted-mac, ubuntu-20.04, windows-latest]
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Dump context
-        env:
-          JOB_CONTEXT: ${{ toJson(job) }}
-          MATRIX_CONTEXT: ${{ toJson(matrix) }}
-          RUNNER_CONTEXT: ${{ toJson(runner) }}
-        run: |
-          echo "JOB_CONTEXT -> $JOB_CONTEXT"
-          echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
-          echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
-          echo "VERSION -> $VERSION"
-
-      - name: Set up GoLang
-        uses: actions/setup-go@v3
-        with:
-          go-version: "1.21"
-          cache: true
-        
-      - name: Configure private token (Mac)
-        if: runner.os == 'macOS'
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Linux)
-        if: runner.os == 'linux'
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Windows)
-        if: runner.os == 'windows'
-        run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"  
-
-      - name: Build Sling (Linux)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'linux'
-        run: bash scripts/ci/build.linux.sh $VERSION
-
-      - name: Build Sling (Mac)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'macOS'
-        run: bash scripts/ci/build.mac.sh $VERSION
-
-
-      - name: Configure Pagefile (Windows)
-        if: runner.os == 'windows'
-        uses: al-cheb/configure-pagefile-action@v1.2
-        with:
-            minimum-size: 16GB
-            maximum-size: 16GB
-            disk-root: "C:"
-
-      - name: Build Sling (Windows)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'windows'
-        run: .\scripts\ci\build.win.ps1 $env:VERSION
-      
-      - uses: BetaHuhn/do-spaces-action@v2
-        with:
-          access_key: ${{ secrets.DO_SPACE_ACCESS_KEY}}
-          secret_key: ${{ secrets.DO_SPACE_SECRET_KEY }}
-          space_name: ${{ secrets.DO_SPACE_NAME }}
-          space_region: ${{ secrets.DO_SPACE_REGION }}
-          source: dist
-          out_dir: slingdata.io/dist
 
   release-python:
     needs: [ release-linux-amd64, release-brew, release-scoop ]
@@ -181,7 +96,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
         
       - name: Configure private token
@@ -192,7 +107,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.mac.yaml
 
   release-scoop:
@@ -209,7 +124,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: true
 
       - name: Configure Pagefile
@@ -228,7 +143,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.windows.yaml
 
   release-linux-arm64:
@@ -244,7 +159,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
 
       - name: Login docker
@@ -259,7 +174,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml
 
       # pushing to docker manually
@@ -288,7 +203,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
 
       - name: Login docker
@@ -303,7 +218,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
 
       - name: Dispatch test-sling-action

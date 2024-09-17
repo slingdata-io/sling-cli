@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -10,15 +11,18 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
 var (
 	// RemoveTrailingDecZeros removes the trailing zeros in CastToString
-	RemoveTrailingDecZeros = false
-	SampleSize             = 900
-	replacePattern         = regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean header fields
-	regexFirstDigit        = *regexp.MustCompile(`^\d`)
+	RemoveTrailingDecZeros    = false
+	SampleSize                = 900
+	replacePattern            = regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean header fields
+	regexFirstDigit           = *regexp.MustCompile(`^\d`)
+	parseConstraintExpression = func(string) (ConstraintEvalFunc, error) { return nil, nil }
 )
 
 // Column represents a schemata column
@@ -39,7 +43,8 @@ type Column struct {
 	Description string `json:"description,omitempty"`
 	FileURI     string `json:"file_uri,omitempty"`
 
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Constraint *ColumnConstraint `json:"constraint,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // Columns represent many columns
@@ -66,6 +71,15 @@ const (
 	TimezType      ColumnType = "timez"
 )
 
+type ConstraintEvalFunc func(value any) bool
+
+type ColumnConstraint struct {
+	Expression string             `json:"expression,omitempty"`
+	Errors     []string           `json:"errors,omitempty"`
+	FailCnt    uint64             `json:"fail_cnt,omitempty"`
+	EvalFunc   ConstraintEvalFunc `json:"-"`
+}
+
 type KeyType string
 
 const (
@@ -82,26 +96,31 @@ const (
 	UpdateKey       KeyType = "update"
 )
 
-var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
+func (kt KeyType) MetadataKey() string {
+	return string(kt) + "_key"
+}
+
+var KeyTypes = []KeyType{AggregateKey, ClusterKey, DuplicateKey, HashKey, IndexKey, PartitionKey, PrimaryKey, SortKey, UniqueKey, UpdateKey}
 
 // ColumnStats holds statistics for a column
 type ColumnStats struct {
-	MinLen      int    `json:"min_len,omitempty"`
-	MaxLen      int    `json:"max_len,omitempty"`
-	MaxDecLen   int    `json:"max_dec_len,omitempty"`
-	Min         int64  `json:"min"`
-	Max         int64  `json:"max"`
-	NullCnt     int64  `json:"null_cnt"`
-	IntCnt      int64  `json:"int_cnt,omitempty"`
-	DecCnt      int64  `json:"dec_cnt,omitempty"`
-	BoolCnt     int64  `json:"bool_cnt,omitempty"`
-	JsonCnt     int64  `json:"json_cnt,omitempty"`
-	StringCnt   int64  `json:"string_cnt,omitempty"`
-	DateCnt     int64  `json:"date_cnt,omitempty"`
-	DateTimeCnt int64  `json:"datetime_cnt,omitempty"`
-	TotalCnt    int64  `json:"total_cnt"`
-	UniqCnt     int64  `json:"uniq_cnt"`
-	Checksum    uint64 `json:"checksum"`
+	MinLen       int    `json:"min_len,omitempty"`
+	MaxLen       int    `json:"max_len,omitempty"`
+	MaxDecLen    int    `json:"max_dec_len,omitempty"`
+	Min          int64  `json:"min"`
+	Max          int64  `json:"max"`
+	NullCnt      int64  `json:"null_cnt"`
+	IntCnt       int64  `json:"int_cnt,omitempty"`
+	DecCnt       int64  `json:"dec_cnt,omitempty"`
+	BoolCnt      int64  `json:"bool_cnt,omitempty"`
+	JsonCnt      int64  `json:"json_cnt,omitempty"`
+	StringCnt    int64  `json:"string_cnt,omitempty"`
+	DateCnt      int64  `json:"date_cnt,omitempty"`
+	DateTimeCnt  int64  `json:"datetime_cnt,omitempty"`
+	DateTimeZCnt int64  `json:"datetimez_cnt,omitempty"`
+	TotalCnt     int64  `json:"total_cnt"`
+	UniqCnt      int64  `json:"uniq_cnt"`
+	Checksum     uint64 `json:"checksum"`
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -232,14 +251,26 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 		found := false
 		for i, col := range cols {
 			if strings.EqualFold(colName, col.Name) {
-				key := string(keyType) + "_key"
-				col.SetMetadata(key, "true")
+				col.SetMetadata(keyType.MetadataKey(), "true")
 				cols[i] = col
 				found = true
 			}
 		}
 		if !found && !g.In(keyType, ClusterKey, PartitionKey, SortKey) {
 			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+		}
+	}
+	return
+}
+
+// SetMetadata sets metadata for columns
+func (cols Columns) SetMetadata(key, value string, colNames ...string) (err error) {
+	for _, colName := range colNames {
+		for i, col := range cols {
+			if strings.EqualFold(colName, col.Name) {
+				col.SetMetadata(key, value)
+				cols[i] = col
+			}
 		}
 	}
 	return
@@ -284,6 +315,7 @@ func (cols Columns) Clone() (newCols Columns) {
 		newCols[j] = Column{
 			Position:    col.Position,
 			Name:        col.Name,
+			Description: col.Description,
 			Type:        col.Type,
 			DbType:      col.DbType,
 			DbPrecision: col.DbPrecision,
@@ -294,6 +326,8 @@ func (cols Columns) Clone() (newCols Columns) {
 			Table:       col.Table,
 			Schema:      col.Schema,
 			Database:    col.Database,
+			Metadata:    col.Metadata,
+			Constraint:  col.Constraint,
 		}
 	}
 	return newCols
@@ -564,10 +598,10 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 }
 
 // GetColumn returns the matched Col
-func (cols Columns) GetColumn(name string) Column {
-	colsMap := map[string]Column{}
+func (cols Columns) GetColumn(name string) *Column {
+	colsMap := map[string]*Column{}
 	for _, col := range cols {
-		colsMap[strings.ToLower(col.Name)] = col
+		colsMap[strings.ToLower(col.Name)] = &col
 	}
 	return colsMap[strings.ToLower(name)]
 }
@@ -745,8 +779,12 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DateTimeCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
-			col.Type = DatetimeType
+		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+			if colStats.DateTimeZCnt > 0 {
+				col.Type = TimestampzType
+			} else {
+				col.Type = DatetimeType
+			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
 		} else if colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
@@ -775,6 +813,24 @@ func MakeRowsChan() chan []any {
 
 const regexExtractPrecisionScale = `[a-zA-Z]+ *\( *(\d+) *(, *\d+)* *\)`
 
+func (col *Column) SetConstraint() {
+	parts := strings.Split(string(col.Type), "|")
+	if len(parts) != 2 {
+		return
+	}
+
+	// fix type value
+	col.Type = ColumnType(strings.TrimSpace(parts[0]))
+
+	cc := &ColumnConstraint{
+		Expression: strings.TrimSpace(parts[1]),
+	}
+	cc.parse()
+	if cc.EvalFunc != nil {
+		col.Constraint = cc
+	}
+}
+
 // SetLengthPrecisionScale parse length, precision, scale
 func (col *Column) SetLengthPrecisionScale() {
 	colType := strings.TrimSpace(string(col.Type))
@@ -795,6 +851,7 @@ func (col *Column) SetLengthPrecisionScale() {
 			// grab length or precision
 			if col.Type.IsString() {
 				col.Stats.MaxLen = cast.ToInt(vals[0])
+				col.DbPrecision = cast.ToInt(vals[0])
 			} else if col.IsNumber() || col.IsDatetime() {
 				col.DbPrecision = cast.ToInt(vals[0])
 			}
@@ -814,6 +871,21 @@ func (col *Column) SetLengthPrecisionScale() {
 	}
 }
 
+// EvaluateConstraint evaluates a value against the constraint function
+func (col *Column) EvaluateConstraint(value any, sp *StreamProcessor) {
+	if c := col.Constraint; c.EvalFunc != nil && !c.EvalFunc(value) {
+		c.FailCnt++
+		if c.FailCnt <= 10 {
+			errMsg := g.F("constraint failure for column '%s', at row number %d, for value: %s", col.Name, sp.N, cast.ToString(value))
+			g.Warn(errMsg)
+			c.Errors = append(c.Errors, errMsg)
+			if os.Getenv("SLING_ON_CONSTRAINT_FAILURE") == "abort" {
+				sp.ds.Context.CaptureErr(g.Error(errMsg))
+			}
+		}
+	}
+}
+
 func (col *Column) SetMetadata(key string, value string) {
 	if col.Metadata == nil {
 		col.Metadata = map[string]string{}
@@ -825,8 +897,7 @@ func (col *Column) IsKeyType(keyType KeyType) bool {
 	if col.Metadata == nil {
 		return false
 	}
-	key := string(keyType) + "_key"
-	return cast.ToBool(col.Metadata[key])
+	return cast.ToBool(col.Metadata[keyType.MetadataKey()])
 }
 
 func (col *Column) Key() string {
@@ -1008,6 +1079,107 @@ func (ct ColumnType) IsValid() bool {
 }
 
 func isDate(t *time.Time) bool {
-	return t.Unix()%(24*60*60) == 0
+	return t != nil && t.Unix()%(24*60*60) == 0
 	// return t.Format("15:04:05.000") == "00:00:00.000" // much slower
+}
+
+func isUTC(t *time.Time) bool {
+	return t != nil && t.Location().String() == "UTC"
+}
+
+// parse parses the constraint expression and sets the function
+func (cc *ColumnConstraint) parse() {
+	var err error
+	cc.EvalFunc, err = parseConstraintExpression(cc.Expression)
+	if err != nil {
+		g.Warn(err.Error())
+		return
+	}
+}
+
+// GetNativeType returns the native column type from generic
+func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
+	template, _ := t.Template()
+	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
+	if !ok {
+		err = g.Error(
+			"No native type mapping defined for col '%s', with type '%s' ('%s') for '%s'",
+			col.Name,
+			col.Type,
+			col.DbType,
+			t,
+		)
+
+		g.Warn(err.Error() + ". Using 'string'")
+		err = nil
+		nativeType = template.GeneralTypeMap["string"]
+	}
+
+	// Add precision as needed
+	if strings.HasSuffix(nativeType, "()") {
+		length := col.Stats.MaxLen
+		if col.IsString() {
+			isSourced := col.Sourced && col.DbPrecision > 0
+			if isSourced {
+				// string length was manually provided
+				length = col.DbPrecision
+			} else if length <= 0 {
+				length = col.Stats.MaxLen * 2
+				if length < 255 {
+					length = 255
+				}
+			}
+
+			maxStringType := template.Value("variable.max_string_type")
+			if !isSourced && maxStringType != "" {
+				nativeType = maxStringType // use specified default
+			} else if length > 255 {
+				// let's make text since high
+				nativeType = template.GeneralTypeMap["text"]
+			} else {
+				nativeType = strings.ReplaceAll(
+					nativeType,
+					"()",
+					fmt.Sprintf("(%d)", length),
+				)
+			}
+		} else if col.IsInteger() {
+			if !col.Sourced && length < env.DdlDefDecLength {
+				length = env.DdlDefDecLength
+			}
+			nativeType = strings.ReplaceAll(
+				nativeType,
+				"()",
+				fmt.Sprintf("(%d)", length),
+			)
+		}
+	} else if strings.Contains(nativeType, "(,)") {
+
+		precision := col.DbPrecision
+		scale := col.DbScale
+
+		if !col.Sourced || col.DbPrecision == 0 {
+			scale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
+			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
+			scale = lo.Ternary(scale > env.DdlMaxDecScale, env.DdlMaxDecScale, scale)
+			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
+				scale = maxDecimals
+			}
+
+			precision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, env.DdlMinDecLength, col.DbPrecision)
+			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+			precision = lo.Ternary(precision > env.DdlMaxDecLength, env.DdlMaxDecLength, precision)
+
+			minPrecision := col.Stats.MaxLen + scale
+			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+		}
+
+		nativeType = strings.ReplaceAll(
+			nativeType,
+			"(,)",
+			fmt.Sprintf("(%d,%d)", precision, scale),
+		)
+	}
+
+	return
 }

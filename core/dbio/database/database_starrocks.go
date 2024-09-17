@@ -194,7 +194,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		}
 
 		sql := g.R(
-			"INSERT INTO {table} ({fields}) VALUES {values} "+noDebugKey,
+			"insert into {table} ({fields}) values  {values} "+noDebugKey,
 			"table", tableFName,
 			"fields", strings.Join(insFields, ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
@@ -292,9 +292,9 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 		}
 	}
 
-	sql, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
 	if err != nil {
-		return sql, g.Error(err)
+		return ddl, g.Error(err)
 	}
 
 	// replace keys
@@ -303,30 +303,30 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 
 	if len(primaryKeyCols) > 0 {
 		tableDistro = "primary"
-		distroColNames = quoteColNames(conn, primaryKeyCols.Names())
+		distroColNames = conn.GetType().QuoteNames(primaryKeyCols.Names()...)
 	} else if len(dupKeyCols) > 0 {
 		tableDistro = "duplicate"
-		distroColNames = quoteColNames(conn, dupKeyCols.Names())
+		distroColNames = conn.GetType().QuoteNames(dupKeyCols.Names()...)
 	} else if len(aggKeyCols) > 0 {
 		tableDistro = "aggregate"
-		distroColNames = quoteColNames(conn, aggKeyCols.Names())
+		distroColNames = conn.GetType().QuoteNames(aggKeyCols.Names()...)
 	} else if len(uniqueKeyCols) > 0 {
 		tableDistro = "unique"
-		distroColNames = quoteColNames(conn, uniqueKeyCols.Names())
+		distroColNames = conn.GetType().QuoteNames(uniqueKeyCols.Names()...)
 	}
 
 	// set hash key
-	hashColNames := quoteColNames(conn, hashKeyCols.Names())
-	sql = strings.ReplaceAll(sql, "{hash_key}", strings.Join(hashColNames, ", "))
+	hashColNames := conn.GetType().QuoteNames(hashKeyCols.Names()...)
+	ddl = strings.ReplaceAll(ddl, "{hash_key}", strings.Join(hashColNames, ", "))
 
 	// set table distribution type & keys
 	distribution := ""
 	if tableDistro != "" && len(distroColNames) > 0 {
 		distribution = g.F("%s key(%s)", tableDistro, strings.Join(distroColNames, ", "))
 	}
-	sql = strings.ReplaceAll(sql, "{distribution}", distribution)
+	ddl = strings.ReplaceAll(ddl, "{distribution}", distribution)
 
-	return sql, nil
+	return ddl, nil
 }
 
 // BulkImportFlow inserts a flow of streams into a table.
@@ -441,7 +441,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		return strings.ReplaceAll(conn.Quote(name), q, "")
 	})
 
-	// default is JSON
+	// default is CSV
 	headers := map[string]string{
 		"expect":  "100-continue",
 		"timeout": "300",
@@ -481,7 +481,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		defer loadCtx.Wg.Write.Done()
 		g.Debug("loading %s [%s] %s", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)), localFile.BatchID)
 
-		defer os.Remove(localFile.Node.Path())
+		defer func() { env.RemoveLocalTempFile(localFile.Node.Path()) }()
+
 		reader, err := os.Open(localFile.Node.Path())
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "could not open temp file: %s", localFile.Node.Path()))

@@ -3,11 +3,12 @@ package dbio
 import (
 	"bufio"
 	"embed"
+	"encoding/csv"
+	"io"
 	"strings"
+	"unicode"
 
 	"github.com/flarco/g"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
@@ -22,6 +23,15 @@ const (
 	// KindUnknown for unknown
 	KindUnknown Kind = ""
 )
+
+var AllKind = []struct {
+	Value  Kind
+	TSName string
+}{
+	{KindDatabase, "KindDatabase"},
+	{KindFile, "KindFile"},
+	{KindUnknown, "KindUnknown"},
+}
 
 // Type is the connection type
 type Type string
@@ -60,13 +70,49 @@ const (
 	TypeDbProton     Type = "proton"
 )
 
+var AllType = []struct {
+	Value  Type
+	TSName string
+}{
+	{TypeUnknown, "TypeUnknown"},
+	{TypeFileLocal, "TypeFileLocal"},
+	{TypeFileHDFS, "TypeFileHDFS"},
+	{TypeFileS3, "TypeFileS3"},
+	{TypeFileAzure, "TypeFileAzure"},
+	{TypeFileGoogle, "TypeFileGoogle"},
+	{TypeFileFtp, "TypeFileFtp"},
+	{TypeFileSftp, "TypeFileSftp"},
+	{TypeFileHTTP, "TypeFileHTTP"},
+	{TypeDbPostgres, "TypeDbPostgres"},
+	{TypeDbRedshift, "TypeDbRedshift"},
+	{TypeDbStarRocks, "TypeDbStarRocks"},
+	{TypeDbMySQL, "TypeDbMySQL"},
+	{TypeDbMariaDB, "TypeDbMariaDB"},
+	{TypeDbOracle, "TypeDbOracle"},
+	{TypeDbBigTable, "TypeDbBigTable"},
+	{TypeDbBigQuery, "TypeDbBigQuery"},
+	{TypeDbSnowflake, "TypeDbSnowflake"},
+	{TypeDbSQLite, "TypeDbSQLite"},
+	{TypeDbDuckDb, "TypeDbDuckDb"},
+	{TypeDbMotherDuck, "TypeDbMotherDuck"},
+	{TypeDbSQLServer, "TypeDbSQLServer"},
+	{TypeDbAzure, "TypeDbAzure"},
+	{TypeDbAzureDWH, "TypeDbAzureDWH"},
+	{TypeDbTrino, "TypeDbTrino"},
+	{TypeDbClickhouse, "TypeDbClickhouse"},
+	{TypeDbMongoDB, "TypeDbMongoDB"},
+	{TypeDbPrometheus, "TypeDbPrometheus"},
+	{TypeDbProton, "TypeDbProton"},
+}
+
 // ValidateType returns true is type is valid
 func ValidateType(tStr string) (Type, bool) {
 	t := Type(strings.ToLower(tStr))
 
 	tMap := map[string]Type{
-		"postgresql": TypeDbPostgres,
-		"file":       TypeFileLocal,
+		"postgresql":  TypeDbPostgres,
+		"mongodb+srv": TypeDbMongoDB,
+		"file":        TypeFileLocal,
 	}
 
 	if tMatched, ok := tMap[tStr]; ok {
@@ -257,21 +303,7 @@ func (template Template) Value(path string) (value string) {
 	return value
 }
 
-// ToData convert is dataset
-func (template Template) ToData() (data iop.Dataset) {
-	columns := []string{"key", "value"}
-	data = iop.NewDataset(iop.NewColumnsFromFields(columns...))
-	data.Rows = append(data.Rows, []interface{}{"core", template.Core})
-	data.Rows = append(data.Rows, []interface{}{"analysis", template.Analysis})
-	data.Rows = append(data.Rows, []interface{}{"function", template.Function})
-	data.Rows = append(data.Rows, []interface{}{"metadata", template.Metadata})
-	data.Rows = append(data.Rows, []interface{}{"general_type_map", template.GeneralTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"native_type_map", template.NativeTypeMap})
-	data.Rows = append(data.Rows, []interface{}{"variable", template.Variable})
-
-	return
-}
-
+// a cache for templates (so we only read once)
 var typeTemplate = map[Type]Template{}
 
 func (t Type) Template() (template Template, err error) {
@@ -294,21 +326,21 @@ func (t Type) Template() (template Template, err error) {
 
 	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
 	if err != nil {
-		return template, g.Error(err, "io.ReadAll(baseTemplateFile)")
+		return template, g.Error(err, "could not read base.yaml")
 	}
 
 	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
-		return template, g.Error(err, "yaml.Unmarshal")
+		return template, g.Error(err, "could not unmarshal baseTemplateBytes")
 	}
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
 	if err != nil {
-		return template, g.Error(err, "io.ReadAll(templateFile) for "+t.String())
+		return template, g.Error(err, "could not read "+t.String()+".yaml")
 	}
 
 	err = yaml.Unmarshal([]byte(templateBytes), &connTemplate)
 	if err != nil {
-		return template, g.Error(err, "yaml.Unmarshal")
+		return template, g.Error(err, "could not unmarshal templateBytes")
 	}
 
 	for key, val := range connTemplate.Core {
@@ -336,22 +368,41 @@ func (t Type) Template() (template Template, err error) {
 		return template, g.Error(err, `cannot open types_native_to_general`)
 	}
 
-	TypesNativeCSV := iop.CSV{Reader: bufio.NewReader(TypesNativeFile)}
-	TypesNativeCSV.Delimiter = '\t'
-	TypesNativeCSV.NoDebug = true
+	csvReader := csv.NewReader(bufio.NewReader(TypesNativeFile))
+	csvReader.Comma = '\t'
 
-	data, err := TypesNativeCSV.Read()
+	var records []map[string]string
+
+	// Read header
+	header, err := csvReader.Read()
 	if err != nil {
-		return template, g.Error(err, `TypesNativeCSV.Read()`)
+		return template, g.Error(err, "failed to read header from types_native_to_general.tsv")
 	}
 
-	for _, rec := range data.Records() {
+	// Read records
+	for {
+		row, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return template, g.Error(err, "failed to read row from types_native_to_general.tsv")
+		}
+
+		record := make(map[string]string)
+		for i, value := range row {
+			record[header[i]] = value
+		}
+		records = append(records, record)
+	}
+
+	for _, rec := range records {
 		if rec["database"] == t.String() {
-			nt := strings.TrimSpace(cast.ToString(rec["native_type"]))
-			gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-			s := strings.TrimSpace(cast.ToString(rec["stats_allowed"]))
-			template.NativeTypeMap[nt] = cast.ToString(gt)
-			template.NativeStatsMap[nt] = cast.ToBool(s)
+			nt := strings.TrimSpace(rec["native_type"])
+			gt := strings.TrimSpace(rec["general_type"])
+			s := strings.TrimSpace(rec["stats_allowed"])
+			template.NativeTypeMap[nt] = gt
+			template.NativeStatsMap[nt] = s == "true"
 		}
 	}
 
@@ -360,22 +411,118 @@ func (t Type) Template() (template Template, err error) {
 		return template, g.Error(err, `cannot open types_general_to_native`)
 	}
 
-	TypesGeneralCSV := iop.CSV{Reader: bufio.NewReader(TypesGeneralFile)}
-	TypesGeneralCSV.Delimiter = '\t'
-	TypesGeneralCSV.NoDebug = true
+	csvReader = csv.NewReader(bufio.NewReader(TypesGeneralFile))
+	csvReader.Comma = '\t'
 
-	data, err = TypesGeneralCSV.Read()
+	// Read header
+	header, err = csvReader.Read()
 	if err != nil {
-		return template, g.Error(err, `TypesGeneralCSV.Read()`)
+		return template, g.Error(err, "failed to read header from types_general_to_native.tsv")
 	}
 
-	for _, rec := range data.Records() {
-		gt := strings.TrimSpace(cast.ToString(rec["general_type"]))
-		template.GeneralTypeMap[gt] = cast.ToString(rec[t.String()])
+	// Read records
+	records = []map[string]string{} // reset
+	for {
+		row, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return template, g.Error(err, "failed to read row from types_general_to_native.tsv")
+		}
+
+		record := make(map[string]string)
+		for i, value := range row {
+			record[header[i]] = value
+		}
+		records = append(records, record)
+	}
+
+	for _, rec := range records {
+		gt := strings.TrimSpace(rec["general_type"])
+		template.GeneralTypeMap[gt] = rec[t.String()]
 	}
 
 	// cache
 	typeTemplate[t] = template
 
 	return template, nil
+}
+
+// Unquote removes quotes to the field name
+func (t Type) Unquote(field string) string {
+	template, _ := t.Template()
+	q := template.Variable["quote_char"]
+	return strings.ReplaceAll(field, q, "")
+}
+
+// Quote adds quotes to the field name
+func (t Type) Quote(field string, normalize ...bool) string {
+	Normalize := true
+	if len(normalize) > 0 {
+		Normalize = normalize[0]
+	}
+
+	template, _ := t.Template()
+	// always normalize if case is uniform. Why would you quote and not normalize?
+	if !hasVariedCase(field) && Normalize {
+		if g.In(t, TypeDbOracle, TypeDbSnowflake) {
+			field = strings.ToUpper(field)
+		} else {
+			field = strings.ToLower(field)
+		}
+	}
+	q := template.Variable["quote_char"]
+	field = t.Unquote(field)
+	return q + field + q
+}
+
+func (t Type) QuoteNames(names ...string) (newNames []string) {
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = t.Quote(names[i])
+	}
+	return newNames
+}
+
+func hasVariedCase(text string) bool {
+	hasUpper := false
+	hasLower := false
+	for _, c := range text {
+		if unicode.IsUpper(c) {
+			hasUpper = true
+		}
+		if unicode.IsLower(c) {
+			hasLower = true
+		}
+		if hasUpper && hasLower {
+			break
+		}
+	}
+
+	return hasUpper && hasLower
+}
+
+func (t Type) GetTemplateValue(path string) (value string) {
+
+	template, _ := t.Template()
+	prefixes := map[string]map[string]string{
+		"core.":             template.Core,
+		"analysis.":         template.Analysis,
+		"function.":         template.Function,
+		"metadata.":         template.Metadata,
+		"general_type_map.": template.GeneralTypeMap,
+		"native_type_map.":  template.NativeTypeMap,
+		"variable.":         template.Variable,
+	}
+
+	for prefix, dict := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			key := strings.Replace(path, prefix, "", 1)
+			value = dict[key]
+			break
+		}
+	}
+
+	return value
 }

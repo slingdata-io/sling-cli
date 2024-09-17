@@ -75,7 +75,7 @@ func TestBatchInsertClickhouse(t *testing.T) {
 		assert.NoError(t, err)
 		return
 	}
-	batch, err := scope.Prepare("INSERT INTO example")
+	batch, err := scope.Prepare("insert into example")
 	if err != nil {
 		assert.NoError(t, err)
 		return

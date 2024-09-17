@@ -17,13 +17,15 @@ core:
     update {table} as t1 set {set_fields2}
     from (select * from {temp_table}) as t2
     where {pk_fields_equal2}
-  sample: SELECT {fields} FROM {table} TABLESAMPLE SYSTEM (50) limit {n}
+  sample: select {fields} from {table} TABLESAMPLE SYSTEM (50) limit {n}
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   rename_column: EXEC sp_rename '{table}.{column}', '{new_column}', 'COLUMN'
-  limit: select top {limit} * from ( {sql} ) as t
+  limit: select top {limit} {fields} from {table}
+  limit_offset: select top {limit} * from ( select {fields} from {table} order by 1 offset {offset} rows) as t
+  limit_sql: select top {limit} * from ( {sql} ) as t
   bulk_insert: |
     BULK INSERT {table}
-    FROM '/dev/stdin'
+    from '/dev/stdin'
     WITH (
       BATCHSIZE = 5000,
       ERRORFILE = '/dev/stderr',
@@ -85,13 +87,13 @@ metadata:
     SELECT
       ind.name as index_name,
       col.name as column_name
-    FROM sys.indexes ind
+    from sys.indexes ind
     INNER JOIN sys.index_columns ic ON ind.object_id = ic.object_id
       and ind.index_id = ic.index_id
     INNER JOIN sys.columns col ON ic.object_id = col.object_id
       and ic.column_id = col.column_id
     INNER JOIN sys.tables t ON ind.object_id = t.object_id
-    WHERE schema_name(t.schema_id) = '{schema}' and t.name = '{table}'
+    where schema_name(t.schema_id) = '{schema}' and t.name = '{table}'
       AND ind.is_primary_key = 0
       AND ind.is_unique = 0
       AND ind.is_unique_constraint = 0
@@ -292,6 +294,7 @@ function:
   truncate_datef: CONVERT(DATETIME, CONVERT(DATE, {field}))
   sleep: waitfor delay '00:00:{seconds}.000'
   checksum_string: datalength({field})
+  cast_to_text: 'cast({field} as nvarchar(max))'
   checksum_integer: 'CAST({field} as bigint)'
   checksum_boolean: datalength({field})
   checksum_json: datalength(replace({field}, ' ', ''))
@@ -304,3 +307,4 @@ variable:
   bind_string: "@p{c}"
   bool_as: string
   batch_rows: 200
+  max_string_type: nvarchar(max)

@@ -26,23 +26,34 @@ core:
           RAISE;
         END IF;
     END;
-  create_temporary_table: create global temporary table {table} ({col_types})
+  drop_index: |
+    BEGIN
+      EXECUTE IMMEDIATE 'DROP INDEX {index}';
+    EXCEPTION
+      WHEN OTHERS THEN
+          IF SQLCODE != -1418 THEN -- Error code for "index not found"
+            RAISE;
+          END IF;
+    END;
+  # create_temporary_table: create global temporary table {table} ({col_types})
   create_index: create index {index} on {table} ({cols})
-  insert: INSERT {options} INTO {table} ({fields}) VALUES ({values})
+  insert: INSERT {options} INTO {table} ({fields}) values  ({values})
   alter_columns: alter table {table} modify ({col_ddl})
   insert_all: |
       INSERT ALL
-      INTO t (col1, col2, col3) VALUES ('val1_1', 'val1_2', 'val1_3')
-      INTO t (col1, col2, col3) VALUES ('val2_1', 'val2_2', 'val2_3')
-      INTO t (col1, col2, col3) VALUES ('val3_1', 'val3_2', 'val3_3')
-      SELECT 1 FROM DUAL
+      INTO t (col1, col2, col3) values  ('val1_1', 'val1_2', 'val1_3')
+      INTO t (col1, col2, col3) values  ('val2_1', 'val2_2', 'val2_3')
+      INTO t (col1, col2, col3) values  ('val3_1', 'val3_2', 'val3_3')
+      select 1 from DUAL
   insert_option: /*+ APPEND NOLOGGING */
-  sample: SELECT {fields} FROM {table} SAMPLE(50) where rownum <= {n}
-  limit: select * from ( {sql} ) where rownum <= {limit}
+  sample: select {fields} from {table} SAMPLE(50) where rownum <= {n}
+  limit: select {fields} from {table} where rownum <= {limit}
+  limit_offset: select {fields} from {table} order by 1 offset {offset} rows fetch next {limit} rows only
+  limit_sql: select * from ( {sql} ) where rownum <= {limit}
   replace: |
     merge into {table} tgt
-    USING (SELECT {name_values}
-            FROM dual) src
+    using (select {name_values}
+            from dual) src
     ON ({src_tgt_condition})
     WHEN MATCHED THEN
       UPDATE SET {set_fields}
@@ -119,8 +130,8 @@ metadata:
       cons.constraint_name as pk_name,
       cols.position as position,
       cols.column_name as column_name
-    FROM all_constraints cons, all_cons_columns cols
-    WHERE cons.owner = '{schema}'
+    from all_constraints cons, all_cons_columns cols
+    where cons.owner = '{schema}'
       and cols.table_name = '{table}'
       and cons.constraint_type = 'P'
       and cons.constraint_name = cols.constraint_name
@@ -285,6 +296,7 @@ routine:
 function:
   truncate_f: trunc({field})
   truncate_datef: trunc({field})
+  cast_to_text: 'cast({field} as varchar(4000))'
   str_utf8: convert({field},'US7ASCII','WE8ISO8859P1')
   date_to_int: to_number(to_char({field}, 'j'))
   number_to_int: round({field}, 0)
@@ -305,3 +317,6 @@ variable:
   batch_rows: 20
   date_layout_str: TO_DATE('{value}', 'YYYY-MM-DD HH24:MI:SS') # DATE in oracle has a time component
   timestamp_layout_str: TO_TIMESTAMP('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6')
+  timestampz_layout: "2006-01-02 15:04:05.000000 -07:00"
+  timestampz_layout_str: TO_TIMESTAMP_TZ('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')
+  max_string_type: varchar(4000)

@@ -105,8 +105,10 @@ func (p *Parquet) nextFunc(it *Iterator) bool {
 
 type ParquetWriter struct {
 	Writer      *parquet.Writer
+	WriterMap   *parquet.GenericWriter[map[string]any]
 	columns     Columns
 	decNumScale []*big.Rat
+	recBuffer   []map[string]any
 }
 
 func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *ParquetWriter, err error) {
@@ -131,15 +133,53 @@ func NewParquetWriter(w io.Writer, columns Columns, codec compress.Codec) (p *Pa
 	if err != nil {
 		return nil, g.Error(err, "could not create parquet writer config")
 	}
-	config.Schema = getParquetSchema(columns)
+	config.Schema = getParquetSchema(columns, false)
 	config.Compression = codec
+	config.CreatedBy = "slingdata.io"
+	config.DataPageStatistics = true
 
-	fw := parquet.NewWriter(w, config)
+	fw := parquet.NewWriter(w, config, parquet.DataPageStatistics(true))
 
 	return &ParquetWriter{
 		Writer:      fw,
 		columns:     columns,
 		decNumScale: decNumScale,
+	}, nil
+
+}
+
+func NewParquetWriterMap(w io.Writer, columns Columns, codec compress.Codec) (p *ParquetWriter, err error) {
+
+	// make scale big.Rat numbers
+	decNumScale := make([]*big.Rat, len(columns))
+	for i, col := range columns {
+		if !col.Sourced || col.DbPrecision == 0 {
+			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, 28, lo.Ternary(col.DbPrecision > 36, 36, col.DbPrecision))
+			col.DbScale = lo.Ternary(col.DbScale == 0, 9, lo.Ternary(col.DbScale > 16, 16, col.DbScale))
+		}
+		columns[i] = col
+
+		if col.DbScale > 0 {
+			decNumScale[i] = MakeDecNumScale(col.DbScale)
+		} else {
+			decNumScale[i] = MakeDecNumScale(1)
+		}
+	}
+
+	config, err := parquet.NewWriterConfig()
+	if err != nil {
+		return nil, g.Error(err, "could not create parquet writer config")
+	}
+	config.Schema = getParquetSchema(columns, true)
+	config.Compression = codec
+	config.CreatedBy = "slingdata.io"
+	config.DataPageStatistics = true
+
+	return &ParquetWriter{
+		WriterMap:   parquet.NewGenericWriter[map[string]any](w, config, parquet.DataPageStatistics(true)),
+		columns:     columns,
+		decNumScale: decNumScale,
+		recBuffer:   make([]map[string]any, 0, 100),
 	}, nil
 
 }
@@ -174,7 +214,11 @@ func (pw *ParquetWriter) WriteRow(row []any) error {
 			}
 		}
 		if i < len(row) {
-			rec[i] = parquet.ValueOf(row[i])
+			if row[i] == nil {
+				rec[i] = parquet.NullValue()
+			} else {
+				rec[i] = parquet.ValueOf(row[i])
+			}
 		}
 	}
 
@@ -186,15 +230,90 @@ func (pw *ParquetWriter) WriteRow(row []any) error {
 	return nil
 }
 
+func (pw *ParquetWriter) WriteRec(row []any) error {
+	rec := map[string]any{}
+
+	for i, col := range pw.columns {
+		switch {
+		case col.IsBool():
+			rec[col.Name] = cast.ToBool(row[i]) // since is stored as string
+		case col.Type == FloatType:
+			rec[col.Name] = cast.ToFloat64(row[i])
+		case col.Type == DecimalType:
+			rec[col.Name] = StringToDecimalByteArray(cast.ToString(row[i]), pw.decNumScale[i], arrowParquet.Types.FixedLenByteArray, 16)
+		case col.IsDatetime() || col.IsDate():
+			switch valT := row[i].(type) {
+			case time.Time:
+				if row[i] != nil {
+					switch col.DbPrecision {
+					case 1, 2, 3:
+						rec[col.Name] = valT.UnixMilli()
+					case 4, 5, 6:
+						rec[col.Name] = valT.UnixMicro()
+					case 7, 8, 9:
+						rec[col.Name] = valT.UnixNano()
+					default:
+						rec[col.Name] = valT.UnixNano()
+					}
+				}
+			default:
+				rec[col.Name] = row[i]
+			}
+		default:
+			rec[col.Name] = row[i]
+		}
+	}
+
+	pw.recBuffer = append(pw.recBuffer, rec)
+
+	if len(pw.recBuffer) == 100 {
+		err := pw.writeBuffer()
+		if err != nil {
+			return g.Error(err, "error writing buffer")
+		}
+	}
+
+	return nil
+}
+
+func (pw *ParquetWriter) writeBuffer() (err error) {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error("panic occurred! %s\n%s", r, string(debug.Stack()))
+		}
+	}()
+
+	if len(pw.recBuffer) > 0 {
+		_, err := pw.WriterMap.Write(pw.recBuffer)
+		if err != nil {
+			return g.Error(err, "error writing record")
+		}
+
+		pw.recBuffer = pw.recBuffer[:0] // reset
+	}
+	return nil
+}
+
 func (pw *ParquetWriter) Close() error {
-	return pw.Writer.Close()
+	if pw.Writer != nil {
+		return pw.Writer.Close()
+	}
+	if pw.WriterMap != nil {
+		err := pw.writeBuffer()
+		if err != nil {
+			return g.Error(err, "error writing buffer")
+		}
+		return pw.WriterMap.Close()
+	}
+	return nil
 }
 
-func getParquetSchema(cols Columns) *parquet.Schema {
-	return parquet.NewSchema("", NewRecNode(cols))
+func getParquetSchema(cols Columns, optional bool) *parquet.Schema {
+	return parquet.NewSchema("sling_schema", NewRecNode(cols, optional))
 }
 
-func NewRecNode(cols Columns) *RecNode {
+func NewRecNode(cols Columns, optional bool) *RecNode {
 
 	rn := &RecNode{
 		fields: make([]structField, len(cols)),
@@ -202,7 +321,7 @@ func NewRecNode(cols Columns) *RecNode {
 
 	for i, col := range cols {
 		field := structField{name: col.Name, index: []int{col.Position - 1}}
-		field.Node = nodeOf(col, []string{})
+		field.Node = nodeOf(col, optional)
 		rn.fields[i] = field
 	}
 
@@ -349,34 +468,34 @@ func (groupType) LogicalType() *format.LogicalType { return nil }
 
 func (groupType) ConvertedType() *deprecated.ConvertedType { return nil }
 
-func nodeOf(col Column, tag []string) parquet.Node {
+func nodeOf(col Column, optional bool) parquet.Node {
 
 	switch col.GoType() {
 	case reflect.TypeOf(deprecated.Int96{}):
-		return parquet.Leaf(parquet.Int96Type)
+		return newNode(parquet.Leaf(parquet.Int96Type), optional)
 	case reflect.TypeOf(uuid.UUID{}):
-		return parquet.UUID()
+		return newNode(parquet.UUID(), optional)
 	case reflect.TypeOf(time.Time{}):
-		newType := parquet.Timestamp(parquet.Nanosecond)
+		node := parquet.Timestamp(parquet.Nanosecond)
 		switch col.DbPrecision {
 		case 1, 2, 3:
-			newType = parquet.Timestamp(parquet.Millisecond)
+			node = parquet.Timestamp(parquet.Millisecond)
 		case 4, 5, 6:
-			newType = parquet.Timestamp(parquet.Microsecond)
+			node = parquet.Timestamp(parquet.Microsecond)
 		case 7, 8, 9:
-			newType = parquet.Timestamp(parquet.Nanosecond)
+			node = parquet.Timestamp(parquet.Nanosecond)
 		}
-		return newType
+		return newNode(node, optional)
 	}
 
 	var n parquet.Node
 	switch col.Type {
 	case FloatType:
 		n = parquet.Leaf(parquet.DoubleType)
-		return &goNode{Node: n, gotype: col.GoType()}
+		return newNode(&goNode{Node: n, gotype: col.GoType()}, optional)
 	case DecimalType:
 		n = parquet.Decimal(col.DbScale, col.DbPrecision, parquet.FixedLenByteArrayType(16))
-		return &goNode{Node: n, gotype: col.GoType()}
+		return newNode(&goNode{Node: n, gotype: col.GoType()}, optional)
 	}
 
 	switch col.GoType().Kind() {
@@ -406,14 +525,14 @@ func nodeOf(col Column, tag []string) parquet.Node {
 
 	case reflect.Ptr:
 		col.goType = col.GoType().Elem()
-		n = parquet.Optional(nodeOf(col, nil))
+		n = parquet.Optional(nodeOf(col, optional))
 
 	case reflect.Slice:
 		if elem := col.GoType().Elem(); elem.Kind() == reflect.Uint8 { // []byte?
 			n = parquet.Leaf(parquet.ByteArrayType)
 		} else {
 			col.goType = elem
-			n = parquet.Repeated(nodeOf(col, nil))
+			n = parquet.Repeated(nodeOf(col, optional))
 		}
 
 	case reflect.Array:
@@ -426,10 +545,17 @@ func nodeOf(col Column, tag []string) parquet.Node {
 
 	}
 
-	return &goNode{Node: n, gotype: col.GoType()}
+	return newNode(&goNode{Node: n, gotype: col.GoType()}, optional)
 }
 
 type goNode struct {
 	parquet.Node
 	gotype reflect.Type
+}
+
+func newNode(node parquet.Node, optional bool) parquet.Node {
+	if optional {
+		return parquet.Optional(node)
+	}
+	return node
 }

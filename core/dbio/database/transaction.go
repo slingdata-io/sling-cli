@@ -11,6 +11,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -131,7 +132,7 @@ func (t *BaseTransaction) ExecContext(ctx context.Context, q string, args ...int
 		if strings.Contains(q, noDebugKey) && !g.IsDebugLow() {
 			err = g.Error(err, "Error executing query")
 		} else {
-			err = g.Error(err, "Error executing: "+CleanSQL(t.Conn, q))
+			err = g.Error(err, "Error executing: "+env.Clean(t.Conn.Props(), q))
 		}
 	}
 
@@ -322,6 +323,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 				row = processClickhouseInsertRow(bColumns, row)
 			} else if conn.GetType() == dbio.TypeDbTrino {
 				row = processTrinoInsertRow(bColumns, row)
+			} else if conn.GetType() == dbio.TypeDbProton {
+				row = processClickhouseInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}
@@ -386,6 +389,12 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		}
 
 		if conn.GetType() == dbio.TypeDbClickhouse {
+			batchSize = 1
+		} else {
+			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
+		}
+
+		if conn.GetType() == dbio.TypeDbProton {
 			batchSize = 1
 		} else {
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)

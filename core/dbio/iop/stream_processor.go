@@ -1,7 +1,9 @@
 package iop
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/flarco/g"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
@@ -37,28 +40,30 @@ type StreamProcessor struct {
 	Config           *StreamConfig
 	rowBlankValCnt   int
 	transformers     Transformers
+	digitString      map[int]string
 }
 
 type StreamConfig struct {
-	TrimSpace         bool                       `json:"trim_space"`
-	EmptyAsNull       bool                       `json:"empty_as_null"`
-	Header            bool                       `json:"header"`
-	Compression       string                     `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string                     `json:"null_if"`
-	NullAs            string                     `json:"null_as"`
-	DatetimeFormat    string                     `json:"datetime_format"`
-	SkipBlankLines    bool                       `json:"skip_blank_lines"`
-	Delimiter         string                     `json:"delimiter"`
-	Escape            string                     `json:"escape"`
-	FileMaxRows       int64                      `json:"file_max_rows"`
-	MaxDecimals       int                        `json:"max_decimals"`
-	Flatten           bool                       `json:"flatten"`
-	FieldsPerRec      int                        `json:"fields_per_rec"`
-	Jmespath          string                     `json:"jmespath"`
-	BoolAsInt         bool                       `json:"-"`
-	Columns           Columns                    `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        map[string][]TransformFunc // array of transform functions to apply
-	maxDecimalsFormat string                     `json:"-"`
+	TrimSpace         bool                   `json:"trim_space"`
+	EmptyAsNull       bool                   `json:"empty_as_null"`
+	Header            bool                   `json:"header"`
+	Compression       string                 `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf            string                 `json:"null_if"`
+	NullAs            string                 `json:"null_as"`
+	DatetimeFormat    string                 `json:"datetime_format"`
+	SkipBlankLines    bool                   `json:"skip_blank_lines"`
+	Delimiter         string                 `json:"delimiter"`
+	Escape            string                 `json:"escape"`
+	FileMaxRows       int64                  `json:"file_max_rows"`
+	BatchLimit        int64                  `json:"batch_limit"`
+	MaxDecimals       int                    `json:"max_decimals"`
+	Flatten           bool                   `json:"flatten"`
+	FieldsPerRec      int                    `json:"fields_per_rec"`
+	Jmespath          string                 `json:"jmespath"`
+	BoolAsInt         bool                   `json:"-"`
+	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms        map[string][]Transform // array of transform functions to apply
+	maxDecimalsFormat string                 `json:"-"`
 
 	Map map[string]string `json:"-"`
 }
@@ -110,8 +115,6 @@ func NewTransformers() Transformers {
 	}
 }
 
-type TransformFunc func(*StreamProcessor, string) (string, error)
-
 // NewStreamProcessor returns a new StreamProcessor
 func NewStreamProcessor() *StreamProcessor {
 	sp := StreamProcessor{
@@ -119,6 +122,7 @@ func NewStreamProcessor() *StreamProcessor {
 		colStats:        map[int]*ColumnStats{},
 		decReplRegex:    regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
 		transformers:    NewTransformers(),
+		digitString:     map[int]string{0: "0"},
 	}
 
 	sp.ResetConfig()
@@ -207,16 +211,28 @@ func NewStreamProcessor() *StreamProcessor {
 		"02-01-2006",
 		"02-01-2006 15:04:05",
 	}
+
+	// up to 90 digits. This is done for CastToStringSafeMask
+	// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
+	// we can create a approximate value mask to output the correct number of bytes
+	digitString := "0"
+	for i := 1; i <= 90; i++ {
+		sp.digitString[i] = digitString
+		digitString = digitString + "0"
+	}
 	return &sp
 }
 
 func DefaultStreamConfig() *StreamConfig {
 	return &StreamConfig{
-		EmptyAsNull: true,
 		MaxDecimals: -1,
-		Columns:     Columns{},
-		transforms:  map[string][]TransformFunc{},
+		transforms:  nil,
+		Map:         map[string]string{"delimiter": "-1"},
 	}
+}
+
+func (sp *StreamProcessor) ColStats() map[int]*ColumnStats {
+	return sp.colStats
 }
 
 func (sp *StreamProcessor) ResetConfig() {
@@ -245,6 +261,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["file_max_rows"] != "" {
 		sp.Config.FileMaxRows = cast.ToInt64(configMap["file_max_rows"])
+	}
+
+	if configMap["batch_limit"] != "" {
+		sp.Config.BatchLimit = cast.ToInt64(configMap["batch_limit"])
 	}
 
 	if configMap["header"] != "" {
@@ -305,21 +325,44 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 }
 
-func makeColumnTransforms(transformsPayload string) map[string][]Transform {
-	columnTransforms := map[string][]Transform{}
+func makeColumnTransforms(transformsPayload string) map[string][]string {
+	columnTransforms := map[string][]string{}
 	g.Unmarshal(transformsPayload, &columnTransforms)
 	return columnTransforms
 }
 
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	columnTransforms := makeColumnTransforms(transformsPayload)
-	sp.Config.transforms = map[string][]TransformFunc{}
+	sp.Config.transforms = map[string][]Transform{}
 	for key, names := range columnTransforms {
-		sp.Config.transforms[key] = []TransformFunc{}
+		sp.Config.transforms[key] = []Transform{}
 		for _, name := range names {
-			f, ok := Transforms[name]
+			t, ok := TransformsMap[name]
 			if ok {
-				sp.Config.transforms[key] = append(sp.Config.transforms[key], f)
+				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
+			} else if n := strings.TrimSpace(string(name)); strings.Contains(n, "(") && strings.HasSuffix(n, ")") {
+				// parse transform with a parameter
+				parts := strings.Split(string(name), "(")
+				if len(parts) != 2 {
+					g.Warn("invalid transform: '%s'", name)
+					continue
+				}
+				tName := parts[0]
+				param := strings.TrimSuffix(parts[1], ")")
+				if t, ok := TransformsMap[tName]; ok {
+					if t.makeFunc == nil {
+						g.Warn("makeFunc not found for transform '%s'. Please contact support", tName)
+						continue
+					}
+					err := t.makeFunc(&t, param)
+					if err != nil {
+						g.Warn("invalid parameter for transform '%s' (%s)", tName, err.Error())
+					} else {
+						sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
+					}
+				} else {
+					g.Warn("did find find transform with params named: '%s'", tName)
+				}
 			} else {
 				g.Warn("did find find transform named: '%s'", name)
 			}
@@ -452,56 +495,6 @@ func (sp *StreamProcessor) commitChecksum() {
 	}
 }
 
-func (sp *StreamProcessor) EncodingTransform(t Transform, val string) (newVal string, err error) {
-
-	switch t {
-	case TransformReplaceAccents:
-		newVal, _, err = transform.String(sp.transformers.Accent, val)
-
-	case TransformDecodeLatin1:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_1, val)
-	case TransformDecodeLatin5:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_5, val)
-	case TransformDecodeLatin9:
-		newVal, _, err = transform.String(sp.transformers.DecodeISO8859_15, val)
-	case TransformDecodeWindows1250:
-		newVal, _, err = transform.String(sp.transformers.DecodeWindows1250, val)
-	case TransformDecodeWindows1252:
-		newVal, _, err = transform.String(sp.transformers.DecodeWindows1252, val)
-	case TransformDecodeUtf16:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF16, val)
-	case TransformDecodeUtf8:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF8, val)
-	case TransformDecodeUtf8Bom:
-		newVal, _, err = transform.String(sp.transformers.DecodeUTF8BOM, val)
-
-	case TransformEncodeLatin1:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_1, val)
-	case TransformEncodeLatin5:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_5, val)
-	case TransformEncodeLatin9:
-		newVal, _, err = transform.String(sp.transformers.EncodeISO8859_15, val)
-	case TransformEncodeWindows1250:
-		newVal, _, err = transform.String(sp.transformers.EncodeWindows1250, val)
-	case TransformEncodeWindows1252:
-		newVal, _, err = transform.String(sp.transformers.EncodeWindows1252, val)
-	case TransformEncodeUtf16:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF16, val)
-	case TransformEncodeUtf8:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF8, val)
-	case TransformEncodeUtf8Bom:
-		newVal, _, err = transform.String(sp.transformers.EncodeUTF8BOM, val)
-	default:
-		return val, nil
-	}
-
-	if err != nil {
-		return val, err
-	}
-
-	return newVal, nil
-}
-
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessVal'
@@ -541,13 +534,15 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		isString = true
-		if sp.Config.TrimSpace {
+		if sp.Config.TrimSpace || !col.IsString() {
+			// if colType is not string, and the value is string, we should trim it
+			// in case it comes from a CSV. If it's empty, it should be considered nil
 			sVal = strings.TrimSpace(sVal)
 			val = sVal
 		}
 		if sVal == "" {
 			sp.rowBlankValCnt++
-			if sp.Config.EmptyAsNull || !sp.ds.Columns[i].IsString() {
+			if sp.Config.EmptyAsNull || !col.IsString() {
 				cs.TotalCnt++
 				cs.NullCnt++
 				return nil
@@ -558,6 +553,10 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			return nil
 		}
 	}
+
+	// get transforms
+	key := strings.ToLower(col.Name)
+	transforms := append(sp.Config.transforms[key], sp.Config.transforms["*"]...)
 
 	switch {
 	case col.Type.IsString():
@@ -570,15 +569,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		// apply transforms
-		key := strings.ToLower(col.Name)
-		if transforms, ok := sp.Config.transforms[key]; ok {
-			for _, t := range transforms {
-				sVal, _ = t(sp, sVal)
-			}
-		}
-		if transforms, ok := sp.Config.transforms["*"]; ok {
-			for _, t := range transforms {
-				sVal, _ = t(sp, sVal)
+		for _, t := range transforms {
+			if t.FuncString != nil {
+				sVal, _ = t.FuncString(sp, sVal)
 			}
 		}
 
@@ -623,6 +616,8 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sp.rowChecksum[i] = uint64(len(sVal))
 			if col.Type == BinaryType {
 				nVal = []byte(sVal)
+			} else if col.Type == JsonType && sVal == "" {
+				nVal = nil // if json, empty should be null
 			} else {
 				nVal = sVal
 			}
@@ -758,7 +753,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 
 	case col.Type.IsBool():
 		var err error
-		bVal, err := cast.ToBoolE(val)
+		bVal, err := sp.CastToBool(val)
 		if err != nil {
 			// is string
 			sp.ds.ChangeColumn(i, StringType)
@@ -776,10 +771,6 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
-			// sp.unrecognizedDate = g.F(
-			// 	"N: %d, ind: %d, val: %s", sp.N, i, cast.ToString(val),
-			// )
-			// sp.warn = true
 			sp.ds.ChangeColumn(i, StringType)
 			cs.StringCnt++
 			sVal = cast.ToString(val)
@@ -790,11 +781,24 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			cs.NullCnt++
 			sp.rowBlankValCnt++
 		} else {
+			// apply transforms
+			for _, t := range transforms {
+				if t.FuncTime != nil {
+					_ = t.FuncTime(sp, &dVal)
+				}
+
+				// column needs to be set to timestampz
+				if t.Name == "set_timezone" && col.Type != TimestampzType {
+					sp.ds.ChangeColumn(i, TimestampzType)
+				}
+			}
 			nVal = dVal
 			if isDate(&dVal) {
 				cs.DateCnt++
-			} else {
+			} else if isUTC(&dVal) {
 				cs.DateTimeCnt++
+			} else {
+				cs.DateTimeZCnt++
 			}
 			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
 		}
@@ -897,6 +901,43 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 	}
 }
 
+// CastToStringSafe to masks to count bytes (even safer)
+func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType ...ColumnType) string {
+	typ := ColumnType("")
+	switch v := val.(type) {
+	case time.Time:
+		typ = DatetimeType
+	default:
+		_ = v
+	}
+
+	if len(valType) > 0 {
+		typ = valType[0]
+	}
+
+	switch {
+	case val == nil:
+		return ""
+	case sp.Config.BoolAsInt && typ.IsBool():
+		return "0" // as a mask
+	case typ.IsBool():
+		return cast.ToString(val)
+	case typ.IsDecimal() || typ.IsFloat():
+		if valD, ok := val.(decimal.Decimal); ok {
+			// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
+			// we can create a approximate value mask to output the correct number of bytes
+			return sp.digitString[valD.NumDigits()]
+		}
+		return cast.ToString(val)
+	case typ.IsDate():
+		return "2006-01-02" // as a mask
+	case typ.IsDatetime():
+		return "2006-01-02 15:04:05.000000 +00" // as a mask
+	default:
+		return cast.ToString(val)
+	}
+}
+
 // CastValWithoutStats casts the value without counting stats
 func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ ColumnType) interface{} {
 	var nVal interface{}
@@ -946,6 +987,30 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 	return nVal
 }
 
+// CastToBool converts interface to bool
+func (sp *StreamProcessor) CastToBool(i interface{}) (b bool, err error) {
+	i = sp.indirect(i)
+
+	switch b := i.(type) {
+	case bool:
+		return b, nil
+	case nil:
+		return false, nil
+	case int64, int32, int16, int8, uint, uint64, uint32, uint16, uint8, float64, float32:
+		return cast.ToInt(i) != 0, nil
+	case string:
+		return strconv.ParseBool(i.(string))
+	case json.Number:
+		v, err := cast.ToInt64E(b)
+		if err == nil {
+			return v != 0, nil
+		}
+		return false, fmt.Errorf("unable to cast %#v of type %T to bool", i, i)
+	default:
+		return false, fmt.Errorf("unable to cast %#v of type %T to bool", i, i)
+	}
+}
+
 // CastToTime converts interface to time
 func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 	i = sp.indirect(i)
@@ -965,7 +1030,7 @@ func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
 	s := cast.ToString(i)
 	if s == "" {
-		return t, g.Error("blank val")
+		return t, nil // return zero time, so it become nil
 	}
 
 	// date layouts to try out
@@ -1112,8 +1177,13 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	sp.rowBlankValCnt = 0
 	sp.rowChecksum = make([]uint64, len(row))
 	for i, val := range row {
-		// fmt.Printf("| (%s) %#v", columns[i].Type, val)
-		row[i] = sp.CastVal(i, val, &columns[i])
+		col := &columns[i]
+		row[i] = sp.CastVal(i, val, col)
+
+		// evaluate constraint
+		if col.Constraint != nil {
+			col.EvaluateConstraint(row[i], sp)
+		}
 	}
 
 	for len(row) < len(columns) {

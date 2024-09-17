@@ -1,8 +1,10 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: "select 'indexes do not apply for snowflake'"
   create_table: create table {table} ({col_types}) {cluster_by}
-  create_index: create index {index} on {table} ({cols})
+  create_temporary_table: create transient table {table} ({col_types}) {cluster_by}
+  create_index: "select 'indexes do not apply for snowflake'"
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
   alter_columns: alter table {table} alter {col_ddl}
@@ -11,24 +13,24 @@ core:
   disable_trigger: ""
   copy_from_stage: |
     COPY INTO {table} ({tgt_columns})
-    FROM ( 
-      SELECT {src_columns}
-      FROM {stage_path} as T
+    from ( 
+      select {src_columns}
+      from {stage_path} as T
     )
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
       ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
-      EMPTY_FIELD_AS_NULL=TRUE
+      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
+      EMPTY_FIELD_AS_NULL = FALSE
       NULL_IF = '\\N'
-      SKIP_HEADER=1
-      REPLACE_INVALID_CHARACTERS=TRUE
+      SKIP_HEADER = 1
+      REPLACE_INVALID_CHARACTERS = TRUE
     )
     ON_ERROR = ABORT_STATEMENT
   copy_from_s3: |
     COPY INTO {table} 
-    FROM '{s3_path}'
+    from '{s3_path}'
     CREDENTIALS = (
       AWS_KEY_ID = '{aws_access_key_id}'
       AWS_SECRET_KEY = '{aws_secret_access_key}'
@@ -37,16 +39,16 @@ core:
       TYPE = CSV
       RECORD_DELIMITER = '\n'
       ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
-      EMPTY_FIELD_AS_NULL=TRUE
+      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
+      EMPTY_FIELD_AS_NULL = FALSE
       NULL_IF = '\\N'
-      SKIP_HEADER=1
-      REPLACE_INVALID_CHARACTERS=TRUE
+      SKIP_HEADER = 1
+      REPLACE_INVALID_CHARACTERS = TRUE
     )
     ON_ERROR = ABORT_STATEMENT
   copy_from_azure: |
     COPY INTO {table} 
-    FROM '{azure_path}'
+    from '{azure_path}'
     CREDENTIALS = (
       AZURE_SAS_TOKEN = '{azure_sas_token}'
     )
@@ -54,28 +56,28 @@ core:
       TYPE = CSV
       RECORD_DELIMITER = '\n'
       ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
-      EMPTY_FIELD_AS_NULL=TRUE
+      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
+      EMPTY_FIELD_AS_NULL = FALSE
       NULL_IF = '\\N'
-      SKIP_HEADER=1
-      REPLACE_INVALID_CHARACTERS=TRUE
+      SKIP_HEADER = 1
+      REPLACE_INVALID_CHARACTERS = TRUE
     )
     ON_ERROR = ABORT_STATEMENT
   copy_to_stage: |
     COPY INTO '{stage_path}'
-    FROM ({sql})
+    from ({sql})
     FILE_FORMAT = (
       TYPE = CSV
       RECORD_DELIMITER = '\n'
       NULL_IF = '\\N'
       COMPRESSION = GZIP
       ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
     )
-    HEADER = FALSE
+    HEADER = TRUE
   copy_to_s3: |
     COPY INTO '{s3_path}'
-    FROM ({sql})
+    from ({sql})
     CREDENTIALS = (
       AWS_KEY_ID = '{aws_access_key_id}'
       AWS_SECRET_KEY = '{aws_secret_access_key}'
@@ -88,10 +90,10 @@ core:
       ESCAPE_UNENCLOSED_FIELD = NONE
       FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
     )
-    HEADER = FALSE
+    HEADER = TRUE
   copy_to_azure: |
     COPY INTO '{azure_path}/'
-    FROM ({sql})
+    from ({sql})
     CREDENTIALS = (
       AZURE_SAS_TOKEN = '{azure_sas_token}'
     )
@@ -103,7 +105,7 @@ core:
       ESCAPE_UNENCLOSED_FIELD = NONE
       FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
     )
-    HEADER = FALSE
+    HEADER = TRUE
 
 metadata:
 
@@ -477,6 +479,7 @@ function:
   str_utf8: "{ field }"
   string_type: string
   cast_to_string: '{field}::string'
+  cast_to_text: '{field}::string'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: call SYSTEM$WAIT({seconds})
@@ -490,6 +493,7 @@ variable:
   bind_string: "?"
   tmp_folder: /tmp
   column_upper: true
+  max_string_type: varchar
 
 error_filter:
   table_not_exist: exist

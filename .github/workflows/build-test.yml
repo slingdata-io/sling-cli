@@ -23,7 +23,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
           
       # - uses: actions/cache@v3
@@ -75,7 +75,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.21"
+          go-version: "1.22"
           cache: false
         
       - name: Configure private token

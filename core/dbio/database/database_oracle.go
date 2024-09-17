@@ -149,27 +149,30 @@ func (conn *OracleConn) ConnString() string {
 }
 
 // ExecMultiContext runs multiple sql queries with context, returns `error`
-func (conn *OracleConn) ExecMultiContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+func (conn *OracleConn) ExecMultiContext(ctx context.Context, qs ...string) (result sql.Result, err error) {
 
 	Res := Result{rowsAffected: 0}
 
-	q2 := strings.TrimRight(strings.TrimSpace(strings.ToLower(q)), ";")
-	cond1 := strings.HasPrefix(q2, "begin") && strings.HasSuffix(q2, "end")
-	cond2 := strings.Contains(q2, "execute immediate")
-	if cond1 || cond2 {
-		return conn.Self().ExecContext(ctx, q)
-	}
-
 	eG := g.ErrorGroup{}
-	for _, sql := range ParseSQLMultiStatements(q) {
-		sql := strings.TrimSuffix(sql, ";")
-		res, err := conn.Self().ExecContext(ctx, sql, args...)
-		if err != nil {
-			eG.Capture(g.Error(err, "Error executing query"))
-		} else {
-			ra, _ := res.RowsAffected()
-			g.Trace("RowsAffected: %d", ra)
-			Res.rowsAffected = Res.rowsAffected + ra
+
+	for _, q := range qs {
+		q2 := strings.TrimRight(strings.TrimSpace(strings.ToLower(q)), ";")
+		cond1 := strings.HasPrefix(q2, "begin") && strings.HasSuffix(q2, "end")
+		cond2 := strings.Contains(q2, "execute immediate")
+		if cond1 || cond2 {
+			return conn.Self().ExecContext(ctx, q)
+		}
+
+		for _, sql := range ParseSQLMultiStatements(q) {
+			sql := strings.TrimSuffix(sql, ";")
+			res, err := conn.Self().ExecContext(ctx, sql)
+			if err != nil {
+				eG.Capture(g.Error(err, "Error executing query"))
+			} else {
+				ra, _ := res.RowsAffected()
+				g.Trace("RowsAffected: %d", ra)
+				Res.rowsAffected = Res.rowsAffected + ra
+			}
 		}
 	}
 
@@ -188,6 +191,31 @@ func (conn *OracleConn) GetTableColumns(table *Table, fields ...string) (columns
 		conn.SetProp("get_synonym", "false")
 	}
 	return
+}
+
+func (conn *OracleConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
+
+	ddl, err := conn.BaseConn.GenerateDDL(table, data, temporary)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	ddl = strings.TrimSpace(ddl)
+
+	ddl, err = table.AddPrimaryKeyToDDL(ddl, data.Columns)
+	if err != nil {
+		return ddl, g.Error(err)
+	}
+
+	for _, index := range table.Indexes(data.Columns) {
+		ddl = strings.ReplaceAll(
+			ddl,
+			"EXCEPTION",
+			g.F("EXECUTE IMMEDIATE '%s';\nEXCEPTION", index.CreateDDL()),
+		)
+	}
+
+	return ddl, nil
 }
 
 func (conn *OracleConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
@@ -353,14 +381,19 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 	for _, col := range ds.Columns {
 		expr := ""
 		colName := conn.Quote(col.Name)
-		if col.Type == "datetime" || col.Type == "date" {
+		if col.Type == iop.DatetimeType || col.Type == iop.DateType {
 			expr = fmt.Sprintf(
 				`"TO_DATE(:%s, 'YYYY-MM-DD HH24:MI:SS')"`,
 				strings.ToUpper(col.Name),
 			)
-		} else if col.Type == "timestamp" || col.Type == "timestampz" {
+		} else if col.Type == iop.TimestampType {
 			expr = fmt.Sprintf(
 				`"TO_TIMESTAMP(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6')"`,
+				strings.ToUpper(col.Name),
+			)
+		} else if col.Type == iop.TimestampzType {
+			expr = fmt.Sprintf(
+				`"TO_TIMESTAMP_TZ(:%s, 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')"`,
 				strings.ToUpper(col.Name),
 			)
 		} else if col.IsString() {
@@ -405,15 +438,19 @@ func sqlLoadCsvReader(ds *iop.Datastream) (*io.PipeReader, *struct{ cols map[int
 					pu.cols[i] = i
 				}
 
-				if ds.Columns[i].Type == "datetime" || ds.Columns[i].Type == "date" {
+				if ds.Columns[i].Type == iop.DatetimeType || ds.Columns[i].Type == iop.DateType {
 					// casting unsafely, but has been determined by ParseString
 					// convert to Oracle Time format
 					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
 					valS = val.(time.Time).Format("2006-01-02 15:04:05")
-				} else if ds.Columns[i].Type == "timestamp" {
+				} else if ds.Columns[i].Type == iop.TimestampType {
 					// convert to Oracle Timestamp format
 					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
-					valS = val.(time.Time).Format("2006-01-02 15:04:05.000")
+					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000")
+				} else if ds.Columns[i].Type == iop.TimestampzType {
+					// convert to Oracle Timestamp format
+					val = ds.Sp.CastValWithoutStats(i, val, ds.Columns[i].Type)
+					valS = val.(time.Time).Format("2006-01-02 15:04:05.000000 -07:00")
 				}
 				row[i] = valS
 			}
@@ -445,13 +482,13 @@ func (conn *OracleConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	}
 
 	sqlTempl := `
-	MERGE INTO {tgt_table} tgt
-	USING (SELECT * FROM {src_table}) src
+	merge into {tgt_table} tgt
+	using (select * from {src_table}) src
 	ON ({src_tgt_pk_equal})
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields})
+		INSERT ({insert_fields}) values  ({src_fields})
 	`
 
 	sql = g.R(
@@ -488,7 +525,7 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, fields []strin
 
 		// for Oracle
 		intos = append(intos, g.R(
-			"INTO {table} ({fields}) VALUES ({values})",
+			"INTO {table} ({fields}) values  ({values})",
 			"table", tableName,
 			"fields", strings.Join(qFields, ", "),
 			"values", strings.Join(values, ","),
@@ -497,7 +534,7 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, fields []strin
 
 	g.Trace("Count of Bind Vars: %d", c)
 	statement := g.R(
-		`INSERT ALL {intosStr} SELECT 1 FROM DUAL`,
+		`INSERT ALL {intosStr} select 1 from DUAL`,
 		"intosStr", strings.Join(intos, "\n"),
 	)
 	return statement

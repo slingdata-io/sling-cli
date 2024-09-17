@@ -1,16 +1,17 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  create_index: "select 'create_index not implemented'"
   create_table: create table if not exists {table} ({col_types}) {distribution} distributed by hash({hash_key})
   insert: insert into {table} ({fields}) values ({values})
   alter_columns: alter table {table} modify {col_ddl}
   modify_column: '{column} {type}'
   update: insert into {table} ({fields}) select {updated_fields} from {table}
   upsert: |
-    INSERT INTO {tgt_table}
+    insert into {tgt_table}
       ({insert_fields})
-    SELECT {src_fields}
-    FROM {src_table} src
+    select {src_fields}
+    from {src_table} src
   rename_column: |
     alter table {table} add column {new_column} {new_type} ;
     insert into {table} ({fields}) select {updated_fields} from {table} ;
@@ -384,6 +385,7 @@ routine:
 function:
   replace: replace({string_expr}, {to_replace}, {replacement})
   str_utf8: '{ field }'
+  cast_to_text: 'cast({field} as varchar(65533))'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
   sleep: select sleep({seconds})
@@ -399,6 +401,7 @@ variable:
   bool_as: integer
   error_ignore_drop_view: unknown
   error_ignore_drop_table: unknown
+  max_string_type: varchar(65533)
 
 error_filter:
   table_not_exist: exist
