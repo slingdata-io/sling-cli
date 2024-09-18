@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.0.0"
+	DuckDbVersion      = "1.1.0"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -209,8 +209,8 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 	args := []string{"-csv", "-nullvalue", `\N\`}
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
 
-	if path := duck.GetProp("path"); path != "" {
-		args = append(args, path)
+	if instance := duck.GetProp("instance"); instance != "" {
+		args = append(args, instance)
 	}
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
@@ -314,7 +314,7 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 	secretSQL := duck.getCreateSecretSQL()
 
 	// submit sql to stdin
-	stdinLines := []string{
+	sqlLines := []string{
 		extensionsSQL + ";",
 		secretSQL + ";",
 		g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
@@ -325,7 +325,7 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 	}
 
 	if !showChanges {
-		stdinLines = []string{
+		sqlLines = []string{
 			extensionsSQL + ";",
 			secretSQL + ";",
 			g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
@@ -342,7 +342,7 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 	}
 	env.LogSQL(propsCombined, sql)
 
-	sqls := strings.Join(stdinLines, "\n")
+	sqls := strings.Join(sqlLines, "\n")
 	// g.Warn(sqls)
 
 	_, err = duck.Proc.StdinWriter.Write([]byte(sqls))
@@ -376,6 +376,10 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 			return nil, g.Error(err, "Could not open DuckDB connection")
 		}
 	}
+
+	// one query at a time
+	duck.Context.Lock()
+	defer duck.Context.Unlock()
 
 	result = duckDbResult{}
 
@@ -432,7 +436,7 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 // waitForExec waits for the execution of a SQL query and returns the result
 func (duck *DuckDb) waitForExec(ctx context.Context) (result sql.Result, err error) {
 	// Extract total changes from stdout
-	var lastLength int
+	var lastOutLength, lastErrLength int
 
 	// Extract total changes from stdout
 	// This loop continuously reads the output from the DuckDB process
@@ -443,9 +447,11 @@ func (duck *DuckDb) waitForExec(ctx context.Context) (result sql.Result, err err
 		case <-ctx.Done():
 			return result, g.Error("sql execution cancelled")
 		default:
-			currentLength := duck.Proc.Stdout.Len()
-			if currentLength > lastLength {
-				output := duck.Proc.Stdout.Bytes()[lastLength:currentLength]
+
+			// stdout
+			outLength := duck.Proc.Stdout.Len()
+			if outLength > lastOutLength {
+				output := duck.Proc.Stdout.Bytes()[lastOutLength:outLength]
 				lines := strings.Split(string(output), "\n")
 				for _, line := range lines {
 					if strings.Contains(line, "total_changes:") {
@@ -460,8 +466,16 @@ func (duck *DuckDb) waitForExec(ctx context.Context) (result sql.Result, err err
 						goto done
 					}
 				}
-				lastLength = currentLength
+				lastOutLength = outLength
 			}
+
+			// stderr
+			errLength := duck.Proc.Stderr.Len()
+			if errLength > lastErrLength {
+				output := duck.Proc.Stderr.Bytes()[lastErrLength:errLength]
+				return result, g.Error(string(output))
+			}
+
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -476,6 +490,10 @@ func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data D
 
 // QueryContext runs a sql query with context, returns `Dataset`
 func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
+	// one query at a time
+	duck.Context.Lock()
+	defer duck.Context.Unlock()
+
 	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
 		return data, g.Error(err, "could not export data")
@@ -525,6 +543,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	started := false
 	done := false
 	duck.Proc.SetScanner(func(stderr bool, line string) {
+		// g.Warn("stderr:%v | %s", stderr, line)
 		if done {
 			return
 		} else if strings.Contains(line, duckDbEOFMarker) {
@@ -535,6 +554,11 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 		if stderr {
 			stderrBuf.WriteString(line + "\n")
+			if strings.Contains(strings.ToLower(line), "error") {
+				queryCtx.CaptureErr(g.Error(line))
+				stdOutWriter.Close()
+				done = true
+			}
 		} else if !started && strings.Contains(line, duckDbSOFMarker) {
 			started = true
 		} else if line != "" && started {
@@ -586,16 +610,6 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	}
 
 	return
-}
-
-// Import inserts a stream into a table
-// It takes a table name and a Datastream as input, and returns the number of rows imported and any error encountered
-// The function handles the import process by writing data to a temporary CSV file or using stdin,
-// then executing an INSERT statement to load the data into the specified table
-func (duck *DuckDb) Import(tableFName string, ds *Datastream) (count uint64, err error) {
-	defer ds.Close()
-
-	return ds.Count, nil
 }
 
 // Quote quotes a column name
