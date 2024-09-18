@@ -364,3 +364,20 @@ func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
 	}
 	return cast.ToUint64(data.Rows[0][0]), nil
 }
+
+func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	nativeType, err = conn.BaseConn.GetNativeType(col)
+
+	// remove nullable if part of pk
+	if col.IsKeyType(iop.PrimaryKey) && strings.HasPrefix(nativeType, "nullable(") {
+		nativeType = strings.TrimPrefix(nativeType, "nullable(")
+		nativeType = strings.TrimSuffix(nativeType, ")")
+	}
+
+	// special case for _tp_time, Column _tp_time is reserved, expected type is non-nullable datetime64
+	if col.Name == "_tp_time" {
+		return "datetime64(3, 'UTC')", nil
+	}
+
+	return nativeType, err
+}
