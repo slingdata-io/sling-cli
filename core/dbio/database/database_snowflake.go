@@ -722,7 +722,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", g.NowFileStr())
 
 	// delete folder when done
-	df.Defer(func() { os.RemoveAll(folderPath) })
+	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 	go func() {
