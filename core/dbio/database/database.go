@@ -1409,36 +1409,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 }
 
 func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.ColumnType) {
-	dbType = strings.ToLower(dbType)
-
-	if conn.GetType() == dbio.TypeDbClickhouse {
-		if strings.HasPrefix(dbType, "nullable(") {
-			dbType = strings.ReplaceAll(dbType, "nullable(", "")
-			dbType = strings.TrimSuffix(dbType, ")")
-		}
-	} else if conn.GetType() == dbio.TypeDbProton {
-		if strings.HasPrefix(dbType, "nullable(") {
-			dbType = strings.ReplaceAll(dbType, "nullable(", "")
-			dbType = strings.TrimSuffix(dbType, ")")
-		}
-	} else if conn.GetType() == dbio.TypeDbDuckDb || conn.GetType() == dbio.TypeDbMotherDuck {
-		if strings.HasSuffix(dbType, "[]") {
-			dbType = "list"
-		}
-	}
-
-	dbType = strings.Split(strings.ToLower(dbType), "(")[0]
-	dbType = strings.Split(dbType, "<")[0]
-
-	if matchedType, ok := conn.Template().NativeTypeMap[dbType]; ok {
-		colType = iop.ColumnType(matchedType)
-	} else {
-		if dbType != "" {
-			g.Debug("using text since type '%s' not mapped for col '%s'", dbType, name)
-		}
-		colType = iop.TextType // default as text
-	}
-	return
+	return iop.NativeTypeToGeneral(name, dbType, conn.GetType())
 }
 
 // GetSQLColumns return columns from a sql query result
@@ -1814,10 +1785,6 @@ func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableN
 		return schemata, g.Error(err, "Could not get schemata at %s level", level)
 	}
 
-	if err != nil {
-		return schemata, g.Error(err, "Could not GetSchemata for "+schemaName)
-	}
-
 	schemas := map[string]Schema{}
 	for _, rec := range data.Records() {
 		schemaName = cast.ToString(rec["schema_name"])
@@ -1872,7 +1839,7 @@ func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableN
 		if level == SchemataLevelColumn {
 			column := iop.Column{
 				Name:     columnName,
-				Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+				Type:     NativeTypeToGeneral(columnName, dataType, conn),
 				Table:    tableName,
 				Schema:   schemaName,
 				Database: currDatabase,

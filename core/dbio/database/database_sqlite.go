@@ -600,7 +600,7 @@ func (conn *SQLiteConn) GetSchemata(level SchemataLevel, schemaName string, tabl
 			if level == SchemataLevelColumn {
 				column := iop.Column{
 					Name:     columnName,
-					Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+					Type:     NativeTypeToGeneral(columnName, dataType, conn),
 					Table:    tableName,
 					Schema:   schemaName,
 					Database: currDatabase,

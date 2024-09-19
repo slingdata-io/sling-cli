@@ -367,7 +367,7 @@ func (conn *MongoDBConn) GetSchemata(level SchemataLevel, schemaName string, tab
 			if level == SchemataLevelColumn {
 				column := iop.Column{
 					Name:     columnName,
-					Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
+					Type:     NativeTypeToGeneral(columnName, dataType, conn),
 					Table:    tableName,
 					Schema:   schemaName,
 					Database: currDatabase,

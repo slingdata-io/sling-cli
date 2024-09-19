@@ -1173,3 +1173,37 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 
 	return
 }
+
+func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType ColumnType) {
+	dbType = strings.ToLower(dbType)
+
+	if connType == dbio.TypeDbClickhouse {
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.ReplaceAll(dbType, "nullable(", "")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+	} else if connType == dbio.TypeDbProton {
+		if strings.HasPrefix(dbType, "nullable(") {
+			dbType = strings.ReplaceAll(dbType, "nullable(", "")
+			dbType = strings.TrimSuffix(dbType, ")")
+		}
+	} else if connType == dbio.TypeDbDuckDb || connType == dbio.TypeDbMotherDuck {
+		if strings.HasSuffix(dbType, "[]") {
+			dbType = "list"
+		}
+	}
+
+	dbType = strings.Split(strings.ToLower(dbType), "(")[0]
+	dbType = strings.Split(dbType, "<")[0]
+
+	template, _ := connType.Template()
+	if matchedType, ok := template.NativeTypeMap[dbType]; ok {
+		colType = ColumnType(matchedType)
+	} else {
+		if dbType != "" {
+			g.Debug("using text since type '%s' not mapped for col '%s'", dbType, name)
+		}
+		colType = TextType // default as text
+	}
+	return
+}
