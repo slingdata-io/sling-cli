@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmespath/go-jmespath"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -32,8 +33,7 @@ import (
 var testMux sync.Mutex
 var testContext = g.NewContext(context.Background())
 
-var ef = env.LoadSlingEnvFile()
-var ec = connection.EnvConns{EnvFile: &ef}
+var conns = connection.GetLocalConns()
 
 type testDB struct {
 	name string
@@ -242,13 +242,16 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	testMux.Unlock()
 
 	for i, rec := range data.Records() {
-		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
+		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
 		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
 		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
-		primaryKey := []string{}
+
 		if val := cast.ToString(rec["source_primary_key"]); val != "" {
-			primaryKey = strings.Split(val, ",")
+			streamConfig["primary_key"] = strings.Split(val, ",")
+		}
+		if val := cast.ToString(rec["source_update_key"]); val != "" {
+			streamConfig["update_key"] = val
 		}
 
 		if conn.useBulk != nil {
@@ -259,26 +262,22 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			sourceOptions["columns"] = g.M("code", "decimal")
 		}
 
-		task := g.M(
-			"source", g.M(
-				"conn", cast.ToString(rec["source_conn"]),
-				"stream", cast.ToString(rec["source_stream"]),
-				"primary_key", primaryKey,
-				"update_key", cast.ToString(rec["source_update_key"]),
-				"options", sourceOptions,
+		streamConfig["mode"] = cast.ToString(rec["mode"])
+		streamConfig["object"] = cast.ToString(rec["target_object"])
+		streamConfig["source_options"] = sourceOptions
+		streamConfig["target_options"] = targetOptions
+
+		replicationConfig := g.M(
+			"source", cast.ToString(rec["source_conn"]),
+			"target", cast.ToString(rec["target_conn"]),
+			"streams", g.M(
+				cast.ToString(rec["source_stream"]), streamConfig,
 			),
-			"target", g.M(
-				"conn", cast.ToString(rec["target_conn"]),
-				"object", cast.ToString(rec["target_object"]),
-				"options", targetOptions,
-			),
-			"mode", cast.ToString(rec["mode"]),
-			"options", options,
 			"env", env,
 		)
-		taskPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
-		taskBytes := []byte(g.Pretty(task))
-		err = os.WriteFile(taskPath, taskBytes, 0777)
+		configPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
+		configBytes := []byte(g.Pretty(replicationConfig))
+		err = os.WriteFile(configPath, configBytes, 0777)
 		g.AssertNoError(t, err)
 	}
 
@@ -286,6 +285,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	files, _ := g.ListDir(folderPath)
 
 	testNumbers := []int{}
+	testNames := []string{}
 	tns := os.Getenv("TESTS")
 	if tns == "" && len(testSelect) > 0 {
 		tns = testSelect[0]
@@ -310,6 +310,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 				}
 			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
 				testNumbers = append(testNumbers, testNumber)
+			} else {
+				//  accepts strings
+				testNames = append(testNames, tn)
 			}
 		}
 	}
@@ -317,6 +320,17 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	for i, file := range files {
 		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
+		}
+		if len(testNames) > 0 {
+			found := false
+			for _, testName := range testNames {
+				if strings.Contains(file.Name, testName) {
+					found = true
+				}
+			}
+			if !found {
+				continue
+			}
 		}
 		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
 			runOneTask(t, file, connType)
@@ -337,39 +351,64 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	bars := "---------------------------"
 	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, connType, bars)
 
-	cfg := &sling.Config{}
-	err := cfg.Unmarshal(file.FullPath)
+	if strings.Contains(file.FullPath, ".discover") {
+
+		fileBytes, err := os.ReadFile(file.FullPath)
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		m, err := g.UnmarshalMap(string(fileBytes))
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		pattern, err := jmespath.Search("object", cast.ToStringMap(m["streams"])[""])
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		testDiscover(t, cast.ToString(pattern), cast.ToStringMap(m["env"]), connType)
+		return
+
+	}
+
+	replicationConfig, err := sling.LoadReplicationConfigFromFile(file.FullPath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	if string(cfg.Mode) == "discover" {
-		testDiscover(t, cfg, connType)
+	tasks, err := replicationConfig.Compile(nil)
+	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	g.Debug("task config => %s", g.Marshal(cfg))
-	task := sling.NewTask("", cfg)
-	if !g.AssertNoError(t, task.Err) {
-		return
+	taskCfg := tasks[0]
+
+	var streamCfg *sling.ReplicationStreamConfig
+	for _, streamCfg = range replicationConfig.Streams {
 	}
+
+	env := replicationConfig.Env
+
+	g.Debug("replication config => %s", g.Marshal(replicationConfig))
 
 	// validate object name
-	if name, ok := task.Config.Env["validation_object"]; ok {
-		if !assert.Equal(t, name, task.Config.Target.Object) {
+	if name, ok := env["validation_object"]; ok {
+		if !assert.Equal(t, name, streamCfg.Object) {
 			return
 		}
 	}
 
-	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
-		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
+	if doDelete := env["delete_duck_db"]; cast.ToBool(doDelete) {
+		os.Remove(strings.TrimPrefix(taskCfg.TgtConn.URL(), "duckdb://"))
 	}
 
 	// process PostSQL for different drop_view syntax
-	if task.Config.TgtConn.Type.IsDb() {
-		dbConn, err := task.Config.TgtConn.AsDatabase()
+	if taskCfg.TgtConn.Type.IsDb() {
+		dbConn, err := taskCfg.TgtConn.AsDatabase()
 		if err == nil {
-			table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
 			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
 			if dbConn.GetType().DBNameUpperCase() {
 				table.Name = strings.ToUpper(table.Name)
@@ -377,21 +416,23 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
-			if preSQL := task.Config.Target.Options.PreSQL; preSQL != nil {
-				task.Config.Target.Options.PreSQL = g.String(g.R(
+			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
+				taskCfg.Target.Options.PreSQL = g.String(g.R(
 					*preSQL,
 					"drop_view", dropViewSQL,
 				))
 			}
-			if postSQL := task.Config.Target.Options.PostSQL; postSQL != nil {
-				task.Config.Target.Options.PostSQL = g.String(g.R(
+			if postSQL := taskCfg.Target.Options.PostSQL; postSQL != nil {
+				taskCfg.Target.Options.PostSQL = g.String(g.R(
 					*postSQL,
 					"drop_view", dropViewSQL,
 				))
 			}
 		}
 	}
+	g.Debug("task config => %s", g.Marshal(taskCfg))
 
+	task := sling.NewTask("", taskCfg)
 	if g.AssertNoError(t, task.Err) {
 		taskContext := g.NewContext(testContext.Ctx)
 		task.Context = &taskContext
@@ -404,18 +445,18 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 
 	// validate count
-	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
+	if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
 		g.Debug("getting count for test validation")
-		conn, err := task.Config.TgtConn.AsDatabase()
+		conn, err := taskCfg.TgtConn.AsDatabase()
 		if g.AssertNoError(t, err) {
-			count, err := conn.GetCount(task.Config.Target.Object)
+			count, err := conn.GetCount(taskCfg.Target.Object)
 			g.AssertNoError(t, err)
-			assert.EqualValues(t, task.GetCount(), count)
+			assert.EqualValues(t, cast.ToInt(task.GetCount()), cast.ToInt(count))
 			conn.Close()
 		}
 	}
 
-	if valRowCountVal := cfg.Env["validation_stream_row_count"]; valRowCountVal != "" {
+	if valRowCountVal := cast.ToString(env["validation_stream_row_count"]); valRowCountVal != "" {
 		taskCount := cast.ToInt(task.GetCount())
 		if strings.HasPrefix(valRowCountVal, ">") {
 			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
@@ -426,9 +467,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 	}
 
-	if valRowCountVal := cfg.Env["validation_row_count"]; valRowCountVal != "" {
-		conn, _ := task.Config.TgtConn.AsDatabase()
-		countU, _ := conn.GetCount(task.Config.Target.Object)
+	if valRowCountVal := cast.ToString(env["validation_row_count"]); valRowCountVal != "" {
+		conn, _ := taskCfg.TgtConn.AsDatabase()
+		countU, _ := conn.GetCount(taskCfg.Target.Object)
 		count := cast.ToInt(countU)
 		if strings.HasPrefix(valRowCountVal, ">") {
 			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
@@ -440,22 +481,22 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 
 	// validate file
-	if val, ok := task.Config.Env["validation_file"]; ok {
-		valFile := strings.TrimPrefix(val, "file://")
+	if val, ok := env["validation_file"]; ok {
+		valFile := strings.TrimPrefix(cast.ToString(val), "file://")
 		dataFile, err := iop.ReadCsv(valFile)
 		if !g.AssertNoError(t, err) {
 			return
 		}
 		orderByStr := "1"
-		if len(task.Config.Source.PrimaryKey()) > 0 {
-			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
+		if len(taskCfg.Source.PrimaryKey()) > 0 {
+			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
-		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
-		conn, _ := task.Config.TgtConn.AsDatabase()
+		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
+		conn, _ := taskCfg.TgtConn.AsDatabase()
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
 		conn.Close()
-		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
+		valCols := strings.Split(cast.ToString(env["validation_cols"]), ",")
 
 		if g.AssertNoError(t, err) {
 			for _, valColS := range valCols {
@@ -544,7 +585,7 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5-10,16,22") // cannot add json type with version 0.9.2
+	testSuite(t, dbio.TypeDbMotherDuck)
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
@@ -574,22 +615,22 @@ func TestSuiteDatabaseClickhouse(t *testing.T) {
 
 func TestSuiteDatabaseProton(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbProton, "22")
+	testSuite(t, dbio.TypeDbProton, "discover_schemas")
 }
 
 func TestSuiteDatabaseTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, "1,3,10,16,22")
+	testSuite(t, dbio.TypeDbTrino, "csv_full_refresh,discover_table,table_full_refresh_into_postgres,table_full_refresh_from_postgres,discover_schemas")
 }
 
 func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, "10,22")
+	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
 }
 
 func TestSuiteDatabasePrometheus(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbPrometheus, "22")
+	testSuite(t, dbio.TypeDbPrometheus, "discover_schemas")
 }
 
 // generate large dataset or use cache
@@ -904,14 +945,14 @@ mode: full-refresh
 	}
 }
 
-func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
+func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbio.Type) {
 
 	conn := connMap[connType]
 
 	opt := connection.DiscoverOptions{
-		Pattern:   cfg.Target.Object,
-		Level:     database.SchemataLevel(cast.ToString(cfg.Env["level"])),
-		Recursive: cast.ToBool(cfg.Env["recursive"]),
+		Pattern:   pattern,
+		Level:     database.SchemataLevel(cast.ToString(env["level"])),
+		Recursive: cast.ToBool(env["recursive"]),
 	}
 
 	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
@@ -922,19 +963,19 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, err := ec.Discover(conn.name, &opt)
+	files, schemata, err := conns.Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	valContains := strings.Split(cast.ToString(cfg.Env["validation_contains"]), ",")
-	valNotContains := strings.Split(cast.ToString(cfg.Env["validation_not_contains"]), ",")
+	valContains := strings.Split(cast.ToString(env["validation_contains"]), ",")
+	valNotContains := strings.Split(cast.ToString(env["validation_not_contains"]), ",")
 	valContains = lo.Filter(valContains, func(v string, i int) bool { return v != "" })
 	valNotContains = lo.Filter(valNotContains, func(v string, i int) bool { return v != "" })
 
-	valRowCount := cast.ToInt(cfg.Env["validation_row_count"])
+	valRowCount := cast.ToInt(env["validation_row_count"])
 	valRowCountMin := -1
-	if val := cast.ToString(cfg.Env["validation_row_count"]); strings.HasPrefix(val, ">") {
+	if val := cast.ToString(env["validation_row_count"]); strings.HasPrefix(val, ">") {
 		valRowCountMin = cast.ToInt(strings.TrimPrefix(val, ">"))
 	}
 
