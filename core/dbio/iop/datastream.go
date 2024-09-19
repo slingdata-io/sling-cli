@@ -1333,10 +1333,10 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	if err == io.EOF {
 		if ds.Metadata.StreamURL.Value != nil {
 			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		} else {
+			g.Trace("csv stream is empty for %s", ds.ID)
 		}
-		ds.SetReady()
-		ds.Close()
-		return nil
+		err = nil
 	} else if err != nil {
 		err = g.Error(err, "could not parse header line")
 		ds.Context.CaptureErr(err)

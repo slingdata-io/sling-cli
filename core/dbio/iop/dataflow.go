@@ -731,6 +731,7 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 	go func() {
 		defer close(rows)
 		for ds := range df.StreamCh {
+			dsN.Sp.Config = ds.Sp.Config // copy config
 			for batch := range ds.BatchChan {
 				if !dsN.Columns.IsSimilarTo(df.Columns) {
 					dsN.AddColumns(df.Columns, false)

@@ -490,9 +490,6 @@ func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data D
 
 // QueryContext runs a sql query with context, returns `Dataset`
 func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
-	// one query at a time
-	duck.Context.Lock()
-	defer duck.Context.Unlock()
 
 	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
@@ -534,6 +531,12 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		return nil, g.Error(err, "could not get columns")
 	}
 
+	// one query at a time
+	duck.Context.Lock()
+
+	// new datastream
+	ds = NewDatastreamContext(queryCtx.Ctx, columns)
+
 	// do not capture stdout, use scanner instead
 	// Create a pipe for stdout, stderr handling
 	stdOutReader, stdOutWriter := io.Pipe()
@@ -572,14 +575,13 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	// start and submit sql
 	err = duck.startAndSubmitSQL(sql, false)
 	if err != nil {
+		duck.Context.Unlock() // release lock
 		return nil, g.Error(err, "Failed to submit SQL")
 	}
 
 	// so that lists are treated as TEXT and not JSON
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
-
-	ds = NewDatastreamContext(queryCtx.Ctx, columns)
 
 	if cds, ok := opts["datastream"]; ok {
 		// if provided, use it
@@ -597,6 +599,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 			duck.closeStdinAndWait()
 		}
 		duck.Proc.SetScanner(nil)
+		duck.Context.Unlock() // release lock
 	})
 
 	err = ds.ConsumeCsvReader(stdOutReader)

@@ -148,3 +148,5 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000-07:00'
