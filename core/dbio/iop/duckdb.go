@@ -733,58 +733,6 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 	return binPath, nil
 }
 
-// DuckDBTypeToColumnType converts a DuckDB type to a ColumnType
-func DuckDBTypeToColumnType(duckDBType string) ColumnType {
-	// Normalize the input by converting to uppercase and trimming spaces
-	duckDBType = strings.TrimSpace(strings.ToUpper(duckDBType))
-
-	// Extract the base type for types with parameters
-	baseType := strings.Split(duckDBType, "(")[0]
-
-	switch baseType {
-	case "BIGINT", "INT8", "LONG", "UBIGINT":
-		return BigIntType
-	case "BIT", "BITSTRING":
-		return BinaryType
-	case "BLOB", "BYTEA", "BINARY", "VARBINARY":
-		return BinaryType
-	case "BOOLEAN", "BOOL", "LOGICAL":
-		return BoolType
-	case "DATE":
-		return DateType
-	case "DECIMAL", "NUMERIC":
-		return DecimalType
-	case "DOUBLE", "FLOAT8":
-		return FloatType
-	case "FLOAT", "FLOAT4", "REAL":
-		return FloatType
-	case "HUGEINT", "UHUGEINT":
-		return BigIntType
-	case "INTEGER", "INT4", "INT", "SIGNED", "UINTEGER":
-		return IntegerType
-	case "INTERVAL":
-		return StringType // No direct mapping, using StringType
-	case "SMALLINT", "INT2", "SHORT", "USMALLINT":
-		return SmallIntType
-	case "TIME":
-		return TimeType
-	case "TIMESTAMP WITH TIME ZONE":
-		return TimestampzType
-	case "TIMESTAMP":
-		return TimestampType
-	case "TINYINT", "INT1", "UTINYINT":
-		return SmallIntType
-	case "ARRAY", "LIST", "MAP", "STRUCT", "UNION":
-		return JsonType
-	case "UUID":
-		return StringType // No direct mapping, using StringType
-	case "VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING":
-		return StringType
-	default:
-		return StringType // Default to StringType for unknown types
-	}
-}
-
 // Describe returns the columns of a query
 func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	// prevent infinite loop
@@ -802,7 +750,7 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 
 		col.Name = cast.ToString(rec["column_name"])
 		col.DbType = cast.ToString(rec["column_type"])
-		col.Type = DuckDBTypeToColumnType(cast.ToString(rec["column_type"]))
+		col.Type = NativeTypeToGeneral(col.Name, cast.ToString(rec["column_type"]), dbio.TypeDbDuckDb)
 		col.Position = k + 1
 
 		columns = append(columns, col)
