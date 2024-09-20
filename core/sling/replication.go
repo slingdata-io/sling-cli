@@ -526,7 +526,9 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	var Env map[string]any
 	g.Unmarshal(g.Marshal(m["env"]), &Env)
 	for k, v := range Env {
-		Env[k] = os.ExpandEnv(cast.ToString(v))
+		if s, ok := v.(string); ok {
+			Env[k] = os.ExpandEnv(s)
+		}
 	}
 
 	// replace variables across the yaml file
