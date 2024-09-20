@@ -126,13 +126,13 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		}
 
 		if opt.Level == database.SchemataLevelColumn {
-			g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
-			if len(schemata.Columns()) <= 10 {
+			g.Debug("unfiltered column records returned: %d", len(schemata.Columns()))
+			if len(schemata.Columns()) <= 15 {
 				g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
 			}
 		} else {
-			g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
-			if len(schemata.Tables()) <= 10 {
+			g.Debug("unfiltered table records returned: %d", len(schemata.Tables()))
+			if len(schemata.Tables()) <= 15 {
 				g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
 			}
 		}
