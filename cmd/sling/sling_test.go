@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -59,7 +60,8 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
-	dbio.TypeDbOracle:            {name: "oracle", schema: "system"},
+	dbio.TypeDbOracle:            {name: "oracle", schema: "system", useBulk: g.Bool(false)},
+	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "system", useBulk: g.Bool(true)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
 	dbio.TypeDbRedshift:          {name: "redshift"},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
@@ -686,7 +688,10 @@ func TestSuiteDatabaseMariaDB(t *testing.T) {
 
 func TestSuiteDatabaseOracle(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbOracle) // for some reason 22-discover hangs.
+	testSuite(t, dbio.TypeDbOracle)
+	if _, err := exec.LookPath("sqlldr"); err == nil {
+		testSuite(t, dbio.Type("oracle_sqlldr"))
+	}
 }
 
 // func TestSuiteDatabaseBigTable(t *testing.T) {
@@ -721,8 +726,10 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
-	// testSuite(t, dbio.TypeDbSQLServer)
-	testSuite(t, dbio.Type("sqlserver_bcp"))
+	testSuite(t, dbio.TypeDbSQLServer)
+	if _, err := exec.LookPath("bcp"); err == nil {
+		testSuite(t, dbio.Type("sqlserver_bcp"))
+	}
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
