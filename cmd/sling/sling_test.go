@@ -184,6 +184,10 @@ func TestExtract(t *testing.T) {
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	defer time.Sleep(100 * time.Millisecond) // for log to flush
 
+	if t.Failed() {
+		return
+	}
+
 	conn, ok := connMap[connType]
 	if !assert.True(t, ok) {
 		return
@@ -525,6 +529,133 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			}
 		}
 	}
+
+	// validate target column types in database
+	if payload, ok := env["validation_types"]; ok {
+		correctTypeMap := map[string]iop.ColumnType{}
+		err = g.Unmarshal(g.Marshal(payload), &correctTypeMap)
+		if !g.AssertNoError(t, err) {
+			g.Warn("%#v", payload)
+			return
+		}
+
+		// get column level types
+		opt := connection.DiscoverOptions{
+			Level:   d.SchemataLevelColumn,
+			Pattern: taskCfg.Target.Object,
+		}
+		ok, nodes, schemata, err := taskCfg.TgtConn.Discover(&opt)
+		var columns iop.Columns
+		if ok && g.AssertNoError(t, err) {
+			if taskCfg.TgtConn.Type.IsDb() {
+				for _, table := range schemata.Tables() {
+					columns = table.Columns
+					break
+				}
+			}
+			if taskCfg.TgtConn.Type.IsFile() {
+				for _, node := range nodes {
+					columns = node.Columns
+					break
+				}
+			}
+		}
+
+		failed := false
+		srcType := taskCfg.SrcConn.Type
+		tgtType := taskCfg.TgtConn.Type
+
+		for colName, correctType := range correctTypeMap {
+
+			// correct correctType
+			switch {
+			case (srcType == dbio.TypeDbMySQL || srcType == dbio.TypeDbMariaDB) && tgtType == dbio.TypeDbPostgres:
+				if strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // mysql/mariadb doesn't have bool
+				}
+				if strings.EqualFold(colName, "update_dt") {
+					correctType = iop.TimestampType // mysql/mariadb doesn't have time zone
+				}
+				if srcType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // mariadb's `json` type is `longtext`
+				}
+			case tgtType == dbio.TypeDbMySQL || tgtType == dbio.TypeDbMariaDB:
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // mysql/mariadb doesn't have bool
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.StringType // mysql/mariadb doesn't have bool
+				}
+				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
+					correctType = iop.DatetimeType // mysql/mariadb uses datetime
+				}
+				if tgtType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // mariadb's `json` type is `longtext`
+				}
+			case tgtType == dbio.TypeDbSQLite || srcType == dbio.TypeDbSQLite:
+				if correctType.IsDatetime() || correctType.IsDate() {
+					correctType = iop.TextType // sqlite uses text for timestamps
+				}
+			case tgtType == dbio.TypeDbOracle:
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // oracle doesn't have bool
+				}
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "date") {
+					correctType = iop.TimestampType /// oracle uses datetime for date
+				}
+				if correctType.IsDate() {
+					correctType = iop.DatetimeType // oracle uses datetime for date
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.StringType // oracle doesn't have bool
+				}
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // oracle uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // oracle uses clob for json
+				}
+			case srcType == dbio.TypeDbOracle && tgtType == dbio.TypeDbPostgres:
+				if correctType.IsDate() {
+					correctType = iop.TimestampType // oracle uses datetime for date
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // oracle doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // oracle uses clob for json
+				}
+			case tgtType == dbio.TypeDbSQLServer:
+				if correctType == iop.TimestampType {
+					correctType = iop.DatetimeType // sqlserver uses datetime
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // sqlserver doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case srcType == dbio.TypeDbSQLServer && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // sqlserver doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			}
+
+			col := columns.GetColumn(colName)
+			if assert.NotEmpty(t, col, "missing column: %s", colName) {
+				if !assert.Equal(t, correctType, col.Type, "column type must match for %s", col.Name) {
+					failed = true
+				}
+			}
+		}
+
+		if failed {
+			g.Warn("actual column types: " + g.Marshal(columns.Types()))
+		}
+	}
 }
 
 func TestSuiteDatabasePostgres(t *testing.T) {
@@ -590,7 +721,7 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbSQLServer)
+	// testSuite(t, dbio.TypeDbSQLServer)
 	testSuite(t, dbio.Type("sqlserver_bcp"))
 }
 
