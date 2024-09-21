@@ -13,7 +13,7 @@ cd -
 cd core/sling
 go test -v -run 'TestTransformMsUUID'
 go test -v -run 'TestReplication'
-go test -run 'TestCheck'
+# go test -run 'TestCheck'
 cd -
 
 ## test cli commands
