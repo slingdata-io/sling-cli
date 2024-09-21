@@ -1772,9 +1772,9 @@ func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableN
 	var data iop.Dataset
 	switch level {
 	case SchemataLevelSchema:
-		data, err = conn.GetSchemas()
+		data, err = conn.Self().GetSchemas()
 	case SchemataLevelTable:
-		data, err = conn.GetTablesAndViews(schemaName)
+		data, err = conn.Self().GetTablesAndViews(schemaName)
 	case SchemataLevelColumn:
 		data, err = conn.SubmitTemplate(
 			"single", conn.template.Metadata, "schemata",
