@@ -37,6 +37,8 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          path: /dbio
+          env: dev
       
       - name: Build Binary
         run: |
