@@ -755,7 +755,7 @@ func TestSuiteDatabaseOracle(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbOracle)
 	if _, err := exec.LookPath("sqlldr"); err == nil {
-		testSuite(t, dbio.Type("oracle_sqlldr"))
+		testSuite(t, dbio.Type("oracle_sqlldr"), "1-5")
 	}
 }
 
