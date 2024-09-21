@@ -18,7 +18,7 @@ metadata:
   current_database: PRAGMA database_list
 
   schemas: |
-    select schema_name
+    select distinct schema_name
     from information_schema.schemata
     order by schema_name
 

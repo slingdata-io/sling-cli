@@ -107,7 +107,9 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		connPool.Mux.Unlock()
 	}
 
-	if err = conn.duck.Open(); err != nil {
+	if cast.ToBool(conn.duck.GetProp("connected")) {
+		return nil
+	} else if err = conn.duck.Open(); err != nil {
 		return err
 	}
 
@@ -115,31 +117,11 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	conn.SetProp("connected", "true")
 
-	_, err = conn.Exec("select 1" + noDebugKey)
-	if err != nil {
-		if strings.Contains(err.Error(), " version") {
-			g.Warn("To having sling use a different DuckDB version, set DUCKDB_VERSION=<version>")
-		}
-		return g.Error(err, "could not init connection")
-	}
-
-	// init extensions
-	_, err = conn.Exec("INSTALL json; LOAD json;" + noDebugKey)
-	if err != nil {
-		return g.Error(err, "could not init extensions")
-	}
-
 	if conn.GetType() == dbio.TypeDbMotherDuck {
 		_, err = conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)
 		if err != nil {
 			return g.Error(err, "could not init extensions")
 		}
-	}
-
-	// set as interactive
-	conn.isInteractive = cast.ToBool(conn.GetProp("interactive"))
-	if conn.BaseConn.Type == dbio.TypeDbMotherDuck && conn.GetProp("interactive") == "" {
-		conn.isInteractive = true // default interactive true for motherduck
 	}
 
 	return nil
@@ -152,6 +134,11 @@ func (conn *DuckDbConn) ExecMultiContext(ctx context.Context, sqls ...string) (r
 
 func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 	return conn.duck.ExecContext(ctx, sql, args...)
+}
+
+func (conn *DuckDbConn) Close() (err error) {
+	conn.SetProp("connected", "false")
+	return conn.duck.Close()
 }
 
 func (conn *DuckDbConn) StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {

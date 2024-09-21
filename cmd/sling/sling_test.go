@@ -56,7 +56,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbBigTable:          {name: "bigtable"},
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
-	dbio.TypeDbDuckDb:            {name: "duckdb"},
+	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
@@ -248,6 +248,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	testMux.Unlock()
 
 	for i, rec := range data.Records() {
+		testName := cast.ToString(rec["test_name"])
 		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
 		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
@@ -268,20 +269,25 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			sourceOptions["columns"] = g.M("code", "decimal")
 		}
 
+		streamName := strings.TrimSpace(cast.ToString(rec["source_stream"]))
 		streamConfig["mode"] = cast.ToString(rec["mode"])
 		streamConfig["object"] = cast.ToString(rec["target_object"])
 		streamConfig["source_options"] = sourceOptions
 		streamConfig["target_options"] = targetOptions
+		if strings.HasPrefix(streamName, "select") {
+			streamConfig["sql"] = g.String(streamName)
+			streamName = testName
+		}
 
 		replicationConfig := g.M(
 			"source", cast.ToString(rec["source_conn"]),
 			"target", cast.ToString(rec["target_conn"]),
 			"streams", g.M(
-				cast.ToString(rec["source_stream"]), streamConfig,
+				streamName, streamConfig,
 			),
 			"env", env,
 		)
-		configPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
+		configPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, testName))
 		configBytes := []byte(g.Pretty(replicationConfig))
 		err = os.WriteFile(configPath, configBytes, 0777)
 		g.AssertNoError(t, err)
@@ -446,21 +452,13 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		if !g.AssertNoError(t, err) {
 			return
 		}
+		task.Config.SrcConn.Close()
+		task.Config.TgtConn.Close()
 	} else {
 		return
 	}
 
-	// validate count
-	if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
-		g.Debug("getting count for test validation")
-		conn, err := taskCfg.TgtConn.AsDatabase()
-		if g.AssertNoError(t, err) {
-			count, err := conn.GetCount(taskCfg.Target.Object)
-			g.AssertNoError(t, err)
-			assert.EqualValues(t, cast.ToInt(task.GetCount()), cast.ToInt(count))
-			conn.Close()
-		}
-	}
+	defer taskCfg.TgtConn.Close()
 
 	if valRowCountVal := cast.ToString(env["validation_stream_row_count"]); valRowCountVal != "" {
 		taskCount := cast.ToInt(task.GetCount())
@@ -473,16 +471,30 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 	}
 
+	// validate count
 	if valRowCountVal := cast.ToString(env["validation_row_count"]); valRowCountVal != "" {
-		conn, _ := taskCfg.TgtConn.AsDatabase()
-		countU, _ := conn.GetCount(taskCfg.Target.Object)
-		count := cast.ToInt(countU)
-		if strings.HasPrefix(valRowCountVal, ">") {
-			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
-			assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
-		} else {
-			valRowCount := cast.ToInt(valRowCountVal)
-			assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
+		g.Debug("getting count for validation_row_count")
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			countU, err := conn.GetCount(taskCfg.Target.Object)
+			g.AssertNoError(t, err)
+			count := cast.ToInt(countU)
+			if strings.HasPrefix(valRowCountVal, ">") {
+				valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
+				assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
+			} else {
+				valRowCount := cast.ToInt(valRowCountVal)
+				assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
+			}
+		}
+	} else if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
+		g.Debug("getting count for test validation")
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			count, err := conn.GetCount(taskCfg.Target.Object)
+			g.AssertNoError(t, err)
+			assert.EqualValues(t, cast.ToInt(task.GetCount()), cast.ToInt(count))
+			conn.Close()
 		}
 	}
 
@@ -546,9 +558,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			Level:   d.SchemataLevelColumn,
 			Pattern: taskCfg.Target.Object,
 		}
-		ok, nodes, schemata, err := taskCfg.TgtConn.Discover(&opt)
+		_, nodes, schemata, err := taskCfg.TgtConn.Discover(&opt)
 		var columns iop.Columns
-		if ok && g.AssertNoError(t, err) {
+		if g.AssertNoError(t, err) {
 			if taskCfg.TgtConn.Type.IsDb() {
 				for _, table := range schemata.Tables() {
 					columns = table.Columns
@@ -561,6 +573,8 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					break
 				}
 			}
+		} else {
+			return
 		}
 
 		failed := false
