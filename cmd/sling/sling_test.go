@@ -56,7 +56,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbBigTable:          {name: "bigtable"},
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
-	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
+	dbio.TypeDbDuckDb:            {name: "duckdb"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
@@ -657,6 +657,26 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case tgtType == dbio.TypeDbClickhouse:
+				if correctType == iop.TimestampType || correctType == iop.TimestampzType {
+					correctType = iop.DatetimeType // clickhouse uses datetime
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // clickhouse doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // clickhouse uses varchar(max) for json
+				}
+			case srcType == dbio.TypeDbClickhouse && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // clickhouse doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // clickhouse uses varchar(max) for json
+				}
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // clickhouse uses datetime
 				}
 			}
 
