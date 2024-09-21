@@ -5,7 +5,7 @@ shopt -s expand_aliases
 
 cd cmd/sling
 go test -v -run 'TestReplicationDefaults'
-go test -v -run 'TestSuiteDatabaseClickhouse' # gives issues when running in parallel
+SLING_PROCESS_BW=false go test -v -run 'TestSuiteDatabaseClickhouse' # gives issues when running in parallel
 go test -v -parallel 3 -run 'TestSuiteFile'
 SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 15m -run TestSuiteDatabase
 cd -
