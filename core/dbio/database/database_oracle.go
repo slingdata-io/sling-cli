@@ -534,8 +534,8 @@ func (conn *OracleConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *OracleConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
-
+func (conn *OracleConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+	fields := cols.Names()
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
 

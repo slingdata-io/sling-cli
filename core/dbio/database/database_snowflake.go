@@ -10,7 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
 
@@ -233,10 +235,15 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 			}
 		default:
 			if stage := conn.getOrCreateStage(table.Schema); stage != "" {
-				filePath, err = conn.UnloadViaStage(table)
+				var unloaded int64
+				filePath, unloaded, err = conn.UnloadViaStage(table)
 				if err != nil {
 					err = g.Error(err, "Could not unload to stage.")
 					return
+				} else if unloaded == 0 {
+					// since no rows, return empty dataflow
+					data := iop.NewDataset(columns)
+					return iop.MakeDataFlow(data.Stream())
 				}
 				filePath = "file://" + filePath // add scheme
 			} else {
@@ -624,7 +631,7 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 	return nil
 }
 
-func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err error) {
+func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unloaded int64, err error) {
 
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
@@ -638,9 +645,10 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	// Write the each stage file to temp file, read to ds
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
 	if err = os.MkdirAll(folderPath, 0777); err != nil {
-		return "", g.Error(err, "could not create temp directory: %s", folderPath)
+		return "", 0, g.Error(err, "could not create temp directory: %s", folderPath)
 	}
 
+	unloadedRows := atomic.Int64{}
 	unload := func(sql string, stagePartPath string) {
 
 		defer context.Wg.Write.Done()
@@ -651,11 +659,15 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 			"stage_path", stagePartPath,
 		)
 
-		_, err = conn.Query(unloadSQL)
+		data, err := conn.Query(unloadSQL)
 		g.LogError(err)
 		if err != nil {
 			err = g.Error(err, "SQL Error for %s", stagePartPath)
 			context.CaptureErr(err)
+		}
+
+		if len(data.Rows) > 0 && len(data.Columns) > 0 {
+			unloadedRows.Add(cast.ToInt64(data.Rows[0][0]))
 		}
 
 	}
@@ -675,7 +687,11 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		return
 	}
 
-	g.Debug("Unloaded to %s", stageFolderPath)
+	g.Debug("Unloaded %d rows to %s", unloadedRows.Load(), stageFolderPath)
+
+	if unloadedRows.Load() == 0 {
+		return "", 0, nil
+	}
 
 	// get file paths
 	data, err := conn.Query("LIST " + stageFolderPath)
@@ -694,7 +710,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		return
 	}
 
-	return folderPath, context.Err()
+	return folderPath, unloadedRows.Load(), context.Err()
 }
 
 // CopyViaStage uses the Snowflake COPY INTO Table command
@@ -1041,6 +1057,77 @@ func (conn *SnowflakeConn) GetViews(schema string) (data iop.Dataset, err error)
 	}
 
 	return data, nil
+}
+
+// GetTablesAndViews returns tables/views for given schema
+func (conn *SnowflakeConn) GetTablesAndViews(schema string) (iop.Dataset, error) {
+	// fields: [table_name]
+	dataTables, err := conn.GetTables(schema)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	dataViews, err := conn.GetViews(schema)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	// combine
+	for _, row := range dataViews.Rows {
+		dataTables.Append(row)
+	}
+
+	return dataTables, nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+
+	values := make([]string, len(cols))
+	qFields := make([]string, len(cols)) // quoted fields
+
+	hasVariant := false
+	for _, col := range cols {
+		if col.DbType == "VARIANT" {
+			hasVariant = true
+		}
+	}
+
+	valuesStr := ""
+	c := 0
+	for n := 0; n < numRows; n++ {
+		for i, col := range cols {
+			c++
+			values[i] = conn.bindVar(i+1, col.Name, n, c)
+			qFields[i] = conn.Self().Quote(col.Name)
+			if col.DbType == "VARIANT" {
+				values[i] = "parse_json(" + values[i] + ")"
+			}
+		}
+		if hasVariant {
+			// use SELECT & UNION ALL when there is a variant column
+			// since binding variants is not supported
+			valuesStr += fmt.Sprintf("select %s union all\n", strings.Join(values, ", "))
+		} else {
+			valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
+		}
+	}
+
+	template := lo.Ternary(
+		hasVariant,
+		"insert into {table} ({fields})  {values}",
+		"insert into {table} ({fields}) values  {values}",
+	)
+
+	statement := g.R(
+		template,
+		"table", tableName,
+		"fields", strings.Join(qFields, ", "),
+		"values", strings.TrimSuffix(valuesStr, "union all\n"),
+	)
+
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
+	return statement
 }
 
 // CastColumnForSelect casts to the correct target column type

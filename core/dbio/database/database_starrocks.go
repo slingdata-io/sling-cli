@@ -164,7 +164,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		mux.Lock()
 		defer mux.Unlock()
 
-		insFields, err := conn.ValidateColumnNames(columns.Names(), bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
 		if err != nil {
 			return g.Error(err, "columns mismatch")
 		}
@@ -196,7 +196,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		sql := g.R(
 			"insert into {table} ({fields}) values  {values} "+noDebugKey,
 			"table", tableFName,
-			"fields", strings.Join(insFields, ", "),
+			"fields", strings.Join(insCols.Names(), ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
 		)
 		_, err = conn.ExecContext(ds.Context.Ctx, sql)

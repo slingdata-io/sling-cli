@@ -128,8 +128,8 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 
 	// TODO: need to validate the source table types are casted
 	// into the target column type
-	tgtFields, err := tgtConn.ValidateColumnNames(
-		tgtColumns.Names(),
+	tgtCols, err := tgtConn.ValidateColumnNames(
+		tgtColumns,
 		tmpColumns.Names(),
 		true,
 	)
@@ -156,7 +156,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		tgtConn.Template().Core["insert_from_table"],
 		"tgt_table", tgtTable.FullName(),
 		"src_table", srcTable.FullName(),
-		"tgt_fields", strings.Join(tgtFields, ", "),
+		"tgt_fields", strings.Join(tgtCols.Names(), ", "),
 		"src_fields", strings.Join(srcFields, ", "),
 	)
 	_, err = tgtConn.Exec(sql)

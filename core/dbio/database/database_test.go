@@ -423,27 +423,27 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	transactColumns, err := conn.GetColumns(db.schema + ".transact")
 	g.AssertNoError(t, err)
 
-	insFields, err := conn.ValidateColumnNames(personColumns.Names(), []string{"first_name", "last_name", "email"}, true)
+	insCols, err := conn.ValidateColumnNames(personColumns, []string{"first_name", "last_name", "email"}, true)
 	g.AssertNoError(t, err)
 	personInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".person",
-		insFields,
+		insCols,
 		1,
 	)
 
-	insFields, err = conn.ValidateColumnNames(placeColumns.Names(), []string{"country", "city", "telcode"}, true)
+	insCols, err = conn.ValidateColumnNames(placeColumns, []string{"country", "city", "telcode"}, true)
 	g.AssertNoError(t, err)
 	placeInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".place",
-		insFields,
+		insCols,
 		1,
 	)
 
-	insFields, err = conn.ValidateColumnNames(transactColumns.Names(), []string{"date_time", "description", "amount"}, true)
+	insCols, err = conn.ValidateColumnNames(transactColumns, []string{"date_time", "description", "amount"}, true)
 	g.AssertNoError(t, err)
 	transactInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".transact",
-		insFields,
+		insCols,
 		1,
 	)
 
@@ -1107,7 +1107,7 @@ func TestCastColumnsForSelect(t *testing.T) {
 	assert.EqualValues(t, 5, len(srcColumns))
 
 	tgtFields, err := conn.ValidateColumnNames(
-		tgtColumns.Names(),
+		tgtColumns,
 		srcColumns.Names(),
 		true,
 	)

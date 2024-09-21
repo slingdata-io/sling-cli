@@ -81,7 +81,7 @@ type Connection interface {
 	ExecMulti(sqls ...string) (result sql.Result, err error)
 	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
-	GenerateInsertStatement(tableName string, fields []string, numRows int) string
+	GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
 	GetAnalysis(string, map[string]interface{}) (string, error)
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
@@ -136,7 +136,7 @@ type Connection interface {
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
-	ValidateColumnNames(tgtColName []string, colNames []string, quote bool) (newColNames []string, err error)
+	ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
@@ -2051,10 +2051,10 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 
 // ValidateColumnNames verifies that source fields are present in the target table
 // It will return quoted field names as `newColNames`, the same length as `colNames`
-func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []string, quote bool) (newColNames []string, err error) {
+func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error) {
 
 	tgtFields := map[string]string{}
-	for _, colName := range tgtColNames {
+	for _, colName := range tgtCols.Names() {
 		colName = conn.Self().Unquote(colName)
 		if quote {
 			tgtFields[strings.ToLower(colName)] = conn.Self().Quote(colName)
@@ -2065,25 +2065,25 @@ func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []strin
 
 	mismatches := []string{}
 	for _, colName := range colNames {
-		newColName, ok := tgtFields[strings.ToLower(colName)]
-		if !ok {
+		newCol := tgtCols.GetColumn(colName)
+		if newCol == nil || newCol.Name == "" {
 			// src field is missing in tgt field
 			mismatches = append(mismatches, g.F("source field '%s' is missing in target table", colName))
 			continue
 		}
 		if quote {
-			newColName = conn.Self().Quote(newColName)
+			newCol.Name = conn.Self().Quote(newCol.Name)
 		} else {
-			newColName = conn.Self().Unquote(newColName)
+			newCol.Name = conn.Self().Unquote(newCol.Name)
 		}
-		newColNames = append(newColNames, newColName)
+		newCols = append(newCols, *newCol)
 	}
 
 	if len(mismatches) > 0 {
 		err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
 	}
 
-	g.Trace("insert target fields: " + strings.Join(newColNames, ", "))
+	g.Trace("insert target fields: " + strings.Join(newCols.Names(), ", "))
 
 	return
 }
@@ -2128,8 +2128,9 @@ func (conn *BaseConn) Quote(field string, normalize ...bool) string {
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *BaseConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
+func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 
+	fields := cols.Names()
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
 
@@ -2496,11 +2497,13 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		return
 	}
 
-	pkFields, err = conn.ValidateColumnNames(tgtColumns.Names(), pkFields, true)
+	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields, true)
 	if err != nil {
 		err = g.Error(err, "PK columns mismatch")
 		return
 	}
+
+	pkFields = pkCols.Names()
 	pkFieldMap := map[string]string{}
 	pkEqualFields := []string{}
 	for _, pkField := range pkFields {
@@ -2509,17 +2512,17 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		pkFieldMap[pkField] = ""
 	}
 
-	srcFields, err := conn.ValidateColumnNames(tgtColumns.Names(), srcColumns.Names(), true)
+	srcCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), true)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := srcFields
+	tgtFields := srcCols.Names()
 	setFields := []string{}
 	insertFields := []string{}
 	placeholdFields := []string{}
-	for _, colName := range srcFields {
+	for _, colName := range srcCols.Names() {
 		insertFields = append(insertFields, colName)
 		placeholdFields = append(placeholdFields, g.F("ph.%s", colName))
 		if _, ok := pkFieldMap[colName]; !ok {
@@ -2530,7 +2533,7 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	}
 
 	// cast into the correct type
-	srcFields = conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
+	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
 	exprs = map[string]string{
 		"src_tgt_pk_equal": strings.Join(pkEqualFields, " and "),
@@ -2832,13 +2835,13 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		return
 	}
 
-	// make sure columns exist in table, get common columns into fields
-	fields, err := conn.ValidateColumnNames(tColumns.Names(), columns.Names(), false)
+	// make sure columns exist in table, get common columns into cols
+	cols, err := conn.ValidateColumnNames(tColumns, columns.Names(), false)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
-	fieldsMap := g.ArrMapString(fields, true)
+	fieldsMap := g.ArrMapString(cols.Names(), true)
 	g.Debug("comparing checksums %s", g.Marshal(tColumns.Types()))
 
 	exprs := []string{}
