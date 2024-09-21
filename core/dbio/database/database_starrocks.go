@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -143,6 +145,20 @@ func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns, i
 		}
 	}
 
+	return
+}
+
+// ExecContext runs a sql query with context, returns `error`
+func (conn *StarRocksConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+retry:
+	result, err = conn.BaseConn.ExecContext(ctx, q, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "A schema change operation is in progress") {
+			g.Debug("%s. Retrying in 5 sec.", err.Error())
+			time.Sleep(5 * time.Second)
+			goto retry
+		}
+	}
 	return
 }
 
