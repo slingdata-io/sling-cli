@@ -37,6 +37,13 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        
+      - name: Load Secrets (dbio)
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           path: /dbio
           env: dev
       
