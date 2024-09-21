@@ -220,15 +220,17 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 	args := []string{"-csv", "-nullvalue", `\N\`}
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
 
+	if cast.ToBool(duck.GetProp("read_only")) {
+		args = append(args, "-readonly")
+	}
+
 	if instance := duck.GetProp("instance"); instance != "" {
 		args = append(args, instance)
 	}
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
 		duck.Proc.Env["motherduck_token"] = motherduckToken
-		if duck.GetProp("interactive") == "" {
-			duck.SetProp("interactive", "true") // set interactive by default for motherduck
-		}
+		args = append(args, "md:")
 	}
 
 	// default extensions
