@@ -130,6 +130,7 @@ func TestReplicationWildcards(t *testing.T) {
 			expected: []string{
 				"\"public\".\"test1k_bigquery_pg\"",
 				"\"public\".\"test1k_bigquery_pg_vw\"",
+				"\"public\".\"test1k_bigquery_pg_orig\"",
 			},
 		},
 	}
