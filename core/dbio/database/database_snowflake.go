@@ -1123,7 +1123,7 @@ func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Co
 		template,
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
-		"values", strings.TrimSuffix(valuesStr, "union all\n"),
+		"values", strings.TrimSuffix(strings.TrimSuffix(valuesStr, ","), "union all\n"),
 	)
 
 	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
