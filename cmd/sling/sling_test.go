@@ -546,6 +546,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	// validate target column types in database
 	if payload, ok := env["validation_types"]; ok {
+
 		correctTypeMap := map[string]iop.ColumnType{}
 		err = g.Unmarshal(g.Marshal(payload), &correctTypeMap)
 		if !g.AssertNoError(t, err) {
@@ -580,12 +581,19 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		failed := false
 		srcType := taskCfg.SrcConn.Type
 		tgtType := taskCfg.TgtConn.Type
+		isMySQLLike := func(t dbio.Type) bool {
+			return t == dbio.TypeDbMySQL || t == dbio.TypeDbMariaDB || t == dbio.TypeDbStarRocks
+		}
 
 		for colName, correctType := range correctTypeMap {
+			// skip those
+			if g.In(srcType, dbio.TypeDbMongoDB) || g.In(tgtType, dbio.TypeDbMongoDB) {
+				continue
+			}
 
 			// correct correctType
 			switch {
-			case (srcType == dbio.TypeDbMySQL || srcType == dbio.TypeDbMariaDB) && tgtType == dbio.TypeDbPostgres:
+			case isMySQLLike(srcType) && tgtType == dbio.TypeDbPostgres:
 				if strings.EqualFold(colName, "target") {
 					correctType = iop.TextType // mysql/mariadb doesn't have bool
 				}
@@ -595,7 +603,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if srcType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
 					correctType = iop.TextType // mariadb's `json` type is `longtext`
 				}
-			case tgtType == dbio.TypeDbMySQL || tgtType == dbio.TypeDbMariaDB:
+				if srcType == dbio.TypeDbStarRocks && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // starrocks's `json` type is `varchar(65500)`
+				}
+			case isMySQLLike(tgtType):
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
 					correctType = iop.TextType // mysql/mariadb doesn't have bool
 				}
@@ -657,6 +668,26 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case tgtType == dbio.TypeDbMongoDB:
+				if correctType == iop.TimestampType {
+					correctType = iop.DateType
+				}
+			case srcType == dbio.TypeDbMongoDB && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.DateType
+				}
+			case tgtType == dbio.TypeDbBigQuery:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // bigquery doesn't have timestampz
+				}
+			case srcType == dbio.TypeDbBigQuery && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // bigquery doesn't have timestampz
+				}
+			case tgtType == dbio.TypeDbTrino:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // trino doesn't have timestampz
 				}
 			case tgtType == dbio.TypeDbClickhouse:
 				if correctType == iop.TimestampType || correctType == iop.TimestampzType {
