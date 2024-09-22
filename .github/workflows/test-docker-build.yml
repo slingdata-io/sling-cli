@@ -55,9 +55,15 @@ jobs:
           go-version: "1.22"
           cache: false
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.mac.sh
         
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -85,6 +91,13 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.2
@@ -93,10 +106,12 @@ jobs:
             maximum-size: 16GB
             disk-root: "C:"
         
-      - name: Configure private token
+      - name: Configure private token & Prep
+        shell: pwsh
         run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
+          $ErrorActionPreference = "Stop"
+
+          .\scripts\ci\prep.win.ps1
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -125,14 +140,20 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -161,14 +182,20 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Configure private token & Prep
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3

@@ -10,13 +10,7 @@ on:
     types: [build-release]
 
 env:
-  GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.DO_SPACE_ACCESS_KEY}}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACE_SECRET_KEY}}
-  PLAUSIBLE_URL: ${{ secrets.PLAUSIBLE_URL }}
-  SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   GOPRIVATE: github.com/slingdata-io/*
-  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
 jobs:
   build:
@@ -99,6 +93,13 @@ jobs:
           go-version: "1.22"
           cache: false
         
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        
       - name: Configure private token & Prep
         run: bash scripts/ci/prep.mac.sh
 
@@ -129,6 +130,13 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.2
@@ -171,6 +179,13 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Login docker
         run: |
@@ -218,6 +233,13 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
 
       - name: Login docker
         run: |
