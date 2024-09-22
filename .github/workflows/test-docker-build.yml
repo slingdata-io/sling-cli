@@ -42,7 +42,7 @@ jobs:
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           use_system_python: true
         
-      - name: Configure private token & Prep
+      - name: Prep for build
         run: |
           # Prep
           bash scripts/ci/prep.mac.sh
@@ -89,7 +89,7 @@ jobs:
             maximum-size: 16GB
             disk-root: "C:"
         
-      - name: Configure private token & Prep
+      - name: Prep for build
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -106,7 +106,7 @@ jobs:
       - name: Post Tests
         shell: pwsh
         run: |
-          .\dist\sling_windows_amd64\sling.exe conns discover local -p '.'
+          .\dist\sling_windows_amd64_v1\sling.exe conns discover local -p '.'
 
   build-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
@@ -136,7 +136,7 @@ jobs:
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token & Prep
+      - name: Prep for build
         run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
@@ -179,7 +179,7 @@ jobs:
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token & Prep
+      - name: Prep for build
         run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
@@ -191,4 +191,4 @@ jobs:
 
       - name: Post Tests
         run: |
-          dist/sling_linux_amd64/sling conns discover local -p '.'
+          dist/sling_linux_amd64_v1/sling conns discover local -p '.'
