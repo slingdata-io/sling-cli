@@ -99,6 +99,7 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
         
       - name: Configure private token & Prep
         run: bash scripts/ci/prep.mac.sh
@@ -137,6 +138,7 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.2
@@ -186,6 +188,7 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Login docker
         run: |
@@ -240,6 +243,7 @@ jobs:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Login docker
         run: |
