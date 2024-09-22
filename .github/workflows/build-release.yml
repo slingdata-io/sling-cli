@@ -102,7 +102,9 @@ jobs:
           use_system_python: true
         
       - name: Configure private token & Prep
-        run: bash scripts/ci/prep.mac.sh
+        run: |
+          # Prep
+          bash scripts/ci/prep.mac.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
