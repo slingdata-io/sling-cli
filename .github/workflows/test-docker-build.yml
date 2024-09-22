@@ -45,7 +45,10 @@ jobs:
       - name: Prep for build
         run: |
           # Prep
-          bash scripts/ci/prep.mac.sh
+          pwd
+          ls -l scripts/ci/
+          cat scripts/ci/prep.mac.sh
+          bash ${{ github.workspace }}/scripts/ci/prep.mac.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
