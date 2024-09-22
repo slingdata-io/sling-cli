@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmespath/go-jmespath"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -32,8 +34,7 @@ import (
 var testMux sync.Mutex
 var testContext = g.NewContext(context.Background())
 
-var ef = env.LoadSlingEnvFile()
-var ec = connection.EnvConns{EnvFile: &ef}
+var conns = connection.GetLocalConns()
 
 type testDB struct {
 	name string
@@ -59,7 +60,8 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
-	dbio.TypeDbOracle:            {name: "oracle", schema: "system"},
+	dbio.TypeDbOracle:            {name: "oracle", schema: "system", useBulk: g.Bool(false)},
+	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "system", useBulk: g.Bool(true)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
 	dbio.TypeDbRedshift:          {name: "redshift"},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
@@ -184,6 +186,10 @@ func TestExtract(t *testing.T) {
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	defer time.Sleep(100 * time.Millisecond) // for log to flush
 
+	if t.Failed() {
+		return
+	}
+
 	conn, ok := connMap[connType]
 	if !assert.True(t, ok) {
 		return
@@ -242,13 +248,17 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	testMux.Unlock()
 
 	for i, rec := range data.Records() {
-		options, _ := g.UnmarshalMap(cast.ToString(rec["options"]))
+		testName := cast.ToString(rec["test_name"])
+		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
 		targetOptions, _ := g.UnmarshalMap(cast.ToString(rec["target_options"]))
 		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
-		primaryKey := []string{}
+
 		if val := cast.ToString(rec["source_primary_key"]); val != "" {
-			primaryKey = strings.Split(val, ",")
+			streamConfig["primary_key"] = strings.Split(val, ",")
+		}
+		if val := cast.ToString(rec["source_update_key"]); val != "" {
+			streamConfig["update_key"] = val
 		}
 
 		if conn.useBulk != nil {
@@ -259,26 +269,27 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			sourceOptions["columns"] = g.M("code", "decimal")
 		}
 
-		task := g.M(
-			"source", g.M(
-				"conn", cast.ToString(rec["source_conn"]),
-				"stream", cast.ToString(rec["source_stream"]),
-				"primary_key", primaryKey,
-				"update_key", cast.ToString(rec["source_update_key"]),
-				"options", sourceOptions,
+		streamName := strings.TrimSpace(cast.ToString(rec["source_stream"]))
+		streamConfig["mode"] = cast.ToString(rec["mode"])
+		streamConfig["object"] = cast.ToString(rec["target_object"])
+		streamConfig["source_options"] = sourceOptions
+		streamConfig["target_options"] = targetOptions
+		if strings.HasPrefix(streamName, "select") {
+			streamConfig["sql"] = g.String(streamName)
+			streamName = testName
+		}
+
+		replicationConfig := g.M(
+			"source", cast.ToString(rec["source_conn"]),
+			"target", cast.ToString(rec["target_conn"]),
+			"streams", g.M(
+				streamName, streamConfig,
 			),
-			"target", g.M(
-				"conn", cast.ToString(rec["target_conn"]),
-				"object", cast.ToString(rec["target_object"]),
-				"options", targetOptions,
-			),
-			"mode", cast.ToString(rec["mode"]),
-			"options", options,
 			"env", env,
 		)
-		taskPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, rec["test_name"]))
-		taskBytes := []byte(g.Pretty(task))
-		err = os.WriteFile(taskPath, taskBytes, 0777)
+		configPath := filepath.Join(folderPath, g.F("%02d.%s.json", i+1, testName))
+		configBytes := []byte(g.Pretty(replicationConfig))
+		err = os.WriteFile(configPath, configBytes, 0777)
 		g.AssertNoError(t, err)
 	}
 
@@ -286,6 +297,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	files, _ := g.ListDir(folderPath)
 
 	testNumbers := []int{}
+	testNames := []string{}
 	tns := os.Getenv("TESTS")
 	if tns == "" && len(testSelect) > 0 {
 		tns = testSelect[0]
@@ -310,6 +322,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 				}
 			} else if testNumber := cast.ToInt(tn); testNumber > 0 {
 				testNumbers = append(testNumbers, testNumber)
+			} else {
+				//  accepts strings
+				testNames = append(testNames, tn)
 			}
 		}
 	}
@@ -317,6 +332,17 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	for i, file := range files {
 		if len(testNumbers) > 0 && !g.In(i+1, testNumbers...) {
 			continue
+		}
+		if len(testNames) > 0 {
+			found := false
+			for _, testName := range testNames {
+				if strings.Contains(file.Name, testName) {
+					found = true
+				}
+			}
+			if !found {
+				continue
+			}
 		}
 		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
 			runOneTask(t, file, connType)
@@ -337,39 +363,64 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	bars := "---------------------------"
 	g.Info("%s Testing %s (%s) %s", bars, file.RelPath, connType, bars)
 
-	cfg := &sling.Config{}
-	err := cfg.Unmarshal(file.FullPath)
+	if strings.Contains(file.FullPath, ".discover") {
+
+		fileBytes, err := os.ReadFile(file.FullPath)
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		m, err := g.UnmarshalMap(string(fileBytes))
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		pattern, err := jmespath.Search("object", cast.ToStringMap(m["streams"])[""])
+		if !g.AssertNoError(t, err) {
+			return
+		}
+
+		testDiscover(t, cast.ToString(pattern), cast.ToStringMap(m["env"]), connType)
+		return
+
+	}
+
+	replicationConfig, err := sling.LoadReplicationConfigFromFile(file.FullPath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	if string(cfg.Mode) == "discover" {
-		testDiscover(t, cfg, connType)
+	tasks, err := replicationConfig.Compile(nil)
+	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	g.Debug("task config => %s", g.Marshal(cfg))
-	task := sling.NewTask("", cfg)
-	if !g.AssertNoError(t, task.Err) {
-		return
+	taskCfg := tasks[0]
+
+	var streamCfg *sling.ReplicationStreamConfig
+	for _, streamCfg = range replicationConfig.Streams {
 	}
+
+	env := replicationConfig.Env
+
+	g.Debug("replication config => %s", g.Marshal(replicationConfig))
 
 	// validate object name
-	if name, ok := task.Config.Env["validation_object"]; ok {
-		if !assert.Equal(t, name, task.Config.Target.Object) {
+	if name, ok := env["validation_object"]; ok {
+		if !assert.Equal(t, name, streamCfg.Object) {
 			return
 		}
 	}
 
-	if doDelete := task.Config.Env["delete_duck_db"]; cast.ToBool(doDelete) {
-		os.Remove(strings.TrimPrefix(task.Config.TgtConn.URL(), "duckdb://"))
+	if doDelete := env["delete_duck_db"]; cast.ToBool(doDelete) {
+		os.Remove(strings.TrimPrefix(taskCfg.TgtConn.URL(), "duckdb://"))
 	}
 
 	// process PostSQL for different drop_view syntax
-	if task.Config.TgtConn.Type.IsDb() {
-		dbConn, err := task.Config.TgtConn.AsDatabase()
+	if taskCfg.TgtConn.Type.IsDb() {
+		dbConn, err := taskCfg.TgtConn.AsDatabase()
 		if err == nil {
-			table, _ := database.ParseTableName(task.Config.Target.Object, dbConn.GetType())
+			table, _ := database.ParseTableName(taskCfg.Target.Object, dbConn.GetType())
 			table.Name = strings.TrimSuffix(table.Name, "_pg") + "_vw"
 			if dbConn.GetType().DBNameUpperCase() {
 				table.Name = strings.ToUpper(table.Name)
@@ -377,21 +428,23 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
-			if preSQL := task.Config.Target.Options.PreSQL; preSQL != nil {
-				task.Config.Target.Options.PreSQL = g.String(g.R(
+			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
+				taskCfg.Target.Options.PreSQL = g.String(g.R(
 					*preSQL,
 					"drop_view", dropViewSQL,
 				))
 			}
-			if postSQL := task.Config.Target.Options.PostSQL; postSQL != nil {
-				task.Config.Target.Options.PostSQL = g.String(g.R(
+			if postSQL := taskCfg.Target.Options.PostSQL; postSQL != nil {
+				taskCfg.Target.Options.PostSQL = g.String(g.R(
 					*postSQL,
 					"drop_view", dropViewSQL,
 				))
 			}
 		}
 	}
+	g.Debug("task config => %s", g.Marshal(taskCfg))
 
+	task := sling.NewTask("", taskCfg)
 	if g.AssertNoError(t, task.Err) {
 		taskContext := g.NewContext(testContext.Ctx)
 		task.Context = &taskContext
@@ -399,23 +452,15 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		if !g.AssertNoError(t, err) {
 			return
 		}
+		task.Config.SrcConn.Close()
+		task.Config.TgtConn.Close()
 	} else {
 		return
 	}
 
-	// validate count
-	if task.Config.Mode == sling.FullRefreshMode && task.Config.TgtConn.Type.IsDb() {
-		g.Debug("getting count for test validation")
-		conn, err := task.Config.TgtConn.AsDatabase()
-		if g.AssertNoError(t, err) {
-			count, err := conn.GetCount(task.Config.Target.Object)
-			g.AssertNoError(t, err)
-			assert.EqualValues(t, task.GetCount(), count)
-			conn.Close()
-		}
-	}
+	defer taskCfg.TgtConn.Close()
 
-	if valRowCountVal := cfg.Env["validation_stream_row_count"]; valRowCountVal != "" {
+	if valRowCountVal := cast.ToString(env["validation_stream_row_count"]); valRowCountVal != "" {
 		taskCount := cast.ToInt(task.GetCount())
 		if strings.HasPrefix(valRowCountVal, ">") {
 			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
@@ -426,36 +471,50 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 	}
 
-	if valRowCountVal := cfg.Env["validation_row_count"]; valRowCountVal != "" {
-		conn, _ := task.Config.TgtConn.AsDatabase()
-		countU, _ := conn.GetCount(task.Config.Target.Object)
-		count := cast.ToInt(countU)
-		if strings.HasPrefix(valRowCountVal, ">") {
-			valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
-			assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
-		} else {
-			valRowCount := cast.ToInt(valRowCountVal)
-			assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
+	// validate count
+	if valRowCountVal := cast.ToString(env["validation_row_count"]); valRowCountVal != "" {
+		g.Debug("getting count for validation_row_count")
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			countU, err := conn.GetCount(taskCfg.Target.Object)
+			g.AssertNoError(t, err)
+			count := cast.ToInt(countU)
+			if strings.HasPrefix(valRowCountVal, ">") {
+				valRowCount := cast.ToInt(strings.TrimPrefix(valRowCountVal, ">"))
+				assert.Greater(t, count, valRowCount, "validation_row_count (%s)", file.Name)
+			} else {
+				valRowCount := cast.ToInt(valRowCountVal)
+				assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
+			}
+		}
+	} else if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
+		g.Debug("getting count for test validation")
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if g.AssertNoError(t, err) {
+			count, err := conn.GetCount(taskCfg.Target.Object)
+			g.AssertNoError(t, err)
+			assert.EqualValues(t, cast.ToInt(task.GetCount()), cast.ToInt(count))
+			conn.Close()
 		}
 	}
 
 	// validate file
-	if val, ok := task.Config.Env["validation_file"]; ok {
-		valFile := strings.TrimPrefix(val, "file://")
+	if val, ok := env["validation_file"]; ok {
+		valFile := strings.TrimPrefix(cast.ToString(val), "file://")
 		dataFile, err := iop.ReadCsv(valFile)
 		if !g.AssertNoError(t, err) {
 			return
 		}
 		orderByStr := "1"
-		if len(task.Config.Source.PrimaryKey()) > 0 {
-			orderByStr = strings.Join(task.Config.Source.PrimaryKey(), ", ")
+		if len(taskCfg.Source.PrimaryKey()) > 0 {
+			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
-		sql := g.F("select * from %s order by %s", task.Config.Target.Object, orderByStr)
-		conn, _ := task.Config.TgtConn.AsDatabase()
+		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
+		conn, _ := taskCfg.TgtConn.AsDatabase()
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
 		conn.Close()
-		valCols := strings.Split(task.Config.Env["validation_cols"], ",")
+		valCols := strings.Split(cast.ToString(env["validation_cols"]), ",")
 
 		if g.AssertNoError(t, err) {
 			for _, valColS := range valCols {
@@ -482,6 +541,186 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					break
 				}
 			}
+		}
+	}
+
+	// validate target column types in database
+	if payload, ok := env["validation_types"]; ok {
+
+		correctTypeMap := map[string]iop.ColumnType{}
+		err = g.Unmarshal(g.Marshal(payload), &correctTypeMap)
+		if !g.AssertNoError(t, err) {
+			g.Warn("%#v", payload)
+			return
+		}
+
+		// get column level types
+		opt := connection.DiscoverOptions{
+			Level:   d.SchemataLevelColumn,
+			Pattern: taskCfg.Target.Object,
+		}
+		_, nodes, schemata, err := taskCfg.TgtConn.Discover(&opt)
+		var columns iop.Columns
+		if g.AssertNoError(t, err) {
+			if taskCfg.TgtConn.Type.IsDb() {
+				for _, table := range schemata.Tables() {
+					columns = table.Columns
+					break
+				}
+			}
+			if taskCfg.TgtConn.Type.IsFile() {
+				for _, node := range nodes {
+					columns = node.Columns
+					break
+				}
+			}
+		} else {
+			return
+		}
+
+		failed := false
+		srcType := taskCfg.SrcConn.Type
+		tgtType := taskCfg.TgtConn.Type
+		isMySQLLike := func(t dbio.Type) bool {
+			return t == dbio.TypeDbMySQL || t == dbio.TypeDbMariaDB || t == dbio.TypeDbStarRocks
+		}
+
+		for colName, correctType := range correctTypeMap {
+			// skip those
+			if g.In(srcType, dbio.TypeDbMongoDB) || g.In(tgtType, dbio.TypeDbMongoDB) {
+				continue
+			}
+
+			// correct correctType
+			switch {
+			case isMySQLLike(srcType) && tgtType == dbio.TypeDbPostgres:
+				if strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // mysql/mariadb doesn't have bool
+				}
+				if strings.EqualFold(colName, "update_dt") {
+					correctType = iop.TimestampType // mysql/mariadb doesn't have time zone
+				}
+				if srcType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // mariadb's `json` type is `longtext`
+				}
+				if srcType == dbio.TypeDbStarRocks && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // starrocks's `json` type is `varchar(65500)`
+				}
+			case isMySQLLike(tgtType):
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // mysql/mariadb doesn't have bool
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.StringType // mysql/mariadb doesn't have bool
+				}
+				if g.In(correctType, iop.TimestampType, iop.TimestampzType) {
+					correctType = iop.DatetimeType // mysql/mariadb uses datetime
+				}
+				if tgtType == dbio.TypeDbMariaDB && strings.EqualFold(colName, "json_data") {
+					correctType = iop.TextType // mariadb's `json` type is `longtext`
+				}
+			case tgtType == dbio.TypeDbSQLite || srcType == dbio.TypeDbSQLite:
+				if correctType.IsDatetime() || correctType.IsDate() {
+					correctType = iop.TextType // sqlite uses text for timestamps
+				}
+			case tgtType == dbio.TypeDbOracle:
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
+					correctType = iop.TextType // oracle doesn't have bool
+				}
+				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "date") {
+					correctType = iop.TimestampType /// oracle uses datetime for date
+				}
+				if correctType.IsDate() {
+					correctType = iop.DatetimeType // oracle uses datetime for date
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.StringType // oracle doesn't have bool
+				}
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // oracle uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // oracle uses clob for json
+				}
+			case srcType == dbio.TypeDbOracle && tgtType == dbio.TypeDbPostgres:
+				if correctType.IsDate() {
+					correctType = iop.TimestampType // oracle uses datetime for date
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // oracle doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // oracle uses clob for json
+				}
+			case tgtType == dbio.TypeDbSQLServer:
+				if correctType == iop.TimestampType {
+					correctType = iop.DatetimeType // sqlserver uses datetime
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // sqlserver doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case srcType == dbio.TypeDbSQLServer && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // sqlserver doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case tgtType == dbio.TypeDbMongoDB:
+				if correctType == iop.TimestampType {
+					correctType = iop.DateType
+				}
+			case srcType == dbio.TypeDbMongoDB && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.DateType
+				}
+			case tgtType == dbio.TypeDbBigQuery:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // bigquery doesn't have timestampz
+				}
+			case srcType == dbio.TypeDbBigQuery && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // bigquery doesn't have timestampz
+				}
+			case tgtType == dbio.TypeDbTrino:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // trino doesn't have timestampz
+				}
+			case tgtType == dbio.TypeDbClickhouse:
+				if correctType == iop.TimestampType || correctType == iop.TimestampzType {
+					correctType = iop.DatetimeType // clickhouse uses datetime
+				}
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // clickhouse doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // clickhouse uses varchar(max) for json
+				}
+			case srcType == dbio.TypeDbClickhouse && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.BoolType {
+					correctType = iop.TextType // clickhouse doesn't have bool
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // clickhouse uses varchar(max) for json
+				}
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // clickhouse uses datetime
+				}
+			}
+
+			col := columns.GetColumn(colName)
+			if assert.NotEmpty(t, col, "missing column: %s", colName) {
+				if !assert.Equal(t, correctType, col.Type, "column type must match for %s", col.Name) {
+					failed = true
+				}
+			}
+		}
+
+		if failed {
+			g.Warn("actual column types: " + g.Marshal(columns.Types()))
 		}
 	}
 }
@@ -514,7 +753,10 @@ func TestSuiteDatabaseMariaDB(t *testing.T) {
 
 func TestSuiteDatabaseOracle(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbOracle, "1-21") // for some reason 22-discover hangs.
+	testSuite(t, dbio.TypeDbOracle)
+	if _, err := exec.LookPath("sqlldr"); err == nil {
+		testSuite(t, dbio.Type("oracle_sqlldr"), "1-5")
+	}
 }
 
 // func TestSuiteDatabaseBigTable(t *testing.T) {
@@ -544,13 +786,15 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMotherDuck, "1-3,5-10,16,22") // cannot add json type with version 0.9.2
+	testSuite(t, dbio.TypeDbMotherDuck)
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
-	testSuite(t, dbio.Type("sqlserver_bcp"))
+	if _, err := exec.LookPath("bcp"); err == nil {
+		testSuite(t, dbio.Type("sqlserver_bcp"))
+	}
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
@@ -574,22 +818,22 @@ func TestSuiteDatabaseClickhouse(t *testing.T) {
 
 func TestSuiteDatabaseProton(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbProton, "22")
+	testSuite(t, dbio.TypeDbProton, "discover_schemas")
 }
 
 func TestSuiteDatabaseTrino(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbTrino, "1,3,10,16,22")
+	testSuite(t, dbio.TypeDbTrino, "csv_full_refresh,discover_table,table_full_refresh_into_postgres,table_full_refresh_from_postgres,discover_schemas")
 }
 
 func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbMongoDB, "10,22")
+	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
 }
 
 func TestSuiteDatabasePrometheus(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbPrometheus, "22")
+	testSuite(t, dbio.TypeDbPrometheus, "discover_schemas")
 }
 
 // generate large dataset or use cache
@@ -904,14 +1148,14 @@ mode: full-refresh
 	}
 }
 
-func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
+func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbio.Type) {
 
 	conn := connMap[connType]
 
 	opt := connection.DiscoverOptions{
-		Pattern:     cfg.Target.Object,
-		ColumnLevel: cast.ToBool(cfg.Env["column_level"]),
-		Recursive:   cast.ToBool(cfg.Env["recursive"]),
+		Pattern:   pattern,
+		Level:     database.SchemataLevel(cast.ToString(env["level"])),
+		Recursive: cast.ToBool(env["recursive"]),
 	}
 
 	if g.In(connType, dbio.TypeFileLocal, dbio.TypeFileSftp) && opt.Pattern == "" {
@@ -922,19 +1166,19 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, err := ec.Discover(conn.name, &opt)
+	files, schemata, err := conns.Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	valContains := strings.Split(cast.ToString(cfg.Env["validation_contains"]), ",")
-	valNotContains := strings.Split(cast.ToString(cfg.Env["validation_not_contains"]), ",")
+	valContains := strings.Split(cast.ToString(env["validation_contains"]), ",")
+	valNotContains := strings.Split(cast.ToString(env["validation_not_contains"]), ",")
 	valContains = lo.Filter(valContains, func(v string, i int) bool { return v != "" })
 	valNotContains = lo.Filter(valNotContains, func(v string, i int) bool { return v != "" })
 
-	valRowCount := cast.ToInt(cfg.Env["validation_row_count"])
+	valRowCount := cast.ToInt(env["validation_row_count"])
 	valRowCountMin := -1
-	if val := cast.ToString(cfg.Env["validation_row_count"]); strings.HasPrefix(val, ">") {
+	if val := cast.ToString(env["validation_row_count"]); strings.HasPrefix(val, ">") {
 		valRowCountMin = cast.ToInt(strings.TrimPrefix(val, ">"))
 	}
 
@@ -947,42 +1191,68 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 	}
 
 	if connType.IsDb() {
+		schemas := lo.Values(schemata.Database().Schemas)
 		tables := lo.Values(schemata.Tables())
 		columns := iop.Columns(lo.Values(schemata.Columns()))
 		if valRowCount > 0 {
-			if opt.ColumnLevel {
-				assert.Equal(t, valRowCount, len(columns), columns.Names())
-			} else {
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Equal(t, valRowCount, len(schemas), lo.Keys(schemata.Database().Schemas))
+			case d.SchemataLevelTable:
 				assert.Equal(t, valRowCount, len(tables), lo.Keys(schemata.Tables()))
+			case d.SchemataLevelColumn:
+				assert.Equal(t, valRowCount, len(columns), columns.Names())
 			}
 		} else {
-			assert.Greater(t, len(tables), 0)
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Greater(t, len(schemas), 0)
+			case d.SchemataLevelTable:
+				assert.Greater(t, len(tables), 0)
+			case d.SchemataLevelColumn:
+				assert.Greater(t, len(columns), 0)
+			}
 		}
 
 		if valRowCountMin > -1 {
-			if opt.ColumnLevel {
-				assert.Greater(t, len(columns), valRowCountMin)
-			} else {
-				assert.Greater(t, len(tables), valRowCountMin)
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				assert.Greater(t, len(schemas), valRowCountMin, lo.Keys(schemata.Database().Schemas))
+			case d.SchemataLevelTable:
+				assert.Greater(t, len(tables), valRowCountMin, lo.Keys(schemata.Tables()))
+			case d.SchemataLevelColumn:
+				assert.Greater(t, len(columns), valRowCountMin, columns.Names())
 			}
 		}
 
 		if len(containsMap) > 0 {
-			resultType := "tables"
-
-			if opt.ColumnLevel {
-				resultType = "columns"
-				for _, col := range columns {
+			var resultType string
+			switch opt.Level {
+			case d.SchemataLevelSchema:
+				resultType = "schemas"
+				for _, schema := range schemas {
 					for word := range containsMap {
-						if strings.EqualFold(word, col.Name) {
+						if strings.EqualFold(word, schema.Name) {
 							containsMap[word] = true
 						}
 					}
 				}
-			} else {
+
+			case d.SchemataLevelTable:
+				resultType = "tables"
 				for _, table := range tables {
 					for word := range containsMap {
 						if strings.EqualFold(word, table.Name) {
+							containsMap[word] = true
+						}
+					}
+				}
+
+			case d.SchemataLevelColumn:
+				resultType = "columns"
+				for _, col := range columns {
+					for word := range containsMap {
+						if strings.EqualFold(word, col.Name) {
 							containsMap[word] = true
 						}
 					}
@@ -1025,7 +1295,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		columns := iop.Columns(lo.Values(files.Columns()))
 
 		if valRowCount > 0 {
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				assert.Equal(t, valRowCount, len(files[0].Columns), g.Marshal(files[0].Columns.Names()))
 			} else {
 				assert.Equal(t, valRowCount, len(files), g.Marshal(files.Paths()))
@@ -1033,7 +1303,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		}
 
 		if valRowCountMin > -1 {
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				assert.Greater(t, len(files[0].Columns), valRowCountMin)
 			} else {
 				assert.Greater(t, len(files), valRowCountMin)
@@ -1043,7 +1313,7 @@ func testDiscover(t *testing.T, cfg *sling.Config, connType dbio.Type) {
 		if len(containsMap) > 0 {
 			resultType := "files"
 
-			if opt.ColumnLevel {
+			if opt.Level == d.SchemataLevelColumn {
 				resultType = "columns"
 				for _, col := range columns {
 					for word := range containsMap {

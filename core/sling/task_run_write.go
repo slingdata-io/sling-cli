@@ -61,6 +61,20 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
 
 		limit := cast.ToUint64(cfg.Source.Limit())
+
+		// store as dataset
+		if cfg.Options.Dataset {
+			df.Limit = limit
+			data, err := df.Collect()
+			if err != nil {
+				err = g.Error(err, "Could not collect dataflow")
+				return cnt, err
+			}
+			t.data = &data
+			cnt = cast.ToUint64(len(data.Rows))
+			return cnt, nil
+		}
+
 		options := map[string]string{"delimiter": ","}
 		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
 

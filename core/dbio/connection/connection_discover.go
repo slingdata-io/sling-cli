@@ -4,12 +4,14 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
@@ -22,7 +24,7 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = dbConn.Connect()
+		err = dbConn.Connect(10)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
@@ -31,7 +33,10 @@ func (c *Connection) Test() (ok bool, err error) {
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = fileClient.Init(context.Background())
+
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		err = fileClient.Init(ctx)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
@@ -53,9 +58,9 @@ func (c *Connection) Test() (ok bool, err error) {
 }
 
 type DiscoverOptions struct {
-	Pattern     string `json:"pattern,omitempty"`
-	ColumnLevel bool   `json:"column_level,omitempty"` // get column level
-	Recursive   bool   `json:"recursive,omitempty"`
+	Pattern   string                 `json:"pattern,omitempty"`
+	Level     database.SchemataLevel `json:"level,omitempty"`
+	Recursive bool                   `json:"recursive,omitempty"`
 }
 
 func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.FileNodes, schemata database.Schemata, err error) {
@@ -91,13 +96,15 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = dbConn.Connect()
+		err = dbConn.Connect(10)
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
 
 		var table database.Table
+		level := database.SchemataLevelSchema
 		if opt.Pattern != "" {
+			level = database.SchemataLevelTable
 			table, _ = database.ParseTableName(opt.Pattern, c.Type)
 			if strings.Contains(table.Schema, "*") || strings.Contains(table.Schema, "?") {
 				table.Schema = ""
@@ -106,28 +113,33 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 				table.Name = ""
 			}
 		}
-		g.Debug("database discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "schema", table.Schema, "table", table.Name, "column_level", opt.ColumnLevel)))
 
-		schemata, err = dbConn.GetSchemata(table.Schema, table.Name)
+		if string(opt.Level) == "" {
+			opt.Level = level
+		}
+
+		g.Debug("database discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "schema", table.Schema, "table", table.Name, "level", opt.Level)))
+
+		schemata, err = dbConn.GetSchemata(opt.Level, table.Schema, table.Name)
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not discover %s", c.Name)
 		}
 
-		if opt.ColumnLevel {
-			g.Debug("unfiltered nodes returned: %d", len(schemata.Columns()))
-			if len(schemata.Columns()) <= 10 {
+		if opt.Level == database.SchemataLevelColumn {
+			g.Debug("unfiltered column records returned: %d", len(schemata.Columns()))
+			if len(schemata.Columns()) <= 15 {
 				g.Debug(g.Marshal(lo.Keys(schemata.Columns())))
 			}
 		} else {
-			g.Debug("unfiltered nodes returned: %d", len(schemata.Tables()))
-			if len(schemata.Tables()) <= 10 {
+			g.Debug("unfiltered table records returned: %d", len(schemata.Tables()))
+			if len(schemata.Tables()) <= 15 {
 				g.Debug(g.Marshal(lo.Keys(schemata.Tables())))
 			}
 		}
 
-		// apply filter
-		if len(patterns) > 0 {
-			schemata = schemata.Filtered(opt.ColumnLevel, patterns...)
+		// apply filter if table is not specified
+		if len(patterns) > 0 && table.Name == "" {
+			schemata = schemata.Filtered(opt.Level == database.SchemataLevelColumn, patterns...)
 		}
 
 	case c.Type.IsFile():
@@ -135,7 +147,11 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not initiate %s", c.Name)
 		}
-		err = fileClient.Init(context.Background())
+
+		parent, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+
+		err = fileClient.Init(parent)
 		if err != nil {
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
@@ -151,7 +167,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			parsePattern()
 		}
 
-		g.Debug("file discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "url", url, "column_level", opt.ColumnLevel, "recursive", opt.Recursive)))
+		g.Debug("file discover inputs: %s", g.Marshal(g.M("pattern", opt.Pattern, "url", url, "column_level", opt.Level, "recursive", opt.Recursive)))
 		if opt.Recursive {
 			nodes, err = fileClient.ListRecursive(url)
 		} else {
@@ -181,14 +197,14 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		})
 
 		// if single file, get columns of file content
-		if opt.ColumnLevel {
+		if opt.Level == database.SchemataLevelColumn {
 			ctx := g.NewContext(fileClient.Context().Ctx, 5)
 
 			getColumns := func(i int) {
 				defer ctx.Wg.Read.Done()
 				node := nodes[i]
 
-				df, err := fileClient.ReadDataflow(node.URI, filesys.FileStreamConfig{Limit: 100})
+				df, err := fileClient.ReadDataflow(node.URI, iop.FileStreamConfig{Limit: 100})
 				if err != nil {
 					ctx.CaptureErr(g.Error(err, "could not read file content of %s", node.URI))
 					return

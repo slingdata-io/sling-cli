@@ -34,6 +34,7 @@ type TaskExecution struct {
 	Progress  string     `json:"progress"`
 
 	df            *iop.Dataflow `json:"-"`
+	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
@@ -246,6 +247,11 @@ func (t *TaskExecution) Df() *iop.Dataflow {
 	return t.df
 }
 
+// Data return the dataset object
+func (t *TaskExecution) Data() *iop.Dataset {
+	return t.data
+}
+
 // GetRate return the speed of flow (rows / sec and bytes / sec)
 // secWindow is how many seconds back to measure (0 is since beginning)
 func (t *TaskExecution) GetRate(secWindow int) (rowRate, byteRate int64) {
@@ -381,8 +387,8 @@ func (t *TaskExecution) Cleanup() {
 	}
 }
 
-// usingCheckpoint means it has an update_key and is incremental mode
-func (t *TaskExecution) usingCheckpoint() bool {
+// isIncrementalWithUpdateKey means it has an update_key and is incremental mode
+func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 

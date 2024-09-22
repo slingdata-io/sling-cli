@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"context"
 	"database/sql/driver"
 	"io"
 	"os"
@@ -201,7 +202,14 @@ func (cfg *Config) SetDefault() {
 }
 
 // Unmarshal parse a configuration file path or config text
-func (cfg *Config) Unmarshal(cfgStr string) error {
+func (cfg *Config) Unmarshal(cfgStr string) (err error) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error(r, "Panic occurred while unmarshalling config")
+		}
+	}()
+
 	// expand variables
 	cfgStr = expandEnvVars(cfgStr)
 
@@ -219,7 +227,7 @@ func (cfg *Config) Unmarshal(cfgStr string) error {
 		}
 	}
 
-	err := yaml.Unmarshal(cfgBytes, cfg)
+	err = yaml.Unmarshal(cfgBytes, cfg)
 	if err != nil {
 		if errStat != nil && !strings.Contains(cfgStr, "\n") && !strings.Contains(cfgStr, ": ") {
 			return g.Error(errStat, "Error parsing config. Invalid path or raw config provided")
@@ -541,6 +549,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Source.Stream = strings.ReplaceAll(cfg.Source.Stream, `\`, `/`) // windows path fix
 	}
 
+	// set sql to stream if source conn is db
+	if cfg.SrcConn.Type.IsDb() && cfg.Source.SQL != "" {
+		cfg.Source.Stream = strings.TrimSpace(cfg.Source.SQL)
+	}
+
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
 		cfg.Source.Data["url"] = cfg.Source.Stream
 		cfg.SrcConn.Data["url"] = cfg.Source.Stream
@@ -622,6 +635,12 @@ func (cfg *Config) Prepare() (err error) {
 	fMap, err := cfg.GetFormatMap()
 	if err != nil {
 		return g.Error(err, "could not get format map for sql")
+	}
+
+	// sql prop
+	cfg.Source.SQL = g.Rm(cfg.Source.SQL, fMap)
+	if cfg.ReplicationStream != nil {
+		cfg.ReplicationStream.SQL = cfg.Source.SQL
 	}
 
 	// check if referring to a SQL file, and set stream text
@@ -877,6 +896,25 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 				"_"+cast.ToString(m["stream_file_ext"]),
 			)
 		}
+
+		// duckdb sql on files, make `stream_scanner`
+		if cfg.Source.SQL != "" {
+			// get file format in order to match scanner
+			fileFormat := dbio.FileTypeNone
+			if cfg.Source.Options != nil && cfg.Source.Options.Format != nil {
+				fileFormat = *cfg.Source.Options.Format
+			}
+			if fileFormat == dbio.FileTypeNone {
+				fileFormat = filesys.InferFileFormat(uri, dbio.FileTypeNone)
+			}
+			if fileFormat == dbio.FileTypeNone {
+				g.Warn("%s: stream format is empty, cannot determine stream_scanner", cfg.StreamName)
+			} else {
+				duck := iop.NewDuckDb(context.Background())
+				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
+				m["stream_scanner"] = g.R(streamScanner, "uri", strings.TrimPrefix(uri, "file://"))
+			}
+		}
 	}
 
 	if t := connection.SchemeType(cfg.Target.Object); t.IsFile() {
@@ -1119,11 +1157,11 @@ func (cfg *Config) MD5() string {
 }
 
 func (cfg *Config) SrcConnMD5() string {
-	return g.MD5(g.Marshal(cfg.SrcConn.Data))
+	return g.MD5(cfg.SrcConn.URL())
 }
 
 func (cfg *Config) TgtConnMD5() string {
-	return g.MD5(g.Marshal(cfg.TgtConn.Data))
+	return g.MD5(cfg.TgtConn.URL())
 }
 
 func (cfg *Config) StreamID() string {
@@ -1132,9 +1170,10 @@ func (cfg *Config) StreamID() string {
 
 // ConfigOptions are configuration options
 type ConfigOptions struct {
-	Debug  bool `json:"debug,omitempty" yaml:"debug,omitempty"`
-	StdIn  bool `json:"-"`                                        // whether stdin is passed
-	StdOut bool `json:"stdout,omitempty" yaml:"stdout,omitempty"` // whether to output to stdout
+	Debug   bool `json:"debug,omitempty" yaml:"debug,omitempty"`
+	StdIn   bool `json:"-"`                                          // whether stdin is passed
+	StdOut  bool `json:"stdout,omitempty" yaml:"stdout,omitempty"`   // whether to output to stdout
+	Dataset bool `json:"dataset,omitempty" yaml:"dataset,omitempty"` // whether to output to dataset
 }
 
 // Source is a source of data
@@ -1143,6 +1182,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	SQL         string         `json:"sql,omitempty" yaml:"sql,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
@@ -1185,9 +1225,6 @@ func (s *Source) MD5() string {
 		g.M("conn", s.Conn),
 		g.M("type", s.Type),
 		g.M("stream", s.Stream),
-		g.M("primary_key", s.PrimaryKeyI),
-		g.M("update_key", s.UpdateKey),
-		g.M("options", s.Options),
 	})
 
 	if strings.Contains(s.Conn, "://") {
@@ -1216,7 +1253,6 @@ func (t *Target) MD5() string {
 		g.M("conn", t.Conn),
 		g.M("type", t.Type),
 		g.M("object", t.Object),
-		g.M("options", t.Options),
 	})
 
 	if strings.Contains(t.Conn, "://") {
@@ -1234,7 +1270,7 @@ type SourceOptions struct {
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
-	Format         *filesys.FileType   `json:"format,omitempty" yaml:"format,omitempty"`
+	Format         *dbio.FileType      `json:"format,omitempty" yaml:"format,omitempty"`
 	NullIf         *string             `json:"null_if,omitempty" yaml:"null_if,omitempty"`
 	DatetimeFormat string              `json:"datetime_format,omitempty" yaml:"datetime_format,omitempty"`
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
@@ -1263,7 +1299,7 @@ type TargetOptions struct {
 	Delimiter        string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	FileMaxRows      *int64              `json:"file_max_rows,omitempty" yaml:"file_max_rows,omitempty"`
 	FileMaxBytes     *int64              `json:"file_max_bytes,omitempty" yaml:"file_max_bytes,omitempty"`
-	Format           filesys.FileType    `json:"format,omitempty" yaml:"format,omitempty"`
+	Format           dbio.FileType       `json:"format,omitempty" yaml:"format,omitempty"`
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
@@ -1321,7 +1357,7 @@ var TargetFileOptionsDefault = TargetOptions{
 		g.Int64(cast.ToInt64(os.Getenv("FILE_MAX_BYTES"))),
 		g.Int64(0),
 	),
-	Format:         filesys.FileTypeNone,
+	Format:         dbio.FileTypeNone,
 	UseBulk:        g.Bool(true),
 	AddNewColumns:  g.Bool(true),
 	DatetimeFormat: "auto",
@@ -1411,7 +1447,7 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
-	if o.Format == filesys.FileTypeNone {
+	if o.Format == dbio.FileTypeNone {
 		o.Format = targetOptions.Format
 	}
 	if o.Concurrency == 0 {

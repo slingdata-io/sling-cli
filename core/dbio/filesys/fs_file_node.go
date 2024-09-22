@@ -1,6 +1,7 @@
 package filesys
 
 import (
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -29,8 +30,21 @@ type FileNode struct {
 	path string    // cached path
 }
 
+func (fn *FileNode) MarshalJSON() ([]byte, error) {
+	type Alias FileNode
+	return json.Marshal(&struct {
+		*Alias
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}{
+		Alias: (*Alias)(fn),
+		Path:  fn.Path(),
+		Name:  fn.Name(),
+	})
+}
+
 func (fn *FileNode) Name() string {
-	parts := strings.Split(fn.Path(), "/")
+	parts := strings.Split(strings.TrimSuffix(fn.Path(), "/"), "/")
 	if len(parts) == 0 {
 		return ""
 	}

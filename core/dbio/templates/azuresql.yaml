@@ -48,18 +48,18 @@ metadata:
     order by schema_name
     
   tables: |
-    select table_name
+    select table_schema as schema_name, table_name, 'false' as is_view
     from INFORMATION_SCHEMA.TABLES
     where table_type = 'BASE TABLE'
-      and table_schema = '{schema}'
-    order by table_name
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
     
   views: |
-    select table_name
+    select table_schema as schema_name, table_name, 'true' as is_view
     from INFORMATION_SCHEMA.TABLES
     where table_type = 'VIEW'
-      and table_schema = '{schema}'
-    order by table_name
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
 
   columns: |
     select column_name, data_type

@@ -92,34 +92,28 @@ jobs:
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           use_system_python: true
-
-      - name: Configure private token (Mac)
-        if: runner.os == 'macOS'
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Linux)
-        if: runner.os == 'linux'
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
-        
-      - name: Configure private token (Windows)
-        if: runner.os == 'windows'
-        run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
       
       - name: Build Sling (Linux)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'linux'
-        run: bash scripts/ci/build.linux.sh $VERSION
+        run: |
+          # Prep
+          bash scripts/ci/prep.linux.sh
+
+          # build
+          bash scripts/ci/build.linux.sh $VERSION
 
       - name: Build Sling (Mac)
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'macOS'
-        run: bash scripts/ci/build.mac.sh $VERSION
+        run: |
+          # Prep
+          bash scripts/ci/prep.mac.sh
+
+          # build
+          bash scripts/ci/build.mac.sh $VERSION
 
 
       - name: Configure Pagefile (Windows)
@@ -134,21 +128,29 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.VERSION }}
         if: runner.os == 'windows'
-        run: .\scripts\ci\build.win.ps1 $env:VERSION
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          
+          # Prep
+          .\scripts\ci\prep.win.ps1
+
+          # Build
+          .\scripts\ci\build.win.ps1 $env:VERSION
 
       - name: Upload to R2 (Windows)
         if: runner.os == 'windows'
         shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
-          
-          .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/ 
+        run: .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/  
 
       - name: Upload to R2 (Unix)
         if: runner.os != 'windows'
-        run: |
-          name=$(uname -s | tr "[:upper:]" "[:lower:]")
-          wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
+        run: mc cp *.tar.gz R2/sling-public/dev/latest/ 
 
-          ./mc cp *.tar.gz R2/sling-public/dev/latest/ 
+      - name: Purge Cache
+        if: runner.os == 'linux'
+        run: |
+          curl 'https://api.cloudflare.com/client/v4/zones/c4605fd9cf8ddcd00671858bbd16ffac/purge_cache' \
+          -H "X-Auth-Key: $CF_AUTH_KEY" \
+          -H "X-Auth-Email: $CF_AUTH_EMAIL" \
+          --data-raw '{"files":["https://f.slingdata.io/dev/latest/sling_linux_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_linux_arm64.tar.gz","https://f.slingdata.io/dev/latest/sling_darwin_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz","https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz"]}'

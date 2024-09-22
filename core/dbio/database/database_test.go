@@ -423,27 +423,27 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	transactColumns, err := conn.GetColumns(db.schema + ".transact")
 	g.AssertNoError(t, err)
 
-	insFields, err := conn.ValidateColumnNames(personColumns.Names(), []string{"first_name", "last_name", "email"}, true)
+	insCols, err := conn.ValidateColumnNames(personColumns, []string{"first_name", "last_name", "email"}, true)
 	g.AssertNoError(t, err)
 	personInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".person",
-		insFields,
+		insCols,
 		1,
 	)
 
-	insFields, err = conn.ValidateColumnNames(placeColumns.Names(), []string{"country", "city", "telcode"}, true)
+	insCols, err = conn.ValidateColumnNames(placeColumns, []string{"country", "city", "telcode"}, true)
 	g.AssertNoError(t, err)
 	placeInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".place",
-		insFields,
+		insCols,
 		1,
 	)
 
-	insFields, err = conn.ValidateColumnNames(transactColumns.Names(), []string{"date_time", "description", "amount"}, true)
+	insCols, err = conn.ValidateColumnNames(transactColumns, []string{"date_time", "description", "amount"}, true)
 	g.AssertNoError(t, err)
 	transactInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".transact",
-		insFields,
+		insCols,
 		1,
 	)
 
@@ -593,7 +593,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	}
 
 	// Test Schemata
-	schemata, err := conn.GetSchemata(db.schema, "")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, db.schema, "")
 	g.AssertNoError(t, err)
 	sData := schemata.Database().Schemas[strings.ToLower(db.schema)]
 	assert.Equal(t, strings.ToLower(db.schema), strings.ToLower(sData.Name))
@@ -1107,7 +1107,7 @@ func TestCastColumnsForSelect(t *testing.T) {
 	assert.EqualValues(t, 5, len(srcColumns))
 
 	tgtFields, err := conn.ValidateColumnNames(
-		tgtColumns.Names(),
+		tgtColumns,
 		srcColumns.Names(),
 		true,
 	)
@@ -1258,7 +1258,7 @@ func testSnowflakeAuth(t *testing.T) {
 	// g.AssertNoError(t, err)
 	// g.Debug("got %d columns", len(data.Rows))
 
-	schemata, err := conn.GetSchemata("", "")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, "", "")
 	g.AssertNoError(t, err)
 	g.Debug("found %d tables totalling %d columns", len(schemata.Tables()), len(schemata.Columns()))
 
@@ -1275,7 +1275,7 @@ func TestSchemataAll(t *testing.T) {
 	err = conn.Connect()
 	g.AssertNoError(t, err)
 
-	schemata, err := conn.GetSchemata("public", "place_vw")
+	schemata, err := conn.GetSchemata(SchemataLevelColumn, "public", "place_vw")
 	// schemata, err := GetSchemataAll(conn)
 	g.AssertNoError(t, err)
 	g.P(schemata)

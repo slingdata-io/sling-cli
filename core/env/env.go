@@ -257,10 +257,10 @@ func GetTempFolder() string {
 		tempDir = val
 	}
 	tempDir = strings.TrimRight(strings.TrimRight(tempDir, "/"), "\\")
-	return cleanWindowsPath(tempDir)
+	return CleanWindowsPath(tempDir)
 }
 
-func cleanWindowsPath(path string) string {
+func CleanWindowsPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
 }
 

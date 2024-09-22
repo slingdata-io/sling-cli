@@ -1,7 +1,7 @@
 package iop
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.0.0"
+	DuckDbVersion      = "1.1.0"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -33,12 +33,20 @@ var (
 
 // DuckDb is a Duck DB compute layer
 type DuckDb struct {
-	Context       *g.Context
-	Proc          *process.Proc
-	StdinWriter   io.Writer
-	isInteractive bool
-	extensions    []string
-	secrets       []string
+	Context    *g.Context
+	Proc       *process.Proc
+	extensions []string
+	secrets    []string
+	query      *duckDbQuery // only one active query at a time
+}
+
+type duckDbQuery struct {
+	Context *g.Context
+	reader  *io.PipeReader
+	writer  *io.PipeWriter
+	err     error
+	started bool
+	done    bool
 }
 
 // NewDuckDb creates a new DuckDb instance with the given context and properties
@@ -194,6 +202,9 @@ func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 
 // Open initializes the DuckDb connection
 func (duck *DuckDb) Open(timeOut ...int) (err error) {
+	if cast.ToBool(duck.GetProp("connected")) {
+		return nil
+	}
 
 	bin, err := EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
@@ -209,15 +220,32 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 	args := []string{"-csv", "-nullvalue", `\N\`}
 	duck.Proc.Env = g.KVArrToMap(os.Environ()...)
 
-	if path := duck.GetProp("path"); path != "" {
-		args = append(args, path)
+	if cast.ToBool(duck.GetProp("read_only")) {
+		args = append(args, "-readonly")
+	}
+
+	if instance := duck.GetProp("instance"); instance != "" {
+		args = append(args, instance)
 	}
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
 		duck.Proc.Env["motherduck_token"] = motherduckToken
+		args = append(args, "md:")
 	}
 
+	// default extensions
+	duck.AddExtension("json")
+
 	duck.Proc.SetArgs(args...)
+
+	// open process
+	err = duck.Proc.Start()
+	if err != nil {
+		return g.Error(err, "Failed to start duckDB process")
+	}
+
+	// start the scanner
+	duck.initScanner()
 
 	duck.SetProp("connected", "true")
 
@@ -229,25 +257,26 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return g.Error(err, "could not init connection")
 	}
 
-	// default extensions
-	duck.AddExtension("json")
-
-	// set as interactive
-	duck.isInteractive = cast.ToBool(duck.GetProp("interactive"))
-
 	return nil
 }
 
 // Close closes the connection
 func (duck *DuckDb) Close() error {
-	if duck.Proc.Exited() {
+	if duck.Proc == nil || duck.Proc.Exited() {
 		return nil
 	}
 
+	duck.SetProp("connected", "false")
+
 	// submit quit command?
-	if duck.isInteractive && duck.Proc.Cmd != nil {
+	if duck.Proc.Cmd != nil {
 		// need to submit to stdin: ".quit"
-		duck.StdinWriter.Write([]byte(".quit\n"))
+		duck.Proc.StdinWriter.Write([]byte(".quit\n"))
+
+		// close stdin
+		if err := duck.closeStdinAndWait(); err != nil {
+			return err
+		}
 	}
 
 	// kill timer
@@ -264,6 +293,7 @@ func (duck *DuckDb) Close() error {
 	case <-done:
 	case <-timer.C:
 		if duck.Proc.Cmd != nil {
+			g.Debug("killing pid %s", duck.Proc.Cmd.Process.Pid)
 			duck.Proc.Cmd.Process.Kill()
 		}
 	}
@@ -299,25 +329,19 @@ func (r duckDbResult) RowsAffected() (int64, error) {
 	return r.TotalChanges, nil
 }
 
-// startAndSubmitSQL starts the duckdb process if needed and submits a sql query to it
-func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) {
-
-	// Set up the process
-	if !duck.isInteractive {
-		err = duck.Proc.Start()
-		if err != nil {
-			return g.Error(err, "Failed to execute SQL")
-		}
-	}
+// SubmitSQL submits a sql query to duckdb via stdin
+func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	extensionsSQL := duck.getLoadExtensionSQL()
 	secretSQL := duck.getCreateSecretSQL()
 
+	queryID := g.RandSuffix("", 3) // for debugging
+
 	// submit sql to stdin
-	stdinLines := []string{
+	sqlLines := []string{
 		extensionsSQL + ";",
 		secretSQL + ";",
-		g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
+		g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 		".changes on",
 		sql + ";",
 		".changes off",
@@ -325,10 +349,10 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 	}
 
 	if !showChanges {
-		stdinLines = []string{
+		sqlLines = []string{
 			extensionsSQL + ";",
 			secretSQL + ";",
-			g.R("select '{v}' AS marker;", "v", duckDbSOFMarker),
+			g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 			sql + ";",
 			g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
 		}
@@ -342,7 +366,7 @@ func (duck *DuckDb) startAndSubmitSQL(sql string, showChanges bool) (err error) 
 	}
 	env.LogSQL(propsCombined, sql)
 
-	sqls := strings.Join(stdinLines, "\n")
+	sqls := strings.Join(sqlLines, "\n")
 	// g.Warn(sqls)
 
 	_, err = duck.Proc.StdinWriter.Write([]byte(sqls))
@@ -363,7 +387,7 @@ func (duck *DuckDb) closeStdinAndWait() (err error) {
 
 	err = duck.Proc.Wait()
 	if err != nil {
-		return g.Error(err, "Failed to execute SQL")
+		return g.Error(err, "Process errored")
 	}
 
 	return nil
@@ -371,11 +395,17 @@ func (duck *DuckDb) closeStdinAndWait() (err error) {
 
 // ExecContext executes a SQL query with context and returns the result
 func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
-	if duck.GetProp("connected") != "true" {
+	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
 		}
 	}
+
+	// one query at a time
+	duck.Context.Lock()
+	defer duck.Context.Unlock()
+
+	dq := duck.newQuery(ctx)
 
 	result = duckDbResult{}
 
@@ -401,72 +431,92 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 	}
 
 	// start and submit sql
-	duck.Proc.Capture = true
-	err = duck.startAndSubmitSQL(sql, true)
+	err = duck.SubmitSQL(sql, true)
 	if err != nil {
 		return result, g.Error(err, "Failed to submit SQL")
 	}
 
 	// Extract total changes from stdout
-	result, err = duck.waitForExec(ctx)
+	result, err = duck.waitForResult(dq)
 	if err != nil {
 		return result, g.Error(err, "Failed to execute SQL")
-	}
-
-	// close if needed
-	duck.Proc.Capture = false
-	if !duck.isInteractive {
-		err = duck.closeStdinAndWait()
-		if err != nil {
-			if strings.Contains(err.Error(), "exit code = -1") && strings.Contains(err.Error(), duckDbEOFMarker) {
-				err = nil // some weird error, returning exit code -1 with stdout
-			} else {
-				return result, g.Error(err, "Failed to close stdin")
-			}
-		}
 	}
 
 	return result, nil
 }
 
-// waitForExec waits for the execution of a SQL query and returns the result
-func (duck *DuckDb) waitForExec(ctx context.Context) (result sql.Result, err error) {
-	// Extract total changes from stdout
-	var lastLength int
+func (duck *DuckDb) newQuery(ctx context.Context) (query *duckDbQuery) {
+	queryContext := g.NewContext(ctx)
+	stdOutReader, stdOutWriter := io.Pipe() // new pipe
+	duck.query = &duckDbQuery{
+		Context: &queryContext,
+		reader:  stdOutReader,
+		writer:  stdOutWriter,
+	}
+	return duck.query
+}
+
+// waitForResult waits for the execution of a SQL query and returns the result
+func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error) {
+
+	stdOutReaderB := bufio.NewReader(dq.reader)
 
 	// Extract total changes from stdout
 	// This loop continuously reads the output from the DuckDB process
 	// It looks for lines containing "total_changes:" to update the result
 	// and stops when it encounters the EOF marker
+	var line string
 	for {
-		select {
-		case <-ctx.Done():
-			return result, g.Error("sql execution cancelled")
-		default:
-			currentLength := duck.Proc.Stdout.Len()
-			if currentLength > lastLength {
-				output := duck.Proc.Stdout.Bytes()[lastLength:currentLength]
-				lines := strings.Split(string(output), "\n")
-				for _, line := range lines {
-					if strings.Contains(line, "total_changes:") {
-						parts := strings.Fields(line)
-						if len(parts) >= 4 {
-							totalChanges, err := strconv.ParseUint(parts[3], 10, 64)
-							if err == nil {
-								result = duckDbResult{TotalChanges: cast.ToInt64(totalChanges)}
-							}
-						}
-					} else if strings.Contains(line, duckDbEOFMarker) {
-						goto done
+		time.Sleep(10 * time.Millisecond)
+
+		if dq.err != nil {
+			return result, dq.err
+		}
+
+		if dq.done {
+			return result, nil
+		}
+
+		if !dq.started {
+			continue
+		}
+
+		// try peeking
+		_, err := stdOutReaderB.Peek(0)
+		if err != nil {
+			if err == io.EOF {
+				// No more data available, but EOF marker not found yet
+				goto next
+			}
+			return result, g.Error(err, "could not read output from stdout")
+		}
+
+		for {
+			// read all available lines
+			line, err = stdOutReaderB.ReadString('\n')
+			if len(line) == 0 && err != nil {
+				if err == io.EOF {
+					// No more data available, but EOF marker not found yet
+					goto next
+				}
+				return result, g.Error(err, "could not read output from stdout")
+			}
+
+			// g.Warn("line | %s", line)
+			if strings.Contains(line, "total_changes:") {
+				parts := strings.Fields(line)
+				if len(parts) >= 4 {
+					totalChanges, err := strconv.ParseUint(parts[3], 10, 64)
+					if err == nil {
+						result = duckDbResult{TotalChanges: cast.ToInt64(totalChanges)}
 					}
 				}
-				lastLength = currentLength
+			} else if strings.Contains(line, duckDbEOFMarker) {
+				return result, nil
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
+	next:
 	}
-done:
-	return
 }
 
 // Query runs a sql query, returns `Dataset`
@@ -476,9 +526,10 @@ func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data D
 
 // QueryContext runs a sql query with context, returns `Dataset`
 func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
+
 	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
-		return data, g.Error(err, "could not export data")
+		return data, g.Error(err, "could not get datastream")
 	}
 
 	data, err = ds.Collect(0)
@@ -498,7 +549,7 @@ func (duck *DuckDb) Stream(sql string, options ...map[string]interface{}) (ds *D
 
 // StreamContext runs a sql query with context, returns `Datastream`
 func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
-	if duck.GetProp("connected") != "true" {
+	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
 		}
@@ -516,46 +567,25 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		return nil, g.Error(err, "could not get columns")
 	}
 
-	// do not capture stdout, use scanner instead
+	// one query at a time
+	duck.Context.Lock()
+
+	// new datastream
+	ds = NewDatastreamContext(queryCtx.Ctx, columns)
+
 	// Create a pipe for stdout, stderr handling
-	stdOutReader, stdOutWriter := io.Pipe()
-	stderrBuf := &bytes.Buffer{}
-
-	// Set up the scanner to write to the pipe
-	started := false
-	done := false
-	duck.Proc.SetScanner(func(stderr bool, line string) {
-		if done {
-			return
-		} else if strings.Contains(line, duckDbEOFMarker) {
-			stdOutWriter.Close()
-			done = true
-			return
-		}
-
-		if stderr {
-			stderrBuf.WriteString(line + "\n")
-		} else if !started && strings.Contains(line, duckDbSOFMarker) {
-			started = true
-		} else if line != "" && started {
-			_, err := stdOutWriter.Write([]byte(line + "\n"))
-			if err != nil {
-				queryCtx.CaptureErr(g.Error(err, "Failed to write to stdout pipe"))
-			}
-		}
-	})
+	dq := duck.newQuery(queryCtx.Ctx)
 
 	// start and submit sql
-	err = duck.startAndSubmitSQL(sql, false)
+	err = duck.SubmitSQL(sql, false)
 	if err != nil {
+		duck.Context.Unlock() // release lock
 		return nil, g.Error(err, "Failed to submit SQL")
 	}
 
 	// so that lists are treated as TEXT and not JSON
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
-
-	ds = NewDatastreamContext(queryCtx.Ctx, columns)
 
 	if cds, ok := opts["datastream"]; ok {
 		// if provided, use it
@@ -569,33 +599,88 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
 
 	ds.Defer(func() {
-		if !duck.isInteractive {
-			duck.closeStdinAndWait()
-		}
-		duck.Proc.SetScanner(nil)
+		duck.Context.Unlock() // release lock
 	})
 
-	err = ds.ConsumeCsvReader(stdOutReader)
+	err = ds.ConsumeCsvReader(dq.reader)
 	if err != nil {
 		ds.Close()
 		return ds, g.Error(err, "could not read output stream")
 	}
 
-	if errOutS := stderrBuf.String(); strings.Contains(errOutS, "Error: ") {
-		return ds, g.Error(errOutS)
+	if dq.err != nil {
+		return ds, dq.err
 	}
 
 	return
 }
 
-// Import inserts a stream into a table
-// It takes a table name and a Datastream as input, and returns the number of rows imported and any error encountered
-// The function handles the import process by writing data to a temporary CSV file or using stdin,
-// then executing an INSERT statement to load the data into the specified table
-func (duck *DuckDb) Import(tableFName string, ds *Datastream) (count uint64, err error) {
-	defer ds.Close()
+// initScanner is set only once
+func (duck *DuckDb) initScanner() {
 
-	return ds.Count, nil
+	errString := strings.Builder{}
+	var errTimer, eofTimer *time.Timer
+
+	var stdOutWriter *io.PipeWriter
+	resetWriter := func() {
+		if stdOutWriter != nil {
+			stdOutWriter.Close()
+		}
+		stdOutWriter = nil // set as nil until next query start
+		duck.query.done = true
+	}
+
+	duck.Proc.SetScanner(func(stderr bool, line string) {
+		// g.Warn("stderr:%v done:%v | %s", stderr, duck.query.done, line)
+
+		if duck.query == nil || duck.query.done {
+			return
+		}
+
+		select {
+		case <-duck.query.Context.Ctx.Done():
+			resetWriter()
+			return
+		default:
+		}
+
+		if stderr {
+			// the issue is we don't know when the error message ends.
+			// so we have a timer to use as a debouce, to concat the error lines
+			if errTimer != nil {
+				errTimer.Stop() // cancel timer for new one
+			}
+
+			// it can occur that the error outputs right after the EOF marker
+			if eofTimer != nil {
+				eofTimer.Stop()
+				eofTimer = nil
+			}
+
+			errString.WriteString(line)
+			errTimer = time.AfterFunc(25*time.Millisecond, func() {
+				duck.query.err = g.Error(errString.String())
+				errString.Reset()
+				resetWriter() // in case writer is active
+			})
+		} else {
+			if strings.Contains(line, duckDbEOFMarker) {
+				eofTimer = time.AfterFunc(25*time.Millisecond, func() {
+					resetWriter() // since result set ended
+				})
+			} else if strings.Contains(line, duckDbSOFMarker) {
+				stdOutWriter = duck.query.writer
+				duck.query.started = true
+			} else if stdOutWriter != nil {
+				_, err := stdOutWriter.Write([]byte(line + "\n"))
+				if err != nil {
+					duck.query.err = g.Error(err, "Failed to write to stdout pipe")
+					resetWriter() // since we errored
+				}
+			}
+		}
+	})
+
 }
 
 // Quote quotes a column name
@@ -716,62 +801,11 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 	return binPath, nil
 }
 
-// DuckDBTypeToColumnType converts a DuckDB type to a ColumnType
-func DuckDBTypeToColumnType(duckDBType string) ColumnType {
-	// Normalize the input by converting to uppercase and trimming spaces
-	duckDBType = strings.TrimSpace(strings.ToUpper(duckDBType))
-
-	// Extract the base type for types with parameters
-	baseType := strings.Split(duckDBType, "(")[0]
-
-	switch baseType {
-	case "BIGINT", "INT8", "LONG", "UBIGINT":
-		return BigIntType
-	case "BIT", "BITSTRING":
-		return BinaryType
-	case "BLOB", "BYTEA", "BINARY", "VARBINARY":
-		return BinaryType
-	case "BOOLEAN", "BOOL", "LOGICAL":
-		return BoolType
-	case "DATE":
-		return DateType
-	case "DECIMAL", "NUMERIC":
-		return DecimalType
-	case "DOUBLE", "FLOAT8":
-		return FloatType
-	case "FLOAT", "FLOAT4", "REAL":
-		return FloatType
-	case "HUGEINT", "UHUGEINT":
-		return BigIntType
-	case "INTEGER", "INT4", "INT", "SIGNED", "UINTEGER":
-		return IntegerType
-	case "INTERVAL":
-		return StringType // No direct mapping, using StringType
-	case "SMALLINT", "INT2", "SHORT", "USMALLINT":
-		return SmallIntType
-	case "TIME":
-		return TimeType
-	case "TIMESTAMP WITH TIME ZONE":
-		return TimestampzType
-	case "TIMESTAMP":
-		return TimestampType
-	case "TINYINT", "INT1", "UTINYINT":
-		return SmallIntType
-	case "ARRAY", "LIST", "MAP", "STRUCT", "UNION":
-		return JsonType
-	case "UUID":
-		return StringType // No direct mapping, using StringType
-	case "VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING":
-		return StringType
-	default:
-		return StringType // Default to StringType for unknown types
-	}
-}
-
 // Describe returns the columns of a query
 func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	// prevent infinite loop
-	if strings.HasPrefix(query, "describe ") {
+	queryL := strings.TrimSpace(strings.ToLower(query))
+	if strings.HasPrefix(queryL, "describe ") || strings.HasPrefix(queryL, "pragma ") {
 		return columns, nil
 	}
 
@@ -785,40 +819,87 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 
 		col.Name = cast.ToString(rec["column_name"])
 		col.DbType = cast.ToString(rec["column_type"])
-		col.Type = DuckDBTypeToColumnType(cast.ToString(rec["column_type"]))
+		col.Type = NativeTypeToGeneral(col.Name, cast.ToString(rec["column_type"]), dbio.TypeDbDuckDb)
 		col.Position = k + 1
 
 		columns = append(columns, col)
 	}
 
 	if len(columns) == 0 {
-		return nil, g.Error("no columns found")
+		return nil, g.Error("no columns found for: %s", query)
+	} else {
+		g.Trace("duckdb describe got %d columns", len(columns))
 	}
 
 	return
 }
 
-func (duck *DuckDb) MakeScanSelectQuery(scanFunc, uri string, fields []string, limit uint64) (sql string) {
+func (duck *DuckDb) GetScannerFunc(format dbio.FileType) (scanFunc string) {
+
+	switch format {
+	case dbio.FileTypeDelta:
+		scanFunc = "delta_scanner"
+	case dbio.FileTypeIceberg:
+		scanFunc = "iceberg_scanner"
+	case dbio.FileTypeParquet:
+		scanFunc = "parquet_scanner"
+	case dbio.FileTypeCsv:
+		scanFunc = "csv_scanner"
+	}
+
+	return
+}
+
+func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStreamConfig) (sql string) {
+
+	where := ""
+	incrementalWhereCond := "1=1"
+
+	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
+		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
+		where = g.F("where %s", incrementalWhereCond)
+	}
+
+	if format == dbio.FileTypeNone {
+		g.Warn("duck.MakeScanQuery: format is empty, cannot determine stream_scanner")
+	}
+
+	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(format))
+	if fsc.SQL != "" {
+		sql = g.R(
+			g.R(fsc.SQL, "stream_scanner", streamScanner),
+			"incremental_where_cond", incrementalWhereCond,
+			"incremental_value", fsc.IncrementalValue,
+			"uri", uri,
+		)
+
+		if fsc.Limit > 0 {
+			sql = g.F("select * from ( %s ) as t limit %d", sql, fsc.Limit)
+		}
+		return sql
+	}
+
+	fields := fsc.Select
 	if len(fields) == 0 || fields[0] == "*" {
 		fields = []string{"*"}
 	} else {
 		fields = dbio.TypeDbDuckDb.QuoteNames(fields...)
 	}
 
-	templ := dbio.TypeDbDuckDb.GetTemplateValue("core." + scanFunc)
-	if templ == "" {
-		templ = "select {fields} from {scanFunc}('{uri}')"
+	selectStreamScanner := dbio.TypeDbDuckDb.GetTemplateValue("core.select_stream_scanner")
+	if selectStreamScanner == "" {
+		selectStreamScanner = "select {fields} from {stream_scanner} {where}"
 	}
 
-	sql = g.R(
-		templ,
+	sql = strings.TrimSpace(g.R(
+		g.R(selectStreamScanner, "stream_scanner", streamScanner),
 		"fields", strings.Join(fields, ","),
-		"scanFunc", scanFunc,
 		"uri", uri,
-	)
+		"where", where,
+	))
 
-	if limit > 0 {
-		sql += fmt.Sprintf(" limit %d", limit)
+	if fsc.Limit > 0 {
+		sql += fmt.Sprintf(" limit %d", fsc.Limit)
 	}
 
 	return sql

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type ParquetDuckDb struct {
@@ -23,25 +24,26 @@ func NewParquetReaderDuckDb(uri string, props ...string) (*ParquetDuckDb, error)
 	}, nil
 }
 
-func (p *ParquetDuckDb) Columns() (Columns, error) {
-	if len(p.columns) > 0 {
-		return p.columns, nil
+func (r *ParquetDuckDb) Columns() (Columns, error) {
+	if len(r.columns) > 0 {
+		return r.columns, nil
 	}
 
 	// query := fmt.Sprintf("SELECT path_in_schema as column_name, type as column_type, column_id, num_values, total_uncompressed_size FROM parquet_metadata('%s') order by column_id", p.URI)
 
 	var err error
-	p.columns, err = p.Duck.Describe(p.MakeSelectQuery(nil, 0))
+	r.columns, err = r.Duck.Describe(r.MakeQuery(FileStreamConfig{}))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
-	return p.columns, nil
+	return r.columns, nil
 }
 
-func (p *ParquetDuckDb) Close() error {
-	return p.Duck.Close()
+func (r *ParquetDuckDb) Close() error {
+	return r.Duck.Close()
 }
 
-func (p *ParquetDuckDb) MakeSelectQuery(fields []string, limit uint64) string {
-	return p.Duck.MakeScanSelectQuery("parquet_scan", p.URI, fields, limit)
+func (r *ParquetDuckDb) MakeQuery(sc FileStreamConfig) string {
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeParquet, r.URI, sc)
+	return sql
 }

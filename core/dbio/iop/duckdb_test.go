@@ -29,13 +29,14 @@ func TestDuckDb(t *testing.T) {
 		duck := NewDuckDb(context.Background())
 		_, err := duck.Exec("SELECT * FROM non_existent_table")
 
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "non_existent_table")
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "non_existent_table")
+		}
 	})
 
 	t.Run("Stream", func(t *testing.T) {
 
-		duck := NewDuckDb(context.Background(), "path=/tmp/test.duckdb")
+		duck := NewDuckDb(context.Background(), "instance=/tmp/test.duckdb")
 
 		// Create a test table and insert some data
 		_, err := duck.ExecMultiContext(
@@ -72,10 +73,13 @@ func TestDuckDb(t *testing.T) {
 		// Clean up: drop the test table
 		_, err = duck.Exec("DROP TABLE export_test")
 		assert.NoError(t, err)
+
+		err = duck.Close()
+		assert.NoError(t, err)
 	})
 
 	t.Run("Query", func(t *testing.T) {
-		duck := NewDuckDb(context.Background(), "path=/tmp/test.duckdb")
+		duck := NewDuckDb(context.Background(), "instance=/tmp/test.duckdb")
 
 		// Create a test table and insert some data
 		_, err := duck.ExecMultiContext(
@@ -91,7 +95,9 @@ func TestDuckDb(t *testing.T) {
 		assert.NotNil(t, data)
 
 		// Verify the queried data
-		assert.Equal(t, 3, len(data.Rows))
+		if !assert.Equal(t, 3, len(data.Rows)) {
+			return
+		}
 
 		// Check the content of the first row
 		assert.Equal(t, int64(1), data.Rows[0][0])
@@ -111,5 +117,14 @@ func TestDuckDb(t *testing.T) {
 		// Clean up: drop the test table
 		_, err = duck.Exec("DROP TABLE query_test")
 		assert.NoError(t, err)
+
+		// Test Pragma Column
+		data, err = duck.Query("PRAGMA database_list")
+		assert.NoError(t, err)
+
+		assert.Len(t, data.Columns, 3)
+		assert.Contains(t, data.Columns.Names(), "seq")
+		assert.Contains(t, data.Columns.Names(), "name")
+		assert.Contains(t, data.Columns.Names(), "file")
 	})
 }

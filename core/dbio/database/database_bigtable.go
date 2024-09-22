@@ -302,7 +302,7 @@ func (conn *BigTableConn) GetSchemas() (iop.Dataset, error) {
 	return data, nil
 }
 
-func (conn *BigTableConn) GetSchemata(schemaName string, tableNames ...string) (schemata Schemata, err error) {
+func (conn *BigTableConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (schemata Schemata, err error) {
 	schemata = Schemata{
 		Databases: map[string]Database{},
 		conn:      conn,

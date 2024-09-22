@@ -157,14 +157,14 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				defer conn.Rollback()
 			}
 
-			insFields, err := conn.ValidateColumnNames(columns.Names(), batch.Columns.Names(), true)
+			insCols, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}
 
 			insertStatement := conn.GenerateInsertStatement(
 				table.FullName(),
-				insFields,
+				insCols,
 				1,
 			)
 
@@ -272,8 +272,8 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
-
+func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+	fields := cols.Names()
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
 

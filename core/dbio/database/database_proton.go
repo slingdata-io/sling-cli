@@ -150,7 +150,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				defer conn.Rollback()
 			}
 
-			insFields, err := conn.ValidateColumnNames(columns.Names(), batch.Columns.Names(), true)
+			insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}
@@ -268,8 +268,8 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *ProtonConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
-
+func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+	fields := cols.Names()
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
 

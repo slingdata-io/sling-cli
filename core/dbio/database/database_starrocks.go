@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -146,6 +148,20 @@ func (conn *StarRocksConn) OptimizeTable(table *Table, newColumns iop.Columns, i
 	return
 }
 
+// ExecContext runs a sql query with context, returns `error`
+func (conn *StarRocksConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+retry:
+	result, err = conn.BaseConn.ExecContext(ctx, q, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "A schema change operation is in progress") {
+			g.Debug("%s. Retrying in 5 sec.", err.Error())
+			time.Sleep(5 * time.Second)
+			goto retry
+		}
+	}
+	return
+}
+
 // InsertBatchStream inserts a stream into a table in batch
 func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	var columns iop.Columns
@@ -164,7 +180,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		mux.Lock()
 		defer mux.Unlock()
 
-		insFields, err := conn.ValidateColumnNames(columns.Names(), bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
 		if err != nil {
 			return g.Error(err, "columns mismatch")
 		}
@@ -196,7 +212,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		sql := g.R(
 			"insert into {table} ({fields}) values  {values} "+noDebugKey,
 			"table", tableFName,
-			"fields", strings.Join(insFields, ", "),
+			"fields", strings.Join(insCols.Names(), ", "),
 			"values", strings.Join(valuesSlice, ",\n"),
 		)
 		_, err = conn.ExecContext(ds.Context.Ctx, sql)

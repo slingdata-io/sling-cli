@@ -41,26 +41,26 @@ metadata:
     order by schema_name
 
   tables: |
-    select table_name
+    select table_schema as schema_name, table_name, 'false' as is_view
     from information_schema.tables
     where table_type = 'BASE TABLE'
       and table_catalog = ( select current_catalog )
-      and table_schema = '{schema}'
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
     order by table_name
 
   views: |
     select * from (
-      select table_name
+      select table_schema as schema_name, table_name, 'true' as is_view
       from information_schema.tables
       where table_type in ('VIEW', 'FOREIGN')
         and table_catalog = ( select current_catalog )
-        and table_schema = '{schema}'
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
       
       union
 
-      select matviewname as table_name
+      select schemaname as table_schema, matviewname as table_name, 'true' as is_view
       from pg_catalog.pg_matviews
-      where schemaname = '{schema}'
+      {{if .schema -}} where schemaname = '{schema}' {{- end}}
     ) t
     order by table_name
 

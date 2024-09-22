@@ -731,12 +731,10 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 	go func() {
 		defer close(rows)
 		for ds := range df.StreamCh {
+			dsN.Sp.Config = ds.Sp.Config // copy config
 			for batch := range ds.BatchChan {
 				if !dsN.Columns.IsSimilarTo(df.Columns) {
 					dsN.AddColumns(df.Columns, false)
-					// batch.Shape(ds.Columns, true)
-					// g.DebugLow("%s, NewBatch since added", dsN.ID)
-					// time.Sleep(2 * time.Second)
 					dsN.NewBatch(dsN.Columns)
 				}
 
@@ -754,34 +752,6 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 				}
 
 				for row := range batch.Rows {
-
-					// srcRec := batch.Columns.MakeRec(row)
-					// tgtRec := dsN.Columns.MakeRec(shaper.Func(row))
-					// diff := false
-					// for k := range srcRec {
-					// 	if srcRec[k] != tgtRec[k] {
-					// 		sI := lo.IndexOf(batch.Columns.Names(true), strings.ToLower(k))
-					// 		tI := lo.IndexOf(dsN.Columns.Names(true), strings.ToLower(k))
-					// 		g.Warn("Key `%s` is mapped from %d to %d => %#v != %#v", k, sI, tI, srcRec[k], tgtRec[k])
-					// 		diff = true
-					// 	}
-					// }
-					// if diff {
-					// 	g.Info("shaper.SrcColumns = %s", g.Marshal(shaper.SrcColumns.Names()))
-					// 	g.Info("shaper.TgtColumns = %s", g.Marshal(shaper.TgtColumns.Names()))
-					// 	g.Info("shaper.ColMap = %s", g.Marshal(shaper.ColMap))
-					// 	if batch.Columns.IsDifferent(shaper.SrcColumns) {
-					// 		g.Warn("batch0.Columns.IsDifferent(shaper.SrcColumns)")
-					// 	}
-					// 	if dsN.Columns.IsDifferent(shaper.TgtColumns) {
-					// 		g.Warn("ds.Columns.IsDifferent(shaper.TgtColumns")
-					// 	}
-					// }
-					// if ds.CurrentBatch != nil && ds.CurrentBatch.Count < 2 {
-					// 	g.Warn("%s | batch0.Rec = %s", batch0.ID(), g.Marshal(batch0.Columns.MakeRec(row)))
-					// 	g.Warn("%s | batch0.Rec.Shaped = %s", ds.CurrentBatch.ID(), g.Marshal(ds.Columns.MakeRec(shaper(row))))
-					// }
-
 					rows <- shaper.Func(row)
 				}
 				if dsN.CurrentBatch != nil {

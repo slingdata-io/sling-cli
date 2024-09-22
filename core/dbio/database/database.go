@@ -81,7 +81,7 @@ type Connection interface {
 	ExecMulti(sqls ...string) (result sql.Result, err error)
 	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
-	GenerateInsertStatement(tableName string, fields []string, numRows int) string
+	GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string
 	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
 	GetAnalysis(string, map[string]interface{}) (string, error)
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
@@ -94,11 +94,12 @@ type Connection interface {
 	GetIndexes(string) (iop.Dataset, error)
 	GetNativeType(col iop.Column) (nativeType string, err error)
 	GetPrimaryKeys(string) (iop.Dataset, error)
-	GetProp(string) string
+	GetProp(...string) string
 	GetSchemas() (iop.Dataset, error)
-	GetSchemata(schemaName string, tableNames ...string) (Schemata, error)
+	GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error)
 	GetSQLColumns(table Table) (columns iop.Columns, err error)
 	GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error)
+	GetTablesAndViews(string) (iop.Dataset, error)
 	GetTables(string) (iop.Dataset, error)
 	GetTemplateValue(path string) (value string)
 	GetType() dbio.Type
@@ -135,7 +136,7 @@ type Connection interface {
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
-	ValidateColumnNames(tgtColName []string, colNames []string, quote bool) (newColNames []string, err error)
+	ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
@@ -487,11 +488,15 @@ func (conn *BaseConn) Template() dbio.Template {
 }
 
 // GetProp returns the value of a property
-func (conn *BaseConn) GetProp(key string) string {
+func (conn *BaseConn) GetProp(key ...string) string {
 	conn.context.Mux.Lock()
-	val := conn.properties[strings.ToLower(key)]
-	conn.context.Mux.Unlock()
-	return val
+	defer conn.context.Mux.Unlock()
+	for _, k := range key {
+		if val, ok := conn.properties[strings.ToLower(k)]; ok {
+			return val
+		}
+	}
+	return ""
 }
 
 // SetProp sets the value of a property
@@ -1228,7 +1233,7 @@ func (conn *BaseConn) SubmitTemplate(level string, templateMap map[string]string
 	template = strings.TrimSpace(template) + noDebugKey
 	sql, err := conn.ProcessTemplate(level, template, values)
 	if err != nil {
-		err = g.Error("error processing template")
+		err = g.Error(err, "error processing template")
 		return
 	}
 	return conn.Self().Query(sql)
@@ -1278,6 +1283,33 @@ func (conn *BaseConn) CurrentDatabase() (dbName string, err error) {
 func (conn *BaseConn) GetDatabases() (iop.Dataset, error) {
 	// fields: [name]
 	return conn.SubmitTemplate("single", conn.template.Metadata, "databases", g.M())
+}
+
+// GetTablesAndViews returns tables/views for given schema
+func (conn *BaseConn) GetTablesAndViews(schema string) (iop.Dataset, error) {
+	// fields: [table_name]
+	dataTables, err := conn.SubmitTemplate(
+		"single", conn.template.Metadata, "tables",
+		g.M("schema", schema),
+	)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	dataViews, err := conn.SubmitTemplate(
+		"single", conn.template.Metadata, "views",
+		g.M("schema", schema),
+	)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	// combine
+	for _, row := range dataViews.Rows {
+		dataTables.Append(row)
+	}
+
+	return dataTables, nil
 }
 
 // GetTables returns tables for given schema
@@ -1377,36 +1409,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 }
 
 func NativeTypeToGeneral(name, dbType string, conn Connection) (colType iop.ColumnType) {
-	dbType = strings.ToLower(dbType)
-
-	if conn.GetType() == dbio.TypeDbClickhouse {
-		if strings.HasPrefix(dbType, "nullable(") {
-			dbType = strings.ReplaceAll(dbType, "nullable(", "")
-			dbType = strings.TrimSuffix(dbType, ")")
-		}
-	} else if conn.GetType() == dbio.TypeDbProton {
-		if strings.HasPrefix(dbType, "nullable(") {
-			dbType = strings.ReplaceAll(dbType, "nullable(", "")
-			dbType = strings.TrimSuffix(dbType, ")")
-		}
-	} else if conn.GetType() == dbio.TypeDbDuckDb || conn.GetType() == dbio.TypeDbMotherDuck {
-		if strings.HasSuffix(dbType, "[]") {
-			dbType = "list"
-		}
-	}
-
-	dbType = strings.Split(strings.ToLower(dbType), "(")[0]
-	dbType = strings.Split(dbType, "<")[0]
-
-	if matchedType, ok := conn.Template().NativeTypeMap[dbType]; ok {
-		colType = iop.ColumnType(matchedType)
-	} else {
-		if dbType != "" {
-			g.Debug("using text since type '%s' not mapped for col '%s'", dbType, name)
-		}
-		colType = iop.TextType // default as text
-	}
-	return
+	return iop.NativeTypeToGeneral(name, dbType, conn.GetType())
 }
 
 // GetSQLColumns return columns from a sql query result
@@ -1736,7 +1739,7 @@ func (conn *BaseConn) Import(data iop.Dataset, tableName string) error {
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table in current database
-func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Schemata, error) {
+func (conn *BaseConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
 
 	schemata := Schemata{
 		Databases: map[string]Database{},
@@ -1766,17 +1769,24 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		currDatabase = cast.ToString(currDbData.FirstVal())
 	}
 
-	schemaData, err := conn.SubmitTemplate(
-		"single", conn.template.Metadata, "schemata",
-		values,
-	)
-
+	var data iop.Dataset
+	switch level {
+	case SchemataLevelSchema:
+		data, err = conn.Self().GetSchemas()
+	case SchemataLevelTable:
+		data, err = conn.Self().GetTablesAndViews(schemaName)
+	case SchemataLevelColumn:
+		data, err = conn.SubmitTemplate(
+			"single", conn.template.Metadata, "schemata",
+			values,
+		)
+	}
 	if err != nil {
-		return schemata, g.Error(err, "Could not GetSchemata for "+schemaName)
+		return schemata, g.Error(err, "Could not get schemata at %s level", level)
 	}
 
 	schemas := map[string]Schema{}
-	for _, rec := range schemaData.Records() {
+	for _, rec := range data.Records() {
 		schemaName = cast.ToString(rec["schema_name"])
 		tableName := cast.ToString(rec["table_name"])
 		columnName := cast.ToString(rec["column_name"])
@@ -1801,40 +1811,49 @@ func (conn *BaseConn) GetSchemata(schemaName string, tableNames ...string) (Sche
 		}
 
 		schema := Schema{
-			Name:   schemaName,
-			Tables: map[string]Table{},
-		}
-
-		table := Table{
-			Name:     tableName,
-			Schema:   schemaName,
+			Name:     schemaName,
 			Database: currDatabase,
-			IsView:   cast.ToBool(rec["is_view"]),
-			Columns:  iop.Columns{},
-			Dialect:  conn.GetType(),
+			Tables:   map[string]Table{},
 		}
 
 		if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
 			schema = schemas[strings.ToLower(schema.Name)]
 		}
 
-		if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
-			table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+		var table Table
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			table = Table{
+				Name:     tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				IsView:   cast.ToBool(rec["is_view"]),
+				Columns:  iop.Columns{},
+				Dialect:  conn.GetType(),
+			}
+
+			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			}
 		}
 
-		column := iop.Column{
-			Name:     columnName,
-			Type:     iop.ColumnType(conn.template.NativeTypeMap[dataType]),
-			Table:    tableName,
-			Schema:   schemaName,
-			Database: currDatabase,
-			Position: cast.ToInt(schemaData.Sp.ProcessVal(rec["position"])),
-			DbType:   dataType,
+		if level == SchemataLevelColumn {
+			column := iop.Column{
+				Name:     columnName,
+				Type:     NativeTypeToGeneral(columnName, dataType, conn),
+				Table:    tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				Position: cast.ToInt(data.Sp.ProcessVal(rec["position"])),
+				DbType:   dataType,
+			}
+
+			table.Columns = append(table.Columns, column)
 		}
 
-		table.Columns = append(table.Columns, column)
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			schema.Tables[strings.ToLower(tableName)] = table
+		}
 
-		schema.Tables[strings.ToLower(tableName)] = table
 		schemas[strings.ToLower(schema.Name)] = schema
 	}
 
@@ -2032,10 +2051,10 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 
 // ValidateColumnNames verifies that source fields are present in the target table
 // It will return quoted field names as `newColNames`, the same length as `colNames`
-func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []string, quote bool) (newColNames []string, err error) {
+func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error) {
 
 	tgtFields := map[string]string{}
-	for _, colName := range tgtColNames {
+	for _, colName := range tgtCols.Names() {
 		colName = conn.Self().Unquote(colName)
 		if quote {
 			tgtFields[strings.ToLower(colName)] = conn.Self().Quote(colName)
@@ -2046,25 +2065,25 @@ func (conn *BaseConn) ValidateColumnNames(tgtColNames []string, colNames []strin
 
 	mismatches := []string{}
 	for _, colName := range colNames {
-		newColName, ok := tgtFields[strings.ToLower(colName)]
-		if !ok {
+		newCol := tgtCols.GetColumn(colName)
+		if newCol == nil || newCol.Name == "" {
 			// src field is missing in tgt field
 			mismatches = append(mismatches, g.F("source field '%s' is missing in target table", colName))
 			continue
 		}
 		if quote {
-			newColName = conn.Self().Quote(newColName)
+			newCol.Name = conn.Self().Quote(newCol.Name)
 		} else {
-			newColName = conn.Self().Unquote(newColName)
+			newCol.Name = conn.Self().Unquote(newCol.Name)
 		}
-		newColNames = append(newColNames, newColName)
+		newCols = append(newCols, *newCol)
 	}
 
 	if len(mismatches) > 0 {
 		err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
 	}
 
-	g.Trace("insert target fields: " + strings.Join(newColNames, ", "))
+	g.Trace("insert target fields: " + strings.Join(newCols.Names(), ", "))
 
 	return
 }
@@ -2109,8 +2128,9 @@ func (conn *BaseConn) Quote(field string, normalize ...bool) string {
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
-func (conn *BaseConn) GenerateInsertStatement(tableName string, fields []string, numRows int) string {
+func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 
+	fields := cols.Names()
 	values := make([]string, len(fields))
 	qFields := make([]string, len(fields)) // quoted fields
 
@@ -2477,11 +2497,13 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		return
 	}
 
-	pkFields, err = conn.ValidateColumnNames(tgtColumns.Names(), pkFields, true)
+	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields, true)
 	if err != nil {
 		err = g.Error(err, "PK columns mismatch")
 		return
 	}
+
+	pkFields = pkCols.Names()
 	pkFieldMap := map[string]string{}
 	pkEqualFields := []string{}
 	for _, pkField := range pkFields {
@@ -2490,17 +2512,17 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		pkFieldMap[pkField] = ""
 	}
 
-	srcFields, err := conn.ValidateColumnNames(tgtColumns.Names(), srcColumns.Names(), true)
+	srcCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), true)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := srcFields
+	tgtFields := srcCols.Names()
 	setFields := []string{}
 	insertFields := []string{}
 	placeholdFields := []string{}
-	for _, colName := range srcFields {
+	for _, colName := range srcCols.Names() {
 		insertFields = append(insertFields, colName)
 		placeholdFields = append(placeholdFields, g.F("ph.%s", colName))
 		if _, ok := pkFieldMap[colName]; !ok {
@@ -2511,7 +2533,7 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	}
 
 	// cast into the correct type
-	srcFields = conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
+	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
 	exprs = map[string]string{
 		"src_tgt_pk_equal": strings.Join(pkEqualFields, " and "),
@@ -2813,13 +2835,13 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		return
 	}
 
-	// make sure columns exist in table, get common columns into fields
-	fields, err := conn.ValidateColumnNames(tColumns.Names(), columns.Names(), false)
+	// make sure columns exist in table, get common columns into cols
+	cols, err := conn.ValidateColumnNames(tColumns, columns.Names(), false)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
-	fieldsMap := g.ArrMapString(fields, true)
+	fieldsMap := g.ArrMapString(cols.Names(), true)
 	g.Debug("comparing checksums %s", g.Marshal(tColumns.Types()))
 
 	exprs := []string{}
@@ -2925,7 +2947,7 @@ func (conn *BaseConn) Info() (ci ConnInfo) {
 
 func (conn *BaseConn) credsProvided(provider string) bool {
 	if provider == "AWS" {
-		if conn.GetProp("AWS_SECRET_ACCESS_KEY") != "" || conn.GetProp("AWS_ACCESS_KEY_ID") != "" {
+		if conn.GetProp("AWS_SECRET_ACCESS_KEY", "SECRET_ACCESS_KEY") != "" || conn.GetProp("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID") != "" {
 			return true
 		}
 	}

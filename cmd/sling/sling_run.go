@@ -452,6 +452,11 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return g.Error(err, "Error compiling replication config")
 	}
 
+	if len(taskConfigs) == 0 {
+		g.Warn("Did not match any streams. Exiting.")
+		return
+	}
+
 	eG := g.ErrorGroup{}
 	successes := 0
 
@@ -464,20 +469,21 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		streamCnt++
 	}
 
+	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
+
 	counter := 0
 	for _, cfg := range taskConfigs {
 		if interrupted {
 			break
 		}
 
-		counter++
-
-		println()
-
 		if cfg.ReplicationStream.Disabled {
-			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, cfg.StreamName)
+			println()
+			g.Debug("skipping stream %s since it is disabled", cfg.StreamName)
 			continue
 		} else {
+			println()
+			counter++
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
 

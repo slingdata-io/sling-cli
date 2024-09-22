@@ -22,7 +22,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.118
+	github.com/flarco/g v0.1.119
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/gobwas/glob v0.2.3
@@ -41,6 +41,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/nqd/flat v0.1.1
+	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/parquet-go/parquet-go v0.23.0
 	github.com/pkg/sftp v1.12.0
 	github.com/prometheus/client_golang v1.19.0
@@ -52,19 +53,19 @@ require (
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.4.0
-	github.com/sijms/go-ora/v2 v2.8.18
+	github.com/sijms/go-ora/v2 v2.8.20
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.10.0
 	github.com/spf13/cast v1.6.0
 	github.com/stretchr/testify v1.9.0
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.17
-	github.com/trinodb/trino-go-client v0.315.0
+	github.com/trinodb/trino-go-client v0.316.0
 	github.com/xo/dburl v0.3.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	go.mongodb.org/mongo-driver v1.14.0
-	golang.org/x/crypto v0.25.0
+	golang.org/x/crypto v0.26.0
 	golang.org/x/oauth2 v0.21.0
-	golang.org/x/text v0.16.0
+	golang.org/x/text v0.17.0
 	google.golang.org/api v0.187.0
 	gopkg.in/cheggaaa/pb.v2 v2.0.7
 	gopkg.in/yaml.v2 v2.4.0
@@ -197,7 +198,6 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/orcaman/concurrent-map/v2 v2.0.1 // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
@@ -237,9 +237,9 @@ require (
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
-	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/term v0.22.0 // indirect
+	golang.org/x/sync v0.8.0 // indirect
+	golang.org/x/sys v0.23.0 // indirect
+	golang.org/x/term v0.23.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect

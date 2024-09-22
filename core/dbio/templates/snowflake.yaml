@@ -119,10 +119,10 @@ metadata:
     show schemas
 
   tables: |
-    show tables in "{schema}"
+    show tables in {{if .schema -}} schema "{schema}" {{else}} account {{end}}
 
   views: |
-    show views in "{schema}"
+    show views in {{if .schema -}} schema "{schema}" {{else}} account {{end}}
 
   columns: |
     show columns in table "{schema}"."{table}"

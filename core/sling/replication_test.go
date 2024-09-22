@@ -40,14 +40,14 @@ func TestReplicationWildcards(t *testing.T) {
 	type test struct {
 		name     string
 		connName string
-		streams  []string
+		patterns []string
 		expected []string
 	}
 
 	tests := []test{
 		{
 			connName: "sftp",
-			streams: []string{
+			patterns: []string{
 				"/_/analytics/sling/*.yaml",
 			},
 			expected: []string{
@@ -58,7 +58,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "sftp",
-			streams: []string{
+			patterns: []string{
 				"/_/analytics/sling/clickhouse-?????.yaml",
 			},
 			expected: []string{
@@ -67,7 +67,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "aws_s3",
-			streams: []string{
+			patterns: []string{
 				"sling_test/*",
 			},
 			expected: []string{
@@ -79,18 +79,10 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "aws_s3",
-			streams: []string{
+			patterns: []string{
 				"sling_test/**",
 			},
 			expected: []string{
-				"sling_test/delta/",
-				"sling_test/delta/_delta_log/",
-				"sling_test/delta/country=Argentina/",
-				"sling_test/delta/country=China/",
-				"sling_test/delta/country=Germany/",
-				"sling_test/lineitem_iceberg/",
-				"sling_test/lineitem_iceberg/data/",
-				"sling_test/lineitem_iceberg/metadata/",
 				"sling_test/csv/part.01.0001.csv",
 				"sling_test/csv/part.01.0002.csv",
 				"sling_test/csv/part.01.0003.csv",
@@ -102,16 +94,23 @@ func TestReplicationWildcards(t *testing.T) {
 				"sling_test/csv/part.01.0009.csv",
 				"sling_test/csv/part.01.0010.csv",
 				"sling_test/csv/part.01.0011.csv",
+				"sling_test/delta/_delta_log/",
 				"sling_test/delta/_delta_log/00000000000000000000.json",
+				"sling_test/delta/",
+				"sling_test/delta/country=Argentina/",
 				"sling_test/delta/country=Argentina/part-00000-8d0390a3-f797-4265-b9c2-da1c941680a3.c000.snappy.parquet",
+				"sling_test/delta/country=China/",
 				"sling_test/delta/country=China/part-00000-88fba1af-b28d-4303-9c85-9a97be631d40.c000.snappy.parquet",
+				"sling_test/delta/country=Germany/",
 				"sling_test/delta/country=Germany/part-00000-030076e1-5ec9-47c2-830a-1569f823b6ee.c000.snappy.parquet",
 				"sling_test/files/test1k_s3.csv",
 				"sling_test/files/test1k_s3.json",
 				"sling_test/files/test1k_s3.parquet",
-				"sling_test/lineitem_iceberg/README.md",
+				"sling_test/lineitem_iceberg/",
+				"sling_test/lineitem_iceberg/data/",
 				"sling_test/lineitem_iceberg/data/00000-411-0792dcfe-4e25-4ca3-8ada-175286069a47-00001.parquet",
 				"sling_test/lineitem_iceberg/data/00041-414-f3c73457-bbd6-4b92-9c15-17b241171b16-00001.parquet",
+				"sling_test/lineitem_iceberg/metadata/",
 				"sling_test/lineitem_iceberg/metadata/10eaca8a-1e1c-421e-ad6d-b232e5ee23d3-m0.avro",
 				"sling_test/lineitem_iceberg/metadata/10eaca8a-1e1c-421e-ad6d-b232e5ee23d3-m1.avro",
 				"sling_test/lineitem_iceberg/metadata/cf3d0be5-cf70-453d-ad8f-48fdc412e608-m0.avro",
@@ -120,16 +119,18 @@ func TestReplicationWildcards(t *testing.T) {
 				"sling_test/lineitem_iceberg/metadata/v1.metadata.json",
 				"sling_test/lineitem_iceberg/metadata/v2.metadata.json",
 				"sling_test/lineitem_iceberg/metadata/version-hint.text",
+				"sling_test/lineitem_iceberg/README.md",
 			},
 		},
 		{
 			connName: "postgres",
-			streams: []string{
+			patterns: []string{
 				"public.test1k_bigquery*",
 			},
 			expected: []string{
 				"\"public\".\"test1k_bigquery_pg\"",
 				"\"public\".\"test1k_bigquery_pg_vw\"",
+				"\"public\".\"test1k_bigquery_pg_orig\"",
 			},
 		},
 	}
@@ -144,7 +145,7 @@ func TestReplicationWildcards(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test.name = g.F("%s|%s", test.connName, test.streams)
+		test.name = g.F("%s|%s", test.connName, test.patterns)
 
 		t.Run(g.F("%s", test.name), func(t *testing.T) {
 
@@ -156,7 +157,7 @@ func TestReplicationWildcards(t *testing.T) {
 			}
 
 			// Add streams to config
-			for _, streamName := range test.streams {
+			for _, streamName := range test.patterns {
 				config.Streams[streamName] = &ReplicationStreamConfig{}
 			}
 
@@ -167,19 +168,25 @@ func TestReplicationWildcards(t *testing.T) {
 			}
 
 			conn := connsMap[test.connName]
+			wildcards := Wildcards{}
 			if conn.Type.IsFile() {
-				err := config.ProcessWildcardsFile(conn, test.streams)
+				wildcards, err = config.ProcessWildcardsFile(conn, test.patterns)
 				assert.NoError(t, err)
 			} else if conn.Type.IsDb() {
-				err := config.ProcessWildcardsDatabase(conn, test.streams)
+				wildcards, err = config.ProcessWildcardsDatabase(conn, test.patterns)
 				assert.NoError(t, err)
 			} else {
 				assert.Fail(t, "Connection type not supported")
 			}
 
+			streams := []string{}
+			for _, wildcard := range wildcards {
+				streams = append(streams, wildcard.StreamNames...)
+			}
+
 			// assert that the streams are correct
-			assert.Equal(t, len(test.expected), len(config.Streams))
-			for streamName := range config.Streams {
+			assert.Equal(t, len(test.expected), len(streams))
+			for _, streamName := range streams {
 				assert.Contains(t, test.expected, streamName)
 			}
 		})

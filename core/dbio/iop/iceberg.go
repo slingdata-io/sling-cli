@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type IcebergReader struct {
@@ -26,23 +27,24 @@ func NewIcebergReader(uri string, props ...string) (*IcebergReader, error) {
 	}, nil
 }
 
-func (i *IcebergReader) Columns() (Columns, error) {
-	if len(i.columns) > 0 {
-		return i.columns, nil
+func (r *IcebergReader) Columns() (Columns, error) {
+	if len(r.columns) > 0 {
+		return r.columns, nil
 	}
 
 	var err error
-	i.columns, err = i.Duck.Describe(i.MakeSelectQuery(nil, 0))
+	r.columns, err = r.Duck.Describe(r.MakeQuery(FileStreamConfig{}))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
-	return i.columns, nil
+	return r.columns, nil
 }
 
 func (i *IcebergReader) Close() error {
 	return i.Duck.Close()
 }
 
-func (i *IcebergReader) MakeSelectQuery(fields []string, limit uint64) string {
-	return i.Duck.MakeScanSelectQuery("iceberg_scan", i.URI, fields, limit)
+func (r *IcebergReader) MakeQuery(sc FileStreamConfig) string {
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeIceberg, r.URI, sc)
+	return sql
 }

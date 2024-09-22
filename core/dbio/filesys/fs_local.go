@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -96,8 +97,8 @@ func (fs *LocalFileSysClient) GetReader(uri string) (reader io.Reader, err error
 }
 
 // GetDatastream return a datastream for the given path
-func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig) (ds *iop.Datastream, err error) {
-	Cfg := FileStreamConfig{}
+func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConfig) (ds *iop.Datastream, err error) {
+	Cfg := iop.FileStreamConfig{}
 	if len(cfg) > 0 {
 		Cfg = cfg[0]
 	}
@@ -108,10 +109,13 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 		return
 	}
 
-	file, err := os.Open(path)
-	if err != nil {
-		err = g.Error(err, "Unable to open "+path)
-		return nil, err
+	var file *os.File
+	if !Cfg.ShouldUseDuckDB() {
+		file, err = os.Open(path)
+		if err != nil {
+			err = g.Error(err, "Unable to open "+path)
+			return nil, err
+		}
 	}
 
 	ds = iop.NewDatastreamContext(fs.Context().Ctx, nil)
@@ -123,9 +127,8 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 	// set selectFields for pruning at source
 	ds.Columns = iop.NewColumnsFromFields(Cfg.Select...)
 
-	fileFormat := Cfg.Format
-	if fileFormat == FileTypeNone {
-		fileFormat = InferFileFormat(path)
+	if Cfg.Format == dbio.FileTypeNone {
+		Cfg.Format = InferFileFormat(path)
 	}
 
 	go func() {
@@ -141,17 +144,21 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 		defer fs.Context().Wg.Read.Done()
 		fs.Context().Wg.Read.Add()
 
-		g.Debug("reading datastream from %s [format=%s]", path, fileFormat)
+		g.Debug("reading datastream from %s [format=%s]", path, Cfg.Format)
 
 		// no reader for iceberg, delta, duckdb will handle it
-		if g.In(fileFormat, FileTypeIceberg, FileTypeDelta) {
+		if Cfg.ShouldUseDuckDB() {
 			file.Close() // no need to keep the file open
-
-			switch fileFormat {
-			case FileTypeIceberg:
-				err = ds.ConsumeIcebergReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
-			case FileTypeDelta:
-				err = ds.ConsumeDeltaReader("file://"+path, Cfg.Select, cast.ToUint64(Cfg.Limit), fs.Props())
+			Cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
+			switch Cfg.Format {
+			case dbio.FileTypeIceberg:
+				err = ds.ConsumeIcebergReader("file://"+path, Cfg)
+			case dbio.FileTypeDelta:
+				err = ds.ConsumeDeltaReader("file://"+path, Cfg)
+			case dbio.FileTypeParquet:
+				err = ds.ConsumeParquetReaderDuckDb("file://"+path, Cfg)
+			case dbio.FileTypeCsv:
+				err = ds.ConsumeCsvReaderDuckDb("file://"+path, Cfg)
 			}
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", path))
@@ -159,23 +166,23 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...FileStreamConfig)
 			return
 		}
 
-		switch fileFormat {
-		case FileTypeJson, FileTypeJsonLines:
+		switch Cfg.Format {
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReader(bufio.NewReader(file))
-		case FileTypeXml:
+		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(bufio.NewReader(file))
-		case FileTypeParquet:
+		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReaderSeeker(file)
-		case FileTypeAvro:
+		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReaderSeeker(file)
-		case FileTypeSAS:
+		case dbio.FileTypeSAS:
 			err = ds.ConsumeSASReaderSeeker(file)
-		case FileTypeExcel:
+		case dbio.FileTypeExcel:
 			err = ds.ConsumeExcelReaderSeeker(file, fs.properties)
-		case FileTypeCsv:
+		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		default:
-			g.Warn("LocalFileSysClient | File Format not recognized: %s. Using CSV parsing", fileFormat)
+			g.Warn("LocalFileSysClient | File Format not recognized: %s. Using CSV parsing", Cfg.Format)
 			err = ds.ConsumeCsvReader(bufio.NewReader(file))
 		}
 
