@@ -387,8 +387,8 @@ func (t *TaskExecution) Cleanup() {
 	}
 }
 
-// usingCheckpoint means it has an update_key and is incremental mode
-func (t *TaskExecution) usingCheckpoint() bool {
+// isIncrementalWithUpdateKey means it has an update_key and is incremental mode
+func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 

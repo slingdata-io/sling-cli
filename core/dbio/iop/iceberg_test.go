@@ -77,14 +77,14 @@ func testIcebergReader(t *testing.T, i *IcebergReader) {
 		{"l_extendedprice", DecimalType},
 		{"l_discount", DecimalType},
 		{"l_tax", DecimalType},
-		{"l_returnflag", StringType},
-		{"l_linestatus", StringType},
+		{"l_returnflag", TextType},
+		{"l_linestatus", TextType},
 		{"l_shipdate", DateType},
 		{"l_commitdate", DateType},
 		{"l_receiptdate", DateType},
-		{"l_shipinstruct", StringType},
-		{"l_shipmode", StringType},
-		{"l_comment", StringType},
+		{"l_shipinstruct", TextType},
+		{"l_shipmode", TextType},
+		{"l_comment", TextType},
 	}
 
 	if assert.Equal(t, len(expectedColumns), len(columns), "Number of columns should match") {

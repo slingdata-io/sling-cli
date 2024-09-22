@@ -25,7 +25,7 @@ func TestParquetRead1(t *testing.T) {
 func TestParquetWrite1(t *testing.T) {
 	// parquet.Node
 	cols := NewColumns(
-		Column{Name: "col_string", Type: StringType},
+		Column{Name: "col_string", Type: TextType},
 		Column{Name: "col_int", Type: IntegerType},
 		Column{Name: "col_bool", Type: BoolType},
 		Column{Name: "col_float", Type: FloatType},
@@ -338,9 +338,9 @@ func TestParquetDuckDb(t *testing.T) {
 		dataType ColumnType
 	}{
 		{"id", BigIntType},
-		{"first_name", StringType},
-		{"last_name", StringType},
-		{"email", StringType},
+		{"first_name", TextType},
+		{"last_name", TextType},
+		{"email", TextType},
 		{"target", BoolType},
 		{"create_dt", TimestampzType},
 		{"date", TimestampzType},

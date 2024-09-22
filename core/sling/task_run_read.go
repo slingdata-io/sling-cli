@@ -72,7 +72,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		selectFieldsStr = strings.Join(fields, ", ")
 	}
 
-	if t.usingCheckpoint() || t.Config.Mode == BackfillMode {
+	if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -234,6 +234,16 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
 		}
+
+		// set incrementalValue if incremental or backfill
+		if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
+			if cfg.IncrementalVal != nil {
+				fsCfg.IncrementalValue = cfg.IncrementalValStr
+			} else {
+				fsCfg.IncrementalValue = "null"
+			}
+		}
+
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {
 			fsCfg.Format = *ffmt
 		}

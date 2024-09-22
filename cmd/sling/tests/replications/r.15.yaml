@@ -14,16 +14,26 @@ streams:
     update_key: l_commitdate
     mode: '{iceberg_mode}' # if blank, defaults to full-refresh
 
+  # Duckdb has issues with delta via s3
   sling_test/delta:
+    disabled: true
     source_options:
       format: delta
     object: public.sling_test_{stream_file_name}
 
+  # Duckdb has issues with delta via s3
   delta_sql:
+    disabled: true
     sql: select last_name from delta_scan('s3://{source_bucket}/sling_test/delta')
     source_options:
       format: delta
     object: public.sling_test_delta_sql
+
+  iceberg_sql:
+    sql: select l_commitdate from iceberg_scan('s3://{source_bucket}/sling_test/lineitem_iceberg', allow_moved_paths = true)
+    source_options:
+      format: iceberg
+    object: public.sling_test_iceberg_sql
 
   test/parquet/test1.parquet:
     sql: select id, first_name from {stream_scanner} where id != '100'

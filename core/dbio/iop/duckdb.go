@@ -855,10 +855,6 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	where := ""
 	incrementalWhereCond := "1=1"
 
-	if fsc.IncrementalValue == "" {
-		fsc.IncrementalValue = "null"
-	}
-
 	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
 		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
 		where = g.F("where %s", incrementalWhereCond)

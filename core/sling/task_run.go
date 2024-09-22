@@ -359,7 +359,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
-	if t.usingCheckpoint() {
+	if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
@@ -380,7 +380,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
+			if t.isIncrementalWithUpdateKey() && t.Config.IncrementalVal != nil {
 				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
@@ -427,7 +427,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.usingCheckpoint() && t.Config.IncrementalVal != nil {
+			if t.isIncrementalWithUpdateKey() && t.Config.IncrementalVal != nil {
 				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
@@ -513,7 +513,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// get watermark
-	if t.usingCheckpoint() {
+	if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable); err != nil {
 			err = g.Error(err, "Could not get incremental value")
