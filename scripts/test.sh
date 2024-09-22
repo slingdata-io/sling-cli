@@ -17,4 +17,6 @@ go test -v -run 'TestReplication'
 cd -
 
 ## test cli commands
+cd cmd/sling
+cp ../../sling .
 SLING_BIN=./sling go test -v -run TestCLI
