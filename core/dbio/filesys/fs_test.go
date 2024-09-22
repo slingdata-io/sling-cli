@@ -347,14 +347,14 @@ func TestFileSysLocalIceberg(t *testing.T) {
 		{"l_extendedprice", iop.DecimalType},
 		{"l_discount", iop.DecimalType},
 		{"l_tax", iop.DecimalType},
-		{"l_returnflag", iop.StringType},
-		{"l_linestatus", iop.StringType},
+		{"l_returnflag", iop.TextType},
+		{"l_linestatus", iop.TextType},
 		{"l_shipdate", iop.DateType},
 		{"l_commitdate", iop.DateType},
 		{"l_receiptdate", iop.DateType},
-		{"l_shipinstruct", iop.StringType},
-		{"l_shipmode", iop.StringType},
-		{"l_comment", iop.StringType},
+		{"l_shipinstruct", iop.TextType},
+		{"l_shipmode", iop.TextType},
+		{"l_comment", iop.TextType},
 	}
 
 	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
@@ -384,10 +384,10 @@ func TestFileSysLocalDelta(t *testing.T) {
 		name     string
 		dataType iop.ColumnType
 	}{
-		{"first_name", iop.StringType},
-		{"last_name", iop.StringType},
-		{"country", iop.StringType},
-		{"continent", iop.StringType},
+		{"first_name", iop.TextType},
+		{"last_name", iop.TextType},
+		{"country", iop.TextType},
+		{"continent", iop.TextType},
 	}
 
 	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
