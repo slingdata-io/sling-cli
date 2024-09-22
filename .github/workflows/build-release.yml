@@ -73,7 +73,7 @@ jobs:
 
 
   release-brew:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: [self-hosted-mac]
     timeout-minutes: 20
     # runs-on: macos-latest
 
