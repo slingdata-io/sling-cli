@@ -907,10 +907,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			if fileFormat == dbio.FileTypeNone {
 				fileFormat = filesys.InferFileFormat(uri, dbio.FileTypeNone)
 			}
-
-			duck := iop.NewDuckDb(context.Background())
-			streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
-			m["stream_scanner"] = g.R(streamScanner, "uri", uri)
+			if fileFormat == dbio.FileTypeNone {
+				g.Warn("%s: stream format is empty, cannot determine stream_scanner", cfg.StreamName)
+			} else {
+				duck := iop.NewDuckDb(context.Background())
+				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
+				m["stream_scanner"] = g.R(streamScanner, "uri", strings.TrimPrefix(uri, "file://"))
+			}
 		}
 	}
 

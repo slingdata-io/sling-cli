@@ -860,6 +860,10 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		where = g.F("where %s", incrementalWhereCond)
 	}
 
+	if format == dbio.FileTypeNone {
+		g.Warn("duck.MakeScanQuery: format is empty, cannot determine stream_scanner")
+	}
+
 	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(format))
 	if fsc.SQL != "" {
 		sql = g.R(

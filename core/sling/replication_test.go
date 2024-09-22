@@ -40,14 +40,14 @@ func TestReplicationWildcards(t *testing.T) {
 	type test struct {
 		name     string
 		connName string
-		streams  []string
+		patterns []string
 		expected []string
 	}
 
 	tests := []test{
 		{
 			connName: "sftp",
-			streams: []string{
+			patterns: []string{
 				"/_/analytics/sling/*.yaml",
 			},
 			expected: []string{
@@ -58,7 +58,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "sftp",
-			streams: []string{
+			patterns: []string{
 				"/_/analytics/sling/clickhouse-?????.yaml",
 			},
 			expected: []string{
@@ -67,7 +67,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "aws_s3",
-			streams: []string{
+			patterns: []string{
 				"sling_test/*",
 			},
 			expected: []string{
@@ -79,7 +79,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "aws_s3",
-			streams: []string{
+			patterns: []string{
 				"sling_test/**",
 			},
 			expected: []string{
@@ -124,7 +124,7 @@ func TestReplicationWildcards(t *testing.T) {
 		},
 		{
 			connName: "postgres",
-			streams: []string{
+			patterns: []string{
 				"public.test1k_bigquery*",
 			},
 			expected: []string{
@@ -145,7 +145,7 @@ func TestReplicationWildcards(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test.name = g.F("%s|%s", test.connName, test.streams)
+		test.name = g.F("%s|%s", test.connName, test.patterns)
 
 		t.Run(g.F("%s", test.name), func(t *testing.T) {
 
@@ -157,7 +157,7 @@ func TestReplicationWildcards(t *testing.T) {
 			}
 
 			// Add streams to config
-			for _, streamName := range test.streams {
+			for _, streamName := range test.patterns {
 				config.Streams[streamName] = &ReplicationStreamConfig{}
 			}
 
@@ -168,19 +168,25 @@ func TestReplicationWildcards(t *testing.T) {
 			}
 
 			conn := connsMap[test.connName]
+			wildcards := Wildcards{}
 			if conn.Type.IsFile() {
-				err := config.ProcessWildcardsFile(conn, test.streams)
+				wildcards, err = config.ProcessWildcardsFile(conn, test.patterns)
 				assert.NoError(t, err)
 			} else if conn.Type.IsDb() {
-				err := config.ProcessWildcardsDatabase(conn, test.streams)
+				wildcards, err = config.ProcessWildcardsDatabase(conn, test.patterns)
 				assert.NoError(t, err)
 			} else {
 				assert.Fail(t, "Connection type not supported")
 			}
 
+			streams := []string{}
+			for _, wildcard := range wildcards {
+				streams = append(streams, wildcard.StreamNames...)
+			}
+
 			// assert that the streams are correct
-			assert.Equal(t, len(test.expected), len(config.Streams))
-			for streamName := range config.Streams {
+			assert.Equal(t, len(test.expected), len(streams))
+			for _, streamName := range streams {
 				assert.Contains(t, test.expected, streamName)
 			}
 		})

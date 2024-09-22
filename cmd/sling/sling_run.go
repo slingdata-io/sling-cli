@@ -477,14 +477,13 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			break
 		}
 
-		counter++
-
-		println()
-
 		if cfg.ReplicationStream.Disabled {
-			g.Debug("[%d / %d] skipping stream %s since it is disabled", counter, streamCnt, cfg.StreamName)
+			println()
+			g.Debug("skipping stream %s since it is disabled", cfg.StreamName)
 			continue
 		} else {
+			println()
+			counter++
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
 
