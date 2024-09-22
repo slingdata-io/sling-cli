@@ -18,10 +18,6 @@ jobs:
     timeout-minutes: 20
     # runs-on: macos-latest
 
-    defaults:
-      run:
-        working-directory: /tmp
-
     steps:
       - name: Checkout
         uses: actions/checkout@v1
@@ -43,12 +39,7 @@ jobs:
           use_system_python: true
         
       - name: Prep for build
-        run: |
-          # Prep
-          pwd
-          ls -l scripts/ci/
-          cat scripts/ci/prep.mac.sh
-          bash ${{ github.workspace }}/scripts/ci/prep.mac.sh
+        run: bash scripts/ci/prep.mac.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
