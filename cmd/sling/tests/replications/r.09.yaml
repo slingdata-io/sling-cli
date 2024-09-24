@@ -7,8 +7,8 @@ defaults:
   sql: "select *, 'hi' there from {stream_name} limit 10"
 
 streams:
-  public.my_table:
   public.my_table?:
+  public.my_table:
   public.my_table_*:
     columns:
       there: string | value_len = 3

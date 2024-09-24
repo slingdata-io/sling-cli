@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 )
 
 type DeltaReader struct {
@@ -26,23 +27,24 @@ func NewDeltaReader(uri string, props ...string) (*DeltaReader, error) {
 	}, nil
 }
 
-func (d *DeltaReader) Columns() (Columns, error) {
-	if len(d.columns) > 0 {
-		return d.columns, nil
+func (r *DeltaReader) Columns() (Columns, error) {
+	if len(r.columns) > 0 {
+		return r.columns, nil
 	}
 
 	var err error
-	d.columns, err = d.Duck.Describe(d.MakeSelectQuery(nil, 0))
+	r.columns, err = r.Duck.Describe(r.MakeQuery(FileStreamConfig{}))
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
-	return d.columns, nil
+	return r.columns, nil
 }
 
-func (d *DeltaReader) Close() error {
-	return d.Duck.Close()
+func (r *DeltaReader) Close() error {
+	return r.Duck.Close()
 }
 
-func (d *DeltaReader) MakeSelectQuery(fields []string, limit uint64) string {
-	return d.Duck.MakeScanSelectQuery("delta_scan", d.URI, fields, limit)
+func (r *DeltaReader) MakeQuery(sc FileStreamConfig) string {
+	sql := r.Duck.MakeScanQuery(dbio.FileTypeDelta, r.URI, sc)
+	return sql
 }

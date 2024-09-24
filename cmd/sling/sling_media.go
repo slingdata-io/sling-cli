@@ -12,7 +12,7 @@ var SlingMedia = media{}
 
 func (m media) PrintFollowUs() {
 	choices := []string{
-		g.F("%s 👉 %s", color.HiGreenString("Follow Sling's Evolution"), color.HiBlueString("https://twitter.com/SlingDataIO")),
+		g.F("%s 👉 %s", color.HiGreenString("Follow Sling's Evolution"), color.HiBlueString("https://x.com/SlingDataIO")),
 		// g.F("%s%s", color.HiGreenString("Follow Sling's Evolution: "), color.HiBlueString("https://linkedin.com/company/slingdata-io")),
 	}
 	i := g.RandInt(len(choices))

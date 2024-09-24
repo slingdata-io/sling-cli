@@ -241,13 +241,13 @@ func InsertStream(conn Connection, tx *BaseTransaction, tableFName string, ds *i
 		err = g.Error(err, "could not get column list")
 		return
 	}
-	insFields, err := conn.ValidateColumnNames(columns.Names(), ds.Columns.Names(), true)
+	insCols, err := conn.ValidateColumnNames(columns, ds.Columns.Names(), true)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insFields, 1)
+	insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insCols, 1)
 
 	var stmt *sql.Stmt
 	if tx != nil {
@@ -295,14 +295,14 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 		mux.Lock()
 		defer mux.Unlock()
 
-		insFields, err := conn.ValidateColumnNames(columns.Names(), bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
 		if err != nil {
 			err = g.Error(err, "columns mismatch")
 			context.CaptureErr(err)
 			return
 		}
 
-		insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insFields, len(rows))
+		insertTemplate := conn.Self().GenerateInsertStatement(tableFName, insCols, len(rows))
 		// conn.Base().AddLog(insertTemplate)
 		// open statement
 		var stmt *sql.Stmt
@@ -388,14 +388,12 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			// }
 		}
 
-		if conn.GetType() == dbio.TypeDbClickhouse {
+		if g.In(conn.GetType(), dbio.TypeDbClickhouse, dbio.TypeDbProton) {
 			batchSize = 1
-		} else {
-			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
-		}
-
-		if conn.GetType() == dbio.TypeDbProton {
-			batchSize = 1
+		} else if conn.GetType() == dbio.TypeDbSnowflake && strings.Contains(strings.Join(columns.DbTypes(), " "), "VARIANT") {
+			// https://github.com/snowflakedb/gosnowflake/blob/099708d318689634a558f705ccc19b3b7b278972/structured_type_write_test.go#L12
+			// variant binding is not currently supported, so we'll use SELECT and UNION ALL with PARSE_JSON
+			batchSize = 50
 		} else {
 			batchSize = cast.ToInt(conn.GetTemplateValue("variable.batch_values")) / len(columns)
 		}

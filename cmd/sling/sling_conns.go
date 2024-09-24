@@ -3,30 +3,33 @@ package main
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/integrii/flaggy"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
-	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
+)
+
+var (
+	connsDiscover = func(*g.CliSC) error { return g.Error("please use the official build of Sling CLI to use this command") }
+	connsCheck    = func(*g.CliSC) error { return g.Error("please use the official build of Sling CLI to use this command") }
 )
 
 func processConns(c *g.CliSC) (ok bool, err error) {
 	ok = true
 
 	ef := env.LoadSlingEnvFile()
-	ec := connection.EnvConns{EnvFile: &ef}
+	ec := connection.EnvFileConns{EnvFile: &ef}
 	asJSON := os.Getenv("SLING_OUTPUT") == "json"
+
+	entries := connection.GetLocalConns()
 
 	env.SetTelVal("task_start_time", time.Now())
 	defer func() {
@@ -70,8 +73,8 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnExec)))
 
 		name := cast.ToString(c.Vals["name"])
-		conn, ok := ec.GetConnEntry(name)
-		if !ok {
+		conn := entries.Get(name)
+		if conn.Name == "" {
 			return ok, g.Error("did not find connection %s", name)
 		}
 
@@ -154,7 +157,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		}
 
 	case "list":
-		fields, rows := ec.List()
+		fields, rows := entries.List()
 		if asJSON {
 			fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
 		} else {
@@ -164,12 +167,12 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	case "test":
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
-		if conn, ok := ec.GetConnEntry(name); ok {
+		if conn := entries.Get(name); conn.Name != "" {
 			env.SetTelVal("conn_type", conn.Connection.Type.String())
 			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
 		}
 
-		ok, err = ec.Test(name)
+		ok, err = entries.Test(name)
 		if err != nil {
 			err = g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
 		}
@@ -185,99 +188,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 			g.Info("success!") // successfully connected
 		}
 	case "discover":
-		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnDiscover)))
-		name := cast.ToString(c.Vals["name"])
-		conn, ok := ec.GetConnEntry(name)
-		if ok {
-			env.SetTelVal("conn_type", conn.Connection.Type.String())
-		}
+		return ok, connsDiscover(c)
 
-		opt := &connection.DiscoverOptions{
-			Pattern:     cast.ToString(c.Vals["pattern"]),
-			ColumnLevel: cast.ToBool(c.Vals["columns"]),
-			Recursive:   cast.ToBool(c.Vals["recursive"]),
-		}
-
-		files, schemata, err := ec.Discover(name, opt)
-		if err != nil {
-			return ok, g.Error(err, "could not discover %s (See https://docs.slingdata.io/sling-cli/environment)", name)
-		}
-
-		if tables := lo.Values(schemata.Tables()); len(tables) > 0 {
-
-			sort.Slice(tables, func(i, j int) bool {
-				val := func(t database.Table) string {
-					return t.FDQN()
-				}
-				return val(tables[i]) < val(tables[j])
-			})
-
-			if opt.ColumnLevel {
-				columns := iop.Columns(lo.Values(schemata.Columns()))
-				if asJSON {
-					fmt.Println(columns.JSON(true))
-				} else {
-					fmt.Println(columns.PrettyTable(true))
-				}
-			} else {
-				fields := []string{"#", "Database", "Schema", "Name", "Type", "Columns"}
-				rows := lo.Map(tables, func(table database.Table, i int) []any {
-					tableType := lo.Ternary(table.IsView, "view", "table")
-					if table.Dialect.DBNameUpperCase() {
-						tableType = strings.ToUpper(tableType)
-					}
-					return []any{i + 1, table.Database, table.Schema, table.Name, tableType, len(table.Columns)}
-				})
-				if asJSON {
-					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
-				} else {
-					fmt.Println(g.PrettyTable(fields, rows))
-				}
-			}
-		} else if len(files) > 0 {
-			if opt.ColumnLevel {
-				columns := iop.Columns(lo.Values(files.Columns()))
-				if asJSON {
-					fmt.Println(columns.JSON(true))
-				} else {
-					fmt.Println(columns.PrettyTable(true))
-				}
-			} else {
-
-				files.Sort()
-
-				fields := []string{"#", "Name", "Type", "Size", "Last Updated (UTC)"}
-				rows := lo.Map(files, func(file filesys.FileNode, i int) []any {
-					fileType := lo.Ternary(file.IsDir, "directory", "file")
-
-					lastUpdated := "-"
-					if file.Updated > 100 {
-						updated := time.Unix(file.Updated, 0)
-						delta := strings.Split(g.DurationString(time.Since(updated)), " ")[0]
-						lastUpdated = g.F("%s (%s ago)", updated.UTC().Format("2006-01-02 15:04:05"), delta)
-					}
-
-					size := "-"
-					if !file.IsDir || file.Size > 0 {
-						size = humanize.IBytes(file.Size)
-					}
-
-					return []any{i + 1, file.Path(), fileType, size, lastUpdated}
-				})
-
-				if asJSON {
-					fmt.Println(g.Marshal(g.M("fields", fields, "rows", rows)))
-				} else {
-					fmt.Println(g.PrettyTable(fields, rows))
-				}
-
-				if len(files) > 0 && !(opt.Recursive || opt.Pattern != "") {
-					g.Info("Those are non-recursive folder or file names (at the root level). Please use the --pattern flag to list sub-folders, or --recursive")
-				}
-			}
-		} else {
-			g.Info("no result.")
-		}
+	case "check":
+		return ok, connsCheck(c)
 
 	case "":
 		return false, nil

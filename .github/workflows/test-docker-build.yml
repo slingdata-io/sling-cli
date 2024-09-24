@@ -12,36 +12,11 @@ env:
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
 jobs:
-  # test1:
-  #   runs-on: [self-hosted, Linux, ARM64]
-
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 0
-      
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v3
-  #       with:
-  #         go-version: "1.22"
-  #         cache: true
-          
-  #     - name: Build Sling
-  #       run: bash scripts/build.sh
-
-  #     - name: Build Docker
-  #       run: |
-  #         docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:dev-arm64 . 
 
   build-brew:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: [self-hosted-mac]
     timeout-minutes: 20
     # runs-on: macos-latest
-
-    defaults:
-      run:
-        working-directory: /tmp
 
     steps:
       - name: Checkout
@@ -55,16 +30,27 @@ jobs:
           go-version: "1.22"
           cache: false
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
         
+      - name: Prep for build
+        run: bash scripts/ci/prep.mac.sh
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
           version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.mac.yaml
+
+      - name: Post Tests
+        run: |
+          dist/sling_darwin_arm64/sling conns discover local -p '.'
 
   build-scoop:
     runs-on: windows-latest
@@ -81,6 +67,14 @@ jobs:
         with:
           go-version: "1.22"
           cache: true
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.2
@@ -89,10 +83,12 @@ jobs:
             maximum-size: 16GB
             disk-root: "C:"
         
-      - name: Configure private token
+      - name: Prep for build
+        shell: pwsh
         run: |
-          $url = ("https://" + $env:GITHUB_TOKEN + ":x-oauth-basic@github.com/")
-          git config --global url."$url".insteadOf "https://github.com/"
+          $ErrorActionPreference = "Stop"
+
+          .\scripts\ci\prep.win.ps1
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -100,6 +96,11 @@ jobs:
           distribution: goreleaser
           version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.windows.yaml
+
+      - name: Post Tests
+        shell: pwsh
+        run: |
+          .\dist\sling_windows_amd64_v1\sling.exe conns discover local -p '.'
 
   build-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
@@ -116,14 +117,21 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Prep for build
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -131,6 +139,10 @@ jobs:
           distribution: goreleaser
           version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.linux.arm64.yaml
+
+      - name: Post Tests
+        run: |
+          dist/sling_linux_arm64/sling conns discover local -p '.'
 
   build-linux-amd64:
     # runs-on: ubuntu-20.04
@@ -148,14 +160,21 @@ jobs:
         with:
           go-version: "1.22"
           cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v2
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          use_system_python: true
 
       - name: Login docker
         run: |
           echo "$DOCKER_PASSWORD" | docker login -u slingdata --password-stdin
         
-      - name: Configure private token
-        run: |
-          git config --global url."https://${GITHUB_TOKEN}:x-oauth-basic@github.com/".insteadOf "https://github.com/"
+      - name: Prep for build
+        run: bash scripts/ci/prep.linux.sh
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v3
@@ -163,3 +182,7 @@ jobs:
           distribution: goreleaser
           version: 'v1.26.2'
           args: build --clean --skip=validate -f .goreleaser.linux.amd64.yaml
+
+      - name: Post Tests
+        run: |
+          dist/sling_linux_amd64_v1/sling conns discover local -p '.'

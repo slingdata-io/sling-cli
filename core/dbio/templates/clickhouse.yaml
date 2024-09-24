@@ -28,18 +28,18 @@ metadata:
     order by name
     
   tables: |
-    select name as table_name
+    select database as schema_name, name as table_name, 'false' as is_view
     from system.tables
     where engine not in ('View')
-      and database = '{schema}'
-    order by name
+      {{if .schema -}} and database = '{schema}' {{- end}}
+    order by database, name
     
   views: |
-    select name as table_name
+    select database as schema_name, name as table_name, 'true' as is_view
     from system.tables
     where engine = 'View'
-      and database = '{schema}'
-    order by name
+      {{if .schema -}} and database = '{schema}' {{- end}}
+    order by database, name
 
   columns: |
     select name as column_name, type as data_type

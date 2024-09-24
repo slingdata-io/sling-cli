@@ -526,3 +526,55 @@ func (t Type) GetTemplateValue(path string) (value string) {
 
 	return value
 }
+
+type FileType string
+
+const (
+	FileTypeNone      FileType = ""
+	FileTypeCsv       FileType = "csv"
+	FileTypeXml       FileType = "xml"
+	FileTypeExcel     FileType = "xlsx"
+	FileTypeJson      FileType = "json"
+	FileTypeParquet   FileType = "parquet"
+	FileTypeAvro      FileType = "avro"
+	FileTypeSAS       FileType = "sas7bdat"
+	FileTypeJsonLines FileType = "jsonlines"
+	FileTypeIceberg   FileType = "iceberg"
+	FileTypeDelta     FileType = "delta"
+	FileTypeRaw       FileType = "raw"
+)
+
+var AllFileType = []struct {
+	Value  FileType
+	TSName string
+}{
+	{FileTypeNone, "FileTypeNone"},
+	{FileTypeCsv, "FileTypeCsv"},
+	{FileTypeXml, "FileTypeXml"},
+	{FileTypeExcel, "FileTypeExcel"},
+	{FileTypeJson, "FileTypeJson"},
+	{FileTypeParquet, "FileTypeParquet"},
+	{FileTypeAvro, "FileTypeAvro"},
+	{FileTypeSAS, "FileTypeSAS"},
+	{FileTypeJsonLines, "FileTypeJsonLines"},
+	{FileTypeIceberg, "FileTypeIceberg"},
+	{FileTypeDelta, "FileTypeDelta"},
+	{FileTypeRaw, "FileTypeRaw"},
+}
+
+func (ft FileType) Ext() string {
+	switch ft {
+	case FileTypeJsonLines:
+		return ".jsonl"
+	default:
+		return "." + string(ft)
+	}
+}
+
+func (ft FileType) IsJson() bool {
+	switch ft {
+	case FileTypeJson, FileTypeJsonLines:
+		return true
+	}
+	return false
+}

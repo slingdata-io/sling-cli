@@ -366,17 +366,17 @@ func (data *Dataset) Records(lower ...bool) []map[string]interface{} {
 }
 
 // RecordsString return rows of maps or string values
-func (data *Dataset) RecordsString(lower ...bool) []map[string]interface{} {
+func (data *Dataset) RecordsString(lower ...bool) []map[string]string {
 	Lower := true
 	if len(lower) > 0 {
 		Lower = lower[0]
 	}
-	records := make([]map[string]interface{}, len(data.Rows))
+	records := make([]map[string]string, len(data.Rows))
 	for i, row := range data.Rows {
-		rec := map[string]interface{}{}
+		rec := map[string]string{}
 		for j, field := range data.GetFields(Lower) {
 			if row[j] == nil {
-				rec[field] = nil
+				rec[field] = ""
 			} else {
 				rec[field] = cast.ToString(row[j])
 			}

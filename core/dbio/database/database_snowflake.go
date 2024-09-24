@@ -10,7 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/youmark/pkcs8"
 
@@ -62,8 +64,30 @@ func (conn *SnowflakeConn) Init() error {
 		gosnowflake.CustomJSONDecoderEnabled = cast.ToBool(val)
 	}
 
-	if kp := conn.GetProp("private_key_path"); kp != "" {
-		encPK, err := getEncodedPrivateKey(kp, conn.GetProp("private_key_passphrase"))
+	if keyPath := conn.GetProp("private_key_path"); keyPath != "" {
+		if !g.PathExists(keyPath) {
+			return g.Error("private_key_path does not exists (%s)", keyPath)
+		}
+
+		pemBytes, err := os.ReadFile(keyPath)
+		if err != nil {
+			return g.Error(err)
+		}
+
+		conn.SetProp("private_key", string(pemBytes))
+	}
+
+	if pk := conn.GetProp("private_key"); pk != "" {
+		// if provided as file path
+		if g.PathExists(pk) {
+			pemBytes, err := os.ReadFile(pk)
+			if err != nil {
+				return g.Error(err)
+			}
+			pk = string(pemBytes)
+		}
+
+		encPK, err := getEncodedPrivateKey(pk, conn.GetProp("private_key_passphrase"))
 		if err != nil {
 			return g.Error(err, "could not get encoded private key")
 		}
@@ -130,18 +154,8 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 	return err
 }
 
-func getEncodedPrivateKey(keyPath, passphrase string) (epk string, err error) {
-	if !g.PathExists(keyPath) {
-		err = g.Error("private_key_path does not exists (%s)", keyPath)
-		return
-	}
-
-	pemBytes, err := os.ReadFile(keyPath)
-	if err != nil {
-		return "", g.Error(err)
-	}
-
-	block, _ := pem.Decode(pemBytes)
+func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
+	block, _ := pem.Decode([]byte(pemStr))
 	key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(passphrase))
 	if err != nil {
 		return "", g.Error(err, "could not parse key")
@@ -221,10 +235,15 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 			}
 		default:
 			if stage := conn.getOrCreateStage(table.Schema); stage != "" {
-				filePath, err = conn.UnloadViaStage(table)
+				var unloaded int64
+				filePath, unloaded, err = conn.UnloadViaStage(table)
 				if err != nil {
 					err = g.Error(err, "Could not unload to stage.")
 					return
+				} else if unloaded == 0 {
+					// since no rows, return empty dataflow
+					data := iop.NewDataset(columns)
+					return iop.MakeDataFlow(data.Stream())
 				}
 				filePath = "file://" + filePath // add scheme
 			} else {
@@ -258,7 +277,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		return
 	}
 	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
-	df.Defer(func() { filesys.Delete(fs, filePath) })
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(fs, filePath)
+		}
+	})
 
 	return
 }
@@ -266,8 +289,8 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 // CopyToS3 exports a query to an S3 location
 func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) {
 
-	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
-	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID", "ACCESS_KEY_ID")
+	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY", "SECRET_ACCESS_KEY")
 	if AwsID == "" || AwsAccessKey == "" {
 		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' to copy to S3 from snowflake")
 		return
@@ -293,7 +316,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 
 	}
 
-	s3Bucket := conn.GetProp("AWS_BUCKET")
+	s3Bucket := conn.GetProp("AWS_BUCKET", "BUCKET")
 	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArrExclude("url")...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
@@ -490,7 +513,11 @@ func (conn *SnowflakeConn) CopyViaAWS(tableFName string, df *iop.Dataflow) (coun
 		return count, g.Error(err, "Could not Delete: "+s3Path)
 	}
 
-	df.Defer(func() { filesys.Delete(s3Fs, s3Path) }) // cleanup
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(s3Fs, s3Path)
+		}
+	}) // cleanup
 
 	g.Info("writing to s3 for snowflake import")
 	s3Fs.SetProp("null_as", `\N`)
@@ -560,7 +587,11 @@ func (conn *SnowflakeConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (co
 		return count, g.Error(err, "Could not Delete: "+azPath)
 	}
 
-	df.Defer(func() { filesys.Delete(azFs, azPath) }) // cleanup
+	df.Defer(func() {
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
+			filesys.Delete(azFs, azPath)
+		}
+	}) // cleanup
 
 	g.Info("writing to azure for snowflake import")
 	azFs.SetProp("null_as", `\N`)
@@ -600,7 +631,7 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 	return nil
 }
 
-func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err error) {
+func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unloaded int64, err error) {
 
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
@@ -614,9 +645,10 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 	// Write the each stage file to temp file, read to ds
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "get", g.NowFileStr())
 	if err = os.MkdirAll(folderPath, 0777); err != nil {
-		return "", g.Error(err, "could not create temp directory: %s", folderPath)
+		return "", 0, g.Error(err, "could not create temp directory: %s", folderPath)
 	}
 
+	unloadedRows := atomic.Int64{}
 	unload := func(sql string, stagePartPath string) {
 
 		defer context.Wg.Write.Done()
@@ -627,11 +659,15 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 			"stage_path", stagePartPath,
 		)
 
-		_, err = conn.Query(unloadSQL)
+		data, err := conn.Query(unloadSQL)
 		g.LogError(err)
 		if err != nil {
 			err = g.Error(err, "SQL Error for %s", stagePartPath)
 			context.CaptureErr(err)
+		}
+
+		if len(data.Rows) > 0 && len(data.Columns) > 0 {
+			unloadedRows.Add(cast.ToInt64(data.Rows[0][0]))
 		}
 
 	}
@@ -651,7 +687,11 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		return
 	}
 
-	g.Debug("Unloaded to %s", stageFolderPath)
+	g.Debug("Unloaded %d rows to %s", unloadedRows.Load(), stageFolderPath)
+
+	if unloadedRows.Load() == 0 {
+		return "", 0, nil
+	}
 
 	// get file paths
 	data, err := conn.Query("LIST " + stageFolderPath)
@@ -670,7 +710,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, err
 		return
 	}
 
-	return folderPath, context.Err()
+	return folderPath, unloadedRows.Load(), context.Err()
 }
 
 // CopyViaStage uses the Snowflake COPY INTO Table command
@@ -698,7 +738,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", g.NowFileStr())
 
 	// delete folder when done
-	df.Defer(func() { os.RemoveAll(folderPath) })
+	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 	go func() {
@@ -980,24 +1020,114 @@ func (conn *SnowflakeConn) GetSchemas() (data iop.Dataset, err error) {
 
 // GetTables returns tables
 func (conn *SnowflakeConn) GetTables(schema string) (data iop.Dataset, err error) {
-	// fields: [table_name]
+	// fields: [schema_name, table_name]
 	data1, err := conn.BaseConn.GetTables(schema)
 	if err != nil {
 		return data1, err
 	}
+	data = data1.Pick("schema_name", "name")
+	data.Columns[0].Name = "SCHEMA_NAME"
+	data.Columns[1].Name = "TABLE_NAME"
 
-	return data1.Pick("name"), nil
+	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
+
+	for i := range data.Rows {
+		data.Rows[i] = append(data.Rows[i], false)
+	}
+
+	return data, nil
 }
 
 // GetTables returns tables
 func (conn *SnowflakeConn) GetViews(schema string) (data iop.Dataset, err error) {
-	// fields: [table_name]
+	// fields: [schema_name, table_name]
 	data1, err := conn.BaseConn.GetViews(schema)
 	if err != nil {
 		return data1, err
 	}
 
-	return data1.Pick("table_name"), nil
+	data = data1.Pick("schema_name", "name")
+	data.Columns[0].Name = "SCHEMA_NAME"
+	data.Columns[1].Name = "TABLE_NAME"
+
+	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
+
+	for i := range data.Rows {
+		data.Rows[i] = append(data.Rows[i], true)
+	}
+
+	return data, nil
+}
+
+// GetTablesAndViews returns tables/views for given schema
+func (conn *SnowflakeConn) GetTablesAndViews(schema string) (iop.Dataset, error) {
+	// fields: [table_name]
+	dataTables, err := conn.GetTables(schema)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	dataViews, err := conn.GetViews(schema)
+	if err != nil {
+		return iop.Dataset{}, err
+	}
+
+	// combine
+	for _, row := range dataViews.Rows {
+		dataTables.Append(row)
+	}
+
+	return dataTables, nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+
+	values := make([]string, len(cols))
+	qFields := make([]string, len(cols)) // quoted fields
+
+	hasVariant := false
+	for _, col := range cols {
+		if col.DbType == "VARIANT" {
+			hasVariant = true
+		}
+	}
+
+	valuesStr := ""
+	c := 0
+	for n := 0; n < numRows; n++ {
+		for i, col := range cols {
+			c++
+			values[i] = conn.bindVar(i+1, col.Name, n, c)
+			qFields[i] = conn.Self().Quote(col.Name)
+			if col.DbType == "VARIANT" {
+				values[i] = "parse_json(" + values[i] + ")"
+			}
+		}
+		if hasVariant {
+			// use SELECT & UNION ALL when there is a variant column
+			// since binding variants is not supported
+			valuesStr += fmt.Sprintf("select %s union all\n", strings.Join(values, ", "))
+		} else {
+			valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
+		}
+	}
+
+	template := lo.Ternary(
+		hasVariant,
+		"insert into {table} ({fields})  {values}",
+		"insert into {table} ({fields}) values  {values}",
+	)
+
+	statement := g.R(
+		template,
+		"table", tableName,
+		"fields", strings.Join(qFields, ", "),
+		"values", strings.TrimSuffix(strings.TrimSuffix(valuesStr, ","), "union all\n"),
+	)
+
+	g.Trace("insert statement: "+strings.Split(statement, ") values  ")[0]+")"+" x %d", numRows)
+	return statement
 }
 
 // CastColumnForSelect casts to the correct target column type

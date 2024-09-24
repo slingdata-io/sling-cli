@@ -7,6 +7,10 @@ core:
   insert_option: ""
   modify_column: 'alter {column} type {type}'
 
+  iceberg_scan: select {fields} from iceberg_scan('{uri}', allow_moved_paths = true) {where}
+  delta_scan: select {fields} from delta_scan('{uri}') {where}
+  parquet_scan: select {fields} from parquet_scan('{uri}') {where}
+
 
 metadata:
   databases: PRAGMA database_list
@@ -19,16 +23,19 @@ metadata:
     order by schema_name
 
   tables: |
-    select table_name
+    select table_schema as schema_name, table_name, 'false' as is_view
     from information_schema.tables
     where table_type = 'BASE TABLE'
-    order by table_name
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
 
 
   views: |
-    select table_name
+    select table_schema as schema_name, table_name, 'true' as is_view
     from information_schema.tables
     where table_type in ('VIEW')
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_schema, table_name
 
   columns: |
     select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
@@ -141,3 +148,5 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000-07:00'

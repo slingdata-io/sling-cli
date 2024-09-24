@@ -20,14 +20,16 @@ metadata:
     order by name
   
   tables: |
-    select name as table_name
+    select '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_name, name as table_name, 'false' as is_view
     from {{if .schema -}} {schema}. {{- end}}sqlite_master
     where type='table'
+    order by schema_name, table_name
 
   views: |
-    select name as table_name
+    select '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_name, name as table_name, 'true' as is_view
     from {{if .schema -}} {schema}. {{- end}}sqlite_master
     where type='view'
+    order by schema_name, table_name
 
   columns: |
     select name as column_name, type as data_type

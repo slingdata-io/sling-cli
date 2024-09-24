@@ -72,7 +72,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		selectFieldsStr = strings.Join(fields, ", ")
 	}
 
-	if t.usingCheckpoint() || t.Config.Mode == BackfillMode {
+	if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -85,16 +85,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 		// select only records that have been modified after last max value
 		if cfg.IncrementalVal != nil {
-			// if primary key is defined, use greater than or equal
-			// in case that many timestamp values are the same and
-			// IncrementalVal has been truncated in target database system
-			greaterThan := lo.Ternary(t.Config.Source.HasPrimaryKey(), ">=", ">")
-
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"value", cfg.IncrementalValStr,
-				"gt", greaterThan,
+				"gt", ">",
 			)
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}
@@ -232,7 +227,23 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 
-		fsCfg := filesys.FileStreamConfig{Select: cfg.Source.Select, Limit: cfg.Source.Limit()}
+		fsCfg := iop.FileStreamConfig{
+			Select:           cfg.Source.Select,
+			Limit:            cfg.Source.Limit(),
+			SQL:              cfg.Source.SQL,
+			IncrementalKey:   cfg.Source.UpdateKey,
+			IncrementalValue: cfg.IncrementalValStr,
+		}
+
+		// set incrementalValue if incremental or backfill
+		if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
+			if cfg.IncrementalVal != nil {
+				fsCfg.IncrementalValue = cfg.IncrementalValStr
+			} else {
+				fsCfg.IncrementalValue = "null"
+			}
+		}
+
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {
 			fsCfg.Format = *ffmt
 		}

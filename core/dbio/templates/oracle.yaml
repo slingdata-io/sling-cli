@@ -93,16 +93,16 @@ metadata:
     order by username
   
   tables: |
-    select table_name
+    select owner as schema_name, table_name, 'false' as is_view
     from sys.all_tables
-    where owner = '{schema}'
-    order by table_name
+    {{if .schema -}} where owner = '{schema}' {{- end}}
+    order by owner, table_name
     
   views: |
-    select view_name as table_name
+    select owner as schema_name, view_name as table_name, 'true' as is_view
     from sys.all_views
-    where owner = '{schema}'
-    order by view_name
+    {{if .schema -}} where owner = '{schema}' {{- end}}
+    order by owner, view_name
 
   columns: |
     select column_name, data_type, coalesce(data_precision, data_length) as precision, data_scale as scale

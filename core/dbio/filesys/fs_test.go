@@ -36,7 +36,13 @@ func TestFileSysLocalCsv(t *testing.T) {
 
 	paths, err = fs.ListRecursive("test/test1/csv/*.csv")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.csv")
+
+	paths, err = fs.ListRecursive("test/test1/csv/test?.?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), "file://test/test1/csv/test1.1.csv")
 
 	// Test Delete, Write, Read
 	testPath := "test/fs.test"
@@ -137,7 +143,7 @@ func TestFileSysLocalFormat(t *testing.T) {
 		"10:00:00", // timez_type
 	})
 
-	for _, format := range []FileType{FileTypeJson, FileTypeJsonLines, FileTypeCsv, FileTypeParquet} {
+	for _, format := range []dbio.FileType{dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeCsv, dbio.FileTypeParquet} {
 		if t.Failed() {
 			break
 		}
@@ -322,7 +328,7 @@ func TestFileSysLocalIceberg(t *testing.T) {
 
 	// Test reading Iceberg metadata
 	path := "test/lineitem_iceberg"
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeIceberg})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Format: dbio.FileTypeIceberg})
 	assert.NoError(t, err)
 
 	data, err := df.Collect()
@@ -341,14 +347,14 @@ func TestFileSysLocalIceberg(t *testing.T) {
 		{"l_extendedprice", iop.DecimalType},
 		{"l_discount", iop.DecimalType},
 		{"l_tax", iop.DecimalType},
-		{"l_returnflag", iop.StringType},
-		{"l_linestatus", iop.StringType},
+		{"l_returnflag", iop.TextType},
+		{"l_linestatus", iop.TextType},
 		{"l_shipdate", iop.DateType},
 		{"l_commitdate", iop.DateType},
 		{"l_receiptdate", iop.DateType},
-		{"l_shipinstruct", iop.StringType},
-		{"l_shipmode", iop.StringType},
-		{"l_comment", iop.StringType},
+		{"l_shipinstruct", iop.TextType},
+		{"l_shipmode", iop.TextType},
+		{"l_comment", iop.TextType},
 	}
 
 	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
@@ -367,7 +373,7 @@ func TestFileSysLocalDelta(t *testing.T) {
 
 	// Test reading Iceberg metadata
 	path := "test/delta"
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Format: FileTypeDelta})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Format: dbio.FileTypeDelta})
 	assert.NoError(t, err)
 
 	data, err := df.Collect()
@@ -378,10 +384,10 @@ func TestFileSysLocalDelta(t *testing.T) {
 		name     string
 		dataType iop.ColumnType
 	}{
-		{"first_name", iop.StringType},
-		{"last_name", iop.StringType},
-		{"country", iop.StringType},
-		{"continent", iop.StringType},
+		{"first_name", iop.TextType},
+		{"last_name", iop.TextType},
+		{"country", iop.TextType},
+		{"continent", iop.TextType},
 	}
 
 	if assert.Equal(t, len(expectedColumns), len(data.Columns), "Number of columns should match") {
@@ -800,7 +806,7 @@ func TestFileSysLarge(t *testing.T) {
 
 	return
 
-	df, err := fs.ReadDataflow(path, FileStreamConfig{Limit: 10000})
+	df, err := fs.ReadDataflow(path, iop.FileStreamConfig{Limit: 10000})
 	assert.NoError(t, err)
 
 	for ds := range df.StreamCh {
@@ -837,7 +843,16 @@ func TestFileSysS3(t *testing.T) {
 
 	paths, err = fs.ListRecursive("s3://ocral-data-1/test/*.test")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 
 	paths, err = fs.ListRecursive("test")
 	assert.NoError(t, err)
@@ -886,7 +901,7 @@ func TestFileSysS3(t *testing.T) {
 
 	// eventual consistency
 	time.Sleep(2 * time.Second) // wait to s3 files to write on AWS side
-	df3, err := fs.ReadDataflow(writeFolderPath, FileStreamConfig{Limit: 1})
+	df3, err := fs.ReadDataflow(writeFolderPath, iop.FileStreamConfig{Limit: 1})
 	assert.NoError(t, err)
 
 	data2, err := iop.MergeDataflow(df3).Collect(int(df3.Limit))
@@ -935,6 +950,14 @@ func TestFileSysAzure(t *testing.T) {
 	paths, err = fs.ListRecursive("test/*1")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 
 	assert.Equal(t, testString, string(testBytes))
 	err = Delete(fs, testPath)
@@ -1010,6 +1033,14 @@ func TestFileSysGoogle(t *testing.T) {
 	paths, err := fs.ListRecursive("gs://flarco_us_bucket/test/*1")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive("sling_test/csv/*.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 11)
+
+	paths, err = fs.ListRecursive("sling_test/csv/part.??.001?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 2)
 
 	paths, err = fs.ListRecursive("test/*1")
 	assert.NoError(t, err)
@@ -1113,7 +1144,17 @@ func TestFileSysSftp(t *testing.T) {
 
 	paths, err = fs.ListRecursive(root + "/tmp/test/*1")
 	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/test?")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/tmp/test/test??")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 0)
 
 	paths, err = fs.ListRecursive("tmp/test")
 	assert.NoError(t, err)
@@ -1217,6 +1258,15 @@ func TestFileSysFtp(t *testing.T) {
 	paths, err = fs.ListRecursive(root + "/test/*.csv")
 	assert.NoError(t, err)
 	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/test?.csv")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 1)
+	assert.Contains(t, paths.URIs(), testPath)
+
+	paths, err = fs.ListRecursive(root + "/test/test??")
+	assert.NoError(t, err)
+	assert.Len(t, paths.URIs(), 0)
 
 	paths, err = fs.ListRecursive(root + "/test/*.1csv")
 	assert.NoError(t, err)

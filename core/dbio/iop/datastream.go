@@ -23,6 +23,7 @@ import (
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/segmentio/ksuid"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"golang.org/x/text/transform"
 
@@ -71,6 +72,20 @@ type schemaChg struct {
 	ChangedType  ColumnType
 	Added        bool
 	AddedCols    Columns
+}
+
+type FileStreamConfig struct {
+	Limit            int               `json:"limit"`
+	Select           []string          `json:"select"`
+	SQL              string            `json:"sql"`
+	Format           dbio.FileType     `json:"format"`
+	IncrementalKey   string            `json:"incremental_key"`
+	IncrementalValue string            `json:"incremental_value"`
+	Props            map[string]string `json:"props"`
+}
+
+func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
+	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
 }
 
 type KeyValue struct {
@@ -1318,10 +1333,10 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	if err == io.EOF {
 		if ds.Metadata.StreamURL.Value != nil {
 			g.Debug("csv stream provided is empty (%s)", ds.Metadata.StreamURL.Value)
+		} else {
+			g.Trace("csv stream is empty for %s", ds.ID)
 		}
-		ds.SetReady()
-		ds.Close()
-		return nil
+		err = nil
 	} else if err != nil {
 		err = g.Error(err, "could not parse header line")
 		ds.Context.CaptureErr(err)
@@ -1428,60 +1443,83 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig) (err error) {
 
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
-	p, err := NewParquetReaderDuckDb(uri, props...)
+	props := g.MapToKVArr(sc.Props)
+	r, err := NewParquetReaderDuckDb(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create ParquetDuckDb")
 	}
 
-	ds, err = p.Duck.Stream(p.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := r.MakeQuery(sc)
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
 
 	ds.Inferred = true
-	ds.Defer(func() { p.Close() })
+	ds.Defer(func() { r.Close() })
 
 	return
 }
 
 // ConsumeIcebergReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeIcebergReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
-
-	i, err := NewIcebergReader(uri, props...)
+func (ds *Datastream) ConsumeIcebergReader(uri string, sc FileStreamConfig) (err error) {
+	props := g.MapToKVArr(sc.Props)
+	r, err := NewIcebergReader(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create IcebergDuckDb")
 	}
 
-	ds, err = i.Duck.Stream(i.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := r.MakeQuery(sc)
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read iceberg rows")
 	}
 
-	ds.Defer(func() { i.Close() })
+	ds.Defer(func() { r.Close() })
 
 	return
 }
 
 // ConsumeDeltaReader uses the provided reader to stream rows
-func (ds *Datastream) ConsumeDeltaReader(uri string, fields []string, limit uint64, fsProps map[string]string) (err error) {
+func (ds *Datastream) ConsumeDeltaReader(uri string, sc FileStreamConfig) (err error) {
 
-	props := g.MapToKVArr(map[string]string{"fs_props": g.Marshal(fsProps)})
-	d, err := NewDeltaReader(uri, props...)
+	props := g.MapToKVArr(sc.Props)
+	r, err := NewDeltaReader(uri, props...)
 	if err != nil {
 		return g.Error(err, "could not create DeltaReader")
 	}
 
-	ds, err = d.Duck.Stream(d.MakeSelectQuery(fields, limit), g.M("datastream", ds))
+	sql := r.MakeQuery(sc)
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
 	if err != nil {
 		return g.Error(err, "could not read delta rows")
 	}
 
 	ds.Inferred = true
-	ds.Defer(func() { d.Close() })
+	ds.Defer(func() { r.Close() })
+
+	return
+}
+
+// ConsumeCsvReaderDuckDb uses the provided reader to stream rows
+func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (err error) {
+
+	props := g.MapToKVArr(sc.Props)
+	r, err := NewCsvReaderDuckDb(uri, ds.config, props...)
+	if err != nil {
+		return g.Error(err, "could not create CsvReaderDuckDb")
+	}
+
+	sql := r.MakeQuery(sc)
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	if err != nil {
+		return g.Error(err, "could not read csv rows")
+	}
+
+	ds.Inferred = true
+	ds.Defer(func() { r.Close() })
 
 	return
 }

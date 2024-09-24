@@ -61,8 +61,52 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 		return connURL
 	}
 
-	// add parseTime
-	u.Query().Add("parseTime", "true")
+	// param keys from https://github.com/go-sql-driver/mysql?tab=readme-ov-file#parameters
+	paramKeyMapping := map[string]string{
+		"allow_all_files":             "allowAllFiles",
+		"allow_cleartext_passwords":   "allowCleartextPasswords",
+		"allow_fallback_to_plaintext": "allowFallbackToPlaintext",
+		"allow_native_passwords":      "allowNativePasswords",
+		"allow_old_passwords":         "allowOldPasswords",
+		"charset":                     "charset",
+		"check_conn_liveness":         "checkConnLiveness",
+		"collation":                   "collation",
+		"client_found_rows":           "clientFoundRows",
+		"columns_with_alias":          "columnsWithAlias",
+		"interpolate_params":          "interpolateParams",
+		"loc":                         "loc",
+		"time_truncate":               "timeTruncate",
+		"max_allowed_packet":          "maxAllowedPacket",
+		"multi_statements":            "multiStatements",
+		"parse_time":                  "parseTime",
+		"read_timeout":                "readTimeout",
+		"reject_read_only":            "rejectReadOnly",
+		"server_pub_key":              "serverPubKey",
+		"timeout":                     "timeout",
+		"tls":                         "tls",
+		"write_timeout":               "writeTimeout",
+		"connection_attributes":       "connectionAttributes",
+	}
+
+	query := u.Query()
+	for key, libKey := range paramKeyMapping {
+		if val := conn.GetProp(key); val != "" {
+			query.Set(libKey, val)
+		}
+		if libKey != key {
+			if val := conn.GetProp(libKey); val != "" {
+				query.Set(libKey, val)
+			}
+		}
+	}
+
+	// reconstruct the url
+	u.RawQuery = query.Encode()
+	u, err = dburl.Parse(u.String())
+	if err != nil {
+		g.LogError(err, "could not parse MySQL URL")
+		return connURL
+	}
 
 	return u.DSN
 }
