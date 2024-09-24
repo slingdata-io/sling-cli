@@ -307,14 +307,8 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		return
 	}
 
+	// proton does not support upsert with delete
 	sqlTempl := `
-	ALTER STREAM {tgt_table}
-	DELETE where ({pk_fields}) in (
-			select {pk_fields}
-			from table({src_table}) src
-	)
-	;
-
 	insert into {tgt_table}
 		({insert_fields})
 	select {src_fields}
