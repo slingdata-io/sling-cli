@@ -1,0 +1,9 @@
+source: oracle
+target: local
+
+defaults:
+  mode: full-refresh
+
+streams:
+  system.TEST1K_ORACLE_SQLLDR:
+    object: /tmp/test.csv

@@ -445,7 +445,7 @@ func (cols Columns) MakeShaper(tgtColumns Columns) (shaper *Shaper, err error) {
 	}
 
 	// determine diff, and match order of target columns
-	tgtColNames := tgtColumns.Names()
+	tgtColNames := tgtColumns.Names(true)
 	diffCols := len(tgtColumns) != len(srcColumns)
 	colMap := map[int]int{}
 	for s, col := range srcColumns {

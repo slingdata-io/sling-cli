@@ -741,6 +741,8 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 				shaper, err := batch.Columns.MakeShaper(dsN.Columns)
 				if err != nil {
 					dsN.Context.CaptureErr(g.Error(err, "could not MakeShaper"))
+					dsN.Close()
+					return
 				}
 				if shaper == nil {
 					shaper = &Shaper{
@@ -766,6 +768,7 @@ func MergeDataflow(df *Dataflow) (dsN *Datastream) {
 	err := dsN.Start()
 	if err != nil {
 		df.Context.CaptureErr(err)
+		dsN.Close()
 	}
 
 	return dsN
