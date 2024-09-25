@@ -72,7 +72,7 @@ func (conn *ProtonConn) NewTransaction(ctx context.Context, options ...*sql.TxOp
 	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
 	conn.tx = Tx
 
-	// CH does not support transactions at the moment
+	// ProtonDB does not support transactions at the moment
 	// Tx := &BlankTransaction{Conn: conn.Self(), context: &context}
 
 	return Tx, nil
@@ -265,6 +265,27 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	g.Debug("%d ROWS COPIED", count)
 	// time.Sleep(100 * time.Millisecond)
 	return count, nil
+}
+
+// ExecContext runs a sql query with context, returns `error`
+func (conn *ProtonConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+	const maxRetries = 3
+	retries := 0
+
+	for {
+		result, err = conn.BaseConn.ExecContext(ctx, q, args...)
+		if err == nil {
+			return
+		}
+
+		retries++
+		if retries >= maxRetries {
+			return
+		}
+
+		g.Info("Error (%s). Sleep 5 sec and retry", err.Error())
+		time.Sleep(5 * time.Second)
+	}
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
