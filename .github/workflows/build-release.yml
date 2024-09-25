@@ -105,7 +105,7 @@ jobs:
         with:
           distribution: goreleaser
           version: 'v1.26.2'
-          args: release --clean --skip=validate -f .goreleaser.mac.yaml
+          args: release --clean --skip=validate -f .goreleaser.mac.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         run: |
@@ -155,7 +155,7 @@ jobs:
         with:
           distribution: goreleaser
           version: 'v1.26.2'
-          args: release --clean --skip=validate -f .goreleaser.windows.yaml
+          args: release --clean --skip=validate -f .goreleaser.windows.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         shell: pwsh
@@ -198,7 +198,7 @@ jobs:
         with:
           distribution: goreleaser
           version: 'v1.26.2'
-          args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml
+          args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         run: |
@@ -253,7 +253,7 @@ jobs:
         with:
           distribution: goreleaser
           version: 'v1.26.2'
-          args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml
+          args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         run: |

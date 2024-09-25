@@ -47,6 +47,7 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 46	Run sling with replication configuration 15 incremental	>0		1		incremental	ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
 47	Run sling with replication configuration 14			5			sling run -r cmd/sling/tests/replications/r.14.yaml
 48	Run sling with replication configuration 14	0					sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows
-49	Run sling with task configuration	24					sling run -c cmd/sling/tests/task.yaml
-50	Run sling with Parquet source	1018					sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
-51	Run sling with empty input	0				execution succeeded	echo '' | sling run --stdout
+49	Run sling with replication configuration 16	1000		1			sling run -r cmd/sling/tests/replications/r.16.yaml
+50	Run sling with task configuration	24					sling run -c cmd/sling/tests/task.yaml
+51	Run sling with Parquet source	1018					sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
+52	Run sling with empty input	0				execution succeeded	echo '' | sling run --stdout
