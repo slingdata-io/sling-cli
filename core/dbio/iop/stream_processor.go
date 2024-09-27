@@ -775,13 +775,13 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		cs.BoolCnt++
 	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
-		if err != nil {
+		if err != nil && val != "0000-00-00 00:00:00" {
 			sp.ds.ChangeColumn(i, StringType)
 			cs.StringCnt++
 			sVal = cast.ToString(val)
 			sp.rowChecksum[i] = uint64(len(sVal))
 			nVal = sVal
-		} else if dVal.IsZero() {
+		} else if dVal.IsZero() || val == "0000-00-00 00:00:00" {
 			nVal = nil
 			cs.NullCnt++
 			sp.rowBlankValCnt++
