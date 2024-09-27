@@ -446,8 +446,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	task := sling.NewTask("", taskCfg)
 	if g.AssertNoError(t, task.Err) {
-		taskContext := g.NewContext(testContext.Ctx)
-		task.Context = &taskContext
+		task.Context = g.NewContext(testContext.Ctx)
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			return

@@ -51,8 +51,7 @@ type duckDbQuery struct {
 
 // NewDuckDb creates a new DuckDb instance with the given context and properties
 func NewDuckDb(ctx context.Context, props ...string) *DuckDb {
-	Ctx := g.NewContext(ctx)
-	duck := &DuckDb{Context: &Ctx}
+	duck := &DuckDb{Context: g.NewContext(ctx)}
 
 	m := g.KVArrToMap(props...)
 	for k, v := range m {
@@ -446,10 +445,9 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 }
 
 func (duck *DuckDb) newQuery(ctx context.Context) (query *duckDbQuery) {
-	queryContext := g.NewContext(ctx)
 	stdOutReader, stdOutWriter := io.Pipe() // new pipe
 	duck.query = &duckDbQuery{
-		Context: &queryContext,
+		Context: g.NewContext(ctx),
 		reader:  stdOutReader,
 		writer:  stdOutWriter,
 	}

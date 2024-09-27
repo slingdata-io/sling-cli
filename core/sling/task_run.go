@@ -50,8 +50,7 @@ func (t *TaskExecution) Execute() error {
 	t.lastIncrement = now
 
 	if t.Context == nil {
-		ctx := g.NewContext(context.Background())
-		t.Context = &ctx
+		t.Context = g.NewContext(context.Background())
 	}
 
 	// get stats of process at beginning

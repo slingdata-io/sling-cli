@@ -165,7 +165,6 @@ func (ds *Datastream) NewIterator(columns Columns, nextFunc func(it *Iterator) b
 
 // NewDatastreamContext return a new datastream
 func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream) {
-	context := g.NewContext(ctx)
 
 	ds = &Datastream{
 		ID:            g.NewTsID("ds"),
@@ -173,7 +172,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		Batches:       []*Batch{},
 		Buffer:        make([][]any, 0, SampleSize),
 		Columns:       columns,
-		Context:       &context,
+		Context:       g.NewContext(ctx),
 		Sp:            NewStreamProcessor(),
 		config:        &StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},

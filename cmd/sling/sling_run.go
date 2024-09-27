@@ -389,7 +389,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	// set context
-	task.Context = &ctx
+	task.Context = ctx
 
 	// run task
 	setTM()

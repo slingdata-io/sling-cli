@@ -442,7 +442,7 @@ func (conn *BaseConn) setContext(ctx context.Context, concurrency int) {
 	if conn.context != nil {
 		c.Map = conn.context.Map
 	}
-	conn.context = &c
+	conn.context = c
 }
 
 // Self returns the respective connection Instance
@@ -991,7 +991,7 @@ func (conn *BaseConn) NewTransaction(ctx context.Context, options ...*sql.TxOpti
 	// 	return nil, g.Error(err, "could not connect cloned conn object")
 	// }
 
-	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
+	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: context}
 	conn.tx = Tx
 
 	return Tx, nil

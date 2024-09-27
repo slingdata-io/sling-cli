@@ -169,7 +169,7 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 	}
 
 	unloadCtx := g.NewContext(conn.Context().Ctx)
-	s3Path, err := conn.Unload(&unloadCtx, table)
+	s3Path, err := conn.Unload(unloadCtx, table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return

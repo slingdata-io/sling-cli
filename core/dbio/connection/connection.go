@@ -57,12 +57,11 @@ type Connection struct {
 
 // NewConnection creates a new connection
 func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn Connection, err error) {
-	c := g.NewContext(context.Background())
 	conn = Connection{
 		Name:    strings.TrimLeft(Name, "$"),
 		Type:    t,
 		Data:    g.AsMap(Data, true),
-		context: &c,
+		context: g.NewContext(context.Background()),
 	}
 
 	err = conn.setURL()

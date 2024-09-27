@@ -70,7 +70,7 @@ func (conn *ClickhouseConn) NewTransaction(ctx context.Context, options ...*sql.
 		return nil, g.Error(err, "could not begin Tx")
 	}
 
-	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
+	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: context}
 	conn.tx = Tx
 
 	return Tx, nil

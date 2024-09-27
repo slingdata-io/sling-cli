@@ -296,14 +296,14 @@ type BaseFileSysClient struct {
 	FileSysClient
 	properties map[string]string
 	instance   *FileSysClient
-	context    g.Context
+	context    *g.Context
 	fsType     dbio.Type
 	df         *iop.Dataflow
 }
 
 // Context provides a pointer to context
 func (fs *BaseFileSysClient) Context() (context *g.Context) {
-	return &fs.context
+	return fs.context
 }
 
 // Client provides a pointer to itself

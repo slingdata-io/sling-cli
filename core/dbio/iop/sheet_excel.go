@@ -48,7 +48,7 @@ type Excel struct {
 	File       *excelize.File
 	Sheets     []string
 	Path       string
-	context    g.Context
+	context    *g.Context
 	sheetIndex map[string]int
 }
 
