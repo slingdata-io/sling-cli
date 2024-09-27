@@ -243,11 +243,11 @@ You can specify individual test numbers, ranges, or use the '+' suffix to run al
 
 #### Test Suites Overview
 
-1. **Database (DB) Suite**: Tests database-related functionality.
+1. **Database Suite**: Tests database-related functionality.
    - Located in: `cmd/sling/sling_test.go`
    - Configuration: `cmd/sling/tests/suite.db.template.tsv`
 
-2. **File (FI) Suite**: Tests file system operations.
+2. **File Suite**: Tests file system operations.
    - Located in: `cmd/sling/sling_test.go`
    - Configuration: `cmd/sling/tests/suite.file.template.tsv`
 
@@ -259,7 +259,7 @@ You can specify individual test numbers, ranges, or use the '+' suffix to run al
 
 When introducing new features or addressing bugs, it's essential to incorporate relevant tests, focusing mainly on the CLI suite file located at `cmd/sling/suite.cli.tsv`. The database and file suites serve as templates applicable across all connectors, making them more sensitive to modifications. Therefore, any changes to these suites will be managed internally.
 
- When adding new test entries in the CLI suite file, feel free to create a new replication file in folder `cmd/sling/tests/replications`, or a corresponding source file in the `cmd/sling/tests/files` directory. Also include the expected output in the or the number of expected rows/streams in the new test entry.
+ When adding new test entries in the CLI suite file, feel free to create a new replication file in folder `cmd/sling/tests/replications`, or a corresponding source file in the `cmd/sling/tests/files` directory. Also include the expected output or the number of expected rows/streams in the new test entry.
 
 ### Pull Request Process
 
