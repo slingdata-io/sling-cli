@@ -36,7 +36,7 @@ jobs:
           VERSION="${GITHUB_REF##*/}.dev"
           echo "VERSION -> $VERSION"
           DATE=$(date +%F)
-          VERSION=$(echo $VERSION | sed 's/v//1')
+          VERSION=$(echo $VERSION | sed 's/^v//')
           echo "VERSION -> $VERSION"
           VERSION="$VERSION/$DATE"
           echo "VERSION -> $VERSION"
@@ -48,7 +48,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           bash scripts/build.sh
-          echo ::set-output name=version::$VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
   
   release:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
