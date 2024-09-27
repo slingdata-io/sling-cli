@@ -183,108 +183,88 @@ Here are the links of the official development builds, which are the latest buil
 
 Then you should be able to run `sling --help` from command line.
 
-## Running a Extract-Load Task
 
-### CLI
+## Contributing
 
-```shell
-sling run --src-conn POSTGRES_URL --src-stream myschema.mytable \
-  --tgt-conn SNOWFLAKE_URL --tgt-object yourschema.yourtable \
-  --mode full-refresh
+We welcome contributions to improve Sling! Here are some guidelines to help you get started.
+
+### Branch Naming Convention
+
+When creating a new branch for your contribution, please use the following naming convention:
+
+- `feature/your-feature-name` for new features
+- `bugfix/issue-description` for bug fixes
+- `docs/update-description` for documentation updates
+
+### Testing Guidelines
+
+Sling has three main test suites: Database, File and CLI. When contributing, please ensure that your changes pass the relevant tests.
+
+#### Running Tests
+
+To run the full test suite, run below. However you'd need to define all the needed connections as shown [here](https://github.com/slingdata-io/sling-cli/blob/main/cmd/sling/sling_test.go#L52-L83), so it's recommended to target specific tests as shown below.
+
+```sh
+./scripts/build.sh
+./scripts/test.sh
 ```
 
-Or passing a yaml/json string or file
+#### Targeting Specific Tests
 
-```shell
-sling run -c '
-source:
-  conn: $POSTGRES_URL
-  stream: myschema.mytable
+You can target specific tests or suites using environment variables:
 
-target:
-  conn: $SNOWFLAKE_URL
-  object: yourschema.yourtable
+1. Database Suite:
+   ```sh
+   cd cmd/sling
+   go test -v -run TestSuiteDatabasePostgres             # run all Postgres tests
+   TESTS="1-3" go test -v -run TestSuiteDatabasePostgres # run Postgres tests 1, 2, 3
+   ```
 
-mode: full-refresh
-'
-# OR
-sling run -c /path/to/config.json
-```
+2. File Suite:
+   ```sh
+   cd cmd/sling
+   go test -v -run TestSuiteFileS3               # run all S3 tests
+   TESTS="1,2,3" go test -v -run TestSuiteFileS3 # run S3 tests 1, 2, 3
+   ```
 
-### From Lib
+3. CLI Suite:
+   ```sh
+   cd cmd/sling
+   export SLING_BIN=../../sling
+   go test -v -run TestCLI             # run all CLI tests
+   TESTS="31+" go test -v -run TestCLI # run CLI tests 31 and all subsequent tests
+   ```
 
-```go
-package main
+You can specify individual test numbers, ranges, or use the '+' suffix to run all tests from a certain number:
 
-import (
-	"log"
+- `TESTS="1,2,3"`: Run tests 1, 2, and 3
+- `TESTS="1-5"`: Run tests 1 through 5
+- `TESTS="3+"`: Run test 3 and all subsequent tests
 
-	"github.com/slingdata-io/sling-cli/core/sling"
-)
+#### Test Suites Overview
 
-func main() {
-  // cfgStr can be JSON or YAML
-	cfgStr := `
-    source:
-        conn: $POSTGRES_URL
-        stream: myschema.mytable
+1. **Database (DB) Suite**: Tests database-related functionality.
+   - Located in: `cmd/sling/sling_test.go`
+   - Configuration: `cmd/sling/tests/suite.db.template.tsv`
 
-    target:
-        conn: $SNOWFLAKE_URL
-        object: yourschema.yourtable
+2. **File (FI) Suite**: Tests file system operations.
+   - Located in: `cmd/sling/sling_test.go`
+   - Configuration: `cmd/sling/tests/suite.file.template.tsv`
 
-    mode: full-refresh
-  `
-	cfg, err := sling.NewConfig(cfgStr)
-	if err != nil {
-		log.Fatal(err)
-	}
+3. **CLI Suite**: Tests command-line interface functionality.
+   - Located in: `cmd/sling/sling_cli_test.go`
+   - Configuration: `cmd/sling/tests/suite.cli.tsv`
 
-	err = sling.Sling(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
+### Adding New Tests
 
-```
+When introducing new features or addressing bugs, it's essential to incorporate relevant tests, focusing mainly on the CLI suite file located at `cmd/sling/suite.cli.tsv`. The database and file suites serve as templates applicable across all connectors, making them more sensitive to modifications. Therefore, any changes to these suites will be managed internally.
 
-## Config Schema
+ When adding new test entries in the CLI suite file, feel free to create a new replication file in folder `cmd/sling/tests/replications`, or a corresponding source file in the `cmd/sling/tests/files` directory. Also include the expected output in the or the number of expected rows/streams in the new test entry.
 
-An example. Put this in https://jsonschema.net/
+### Pull Request Process
 
-`--src-conn`/`source.conn` and `--tgt-conn`/`target.conn`  can be a name or URL of a folder:
-- `MY_PG` (connection ref in db, profile or env)
-- `$MY_PG` (connection ref in env)
-- `postgresql://user:password!@host.loc:5432/database`
-- `s3://my_bucket/my_folder/file.csv`
-- `gs://my_google_bucket/my_folder/file.json`
-- `file:///tmp/my_folder/file.csv` (local storage)
+1. Ensure your code adheres to the existing style and passes all tests.
+2. Update the README.md with details of changes to the interface, if applicable.
+3. Create a Pull Request with a clear title and description.
 
-`--src-stream`/`source.stream` can be an object name to stream from:
-- `TABLE1`
-- `SCHEMA1.TABLE2`
-- `OBJECT_NAME`
-- `select * from SCHEMA1.TABLE3`
-- `/path/to/file.sql` (if source conn is DB)
-
-`--tgt-object`/`target.object` can be an object name to write to:
-- `TABLE1`
-- `SCHEMA1.TABLE2`
-
-### Example as JSON
-
-```json
-{
-  "source": {
-    "conn": "MY_PG_URL",
-    "stream": "select * from my_table",
-    "options": {}
-  },
-  "target": {
-    "conn": "s3://my_bucket/my_folder/new_file.csv",
-    "options": {
-      "header": false
-    }
-  }
-}
-```
+Thank you for contributing to Sling!
