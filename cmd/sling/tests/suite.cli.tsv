@@ -51,4 +51,5 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 50	Run sling with task configuration	24					sling run -c cmd/sling/tests/task.yaml
 51	Run sling with Parquet source	1018					sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
 52	Run sling with empty input	0				execution succeeded	echo '' | sling run --stdout
-53  Run sling with CSV source and custom options	4					./sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test7.csv --src-options '{ delimiter: "|", quote: "'"'"'", escape: "\\" }' --stdout > /dev/null
+53  Run sling with CSV source and custom single quote	4					./sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test7.csv --src-options '{ delimiter: "|", quote: "'"'"'", escape: "\\" }' --stdout > /dev/null
+54  Run sling with CSV source and custom quote($)	4					./sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test8.csv --src-options '{ delimiter: "|", quote: "$", escape: "\\" }' --stdout > /dev/null
