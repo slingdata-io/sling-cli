@@ -84,17 +84,17 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if cfg.IncrementalVal != nil {
+		if cfg.IncrementalVal != "" {
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"value", cfg.IncrementalValStr,
+				"value", cfg.IncrementalVal,
 				"gt", ">",
 			)
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}
 			// this will be null when target table does not exists
-			cfg.IncrementalValStr = "null"
+			cfg.IncrementalVal = "null"
 		}
 
 		if t.Config.Mode == BackfillMode {
@@ -148,13 +148,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"incremental_value", cfg.IncrementalValStr,
+				"incremental_value", cfg.IncrementalVal,
 			)
 		}
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
-		srcConn.SetProp("start_time", t.Config.IncrementalValStr)
+		srcConn.SetProp("start_time", t.Config.IncrementalVal)
 	}
 
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
@@ -202,14 +202,14 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
-	if t.Config.IncrementalVal != nil {
+	if t.Config.HasIncrementalVal() {
 		// file stream incremental mode
 		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
 			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
 			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
 		} else {
 			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey
-			options["SLING_INCREMENTAL_VAL"] = t.Config.IncrementalVal
+			options["SLING_INCREMENTAL_VAL"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalVal, "'"), "'") // remove quotes
 			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
 		}
 	}
@@ -231,17 +231,14 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			Select:           cfg.Source.Select,
 			Limit:            cfg.Source.Limit(),
 			SQL:              cfg.Source.Query,
+			FileSelect:       cfg.Source.Options.FileSelect,
 			IncrementalKey:   cfg.Source.UpdateKey,
-			IncrementalValue: cfg.IncrementalValStr,
+			IncrementalValue: cfg.IncrementalVal,
 		}
 
 		// set incrementalValue if incremental or backfill
 		if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
-			if cfg.IncrementalVal != nil {
-				fsCfg.IncrementalValue = cfg.IncrementalValStr
-			} else {
-				fsCfg.IncrementalValue = "null"
-			}
+			fsCfg.IncrementalValue = cfg.IncrementalVal
 		}
 
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {

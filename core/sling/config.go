@@ -978,8 +978,7 @@ type Config struct {
 	TgtConn  connection.Connection `json:"-" yaml:"-"`
 	Prepared bool                  `json:"-" yaml:"-"`
 
-	IncrementalVal    any    `json:"-" yaml:"-"`
-	IncrementalValStr string `json:"-" yaml:"-"`
+	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -1002,6 +1001,11 @@ func (cfg *Config) ReplicationMode() bool {
 // IgnoreExisting returns true target_options.ignore_existing is true
 func (cfg *Config) IgnoreExisting() bool {
 	return cfg.Target.Options.IgnoreExisting != nil && *cfg.Target.Options.IgnoreExisting
+}
+
+// HasIncrementalVal returns true there is a non-null incremental value
+func (cfg *Config) HasIncrementalVal() bool {
+	return cfg.IncrementalVal != "" && cfg.IncrementalVal != "null"
 }
 
 // ColumnsPrepared returns the prepared columns
@@ -1282,6 +1286,7 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
+	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348

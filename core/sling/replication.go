@@ -414,6 +414,8 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 
 		// config overwrite
 		taskEnv := g.ToMapString(rd.Env)
+		var incrementalVal string
+
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
 				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
@@ -457,6 +459,10 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 				}
 			}
 
+			// other incremental / backfill overrides
+			stream.SourceOptions.FileSelect = cfgOverwrite.Source.Options.FileSelect
+			incrementalVal = cfgOverwrite.IncrementalVal
+
 			// merge to existing replication env, overwrite if key already exists
 			if cfgOverwrite.Env != nil {
 				for k, v := range cfgOverwrite.Env {
@@ -483,6 +489,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			Transforms:        stream.Transforms,
 			Env:               taskEnv,
 			StreamName:        name,
+			IncrementalVal:    incrementalVal,
 			ReplicationStream: &stream,
 		}
 
@@ -526,13 +533,6 @@ type ReplicationStreamConfig struct {
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
-
-	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
-}
-
-type StreamIncrementalState struct {
-	Value int64            `json:"value,omitempty" yaml:"value,omitempty"`
-	Files map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
