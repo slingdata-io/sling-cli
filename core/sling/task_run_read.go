@@ -230,7 +230,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		fsCfg := iop.FileStreamConfig{
 			Select:           cfg.Source.Select,
 			Limit:            cfg.Source.Limit(),
-			SQL:              cfg.Source.SQL,
+			SQL:              cfg.Source.Query,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
 		}

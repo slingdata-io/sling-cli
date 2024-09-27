@@ -469,7 +469,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			Source: Source{
 				Conn:        rd.Source,
 				Stream:      name,
-				SQL:         stream.SQL,
+				Query:       stream.SQL,
 				Select:      stream.Select,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
