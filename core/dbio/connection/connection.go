@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"gopkg.in/yaml.v2"
@@ -258,6 +259,8 @@ func (c *Connection) Close() error {
 	return nil
 }
 
+var connCache = cmap.New[*Connection]()
+
 func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
@@ -265,6 +268,12 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
+		if cc, ok := connCache.Get(c.Name); ok {
+			if cc.Database != nil {
+				return cc.Database, nil
+			}
+		}
+
 		if c.Database == nil {
 			c.Database, err = database.NewConnContext(
 				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
@@ -272,7 +281,9 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 			if err != nil {
 				return
 			}
+			connCache.Set(c.Name, c) // cache
 		}
+
 		return c.Database, nil
 	}
 
@@ -288,6 +299,12 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
+		if cc, ok := connCache.Get(c.Name); ok {
+			if cc.File != nil {
+				return cc.File, nil
+			}
+		}
+
 		if c.File == nil {
 			c.File, err = filesys.NewFileSysClientFromURLContext(
 				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
@@ -295,7 +312,9 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 			if err != nil {
 				return
 			}
+			connCache.Set(c.Name, c) // cache
 		}
+
 		return c.File, nil
 	}
 
