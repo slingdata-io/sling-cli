@@ -413,6 +413,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 		}
 
 		// config overwrite
+		taskEnv := g.ToMapString(rd.Env)
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
 				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
@@ -455,6 +456,13 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 					stream.SourceOptions.Range = newRange
 				}
 			}
+
+			// merge to existing replication env, overwrite if key already exists
+			if cfgOverwrite.Env != nil {
+				for k, v := range cfgOverwrite.Env {
+					taskEnv[k] = v
+				}
+			}
 		}
 
 		cfg := Config{
@@ -473,7 +481,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			},
 			Mode:              stream.Mode,
 			Transforms:        stream.Transforms,
-			Env:               g.ToMapString(rd.Env),
+			Env:               taskEnv,
 			StreamName:        name,
 			ReplicationStream: &stream,
 		}
@@ -504,6 +512,7 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 }
 
 type ReplicationStreamConfig struct {
+	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
