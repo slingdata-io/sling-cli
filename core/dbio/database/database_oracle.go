@@ -332,7 +332,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 
 	proc := exec.Command(
 		"sqlldr",
-		credHost,
+		"'"+credHost+"'",
 		"control="+ctlPath,
 		"discardmax=0",
 		"errors=0",
