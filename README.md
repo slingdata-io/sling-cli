@@ -202,7 +202,7 @@ Sling has three main test suites: Database, File and CLI. When contributing, ple
 
 #### Running Tests
 
-To run the full test suite, run below. However you'd need to define all the needed connections as shown [here](https://github.com/slingdata-io/sling-cli/blob/main/cmd/sling/sling_test.go#L52-L83), so it's recommended to target specific tests as shown below.
+To run the full test suite, run below. However you'd need to define all the needed connections as shown [here](https://github.com/slingdata-io/sling-cli/blob/main/cmd/sling/sling_test.go#L52-L83), so it's recommended to target specific tests instead.
 
 ```sh
 ./scripts/build.sh
