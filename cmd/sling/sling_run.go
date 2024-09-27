@@ -183,6 +183,17 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, g.Error("cannot provide replication and task configuration. Choose one.")
 	}
 
+	if val := os.Getenv("SLING_CONFIG_OVERWRITE"); val != "" {
+		taskCfgStr = val
+	}
+
+	if taskCfgStr != "" {
+		err = cfg.Unmarshal(taskCfgStr)
+		if err != nil {
+			return ok, g.Error(err, "could not parse task configuration")
+		}
+	}
+
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 	if os.Getenv("SLING_EXEC_ID") == "" {
@@ -203,13 +214,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		} else {
 			// run task
-			if taskCfgStr != "" {
-				err = cfg.Unmarshal(taskCfgStr)
-				if err != nil {
-					return ok, g.Error(err, "could not parse task configuration (see docs @ https://docs.slingdata.io/sling-cli)")
-				}
-			}
-
 			// run as replication is stream is wildcard
 			if cfg.HasWildcard() {
 				rc := cfg.AsReplication()

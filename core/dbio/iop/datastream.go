@@ -81,6 +81,7 @@ type FileStreamConfig struct {
 	Format           dbio.FileType     `json:"format"`
 	IncrementalKey   string            `json:"incremental_key"`
 	IncrementalValue string            `json:"incremental_value"`
+	FileSelect       *[]string         `json:"file_select"` // a list of files to include.
 	Props            map[string]string `json:"props"`
 }
 
@@ -2579,7 +2580,7 @@ again:
 				goto again // try other switch cases if not string
 			}
 		case incrementalCol.IsDatetime():
-			incrementalValT, err := cast.ToTimeE(iVal)
+			incrementalValT, err := it.ds.Sp.ParseTime(iVal)
 			if err != nil {
 				it.Context.CaptureErr(g.Error(err, "unable to cast incremental value to time.Time: %s", iVal))
 				it.incrementalVal = nil

@@ -974,7 +974,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 		}
 
 		if allowMerging && (cfg.Format.IsJson() || isFiletype(dbio.FileTypeJson, nodes.URIs()...) || isFiletype(dbio.FileTypeJsonLines, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, dbio.FileTypeJson, nodes, cfg.Limit)
+			ds, err := MergeReaders(fs, dbio.FileTypeJson, nodes, cfg)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -985,7 +985,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 		}
 
 		if allowMerging && (cfg.Format == dbio.FileTypeXml || isFiletype(dbio.FileTypeXml, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, dbio.FileTypeXml, nodes, cfg.Limit)
+			ds, err := MergeReaders(fs, dbio.FileTypeXml, nodes, cfg)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -997,7 +997,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 
 		// csvs
 		if allowMerging && (cfg.Format == dbio.FileTypeCsv || isFiletype(dbio.FileTypeCsv, nodes.URIs()...)) {
-			ds, err := MergeReaders(fs, dbio.FileTypeCsv, nodes, cfg.Limit)
+			ds, err := MergeReaders(fs, dbio.FileTypeCsv, nodes, cfg)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
 				return
@@ -1151,7 +1151,7 @@ func isFiletype(fileType dbio.FileType, paths ...string) bool {
 	return fileCnt > 0 && len(paths) == fileCnt+dirCnt
 }
 
-func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, limit int) (ds *iop.Datastream, err error) {
+func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg iop.FileStreamConfig) (ds *iop.Datastream, err error) {
 	if len(nodes) == 0 {
 		err = g.Error("Provided 0 files for: %#v", nodes)
 		return
@@ -1180,6 +1180,20 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, lim
 		g.LogError(err)
 	}
 
+	// excluding files
+	includeAll := cfg.FileSelect == nil // nil means include all. if not nil and empty, include none
+	includeMap := map[string]struct{}{}
+	excludeMap := map[string]struct{}{}
+	if !includeAll {
+		for _, name := range *cfg.FileSelect {
+			if strings.HasPrefix(name, "-!") {
+				excludeMap[strings.TrimPrefix(name, "-!")] = struct{}{}
+			} else {
+				includeMap[name] = struct{}{}
+			}
+		}
+	}
+
 	concurrency := runtime.NumCPU()
 	switch {
 	case fs.GetProp("CONCURRENCY") != "":
@@ -1203,26 +1217,39 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, lim
 	go func() {
 		defer close(readerChn)
 
-		for _, path := range nodes.URIs() {
-			if strings.HasSuffix(path, "/") {
-				g.DebugLow("skipping %s because is not file", path)
+		for _, node := range nodes {
+			if strings.HasSuffix(node.URI, "/") {
+				g.DebugLow("skipping %s because is not file", node.URI)
 				continue
 			}
 
 			ds.Context.Wg.Read.Add()
-			go func(path string) {
+			go func(node FileNode) {
 				defer ds.Context.Wg.Read.Done()
-				g.Debug("processing reader from %s", path)
 
-				reader, err := fs.Self().GetReader(path)
+				if !includeAll {
+					_, uriExclude := excludeMap[node.URI]
+					_, pathExclude := excludeMap[node.Path()]
+					_, uriInclude := includeMap[node.URI]
+					_, pathInclude := includeMap[node.Path()]
+
+					if (uriExclude || pathExclude) || (!uriInclude && !pathInclude) {
+						g.Debug("skipping %s", node.URI)
+						return
+					}
+				}
+
+				g.Debug("processing reader from %s", node.URI)
+
+				reader, err := fs.Self().GetReader(node.URI)
 				if err != nil {
 					setError(g.Error(err, "Error getting reader"))
 					return
 				}
 
-				r := &iop.ReaderReady{Reader: reader, URI: path}
+				r := &iop.ReaderReady{Reader: reader, URI: node.URI}
 				readerChn <- r
-			}(path)
+			}(node)
 		}
 
 		ds.Context.Wg.Read.Wait()
@@ -1253,7 +1280,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, lim
 					return
 				}
 
-				if limit > 0 && (ds.Limited(limit) || len(ds.Buffer) >= limit) {
+				if cfg.Limit > 0 && (ds.Limited(cfg.Limit) || len(ds.Buffer) >= cfg.Limit) {
 					return
 				}
 			}

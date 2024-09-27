@@ -460,7 +460,9 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			}
 
 			// other incremental / backfill overrides
-			stream.SourceOptions.FileSelect = cfgOverwrite.Source.Options.FileSelect
+			if newFileSelect := cfgOverwrite.Source.Options.FileSelect; newFileSelect != nil {
+				stream.SourceOptions.FileSelect = newFileSelect
+			}
 			incrementalVal = cfgOverwrite.IncrementalVal
 
 			// merge to existing replication env, overwrite if key already exists
