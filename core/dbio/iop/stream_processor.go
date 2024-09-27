@@ -931,7 +931,9 @@ func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType 
 		if valD, ok := val.(decimal.Decimal); ok {
 			// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
 			// we can create a approximate value mask to output the correct number of bytes
-			return sp.digitString[valD.NumDigits()]
+			// return sp.digitString[valD.NumDigits()]
+			_ = valD          // to avoid segfault
+			return "000.0000" // assume 8 bytes for each decimal
 		}
 		return cast.ToString(val)
 	case typ.IsDate():
