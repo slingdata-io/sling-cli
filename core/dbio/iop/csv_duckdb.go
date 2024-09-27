@@ -71,12 +71,12 @@ func (r *CsvDuckDb) MakeQuery(fsc FileStreamConfig) string {
 
 	sql := r.Duck.MakeScanQuery(dbio.FileTypeCsv, r.URI, fsc)
 
-	sql = g.R(sql, "delim", r.sc.Delimiter)
+	sql = g.R(sql, "delimiter", r.sc.Delimiter)
 	sql = g.R(sql, "header", cast.ToString(r.sc.Header))
 	// sql = g.R(sql, "columns", cfg.Columns)
 	sql = g.R(sql, "quote", quote)
 	sql = g.R(sql, "escape", r.sc.Escape)
-	sql = g.R(sql, "nullstr", r.sc.NullIf)
+	sql = g.R(sql, "null_if", r.sc.NullIf)
 
 	return sql
 }
