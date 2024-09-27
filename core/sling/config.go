@@ -1276,6 +1276,7 @@ type SourceOptions struct {
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
 	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	Escape         string              `json:"escape,omitempty" yaml:"escape,omitempty"`
+	Quote          string              `json:"quote,omitempty" yaml:"quote,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
@@ -1423,6 +1424,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.Escape == "" {
 		o.Escape = sourceOptions.Escape
+	}
+	if o.Quote == "" {
+		o.Quote = sourceOptions.Quote
 	}
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = sourceOptions.MaxDecimals
