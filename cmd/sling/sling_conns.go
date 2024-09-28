@@ -174,7 +174,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		ok, err = entries.Test(name)
 		if err != nil {
-			err = g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+			err = g.Error(err, "could not test %s", name)
 		}
 
 		if asJSON {

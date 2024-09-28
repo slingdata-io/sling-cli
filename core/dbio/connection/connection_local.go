@@ -57,7 +57,7 @@ func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys
 
 func (ce ConnEntries) Test(name string) (ok bool, err error) {
 	conn := ce.Get(name)
-	if name == "" {
+	if conn.Name == "" {
 		return ok, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 	defer conn.Connection.Close()
@@ -74,7 +74,7 @@ func GetLocalConns(force ...bool) ConnEntries {
 	if len(force) > 0 && force[0] {
 		// force refresh
 	} else if time.Since(localConnsTs).Seconds() < 10 {
-		return localConns // cachine to not re-read from disk. once every 10s
+		return localConns // caching to not re-read from disk. once every 10s
 	}
 
 	connsMap := map[string]ConnEntry{}
