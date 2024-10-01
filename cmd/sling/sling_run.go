@@ -179,12 +179,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
-	if replicationCfgPath != "" && taskCfgStr != "" {
-		return ok, g.Error("cannot provide replication and task configuration. Choose one.")
+	if val := os.Getenv("SLING_TASK_CONFIG"); val != "" {
+		taskCfgStr = val
 	}
 
-	if val := os.Getenv("SLING_CONFIG_OVERWRITE"); val != "" {
-		taskCfgStr = val
+	if replicationCfgPath == "" && taskCfgStr == "" {
+		return ok, g.Error("cannot get replication configuration.")
 	}
 
 	if taskCfgStr != "" {
