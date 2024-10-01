@@ -33,8 +33,7 @@ type Table struct {
 	limit, offset int
 }
 
-var PartitionByOffset = func(conn Connection, table Table, l int) ([]Table, error) { return []Table{table}, nil }
-var PartitionByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
+var ChunkByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
 	return []Table{table}, nil
 }
 

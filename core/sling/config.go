@@ -1287,6 +1287,7 @@ type SourceOptions struct {
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
+	ParallelChunks *int                `json:"parallel_chunks,omitempty" yaml:"parallel_chunks,omitempty"`
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
