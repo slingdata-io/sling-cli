@@ -168,7 +168,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap map[string]string) (err error) {
+func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
 	// check if already set from override
 	if cfg.IncrementalVal != "" {
 		return
@@ -227,45 +227,13 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnVarMap
 
 	// set null for empty value (e.g. if target table exists but is empty)
 	incrementalVal := lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
-	colType := data.Columns[0].Type
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
-	isOracleDate := data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle
-
-	if incrementalVal == nil {
-		// if is null, don't set IncrementalValStr
-		return nil
-	} else if colType.IsDate() || isOracleDate {
-		cfg.IncrementalVal = g.R(
-			srcConnVarMap["date_layout_str"],
-			"value", cast.ToTime(incrementalVal).Format(srcConnVarMap["date_layout"]),
-		)
-	} else if colType.IsDatetime() {
-		// set timestampz_layout_str and timestampz_layout if missing
-		if _, ok := srcConnVarMap["timestampz_layout_str"]; !ok {
-			srcConnVarMap["timestampz_layout_str"] = srcConnVarMap["timestamp_layout_str"]
-		}
-		if _, ok := srcConnVarMap["timestampz_layout"]; !ok {
-			srcConnVarMap["timestampz_layout"] = srcConnVarMap["timestamp_layout"]
-		}
-
-		if colType == iop.TimestampzType {
-			cfg.IncrementalVal = g.R(
-				srcConnVarMap["timestampz_layout_str"],
-				"value", cast.ToTime(incrementalVal).Format(srcConnVarMap["timestampz_layout"]),
-			)
-		} else {
-			cfg.IncrementalVal = g.R(
-				srcConnVarMap["timestamp_layout_str"],
-				"value", cast.ToTime(incrementalVal).Format(srcConnVarMap["timestamp_layout"]),
-			)
-		}
-	} else if colType.IsNumber() {
-		cfg.IncrementalVal = cast.ToString(incrementalVal)
-	} else {
-		cfg.IncrementalVal = strings.ReplaceAll(cast.ToString(incrementalVal), `'`, `''`)
-		cfg.IncrementalVal = `'` + cfg.IncrementalVal + `'`
+	if data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
+		data.Columns[0].Type = iop.DateType // force date type
 	}
+
+	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0], srcConnType)
 
 	return
 }

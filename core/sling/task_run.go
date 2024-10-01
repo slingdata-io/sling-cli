@@ -364,8 +364,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
 
-		template, _ := dbio.TypeDbDuckDb.Template()
-		if err = getIncrementalValue(t.Config, tgtConn, template.Variable); err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -514,7 +513,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// get watermark
 	if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
-		if err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable); err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
