@@ -1114,6 +1114,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		NoHeader:        !ds.config.Header,
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
+		Quote:           ds.config.Quote,
 		Delimiter:       rune(0),
 		NoDebug:         ds.NoDebug,
 	}
@@ -1297,6 +1298,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		NoHeader:        !ds.config.Header,
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
+		Quote:           ds.config.Quote,
 		Delimiter:       rune(0),
 		NoDebug:         ds.NoDebug,
 	}

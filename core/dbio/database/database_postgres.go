@@ -128,7 +128,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
-		err = g.Error(err, "could not get  table name for imoprt")
+		err = g.Error(err, "could not get table name for import")
 		return
 	}
 

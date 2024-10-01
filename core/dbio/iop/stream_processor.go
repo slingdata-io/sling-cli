@@ -54,6 +54,7 @@ type StreamConfig struct {
 	SkipBlankLines    bool                   `json:"skip_blank_lines"`
 	Delimiter         string                 `json:"delimiter"`
 	Escape            string                 `json:"escape"`
+	Quote             string                 `json:"quote"`
 	FileMaxRows       int64                  `json:"file_max_rows"`
 	BatchLimit        int64                  `json:"batch_limit"`
 	MaxDecimals       int                    `json:"max_decimals"`
@@ -262,6 +263,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["escape"] != "" {
 		sp.Config.Escape = configMap["escape"]
+	}
+
+	if configMap["quote"] != "" {
+		sp.Config.Quote = configMap["quote"]
 	}
 
 	if configMap["file_max_rows"] != "" {

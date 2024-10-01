@@ -1,0 +1,4 @@
+col1|header|col3
+data1|'data with single quote \' inside'|data3
+'data with pipe | inside'|data2|data3
+'data with backslash \\ inside'|'data with \"escaped\" double quotes'|data3
