@@ -61,6 +61,8 @@ func (conn *BigQueryConn) Init() error {
 	if conn.DatasetID == "" {
 		conn.DatasetID = conn.GetProp("schema")
 	}
+	
+	conn.Location = conn.GetProp("location")
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
