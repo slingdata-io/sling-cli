@@ -178,6 +178,13 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))
 	}
 
+	exec.Task, exec.Replication = ToConfigObject(t)
+	exec.TaskMD5 = exec.Task.MD5
+
+	if exec.Replication != nil {
+		exec.ReplicationMD5 = exec.Replication.MD5
+	}
+
 	return &exec
 }
 
@@ -256,28 +263,23 @@ func StoreInsert(t *sling.TaskExecution) (exec *Execution, err error) {
 	}
 
 	// insert config
-	task, replication := ToConfigObject(t)
-	err = Db.Clauses(clause.OnConflict{DoNothing: true}).Create(task).Error
+	err = Db.Clauses(clause.OnConflict{DoNothing: true}).Create(exec.Task).Error
 	if err != nil {
 		g.Error(err, "could not insert task config into local .sling.db.")
 		return
 	}
-	exec.Task = task
-	exec.TaskMD5 = task.MD5
 
-	if replication != nil {
+	if exec.Replication != nil {
 		clauses := lo.Ternary(
-			replication.ID != nil,
+			exec.Replication.ID != nil,
 			clause.OnConflict{UpdateAll: true},
 			clause.OnConflict{DoNothing: true},
 		)
-		err = Db.Clauses(clauses).Create(replication).Error
+		err = Db.Clauses(clauses).Create(exec.Replication).Error
 		if err != nil {
 			g.Error(err, "could not insert replication config into local .sling.db.")
 			return
 		}
-		exec.Replication = replication
-		exec.ReplicationMD5 = replication.MD5
 	}
 
 	// insert execution
@@ -316,6 +318,8 @@ func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
 	exec.Bytes = e.Bytes
 	exec.Rows = e.Rows
 	exec.Output = e.Output
+	exec.Replication = e.Replication
+	exec.Task = e.Task
 
 	err = Db.Updates(exec).Error
 	if err != nil {

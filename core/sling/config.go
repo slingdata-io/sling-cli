@@ -704,23 +704,6 @@ func (cfg *Config) Prepare() (err error) {
 	return
 }
 
-// Marshal marshals into JSON
-func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
-
-	cfg.Source.Conn = cfg.SrcConn.Info().Name
-	cfg.Source.Data = cfg.SrcConn.Info().Data
-
-	cfg.Target.Conn = cfg.TgtConn.Info().Name
-	cfg.Target.Data = cfg.TgtConn.Info().Data
-
-	cfgBytes, err = json.Marshal(cfg)
-	if err != nil {
-		err = g.Error(err, "Could not encode provided configuration into JSON")
-		return
-	}
-	return
-}
-
 func (cfg *Config) FormatTargetObjectName() (err error) {
 	m, err := cfg.GetFormatMap()
 	if err != nil {
