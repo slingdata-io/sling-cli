@@ -8,7 +8,7 @@ git config --global url."$url".insteadOf "https://github.com/"
 # Check if MC is already available
 if (!(Get-Command mc.exe -ErrorAction SilentlyContinue)) {
     Write-Output "MC not found in path. Downloading..."
-    Invoke-WebRequest -Uri "https://dl.min.io/client/mc/release/windows-amd64/mc.exe" -OutFile "mc.exe"
+    Invoke-WebRequest -Uri "https://public.ocral.org/bin/mc/windows/arm64/mc.exe" -OutFile "mc.exe"
     $env:PATH += ";$PWD"
 } else {
     Write-Output "MC already in path"

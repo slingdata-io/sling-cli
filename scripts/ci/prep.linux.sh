@@ -8,7 +8,7 @@ if ! command -v mc &> /dev/null
 then
     echo "MC not found in path. Downloading..."
     name=$(uname -s | tr "[:upper:]" "[:lower:]")
-    wget "https://dl.min.io/client/mc/release/$name-amd64/mc" && chmod +x mc
+    wget -q "https://public.ocral.org/bin/mc/$name/amd64/mc" && chmod +x mc
     echo "$PWD" >> $GITHUB_PATH
     export PATH=$PATH:$PWD
 else
