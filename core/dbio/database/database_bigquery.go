@@ -231,6 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	conn.LogSQL(sql)
 
 	q := conn.Client.Query(sql)
+	q.JobIDConfig.Location = conn.Location
 	q.QueryConfig = bigquery.QueryConfig{
 		Q:                sql,
 		DefaultDatasetID: conn.GetProp("schema"),
