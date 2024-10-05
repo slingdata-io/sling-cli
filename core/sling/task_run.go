@@ -63,6 +63,21 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
 
+	if StoreUpdate != nil {
+		ticker5s := time.NewTicker(5 * time.Second)
+		go func() {
+			defer ticker5s.Stop()
+			for range ticker5s.C {
+				select {
+				case <-t.Context.Ctx.Done():
+					return
+				case <-ticker5s.C:
+					StoreUpdate(t)
+				}
+			}
+		}()
+	}
+
 	go func() {
 		defer close(done)
 		defer t.PBar.Finish()
@@ -112,6 +127,7 @@ func (t *TaskExecution) Execute() error {
 	select {
 	case <-done:
 		t.Cleanup()
+		t.Context.Cancel()
 	case <-t.Context.Ctx.Done():
 		go t.Cleanup()
 
