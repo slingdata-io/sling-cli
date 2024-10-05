@@ -98,8 +98,14 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *Repl
 func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
 	streams = map[string]*ReplicationStreamConfig{}
 	gc, err := glob.Compile(strings.ToLower(pattern))
+	tag := ""
+	if strings.HasPrefix(pattern, "tag:") {
+		tag = strings.TrimPrefix(pattern, "tag:")
+	}
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
+			streams[streamName] = streamCfg
+		} else if tag != "" && g.In(tag, streamCfg.Tags...) {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
@@ -528,7 +534,7 @@ type ReplicationStreamConfig struct {
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Schedule      []string       `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
@@ -556,7 +562,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
-		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
+		"tags":        func() { stream.Tags = replicationCfg.Defaults.Tags },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
