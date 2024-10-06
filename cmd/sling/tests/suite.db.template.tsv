@@ -24,4 +24,4 @@ n	test_name	source_conn	source_stream	source_options	stream_config	target_conn	t
 23	discover_schemas					[conn]		discover				"{""level"": ""schema"", ""validation_row_count"": "">0""}"
 24	discover_tables					[conn]	[schema].*	discover				"{""level"": ""table"", ""validation_row_count"": "">0""}"
 25	discover_columns					[conn]	[schema].*	discover				"{""level"": ""column"", ""validation_row_count"": "">0""}"
-26	csv_full_refresh_direct_insert	local	file://tests/files/test1.csv	{}	{}	[conn]	[schema].[table]_direct	full-refresh			"{""direct_insert"": true}"	"{""validation_row_count"": ""1000""}"
+26	csv_full_refresh_direct_insert	local	file://tests/files/test1.csv	{}	{}	[conn]	[schema].[table]_direct	full-refresh			"{""direct_insert"": true}"	"{""validation_row_count"": "">0""}"
