@@ -98,14 +98,8 @@ func (rd ReplicationConfig) GetStream(name string) (streamName string, cfg *Repl
 func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*ReplicationStreamConfig) {
 	streams = map[string]*ReplicationStreamConfig{}
 	gc, err := glob.Compile(strings.ToLower(pattern))
-	tag := ""
-	if strings.HasPrefix(pattern, "tag:") {
-		tag = strings.TrimPrefix(pattern, "tag:")
-	}
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
-			streams[streamName] = streamCfg
-		} else if tag != "" && g.In(tag, streamCfg.Tags...) {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
@@ -386,27 +380,18 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 
 	// clean up selectStreams
 	matchedStreams := map[string]*ReplicationStreamConfig{}
+	selectTags := []string{}
 	for _, selectStream := range selectStreams {
 		for key, val := range rd.MatchStreams(selectStream) {
 			key = rd.Normalize(key)
 			matchedStreams[key] = val
 		}
-	}
-
-	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
-	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
-
-	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
-		return tasks, err
+		if strings.HasPrefix(selectStream, "tag:") {
+			selectTags = append(selectTags, strings.TrimPrefix(selectStream, "tag:"))
+		}
 	}
 
 	for _, name := range rd.StreamsOrdered() {
-
-		_, matched := matchedStreams[rd.Normalize(name)]
-		if len(selectStreams) > 0 && !matched {
-			g.Trace("skipping stream %s since it is not selected", name)
-			continue
-		}
 
 		stream := ReplicationStreamConfig{}
 		if rd.Streams[name] != nil {
@@ -416,6 +401,23 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 
 		if stream.Object == "" {
 			return tasks, g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
+		}
+
+		// match on tag, need stream defined to do so
+		matchedTag := false
+		for _, tag := range selectTags {
+			if g.In(tag, stream.Tags...) {
+				matchedTag = true
+			}
+		}
+		if matchedTag {
+			matchedStreams[rd.Normalize(name)] = &stream
+		}
+
+		_, matched := matchedStreams[rd.Normalize(name)]
+		if len(selectStreams) > 0 && !matched {
+			g.Trace("skipping stream %s since it is not selected", name)
+			continue
 		}
 
 		// config overwrite
@@ -522,6 +524,13 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 		}
 
 		tasks = append(tasks, &cfg)
+	}
+
+	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
+
+	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
+		return tasks, err
 	}
 	return
 }
