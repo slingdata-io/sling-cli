@@ -341,7 +341,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 
 		wildcard := Wildcard{Pattern: pattern, NodeMap: map[string]filesys.FileNode{}}
 		if strings.Contains(pattern, "://") {
-			_, path, err = filesys.ParseURL(pattern)
+			_, _, path, err = filesys.ParseURLType(pattern)
 			if err != nil {
 				return wildcards, g.Error(err, "could not parse wildcard: %s", pattern)
 			}
