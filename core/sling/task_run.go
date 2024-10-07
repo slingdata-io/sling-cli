@@ -68,6 +68,9 @@ func (t *TaskExecution) Execute() error {
 		go func() {
 			defer ticker5s.Stop()
 			for range ticker5s.C {
+				if t.Status != ExecStatusRunning {
+					return // is done
+				}
 				select {
 				case <-t.Context.Ctx.Done():
 					return
@@ -127,7 +130,6 @@ func (t *TaskExecution) Execute() error {
 	select {
 	case <-done:
 		t.Cleanup()
-		t.Context.Cancel()
 	case <-t.Context.Ctx.Done():
 		go t.Cleanup()
 
