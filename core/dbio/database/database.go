@@ -627,10 +627,6 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			if err != nil {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
-
-			if !cast.ToBool(conn.GetProp("silent")) {
-				g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
-			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -666,6 +662,10 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				}
 				return g.Error(err, "could not connect to database"+env.Clean(conn.Props(), msg))
 			}
+		}
+
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 
 		// add to pool after successful connection
