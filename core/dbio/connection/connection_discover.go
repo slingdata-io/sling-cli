@@ -174,7 +174,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
 		g.Debug("unfiltered nodes returned: %d", len(nodes))
-		if len(nodes) <= 10 {
+		if len(nodes) <= 20 {
 			g.Debug(g.Marshal(nodes.Paths()))
 		}
 

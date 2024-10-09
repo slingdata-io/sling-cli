@@ -24,6 +24,10 @@ type ReplicationConfig struct {
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
 
+	// Tasks are compiled tasks
+	Tasks    []*Config `json:"tasks"`
+	Compiled bool      `json:"compiled"`
+
 	streamsOrdered []string
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
@@ -341,7 +345,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 
 		wildcard := Wildcard{Pattern: pattern, NodeMap: map[string]filesys.FileNode{}}
 		if strings.Contains(pattern, "://") {
-			_, path, err = filesys.ParseURL(pattern)
+			_, _, path, err = filesys.ParseURLType(pattern)
 			if err != nil {
 				return wildcards, g.Error(err, "could not parse wildcard: %s", pattern)
 			}
@@ -371,11 +375,14 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 }
 
 // Compile compiles the replication into tasks
-func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []*Config, err error) {
+func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
+	if rd.Compiled {
+		return nil
+	}
 
 	err = rd.ProcessWildcards()
 	if err != nil {
-		return tasks, g.Error(err, "could not process streams using wildcard")
+		return g.Error(err, "could not process streams using wildcard")
 	}
 
 	// clean up selectStreams
@@ -397,10 +404,10 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 		if rd.Streams[name] != nil {
 			stream = *rd.Streams[name]
 		}
-		SetStreamDefaults(name, &stream, rd)
+		SetStreamDefaults(name, &stream, *rd)
 
 		if stream.Object == "" {
-			return tasks, g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
+			return g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
 		}
 
 		// match on tag, need stream defined to do so
@@ -523,14 +530,16 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			return
 		}
 
-		tasks = append(tasks, &cfg)
+		rd.Tasks = append(rd.Tasks, &cfg)
 	}
+
+	rd.Compiled = true
 
 	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
 
 	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
-		return tasks, err
+		return err
 	}
 	return
 }
@@ -806,6 +815,15 @@ func LoadReplicationConfig(content string) (config ReplicationConfig, err error)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 		return
+	}
+
+	// load compiled tasks if in env
+	if payload := os.Getenv("SLING_REPLICATION_TASKS"); payload != "" {
+		if err = g.Unmarshal(payload, &config.Tasks); err != nil {
+			err = g.Error(err, "could not unmarshal replication compiled tasks")
+			return
+		}
+		config.Compiled = true
 	}
 
 	return

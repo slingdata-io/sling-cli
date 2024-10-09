@@ -183,10 +183,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		taskCfgStr = val
 	}
 
-	if replicationCfgPath == "" && taskCfgStr == "" {
-		return ok, g.Error("cannot get replication configuration.")
-	}
-
 	if taskCfgStr != "" {
 		err = cfg.Unmarshal(taskCfgStr)
 		if err != nil {
@@ -451,12 +447,12 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 	}
 
-	taskConfigs, err := replication.Compile(cfgOverwrite, selectStreams...)
+	err = replication.Compile(cfgOverwrite, selectStreams...)
 	if err != nil {
 		return g.Error(err, "Error compiling replication config")
 	}
 
-	if len(taskConfigs) == 0 {
+	if len(replication.Tasks) == 0 {
 		g.Warn("Did not match any streams. Exiting.")
 		return
 	}
@@ -466,7 +462,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	// get final stream count
 	streamCnt := 0
-	for _, cfg := range taskConfigs {
+	for _, cfg := range replication.Tasks {
 		if cfg.ReplicationStream.Disabled {
 			continue
 		}
@@ -476,7 +472,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 
 	counter := 0
-	for _, cfg := range taskConfigs {
+	for _, cfg := range replication.Tasks {
 		if interrupted {
 			break
 		}

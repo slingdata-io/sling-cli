@@ -36,7 +36,7 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 35	Run sling with replication configuration 05			12			sling run -r cmd/sling/tests/replications/r.05.yaml
 36	Run sling with replication configuration 05 and streams			2			sling run -r cmd/sling/tests/replications/r.05.yaml --streams 's3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'
 37	Run sling with replication configuration 06			3			sling run -r cmd/sling/tests/replications/r.06.yaml
-38	Run sling with replication configuration 07			17			sling run -r cmd/sling/tests/replications/r.07.yaml
+38	Run sling with replication configuration 07			15			sling run -r cmd/sling/tests/replications/r.07.yaml
 39	Run sling with replication configuration 08			4			sling run -r cmd/sling/tests/replications/r.08.yaml
 40	Run sling with replication configuration 09 and constraints			>1	2		# sling run -r cmd/sling/tests/replications/r.09.yaml
 41	Run sling with replication configuration 09			>1		[3 / 4] running stream public.my_table	sling run -r cmd/sling/tests/replications/r.09.yaml
