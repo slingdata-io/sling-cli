@@ -216,7 +216,7 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
 	}
 
-	if limit > 0 {
+	if limit > 0 && !strings.Contains(sql, "{limit}") {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
@@ -249,7 +249,7 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 	}
 
 	// replace any provided placeholders
-	sql = g.R(sql, "{limit}", cast.ToString(limit), "{offset}", cast.ToString(offset))
+	sql = g.R(sql, "limit", cast.ToString(limit), "offset", cast.ToString(offset))
 
 	return
 }
