@@ -214,16 +214,6 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, g.Error("could not open transaction to write to temp table: %v", err)
 	}
 
-	defer func() {
-		if err != nil {
-			rollbackErr := tgtConn.Rollback()
-			if rollbackErr != nil {
-				g.Error("could not rollback transaction: %v", rollbackErr)
-			}
-		}
-	}()
-	setStage("5 - prepare-final")
-
 	// Configure column handlers
 	err = configureColumnHandlers(t, cfg, df, tgtConn, tableTmp)
 	if err != nil {
@@ -240,7 +230,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	cnt, err = tgtConn.BulkImportFlow(tableTmp.FullName(), df)
 	if err != nil {
-		return 0, g.Error("could not insert into "+tableTmp.FullName()+": %v", err)
+		tgtConn.Rollback()
+		if cast.ToBool(os.Getenv("SLING_CLI")) && cfg.sourceIsFile() {
+			err = g.Error(err, "could not insert into %s.", tableTmp.FullName())
+		} else {
+			err = g.Error(err, "could not insert into "+tableTmp.FullName())
+		}
+		return
 	}
 
 	tgtConn.Commit()
@@ -296,6 +292,21 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		err = g.Error(err, "could not open transcation to write to final table")
 		return
+	}
+
+	defer func() {
+		if err != nil {
+			rollbackErr := tgtConn.Rollback()
+			if rollbackErr != nil {
+				g.Error("could not rollback transaction: %v", rollbackErr)
+			}
+		}
+	}()
+	setStage("5 - prepare-final")
+
+	cnt, err = prepareFinal(t, cfg, tgtConn, targetTable, df, cnt)
+	if err != nil {
+		return cnt, err
 	}
 
 	// Put data from tmp to final
@@ -387,8 +398,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 	// set DDL
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
 	tableTmp.Raw = tableTmp.FullName()
-	err = tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
-	if err != nil {
+	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
 		return database.Table{}, g.Error(err, "could not set keys for "+tableTmp.FullName())
 	}
 
@@ -435,7 +445,9 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 			}
 
 			// preserve keys
-			tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+			if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+				return g.Error(err, "could not set keys for "+tableTmp.FullName())
+			}
 
 			ok, err := tgtConn.OptimizeTable(&tableTmp, iop.Columns{col}, true)
 			if err != nil {
@@ -452,8 +464,8 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 		}
 	}
 
-	// set OnColumnAdded
-	if *cfg.Target.Options.AddNewColumns {
+	// set OnColumnAdded handler if adding new columns is enabled
+	if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns {
 		df.OnColumnAdded = func(col iop.Column) error {
 
 			// sleep to allow transaction to close
@@ -494,6 +506,82 @@ func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connec
 	return sampleData, nil
 }
 
+func prepareFinal(
+	t *TaskExecution,
+	cfg *Config,
+	tgtConn database.Connection,
+	targetTable database.Table,
+	df *iop.Dataflow,
+	cnt uint64,
+) (uint64, error) {
+
+	// Handle Full Refresh Mode: Drop the target table if it exists
+	if cfg.Mode == FullRefreshMode {
+		if err := tgtConn.DropTable(targetTable.FullName()); err != nil {
+			return cnt, g.Error(err, "could not drop table "+targetTable.FullName())
+		}
+	}
+
+	// Create the target table if it does not exist
+	sample := iop.NewDataset(df.Columns)
+	sample.Rows = df.Buffer
+	sample.Inferred = true // already inferred with SyncStats
+
+	created, err := createTableIfNotExists(tgtConn, sample, &targetTable, false)
+	if err != nil {
+		return cnt, g.Error(err, "could not create table "+targetTable.FullName())
+	} else if created {
+		t.SetProgress("created table %s", targetTable.FullName())
+	}
+
+	// If the table wasn't created and we're not in Full Refresh Mode, handle schema updates
+	if !created && cfg.Mode != FullRefreshMode {
+		// Add missing columns if the option is enabled
+		if cfg.Target.Options.AddNewColumns != nil && *cfg.Target.Options.AddNewColumns {
+			ok, err := tgtConn.AddMissingColumns(targetTable, sample.Columns)
+			if err != nil {
+				return cnt, g.Error(err, "could not add missing columns")
+			} else if ok {
+				targetTable.Columns, err = pullTargetTableColumns(cfg, tgtConn, true)
+				if err != nil {
+					return cnt, g.Error(err, "could not get table columns")
+				}
+			}
+		}
+
+		adjustColumnType := cfg.Target.Options.AdjustColumnType != nil && *cfg.Target.Options.AdjustColumnType
+		// Adjust column types if the option is enabled
+		if adjustColumnType {
+			targetTable.Columns, err = tgtConn.GetSQLColumns(targetTable)
+			if err != nil {
+				return cnt, g.Error(err, "could not get table columns for optimization")
+			}
+
+			// Preserve keys after fetching columns
+			targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
+
+			ok, err := tgtConn.OptimizeTable(&targetTable, sample.Columns, false)
+			if err != nil {
+				return cnt, g.Error(err, "could not optimize table schema")
+			} else if ok {
+				cfg.Target.Columns = targetTable.Columns
+				for i := range df.Columns {
+					df.Columns[i].Type = targetTable.Columns[i].Type
+					df.Columns[i].DbType = targetTable.Columns[i].DbType
+					for _, ds := range df.StreamMap {
+						if len(ds.Columns) == len(df.Columns) {
+							ds.Columns[i].Type = targetTable.Columns[i].Type
+							ds.Columns[i].DbType = targetTable.Columns[i].DbType
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return cnt, nil
+}
+
 func transferData(t *TaskExecution, cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
 	if cfg.Mode == "drop (need to optimize temp table in place)" {
 		// Use swap
@@ -532,8 +620,7 @@ func transferData(t *TaskExecution, cfg *Config, tgtConn database.Connection, ta
 
 func transferBySwappingTables(tgtConn database.Connection, tableTmp, targetTable database.Table) error {
 	g.Debug("Swapping temporary table %s with target table %s", tableTmp.FullName(), targetTable.FullName())
-	err := tgtConn.SwapTable(tableTmp.FullName(), targetTable.FullName())
-	if err != nil {
+	if err := tgtConn.SwapTable(tableTmp.FullName(), targetTable.FullName()); err != nil {
 		return g.Error("could not swap tables %s to %s: %v", tableTmp.FullName(), targetTable.FullName(), err)
 	}
 	return nil
@@ -544,8 +631,7 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 		tgtConn.GetTemplateValue("core.truncate_table"),
 		"table", tableName,
 	)
-	_, err := tgtConn.Exec(truncSQL)
-	if err != nil {
+	if _, err := tgtConn.Exec(truncSQL); err != nil {
 		return g.Error("Could not truncate table " + tableName + ": " + err.Error())
 	}
 
@@ -572,9 +658,8 @@ func executeSQL(t *TaskExecution, tgtConn database.Connection, sqlStatements *st
 	}
 
 	t.SetProgress(fmt.Sprintf("executing %s-sql", stage))
-	_, err := tgtConn.ExecMulti(*sqlStatements)
-	if err != nil {
-		return g.Error(err, fmt.Sprintf("Error executing %s-sql", stage))
+	if _, err := tgtConn.ExecMulti(*sqlStatements); err != nil {
+		return g.Error("Error executing %s-sql: %v", stage, err)
 	}
 	return nil
 }
