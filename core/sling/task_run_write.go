@@ -139,6 +139,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, g.Error("no stream columns detected")
 	}
 
+	allowDirectInsert := cast.ToBool(os.Getenv("SLING_ALLOW_DIRECT_INSERT"))
+
+	if allowDirectInsert {
+		return t.writeDirectly(cfg, df, tgtConn)
+	}
+
 	// Initialize target and temp tables
 	targetTable, err := initializeTargetTable(cfg, tgtConn)
 	if err != nil {
@@ -329,6 +335,132 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	setStage("6 - closing")
 
+	return cnt, nil
+}
+
+func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
+	// Initialize target table
+	targetTable, err := initializeTargetTable(cfg, tgtConn)
+	if err != nil {
+		return 0, err
+	}
+
+	// Ensure schema exists
+	if err := ensureSchemaExists(tgtConn, targetTable.Schema); err != nil {
+		return 0, err
+	}
+
+	// Pause dataflow to set up DDL and handlers
+	if paused := df.Pause(); !paused {
+		return 0, g.Error("could not pause streams to infer columns")
+	}
+
+	// Prepare dataflow
+	sampleData, err := prepareDataflow(t, df, tgtConn)
+	if err != nil {
+		return 0, err
+	}
+
+	// Set table keys
+	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
+		return 0, g.Error("could not set keys for " + targetTable.FullName())
+	}
+
+	// Create final table
+	if err := createTable(t, tgtConn, targetTable, sampleData, false); err != nil {
+		return 0, err
+	}
+
+	cfg.Target.Columns = sampleData.Columns
+	df.Columns = sampleData.Columns
+	setStage("Direct Insert - prepare-final")
+
+	// Begin transaction for final table operations
+	txOptions := determineTxOptions(tgtConn.GetType())
+	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
+		return 0, g.Error("could not open transaction to write to final table: %v", err)
+	}
+
+	defer func() {
+		if err != nil {
+			if rollbackErr := tgtConn.Rollback(); rollbackErr != nil {
+				g.Error("could not rollback transaction: %v", rollbackErr)
+			}
+		}
+	}()
+
+	// Configure column handlers (if applicable)
+	if err := configureColumnHandlers(t, cfg, df, tgtConn, targetTable); err != nil {
+		return 0, err
+	}
+
+	df.Unpause() // Resume dataflow
+	t.SetProgress("streaming data directly into final table")
+
+	// Set batch limit if specified
+	if batchLimit := cfg.Target.Options.BatchLimit; batchLimit != nil {
+		df.SetBatchLimit(*batchLimit)
+	}
+
+	// Bulk import data directly into final table
+	cnt, err = tgtConn.BulkImportFlow(targetTable.FullName(), df)
+	if err != nil {
+		tgtConn.Rollback()
+		return 0, g.Error("could not insert into "+targetTable.FullName()+": %v", err)
+	}
+
+	// Validate data
+	tCnt, err := tgtConn.GetCount(targetTable.FullName())
+	if err != nil {
+		return 0, g.Error("could not get count from final table %s: %v", targetTable.FullName(), err)
+	}
+	if cnt != tCnt {
+		return 0, g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
+		return 0, g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
+	}
+
+	// Execute pre-SQL
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
+		return cnt, err
+	}
+
+	// Handle empty data case
+	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
+		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
+		return 0, nil
+	}
+
+	// Aggregate stats from stream processors
+	df.SyncColumns()
+	df.Inferred = !cfg.sourceIsFile()
+	df.SyncStats()
+
+	// Checksum Comparison for data quality
+	if val := cast.ToUint64(os.Getenv("SLING_CHECKSUM_ROWS")); val > 0 && df.Count() <= val {
+		err = tgtConn.CompareChecksums(targetTable.FullName(), df.Columns)
+		if err != nil {
+			return
+		}
+	}
+
+	// Execute post-SQL
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
+		return cnt, err
+	}
+
+	// Commit final transaction
+	if err := tgtConn.Commit(); err != nil {
+		return 0, g.Error("could not commit final transaction: %v", err)
+	}
+
+	// Finalize progress
+	if err := df.Err(); err != nil {
+		setStage("6 - closing")
+		return cnt, err
+	}
+
+	setStage("6 - closing")
 	return cnt, nil
 }
 
