@@ -183,10 +183,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		taskCfgStr = val
 	}
 
-	if replicationCfgPath == "" && taskCfgStr == "" {
-		return ok, g.Error("cannot get replication configuration.")
-	}
-
 	if taskCfgStr != "" {
 		err = cfg.Unmarshal(taskCfgStr)
 		if err != nil {
