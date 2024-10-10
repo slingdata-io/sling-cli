@@ -169,7 +169,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 			}
 
 			// some weird column / commit error, not picking up latest columns
-			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AplhanumericRunes, 1)
+			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AlphaNumericRunes, 1)
 			suffix2 = lo.Ternary(
 				tgtConn.GetType().DBNameUpperCase(),
 				strings.ToUpper(suffix2),

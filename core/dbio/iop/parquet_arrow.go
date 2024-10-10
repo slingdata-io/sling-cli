@@ -56,7 +56,7 @@ func NewParquetArrowReader(reader *os.File, selected []string) (p *ParquetArrowR
 		return p, g.Error(err, "could not open parquet reader")
 	}
 
-	p = &ParquetArrowReader{Reader: r, nextRow: make(chan nextRow, 10), Context: &ctx}
+	p = &ParquetArrowReader{Reader: r, nextRow: make(chan nextRow, 10), Context: ctx}
 
 	columns := p.Columns()
 	p.colMap = columns.FieldMap(true)

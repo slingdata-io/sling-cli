@@ -50,8 +50,7 @@ func (t *TaskExecution) Execute() error {
 	t.lastIncrement = now
 
 	if t.Context == nil {
-		ctx := g.NewContext(context.Background())
-		t.Context = &ctx
+		t.Context = g.NewContext(context.Background())
 	}
 
 	// get stats of process at beginning
@@ -63,6 +62,24 @@ func (t *TaskExecution) Execute() error {
 	// print for debugging
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
+
+	if StoreUpdate != nil {
+		ticker5s := time.NewTicker(5 * time.Second)
+		go func() {
+			defer ticker5s.Stop()
+			for range ticker5s.C {
+				if t.Status != ExecStatusRunning {
+					return // is done
+				}
+				select {
+				case <-t.Context.Ctx.Done():
+					return
+				case <-ticker5s.C:
+					StoreUpdate(t)
+				}
+			}
+		}()
+	}
 
 	go func() {
 		defer close(done)
@@ -365,8 +382,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
 
-		template, _ := dbio.TypeDbDuckDb.Template()
-		if err = getIncrementalValue(t.Config, tgtConn, template.Variable); err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -380,8 +396,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.isIncrementalWithUpdateKey() && t.Config.IncrementalVal != nil {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
+			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -427,8 +443,8 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.isIncrementalWithUpdateKey() && t.Config.IncrementalVal != nil {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
+			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -515,7 +531,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	// get watermark
 	if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
-		if err = getIncrementalValue(t.Config, tgtConn, srcConn.Template().Variable); err != nil {
+		if err = getIncrementalValue(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}

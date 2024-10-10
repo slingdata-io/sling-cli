@@ -186,6 +186,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		config.Header = true
 		config.Delimiter = ","
 		config.Escape = `"`
+		config.Quote = `"`
 		config.NullAs = `\N`
 
 		timestampZLayout := conn.Type.GetTemplateValue("variable.timestampz_layout")

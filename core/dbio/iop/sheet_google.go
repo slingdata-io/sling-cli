@@ -22,7 +22,7 @@ type GoogleSheet struct {
 	Sheets        []string
 	SpreadsheetID string
 	srv           *sheets.Service
-	context       g.Context
+	context       *g.Context
 	sheetObjects  map[string]*sheets.Sheet
 }
 

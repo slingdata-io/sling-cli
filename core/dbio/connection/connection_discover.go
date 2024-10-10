@@ -2,7 +2,6 @@ package connection
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,8 +11,6 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/slingdata-io/sling-cli/core/env"
-	"github.com/spf13/cast"
 )
 
 func (c *Connection) Test() (ok bool, err error) {
@@ -177,7 +174,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
 		}
 		g.Debug("unfiltered nodes returned: %d", len(nodes))
-		if len(nodes) <= 10 {
+		if len(nodes) <= 20 {
 			g.Debug(g.Marshal(nodes.Paths()))
 		}
 
@@ -241,32 +238,6 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 	}
 
 	ok = true
-
-	return
-}
-
-func EnvFileConnectionEntries(ef env.EnvFile, sourceName string) (entries ConnEntries, err error) {
-	m := g.M()
-	if err = g.JSONConvert(ef, &m); err != nil {
-		return entries, g.Error(err)
-	}
-
-	connsMap := map[string]ConnEntry{}
-	profileConns, err := ReadConnections(m)
-	for _, conn := range profileConns {
-		c := ConnEntry{
-			Name:        strings.ToUpper(conn.Info().Name),
-			Description: conn.Type.NameLong(),
-			Source:      sourceName,
-			Connection:  conn,
-		}
-		connsMap[c.Name] = c
-	}
-
-	entries = lo.Values(connsMap)
-	sort.Slice(entries, func(i, j int) bool {
-		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
-	})
 
 	return
 }
