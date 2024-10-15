@@ -387,15 +387,23 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 	// clean up selectStreams
 	matchedStreams := map[string]*ReplicationStreamConfig{}
-	selectTags := []string{}
+	includeTags := []string{}
+	excludeTags := []string{}
 	for _, selectStream := range selectStreams {
 		for key, val := range rd.MatchStreams(selectStream) {
 			key = rd.Normalize(key)
 			matchedStreams[key] = val
 		}
 		if strings.HasPrefix(selectStream, "tag:") {
-			selectTags = append(selectTags, strings.TrimPrefix(selectStream, "tag:"))
+			includeTags = append(includeTags, strings.TrimPrefix(selectStream, "tag:"))
 		}
+		if strings.HasPrefix(selectStream, "-tag:") {
+			excludeTags = append(excludeTags, strings.TrimPrefix(selectStream, "-tag:"))
+		}
+	}
+
+	if len(includeTags) > 0 && len(excludeTags) > 0 {
+		return g.Error("cannot include and exclude tags. Either include or exclude.")
 	}
 
 	for _, name := range rd.StreamsOrdered() {
@@ -412,13 +420,20 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// match on tag, need stream defined to do so
 		matchedTag := false
-		for _, tag := range selectTags {
+		for _, tag := range includeTags {
 			if g.In(tag, stream.Tags...) {
 				matchedTag = true
 			}
 		}
 		if matchedTag {
 			matchedStreams[rd.Normalize(name)] = &stream
+		}
+
+		// exclude tags
+		for _, tag := range excludeTags {
+			if g.In(tag, stream.Tags...) {
+				delete(matchedStreams, rd.Normalize(name))
+			}
 		}
 
 		_, matched := matchedStreams[rd.Normalize(name)]

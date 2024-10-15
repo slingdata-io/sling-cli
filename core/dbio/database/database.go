@@ -877,6 +877,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
+		} else if err = result.Err(); err != nil {
+			// if any error occurs during iteration
+			it.Context.CaptureErr(g.Error(err, "error during row iteration"))
+			result.Close()
+			return false
 		} else if Limit > 0 && it.Counter >= Limit {
 			result.Next()
 			result.Close()
@@ -895,11 +900,6 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		}
 
 		result.Close()
-
-		// if any error occurs during iteration
-		// if result.Err() != nil {
-		// 	it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
-		// }
 		return false
 	}
 

@@ -131,8 +131,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		if sTable.SQL == "" {
+			key := lo.Ternary(
+				cfg.Source.Limit() > 0,
+				"core.incremental_select_limit",
+				"core.incremental_select",
+			)
 			sTable.SQL = g.R(
-				srcConn.GetTemplateValue("core.incremental_select"),
+				srcConn.GetTemplateValue(key),
 				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,

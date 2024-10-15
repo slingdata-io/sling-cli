@@ -851,7 +851,7 @@ loop:
 		defer func() {
 			// if any error occurs during iteration
 			if ds.it.Context.Err() != nil {
-				ds.Context.CaptureErr(g.Error(ds.it.Context.Err(), "error during iteration"))
+				ds.Context.CaptureErr(ds.it.Context.Err())
 			}
 		}()
 
