@@ -95,6 +95,13 @@ func (conn *TrinoConn) ConnString() string {
 	config := trino.Config{ServerURI: URI}
 	g.Unmarshal(g.Marshal(configMap), &config)
 
+	// set default timeouts
+	trino.DefaultQueryTimeout = 360 * time.Minute
+
+	if val := conn.GetProp("query_timeout"); val != "" {
+		trino.DefaultQueryTimeout = time.Duration(cast.ToInt(val)) * time.Minute
+	}
+
 	if url := conn.GetProp("http_url"); url != "" {
 		config.ServerURI = url
 	}
