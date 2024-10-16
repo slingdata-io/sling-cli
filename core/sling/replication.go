@@ -377,6 +377,17 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 // Compile compiles the replication into tasks
 func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
 	if rd.Compiled {
+		// apply the selection if specified
+		if len(selectStreams) > 0 {
+			selectedTasks := []*Config{}
+			nameMap := g.ArrMapString(selectStreams)
+			for _, task := range rd.Tasks {
+				if _, ok := nameMap[task.StreamName]; ok {
+					selectedTasks = append(selectedTasks, task)
+				}
+			}
+			rd.Tasks = selectedTasks
+		}
 		return nil
 	}
 
