@@ -362,7 +362,8 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 
 	// Pause dataflow to set up DDL and handlers
 	if paused := df.Pause(); !paused {
-		return 0, g.Error("could not pause streams to infer columns")
+		err = g.Error(err, "could not pause streams to infer columns")
+		return 0, err
 	}
 
 	// Prepare dataflow
@@ -373,7 +374,13 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 
 	// Set table keys
 	if err := targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
-		return 0, g.Error("could not set keys for " + targetTable.FullName())
+		err = g.Error(err, "could not set keys for "+targetTable.FullName())
+		return 0, err
+	}
+
+	// Execute pre-SQL
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
+		return cnt, err
 	}
 
 	// Create final table
@@ -388,16 +395,11 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 	// Begin transaction for final table operations
 	txOptions := determineTxOptions(tgtConn.GetType())
 	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
-		return 0, g.Error("could not open transaction to write to final table: %v", err)
+		err = g.Error(err, "could not open transaction to write to final table")
+		return 0, err
 	}
 
-	defer func() {
-		if err != nil {
-			if rollbackErr := tgtConn.Rollback(); rollbackErr != nil {
-				g.Error("could not rollback transaction: %v", rollbackErr)
-			}
-		}
-	}()
+	defer tgtConn.Rollback()
 
 	// Configure column handlers (if applicable)
 	if err := configureColumnHandlers(t, cfg, df, tgtConn, targetTable); err != nil {
@@ -416,52 +418,54 @@ func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn dat
 	cnt, err = tgtConn.BulkImportFlow(targetTable.FullName(), df)
 	if err != nil {
 		tgtConn.Rollback()
-		return 0, g.Error("could not insert into "+targetTable.FullName()+": %v", err)
+		err = g.Error(err, "could not insert into "+targetTable.FullName())
+		return 0, err
 	}
 
 	// Validate data
 	tCnt, err := tgtConn.GetCount(targetTable.FullName())
 	if err != nil {
-		return 0, g.Error("could not get count from final table %s: %v", targetTable.FullName(), err)
+		err = g.Error(err, "could not get count from final table %s", targetTable.FullName())
+		return 0, err
 	}
 	if cnt != tCnt {
-		return 0, g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+		err = g.Error(err, "inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+		return 0, err
 	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
-		return 0, g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
-	}
-
-	// Execute pre-SQL
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
-		return cnt, err
+		err = g.Error(err, "Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
+		return 0, err
 	}
 
 	// Handle empty data case
 	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
 		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
 		return 0, nil
+	} else if cnt > 0 {
+		// FIXME: find root cause of why columns don't sync while streaming
+		df.SyncColumns()
+
+		// Aggregate stats from stream processors
+		df.Inferred = !cfg.sourceIsFile() // Re-infer if source is file
+		df.SyncStats()
+
+		// Checksum Comparison, data quality. Limit to env var SLING_CHECKSUM_ROWS, cause sums get too high
+		if val := cast.ToUint64(os.Getenv("SLING_CHECKSUM_ROWS")); val > 0 && df.Count() <= val {
+			err = tgtConn.CompareChecksums(targetTable.FullName(), df.Columns)
+			if err != nil {
+				return
+			}
+		}
 	}
 
-	// Aggregate stats from stream processors
-	df.SyncColumns()
-	df.Inferred = !cfg.sourceIsFile()
-	df.SyncStats()
-
-	// Checksum Comparison for data quality
-	if val := cast.ToUint64(os.Getenv("SLING_CHECKSUM_ROWS")); val > 0 && df.Count() <= val {
-		err = tgtConn.CompareChecksums(targetTable.FullName(), df.Columns)
-		if err != nil {
-			return
-		}
+	// Commit final transaction
+	if err := tgtConn.Commit(); err != nil {
+		err = g.Error(err, "could not commit final transaction")
+		return 0, err
 	}
 
 	// Execute post-SQL
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
 		return cnt, err
-	}
-
-	// Commit final transaction
-	if err := tgtConn.Commit(); err != nil {
-		return 0, g.Error("could not commit final transaction: %v", err)
 	}
 
 	// Finalize progress
