@@ -90,7 +90,7 @@ jobs:
           cache: false
         
       - name: Load Secrets
-        uses: flarco/infisical-action@v2
+        uses: flarco/infisical-action@v3
         with:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
@@ -129,7 +129,7 @@ jobs:
           cache: true
         
       - name: Load Secrets
-        uses: flarco/infisical-action@v2
+        uses: flarco/infisical-action@v3
         with:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
@@ -179,7 +179,7 @@ jobs:
           cache: false
         
       - name: Load Secrets
-        uses: flarco/infisical-action@v2
+        uses: flarco/infisical-action@v3
         with:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
@@ -234,7 +234,7 @@ jobs:
           cache: false
         
       - name: Load Secrets
-        uses: flarco/infisical-action@v2
+        uses: flarco/infisical-action@v3
         with:
           version: 0.28.1
           client_id: ${{ secrets.INFISICAL_CLIENT_ID }}

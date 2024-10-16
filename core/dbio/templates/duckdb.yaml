@@ -152,8 +152,8 @@ function:
   iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
   delta_scanner: delta_scan('{uri}')
   parquet_scanner: parquet_scan('{uri}')
-  # csv_scanner: read_csv('{uri}', delim='{delim}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{nullstr}')
-  csv_scanner: read_csv('{uri}', delim='{delim}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{nullstr}')
+  # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
+  csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
 
 variable:
   bool_as: integer

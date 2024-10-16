@@ -26,6 +26,7 @@ type CSV struct {
 	NoHeader        bool
 	Delimiter       rune
 	Escape          string
+	Quote           string
 	FieldsPerRecord int
 	Columns         []Column
 	File            *os.File
@@ -263,6 +264,11 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 		options := csv.CsvOptions{}
 		options.Delimiter = byte(c.Delimiter)
 		options.Escape = []byte(c.Escape)[0]
+
+		if c.Quote != "" {
+			options.Quote = []byte(c.Quote)[0]
+		}
+
 		return csv.NewCsv(options).NewReader(reader4), nil
 	}
 

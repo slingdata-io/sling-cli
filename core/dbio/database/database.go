@@ -442,7 +442,7 @@ func (conn *BaseConn) setContext(ctx context.Context, concurrency int) {
 	if conn.context != nil {
 		c.Map = conn.context.Map
 	}
-	conn.context = &c
+	conn.context = c
 }
 
 // Self returns the respective connection Instance
@@ -627,10 +627,6 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 			if err != nil {
 				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
 			}
-
-			if !cast.ToBool(conn.GetProp("silent")) {
-				g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
-			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
 		}
@@ -666,6 +662,10 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 				}
 				return g.Error(err, "could not connect to database"+env.Clean(conn.Props(), msg))
 			}
+		}
+
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 
 		// add to pool after successful connection
@@ -877,6 +877,11 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 	nextFunc := func(it *iop.Iterator) bool {
 		if result == nil {
 			return false
+		} else if err = result.Err(); err != nil {
+			// if any error occurs during iteration
+			it.Context.CaptureErr(g.Error(err, "error during row iteration"))
+			result.Close()
+			return false
 		} else if Limit > 0 && it.Counter >= Limit {
 			result.Next()
 			result.Close()
@@ -895,11 +900,6 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 		}
 
 		result.Close()
-
-		// if any error occurs during iteration
-		// if result.Err() != nil {
-		// 	it.Context.CaptureErr(g.Error(result.Err(), "error during iteration in nextFunc"))
-		// }
 		return false
 	}
 
@@ -991,7 +991,7 @@ func (conn *BaseConn) NewTransaction(ctx context.Context, options ...*sql.TxOpti
 	// 	return nil, g.Error(err, "could not connect cloned conn object")
 	// }
 
-	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
+	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: context}
 	conn.tx = Tx
 
 	return Tx, nil

@@ -109,7 +109,7 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 	}
 
 	copyCtx := g.NewContext(conn.Context().Ctx)
-	stdOutReader, err := conn.CopyToStdout(&copyCtx, table.Select(0, 0))
+	stdOutReader, err := conn.CopyToStdout(copyCtx, table.Select(0, 0))
 	if err != nil {
 		return ds, err
 	}
@@ -128,7 +128,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
-		err = g.Error(err, "could not get  table name for imoprt")
+		err = g.Error(err, "could not get table name for import")
 		return
 	}
 

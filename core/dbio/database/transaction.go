@@ -324,7 +324,7 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 			} else if conn.GetType() == dbio.TypeDbTrino {
 				row = processTrinoInsertRow(bColumns, row)
 			} else if conn.GetType() == dbio.TypeDbProton {
-				row = processClickhouseInsertRow(bColumns, row)
+				row = processProtonInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}

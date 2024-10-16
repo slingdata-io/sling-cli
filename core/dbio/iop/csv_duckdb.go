@@ -33,6 +33,10 @@ func NewCsvReaderDuckDb(uri string, sc *StreamConfig, props ...string) (*CsvDuck
 		sc.Escape = `"`
 	}
 
+	if sc.Quote == "" {
+		sc.Quote = `"`
+	}
+
 	if sc.NullIf == "" {
 		sc.NullIf = `\N`
 	}
@@ -66,17 +70,17 @@ func (r *CsvDuckDb) Close() error {
 func (r *CsvDuckDb) MakeQuery(fsc FileStreamConfig) string {
 	quote := r.Duck.GetProp("quote_char")
 	if quote == "" {
-		quote = `"`
+		quote = r.sc.Quote
 	}
 
 	sql := r.Duck.MakeScanQuery(dbio.FileTypeCsv, r.URI, fsc)
 
-	sql = g.R(sql, "delim", r.sc.Delimiter)
+	sql = g.R(sql, "delimiter", r.sc.Delimiter)
 	sql = g.R(sql, "header", cast.ToString(r.sc.Header))
 	// sql = g.R(sql, "columns", cfg.Columns)
 	sql = g.R(sql, "quote", quote)
 	sql = g.R(sql, "escape", r.sc.Escape)
-	sql = g.R(sql, "nullstr", r.sc.NullIf)
+	sql = g.R(sql, "null_if", r.sc.NullIf)
 
 	return sql
 }

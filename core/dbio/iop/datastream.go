@@ -81,6 +81,7 @@ type FileStreamConfig struct {
 	Format           dbio.FileType     `json:"format"`
 	IncrementalKey   string            `json:"incremental_key"`
 	IncrementalValue string            `json:"incremental_value"`
+	FileSelect       *[]string         `json:"file_select"` // a list of files to include.
 	Props            map[string]string `json:"props"`
 }
 
@@ -165,7 +166,6 @@ func (ds *Datastream) NewIterator(columns Columns, nextFunc func(it *Iterator) b
 
 // NewDatastreamContext return a new datastream
 func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream) {
-	context := g.NewContext(ctx)
 
 	ds = &Datastream{
 		ID:            g.NewTsID("ds"),
@@ -173,7 +173,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		Batches:       []*Batch{},
 		Buffer:        make([][]any, 0, SampleSize),
 		Columns:       columns,
-		Context:       &context,
+		Context:       g.NewContext(ctx),
 		Sp:            NewStreamProcessor(),
 		config:        &StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
@@ -851,7 +851,7 @@ loop:
 		defer func() {
 			// if any error occurs during iteration
 			if ds.it.Context.Err() != nil {
-				ds.Context.CaptureErr(g.Error(ds.it.Context.Err(), "error during iteration"))
+				ds.Context.CaptureErr(ds.it.Context.Err())
 			}
 		}()
 
@@ -1114,6 +1114,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		NoHeader:        !ds.config.Header,
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
+		Quote:           ds.config.Quote,
 		Delimiter:       rune(0),
 		NoDebug:         ds.NoDebug,
 	}
@@ -1297,6 +1298,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		NoHeader:        !ds.config.Header,
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
+		Quote:           ds.config.Quote,
 		Delimiter:       rune(0),
 		NoDebug:         ds.NoDebug,
 	}
@@ -2580,7 +2582,7 @@ again:
 				goto again // try other switch cases if not string
 			}
 		case incrementalCol.IsDatetime():
-			incrementalValT, err := cast.ToTimeE(iVal)
+			incrementalValT, err := it.ds.Sp.ParseTime(iVal)
 			if err != nil {
 				it.Context.CaptureErr(g.Error(err, "unable to cast incremental value to time.Time: %s", iVal))
 				it.incrementalVal = nil

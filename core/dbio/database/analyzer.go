@@ -318,13 +318,13 @@ func (da *DataAnalyzer) ProcessRelationsString() (err error) {
 	g.Info("processing string relations: OneToOne")
 	err = da.GetOneToOne(uniqueCols, true)
 	if err != nil {
-		return g.Error(err, "could not run GetOneToMany")
+		return g.Error(err, "could not run GetOneToOne")
 	}
 
 	g.Info("processing string relations: ManyToMany")
 	err = da.GetManyToMany(nonUniqueCols, true)
 	if err != nil {
-		return g.Error(err, "could not run GetOneToMany")
+		return g.Error(err, "could not run GetManyToMany")
 	}
 
 	return
@@ -378,13 +378,13 @@ func (da *DataAnalyzer) ProcessRelationsInteger() (err error) {
 	g.Info("processing integer relations: OneToOne")
 	err = da.GetOneToOne(uniqueCols, false)
 	if err != nil {
-		return g.Error(err, "could not run GetOneToMany")
+		return g.Error(err, "could not run GetOneToOne")
 	}
 
 	g.Info("processing integer relations: ManyToMany")
 	err = da.GetManyToMany(nonUniqueCols, false)
 	if err != nil {
-		return g.Error(err, "could not run GetOneToMany")
+		return g.Error(err, "could not run GetManyToMany")
 	}
 
 	return

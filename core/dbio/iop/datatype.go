@@ -1207,3 +1207,43 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 	}
 	return
 }
+
+// FormatValue format as sql expression (adds quotes)
+func FormatValue(val any, column Column, connType dbio.Type) (newVal string) {
+	template, _ := connType.Template()
+
+	if val == nil {
+		return ""
+	} else if column.Type.IsDate() {
+		newVal = g.R(
+			template.Variable["date_layout_str"],
+			"value", cast.ToTime(val).Format(template.Variable["date_layout"]),
+		)
+	} else if column.Type.IsDatetime() {
+		// set timestampz_layout_str and timestampz_layout if missing
+		if _, ok := template.Variable["timestampz_layout_str"]; !ok {
+			template.Variable["timestampz_layout_str"] = template.Variable["timestamp_layout_str"]
+		}
+		if _, ok := template.Variable["timestampz_layout"]; !ok {
+			template.Variable["timestampz_layout"] = template.Variable["timestamp_layout"]
+		}
+
+		if column.Type == TimestampzType {
+			newVal = g.R(
+				template.Variable["timestampz_layout_str"],
+				"value", cast.ToTime(val).Format(template.Variable["timestampz_layout"]),
+			)
+		} else {
+			newVal = g.R(
+				template.Variable["timestamp_layout_str"],
+				"value", cast.ToTime(val).Format(template.Variable["timestamp_layout"]),
+			)
+		}
+	} else if column.Type.IsNumber() {
+		newVal = cast.ToString(val)
+	} else {
+		newVal = strings.ReplaceAll(cast.ToString(val), `'`, `''`)
+		newVal = `'` + newVal + `'`
+	}
+	return
+}

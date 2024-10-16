@@ -480,7 +480,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		}
 		bcpArgs = append(bcpArgs, bcpAuthParts...)
 	} else {
-		if g.In(conn.GetProp("authenticator"), "winsspi") {
+		if g.In(conn.GetProp("authenticator"), "winsspi") || conn.isTrusted() {
 			bcpArgs = append(bcpArgs, "-T")
 		} else {
 			bcpArgs = append(bcpArgs, "-U", user, "-P", password)
@@ -658,6 +658,16 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 	}
 
 	return df.Count(), err
+}
+
+func (conn *MsSQLServerConn) isTrusted() bool {
+	if strings.Contains(conn.ConnString(), "TrustServerCertificate") {
+		return true
+	}
+	if strings.Contains(conn.ConnString(), "TrustedConnection") {
+		return true
+	}
+	return false
 }
 
 // CopyFromAzure uses the COPY INTO Table command from Azure

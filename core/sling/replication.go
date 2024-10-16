@@ -24,6 +24,10 @@ type ReplicationConfig struct {
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
 
+	// Tasks are compiled tasks
+	Tasks    []*Config `json:"tasks"`
+	Compiled bool      `json:"compiled"`
+
 	streamsOrdered []string
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
@@ -341,7 +345,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 
 		wildcard := Wildcard{Pattern: pattern, NodeMap: map[string]filesys.FileNode{}}
 		if strings.Contains(pattern, "://") {
-			_, path, err = filesys.ParseURL(pattern)
+			_, _, path, err = filesys.ParseURLType(pattern)
 			if err != nil {
 				return wildcards, g.Error(err, "could not parse wildcard: %s", pattern)
 			}
@@ -371,30 +375,77 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 }
 
 // Compile compiles the replication into tasks
-func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (tasks []*Config, err error) {
+func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
+	if rd.Compiled {
+		// apply the selection if specified
+		if len(selectStreams) > 0 {
+			selectedTasks := []*Config{}
+			nameMap := g.ArrMapString(selectStreams)
+			for _, task := range rd.Tasks {
+				if _, ok := nameMap[task.StreamName]; ok {
+					selectedTasks = append(selectedTasks, task)
+				}
+			}
+			rd.Tasks = selectedTasks
+		}
+		return nil
+	}
 
 	err = rd.ProcessWildcards()
 	if err != nil {
-		return tasks, g.Error(err, "could not process streams using wildcard")
+		return g.Error(err, "could not process streams using wildcard")
 	}
 
 	// clean up selectStreams
 	matchedStreams := map[string]*ReplicationStreamConfig{}
+	includeTags := []string{}
+	excludeTags := []string{}
 	for _, selectStream := range selectStreams {
 		for key, val := range rd.MatchStreams(selectStream) {
 			key = rd.Normalize(key)
 			matchedStreams[key] = val
 		}
+		if strings.HasPrefix(selectStream, "tag:") {
+			includeTags = append(includeTags, strings.TrimPrefix(selectStream, "tag:"))
+		}
+		if strings.HasPrefix(selectStream, "-tag:") {
+			excludeTags = append(excludeTags, strings.TrimPrefix(selectStream, "-tag:"))
+		}
 	}
 
-	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
-	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
-
-	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
-		return tasks, err
+	if len(includeTags) > 0 && len(excludeTags) > 0 {
+		return g.Error("cannot include and exclude tags. Either include or exclude.")
 	}
 
 	for _, name := range rd.StreamsOrdered() {
+
+		stream := ReplicationStreamConfig{}
+		if rd.Streams[name] != nil {
+			stream = *rd.Streams[name]
+		}
+		SetStreamDefaults(name, &stream, *rd)
+
+		if stream.Object == "" {
+			return g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
+		}
+
+		// match on tag, need stream defined to do so
+		matchedTag := false
+		for _, tag := range includeTags {
+			if g.In(tag, stream.Tags...) {
+				matchedTag = true
+			}
+		}
+		if matchedTag {
+			matchedStreams[rd.Normalize(name)] = &stream
+		}
+
+		// exclude tags
+		for _, tag := range excludeTags {
+			if g.In(tag, stream.Tags...) {
+				delete(matchedStreams, rd.Normalize(name))
+			}
+		}
 
 		_, matched := matchedStreams[rd.Normalize(name)]
 		if len(selectStreams) > 0 && !matched {
@@ -402,17 +453,10 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			continue
 		}
 
-		stream := ReplicationStreamConfig{}
-		if rd.Streams[name] != nil {
-			stream = *rd.Streams[name]
-		}
-		SetStreamDefaults(name, &stream, rd)
-
-		if stream.Object == "" {
-			return tasks, g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
-		}
-
 		// config overwrite
+		taskEnv := g.ToMapString(rd.Env)
+		var incrementalVal string
+
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
 				g.Debug("stream mode overwritten for `%s`: %s => %s", name, stream.Mode, cfgOverwrite.Mode)
@@ -455,13 +499,26 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 					stream.SourceOptions.Range = newRange
 				}
 			}
+
+			// other incremental / backfill overrides
+			if newFileSelect := cfgOverwrite.Source.Options.FileSelect; newFileSelect != nil {
+				stream.SourceOptions.FileSelect = newFileSelect
+			}
+			incrementalVal = cfgOverwrite.IncrementalVal
+
+			// merge to existing replication env, overwrite if key already exists
+			if cfgOverwrite.Env != nil {
+				for k, v := range cfgOverwrite.Env {
+					taskEnv[k] = v
+				}
+			}
 		}
 
 		cfg := Config{
 			Source: Source{
 				Conn:        rd.Source,
 				Stream:      name,
-				SQL:         stream.SQL,
+				Query:       stream.SQL,
 				Select:      stream.Select,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
@@ -473,8 +530,9 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			},
 			Mode:              stream.Mode,
 			Transforms:        stream.Transforms,
-			Env:               g.ToMapString(rd.Env),
+			Env:               taskEnv,
 			StreamName:        name,
+			IncrementalVal:    incrementalVal,
 			ReplicationStream: &stream,
 		}
 
@@ -498,32 +556,35 @@ func (rd ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...strin
 			return
 		}
 
-		tasks = append(tasks, &cfg)
+		rd.Tasks = append(rd.Tasks, &cfg)
+	}
+
+	rd.Compiled = true
+
+	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
+	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
+
+	if err = testStreamCnt(streamCnt, lo.Keys(matchedStreams), lo.Keys(rd.Streams)); err != nil {
+		return err
 	}
 	return
 }
 
 type ReplicationStreamConfig struct {
+	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
-	Schedule      []string       `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
-
-	State *StreamIncrementalState `json:"state,omitempty" yaml:"state,omitempty"`
-}
-
-type StreamIncrementalState struct {
-	Value int64            `json:"value,omitempty" yaml:"value,omitempty"`
-	Files map[string]int64 `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -545,7 +606,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
-		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
+		"tags":        func() { stream.Tags = replicationCfg.Defaults.Tags },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
@@ -780,6 +841,15 @@ func LoadReplicationConfig(content string) (config ReplicationConfig, err error)
 	if err != nil {
 		err = g.Error(err, "Error parsing replication config")
 		return
+	}
+
+	// load compiled tasks if in env
+	if payload := os.Getenv("SLING_REPLICATION_TASKS"); payload != "" {
+		if err = g.Unmarshal(payload, &config.Tasks); err != nil {
+			err = g.Error(err, "could not unmarshal replication compiled tasks")
+			return
+		}
+		config.Compiled = true
 	}
 
 	return

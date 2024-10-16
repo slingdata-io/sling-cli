@@ -550,8 +550,8 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// set sql to stream if source conn is db
-	if cfg.SrcConn.Type.IsDb() && cfg.Source.SQL != "" {
-		cfg.Source.Stream = strings.TrimSpace(cfg.Source.SQL)
+	if cfg.SrcConn.Type.IsDb() && cfg.Source.Query != "" {
+		cfg.Source.Stream = strings.TrimSpace(cfg.Source.Query)
 	}
 
 	if connection.SchemeType(cfg.Source.Stream).IsFile() && !strings.HasSuffix(cfg.Source.Stream, ".sql") {
@@ -638,9 +638,9 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// sql prop
-	cfg.Source.SQL = g.Rm(cfg.Source.SQL, fMap)
+	cfg.Source.Query = g.Rm(cfg.Source.Query, fMap)
 	if cfg.ReplicationStream != nil {
-		cfg.ReplicationStream.SQL = cfg.Source.SQL
+		cfg.ReplicationStream.SQL = cfg.Source.Query
 	}
 
 	// check if referring to a SQL file, and set stream text
@@ -701,23 +701,6 @@ func (cfg *Config) Prepare() (err error) {
 
 	// done
 	cfg.Prepared = true
-	return
-}
-
-// Marshal marshals into JSON
-func (cfg *Config) Marshal() (cfgBytes []byte, err error) {
-
-	cfg.Source.Conn = cfg.SrcConn.Info().Name
-	cfg.Source.Data = cfg.SrcConn.Info().Data
-
-	cfg.Target.Conn = cfg.TgtConn.Info().Name
-	cfg.Target.Data = cfg.TgtConn.Info().Data
-
-	cfgBytes, err = json.Marshal(cfg)
-	if err != nil {
-		err = g.Error(err, "Could not encode provided configuration into JSON")
-		return
-	}
 	return
 }
 
@@ -898,7 +881,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 
 		// duckdb sql on files, make `stream_scanner`
-		if cfg.Source.SQL != "" {
+		if cfg.Source.Query != "" {
 			// get file format in order to match scanner
 			fileFormat := dbio.FileTypeNone
 			if cfg.Source.Options != nil && cfg.Source.Options.Format != nil {
@@ -978,8 +961,7 @@ type Config struct {
 	TgtConn  connection.Connection `json:"-" yaml:"-"`
 	Prepared bool                  `json:"-" yaml:"-"`
 
-	IncrementalVal    any    `json:"-" yaml:"-"`
-	IncrementalValStr string `json:"-" yaml:"-"`
+	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -1002,6 +984,11 @@ func (cfg *Config) ReplicationMode() bool {
 // IgnoreExisting returns true target_options.ignore_existing is true
 func (cfg *Config) IgnoreExisting() bool {
 	return cfg.Target.Options.IgnoreExisting != nil && *cfg.Target.Options.IgnoreExisting
+}
+
+// HasIncrementalVal returns true there is a non-null incremental value
+func (cfg *Config) HasIncrementalVal() bool {
+	return cfg.IncrementalVal != "" && cfg.IncrementalVal != "null"
 }
 
 // ColumnsPrepared returns the prepared columns
@@ -1182,7 +1169,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	SQL         string         `json:"sql,omitempty" yaml:"sql,omitempty"`
+	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
@@ -1276,12 +1263,15 @@ type SourceOptions struct {
 	SkipBlankLines *bool               `json:"skip_blank_lines,omitempty" yaml:"skip_blank_lines,omitempty"`
 	Delimiter      string              `json:"delimiter,omitempty" yaml:"delimiter,omitempty"`
 	Escape         string              `json:"escape,omitempty" yaml:"escape,omitempty"`
+	Quote          string              `json:"quote,omitempty" yaml:"quote,omitempty"`
 	MaxDecimals    *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	JmesPath       *string             `json:"jmespath,omitempty" yaml:"jmespath,omitempty"`
 	Sheet          *string             `json:"sheet,omitempty" yaml:"sheet,omitempty"`
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
+	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
+	ParallelChunks *int                `json:"parallel_chunks,omitempty" yaml:"parallel_chunks,omitempty"`
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
@@ -1423,6 +1413,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.Escape == "" {
 		o.Escape = sourceOptions.Escape
+	}
+	if o.Quote == "" {
+		o.Quote = sourceOptions.Quote
 	}
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = sourceOptions.MaxDecimals

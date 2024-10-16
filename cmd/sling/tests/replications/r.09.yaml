@@ -8,6 +8,7 @@ defaults:
 
 streams:
   public.my_table?:
+    tags: [ my_table ]
   public.my_table:
   public.my_table_*:
     columns:

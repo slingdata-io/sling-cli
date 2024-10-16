@@ -151,7 +151,7 @@ func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err er
 	}
 
 	copyCtx := g.NewContext(conn.Context().Ctx)
-	stdOutReader, err := conn.LoadDataOutFile(&copyCtx, table.Select(0, 0))
+	stdOutReader, err := conn.LoadDataOutFile(copyCtx, table.Select(0, 0))
 	if err != nil {
 		return ds, err
 	}
