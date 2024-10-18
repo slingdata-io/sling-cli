@@ -114,7 +114,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			}
 		}
 	} else {
-		err = g.Error(err, "target for output is not specified")
+		err = g.Error("target for output is not specified")
 		return
 	}
 
@@ -136,7 +136,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Detect empty columns
 	if len(df.Columns) == 0 {
-		err = g.Error(err, "no stream columns detected")
+		err = g.Error("no stream columns detected")
 		return 0, err
 	}
 
@@ -252,15 +252,16 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// Validate data
 	tCnt, err := tgtConn.GetCount(tableTmp.FullName())
 	if err != nil {
-		err = g.Error(err, "could not get count from temp table %s", tableTmp.FullName())
+		err = g.Error(err, "could not get count for temp table "+tableTmp.FullName())
 		return 0, err
-	}
-	if cnt != tCnt {
-		err = g.Error(err, "inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
-		return 0, err
-	} else if tCnt == 0 && len(sampleData.Rows) > 0 {
-		err = g.Error(err, "Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
-		return 0, err
+	} else {
+		if cnt != tCnt {
+			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+			return 0, err
+		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
+			err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
+			return 0, err
+		}
 	}
 
 	// Execute pre-SQL
@@ -367,7 +368,7 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 
 	// check table ddl
 	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
-		err = g.Error(err, "The Table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
+		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
 		return database.Table{}, err
 	}
 
