@@ -1015,7 +1015,10 @@ func (conn *SnowflakeConn) GetSchemas() (data iop.Dataset, err error) {
 		return data1, err
 	}
 
-	return data1.Pick("name"), nil
+	data = data1.Pick("name")
+	data.Columns[0].Name = "schema_name" // rename column
+
+	return data, nil
 }
 
 // GetTables returns tables
