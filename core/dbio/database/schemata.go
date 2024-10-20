@@ -238,16 +238,6 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		}
 	}
 
-	if isSQLServer {
-		// add offset after "order by"
-		matches := g.Matches(sql, ` order by "([\S ]+)" asc`)
-		if !startsWith && len(matches) == 1 {
-			orderBy := matches[0].Full
-			newOrderBy := strings.ReplaceAll(matches[0].Full, " asc", "  asc") // to not match again
-			sql = strings.ReplaceAll(sql, orderBy, g.F("%s offset %d rows", newOrderBy, offset))
-		}
-	}
-
 	// replace any provided placeholders
 	sql = g.R(sql, "limit", cast.ToString(limit), "offset", cast.ToString(offset))
 

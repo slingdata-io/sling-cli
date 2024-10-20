@@ -133,7 +133,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if sTable.SQL == "" {
 			key := lo.Ternary(
 				cfg.Source.Limit() > 0,
-				"core.incremental_select_limit",
+				lo.Ternary(
+					cfg.Source.Offset() > 0,
+					"core.incremental_select_limit_offset",
+					"core.incremental_select_limit",
+				),
 				"core.incremental_select",
 			)
 			sTable.SQL = g.R(
