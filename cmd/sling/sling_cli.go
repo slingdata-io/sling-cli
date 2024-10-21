@@ -354,7 +354,7 @@ func init() {
 	cliUpdate.Make().Add()
 
 	if projectID == "" {
-		projectID = os.Getenv("GITHUB_REPOSITORY_ID")
+		projectID = os.Getenv("SLING_PROJECT_ID")
 	}
 }
 

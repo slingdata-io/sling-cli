@@ -19,6 +19,24 @@ func TestConnectionDiscover(t *testing.T) {
 
 	tests := []test{
 		{
+			connName: "local",
+			pattern:  "../../../cmd/sling/tests/files/*.csv",
+			expected: []string{
+				"../../../cmd/sling/tests/files/test.wide.csv",
+				"../../../cmd/sling/tests/files/test1.1.csv",
+				"../../../cmd/sling/tests/files/test1.2.csv",
+				"../../../cmd/sling/tests/files/test1.csv",
+				"../../../cmd/sling/tests/files/test1.result.csv",
+				"../../../cmd/sling/tests/files/test1.upsert.csv",
+				"../../../cmd/sling/tests/files/test2.csv",
+				"../../../cmd/sling/tests/files/test4.csv",
+				"../../../cmd/sling/tests/files/test5.csv",
+				"../../../cmd/sling/tests/files/test6.csv",
+				"../../../cmd/sling/tests/files/test7.csv",
+				"../../../cmd/sling/tests/files/test8.csv",
+			},
+		},
+		{
 			connName: "sftp",
 			pattern:  "/_/analytics/sling/clickhouse-duckdb.yaml",
 			expected: []string{
@@ -234,7 +252,6 @@ func TestConnectionDiscover(t *testing.T) {
 				assert.Contains(t, test.expected, result)
 			}
 		})
-
 	}
 }
 

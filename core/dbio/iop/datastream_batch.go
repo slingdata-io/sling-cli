@@ -25,7 +25,6 @@ type Batch struct {
 // NewBatch create new batch with fixed columns
 // should be used each time column type changes, or columns are added
 func (ds *Datastream) NewBatch(columns Columns) *Batch {
-	ctx := g.NewContext(ds.Context.Ctx)
 	batch := &Batch{
 		id:         len(ds.Batches),
 		Columns:    columns,
@@ -35,7 +34,7 @@ func (ds *Datastream) NewBatch(columns Columns) *Batch {
 		Limit:      ds.Sp.Config.BatchLimit,
 		closeChan:  make(chan struct{}),
 		transforms: []func(row []any) []any{},
-		context:    &ctx,
+		context:    g.NewContext(ds.Context.Ctx),
 	}
 
 	if batch.Previous != nil && !batch.Previous.closed {

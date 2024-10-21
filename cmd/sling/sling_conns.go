@@ -110,7 +110,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 				return ok, g.Error(err, "cannot parse query")
 			}
 
-			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || strings.Contains(strings.ToLower(query), "select") || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
+			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || (strings.Contains(strings.ToLower(query), "select") && !strings.Contains(strings.ToLower(query), "insert")) || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
 
 				data, err := dbConn.Query(sQuery.Select(100, 0))
 				if err != nil {
@@ -174,7 +174,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 		ok, err = entries.Test(name)
 		if err != nil {
-			err = g.Error(err, "could not test %s (See https://docs.slingdata.io/sling-cli/environment)", name)
+			err = g.Error(err, "could not test %s", name)
 		}
 
 		if asJSON {

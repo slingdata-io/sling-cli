@@ -54,6 +54,7 @@ func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) 
 		config.Header = true
 		config.Delimiter = ","
 		config.Escape = `"`
+		config.Quote = `"`
 		config.NullAs = `\N`
 		config.DatetimeFormat = conn.Type.GetTemplateValue("variable.timestampz_layout")
 

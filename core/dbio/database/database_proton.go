@@ -69,10 +69,10 @@ func (conn *ProtonConn) NewTransaction(ctx context.Context, options ...*sql.TxOp
 		return nil, g.Error(err, "could not begin Tx")
 	}
 
-	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: &context}
+	Tx := &BaseTransaction{Tx: tx, Conn: conn.Self(), context: context}
 	conn.tx = Tx
 
-	// CH does not support transactions at the moment
+	// ProtonDB does not support transactions at the moment
 	// Tx := &BlankTransaction{Conn: conn.Self(), context: &context}
 
 	return Tx, nil
@@ -104,7 +104,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
-		err = g.Error(err, "could not get  table name for imoprt")
+		err = g.Error(err, "could not get table name for import")
 		return
 	}
 
@@ -267,6 +267,27 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	return count, nil
 }
 
+// ExecContext runs a sql query with context, returns `error`
+func (conn *ProtonConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+	const maxRetries = 3
+	retries := 0
+
+	for {
+		result, err = conn.BaseConn.ExecContext(ctx, q, args...)
+		if err == nil {
+			return
+		}
+
+		retries++
+		if retries >= maxRetries {
+			return
+		}
+
+		g.Info("Error (%s). Sleep 5 sec and retry", err.Error())
+		time.Sleep(5 * time.Second)
+	}
+}
+
 // GenerateInsertStatement returns the proper INSERT statement
 func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 	fields := cols.Names()
@@ -290,7 +311,7 @@ func (conn *ProtonConn) GenerateInsertStatement(tableName string, cols iop.Colum
 	}
 
 	statement := g.R(
-		"insert into {table} ({fields}) values  {values}",
+		"insert into {table} ({fields}) values {values}",
 		"table", tableName,
 		"fields", strings.Join(qFields, ", "),
 		"values", strings.TrimSuffix(valuesStr, ","),
@@ -307,14 +328,8 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		return
 	}
 
+	// proton does not support upsert with delete
 	sqlTempl := `
-	ALTER STREAM {tgt_table}
-	DELETE where ({pk_fields}) in (
-			select {pk_fields}
-			from table({src_table}) src
-	)
-	;
-
 	insert into {tgt_table}
 		({insert_fields})
 	select {src_fields}
@@ -363,4 +378,21 @@ func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
 		return 0, err
 	}
 	return cast.ToUint64(data.Rows[0][0]), nil
+}
+
+func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	nativeType, err = conn.BaseConn.GetNativeType(col)
+
+	// remove nullable if part of pk
+	if col.IsKeyType(iop.PrimaryKey) && strings.HasPrefix(nativeType, "nullable(") {
+		nativeType = strings.TrimPrefix(nativeType, "nullable(")
+		nativeType = strings.TrimSuffix(nativeType, ")")
+	}
+
+	// special case for _tp_time, Column _tp_time is reserved, expected type is non-nullable datetime64
+	if col.Name == "_tp_time" {
+		return "datetime64(3, 'UTC')", nil
+	}
+
+	return nativeType, err
 }

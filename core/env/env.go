@@ -71,7 +71,7 @@ func init() {
 		os.Setenv("SLING_CHECKSUM_ROWS", "10000")
 	}
 
-	TelMap["parent"] = process.GetParent()
+	TelMap["parent"] = g.Marshal(process.GetParent())
 }
 
 func HomeBinDir() string {

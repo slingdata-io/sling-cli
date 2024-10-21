@@ -215,7 +215,26 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 		conn.LogSQL(g.Marshal(g.M("database", table.Schema, "collection", table.Name, "filter", filter, "options", g.M("limit", findOpts.Limit, "projection", findOpts.Projection))))
 	}
 
-	cur, err := collection.Find(queryContext.Ctx, filter, findOpts)
+	var cur *mongo.Cursor
+	if pipeline, ok := opts["pipeline"]; ok {
+		// https://www.mongodb.com/docs/manual/core/aggregation-pipeline/
+		var aggPipeline []bson.D
+
+		// check if pipeline is a slice of any
+		switch v := pipeline.(type) {
+		case []any:
+			for _, item := range v {
+				var aggItem bson.D
+				g.JSONConvert(item, &aggItem)
+				aggPipeline = append(aggPipeline, aggItem)
+			}
+		default:
+			return nil, g.Error("unsupported input for aggregation pipeline: %#v", pipeline)
+		}
+		cur, err = collection.Aggregate(queryContext.Ctx, aggPipeline)
+	} else {
+		cur, err = collection.Find(queryContext.Ctx, filter, findOpts)
+	}
 	if err != nil {
 		return ds, g.Error(err, "error querying collection")
 	}

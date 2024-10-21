@@ -735,7 +735,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	// Write the ds to a temp file
-	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", tableFName, g.NowFileStr())
 
 	// delete folder when done
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
@@ -1015,7 +1015,10 @@ func (conn *SnowflakeConn) GetSchemas() (data iop.Dataset, err error) {
 		return data1, err
 	}
 
-	return data1.Pick("name"), nil
+	data = data1.Pick("name")
+	data.Columns[0].Name = "schema_name" // rename column
+
+	return data, nil
 }
 
 // GetTables returns tables

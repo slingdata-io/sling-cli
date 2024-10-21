@@ -54,6 +54,7 @@ type StreamConfig struct {
 	SkipBlankLines    bool                   `json:"skip_blank_lines"`
 	Delimiter         string                 `json:"delimiter"`
 	Escape            string                 `json:"escape"`
+	Quote             string                 `json:"quote"`
 	FileMaxRows       int64                  `json:"file_max_rows"`
 	BatchLimit        int64                  `json:"batch_limit"`
 	MaxDecimals       int                    `json:"max_decimals"`
@@ -262,6 +263,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["escape"] != "" {
 		sp.Config.Escape = configMap["escape"]
+	}
+
+	if configMap["quote"] != "" {
+		sp.Config.Quote = configMap["quote"]
 	}
 
 	if configMap["file_max_rows"] != "" {
@@ -775,13 +780,13 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		cs.BoolCnt++
 	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
-		if err != nil {
+		if err != nil && !g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
 			sp.ds.ChangeColumn(i, StringType)
 			cs.StringCnt++
 			sVal = cast.ToString(val)
 			sp.rowChecksum[i] = uint64(len(sVal))
 			nVal = sVal
-		} else if dVal.IsZero() {
+		} else if dVal.IsZero() || g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
 			nVal = nil
 			cs.NullCnt++
 			sp.rowBlankValCnt++
@@ -931,7 +936,9 @@ func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType 
 		if valD, ok := val.(decimal.Decimal); ok {
 			// shopspring/decimal is buggy and can segfault. Using val.NumDigit,
 			// we can create a approximate value mask to output the correct number of bytes
-			return sp.digitString[valD.NumDigits()]
+			// return sp.digitString[valD.NumDigits()]
+			_ = valD          // to avoid segfault
+			return "000.0000" // assume 8 bytes for each decimal
 		}
 		return cast.ToString(val)
 	case typ.IsDate():

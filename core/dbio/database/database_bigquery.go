@@ -62,6 +62,8 @@ func (conn *BigQueryConn) Init() error {
 		conn.DatasetID = conn.GetProp("schema")
 	}
 
+	conn.Location = conn.GetProp("location")
+
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
@@ -137,7 +139,17 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, time.Duration(to)*time.Second)
 	defer cancel()
 
-	return bigquery.NewClient(ctx, conn.ProjectID, authOption)
+	client, err = bigquery.NewClient(ctx, conn.ProjectID, authOption)
+	if err != nil {
+		return nil, g.Error(err, "Failed to create BigQuery client")
+	}
+
+	// set the location if specified
+	if conn.Location != "" {
+		client.Location = conn.Location
+	}
+
+	return client, nil
 }
 
 // Connect connects to the database
@@ -219,6 +231,7 @@ func (conn *BigQueryConn) ExecContext(ctx context.Context, sql string, args ...i
 	conn.LogSQL(sql)
 
 	q := conn.Client.Query(sql)
+	q.JobIDConfig.Location = conn.Location
 	q.QueryConfig = bigquery.QueryConfig{
 		Q:                sql,
 		DefaultDatasetID: conn.GetProp("schema"),
@@ -745,6 +758,7 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 
 	loader := client.Dataset(table.Schema).Table(table.Name).LoaderFrom(source)
 	loader.WriteDisposition = bigquery.WriteAppend
+	loader.Location = client.Location
 
 	job, err := loader.Run(conn.Context().Ctx)
 	if err != nil {
@@ -793,6 +807,7 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 	gcsRef.MaxBadRecords = 0
 	loader := client.Dataset(table.Schema).Table(table.Name).LoaderFrom(gcsRef)
 	loader.WriteDisposition = bigquery.WriteAppend
+	loader.Location = client.Location
 
 	job, err := loader.Run(conn.Context().Ctx)
 	if err != nil {
@@ -954,7 +969,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 
 	extractor := client.DatasetInProject(conn.ProjectID, table.Schema).Table(table.Name).ExtractorTo(gcsRef)
 	extractor.DisableHeader = false
-	extractor.Location = conn.Location
+	extractor.Location = client.Location
 
 	job, err := extractor.Run(conn.Context().Ctx)
 	if err != nil {

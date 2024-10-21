@@ -191,10 +191,9 @@ func (conn *BigTableConn) Close() error {
 
 // NewTransaction creates a new transaction
 func (conn *BigTableConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
-	context := g.NewContext(ctx)
 
 	// BT does not support transactions at the moment
-	Tx := &BlankTransaction{Conn: conn.Self(), context: &context}
+	Tx := &BlankTransaction{Conn: conn.Self(), context: g.NewContext(ctx)}
 	conn.tx = Tx
 
 	return nil, nil

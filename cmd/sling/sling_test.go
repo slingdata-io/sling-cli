@@ -390,12 +390,12 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		return
 	}
 
-	tasks, err := replicationConfig.Compile(nil)
+	err = replicationConfig.Compile(nil)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	taskCfg := tasks[0]
+	taskCfg := replicationConfig.Tasks[0]
 
 	var streamCfg *sling.ReplicationStreamConfig
 	for _, streamCfg = range replicationConfig.Streams {
@@ -446,8 +446,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 	task := sling.NewTask("", taskCfg)
 	if g.AssertNoError(t, task.Err) {
-		taskContext := g.NewContext(testContext.Ctx)
-		task.Context = &taskContext
+		task.Context = g.NewContext(testContext.Ctx)
 		err = task.Execute()
 		if !g.AssertNoError(t, err) {
 			return
@@ -1017,14 +1016,14 @@ streams:
 		return
 	}
 
-	taskConfigs, err := replication.Compile(nil)
+	err = replication.Compile(nil)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	if !assert.GreaterOrEqual(t, len(taskConfigs), 5) {
+	if !assert.GreaterOrEqual(t, len(replication.Tasks), 5) {
 		streams := []string{}
-		for _, task := range taskConfigs {
+		for _, task := range replication.Tasks {
 			streams = append(streams, task.StreamName)
 		}
 		g.Warn(g.F("streams: %#v", streams))
@@ -1033,7 +1032,7 @@ streams:
 
 	{
 		// First Stream: stream_0
-		config := taskConfigs[0]
+		config := replication.Tasks[0]
 		config.SetDefault()
 		assert.Equal(t, sling.FullRefreshMode, config.Mode)
 		assert.Equal(t, "local", config.Source.Conn)
@@ -1052,7 +1051,7 @@ streams:
 
 	{
 		// Second Stream: stream_1
-		config := taskConfigs[1]
+		config := replication.Tasks[1]
 		config.SetDefault()
 		assert.Equal(t, sling.IncrementalMode, config.Mode)
 		assert.Equal(t, "stream_1", config.Source.Stream)
@@ -1073,7 +1072,7 @@ streams:
 
 	{
 		// Third Stream: stream_2
-		config := taskConfigs[2]
+		config := replication.Tasks[2]
 		config.SetDefault()
 		assert.Equal(t, "stream_2", config.Source.Stream)
 		assert.Equal(t, []string{}, config.Source.Select)
@@ -1089,7 +1088,7 @@ streams:
 	{
 		// Fourth Stream: file://tests/files/parquet/*.parquet
 		// single, wildcard not expanded
-		config := taskConfigs[3]
+		config := replication.Tasks[3]
 		config.SetDefault()
 		assert.Equal(t, config.Source.Stream, "file://tests/files/parquet/*.parquet")
 		assert.Equal(t, `"my_schema3"."table3"`, config.Target.Object)
@@ -1098,7 +1097,7 @@ streams:
 	{
 		// Fifth Stream: file://tests/files/*.csv
 		// wildcard expanded
-		config := taskConfigs[4]
+		config := replication.Tasks[4]
 		assert.True(t, strings.HasPrefix(config.Source.Stream, "tests/files/"))
 		assert.NotEqual(t, config.Source.Stream, "tests/files/*.csv")
 		assert.Equal(t, `"my_schema3"."table3"`, config.Target.Object)
