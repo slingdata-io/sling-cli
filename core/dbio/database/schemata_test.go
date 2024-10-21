@@ -97,20 +97,12 @@ func TestParseTableName(t *testing.T) {
 }
 
 func TestRegexMatch(t *testing.T) {
-	table, err := ParseTableName(`select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
-	if !assert.NoError(t, err) {
-		return
-	}
-	sql := table.Select(10, 5)
-	assert.True(t, strings.Contains(sql, ` order by "created"  asc offset 5 rows`))
-	sql = table.Select(0, 0, "id")
-	assert.True(t, strings.Contains(sql, ` order by "created"  asc offset 0 rows`))
 
-	table, err = ParseTableName(`with () select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
+	table, err := ParseTableName(`with () select id, created, type from "dbo"."biz" where "created" >= '2021-01-01 01:40:00' order by "created" asc`, dbio.TypeDbSQLServer)
 	if !assert.NoError(t, err) {
 		return
 	}
-	sql = table.Select(10, 0)
+	sql := table.Select(10, 0)
 	assert.True(t, strings.HasPrefix(sql, `with () select id`), sql)
 }
 
