@@ -21,7 +21,3 @@ cd -
 cd filesys
 go test -v -run 'TestFileSysLocalCsv|TestFileSysLocalJson|TestFileSysLocalParquet|TestFileSysLocalFormat|TestFileSysGoogle|TestFileSysS3|TestFileSysAzure|TestFileSysSftp|TestFileSysFtp|TestExcel|TestFileSysLocalIceberg|TestFileSysLocalDelta'
 cd -
-
-# cd saas
-# go test -v -run 'TestAirbyteGithub|TestAirbyteNotion'
-# cd -
