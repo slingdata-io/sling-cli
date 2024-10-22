@@ -112,6 +112,9 @@ func (conn *MsSQLServerConn) ConnString() string {
 		"TrustServerCertificate":   "TrustServerCertificate",
 		"trust_server_certificate": "TrustServerCertificate",
 
+		"TrustedConnection":  "TrustedConnection",
+		"trusted_connection": "TrustedConnection",
+
 		"certificate": "certificate",
 
 		"hostNameInCertificate":   "hostNameInCertificate",
@@ -661,13 +664,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 }
 
 func (conn *MsSQLServerConn) isTrusted() bool {
-	if strings.Contains(conn.ConnString(), "TrustServerCertificate") {
-		return true
-	}
-	if strings.Contains(conn.ConnString(), "TrustedConnection") {
-		return true
-	}
-	return false
+	return strings.Contains(conn.ConnString(), "TrustedConnection")
 }
 
 // CopyFromAzure uses the COPY INTO Table command from Azure
