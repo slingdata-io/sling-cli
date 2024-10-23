@@ -153,8 +153,8 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		sameCols := g.Marshal(ds.Columns.Names(true, true)) == g.Marshal(columns.Names(true, true))
 
 		// write to temp CSV
-		csvPath := path.Join(env.GetTempFolder(), g.NewTsID("sqlite.temp")+".csv")
-		sqlPath := path.Join(env.GetTempFolder(), g.NewTsID("sqlite.temp")+".sql")
+		csvPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlite.%s", env.CleanTableName(tableFName)))+".temp.csv")
+		sqlPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlite.%s", env.CleanTableName(tableFName)))+".temp.sql")
 
 		// set header. not needed if not creating a temp table
 		cfgMap := ds.GetConfig()
