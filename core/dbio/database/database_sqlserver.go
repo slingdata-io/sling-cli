@@ -334,7 +334,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		// Write the ds to a temp file
 
-		filePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
+		filePath := path.Join(env.GetTempFolder(), "sqlserver", env.CleanTableName(tableFName), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
 
 		if err != nil {
@@ -456,7 +456,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 	errPath := "/dev/stderr"
 	if runtime.GOOS == "windows" || true {
-		errPath = path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+".error")
+		errPath = path.Join(env.GetTempFolder(), "sqlserver", env.CleanTableName(tableFName), g.NewTsID("sqlserver")+".error")
 		defer os.Remove(errPath)
 	}
 

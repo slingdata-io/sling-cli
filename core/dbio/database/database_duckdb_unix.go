@@ -32,7 +32,7 @@ func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) 
 	}
 
 	// Create a named pipe
-	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", env.CleanTableName(tableFName), g.NowFileStr())
 	if err = os.MkdirAll(folderPath, 0755); err != nil {
 		return 0, g.Error(err, "could not create temp folder: %s", folderPath)
 	}

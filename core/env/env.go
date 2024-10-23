@@ -260,6 +260,10 @@ func GetTempFolder() string {
 	return CleanWindowsPath(tempDir)
 }
 
+func CleanTableName(tableName string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(tableName, `"`, ``), "`", ""))
+}
+
 func CleanWindowsPath(path string) string {
 	return strings.ReplaceAll(path, `\`, `/`)
 }

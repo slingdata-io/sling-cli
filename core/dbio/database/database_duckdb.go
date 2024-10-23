@@ -171,7 +171,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		return
 	}
 
-	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", env.CleanTableName(tableFName), g.NowFileStr())
 	fileReadyChn := make(chan filesys.FileReady, 3)
 
 	go func() {

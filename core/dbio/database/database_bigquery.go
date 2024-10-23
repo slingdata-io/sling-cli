@@ -573,7 +573,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return
 	}
 
-	localPath := path.Join(env.GetTempFolder(), "bigquery", tableFName, g.NowFileStr())
+	localPath := path.Join(env.GetTempFolder(), "bigquery", env.CleanTableName(tableFName), g.NowFileStr())
 	err = filesys.Delete(fs, localPath)
 	if err != nil {
 		return count, g.Error(err, "Could not Delete: "+localPath)

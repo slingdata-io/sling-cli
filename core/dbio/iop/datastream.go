@@ -1420,8 +1420,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 // ConsumeParquetReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	parquetPath := path.Join(tempDir, g.NewTsID("parquet.temp")+".parquet")
+	parquetPath := path.Join(env.GetTempFolder(), g.NewTsID("parquet.temp")+".parquet")
 	ds.Defer(func() { env.RemoveLocalTempFile(parquetPath) })
 
 	file, err := os.Create(parquetPath)
@@ -1549,8 +1548,7 @@ func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) 
 // ConsumeAvroReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeAvroReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	avroPath := path.Join(tempDir, g.NewTsID("avro.temp")+".avro")
+	avroPath := path.Join(env.GetTempFolder(), g.NewTsID("avro.temp")+".avro")
 	ds.Defer(func() { env.RemoveLocalTempFile(avroPath) })
 
 	file, err := os.Create(avroPath)
@@ -1596,8 +1594,7 @@ func (ds *Datastream) ConsumeSASReaderSeeker(reader io.ReadSeeker) (err error) {
 // ConsumeSASReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	sasPath := path.Join(tempDir, g.NewTsID("sas.temp")+".sas7bdat")
+	sasPath := path.Join(env.GetTempFolder(), g.NewTsID("sas.temp")+".sas7bdat")
 	ds.Defer(func() { env.RemoveLocalTempFile(sasPath) })
 
 	file, err := os.Create(sasPath)
@@ -1661,8 +1658,7 @@ func (ds *Datastream) ConsumeExcelReaderSeeker(reader io.ReadSeeker, props map[s
 // ConsumeSASReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]string) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
+	excelPath := path.Join(env.GetTempFolder(), g.NewTsID("excel.temp")+".xlsx")
 	ds.Defer(func() { env.RemoveLocalTempFile(excelPath) })
 
 	file, err := os.Create(excelPath)
