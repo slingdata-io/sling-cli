@@ -70,9 +70,7 @@ func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) 
 
 		tbw := int64(0)
 		for ds := range df.StreamCh {
-			ds.Sp.Config = config
-
-			for batchR := range ds.NewCsvReaderChnl(0, 0) {
+			for batchR := range ds.NewCsvReaderChnl(config) {
 				bw, err := io.Copy(bufWriter, batchR.Reader)
 				if err != nil {
 					err = g.Error(err, "Error writing from reader")

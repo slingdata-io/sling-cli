@@ -91,7 +91,9 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			// continue
 
 			stream.SetConfig(options)
-			for batchR := range stream.NewCsvReaderChnl(cast.ToInt(limit), 0) {
+			sc := df.StreamConfig()
+			sc.FileMaxRows = cast.ToInt64(limit)
+			for batchR := range stream.NewCsvReaderChnl(sc) {
 				if limit > 0 && cnt >= limit {
 					return
 				}

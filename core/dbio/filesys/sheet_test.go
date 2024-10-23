@@ -173,7 +173,7 @@ func TestGoogleSheet(t *testing.T) {
 
 	httpFs.SetProp("GSHEET_SHEET_NAME", "new")
 	httpFs.SetProp("GSHEET_MODE", "new")
-	_, err = httpFs.Write(url, data.Stream().NewCsvReader(0, 0))
+	_, err = httpFs.Write(url, data.Stream().NewCsvReader(iop.DefaultStreamConfig()))
 	assert.NoError(t, err)
 
 	ggs.RefreshSheets()

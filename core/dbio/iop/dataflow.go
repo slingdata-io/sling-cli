@@ -101,7 +101,7 @@ func (df *Dataflow) CleanUp() {
 }
 
 // StreamConfig get the first Sp config
-func (df *Dataflow) StreamConfig() (cfg *StreamConfig) {
+func (df *Dataflow) StreamConfig() (cfg StreamConfig) {
 	df.mux.Lock()
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
@@ -111,7 +111,7 @@ func (df *Dataflow) StreamConfig() (cfg *StreamConfig) {
 }
 
 // SetConfig set the Sp config
-func (df *Dataflow) SetConfig(cfg *StreamConfig) {
+func (df *Dataflow) SetConfig(cfg StreamConfig) {
 	// don't overwrite transforms if not provided
 	if cfg.transforms == nil {
 		cfg.transforms = df.StreamConfig().transforms

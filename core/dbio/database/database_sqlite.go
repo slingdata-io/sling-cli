@@ -157,15 +157,14 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		sqlPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlite.%s", env.CleanTableName(tableFName)))+".temp.sql")
 
 		// set header. not needed if not creating a temp table
-		cfgMap := ds.GetConfig()
-		cfgMap["delimiter"] = ","
-		cfgMap["bool_at_int"] = "true"
-		cfgMap["header"] = lo.Ternary(sameCols, "false", "true")
-		cfgMap["datetime_format"] = conn.GetProp("datetime_format")
-		if strings.ToLower(cfgMap["datetime_format"]) == "auto" {
-			cfgMap["datetime_format"] = "2006-01-02 15:04:05.000Z"
+		cfg := iop.DefaultStreamConfig()
+		cfg.Delimiter = ","
+		cfg.BoolAsInt = true
+		cfg.Header = lo.Ternary(sameCols, false, true)
+		cfg.DatetimeFormat = conn.GetProp("datetime_format")
+		if strings.ToLower(cfg.DatetimeFormat) == "auto" || cfg.DatetimeFormat == "" {
+			cfg.DatetimeFormat = "2006-01-02 15:04:05.000Z"
 		}
-		ds.SetConfig(cfgMap)
 
 		if runtime.GOOS == "windows" {
 			fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal)
@@ -174,7 +173,7 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				return 0, err
 			}
 
-			_, err = fs.Write("file://"+csvPath, ds.NewCsvReader(0, 0))
+			_, err = fs.Write("file://"+csvPath, ds.NewCsvReader(cfg))
 			if err != nil {
 				err = g.Error(err, "could not write to temp file")
 				return 0, err
@@ -183,7 +182,7 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 		} else {
 			csvPath = "/dev/stdin"
-			cmd.Stdin = ds.NewCsvReader(0, 0)
+			cmd.Stdin = ds.NewCsvReader(cfg)
 		}
 
 		tempTable := g.RandSuffix("temp_", 4)

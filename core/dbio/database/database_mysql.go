@@ -275,7 +275,7 @@ func (conn *MySQLConn) LoadDataInFile(tableFName string, ds *iop.Datastream) (co
 	)
 
 	proc.Stderr = &stderr
-	proc.Stdin = ds.NewCsvReader(0, 0)
+	proc.Stdin = ds.NewCsvReader(iop.DefaultStreamConfig())
 
 	err = proc.Run()
 	if err != nil {

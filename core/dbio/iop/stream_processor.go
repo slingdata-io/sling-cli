@@ -37,7 +37,7 @@ type StreamProcessor struct {
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
 	dateLayouts      []string
-	Config           *StreamConfig
+	Config           StreamConfig
 	rowBlankValCnt   int
 	transformers     Transformers
 	digitString      map[int]string
@@ -47,7 +47,7 @@ type StreamConfig struct {
 	TrimSpace         bool                   `json:"trim_space"`
 	EmptyAsNull       bool                   `json:"empty_as_null"`
 	Header            bool                   `json:"header"`
-	Compression       string                 `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	Compression       CompressorType         `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
 	NullIf            string                 `json:"null_if"`
 	NullAs            string                 `json:"null_as"`
 	DatetimeFormat    string                 `json:"datetime_format"`
@@ -56,17 +56,25 @@ type StreamConfig struct {
 	Escape            string                 `json:"escape"`
 	Quote             string                 `json:"quote"`
 	FileMaxRows       int64                  `json:"file_max_rows"`
+	FileMaxBytes      int64                  `json:"file_max_bytes"`
 	BatchLimit        int64                  `json:"batch_limit"`
 	MaxDecimals       int                    `json:"max_decimals"`
 	Flatten           bool                   `json:"flatten"`
 	FieldsPerRec      int                    `json:"fields_per_rec"`
 	Jmespath          string                 `json:"jmespath"`
+	Sheet             string                 `json:"sheet"`
 	BoolAsInt         bool                   `json:"-"`
 	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string][]Transform // array of transform functions to apply
 	maxDecimalsFormat string                 `json:"-"`
 
 	Map map[string]string `json:"-"`
+}
+
+func (sc *StreamConfig) ToMap() map[string]string {
+	m := g.M()
+	g.Unmarshal(g.Marshal(sc), &m)
+	return g.ToMapString(m)
 }
 
 type Transformers struct {
@@ -229,11 +237,24 @@ func NewStreamProcessor() *StreamProcessor {
 	return &sp
 }
 
-func DefaultStreamConfig() *StreamConfig {
-	return &StreamConfig{
+func DefaultStreamConfig() StreamConfig {
+	return StreamConfig{
 		MaxDecimals: -1,
 		transforms:  nil,
 		Map:         map[string]string{"delimiter": "-1"},
+	}
+}
+
+func LoaderStreamConfig(header bool) StreamConfig {
+	return StreamConfig{
+		Header:         header,
+		Delimiter:      ",",
+		Escape:         `"`,
+		Quote:          `"`,
+		NullAs:         `\N`,
+		DatetimeFormat: "auto",
+		MaxDecimals:    -1,
+		transforms:     nil,
 	}
 }
 
@@ -271,6 +292,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["file_max_rows"] != "" {
 		sp.Config.FileMaxRows = cast.ToInt64(configMap["file_max_rows"])
+	}
+
+	if configMap["file_max_bytes"] != "" {
+		sp.Config.FileMaxBytes = cast.ToInt64(configMap["file_max_bytes"])
 	}
 
 	if configMap["batch_limit"] != "" {
@@ -312,6 +337,9 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	if configMap["jmespath"] != "" {
 		sp.Config.Jmespath = cast.ToString(configMap["jmespath"])
 	}
+	if configMap["sheet"] != "" {
+		sp.Config.Sheet = cast.ToString(configMap["sheet"])
+	}
 	if configMap["skip_blank_lines"] != "" {
 		sp.Config.SkipBlankLines = cast.ToBool(configMap["skip_blank_lines"])
 	}
@@ -324,7 +352,9 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	if configMap["transforms"] != "" {
 		sp.applyTransforms(configMap["transforms"])
 	}
-	sp.Config.Compression = configMap["compression"]
+	if configMap["compression"] != "" {
+		sp.Config.Compression = CompressorType(strings.ToLower(configMap["compression"]))
+	}
 
 	if configMap["datetime_format"] != "" {
 		sp.Config.DatetimeFormat = Iso8601ToGoLayout(configMap["datetime_format"])
