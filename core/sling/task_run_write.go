@@ -142,10 +142,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	}
 
-	allowDirectInsert := cast.ToBool(os.Getenv("SLING_ALLOW_DIRECT_INSERT"))
+	directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
 
-	if allowDirectInsert {
-		return t.writeDirectly(cfg, df, tgtConn)
+	if directInsert {
+		return t.writeToDbDirectly(cfg, df, tgtConn)
 	}
 
 	// Initialize target and temp tables
@@ -351,7 +351,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	return cnt, nil
 }
 
-func (t *TaskExecution) writeDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
+func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn database.Connection) (cnt uint64, err error) {
 	// Initialize target table
 	targetTable, err := initializeTargetTable(cfg, tgtConn)
 	if err != nil {
