@@ -397,7 +397,6 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
-	cfg.Target.Columns = sampleData.Columns
 	df.Columns = sampleData.Columns
 	setStage("5 - load-into-final")
 
