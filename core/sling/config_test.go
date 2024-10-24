@@ -61,9 +61,9 @@ func TestConfig(t *testing.T) {
 func TestColumnCasing(t *testing.T) {
 	df := iop.NewDataflow(0)
 
-	sourceCasing := SourceColumnCasing
-	snakeCasing := SnakeColumnCasing
-	targetCasing := TargetColumnCasing
+	sourceCasing := iop.SourceColumnCasing
+	snakeCasing := iop.SnakeColumnCasing
+	targetCasing := iop.TargetColumnCasing
 
 	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"})
 	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &sourceCasing)

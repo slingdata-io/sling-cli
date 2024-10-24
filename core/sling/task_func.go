@@ -185,8 +185,8 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType d
 	}
 
 	tgtUpdateKey := cfg.Source.UpdateKey
-	if cc := cfg.Target.Options.ColumnCasing; cc != nil && *cc != SourceColumnCasing {
-		tgtUpdateKey = applyColumnCasing(tgtUpdateKey, *cc == SnakeColumnCasing, tgtConn.GetType())
+	if cc := cfg.Target.Options.ColumnCasing; cc != nil {
+		tgtUpdateKey = cc.Apply(tgtUpdateKey, tgtConn.GetType())
 	}
 
 	// get target columns to match update-key

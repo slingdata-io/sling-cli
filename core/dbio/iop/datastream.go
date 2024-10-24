@@ -2024,7 +2024,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 			}
 
 			if sp.Config.Header {
-				bw, err := w.Write(batch.Columns.Names(true, true))
+				bw, err := w.Write(batch.Columns.Names(false, true))
 				tbw = tbw + cast.ToInt64(bw)
 				if err != nil {
 					err = g.Error(err, "error writing header")
@@ -2109,7 +2109,7 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 		tbw = tbw + cast.ToInt64(bw)
 
 		for batch := range ds.BatchChan {
-			fields := batch.Columns.Names(true)
+			fields := batch.Columns.Names()
 
 			for row0 := range batch.Rows {
 				c++
@@ -2182,7 +2182,7 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 		c := int64(0) // local counter
 
 		for batch := range ds.BatchChan {
-			fields := batch.Columns.Names(true)
+			fields := batch.Columns.Names()
 
 			for row0 := range batch.Rows {
 				c++
@@ -2482,7 +2482,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 		}
 
 		if sp.Config.Header {
-			bw, err := w.Write(batch.Columns.Names(true, true))
+			bw, err := w.Write(batch.Columns.Names(false, true))
 			tbw = tbw + cast.ToInt64(bw)
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "error writing header"))

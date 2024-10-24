@@ -63,6 +63,7 @@ type StreamConfig struct {
 	FieldsPerRec      int                    `json:"fields_per_rec"`
 	Jmespath          string                 `json:"jmespath"`
 	Sheet             string                 `json:"sheet"`
+	ColumnCasing      ColumnCasing           `json:"column_casing"`
 	BoolAsInt         bool                   `json:"-"`
 	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string][]Transform // array of transform functions to apply
@@ -347,6 +348,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["skip_blank_lines"]; ok {
 		sp.Config.SkipBlankLines = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["column_casing"]; ok {
+		sp.Config.ColumnCasing = ColumnCasing(val)
 	}
 
 	if val, ok := configMap["bool_at_int"]; ok {

@@ -794,9 +794,9 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 
 func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.Table, cfg *Config) error {
 	tgtPrimaryKey := cfg.Source.PrimaryKey()
-	if cc := cfg.Target.Options.ColumnCasing; cc != nil && *cc != SourceColumnCasing {
+	if casing := cfg.Target.Options.ColumnCasing; casing != nil {
 		for i, pk := range tgtPrimaryKey {
-			tgtPrimaryKey[i] = applyColumnCasing(pk, *cc == SnakeColumnCasing, tgtConn.GetType())
+			tgtPrimaryKey[i] = casing.Apply(pk, tgtConn.GetType())
 		}
 	}
 	g.Debug("Performing upsert from temporary table %s to target table %s with primary keys %v",

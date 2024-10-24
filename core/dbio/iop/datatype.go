@@ -1255,3 +1255,63 @@ func FormatValue(val any, column Column, connType dbio.Type) (newVal string) {
 	}
 	return
 }
+
+// ColumnCasing is the casing method to use
+type ColumnCasing string
+
+const (
+	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
+	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
+	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
+	UpperColumnCasing  ColumnCasing = "upper"  // make it upper case
+	LowerColumnCasing  ColumnCasing = "lower"  // make it lower case
+)
+
+// Equals evaluates equality for column casing (pointer safe)
+func (cc *ColumnCasing) Equals(val ColumnCasing) bool {
+	if cc.IsEmpty() {
+		return false
+	}
+	return *cc == val
+}
+
+// IsEmpty return true if nil or blank
+func (cc *ColumnCasing) IsEmpty() bool {
+	if cc == nil || string(*cc) == "" {
+		return true
+	}
+	return false
+}
+
+var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+
+// Apply applies column casing to provided name.
+// If cc is nil or SourceColumnCasing, it returns the original value
+func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
+	if cc.IsEmpty() || cc.Equals(SourceColumnCasing) {
+		return name
+	}
+
+	// convert to snake case
+	if cc.Equals(SnakeColumnCasing) {
+		name = matchAllCap.ReplaceAllString(name, "${1}_${2}")
+	}
+
+	// clean up other weird chars
+	name = CleanName(name)
+
+	switch {
+	case cc.Equals(UpperColumnCasing):
+		return strings.ToUpper(name)
+	case cc.Equals(LowerColumnCasing):
+		return strings.ToLower(name)
+	case cc.Equals(TargetColumnCasing), cc.Equals(SnakeColumnCasing):
+		// lower case for target file system
+		if tgtConnType.DBNameUpperCase() {
+			return strings.ToUpper(name)
+		}
+		return strings.ToLower(name)
+	}
+
+	return name
+}

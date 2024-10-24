@@ -53,24 +53,6 @@ var AllMode = []struct {
 	{BackfillMode, "BackfillMode"},
 }
 
-// ColumnCasing is the casing method to use
-type ColumnCasing string
-
-const (
-	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
-	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
-	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
-)
-
-var AllColumnCasing = []struct {
-	Value  ColumnCasing
-	TSName string
-}{
-	{SourceColumnCasing, "SourceColumnCasing"},
-	{TargetColumnCasing, "TargetColumnCasing"},
-	{SnakeColumnCasing, "SnakeColumnCasing"},
-}
-
 // NewConfig return a config object from a YAML / JSON string
 func NewConfig(cfgStr string) (cfg *Config, err error) {
 	// set default, unmarshalling will overwrite
@@ -1295,7 +1277,7 @@ type TargetOptions struct {
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
-	ColumnCasing     *ColumnCasing       `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
+	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1353,7 +1335,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
-	ColumnCasing:   (*ColumnCasing)(g.String(string(SourceColumnCasing))),
+	ColumnCasing:   g.Ptr(iop.SourceColumnCasing),
 }
 
 var TargetDBOptionsDefault = TargetOptions{
@@ -1367,7 +1349,7 @@ var TargetDBOptionsDefault = TargetOptions{
 	AdjustColumnType: g.Bool(false),
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
-	ColumnCasing:     (*ColumnCasing)(g.String(string(SourceColumnCasing))),
+	ColumnCasing:     g.Ptr(iop.SourceColumnCasing),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
