@@ -620,7 +620,10 @@ func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, er
 		}
 	}()
 
-	return fs.Self().WriteDataflowReady(df, url, fileReadyChn, df.StreamConfig())
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+
+	return fs.Self().WriteDataflowReady(df, url, fileReadyChn, sp.Config)
 }
 
 // GetReaders returns one or more readers from specified paths in specified FileSysClient
