@@ -420,8 +420,10 @@ func applyColumnCasingToDf(df *iop.Dataflow, connType dbio.Type, casing *iop.Col
 			ds.Columns[i].Name = casing.Apply(col.Name, connType)
 		}
 
-		for i, col := range ds.CurrentBatch.Columns {
-			ds.CurrentBatch.Columns[i].Name = casing.Apply(col.Name, connType)
+		if ds.CurrentBatch != nil {
+			for i, col := range ds.CurrentBatch.Columns {
+				ds.CurrentBatch.Columns[i].Name = casing.Apply(col.Name, connType)
+			}
 		}
 	}
 }
