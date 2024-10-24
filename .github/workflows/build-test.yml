@@ -96,6 +96,14 @@ jobs:
           client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           path: /dbio
           env: dev
+      
+      - name: Build Binary
+        run: |
+          # Prep
+          bash scripts/ci/prep.linux.sh
+
+          # build
+          bash scripts/ci/build.linux.sh dev
 
       - name: Run Go Tests (dbio)
         run: |
