@@ -11,14 +11,15 @@ env:
 
 jobs:
 
-  build-test:
+  build-test-sling:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
 
     runs-on: [self-hosted, linux, ubuntu-20]
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v2
+      
       - uses: myrotvorets/set-commit-status-action@master
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -65,17 +66,59 @@ jobs:
           
           bash scripts/test.sh
 
+  build-test-dbio:
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
+
+    runs-on: [self-hosted, linux, ubuntu-20]
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.22"
+          cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        
+      - name: Load Secrets (dbio)
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          path: /dbio
+          env: dev
+      
+      - name: Build Binary
+        run: |
+          # Prep
+          bash scripts/ci/prep.linux.sh
+
+          # build
+          bash scripts/ci/build.linux.sh dev
+
       - name: Run Go Tests (dbio)
         run: |
           export DEBUG=''
 
-          # Oracle env
-          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
-          export PATH="$PATH:$ORACLE_HOME/bin"
-
           cd core/dbio
           bash scripts/test.sh
 
+  build-test-success:
+
+    runs-on: [self-hosted, linux, ubuntu-20]
+    needs: [ build-test-sling, build-test-dbio ]
+
+    steps:
+      - uses: actions/checkout@v2
 
       - uses: myrotvorets/set-commit-status-action@master
         if: always()

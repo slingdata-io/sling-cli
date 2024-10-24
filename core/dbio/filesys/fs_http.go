@@ -189,7 +189,7 @@ func (fs *HTTPFileSysClient) GetReader(url string) (reader io.Reader, err error)
 		if err != nil {
 			return nil, g.Error(err, "could not open sheet: "+fs.GetProp("SHEET"))
 		}
-		return data.Stream().NewCsvReader(0, 0), nil
+		return data.Stream().NewCsvReader(iop.DefaultStreamConfig()), nil
 	}
 
 	resp, err := fs.doGet(url)

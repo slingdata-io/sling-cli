@@ -21,7 +21,7 @@ func NewCsvReaderDuckDb(uri string, sc *StreamConfig, props ...string) (*CsvDuck
 	uri = duck.PrepareFsSecretAndURI(uri)
 
 	if sc == nil {
-		sc = DefaultStreamConfig()
+		sc = g.Ptr(DefaultStreamConfig())
 		sc.Header = true
 	}
 

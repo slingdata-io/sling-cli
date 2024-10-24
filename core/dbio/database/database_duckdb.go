@@ -171,7 +171,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		return
 	}
 
-	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "duckdb", "import", env.CleanTableName(tableFName), g.NowFileStr())
 	fileReadyChn := make(chan filesys.FileReady, 3)
 
 	go func() {
@@ -188,11 +188,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		config.Escape = `"`
 		config.Quote = `"`
 		config.NullAs = `\N`
-
-		timestampZLayout := conn.Type.GetTemplateValue("variable.timestampz_layout")
-		// config.DatetimeFormat = timestampZLayout // no effect since overwritten
-		// see ds.SetConfig(fs.Props()) in fs.go
-		fs.SetProp("datetime_format", timestampZLayout)
+		config.DatetimeFormat = conn.Type.GetTemplateValue("variable.timestampz_layout")
 
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 		if err != nil {

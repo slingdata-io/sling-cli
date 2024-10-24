@@ -735,7 +735,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	// Write the ds to a temp file
-	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", tableFName, g.NowFileStr())
+	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", env.CleanTableName(tableFName), g.NowFileStr())
 
 	// delete folder when done
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
@@ -748,8 +748,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			return
 		}
 
-		fs.SetProp("null_as", `\N`)
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, iop.DefaultStreamConfig())
+		config := iop.LoaderStreamConfig(true)
+		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))
@@ -759,7 +759,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}()
 
 	// Import to staging
-	stageFolderPath := g.F("@%s.%s/%s/%s", conn.GetProp("schema"), conn.GetProp("internalStage"), tableFName, g.NowFileStr())
+	stageFolderPath := g.F("@%s.%s/%s/%s", conn.GetProp("schema"), conn.GetProp("internalStage"), env.CleanTableName(tableFName), g.NowFileStr())
 	conn.Exec("USE SCHEMA " + conn.GetProp("schema"))
 	_, err = conn.Exec("REMOVE " + stageFolderPath)
 	if err != nil {
@@ -767,7 +767,6 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		return
 	}
 	df.Defer(func() {
-		_, err := conn.Exec("REMOVE " + stageFolderPath)
 		if err != nil && strings.Contains(err.Error(), "transaction") {
 			conn.tx = nil // clear any failed transactions
 			conn.Exec("REMOVE " + stageFolderPath)

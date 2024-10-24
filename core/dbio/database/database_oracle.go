@@ -279,7 +279,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	}
 
 	// write to ctlPath
-	ctlPath := path.Join(env.GetTempFolder(), g.NewTsID("oracle.data.sqlldr")+".ctl")
+	ctlPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("oracle.%s.sqlldr", env.CleanTableName(tableFName)))+".ctl")
 	ctlStr := g.R(
 		conn.BaseConn.GetTemplateValue("core.sqlldr"),
 		"table", tableFName,
@@ -310,8 +310,8 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	postUpdates := cmap.New[int]()
 
 	if runtime.GOOS == "windows" {
-		dataPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.data.temp")+".csv")
-		logPath = path.Join(env.GetTempFolder(), g.NewTsID("oracle.log.temp"))
+		dataPath = path.Join(env.GetTempFolder(), g.NewTsID(g.F("oracle.%s", env.CleanTableName(tableFName)))+".temp.csv")
+		logPath = path.Join(env.GetTempFolder(), g.NewTsID(g.F("oracle.%s", env.CleanTableName(tableFName)))+".log")
 
 		file, err := os.Create(dataPath)
 		if err != nil {

@@ -54,7 +54,7 @@ type Datastream struct {
 	closed        bool
 	empty         bool
 	it            *Iterator
-	config        *StreamConfig
+	config        StreamConfig
 	df            *Dataflow
 	bwRows        chan []any // for correct byte written
 	readyChn      chan struct{}
@@ -175,7 +175,7 @@ func NewDatastreamContext(ctx context.Context, columns Columns) (ds *Datastream)
 		Columns:       columns,
 		Context:       g.NewContext(ctx),
 		Sp:            NewStreamProcessor(),
-		config:        &StreamConfig{EmptyAsNull: true, Header: true},
+		config:        StreamConfig{EmptyAsNull: true, Header: true},
 		deferFuncs:    []func(){},
 		bwCsv:         csv.NewWriter(io.Discard),
 		bwRows:        make(chan []any, 100),
@@ -1420,8 +1420,7 @@ func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 // ConsumeParquetReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	parquetPath := path.Join(tempDir, g.NewTsID("parquet.temp")+".parquet")
+	parquetPath := path.Join(env.GetTempFolder(), g.NewTsID("parquet.temp")+".parquet")
 	ds.Defer(func() { env.RemoveLocalTempFile(parquetPath) })
 
 	file, err := os.Create(parquetPath)
@@ -1509,7 +1508,7 @@ func (ds *Datastream) ConsumeDeltaReader(uri string, sc FileStreamConfig) (err e
 func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (err error) {
 
 	props := g.MapToKVArr(sc.Props)
-	r, err := NewCsvReaderDuckDb(uri, ds.config, props...)
+	r, err := NewCsvReaderDuckDb(uri, &ds.config, props...)
 	if err != nil {
 		return g.Error(err, "could not create CsvReaderDuckDb")
 	}
@@ -1549,8 +1548,7 @@ func (ds *Datastream) ConsumeAvroReaderSeeker(reader io.ReadSeeker) (err error) 
 // ConsumeAvroReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeAvroReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	avroPath := path.Join(tempDir, g.NewTsID("avro.temp")+".avro")
+	avroPath := path.Join(env.GetTempFolder(), g.NewTsID("avro.temp")+".avro")
 	ds.Defer(func() { env.RemoveLocalTempFile(avroPath) })
 
 	file, err := os.Create(avroPath)
@@ -1596,8 +1594,7 @@ func (ds *Datastream) ConsumeSASReaderSeeker(reader io.ReadSeeker) (err error) {
 // ConsumeSASReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeSASReader(reader io.Reader) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	sasPath := path.Join(tempDir, g.NewTsID("sas.temp")+".sas7bdat")
+	sasPath := path.Join(env.GetTempFolder(), g.NewTsID("sas.temp")+".sas7bdat")
 	ds.Defer(func() { env.RemoveLocalTempFile(sasPath) })
 
 	file, err := os.Create(sasPath)
@@ -1661,8 +1658,7 @@ func (ds *Datastream) ConsumeExcelReaderSeeker(reader io.ReadSeeker, props map[s
 // ConsumeSASReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeExcelReader(reader io.Reader, props map[string]string) (err error) {
 	// need to write to temp file prior
-	tempDir := env.GetTempFolder()
-	excelPath := path.Join(tempDir, g.NewTsID("excel.temp")+".xlsx")
+	excelPath := path.Join(env.GetTempFolder(), g.NewTsID("excel.temp")+".xlsx")
 	ds.Defer(func() { env.RemoveLocalTempFile(excelPath) })
 
 	file, err := os.Create(excelPath)
@@ -1937,13 +1933,13 @@ func (ds *Datastream) MapParallel(transf func([]any) []any, numWorkers int) (nDs
 }
 
 // NewCsvBytesChnl returns a channel yield chunk of bytes of csv
-func (ds *Datastream) NewCsvBytesChnl(chunkRowSize int) (dataChn chan *[]byte) {
+func (ds *Datastream) NewCsvBytesChnl(sc StreamConfig) (dataChn chan *[]byte) {
 	dataChn = make(chan *[]byte, 100)
 
 	go func() {
 		defer close(dataChn)
 		for {
-			reader := ds.NewCsvReader(chunkRowSize, 0)
+			reader := ds.NewCsvReader(sc)
 			data, err := io.ReadAll(reader)
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
@@ -1957,8 +1953,8 @@ func (ds *Datastream) NewCsvBytesChnl(chunkRowSize int) (dataChn chan *[]byte) {
 }
 
 // NewCsvBufferReader creates a Reader with limit. If limit == 0, then read all rows.
-func (ds *Datastream) NewCsvBufferReader(limit int, bytesLimit int64) *bytes.Reader {
-	reader := ds.NewCsvReader(limit, bytesLimit)
+func (ds *Datastream) NewCsvBufferReader(sc StreamConfig) *bytes.Reader {
+	reader := ds.NewCsvReader(sc)
 	data, err := io.ReadAll(reader) // puts data in memory
 	if err != nil {
 		ds.Context.CaptureErr(g.Error(err, "Error io.ReadAll(reader)"))
@@ -1968,14 +1964,14 @@ func (ds *Datastream) NewCsvBufferReader(limit int, bytesLimit int64) *bytes.Rea
 
 // NewCsvBufferReaderChnl provides a channel of readers as the limit is reached
 // data is read in memory, whereas NewCsvReaderChnl does not hold in memory
-func (ds *Datastream) NewCsvBufferReaderChnl(rowLimit int, bytesLimit int64) (readerChn chan *bytes.Reader) {
+func (ds *Datastream) NewCsvBufferReaderChnl(sc StreamConfig) (readerChn chan *bytes.Reader) {
 
 	readerChn = make(chan *bytes.Reader) // not buffered, will block if receiver isn't ready
 
 	go func() {
 		defer close(readerChn)
 		for !ds.empty {
-			readerChn <- ds.NewCsvBufferReader(rowLimit, bytesLimit)
+			readerChn <- ds.NewCsvBufferReader(sc)
 		}
 	}()
 
@@ -1986,12 +1982,12 @@ type BatchReader struct {
 	Batch   *Batch
 	Columns Columns
 	Reader  io.Reader
-	Counter int
+	Counter int64
 }
 
 // NewCsvReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
-func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerChn chan *BatchReader) {
+func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 
 	pipeR, pipeW := io.Pipe()
@@ -2009,6 +2005,9 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 		var w *csv.Writer
 		var br *BatchReader
 
+		sp := NewStreamProcessor()
+		sp.Config = sc
+
 		defer close(readerChn)
 
 		nextPipe := func(batch *Batch) error {
@@ -2020,12 +2019,12 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 			pipeR, pipeW = io.Pipe()
 			w = csv.NewWriter(pipeW)
 			w.Comma = ','
-			if ds.config.Delimiter != "" {
-				w.Comma = []rune(ds.config.Delimiter)[0]
+			if sp.Config.Delimiter != "" {
+				w.Comma = []rune(sp.Config.Delimiter)[0]
 			}
 
-			if ds.config.Header {
-				bw, err := w.Write(batch.Columns.Names(true, true))
+			if sp.Config.Header {
+				bw, err := w.Write(batch.Columns.Names(false, true))
 				tbw = tbw + cast.ToInt64(bw)
 				if err != nil {
 					err = g.Error(err, "error writing header")
@@ -2058,7 +2057,7 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 				// convert to csv string
 				row := make([]string, len(row0))
 				for i, val := range row0 {
-					row[i] = ds.Sp.CastToString(i, val, batch.Columns[i].Type)
+					row[i] = sp.CastToString(i, val, batch.Columns[i].Type)
 				}
 				mux.Lock()
 
@@ -2073,7 +2072,7 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 				w.Flush()
 				mux.Unlock()
 
-				if (rowLimit > 0 && br.Counter >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+				if (sc.FileMaxRows > 0 && br.Counter >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 					err = nextPipe(batch)
 					if err != nil {
 						ds.Context.CaptureErr(err)
@@ -2092,7 +2091,7 @@ func (ds *Datastream) NewCsvReaderChnl(rowLimit int, bytesLimit int64) (readerCh
 	return readerChn
 }
 
-func (ds *Datastream) NewJsonReaderChnl(rowLimit int, bytesLimit int64) (readerChn chan *io.PipeReader) {
+func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
 	readerChn = make(chan *io.PipeReader, 100)
 
 	pipe := g.NewPipe()
@@ -2104,13 +2103,13 @@ func (ds *Datastream) NewJsonReaderChnl(rowLimit int, bytesLimit int64) (readerC
 	go func() {
 		defer close(readerChn)
 
-		c := 0 // local counter
+		c := int64(0) // local counter
 
 		bw, _ := pipe.Writer.Write([]byte("["))
 		tbw = tbw + cast.ToInt64(bw)
 
 		for batch := range ds.BatchChan {
-			fields := batch.Columns.Names(true)
+			fields := batch.Columns.Names()
 
 			for row0 := range batch.Rows {
 				c++
@@ -2144,7 +2143,7 @@ func (ds *Datastream) NewJsonReaderChnl(rowLimit int, bytesLimit int64) (readerC
 					return
 				}
 
-				if (rowLimit > 0 && c >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+				if (sc.FileMaxRows > 0 && c >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 					pipe.Writer.Write([]byte("]")) // close bracket
 					pipe.Writer.Close()            // close the prior reader?
 					tbw = 0                        // reset
@@ -2169,7 +2168,7 @@ func (ds *Datastream) NewJsonReaderChnl(rowLimit int, bytesLimit int64) (readerC
 
 // NewJsonLinesReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
-func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (readerChn chan *io.PipeReader) {
+func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
 	readerChn = make(chan *io.PipeReader, 100)
 
 	pipe := g.NewPipe()
@@ -2180,10 +2179,10 @@ func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (re
 	go func() {
 		defer close(readerChn)
 
-		c := 0 // local counter
+		c := int64(0) // local counter
 
 		for batch := range ds.BatchChan {
-			fields := batch.Columns.Names(true)
+			fields := batch.Columns.Names()
 
 			for row0 := range batch.Rows {
 				c++
@@ -2210,7 +2209,7 @@ func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (re
 					return
 				}
 
-				if (rowLimit > 0 && c >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+				if (sc.FileMaxRows > 0 && c >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 					pipe.Writer.Close() // close the prior reader?
 					tbw = 0             // reset
 
@@ -2230,7 +2229,7 @@ func (ds *Datastream) NewJsonLinesReaderChnl(rowLimit int, bytesLimit int64) (re
 // NewParquetArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
 // WARN: Not using this one since it doesn't write Decimals properly.
-func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 
 	pipeR, pipeW := io.Pipe()
@@ -2261,7 +2260,7 @@ func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, 
 			// default compression is snappy
 			codec := arrowCompress.Codecs.Snappy
 
-			switch compression {
+			switch sc.Compression {
 			case SnappyCompressorType:
 				codec = arrowCompress.Codecs.Snappy
 			case ZStandardCompressorType:
@@ -2300,7 +2299,7 @@ func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, 
 
 				br.Counter++
 
-				if (rowLimit > 0 && br.Counter >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+				if (sc.FileMaxRows > 0 && br.Counter >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 					err = nextPipe(batch)
 					if err != nil {
 						ds.Context.CaptureErr(err)
@@ -2321,15 +2320,15 @@ func (ds *Datastream) NewParquetArrowReaderChnl(rowLimit int, bytesLimit int64, 
 	return readerChn
 }
 
-func (ds *Datastream) NewExcelReaderChnl(rowLimit int, bytesLimit int64, sheetName string) (readerChn chan *BatchReader) {
+func (ds *Datastream) NewExcelReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 	xls := NewExcel()
 
-	if sheetName == "" {
-		sheetName = "Sheet1"
+	if sc.Sheet == "" {
+		sc.Sheet = "Sheet1"
 	}
 
-	err := xls.WriteSheet(sheetName, ds, "overwrite")
+	err := xls.WriteSheet(sc.Sheet, ds, "overwrite")
 	if err != nil {
 		ds.Context.CaptureErr(g.Error(err, "error writing sheet"))
 		return
@@ -2357,7 +2356,7 @@ func (ds *Datastream) NewExcelReaderChnl(rowLimit int, bytesLimit int64, sheetNa
 
 // NewParquetReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
-func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compression CompressorType) (readerChn chan *BatchReader) {
+func (ds *Datastream) NewParquetReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
 	readerChn = make(chan *BatchReader, 100)
 
 	pipeR, pipeW := io.Pipe()
@@ -2389,7 +2388,7 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 			var codec compress.Codec
 			codec = &parquet.Snappy
 
-			switch compression {
+			switch sc.Compression {
 			case SnappyCompressorType:
 				codec = &parquet.Snappy
 			case ZStandardCompressorType:
@@ -2429,13 +2428,13 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 
 				br.Counter++
 
-				if (rowLimit > 0 && br.Counter >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+				if (sc.FileMaxRows > 0 && br.Counter >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 					err = nextPipe(batch)
 					if err != nil {
 						ds.Context.CaptureErr(err)
 						return
 					}
-				} else if rowLimit == 0 && br.Counter == 10000000 {
+				} else if sc.FileMaxRows == 0 && br.Counter == 10000000 {
 					// memory can build up when writing a large dataset to a single parquet file
 					// https://github.com/slingdata-io/sling-cli/issues/351
 					g.Warn("writing a large dataset to a single parquet file can cause memory build-up. If memory consumption is high, try writing to multiple parquet files instead of one, with the file_max_rows target option.")
@@ -2454,12 +2453,15 @@ func (ds *Datastream) NewParquetReaderChnl(rowLimit int, bytesLimit int64, compr
 }
 
 // NewCsvReader creates a Reader with limit. If limit == 0, then read all rows.
-func (ds *Datastream) NewCsvReader(rowLimit int, bytesLimit int64) *io.PipeReader {
+func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 	pipeR, pipeW := io.Pipe()
 
 	tbw := int64(0)
 	go func() {
 		defer pipeW.Close()
+
+		sp := NewStreamProcessor()
+		sp.Config = sc // override with provided config
 
 		// only process current batch
 		var batch *Batch
@@ -2472,15 +2474,15 @@ func (ds *Datastream) NewCsvReader(rowLimit int, bytesLimit int64) *io.PipeReade
 			return
 		}
 
-		c := 0 // local counter
+		c := int64(0) // local counter
 		w := csv.NewWriter(pipeW)
 		w.Comma = ','
-		if ds.config.Delimiter != "" {
-			w.Comma = []rune(ds.config.Delimiter)[0]
+		if sp.Config.Delimiter != "" {
+			w.Comma = []rune(sp.Config.Delimiter)[0]
 		}
 
-		if ds.config.Header {
-			bw, err := w.Write(batch.Columns.Names(true, true))
+		if sp.Config.Header {
+			bw, err := w.Write(batch.Columns.Names(false, true))
 			tbw = tbw + cast.ToInt64(bw)
 			if err != nil {
 				ds.Context.CaptureErr(g.Error(err, "error writing header"))
@@ -2493,7 +2495,7 @@ func (ds *Datastream) NewCsvReader(rowLimit int, bytesLimit int64) *io.PipeReade
 			// convert to csv string
 			row := make([]string, len(row0))
 			for i, val := range row0 {
-				row[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+				row[i] = sp.CastToString(i, val, ds.Columns[i].Type)
 			}
 			bw, err := w.Write(row)
 			tbw = tbw + cast.ToInt64(bw)
@@ -2504,7 +2506,7 @@ func (ds *Datastream) NewCsvReader(rowLimit int, bytesLimit int64) *io.PipeReade
 			}
 			w.Flush()
 
-			if (rowLimit > 0 && c >= rowLimit) || (bytesLimit > 0 && tbw >= bytesLimit) {
+			if (sc.FileMaxRows > 0 && c >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
 				return // close reader if limit is reached
 			}
 		}

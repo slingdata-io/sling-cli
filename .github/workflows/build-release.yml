@@ -13,49 +13,6 @@ env:
   GOPRIVATE: github.com/slingdata-io/*
 
 jobs:
-  build:
-    runs-on: [self-hosted, linux, ubuntu-20]
-    timeout-minutes: 5
-
-    outputs:
-      VERSION: ${{ steps.get_version.outputs.VERSION }}
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up GoLang
-        uses: actions/setup-go@v3
-        with:
-          go-version: "1.22"
-          cache: false
-        
-      - name: Get the version
-        id: get_version
-        run: |
-          git pull --ff-only
-          git tag -l --sort=-creatordate | head -n 9
-          TAG=$(git tag -l --sort=-creatordate | head -n 1)
-          VERSION=$(echo $TAG | sed 's/v//')
-          echo "VERSION -> $VERSION"
-          echo ::set-output name=VERSION::$VERSION
-
-      - id: step1
-        name: Build
-        env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: |
-          bash scripts/prep.gomod.sh
-          export WORK_FOLDER=/__/work/sling-cli/${GITHUB_RUN_NUMBER}
-          mkdir -p $WORK_FOLDER
-          cp -r . $WORK_FOLDER/sling
-          sudo chmod -R 777 $WORK_FOLDER
-
-          docker run --rm -v /__/docker-data/devbox/root/go:/root/go -v /__:/__ -v /tmp:/tmp -v $WORK_FOLDER:/work --workdir /work/sling flarco/devbox:base bash scripts/build.test.sh $VERSION
-          sudo rm -rf $WORK_FOLDER/sling
-
-          echo $VERSION
-          VERSION=$(/__/bin/sling --version | sed 's/Version: //')
-          echo ::set-output name=version::$VERSION
 
   release-python:
     needs: [ release-linux-amd64, release-brew, release-scoop ]

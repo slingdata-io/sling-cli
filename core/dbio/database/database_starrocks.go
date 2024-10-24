@@ -431,7 +431,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		fs.SetProp("file_max_bytes", val)
 	}
 
-	localPath := path.Join(env.GetTempFolder(), "starrocks", table.Schema, table.Name, g.NowFileStr())
+	localPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("starrocks.%s", env.CleanTableName(tableFName))))
 
 	// TODO: use reader to fead HTTP directly. Need to get proper redirected URL first.
 	// for ds := range df.StreamCh {

@@ -37,7 +37,7 @@ type StreamProcessor struct {
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
 	dateLayouts      []string
-	Config           *StreamConfig
+	Config           StreamConfig
 	rowBlankValCnt   int
 	transformers     Transformers
 	digitString      map[int]string
@@ -47,7 +47,7 @@ type StreamConfig struct {
 	TrimSpace         bool                   `json:"trim_space"`
 	EmptyAsNull       bool                   `json:"empty_as_null"`
 	Header            bool                   `json:"header"`
-	Compression       string                 `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	Compression       CompressorType         `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
 	NullIf            string                 `json:"null_if"`
 	NullAs            string                 `json:"null_as"`
 	DatetimeFormat    string                 `json:"datetime_format"`
@@ -56,17 +56,26 @@ type StreamConfig struct {
 	Escape            string                 `json:"escape"`
 	Quote             string                 `json:"quote"`
 	FileMaxRows       int64                  `json:"file_max_rows"`
+	FileMaxBytes      int64                  `json:"file_max_bytes"`
 	BatchLimit        int64                  `json:"batch_limit"`
 	MaxDecimals       int                    `json:"max_decimals"`
 	Flatten           bool                   `json:"flatten"`
 	FieldsPerRec      int                    `json:"fields_per_rec"`
 	Jmespath          string                 `json:"jmespath"`
+	Sheet             string                 `json:"sheet"`
+	ColumnCasing      ColumnCasing           `json:"column_casing"`
 	BoolAsInt         bool                   `json:"-"`
 	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string][]Transform // array of transform functions to apply
 	maxDecimalsFormat string                 `json:"-"`
 
 	Map map[string]string `json:"-"`
+}
+
+func (sc *StreamConfig) ToMap() map[string]string {
+	m := g.M()
+	g.Unmarshal(g.Marshal(sc), &m)
+	return g.ToMapString(m)
 }
 
 type Transformers struct {
@@ -229,11 +238,24 @@ func NewStreamProcessor() *StreamProcessor {
 	return &sp
 }
 
-func DefaultStreamConfig() *StreamConfig {
-	return &StreamConfig{
+func DefaultStreamConfig() StreamConfig {
+	return StreamConfig{
 		MaxDecimals: -1,
 		transforms:  nil,
 		Map:         map[string]string{"delimiter": "-1"},
+	}
+}
+
+func LoaderStreamConfig(header bool) StreamConfig {
+	return StreamConfig{
+		Header:         header,
+		Delimiter:      ",",
+		Escape:         `"`,
+		Quote:          `"`,
+		NullAs:         `\N`,
+		DatetimeFormat: "auto",
+		MaxDecimals:    -1,
+		transforms:     nil,
 	}
 }
 
@@ -253,38 +275,42 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	sp.Config.Map = configMap
 
-	if configMap["fields_per_rec"] != "" {
-		sp.Config.FieldsPerRec = cast.ToInt(configMap["fields_per_rec"])
+	if val, ok := configMap["fields_per_rec"]; ok {
+		sp.Config.FieldsPerRec = cast.ToInt(val)
 	}
 
-	if configMap["delimiter"] != "" {
-		sp.Config.Delimiter = configMap["delimiter"]
+	if val, ok := configMap["delimiter"]; ok {
+		sp.Config.Delimiter = val
 	}
 
-	if configMap["escape"] != "" {
-		sp.Config.Escape = configMap["escape"]
+	if val, ok := configMap["escape"]; ok {
+		sp.Config.Escape = val
 	}
 
-	if configMap["quote"] != "" {
-		sp.Config.Quote = configMap["quote"]
+	if val, ok := configMap["quote"]; ok {
+		sp.Config.Quote = val
 	}
 
-	if configMap["file_max_rows"] != "" {
-		sp.Config.FileMaxRows = cast.ToInt64(configMap["file_max_rows"])
+	if val, ok := configMap["file_max_rows"]; ok {
+		sp.Config.FileMaxRows = cast.ToInt64(val)
 	}
 
-	if configMap["batch_limit"] != "" {
-		sp.Config.BatchLimit = cast.ToInt64(configMap["batch_limit"])
+	if val, ok := configMap["file_max_bytes"]; ok {
+		sp.Config.FileMaxBytes = cast.ToInt64(val)
 	}
 
-	if configMap["header"] != "" {
-		sp.Config.Header = cast.ToBool(configMap["header"])
+	if val, ok := configMap["batch_limit"]; ok {
+		sp.Config.BatchLimit = cast.ToInt64(val)
+	}
+
+	if val, ok := configMap["header"]; ok {
+		sp.Config.Header = cast.ToBool(val)
 	} else {
 		sp.Config.Header = true
 	}
 
-	if configMap["flatten"] != "" {
-		sp.Config.Flatten = cast.ToBool(configMap["flatten"])
+	if val, ok := configMap["flatten"]; ok {
+		sp.Config.Flatten = cast.ToBool(val)
 	}
 
 	if configMap["max_decimals"] != "" && configMap["max_decimals"] != "-1" {
@@ -297,37 +323,55 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		}
 	}
 
-	if configMap["empty_as_null"] != "" {
-		sp.Config.EmptyAsNull = cast.ToBool(configMap["empty_as_null"])
+	if val, ok := configMap["empty_as_null"]; ok {
+		sp.Config.EmptyAsNull = cast.ToBool(val)
 	}
-	if configMap["null_if"] != "" {
-		sp.Config.NullIf = configMap["null_if"]
-	}
-	if configMap["null_as"] != "" {
-		sp.Config.NullAs = configMap["null_as"]
-	}
-	if configMap["trim_space"] != "" {
-		sp.Config.TrimSpace = cast.ToBool(configMap["trim_space"])
-	}
-	if configMap["jmespath"] != "" {
-		sp.Config.Jmespath = cast.ToString(configMap["jmespath"])
-	}
-	if configMap["skip_blank_lines"] != "" {
-		sp.Config.SkipBlankLines = cast.ToBool(configMap["skip_blank_lines"])
-	}
-	if configMap["bool_at_int"] != "" {
-		sp.Config.BoolAsInt = cast.ToBool(configMap["bool_at_int"])
-	}
-	if configMap["columns"] != "" {
-		g.Unmarshal(configMap["columns"], &sp.Config.Columns)
-	}
-	if configMap["transforms"] != "" {
-		sp.applyTransforms(configMap["transforms"])
-	}
-	sp.Config.Compression = configMap["compression"]
 
-	if configMap["datetime_format"] != "" {
-		sp.Config.DatetimeFormat = Iso8601ToGoLayout(configMap["datetime_format"])
+	if val, ok := configMap["null_if"]; ok {
+		sp.Config.NullIf = val
+	}
+
+	if val, ok := configMap["null_as"]; ok {
+		sp.Config.NullAs = val
+	}
+	if val, ok := configMap["trim_space"]; ok {
+		sp.Config.TrimSpace = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["jmespath"]; ok {
+		sp.Config.Jmespath = cast.ToString(val)
+	}
+
+	if val, ok := configMap["sheet"]; ok {
+		sp.Config.Sheet = cast.ToString(val)
+	}
+
+	if val, ok := configMap["skip_blank_lines"]; ok {
+		sp.Config.SkipBlankLines = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["column_casing"]; ok {
+		sp.Config.ColumnCasing = ColumnCasing(val)
+	}
+
+	if val, ok := configMap["bool_at_int"]; ok {
+		sp.Config.BoolAsInt = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["columns"]; ok {
+		g.Unmarshal(val, &sp.Config.Columns)
+	}
+
+	if val, ok := configMap["transforms"]; ok {
+		sp.applyTransforms(val)
+	}
+
+	if val, ok := configMap["compression"]; ok {
+		sp.Config.Compression = CompressorType(strings.ToLower(val))
+	}
+
+	if val, ok := configMap["datetime_format"]; ok {
+		sp.Config.DatetimeFormat = Iso8601ToGoLayout(val)
 		// put in first
 		sp.dateLayouts = append(
 			[]string{sp.Config.DatetimeFormat},

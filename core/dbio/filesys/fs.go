@@ -47,7 +47,7 @@ type FileSysClient interface {
 	Write(path string, reader io.Reader) (bw int64, err error)
 	Prefix(suffix ...string) string
 	ReadDataflow(url string, cfg ...iop.FileStreamConfig) (df *iop.Dataflow, err error)
-	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error)
+	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
 	MkdirAll(path string) (err error)
@@ -536,7 +536,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 			return df, g.Error(err, "could not get zip reader")
 		}
 
-		folderPath := path.Join(env.GetTempFolder(), "dbio_temp_")
+		folderPath := path.Join(env.GetTempFolder(), "sling_temp_")
 
 		zipPath := folderPath + ".zip"
 		_, err = localFs.Write(zipPath, reader)
@@ -620,7 +620,10 @@ func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, er
 		}
 	}()
 
-	return fs.Self().WriteDataflowReady(df, url, fileReadyChn, nil)
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+
+	return fs.Self().WriteDataflowReady(df, url, fileReadyChn, sp.Config)
 }
 
 // GetReaders returns one or more readers from specified paths in specified FileSysClient
@@ -649,16 +652,25 @@ type FileReady struct {
 }
 
 // WriteDataflowReady writes to a file sys and notifies the fileReady chan.
-func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc *iop.StreamConfig) (bw int64, err error) {
+func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc iop.StreamConfig) (bw int64, err error) {
 	fsClient := fs.Self()
 	defer close(fileReadyChn)
+
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
 	concurrency := cast.ToInt(fs.GetProp("CONCURRENCY"))
-	compression := iop.CompressorType(strings.ToLower(fs.GetProp("COMPRESSION")))
 	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
-	fileRowLimit := cast.ToInt(fs.GetProp("FILE_MAX_ROWS"))
-	fileBytesLimit := cast.ToInt64(fs.GetProp("FILE_MAX_BYTES")) // uncompressed file size
 	fileExt := cast.ToString(fs.GetProp("FILE_EXTENSION"))
+
+	// use provided config or get from dataflow
+	if val := fs.GetProp("COMPRESSION"); val != "" {
+		sc.Compression = iop.CompressorType(strings.ToLower(val))
+	}
+	if val := fs.GetProp("FILE_MAX_ROWS"); val != "" {
+		sc.FileMaxRows = cast.ToInt64(val)
+	}
+	if val := fs.GetProp("FILE_MAX_BYTES"); val != "" {
+		sc.FileMaxBytes = cast.ToInt64(val)
+	}
 
 	// set default concurrency
 	// let's set 7 as a safe limit
@@ -677,15 +689,15 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 	url = strings.TrimSuffix(NormalizeURI(fs, url), "/")
 
-	singleFile := fileRowLimit == 0 && fileBytesLimit == 0
+	singleFile := sc.FileMaxRows == 0 && sc.FileMaxBytes == 0
 
 	// parse file partitioning notation (*), determine single-file vs folder mode
 	parts := strings.Split(url, "/")
 	if lastPart := parts[len(parts)-1]; strings.HasPrefix(lastPart, "*") {
 		singleFile = false
 		// set partition file defaults
-		fileRowLimit = lo.Ternary(fileRowLimit == 0, 100000, fileRowLimit)
-		fileBytesLimit = lo.Ternary(fileBytesLimit == 0, 50000000, fileBytesLimit)
+		sc.FileMaxRows = lo.Ternary(sc.FileMaxRows == 0, 100000, sc.FileMaxRows)
+		sc.FileMaxBytes = lo.Ternary(sc.FileMaxBytes == 0, 50000000, sc.FileMaxBytes)
 		if suffix := strings.TrimPrefix(lastPart, "*"); suffix != "" {
 			fileExt = suffix
 		}
@@ -693,12 +705,8 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	// adjust fileBytesLimit due to compression
-	if g.In(compression, iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) {
-		fileBytesLimit = fileBytesLimit * 6 // compressed, multiply
-	}
-
-	if sc != nil {
-		df.SetConfig(sc)
+	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) {
+		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply
 	}
 
 	processStream := func(ds *iop.Datastream, partURL string) {
@@ -741,14 +749,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				} {
 					compressor := iop.NewCompressor(comp)
 					if strings.HasSuffix(subPartURL, compressor.Suffix()) {
-						compression = comp
+						sc.Compression = comp
 						subPartURL = strings.TrimSuffix(subPartURL, compressor.Suffix())
 						break
 					}
 				}
 			}
 
-			compressor := iop.NewCompressor(compression)
+			compressor := iop.NewCompressor(sc.Compression)
 			if fileFormat == dbio.FileTypeParquet {
 				compressor = iop.NewCompressor("none") // compression is done internally
 			} else {
@@ -765,28 +773,28 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 		switch fileFormat {
 		case dbio.FileTypeJson:
-			for reader := range ds.NewJsonReaderChnl(fileRowLimit, fileBytesLimit) {
+			for reader := range ds.NewJsonReaderChnl(sc) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
 				if err != nil {
 					break
 				}
 			}
 		case dbio.FileTypeJsonLines:
-			for reader := range ds.NewJsonLinesReaderChnl(fileRowLimit, fileBytesLimit) {
+			for reader := range ds.NewJsonLinesReaderChnl(sc) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
 				if err != nil {
 					break
 				}
 			}
 		case dbio.FileTypeParquet:
-			for reader := range ds.NewParquetReaderChnl(fileRowLimit, fileBytesLimit, compression) {
+			for reader := range ds.NewParquetReaderChnl(sc) {
 				err := processReader(reader)
 				if err != nil {
 					break
 				}
 			}
 		case dbio.FileTypeExcel:
-			for reader := range ds.NewExcelReaderChnl(fileRowLimit, fileBytesLimit, fs.GetProp("sheet")) {
+			for reader := range ds.NewExcelReaderChnl(sc) {
 				err := processReader(reader)
 				if err != nil {
 					break
@@ -795,7 +803,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		case dbio.FileTypeCsv:
 			if useBufferedStream {
 				// faster, but dangerous. Holds data in memory
-				for reader := range ds.NewCsvBufferReaderChnl(fileRowLimit, fileBytesLimit) {
+				for reader := range ds.NewCsvBufferReaderChnl(sc) {
 					err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
 					if err != nil {
 						break
@@ -803,7 +811,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				}
 			} else {
 				// slower! but safer, waits for compression but does not hold data in memory
-				for batchR := range ds.NewCsvReaderChnl(fileRowLimit, fileBytesLimit) {
+				for batchR := range ds.NewCsvReaderChnl(sc) {
 					err := processReader(batchR)
 					if err != nil {
 						break
@@ -862,7 +870,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			partURL = url
 		}
 
-		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, fileRowLimit, fileBytesLimit, compression, concurrency, useBufferedStream, fileFormat, singleFile)
+		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, useBufferedStream, fileFormat, singleFile)
 
 		df.Context.Wg.Read.Add()
 		ds.SetConfig(fs.Props()) // pass options
@@ -1071,13 +1079,6 @@ func MakeDatastream(reader io.Reader, cfg map[string]string) (ds *iop.Datastream
 	}
 
 	return ds, nil
-}
-
-// WriteDatastream writes a datasream to a writer
-// or use fs.Write(path, ds.NewCsvReader(0))
-func WriteDatastream(writer io.Writer, ds *iop.Datastream) (bw int64, err error) {
-	reader := ds.NewCsvReader(0, 0)
-	return Write(reader, writer)
 }
 
 // Write writer to a writer from a reader
@@ -1302,49 +1303,6 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 	}
 
 	return ds, nil
-}
-
-func ProcessStreamViaTempFile(ds *iop.Datastream) (nDs *iop.Datastream, err error) {
-	// temp file
-	tempDir := env.GetTempFolder()
-	filePath := path.Join(tempDir, g.NewTsID("sling.temp")+".csv")
-
-	fs, err := NewFileSysClient(dbio.TypeFileLocal)
-	if err != nil {
-		return nil, g.Error(err, "could not obtain client for temp file in ProcessStreamViaTempFile")
-	}
-
-	err = ds.WaitReady()
-	if err != nil {
-		return nil, err
-	}
-
-	g.Debug("writing to temp file %s", filePath)
-	_, err = fs.Write("file://"+filePath, ds.NewCsvReader(0, 0))
-	if err != nil {
-		return nil, g.Error(err, "could not write to temp file for ProcessStreamViaTempFile")
-	}
-
-	nDs = iop.NewDatastreamContext(ds.Context.Ctx, ds.Columns)
-	nDs.Inferred = true
-	config := ds.GetConfig()
-	config["fields_per_rec"] = "-1" // allow different number of records per line
-	nDs.SetConfig(config)
-	nDs.Defer(func() { env.RemoveLocalTempFile(filePath) })
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		err = g.Error(err, "Unable to open temp file: "+filePath)
-		return nil, err
-	}
-
-	err = nDs.ConsumeCsvReader(file)
-	if err != nil {
-		os.Remove(filePath)
-		return nDs, g.Error(err, "could not consume temp file for ProcessStreamViaTempFile")
-	}
-
-	return nDs, nil
 }
 
 func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {

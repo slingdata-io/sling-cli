@@ -112,6 +112,9 @@ func (conn *MsSQLServerConn) ConnString() string {
 		"TrustServerCertificate":   "TrustServerCertificate",
 		"trust_server_certificate": "TrustServerCertificate",
 
+		"TrustedConnection":  "TrustedConnection",
+		"trusted_connection": "TrustedConnection",
+
 		"certificate": "certificate",
 
 		"hostNameInCertificate":   "hostNameInCertificate",
@@ -331,7 +334,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 
 		// Write the ds to a temp file
 
-		filePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+g.F("%d.csv", len(ds.Batches)))
+		filePath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlserver.%s", env.CleanTableName(tableFName)))+g.F("%d.csv", len(ds.Batches)))
 		csvRowCnt, err := writeCsvWithoutQuotes(filePath, batch, fileRowLimit)
 
 		if err != nil {
@@ -453,7 +456,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 	errPath := "/dev/stderr"
 	if runtime.GOOS == "windows" || true {
-		errPath = path.Join(env.GetTempFolder(), g.NewTsID("sqlserver")+".error")
+		errPath = path.Join(env.GetTempFolder(), g.NewTsID(g.F("sqlserver.%s", env.CleanTableName(tableFName)))+".error")
 		defer os.Remove(errPath)
 	}
 
@@ -661,13 +664,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 }
 
 func (conn *MsSQLServerConn) isTrusted() bool {
-	if strings.Contains(conn.ConnString(), "TrustServerCertificate") {
-		return true
-	}
-	if strings.Contains(conn.ConnString(), "TrustedConnection") {
-		return true
-	}
-	return false
+	return strings.Contains(conn.ConnString(), "TrustedConnection")
 }
 
 // CopyFromAzure uses the COPY INTO Table command from Azure
@@ -735,7 +732,7 @@ func (conn *MsSQLServerConn) CopyFromAzure(tableFName, azPath string) (count uin
 func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64, err error) {
 	file, err := os.Create(path)
 	if err != nil {
-		return cnt, err
+		return cnt, g.Error(err, "could not create file")
 	}
 	defer file.Close()
 
