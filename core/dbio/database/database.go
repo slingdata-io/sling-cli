@@ -2053,16 +2053,6 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 // It will return quoted field names as `newColNames`, the same length as `colNames`
 func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error) {
 
-	tgtFields := map[string]string{}
-	for _, colName := range tgtCols.Names() {
-		colName = conn.Self().Unquote(colName)
-		if quote {
-			tgtFields[strings.ToLower(colName)] = conn.Self().Quote(colName)
-		} else {
-			tgtFields[strings.ToLower(colName)] = colName
-		}
-	}
-
 	mismatches := []string{}
 	for _, colName := range colNames {
 		newCol := tgtCols.GetColumn(colName)
