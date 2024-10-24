@@ -589,14 +589,15 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 
 // GetColumn returns the matched Col
 func (cols Columns) GetColumn(name string) *Column {
+	colsOrigMap := map[string]*Column{}
 	colsMap := map[string]*Column{}
 	for _, col := range cols {
-		colsMap[col.Name] = &col // for any mixed-cased columns
+		colsOrigMap[col.Name] = &col // for any mixed-cased columns
 		colsMap[strings.ToLower(col.Name)] = &col
 	}
 
 	// look for column in original casing first
-	if col, ok := colsMap[name]; ok && col != nil {
+	if col, ok := colsOrigMap[name]; ok && col != nil {
 		return col
 	}
 
