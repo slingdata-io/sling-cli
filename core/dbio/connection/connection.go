@@ -638,6 +638,8 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("schema", c.Data["database"])
 		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
 
 		// parse http url
 		if httpUrlStr, ok := c.Data["http_url"]; ok {
@@ -650,7 +652,7 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("database", "default")
 		}
 
-		template = "clickhouse://{username}:{password}@{host}:{port}/{database}"
+		template = "clickhouse://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeDbProton:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("username", "") // proton can work without a user
