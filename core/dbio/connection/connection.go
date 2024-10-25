@@ -659,6 +659,8 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("schema", c.Data["database"])
 		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
 
 		// parse http url
 		if httpUrlStr, ok := c.Data["http_url"]; ok {
@@ -671,7 +673,7 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("database", "default")
 		}
 
-		template = "proton://{username}:{password}@{host}:{port}/{database}"
+		template = "proton://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
