@@ -746,10 +746,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	)
 
 	if cfg.SrcConn.Type.String() != "" {
-		m["source_type"] = cfg.SrcConn.Type
+		m["source_type"] = string(cfg.SrcConn.Type)
+		m["source_kind"] = string(cfg.SrcConn.Type.Kind())
 	}
 	if cfg.TgtConn.Type.String() != "" {
-		m["target_type"] = cfg.TgtConn.Type
+		m["target_type"] = string(cfg.TgtConn.Type)
+		m["target_kind"] = string(cfg.TgtConn.Type.Kind())
 	}
 
 	if cfg.Source.Conn != "" {
@@ -916,8 +918,38 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		g.Warn("Could not successfully get format values. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
 
+	now := time.Now()
+
+	// nested formatting for jmespath lookup
+	nm := map[string]map[string]any{
+		"timestamp": {
+			"file_name": now.Format("2006_01_02_150405"),
+			"rfc3339":   now.Format(time.RFC3339),
+			"date":      now.Format(time.DateOnly),
+			"datetime":  now.Format(time.DateTime),
+		},
+		"source": {},
+		"target": {},
+		"stream": {},
+		"object": {},
+	}
+
 	// apply date variables
-	for k, v := range iop.GetISO8601DateMap(time.Now()) {
+	for k, v := range iop.GetISO8601DateMap(now) {
+		m[k] = v
+		nm["timestamp"][k] = v
+	}
+
+	for origKey, v := range m {
+		for _, key := range lo.Keys(nm) {
+			if strings.HasPrefix(origKey, key+"_") {
+				nm[key][strings.TrimPrefix(origKey, key+"_")] = v
+			}
+		}
+	}
+
+	// copy over (keep old for legacy)
+	for k, v := range nm {
 		m[k] = v
 	}
 

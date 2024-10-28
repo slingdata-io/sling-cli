@@ -585,6 +585,7 @@ type ReplicationStreamConfig struct {
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Hooks         Hooks          `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {

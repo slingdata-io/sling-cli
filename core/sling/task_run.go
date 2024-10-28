@@ -11,6 +11,7 @@ import (
 
 	_ "net/http/pprof"
 
+	"github.com/nqd/flat"
 	"github.com/slingdata-io/sling-cli/core"
 
 	"github.com/flarco/g"
@@ -107,6 +108,11 @@ func (t *TaskExecution) Execute() error {
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
+		// pre-hooks
+		if t.Err = t.ExecuteHooks("pre"); t.Err != nil {
+			return
+		}
+
 		switch t.Type {
 		case DbSQL:
 			t.Err = t.runDbSQL()
@@ -133,6 +139,13 @@ func (t *TaskExecution) Execute() error {
 					g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
 					t.Status = ExecStatusWarning // set as warning status
 				}
+			}
+		}
+
+		// post-hooks
+		if hookErr := t.ExecuteHooks("post"); hookErr != nil {
+			if t.Err == nil {
+				t.Err = hookErr
 			}
 		}
 	}()
@@ -176,6 +189,57 @@ func (t *TaskExecution) Execute() error {
 	t.EndTime = &now2
 
 	return t.Err
+}
+
+func (t *TaskExecution) ExecuteHooks(stage string) (err error) {
+	if t.Config == nil || t.Config.ReplicationStream == nil {
+		return nil
+	}
+
+	var hooks []Hook
+	if stage == "pre" {
+		hooks, err = t.Config.ReplicationStream.Hooks.PreHooks(t)
+	} else if stage == "post" {
+		hooks, err = t.Config.ReplicationStream.Hooks.PostHooks(t)
+	} else {
+		return g.Error("invalid hook stage")
+	}
+	if err != nil {
+		return g.Error(err, "could not make hooks")
+	}
+
+	for _, hook := range hooks {
+		data := g.M("stage", stage, "id", hook.ID(), "type", hook.Type())
+		g.Debug("executing hook", data)
+
+		hookErr := hook.Execute(t)
+		err = hook.ExecuteOnDone(hookErr, t)
+
+		if err != nil {
+			return g.Error(err, "error executing hook")
+		}
+	}
+
+	return nil
+}
+
+func (t *TaskExecution) GetStateMap() map[string]any {
+	// format map
+	fMap, _ := t.Config.GetFormatMap()
+
+	// merge with context map
+	cMap := t.Context.Map.Items()
+	for k, v := range fMap {
+		cMap[k] = v
+	}
+
+	// flatten with dot separator
+	sMap, err := flat.Flatten(cMap, &flat.Options{Delimiter: ".", Safe: true})
+	if err != nil {
+		g.LogError(err, "error flattening state map")
+	}
+
+	return sMap
 }
 
 func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
@@ -400,6 +464,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
 	}
 
 	if t.Config.Options.StdIn && t.Config.SrcConn.Type.IsUnknown() {
@@ -549,6 +614,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
 	}
 
 	t.SetProgress("reading from source database")
