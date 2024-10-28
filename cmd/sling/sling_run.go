@@ -419,11 +419,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		totalBytes = totalBytes + inBytes
 	}
 
-	// warn constrains
+	// add up constraints
 	if df := task.Df(); df != nil {
 		for _, col := range df.Columns {
 			if c := col.Constraint; c != nil && c.FailCnt > 0 {
-				g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
 				constraintFails = constraintFails + c.FailCnt
 			}
 		}

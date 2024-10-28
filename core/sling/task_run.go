@@ -125,6 +125,16 @@ func (t *TaskExecution) Execute() error {
 
 		// update into store
 		StoreUpdate(t)
+
+		// warn constrains
+		if df := t.Df(); df != nil {
+			for _, col := range df.Columns {
+				if c := col.Constraint; c != nil && c.FailCnt > 0 {
+					g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
+					t.Status = ExecStatusWarning // set as warning status
+				}
+			}
+		}
 	}()
 
 	select {
@@ -143,8 +153,12 @@ func (t *TaskExecution) Execute() error {
 	}
 
 	if t.Err == nil {
-		t.SetProgress("execution succeeded")
-		t.Status = ExecStatusSuccess
+		if t.Status == ExecStatusWarning {
+			t.SetProgress("execution succeeded (with warnings)")
+		} else {
+			t.SetProgress("execution succeeded")
+			t.Status = ExecStatusSuccess
+		}
 	} else {
 		t.SetProgress("execution failed")
 		t.Status = ExecStatusError
