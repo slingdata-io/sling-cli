@@ -609,7 +609,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
 		"tags":        func() { stream.Tags = replicationCfg.Defaults.Tags },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
-		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
+		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
 		"hooks":       func() { stream.Hooks = replicationCfg.Defaults.Hooks },
