@@ -295,6 +295,10 @@ func (fs *SftpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, e
 	}
 
 	file, err := fs.client.Create(path)
+	if err != nil && strings.Contains(err.Error(), "SSH_FX_OP_UNSUPPORTED") {
+		// https://github.com/pkg/sftp/issues/305
+		file, err = fs.client.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	}
 	if err != nil {
 		err = g.Error(err, "Unable to open "+path)
 		return
@@ -347,6 +351,10 @@ func (fs *SftpFileSysClient) GetWriter(urlStr string) (writer io.Writer, err err
 		return
 	}
 	file, err := fs.client.Create(path)
+	if err != nil && strings.Contains(err.Error(), "SSH_FX_OP_UNSUPPORTED") {
+		// https://github.com/pkg/sftp/issues/305
+		file, err = fs.client.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	}
 	if err != nil {
 		err = g.Error(err, "Unable to open "+path)
 		return
