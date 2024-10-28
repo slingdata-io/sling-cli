@@ -612,6 +612,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
+		"hooks":       func() { stream.Hooks = replicationCfg.Defaults.Hooks },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -622,13 +623,13 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 
 	// set default options
 	if stream.SourceOptions == nil {
-		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
+		stream.SourceOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.SourceOptions))
 	} else if replicationCfg.Defaults.SourceOptions != nil {
 		stream.SourceOptions.SetDefaults(*replicationCfg.Defaults.SourceOptions)
 	}
 
 	if stream.TargetOptions == nil {
-		stream.TargetOptions = replicationCfg.Defaults.TargetOptions
+		stream.TargetOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.TargetOptions))
 	} else if replicationCfg.Defaults.TargetOptions != nil {
 		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
 	}
