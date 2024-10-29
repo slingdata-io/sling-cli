@@ -787,7 +787,6 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 		return err
 	}
 
-	t.SetProgress("truncated table " + tableName)
 	return nil
 }
 
