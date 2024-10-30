@@ -144,7 +144,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// write directly to the final table (no temp table)
 	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert {
-		return t.writeToDbDirectly(cfg, df, tgtConn)
+		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
+		} else {
+			return t.writeToDbDirectly(cfg, df, tgtConn)
+		}
 	}
 
 	// Initialize target and temp tables
