@@ -1,4 +1,4 @@
-source: DO_SPACES
+source: OCRAL_R2
 target: TEST_PG_SLING_MASTER
 
 defaults:

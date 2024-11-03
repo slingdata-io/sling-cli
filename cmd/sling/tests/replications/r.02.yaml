@@ -1,5 +1,5 @@
 source: TEST_PG_SLING_MASTER
-target: DO_SPACES
+target: OCRAL_R2
 
 defaults:
   mode: full-refresh
