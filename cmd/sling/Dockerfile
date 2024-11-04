@@ -9,9 +9,9 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 po
 # Install Oracle Instant Client
 RUN cd /tmp && \
   wget https://f.slingdata.io/oracle_client_amd64.tar.gz && \
-  tar -xf oracle_client64.tar.gz && \
+  tar -xf oracle_client_amd64.tar.gz && \
   mkdir -p /usr/lib/oracle/19.3 && mv oracle_client64 /usr/lib/oracle/19.3/client64 && \
-  rm -f oracle_client64.tar.gz
+  rm -f oracle_client_amd64.tar.gz
 
 ## Install mssql-tools
 ## from https://docs.microsoft.com/en-us/sql/linux/sql-server-linux-setup-tools?view=sql-server-ver15#ubuntu
