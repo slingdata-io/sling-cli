@@ -8,7 +8,7 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y unzip libaio1 po
 
 # Install Oracle Instant Client
 RUN cd /tmp && \
-  wget https://ocral.nyc3.cdn.digitaloceanspaces.com/sling/public/oracle_client64.tar.gz && \
+  wget https://f.slingdata.io/oracle_client_amd64.tar.gz && \
   tar -xf oracle_client64.tar.gz && \
   mkdir -p /usr/lib/oracle/19.3 && mv oracle_client64 /usr/lib/oracle/19.3/client64 && \
   rm -f oracle_client64.tar.gz
