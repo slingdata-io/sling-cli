@@ -283,7 +283,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Handle empty data case
 	if cnt == 0 && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY_TABLES")) && !cast.ToBool(os.Getenv("SLING_ALLOW_EMPTY")) {
-		g.Warn("No data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
+		g.Warn("no data or records found in stream. Nothing to do. To allow Sling to create empty tables, set SLING_ALLOW_EMPTY=TRUE")
 		return 0, nil
 	} else if cnt > 0 {
 		// FIXME: find root cause of why columns don't sync while streaming
@@ -316,7 +316,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// Prepare final table operations
 	if err = prepareFinal(t, cfg, tgtConn, targetTable, df); err != nil {
-		err = g.Error(err, "Error preparing final table")
+		err = g.Error(err, "error preparing final table")
 		return 0, err
 	}
 
@@ -327,13 +327,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
 	} else if err := transferData(cfg, tgtConn, tableTmp, targetTable); err != nil {
-		err = g.Error(err, "Error transferring data from temp to final table")
+		err = g.Error(err, "error transferring data from temp to final table")
 		return 0, err
 	}
 
 	// Execute post-SQL
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
-		err = g.Error(err, "Error executing %s-sql", "post")
+		err = g.Error(err, "error executing %s-sql", "post")
 		return 0, err
 	}
 
@@ -415,7 +415,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 
 	// Prepare final table operations & handlers
 	if err = prepareFinal(t, cfg, tgtConn, targetTable, df); err != nil {
-		err = g.Error(err, "Error preparing final table")
+		err = g.Error(err, "error preparing final table")
 		return 0, err
 	}
 
@@ -447,7 +447,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 			err = g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 			return 0, err
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
-			err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
+			err = g.Error("loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 			return 0, err
 		}
 
@@ -470,7 +470,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 
 	// Handle empty data case
 	if cnt == 0 {
-		g.Warn("No data or records found in stream. Nothing to insert.")
+		g.Warn("no data or records found in stream. Nothing to insert.")
 	}
 
 	// Execute post-SQL
@@ -513,7 +513,7 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 
 	// check table ddl
 	if targetTable.DDL != "" && !strings.Contains(targetTable.DDL, targetTable.Raw) {
-		err = g.Error("The Table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
+		err = g.Error("the table DDL provided needs to contains the exact object table name: %s\nProvided:\n%s", targetTable.Raw, targetTable.DDL)
 		return database.Table{}, err
 	}
 
@@ -566,7 +566,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 
 func ensureSchemaExists(tgtConn database.Connection, schemaName string) error {
 	if _, err := createSchemaIfNotExists(tgtConn, schemaName); err != nil {
-		return g.Error(err, "Error checking & creating schema "+schemaName)
+		return g.Error(err, "error checking & creating schema "+schemaName)
 	}
 	return nil
 }
@@ -752,7 +752,7 @@ func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTabl
 	if (cfg.Mode == IncrementalMode && len(cfg.Source.PrimaryKey()) == 0) || cfg.Mode == SnapshotMode || cfg.Mode == FullRefreshMode || cfg.Mode == TruncateMode {
 		// insert directly
 		if err := insertFromTemp(cfg, tgtConn); err != nil {
-			err = g.Error(err, "Could not insert from temp")
+			err = g.Error(err, "could not insert from temp")
 			return err
 		}
 		return nil
@@ -761,7 +761,7 @@ func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTabl
 	if cfg.Mode == IncrementalMode || cfg.Mode == BackfillMode {
 		// execute upsert
 		if err := performUpsert(tgtConn, tableTmp, targetTable, cfg); err != nil {
-			err = g.Error(err, "Could not perform upsert from temp")
+			err = g.Error(err, "could not perform upsert from temp")
 			return err
 		}
 		return nil
@@ -773,7 +773,7 @@ func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTabl
 }
 
 func transferBySwappingTables(tgtConn database.Connection, tableTmp, targetTable database.Table) error {
-	g.Debug("Swapping temporary table %s with target table %s", tableTmp.FullName(), targetTable.FullName())
+	g.Debug("swapping temporary table %s with target table %s", tableTmp.FullName(), targetTable.FullName())
 	if err := tgtConn.SwapTable(tableTmp.FullName(), targetTable.FullName()); err != nil {
 		err = g.Error(err, "could not swap tables %s to %s", tableTmp.FullName(), targetTable.FullName())
 		return err
@@ -787,7 +787,7 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 		"table", tableName,
 	)
 	if _, err := tgtConn.Exec(truncSQL); err != nil {
-		err = g.Error(err, "Could not truncate table ", tableName)
+		err = g.Error(err, "could not truncate table ", tableName)
 		return err
 	}
 
@@ -801,11 +801,11 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 			tgtPrimaryKey[i] = casing.Apply(pk, tgtConn.GetType())
 		}
 	}
-	g.Debug("Performing upsert from temporary table %s to target table %s with primary keys %v",
+	g.Debug("performing upsert from temporary table %s to target table %s with primary keys %v",
 		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	rowAffCnt, err := tgtConn.Upsert(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	if err != nil {
-		err = g.Error(err, "Could not perform upsert from temp")
+		err = g.Error(err, "could not perform upsert from temp")
 		return err
 	}
 	if rowAffCnt > 0 {
