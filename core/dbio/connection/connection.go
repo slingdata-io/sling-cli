@@ -599,13 +599,27 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
-		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("app_name", "sling")
 
-		template = "sqlserver://{username}:{password}@{host}:{port}"
-		if _, ok := c.Data["instance"]; ok {
-			template = template + "/{instance}"
+		template = "sqlserver://{username}:{password}@{host}"
+
+		_, port_ok := c.Data["port"]
+		_, instance_ok := c.Data["instance"]
+
+		if port_ok && instance_ok {
+			g.Warn("ignored instance for %s, both port and instance were specified", c.Name)
 		}
+
+		switch {
+		case port_ok:
+			template += ":{port}"
+		case instance_ok:
+			template += "/instance"
+		default:
+			template += ":{port}"
+			setIfMissing("port", c.Type.DefPort())
+		}
+
 		template = template + "?"
 		if _, ok := c.Data["database"]; ok {
 			template = template + "&database={database}"
