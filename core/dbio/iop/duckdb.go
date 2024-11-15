@@ -229,7 +229,7 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
 		duck.Proc.Env["motherduck_token"] = motherduckToken
-		args = append(args, "md:")
+		args = append(args, "md:"+duck.GetProp("database"))
 	}
 
 	// default extensions
