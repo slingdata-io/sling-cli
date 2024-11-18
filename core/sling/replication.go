@@ -581,6 +581,7 @@ type ReplicationStreamConfig struct {
 	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
+	Schedule      string         `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
@@ -607,6 +608,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
+		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
 		"tags":        func() { stream.Tags = replicationCfg.Defaults.Tags },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
