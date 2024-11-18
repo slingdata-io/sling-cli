@@ -478,7 +478,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		bcpAuthParts := []string{}
 		err = g.Unmarshal(bcpAuthString, &bcpAuthParts)
 		if err != nil {
-			err = g.Error("could not parse property `bcp_auth_string`. Is an array of strings provided?")
+			err = g.Error("could not parse property `bcp_auth_string` (%s). Is an array of strings provided?", err.Error())
 			return
 		}
 		bcpArgs = append(bcpArgs, bcpAuthParts...)
@@ -492,6 +492,17 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		if cast.ToBool(conn.GetProp("bcp_entra_auth")) {
 			bcpArgs = append(bcpArgs, "-G")
 		}
+	}
+
+	if bcpExtraArgs := conn.GetProp("bcp_extra_args"); bcpExtraArgs != "" {
+		g.Warn(bcpExtraArgs)
+		bcpExtraParts := []string{}
+		err = g.Unmarshal(bcpExtraArgs, &bcpExtraParts)
+		if err != nil {
+			err = g.Error("could not parse property `bcp_extra_args` (%s). Is an array of strings provided?", err.Error())
+			return
+		}
+		bcpArgs = append(bcpArgs, bcpExtraParts...)
 	}
 
 	proc := exec.Command("bcp", bcpArgs...)

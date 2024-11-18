@@ -606,10 +606,6 @@ func (c *Connection) setURL() (err error) {
 		_, port_ok := c.Data["port"]
 		_, instance_ok := c.Data["instance"]
 
-		if port_ok && instance_ok {
-			g.Warn("ignored instance for %s, both port and instance were specified", c.Name)
-		}
-
 		switch {
 		case port_ok:
 			template += ":{port}"
