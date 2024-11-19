@@ -495,7 +495,6 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 
 	if bcpExtraArgs := conn.GetProp("bcp_extra_args"); bcpExtraArgs != "" {
-		g.Warn(bcpExtraArgs)
 		bcpExtraParts := []string{}
 		err = g.Unmarshal(bcpExtraArgs, &bcpExtraParts)
 		if err != nil {
