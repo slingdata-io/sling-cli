@@ -183,6 +183,8 @@ func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
 		}
 		conn.SetProp("schema", schema)
 		conn.SetProp("internal_stage", defStaging)
+	} else {
+		conn.Exec("USE SCHEMA " + schema + noDebugKey)
 	}
 	return conn.GetProp("internal_stage")
 }
