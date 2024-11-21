@@ -899,6 +899,14 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 			}
 		}
 
+		// Check for context cancellation when Next() returns false
+		if ctxErr := queryContext.Ctx.Err(); ctxErr != nil {
+			it.Context.CaptureErr(g.Error(ctxErr, "query context canceled"))
+		} else if err = result.Err(); err != nil {
+			// Double check result.Err() in case error occurred between previous check
+			it.Context.CaptureErr(g.Error(err, "error after row iteration"))
+		}
+
 		result.Close()
 		return false
 	}
