@@ -16,7 +16,7 @@
     <img src="https://pkg.go.dev/badge/github.com/slingdata-io/sling-cli.svg" alt="Go Reference"/>
   </a>
   <a href="https://discord.gg/q5xtaSNDvp">
-    <img alt="Discord" src="https://dcbadge.vercel.app/api/server/q5xtaSNDvp?style=flat"/>
+    <img alt="Discord" src="https://img.shields.io/discord/1210406123744796702?style=flat&logo=discord&label=discord"/>
   </a>
   <a href="https://github.com/slingdata-io/sling-cli/tags" rel="nofollow">
     <img alt="GitHub tag (latest SemVer pre-release)" src="https://img.shields.io/github/v/tag/slingdata-io/sling-cli?include_prereleases&label=version"/>
