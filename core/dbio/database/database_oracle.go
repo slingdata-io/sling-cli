@@ -422,6 +422,9 @@ func (conn *OracleConn) getColumnsString(ds *iop.Datastream) string {
 			)
 		} else if col.IsString() {
 			expr = g.F("char(400000) NULLIF %s=BLANKS", colName)
+			if col.DbPrecision > 400000 {
+				expr = g.F("char(%d) NULLIF %s=BLANKS", col.DbPrecision, colName)
+			}
 		}
 		columnsString += fmt.Sprintf("  %s %s,\n", colName, expr)
 	}
