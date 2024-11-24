@@ -295,6 +295,8 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		return
 	}
 
+	g.Debug("sqldr ctl file content (%s):\n%s", ctlPath, ctlStr)
+
 	password, _ := url.User.Password()
 	hostPort := url.Host
 	sid := strings.ReplaceAll(url.Path, "/", "")
