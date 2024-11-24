@@ -175,6 +175,9 @@ func (cfg *Config) SetDefault() {
 	if val := os.Getenv("SLING_ROW_ID_COLUMN"); val != "" {
 		cfg.MetadataRowID = cast.ToBool(val)
 	}
+	if val := os.Getenv("SLING_EXEC_ID_COLUMN"); val != "" {
+		cfg.MetadataExecID = cast.ToBool(val)
+	}
 	if val := os.Getenv("SLING_ROW_NUM_COLUMN"); val != "" {
 		cfg.MetadataRowNum = cast.ToBool(val)
 	}
@@ -981,6 +984,7 @@ type Config struct {
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
 	MetadataRowNum    bool  `json:"-" yaml:"-"`
 	MetadataRowID     bool  `json:"-" yaml:"-"`
+	MetadataExecID    bool  `json:"-" yaml:"-"`
 
 	extraTransforms []string `json:"-" yaml:"-"`
 }

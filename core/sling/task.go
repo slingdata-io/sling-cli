@@ -296,6 +296,11 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 		metadata.RowID.Key = slingRowIDColumn
 	}
 
+	if t.Config.MetadataExecID {
+		metadata.ExecID.Key = slingExecIDColumn
+		metadata.ExecID.Value = t.ExecID
+	}
+
 	if t.Config.MetadataRowNum {
 		metadata.RowNum.Key = slingRowNumColumn
 	}

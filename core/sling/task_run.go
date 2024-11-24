@@ -30,6 +30,7 @@ var slingLoadedAtColumn = "_sling_loaded_at"
 var slingStreamURLColumn = "_sling_stream_url"
 var slingRowNumColumn = "_sling_row_num"
 var slingRowIDColumn = "_sling_row_id"
+var slingExecIDColumn = "_sling_exec_id"
 
 func init() {
 	// we need a webserver to get the pprof webserver

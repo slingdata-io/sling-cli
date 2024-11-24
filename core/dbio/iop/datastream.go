@@ -99,6 +99,7 @@ type Metadata struct {
 	LoadedAt  KeyValue `json:"loaded_at"`
 	RowNum    KeyValue `json:"row_num"`
 	RowID     KeyValue `json:"row_id"`
+	ExecID    KeyValue `json:"exec_id"`
 }
 
 // AsMap return as map
@@ -814,6 +815,21 @@ loop:
 						return uid.String()
 					}
 				}
+			}
+		}
+
+		if ds.Metadata.ExecID.Key != "" {
+			ds.Metadata.ExecID.Key = ensureName(ds.Metadata.ExecID.Key)
+			col := Column{
+				Name:        ds.Metadata.ExecID.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.ExecID",
+				Metadata:    map[string]string{"sling_metadata": "exec_id"},
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.ExecID.Value
 			}
 		}
 	}
