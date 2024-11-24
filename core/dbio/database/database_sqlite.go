@@ -446,12 +446,12 @@ func EnsureBinSQLite() (binPath string, err error) {
 		case "darwin/386":
 			downloadURL = "https://www.sqlite.org/2023/sqlite-tools-osx-x86-3410000.zip"
 		case "darwin/arm", "darwin/arm64":
-			downloadURL = `https://ocral.nyc3.cdn.digitaloceanspaces.com/slingdata.io%2Fsqlite%2F3.41%2Fsqlite3-darwin-arm64-3.41.zip`
+			downloadURL = `https://f.slingdata.io/sqlite3-darwin-arm64-3.41.zip`
 
 		case "linux/386":
 			downloadURL = "https://www.sqlite.org/2023/sqlite-tools-linux-x86-3410000.zip"
 		case "linux/amd64":
-			downloadURL = `https://ocral.nyc3.cdn.digitaloceanspaces.com/slingdata.io%2Fsqlite%2F3.41%2Fsqlite-linux-amd64-3.41.zip`
+			downloadURL = `https://f.slingdata.io/sqlite-linux-amd64-3.41.zip`
 
 		default:
 			return defaultBin("sqlite3")

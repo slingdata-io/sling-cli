@@ -581,10 +581,12 @@ type ReplicationStreamConfig struct {
 	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
 	SourceOptions *SourceOptions `json:"source_options,omitempty" yaml:"source_options,omitempty"`
 	TargetOptions *TargetOptions `json:"target_options,omitempty" yaml:"target_options,omitempty"`
+	Schedule      string         `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Disabled      bool           `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Hooks         Hooks          `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -606,11 +608,13 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },
+		"schedule":    func() { stream.Schedule = replicationCfg.Defaults.Schedule },
 		"tags":        func() { stream.Tags = replicationCfg.Defaults.Tags },
 		"disabled":    func() { stream.Disabled = replicationCfg.Defaults.Disabled },
-		"single":      func() { stream.Single = replicationCfg.Defaults.Single },
+		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
+		"hooks":       func() { stream.Hooks = replicationCfg.Defaults.Hooks },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -621,13 +625,13 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 
 	// set default options
 	if stream.SourceOptions == nil {
-		stream.SourceOptions = replicationCfg.Defaults.SourceOptions
+		stream.SourceOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.SourceOptions))
 	} else if replicationCfg.Defaults.SourceOptions != nil {
 		stream.SourceOptions.SetDefaults(*replicationCfg.Defaults.SourceOptions)
 	}
 
 	if stream.TargetOptions == nil {
-		stream.TargetOptions = replicationCfg.Defaults.TargetOptions
+		stream.TargetOptions = g.Ptr(g.PtrVal(replicationCfg.Defaults.TargetOptions))
 	} else if replicationCfg.Defaults.TargetOptions != nil {
 		stream.TargetOptions.SetDefaults(*replicationCfg.Defaults.TargetOptions)
 	}

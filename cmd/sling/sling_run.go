@@ -39,8 +39,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
-	iterate := 1
-	itNumber := 1
 
 	// recover from panic
 	defer func() {
@@ -103,14 +101,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "offset":
 			cfg.Source.Options.Offset = g.Int(cast.ToInt(v))
 
-		case "iterate":
-			if cast.ToString(v) == "infinite" {
-				iterate = -1
-			} else if val := cast.ToInt(v); val > 0 {
-				iterate = val
-			} else {
-				return ok, g.Error("invalid value for `iterate`")
-			}
 		case "range":
 			cfg.Source.Options.Range = g.String(cast.ToString(v))
 
@@ -201,40 +191,32 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	go checkUpdate(false)
 	defer printUpdateAvailable()
 
-	for {
-		if replicationCfgPath != "" {
-			//  run replication
-			err = runReplication(replicationCfgPath, cfg, selectStreams...)
-			if err != nil {
-				return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
-			}
-		} else {
-			// run task
-			// run as replication is stream is wildcard
-			if cfg.HasWildcard() {
-				rc := cfg.AsReplication()
-				replicationCfgPath = path.Join(env.GetTempFolder(), g.NewTsID("replication.temp")+".json")
-				err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
-				if err != nil {
-					return ok, g.Error(err, "could not write temp replication: %s", replicationCfgPath)
-				}
-				defer os.Remove(replicationCfgPath)
-				continue // run replication
-			}
-
-			err = runTask(cfg, nil)
-			if err != nil {
-				return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
-			}
+runReplication:
+	if replicationCfgPath != "" {
+		//  run replication
+		err = runReplication(replicationCfgPath, cfg, selectStreams...)
+		if err != nil {
+			return ok, g.Error(err, "failure running replication (see docs @ https://docs.slingdata.io/sling-cli)")
 		}
-		if iterate > 0 && itNumber >= iterate {
-			break
+	} else {
+		// run task, add replication config for md5
+		rc := cfg.AsReplication()
+
+		// run as replication is stream is wildcard
+		if cfg.HasWildcard() {
+			replicationCfgPath = path.Join(env.GetTempFolder(), g.NewTsID("replication.temp")+".json")
+			err = os.WriteFile(replicationCfgPath, []byte(g.Marshal(rc)), 0775)
+			if err != nil {
+				return ok, g.Error(err, "could not write temp replication: %s", replicationCfgPath)
+			}
+			defer os.Remove(replicationCfgPath)
+			goto runReplication // run replication
 		}
 
-		itNumber++
-		time.Sleep(1 * time.Second) // sleep for one second
-		println()
-		g.Info("Iteration #%d", itNumber)
+		err = runTask(cfg, &rc)
+		if err != nil {
+			return ok, g.Error(err, "failure running task (see docs @ https://docs.slingdata.io/sling-cli)")
+		}
 	}
 
 	// test count/bytes if need
@@ -419,11 +401,10 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		totalBytes = totalBytes + inBytes
 	}
 
-	// warn constrains
+	// add up constraints
 	if df := task.Df(); df != nil {
 		for _, col := range df.Columns {
 			if c := col.Constraint; c != nil && c.FailCnt > 0 {
-				g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
 				constraintFails = constraintFails + c.FailCnt
 			}
 		}

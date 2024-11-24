@@ -119,6 +119,15 @@ func (s ExecStatus) IsFailure() bool {
 	return false
 }
 
+// IsWarning returns true if an execution is warning
+func (s ExecStatus) IsWarning() bool {
+	switch s {
+	case ExecStatusWarning:
+		return true
+	}
+	return false
+}
+
 // IsSuccess returns true if an execution is successful
 func (s ExecStatus) IsSuccess() bool {
 	switch s {

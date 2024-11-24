@@ -599,13 +599,23 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
-		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("app_name", "sling")
 
-		template = "sqlserver://{username}:{password}@{host}:{port}"
-		if _, ok := c.Data["instance"]; ok {
-			template = template + "/{instance}"
+		template = "sqlserver://{username}:{password}@{host}"
+
+		_, port_ok := c.Data["port"]
+		_, instance_ok := c.Data["instance"]
+
+		switch {
+		case port_ok:
+			template += ":{port}"
+		case instance_ok:
+			template += "/instance"
+		default:
+			template += ":{port}"
+			setIfMissing("port", c.Type.DefPort())
 		}
+
 		template = template + "?"
 		if _, ok := c.Data["database"]; ok {
 			template = template + "&database={database}"
@@ -659,6 +669,8 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("schema", c.Data["database"])
 		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("secure", "false")
+		setIfMissing("skip_verify", "false")
 
 		// parse http url
 		if httpUrlStr, ok := c.Data["http_url"]; ok {
@@ -671,7 +683,7 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("database", "default")
 		}
 
-		template = "proton://{username}:{password}@{host}:{port}/{database}"
+		template = "proton://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

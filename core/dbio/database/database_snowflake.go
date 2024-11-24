@@ -170,7 +170,7 @@ func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
 }
 
 func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
-	if conn.GetProp("internalStage") == "" {
+	if conn.GetProp("internal_stage") == "" {
 		defStaging := "sling_staging"
 		if schema == "" {
 			schema = conn.GetProp("schema")
@@ -182,9 +182,11 @@ func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
 			return ""
 		}
 		conn.SetProp("schema", schema)
-		conn.SetProp("internalStage", defStaging)
+		conn.SetProp("internal_stage", defStaging)
+	} else {
+		conn.Exec("USE SCHEMA " + schema + noDebugKey)
 	}
-	return conn.GetProp("internalStage")
+	return conn.GetProp("internal_stage")
 }
 
 // GenerateDDL generates a DDL based on a dataset
@@ -635,7 +637,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unl
 
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
-		conn.GetProp("internalStage"),
+		conn.GetProp("internal_stage"),
 		tempCloudStorageFolder,
 		cast.ToString(g.Now()),
 	)
@@ -719,8 +721,8 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 
 	context := g.NewContext(conn.Context().Ctx)
 
-	if conn.GetProp("internalStage") == "" {
-		return 0, g.Error("Prop internalStage is required")
+	if conn.GetProp("internal_stage") == "" {
+		return 0, g.Error("Prop internal_stage is required")
 	}
 
 	if conn.GetProp("schema") == "" {
@@ -759,7 +761,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}()
 
 	// Import to staging
-	stageFolderPath := g.F("@%s.%s/%s/%s", conn.GetProp("schema"), conn.GetProp("internalStage"), env.CleanTableName(tableFName), g.NowFileStr())
+	stageFolderPath := g.F("@%s.%s/%s/%s", conn.GetProp("schema"), conn.GetProp("internal_stage"), env.CleanTableName(tableFName), g.NowFileStr())
 	conn.Exec("USE SCHEMA " + conn.GetProp("schema"))
 	_, err = conn.Exec("REMOVE " + stageFolderPath)
 	if err != nil {
@@ -778,7 +780,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
 		err = conn.StagePUT(file.Node.URI, stageFolderPath)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internalStage")))
+			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internal_stagee")))
 		}
 		pathArr := strings.Split(file.Node.Path(), "/")
 		fileName := pathArr[len(pathArr)-1]

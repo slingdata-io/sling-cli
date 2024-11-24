@@ -1,5 +1,5 @@
 source:
-  conn: DO_SPACES
+  conn: OCRAL_R2
   stream: s3://ocral/mlo.community.test/channels.json
 
 target:

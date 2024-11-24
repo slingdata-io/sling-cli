@@ -99,6 +99,7 @@ type Metadata struct {
 	LoadedAt  KeyValue `json:"loaded_at"`
 	RowNum    KeyValue `json:"row_num"`
 	RowID     KeyValue `json:"row_id"`
+	ExecID    KeyValue `json:"exec_id"`
 }
 
 // AsMap return as map
@@ -222,7 +223,7 @@ func (ds *Datastream) processBwRows() {
 
 		for row := range ds.bwRows {
 			if processBw {
-				ds.writeBwCsv(ds.CastToStringSafeMask(row))
+				ds.writeBwCsvSafe(ds.CastToStringSafeMask(row))
 				ds.bwCsv.Flush()
 			}
 		}
@@ -317,6 +318,22 @@ func (ds *Datastream) CastToStringSafeMask(row []any) []string {
 func (ds *Datastream) writeBwCsv(row []string) {
 	bw, _ := ds.bwCsv.Write(row)
 	ds.AddBytes(int64(bw))
+}
+
+func (ds *Datastream) writeBwCsvSafe(row []string) {
+	var totalBytes int64
+
+	for _, val := range row {
+		totalBytes += int64(len(val)) // Calculate the byte length of the string
+		totalBytes++                  // Add 1 for delimiter/separator
+	}
+
+	if len(row) > 0 {
+		totalBytes-- // Remove last delimiter
+		totalBytes++ // Add newline character
+	}
+
+	ds.AddBytes(totalBytes)
 }
 
 // Push return the fields of the Data
@@ -798,6 +815,21 @@ loop:
 						return uid.String()
 					}
 				}
+			}
+		}
+
+		if ds.Metadata.ExecID.Key != "" {
+			ds.Metadata.ExecID.Key = ensureName(ds.Metadata.ExecID.Key)
+			col := Column{
+				Name:        ds.Metadata.ExecID.Key,
+				Type:        StringType,
+				Position:    len(ds.Columns) + 1,
+				Description: "Sling.Metadata.ExecID",
+				Metadata:    map[string]string{"sling_metadata": "exec_id"},
+			}
+			ds.Columns = append(ds.Columns, col)
+			metaValuesMap[col.Position-1] = func(it *Iterator) any {
+				return ds.Metadata.ExecID.Value
 			}
 		}
 	}
