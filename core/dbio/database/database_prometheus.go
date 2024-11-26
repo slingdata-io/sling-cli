@@ -55,7 +55,7 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 	}
 
 	if user := conn.GetProp("user"); user != "" {
-		rt = config.NewBasicAuthRoundTripper(config.NewFileSecret(user), config.NewInlineSecret(conn.GetProp("password")), rt)
+		rt = config.NewBasicAuthRoundTripper(config.NewInlineSecret(user), config.NewInlineSecret(conn.GetProp("password")), rt)
 	}
 
 	c, err := api.NewClient(api.Config{
