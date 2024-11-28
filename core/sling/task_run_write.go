@@ -508,7 +508,15 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 	if cfg.Target.Options.TableDDL != nil {
 		targetTable.DDL = *cfg.Target.Options.TableDDL
 	}
-	targetTable.DDL = g.R(targetTable.DDL, "object_name", targetTable.Raw, "table", targetTable.Raw)
+
+	// inject variables
+	fm, err := cfg.GetFormatMap()
+	if err != nil {
+		return database.Table{}, err
+	}
+	fm["table"] = targetTable.Raw
+	targetTable.DDL = g.Rm(targetTable.DDL, fm)
+
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 
 	// check table ddl
