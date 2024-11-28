@@ -590,6 +590,12 @@ func (cfg *Config) Prepare() (err error) {
 	cfg.Source.Type = cfg.SrcConn.Type
 	cfg.Target.Type = cfg.TgtConn.Type
 
+	// validate capability to write
+	switch cfg.Target.Type {
+	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbBigTable:
+		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
+	}
+
 	// validate table keys
 	if tkMap := cfg.Target.Options.TableKeys; tkMap != nil {
 		for _, kt := range lo.Keys(tkMap) {
