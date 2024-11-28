@@ -138,9 +138,14 @@ func (cs *ColumnStats) DuplicatePercent() float64 {
 }
 
 func init() {
-	if os.Getenv("SAMPLE_SIZE") != "" {
-		SampleSize = cast.ToInt(os.Getenv("SAMPLE_SIZE"))
+	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
+		SampleSize = cast.ToInt(val) // legacy
 	}
+
+	if val := os.Getenv("SLING_SAMPLE_SIZE"); val != "" {
+		SampleSize = cast.ToInt(val)
+	}
+
 	if os.Getenv("REMOVE_TRAILING_ZEROS") != "" {
 		RemoveTrailingDecZeros = cast.ToBool(os.Getenv("REMOVE_TRAILING_ZEROS"))
 	}
