@@ -229,7 +229,7 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 	conn.Commit() // cannot have transaction lock table
 
 	// return conn.BaseConn.InsertBatchStream(tableFName, ds)
-	_, err = exec.LookPath("bcp")
+	_, err = exec.LookPath(conn.bcpPath())
 	if err != nil {
 		g.Debug("bcp not found in path. Using cursor...")
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
@@ -407,6 +407,13 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	return ds.Count, ds.Err()
 }
 
+func (conn *MsSQLServerConn) bcpPath() string {
+	if val := conn.GetProp("bcp_path"); val != "" {
+		return val
+	}
+	return "bcp"
+}
+
 // BcpImportFile Import using bcp tool
 // https://docs.microsoft.com/en-us/sql/tools/bcp-utility?view=sql-server-ver15
 // bcp dbo.test1 in '/tmp/LargeDataset.csv' -S tcp:sqlserver.host,51433 -d master -U sa -P 'password' -c -t ',' -b 5000
@@ -427,7 +434,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 
 	// get version
 	version := 14
-	versionOut, err := exec.Command("bcp", "-v").Output()
+	versionOut, err := exec.Command(conn.bcpPath(), "-v").Output()
 	if err != nil {
 		return 0, g.Error(err, "could not get bcp version")
 	}
@@ -504,7 +511,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		bcpArgs = append(bcpArgs, bcpExtraParts...)
 	}
 
-	proc := exec.Command("bcp", bcpArgs...)
+	proc := exec.Command(conn.bcpPath(), bcpArgs...)
 	proc.Stderr = &stderr
 	proc.Stdout = &stdout
 
@@ -517,7 +524,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 
 	// build cmdStr
 	args := lo.Map(proc.Args, func(v string, i int) string {
-		if !g.In(v, "in", "-S", "-d", "-U", "-P", "-t", "-u", "-m", "-c", "-q", "-b", "-F", "-e", "bcp") {
+		if !g.In(v, "in", "-S", "-d", "-U", "-P", "-t", "-u", "-m", "-c", "-q", "-b", "-F", "-e", conn.bcpPath()) {
 			v = strings.ReplaceAll(v, hostPort, "****")
 			if password != "" {
 				v = strings.ReplaceAll(v, password, "****")
