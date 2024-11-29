@@ -39,3 +39,6 @@ cmd/sling/build/
 cmd/sling/frontend
 .cursorignore
 .sling.json
+.python-version
+pyproject.toml
+uv.lock
