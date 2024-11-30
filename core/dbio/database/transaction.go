@@ -480,9 +480,11 @@ func Upsert(conn Connection, tx Transaction, sourceTable, targetTable string, pk
 		return
 	}
 
-	count, err = result.RowsAffected()
-	if err != nil || (count == 0 && conn.GetType() == dbio.TypeDbClickhouse) {
-		count = -1
+	if result != nil {
+		count, err = result.RowsAffected()
+		if err != nil || (count == 0 && conn.GetType() == dbio.TypeDbClickhouse) {
+			count = -1
+		}
 	}
 
 	return
