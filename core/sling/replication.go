@@ -586,7 +586,8 @@ type ReplicationStreamConfig struct {
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
-	Hooks         Hooks          `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+	PreHooks      Hooks          `json:"pre_hooks,omitempty" yaml:"pre_hooks,omitempty"`
+	PostHooks     Hooks          `json:"post_hooks,omitempty" yaml:"post_hooks,omitempty"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -614,7 +615,8 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"hooks":       func() { stream.Hooks = replicationCfg.Defaults.Hooks },
+		"pre_hooks":   func() { stream.PreHooks = replicationCfg.Defaults.PreHooks },
+		"post_hooks":  func() { stream.PostHooks = replicationCfg.Defaults.PostHooks },
 	}
 
 	for key, setFunc := range defaultSet {

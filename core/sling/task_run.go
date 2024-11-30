@@ -112,6 +112,10 @@ func (t *TaskExecution) Execute() error {
 		// pre-hooks
 		if t.Err = t.ExecuteHooks("pre"); t.Err != nil {
 			return
+		} else if t.skipStream {
+			t.SetProgress("skipping stream")
+			t.Status = ExecStatusSkipped
+			return
 		}
 
 		switch t.Type {
@@ -199,9 +203,9 @@ func (t *TaskExecution) ExecuteHooks(stage string) (err error) {
 
 	var hooks []Hook
 	if stage == "pre" {
-		hooks, err = t.Config.ReplicationStream.Hooks.PreHooks(t)
+		hooks, err = t.Config.ReplicationStream.PreHooks.Parse(stage, t)
 	} else if stage == "post" {
-		hooks, err = t.Config.ReplicationStream.Hooks.PostHooks(t)
+		hooks, err = t.Config.ReplicationStream.PostHooks.Parse(stage, t)
 	} else {
 		return g.Error("invalid hook stage")
 	}
@@ -411,18 +415,6 @@ func (t *TaskExecution) runDbToFile() (err error) {
 	err = t.df.Err()
 	return
 
-}
-
-func (t *TaskExecution) runFolderToDB() (err error) {
-	/*
-		This will take a URL as a folder path
-		1. list the files/folders in it (not recursive)
-		2a. run runFileToDB for each of the files, naming the target table respectively
-		2b. OR run runFileToDB for each of the files, to the same target able, assume each file has same structure
-		3. keep list of file inserted in Job.Settings (view handleExecutionHeartbeat in server_ws.go).
-
-	*/
-	return
 }
 
 func (t *TaskExecution) runFileToDB() (err error) {

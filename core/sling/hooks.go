@@ -11,30 +11,15 @@ type Hook interface {
 	ExecuteOnDone(error, *TaskExecution) error
 }
 
-type Hooks struct {
-	Pre  []any `json:"pre" yaml:"pre"`
-	Post []any `json:"post" yaml:"post"`
-}
+type Hooks []any
 
-func (h *Hooks) PreHooks(te *TaskExecution) (hooks []Hook, err error) {
-	for i, hook := range h.Pre {
-		preHook, err := ParseHook(hook, te, g.F("pre-%02d", i+1))
+func (hks Hooks) Parse(stage string, te *TaskExecution) (hooks []Hook, err error) {
+	for i, hook := range hks {
+		parsedHook, err := ParseHook(hook, te, g.F("%s-%02d", stage, i+1))
 		if err != nil {
-			return nil, g.Error(err, "error making pre-hook")
-		} else if preHook != nil {
-			hooks = append(hooks, preHook)
-		}
-	}
-	return hooks, nil
-}
-
-func (h *Hooks) PostHooks(te *TaskExecution) (hooks []Hook, err error) {
-	for i, hook := range h.Post {
-		postHook, err := ParseHook(hook, te, g.F("post-%02d", i+1))
-		if err != nil {
-			return nil, g.Error(err, "error making pre-hook")
-		} else if postHook != nil {
-			hooks = append(hooks, postHook)
+			return nil, g.Error(err, "error making %s-hook", stage)
+		} else if parsedHook != nil {
+			hooks = append(hooks, parsedHook)
 		}
 	}
 	return hooks, nil

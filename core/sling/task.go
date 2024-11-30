@@ -36,6 +36,7 @@ type TaskExecution struct {
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
+	skipStream    bool            `json:"skip_stream"`
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
 	Output        strings.Builder `json:"-"`
 	OutputLines   chan *g.LogLine
