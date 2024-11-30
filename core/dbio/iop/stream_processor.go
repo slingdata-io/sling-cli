@@ -45,7 +45,6 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	TrimSpace         bool                   `json:"trim_space"`
 	EmptyAsNull       bool                   `json:"empty_as_null"`
 	Header            bool                   `json:"header"`
 	Compression       CompressorType         `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
@@ -335,9 +334,6 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	if val, ok := configMap["null_as"]; ok {
 		sp.Config.NullAs = val
 	}
-	if val, ok := configMap["trim_space"]; ok {
-		sp.Config.TrimSpace = cast.ToBool(val)
-	}
 
 	if val, ok := configMap["jmespath"]; ok {
 		sp.Config.Jmespath = cast.ToString(val)
@@ -589,7 +585,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 
 		isString = true
-		if sp.Config.TrimSpace || !col.IsString() {
+		if !col.IsString() {
 			// if colType is not string, and the value is string, we should trim it
 			// in case it comes from a CSV. If it's empty, it should be considered nil
 			sVal = strings.TrimSpace(sVal)

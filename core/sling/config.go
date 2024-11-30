@@ -1275,7 +1275,6 @@ func (t *Target) MD5() string {
 
 // SourceOptions are connection and stream processing options
 type SourceOptions struct {
-	TrimSpace      *bool               `json:"trim_space,omitempty" yaml:"trim_space,omitempty"`
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
 	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
@@ -1329,7 +1328,6 @@ type TargetOptions struct {
 }
 
 var SourceFileOptionsDefault = SourceOptions{
-	TrimSpace:      g.Bool(false),
 	EmptyAsNull:    g.Bool(true),
 	Header:         g.Bool(true),
 	Flatten:        g.Bool(false),
@@ -1398,9 +1396,6 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 
 	if o == nil {
 		o = &sourceOptions
-	}
-	if o.TrimSpace == nil {
-		o.TrimSpace = sourceOptions.TrimSpace
 	}
 	if o.EmptyAsNull == nil {
 		o.EmptyAsNull = sourceOptions.EmptyAsNull
