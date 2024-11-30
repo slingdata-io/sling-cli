@@ -45,29 +45,29 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	EmptyAsNull       bool                   `json:"empty_as_null"`
-	Header            bool                   `json:"header"`
-	Compression       CompressorType         `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string                 `json:"null_if"`
-	NullAs            string                 `json:"null_as"`
-	DatetimeFormat    string                 `json:"datetime_format"`
-	SkipBlankLines    bool                   `json:"skip_blank_lines"`
-	Delimiter         string                 `json:"delimiter"`
-	Escape            string                 `json:"escape"`
-	Quote             string                 `json:"quote"`
-	FileMaxRows       int64                  `json:"file_max_rows"`
-	FileMaxBytes      int64                  `json:"file_max_bytes"`
-	BatchLimit        int64                  `json:"batch_limit"`
-	MaxDecimals       int                    `json:"max_decimals"`
-	Flatten           bool                   `json:"flatten"`
-	FieldsPerRec      int                    `json:"fields_per_rec"`
-	Jmespath          string                 `json:"jmespath"`
-	Sheet             string                 `json:"sheet"`
-	ColumnCasing      ColumnCasing           `json:"column_casing"`
-	BoolAsInt         bool                   `json:"-"`
-	Columns           Columns                `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        map[string][]Transform // array of transform functions to apply
-	maxDecimalsFormat string                 `json:"-"`
+	EmptyAsNull       bool                     `json:"empty_as_null"`
+	Header            bool                     `json:"header"`
+	Compression       CompressorType           `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf            string                   `json:"null_if"`
+	NullAs            string                   `json:"null_as"`
+	DatetimeFormat    string                   `json:"datetime_format"`
+	SkipBlankLines    bool                     `json:"skip_blank_lines"`
+	Delimiter         string                   `json:"delimiter"`
+	Escape            string                   `json:"escape"`
+	Quote             string                   `json:"quote"`
+	FileMaxRows       int64                    `json:"file_max_rows"`
+	FileMaxBytes      int64                    `json:"file_max_bytes"`
+	BatchLimit        int64                    `json:"batch_limit"`
+	MaxDecimals       int                      `json:"max_decimals"`
+	Flatten           bool                     `json:"flatten"`
+	FieldsPerRec      int                      `json:"fields_per_rec"`
+	Jmespath          string                   `json:"jmespath"`
+	Sheet             string                   `json:"sheet"`
+	ColumnCasing      ColumnCasing             `json:"column_casing"`
+	BoolAsInt         bool                     `json:"-"`
+	Columns           Columns                  `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms        map[string]TransformList // array of transform functions to apply
+	maxDecimalsFormat string                   `json:"-"`
 
 	Map map[string]string `json:"-"`
 }
@@ -384,9 +384,9 @@ func makeColumnTransforms(transformsPayload string) map[string][]string {
 
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	columnTransforms := makeColumnTransforms(transformsPayload)
-	sp.Config.transforms = map[string][]Transform{}
+	sp.Config.transforms = map[string]TransformList{}
 	for key, names := range columnTransforms {
-		sp.Config.transforms[key] = []Transform{}
+		sp.Config.transforms[key] = TransformList{}
 		for _, name := range names {
 			t, ok := TransformsMap[name]
 			if ok {
@@ -567,6 +567,8 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		return nil
 	}
 
+	colKey := strings.ToLower(col.Name)
+
 	switch v := val.(type) {
 	case big.Int:
 		val = v.Int64()
@@ -593,7 +595,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 		if sVal == "" {
 			sp.rowBlankValCnt++
-			if sp.Config.EmptyAsNull || !col.IsString() {
+			if sp.Config.EmptyAsNull || !col.IsString() || sp.Config.transforms[colKey].HasTransform(TransformEmptyAsNull) {
 				cs.TotalCnt++
 				cs.NullCnt++
 				return nil
@@ -606,8 +608,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	}
 
 	// get transforms
-	key := strings.ToLower(col.Name)
-	transforms := append(sp.Config.transforms[key], sp.Config.transforms["*"]...)
+	transforms := append(sp.Config.transforms[colKey], sp.Config.transforms["*"]...)
 
 	switch {
 	case col.Type.IsString():
