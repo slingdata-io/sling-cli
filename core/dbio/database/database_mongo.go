@@ -60,7 +60,7 @@ func (conn *MongoDBConn) getNewClient(timeOut ...int) (client *mongo.Client, err
 		options.Client().SetCompressors([]string{"zstd", "snappy", "zlib"}),
 	}
 
-	tlsConfig, err := conn.getTlsConfig()
+	tlsConfig, err := conn.makeTlsConfig()
 	if err != nil {
 		return nil, g.Error(err)
 	} else if tlsConfig != nil {
