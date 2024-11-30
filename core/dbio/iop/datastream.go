@@ -902,6 +902,12 @@ loop:
 				if ds.config.SkipBlankLines && ds.Sp.rowBlankValCnt == len(row) {
 					goto loop
 				}
+
+				if ds.Sp.skipCurrent {
+					ds.Sp.skipCurrent = false // reset
+					goto loop
+				}
+
 				if ds.Limited() {
 					break loop
 				}

@@ -33,6 +33,7 @@ type StreamProcessor struct {
 	rowChecksum      []uint64
 	unrecognizedDate string
 	warn             bool
+	skipCurrent      bool // whether to skip current row (for constraints)
 	parseFuncs       map[string]func(s string) (interface{}, error)
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
@@ -1238,7 +1239,14 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 
 		// evaluate constraint
 		if col.Constraint != nil {
-			col.EvaluateConstraint(row[i], sp)
+			if err := col.EvaluateConstraint(row[i], sp); err != nil {
+				switch os.Getenv("SLING_ON_CONSTRAINT_FAILURE") {
+				case "abort":
+					sp.ds.Context.CaptureErr(err)
+				case "skip":
+					sp.skipCurrent = true
+				}
+			}
 		}
 	}
 
