@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -662,13 +663,13 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	fileExt := cast.ToString(fs.GetProp("FILE_EXTENSION"))
 
 	// use provided config or get from dataflow
-	if val := fs.GetProp("COMPRESSION"); val != "" {
+	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))
 	}
-	if val := fs.GetProp("FILE_MAX_ROWS"); val != "" {
+	if val := fs.GetProp("FILE_MAX_ROWS"); val != "" && sc.FileMaxRows == 0 {
 		sc.FileMaxRows = cast.ToInt64(val)
 	}
-	if val := fs.GetProp("FILE_MAX_BYTES"); val != "" {
+	if val := fs.GetProp("FILE_MAX_BYTES"); val != "" && sc.FileMaxBytes == 0 {
 		sc.FileMaxBytes = cast.ToInt64(val)
 	}
 
@@ -847,6 +848,9 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			return 0, g.Error(err, "could not create directory")
 		}
 	}
+
+	// set default batch limit
+	df.SetBatchLimit(sc.BatchLimit)
 
 	partCnt := 1
 
@@ -1321,4 +1325,77 @@ func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {
 
 	// default is csv
 	return dbio.FileTypeCsv
+}
+
+// CopyFromLocalRecursive copies a local file or directory recursively to a remote filesystem
+func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath string) (totalBytes int64, err error) {
+	// Check if source exists
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return 0, g.Error(err, "Error accessing local path: "+localPath)
+	}
+
+	// If it's a single file, copy it directly
+	if !info.IsDir() {
+		file, err := os.Open(localPath)
+		if err != nil {
+			return 0, g.Error(err, "Error opening local file: "+localPath)
+		}
+		defer file.Close()
+
+		bw, err := fs.Write(remotePath, file)
+		if err != nil {
+			return 0, g.Error(err, "Error writing to remote path: "+remotePath)
+		}
+		return bw, nil
+	}
+
+	// For directories, walk through and copy each file
+	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return g.Error(err, "Error walking path: "+path)
+		}
+
+		// Skip directories themselves
+		if info.IsDir() {
+			return nil
+		}
+
+		// Calculate relative path to maintain directory structure
+		relPath, err := filepath.Rel(localPath, path)
+		if err != nil {
+			return g.Error(err, "Error getting relative path for: "+path)
+		}
+
+		// Convert path separators to forward slashes for consistency
+		relPath = filepath.ToSlash(relPath)
+
+		// Construct remote path
+		remoteFilePath := remotePath
+		if !strings.HasSuffix(remotePath, "/") {
+			remoteFilePath += "/"
+		}
+		remoteFilePath += relPath
+
+		// Open and copy the file
+		file, err := os.Open(path)
+		if err != nil {
+			return g.Error(err, "Error opening file: "+path)
+		}
+		defer file.Close()
+
+		bw, err := fs.Write(remoteFilePath, file)
+		if err != nil {
+			return g.Error(err, "Error writing to remote path: "+remoteFilePath)
+		}
+
+		totalBytes += bw
+		return nil
+	})
+
+	if err != nil {
+		return totalBytes, g.Error(err, "Error during recursive copy")
+	}
+
+	return totalBytes, nil
 }

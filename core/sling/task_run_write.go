@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -51,9 +53,15 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		// apply column casing
 		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
 
-		bw, err = filesys.WriteDataflow(fs, df, uri)
+		// use duckdb for writing parquet
+		if t.shouldWriteViaDuckDB(uri) {
+			// push to temp duck file
+			bw, err = writeDataflowViaDuckDB(t, df, fs, uri)
+		} else {
+			bw, err = filesys.WriteDataflow(fs, df, uri)
+		}
 		if err != nil {
-			err = g.Error(err, "Could not FileSysWriteDataflow")
+			err = g.Error(err, "Could not write")
 			return cnt, err
 		}
 		cnt = df.Count()
@@ -659,9 +667,7 @@ func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connec
 	// apply column casing
 	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
-	sampleData := iop.NewDataset(df.Columns)
-	sampleData.Rows = df.Buffer
-	sampleData.Inferred = df.Inferred
+	sampleData := df.BufferDataset()
 	if !sampleData.Inferred {
 		sampleData.SafeInference = true
 		sampleData.InferColumnTypes()
@@ -800,6 +806,97 @@ func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName stri
 	}
 
 	return nil
+}
+
+// writeDataflowViaDuckDB is to use a temporary duckdb, especially for writing parquet files.
+// duckdb has the best parquet file writer, also allows partitioning
+func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileSysClient, uri string) (bw int64, err error) {
+	// push to temp duck file
+	var duckConn database.Connection
+
+	tempTable, _ := database.ParseTableName("main.sling_parquet_temp", dbio.TypeDbDuckDb)
+	folder := path.Join(env.GetTempFolder(), "duckdb", g.RandSuffix(tempTable.Name, 3))
+	defer env.RemoveAllLocalTempFile(folder)
+
+	duckPath := env.CleanWindowsPath(path.Join(folder, "db"))
+	duckConn, err = database.NewConnContext(t.Context.Ctx, "duckdb://"+duckPath)
+	if err != nil {
+		err = g.Error(err, "Could not create temp duckdb connection")
+		return bw, err
+	}
+	defer duckConn.Close()
+
+	// create table
+	_, err = createTableIfNotExists(duckConn, df.BufferDataset(), &tempTable, false)
+	if err != nil {
+		err = g.Error(err, "Could not create temp duckdb table")
+		return bw, err
+	}
+
+	// insert into table
+	_, err = duckConn.BulkImportFlow(tempTable.Name, df)
+	if err != nil {
+		err = g.Error(err, "Could not write to temp duckdb table")
+		return bw, err
+	}
+
+	// export to local file
+	if err = os.MkdirAll(folder, 0755); err != nil {
+		err = g.Error(err, "Could not create temp duckdb output folder")
+		return bw, err
+	}
+
+	// get duckdb instance
+	duck := duckConn.(*database.DuckDbConn).DuckDb()
+
+	copyOptions := iop.DuckDbCopyOptions{
+		Compression:        string(g.PtrVal(t.Config.Target.Options.Compression)),
+		PartitionFields:    extractPartFields(uri),
+		PartitionKey:       t.Config.Source.UpdateKey,
+		WritePartitionCols: true,
+		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
+	}
+
+	if len(copyOptions.PartitionFields) > 0 && copyOptions.PartitionKey == "" {
+		return bw, g.Error("missing update_key in order to partition")
+	}
+
+	// duckdb does not allow limiting by number of rows
+	if g.PtrVal(t.Config.Target.Options.FileMaxRows) > 0 {
+		return bw, g.Error("can no longer use file_max_rows to write to parquet (use file_max_bytes instead).")
+	}
+
+	// if * is specified, set default FileSizeBytes,
+	if strings.Contains(uri, "*") && copyOptions.FileSizeBytes == 0 {
+		copyOptions.FileSizeBytes = 50 * 1024 * 1024 // 50MB default file size
+	}
+
+	// generate sql for parquet export
+	localPath := env.CleanWindowsPath(path.Join(folder, "output"))
+	sql, err := duck.GenerateCopyStatement(tempTable.FullName(), localPath, copyOptions)
+	if err != nil {
+		err = g.Error(err, "Could not generate duckdb copy statement")
+		return bw, err
+	}
+
+	_, err = duckConn.Exec(sql)
+	if err != nil {
+		err = g.Error(err, "Could not write to parquet file")
+		return bw, err
+	}
+
+	// copy files bytes recursively to target
+	if strings.Contains(uri, "*") {
+		uri = filesys.GetDeepestParent(uri) // get target folder, since split by files
+	}
+
+	// remove partition fields from url
+	for _, field := range copyOptions.PartitionFields {
+		uri = strings.ReplaceAll(uri, g.F("/{%s}", field), "")
+	}
+	bw, err = filesys.CopyFromLocalRecursive(fs, localPath, uri)
+
+	return bw, err
 }
 
 func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.Table, cfg *Config) error {

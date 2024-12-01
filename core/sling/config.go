@@ -569,16 +569,20 @@ func (cfg *Config) Prepare() (err error) {
 	} else if strings.Contains(cfg.Target.Object, "{") {
 		words := []string{}
 		for _, m := range g.Matches(cfg.Target.Object, `\{([^}]+)\}`) {
-			if len(m.Group) > 0 {
+			if len(m.Group) > 0 && !strings.HasPrefix(m.Group[0], "part_") {
 				words = append(words, m.Group[0])
 			}
 		}
 
-		g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
-		for _, word := range words {
-			cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
+		if len(words) > 0 {
+			g.Debug("Could not successfully format target object name. Blank values for: %s", strings.Join(words, ", "))
+			for _, word := range words {
+				cfg.Target.Object = strings.ReplaceAll(cfg.Target.Object, "{"+word+"}", "")
+			}
 		}
-		cfg.ReplicationStream.Object = cfg.Target.Object
+		if cfg.ReplicationStream != nil {
+			cfg.ReplicationStream.Object = cfg.Target.Object
+		}
 	}
 
 	// add md5 of options, so that wee reconnect for various options
@@ -1257,6 +1261,13 @@ type Target struct {
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
+}
+
+func (t *Target) ObjectFileFormat() dbio.FileType {
+	if t.Options != nil && t.Options.Format != dbio.FileTypeNone {
+		return t.Options.Format
+	}
+	return filesys.InferFileFormat(t.Object)
 }
 
 func (t *Target) MD5() string {

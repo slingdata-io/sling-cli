@@ -460,6 +460,8 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			break
 		}
 
+		env.LogSink = nil // clear log sink
+
 		if cfg.ReplicationStream.Disabled {
 			println()
 			g.Debug("skipping stream %s since it is disabled", cfg.StreamName)
@@ -471,8 +473,6 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			counter++
 			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
 		}
-
-		env.LogSink = nil // clear log sink
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
 		env.SetTelVal("replication_md5", replication.MD5())

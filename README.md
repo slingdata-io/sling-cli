@@ -230,7 +230,7 @@ You can target specific tests or suites using environment variables:
 3. CLI Suite:
    ```sh
    cd cmd/sling
-   export SLING_BIN=../../sling
+   export SLING_BIN=./sling
    go test -v -run TestCLI             # run all CLI tests
    TESTS="31+" go test -v -run TestCLI # run CLI tests 31 and all subsequent tests
    ```

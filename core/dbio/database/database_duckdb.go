@@ -72,6 +72,11 @@ func (conn *DuckDbConn) GetURL(newURL ...string) string {
 	return URL
 }
 
+// DuckDb returns the DuckDb instance
+func (conn *DuckDbConn) DuckDb() *iop.DuckDb {
+	return conn.duck
+}
+
 func (conn *DuckDbConn) dbPath() (string, error) {
 	dbPathU, err := net.NewURL(conn.GetURL())
 	if err != nil {
@@ -182,7 +187,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		}
 
 		config := iop.DefaultStreamConfig()
-		config.BatchLimit = 250000
+		config.FileMaxRows = 250000
 		config.Header = true
 		config.Delimiter = ","
 		config.Escape = `"`

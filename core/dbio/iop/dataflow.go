@@ -151,6 +151,14 @@ func (df *Dataflow) Close() {
 	df.closed = true
 }
 
+// BufferDataset return the buffer as a dataset
+func (df *Dataflow) BufferDataset() Dataset {
+	data := NewDataset(df.Columns)
+	data.Rows = df.Buffer
+	data.Inferred = df.Inferred
+	return data
+}
+
 // Pause pauses all streams
 func (df *Dataflow) Pause(exceptDs ...string) bool {
 	if df.Ready {
