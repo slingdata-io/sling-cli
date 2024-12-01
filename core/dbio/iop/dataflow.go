@@ -130,7 +130,9 @@ func (df *Dataflow) SetBatchLimit(limit int64) {
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
 		ds.Sp.Config.BatchLimit = limit
-		ds.CurrentBatch.Limit = limit
+		if ds.CurrentBatch != nil {
+			ds.CurrentBatch.Limit = limit
+		}
 	}
 }
 
