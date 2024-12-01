@@ -3,6 +3,7 @@ package sling
 import (
 	"math"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -92,6 +93,25 @@ func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool
 		}
 	}
 	return cfg.Target.columns, nil
+}
+
+// extractPartFields extract the partition fields from the given path
+func extractPartFields(path string) []string {
+	// Regex pattern to match {part_*} fields
+	pattern := regexp.MustCompile(`{(part_[^}]+)}`)
+
+	// Find all matches in the path
+	matches := pattern.FindAllStringSubmatch(path, -1)
+
+	// Extract the captured groups (without braces)
+	result := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			result = append(result, match[1])
+		}
+	}
+
+	return result
 }
 
 func pullTargetTempTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {

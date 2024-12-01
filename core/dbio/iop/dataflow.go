@@ -130,7 +130,9 @@ func (df *Dataflow) SetBatchLimit(limit int64) {
 	defer df.mux.Unlock()
 	for _, ds := range df.Streams {
 		ds.Sp.Config.BatchLimit = limit
-		ds.CurrentBatch.Limit = limit
+		if ds.CurrentBatch != nil {
+			ds.CurrentBatch.Limit = limit
+		}
 	}
 }
 
@@ -149,6 +151,14 @@ func (df *Dataflow) Close() {
 		close(df.StreamCh)
 	}
 	df.closed = true
+}
+
+// BufferDataset return the buffer as a dataset
+func (df *Dataflow) BufferDataset() Dataset {
+	data := NewDataset(df.Columns)
+	data.Rows = df.Buffer
+	data.Inferred = df.Inferred
+	return data
 }
 
 // Pause pauses all streams

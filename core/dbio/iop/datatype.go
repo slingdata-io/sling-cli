@@ -138,9 +138,14 @@ func (cs *ColumnStats) DuplicatePercent() float64 {
 }
 
 func init() {
-	if os.Getenv("SAMPLE_SIZE") != "" {
-		SampleSize = cast.ToInt(os.Getenv("SAMPLE_SIZE"))
+	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
+		SampleSize = cast.ToInt(val) // legacy
 	}
+
+	if val := os.Getenv("SLING_SAMPLE_SIZE"); val != "" {
+		SampleSize = cast.ToInt(val)
+	}
+
 	if os.Getenv("REMOVE_TRAILING_ZEROS") != "" {
 		RemoveTrailingDecZeros = cast.ToBool(os.Getenv("REMOVE_TRAILING_ZEROS"))
 	}
@@ -870,18 +875,17 @@ func (col *Column) SetLengthPrecisionScale() {
 }
 
 // EvaluateConstraint evaluates a value against the constraint function
-func (col *Column) EvaluateConstraint(value any, sp *StreamProcessor) {
+func (col *Column) EvaluateConstraint(value any, sp *StreamProcessor) (err error) {
 	if c := col.Constraint; c.EvalFunc != nil && !c.EvalFunc(value) {
 		c.FailCnt++
-		if c.FailCnt <= 10 {
+		if c.FailCnt <= 20 {
 			errMsg := g.F("constraint failure for column '%s', at row number %d, for value: %s", col.Name, sp.N, cast.ToString(value))
 			g.Warn(errMsg)
 			c.Errors = append(c.Errors, errMsg)
-			if os.Getenv("SLING_ON_CONSTRAINT_FAILURE") == "abort" {
-				sp.ds.Context.CaptureErr(g.Error(errMsg))
-			}
+			return g.Error(errMsg)
 		}
 	}
+	return
 }
 
 func (col *Column) SetMetadata(key string, value string) {

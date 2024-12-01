@@ -192,7 +192,6 @@ func TestSreamOptions(t *testing.T) {
 	assert.Equal(t, nil, data.Rows[20][0])
 
 	configMap["null_if"] = "NULL"
-	configMap["trim_space"] = "TRUE"
 	configMap["skip_blank_lines"] = "TRUE"
 	configMap["datetime_format"] = "DD-MM-YYYY HH:mm:ss.s"
 	data = consume()

@@ -681,6 +681,97 @@ func (duck *DuckDb) initScanner() {
 
 }
 
+type DuckDbCopyOptions struct {
+	Compression        string
+	PartitionFields    []string // part_year, part_month, part_day, etc.
+	PartitionKey       string
+	WritePartitionCols bool
+	FileSizeBytes      int64
+}
+
+func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options DuckDbCopyOptions) (sql string, err error) {
+	type partExpression struct {
+		alias      string
+		expression string
+	}
+
+	var partExpressions []partExpression
+
+	// validate PartitionLevels
+	for _, pl := range options.PartitionFields {
+		if !g.In(pl, "part_year", "part_month", "part_week", "part_day", "part_hour", "part_minute", "part_year_month") {
+			return sql, g.Error("invalid partition level: %s", pl)
+		} else if options.PartitionKey == "" {
+			return "", g.Error("missing partition key")
+		}
+
+		datePart := strings.TrimPrefix(pl, "part_")
+		pe := partExpression{
+			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), datePart),
+			expression: g.F("date_part('%s', %s)", datePart, options.PartitionKey),
+		}
+
+		switch pl {
+		case "part_year_month":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y-%m")
+		case "part_month":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%m")
+		case "part_week":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%V")
+		case "part_day":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%d")
+		case "part_hour":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%H")
+		case "part_minute":
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%M")
+		}
+
+		partExpressions = append(partExpressions, pe)
+	}
+
+	// validate compression
+	options.Compression = strings.ToLower(options.Compression)
+	if g.In(options.Compression, "", "none", "auto") {
+		options.Compression = "snappy"
+	}
+
+	fileSizeBytesExpr := ""
+	if options.FileSizeBytes > 0 {
+		fileSizeBytesExpr = g.F("file_size_bytes %d,", options.FileSizeBytes)
+	}
+
+	if len(partExpressions) > 0 {
+		partSqlColumns := make([]string, len(partExpressions))
+		partSqlExpressions := make([]string, len(partExpressions))
+		for i, partExpression := range partExpressions {
+			aliasQ := dbio.TypeDbDuckDb.Quote(partExpression.alias)
+			partSqlColumns[i] = aliasQ
+			partSqlExpressions[i] = g.F("%s as %s", partExpression.expression, aliasQ)
+		}
+
+		sql = g.R(
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet_partitions"),
+			"table", fromTable,
+			"local_path", toLocalPath,
+			"file_size_bytes_expr", fileSizeBytesExpr,
+			"partition_expressions", strings.Join(partSqlExpressions, ", "),
+			"partition_columns", strings.Join(partSqlColumns, ", "),
+			"compression", cast.ToString(options.Compression),
+			"write_partition_columns", cast.ToString(options.WritePartitionCols),
+		)
+	} else {
+		sql = g.R(
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet"),
+			"table", fromTable,
+			"local_path", toLocalPath,
+			"file_size_bytes_expr", fileSizeBytesExpr,
+			"compression", cast.ToString(options.Compression),
+		)
+	}
+
+	return
+}
+
 // Quote quotes a column name
 func (duck *DuckDb) Quote(col string) (qName string) {
 	qName = `"` + col + `"`

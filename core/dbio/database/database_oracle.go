@@ -228,9 +228,16 @@ func (conn *OracleConn) SubmitTemplate(level string, templateMap map[string]stri
 	return conn.BaseConn.SubmitTemplate(level, templateMap, name, values)
 }
 
+func (conn *OracleConn) sqlldrPath() string {
+	if val := conn.GetProp("sqlldr_path"); val != "" {
+		return val
+	}
+	return "sqlldr"
+}
+
 // BulkImportStream bulk import stream
 func (conn *OracleConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	_, err = exec.LookPath("sqlldr")
+	_, err = exec.LookPath(conn.sqlldrPath())
 	if err != nil {
 		g.Debug("sqlldr not found in path. Using cursor...")
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
@@ -295,7 +302,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		return
 	}
 
-	g.Debug("sqldr ctl file content (%s):\n%s", ctlPath, ctlStr)
+	g.Debug("sqlldr ctl file content (%s):\n%s", ctlPath, ctlStr)
 
 	password, _ := url.User.Password()
 	hostPort := url.Host
@@ -333,7 +340,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	}
 
 	proc := exec.Command(
-		"sqlldr",
+		conn.sqlldrPath(),
 		"'"+credHost+"'",
 		"control="+ctlPath,
 		"discardmax=0",

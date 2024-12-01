@@ -36,6 +36,7 @@ type TaskExecution struct {
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
+	skipStream    bool            `json:"skip_stream"`
 	lastIncrement time.Time       // the time of last row increment (to determine stalling)
 	Output        strings.Builder `json:"-"`
 	OutputLines   chan *g.LogLine
@@ -384,6 +385,15 @@ func (t *TaskExecution) Cleanup() {
 	if t.df != nil {
 		t.df.CleanUp()
 	}
+}
+
+// shouldWriteViaDuckDB determines whether we should use duckdb
+// at the moment, use duckdb only for partitioned target parquet files
+func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
+	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet) {
+		return len(extractPartFields(uri)) > 0
+	}
+	return false
 }
 
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode

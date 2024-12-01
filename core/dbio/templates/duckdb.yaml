@@ -10,6 +10,29 @@ core:
   insert_option: ""
   modify_column: 'alter {column} type {type}'
   select_stream_scanner: select {fields} from {stream_scanner} {where}
+  export_parquet: |
+    COPY (
+      select *
+      from {table}
+    ) TO '{local_path}' 
+    (
+      format 'parquet', {file_size_bytes_expr}
+      compression '{compression}'
+    )
+  export_parquet_partitions: |
+    COPY (
+      select
+        *,
+        {partition_expressions}
+      from {table}
+    ) TO '{local_path}' 
+    ( 
+      format 'parquet', {file_size_bytes_expr}
+      compression '{compression}',
+      overwrite true,
+      write_partition_columns {write_partition_columns},
+      partition_by ( {partition_columns} )
+    )
 
 
 metadata:

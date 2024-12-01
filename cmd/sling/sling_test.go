@@ -967,7 +967,6 @@ defaults:
   primary_key: [col1, col2]
   update_key: col3
   source_options:
-    trim_space: false
     delimiter: ","
   target_options:
     file_max_rows: 500000
@@ -985,7 +984,6 @@ streams:
     update_key: col2
     source_options:
 			columns: { pro: 'decimal(10,4)', pro2: 'string' }
-      trim_space: true
       delimiter: "|"
 			transforms: [trim_space]
     target_options:
@@ -1040,7 +1038,6 @@ streams:
 		assert.Equal(t, []string{"col1", "col2", "col3"}, config.Source.Select)
 		assert.Equal(t, []string{"col1", "col2"}, config.Source.PrimaryKey())
 		assert.Equal(t, "col3", config.Source.UpdateKey)
-		assert.Equal(t, g.Bool(false), config.Source.Options.TrimSpace)
 		assert.Equal(t, ",", config.Source.Options.Delimiter)
 
 		assert.Equal(t, "postgres", config.Target.Conn)
@@ -1058,7 +1055,6 @@ streams:
 		assert.Equal(t, []string{"col1"}, config.Source.Select)
 		assert.Equal(t, []string{"col3"}, config.Source.PrimaryKey())
 		assert.Equal(t, "col2", config.Source.UpdateKey)
-		assert.Equal(t, g.Bool(true), config.Source.Options.TrimSpace)
 		assert.Equal(t, "|", config.Source.Options.Delimiter)
 		assert.Equal(t, "[{\"name\":\"pro\",\"type\":\"decimal(10,4)\"},{\"name\":\"pro2\",\"type\":\"string\"}]", g.Marshal(config.Target.Columns))
 		assert.Equal(t, `["trim_space"]`, g.Marshal(config.Transforms))

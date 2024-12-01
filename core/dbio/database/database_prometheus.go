@@ -43,7 +43,7 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 	rt := api.DefaultRoundTripper
 
 	// get tls
-	tlsConfig, err := conn.getTlsConfig()
+	tlsConfig, err := conn.makeTlsConfig()
 	if err != nil {
 		return nil, g.Error(err)
 	} else if tlsConfig != nil {

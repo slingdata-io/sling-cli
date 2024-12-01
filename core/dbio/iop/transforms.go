@@ -68,6 +68,17 @@ type Transform struct {
 	makeFunc   func(t *Transform, params ...any) error
 }
 
+type TransformList []Transform
+
+func (tl TransformList) HasTransform(t Transform) bool {
+	for _, t0 := range tl {
+		if t.Name == t0.Name {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	TransformDecodeLatin1 = Transform{
 		Name: "decode_latin1",
@@ -280,6 +291,14 @@ var (
 		Name: "trim_space",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return strings.TrimSpace(val), nil
+		},
+	}
+
+	// used as lookup, cannot return null since is not pointer
+	TransformEmptyAsNull = Transform{
+		Name: "empty_as_null",
+		FuncString: func(sp *StreamProcessor, val string) (string, error) {
+			return val, nil
 		},
 	}
 

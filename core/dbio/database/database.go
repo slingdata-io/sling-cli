@@ -2957,17 +2957,63 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 	return false
 }
 
-func (conn *BaseConn) getTlsConfig() (tlsConfig *tls.Config, err error) {
+func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
 	if cast.ToBool(conn.GetProp("tls")) {
 		tlsConfig = &tls.Config{}
 	}
 
-	cert := conn.GetProp("cert_file")
-	key := conn.GetProp("cert_key_file")
-	caCert := conn.GetProp("cert_ca_file")
+	// legacy only handles files
+	certificate := conn.GetProp("cert_file")
+	certificateKey := conn.GetProp("cert_key_file")
+	certificateCA := conn.GetProp("cert_ca_file")
 
-	if key != "" && cert != "" {
-		cert, err := tls.LoadX509KeyPair(cert, key)
+	// processValue handles files or values
+	processValue := func(val string) (string, error) {
+		// check if file exists
+		if _, err := os.Stat(val); err == nil {
+			bytes, err := os.ReadFile(val)
+			if err != nil {
+				return "", g.Error(err, "Failed to load file: %s", val)
+			}
+			val = string(bytes)
+		}
+
+		// check if it is a pem encoded certificate
+		val = strings.TrimSpace(val)
+		if strings.HasPrefix(val, "-----BEGIN") {
+			return val, nil
+		}
+
+		// not a file or pem encoded certificate
+		return "", g.Error("invalid certificate value or file path")
+	}
+
+	if val := conn.GetProp("certificate"); val != "" {
+		certificate, err = processValue(val)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load client certificate")
+		}
+		conn.SetProp("certificate", certificate) // overwrite
+	}
+
+	if val := conn.GetProp("certificate_key"); val != "" {
+		certificateKey, err = processValue(val)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load client certificate key")
+		}
+		conn.SetProp("certificate_key", certificateKey) // overwrite
+	}
+
+	if val := conn.GetProp("certificate_ca"); val != "" {
+		certificateCA, err = processValue(val)
+		if err != nil {
+			return nil, g.Error(err, "Failed to load CA certificate")
+		}
+		conn.SetProp("certificate_ca", certificateCA) // overwrite
+	}
+
+	if certificateKey != "" && certificate != "" {
+		cert, err := tls.LoadX509KeyPair(certificate, certificateKey)
 		if err != nil {
 			return nil, g.Error(err, "Failed to load client certificate")
 		}
@@ -2976,8 +3022,8 @@ func (conn *BaseConn) getTlsConfig() (tlsConfig *tls.Config, err error) {
 			Certificates: []tls.Certificate{cert},
 		}
 
-		if caCert != "" {
-			caCert, err := os.ReadFile(caCert)
+		if certificateCA != "" {
+			caCert, err := os.ReadFile(certificateCA)
 			if err != nil {
 				return nil, g.Error(err, "Failed to load CA certificate")
 			}
