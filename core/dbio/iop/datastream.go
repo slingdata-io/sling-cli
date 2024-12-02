@@ -679,11 +679,8 @@ func (ds *Datastream) Start() (err error) {
 		return g.Error(err, "need to define iterator")
 	}
 
-	castAllAsString := len(ds.Sp.Config.Columns) == 1 &&
-		ds.Sp.Config.Columns[0].Name == "*" &&
-		ds.Sp.Config.Columns[0].IsString()
-
-	if SampleSize == 0 || castAllAsString {
+	castAllColumns := len(ds.Sp.Config.Columns) == 1 && ds.Sp.Config.Columns[0].Name == "*"
+	if SampleSize == 0 || castAllColumns {
 		goto skipBuffer
 	}
 
