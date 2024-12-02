@@ -18,7 +18,7 @@ go mod edit -dropreplace='github.com/slingdata-io/sling' go.mod
 go mod edit -droprequire='github.com/slingdata-io/sling' go.mod
 go mod tidy
 
-go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$env:PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$env:SENTRY_DSN'" -o sling.exe github.com/slingdata-io/sling-cli/cmd/sling
+go build -ldflags="-X 'github.com/slingdata-io/sling-cli/core.Version=$env:VERSION' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL=$env:PLAUSIBLE_URL' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn=$env:SENTRY_DSN' -X 'github.com/slingdata-io/sling/agent.Version=$env:VERSION'" -o sling.exe github.com/slingdata-io/sling-cli/cmd/sling
 
 .\sling.exe --version
 
