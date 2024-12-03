@@ -26,7 +26,7 @@ builds:
       - darwin
     
     ldflags:
-      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}'"
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Version}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}' -X 'github.com/slingdata-io/sling/agent.Version={{.Version}}'"
 
 universal_binaries:
   - id: sling

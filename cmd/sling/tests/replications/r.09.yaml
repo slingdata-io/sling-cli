@@ -27,9 +27,9 @@ streams:
           query: |
             select
               '{hook.hook1.connection}' as conn,
-              '${hook.hook1.columns}' as columns1,
-              '${hook.hook1.result.first.b}' as b,
-              '${hook.hook1.result.all}' as all_,
+              '{hook.hook1.columns}' as columns1,
+              '{hook.hook1.result.first.b}' as b,
+              '{hook.hook1.result.all}' as all_,
               '{hook.previous.response.payload}' as response,
               '{hook.public_my_table-post-01.request.url}' as request,
               '{hook.previous.response.payload_json.status}' as response2

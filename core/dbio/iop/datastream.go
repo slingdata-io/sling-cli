@@ -679,6 +679,11 @@ func (ds *Datastream) Start() (err error) {
 		return g.Error(err, "need to define iterator")
 	}
 
+	castAllColumns := len(ds.Sp.Config.Columns) == 1 && ds.Sp.Config.Columns[0].Name == "*"
+	if SampleSize == 0 || castAllColumns {
+		goto skipBuffer
+	}
+
 loop:
 	for ds.it.next() {
 		select {
@@ -698,12 +703,6 @@ loop:
 		default:
 			if ds.it.Counter == 1 && !ds.NoDebug {
 				g.Trace("%#v", ds.it.Row) // trace first row for debugging
-			} else if SampleSize == 0 {
-				// if sample size if zero, don't process rows
-				break loop
-			} else if cols := ds.Sp.Config.Columns; len(cols) == 1 && cols[0].Name == "*" && cols[0].IsString() {
-				// if specified to coerce all columns to string, don't process rows
-				break loop
 			}
 
 			row := ds.Sp.ProcessRow(ds.it.Row)
@@ -714,8 +713,10 @@ loop:
 		}
 	}
 
+skipBuffer:
+
 	// infer types
-	if !ds.Inferred {
+	if !ds.Inferred && len(ds.Buffer) > 0 {
 		sampleData := NewDataset(ds.Columns)
 		sampleData.Rows = ds.Buffer
 		sampleData.NoDebug = ds.NoDebug
