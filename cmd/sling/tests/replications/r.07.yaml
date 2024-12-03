@@ -8,4 +8,5 @@ defaults:
 streams:
   file://./cmd/sling/tests/files/parquet/*:
   file://./cmd/sling/tests/files/*.csv:
+    columns: { "*": string }
   file://./cmd/sling/tests/files/test?.json:
