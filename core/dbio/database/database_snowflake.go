@@ -157,7 +157,7 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
-		return "", g.Error("invalid PEM data: no PEM block found")
+		return "", g.Error("invalid private key data: no PEM block found")
 	}
 
 	key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(passphrase))
