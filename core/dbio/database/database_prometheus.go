@@ -58,6 +58,10 @@ func (conn *PrometheusConn) getNewClient(timeOut ...int) (client v1.API, err err
 		rt = config.NewBasicAuthRoundTripper(config.NewInlineSecret(user), config.NewInlineSecret(conn.GetProp("password")), rt)
 	}
 
+	if tenant := conn.GetProp("tenant"); tenant != "" {
+		rt = config.NewHeadersRoundTripper(&config.Headers{Headers: map[string]config.Header{"X-Scope-OrgID": {Values: []string{tenant}}}}, rt)
+	}
+
 	c, err := api.NewClient(api.Config{
 		Address:      conn.GetProp("http_url"),
 		RoundTripper: rt,
