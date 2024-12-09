@@ -7,24 +7,25 @@ import (
 	"time"
 
 	"github.com/flarco/g"
-	"github.com/samber/lo"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/sling"
 	"github.com/spf13/cast"
-	"gorm.io/gorm/clause"
 )
+
+var Store = cmap.New[*Execution]()
 
 func init() {
 
 	sling.StoreInsert = func(t *sling.TaskExecution) error {
-		_, err := StoreInsert(t)
-		return err
+		StoreSet(t)
+		return nil
 	}
 
 	sling.StoreUpdate = func(t *sling.TaskExecution) error {
-		_, err := StoreUpdate(t)
-		return err
+		StoreSet(t)
+		return nil
 	}
 }
 
@@ -247,88 +248,27 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 }
 
 // Store saves the task into the local sqlite
-func StoreInsert(t *sling.TaskExecution) (exec *Execution, err error) {
-	if Db == nil {
-		return
-	}
-
-	// make execution
-	exec = ToExecutionObject(t)
-
-	// determine if execution already exists
-	result := g.M()
-	Db.Raw(`select count(1) cnt from executions where exec_id = ? and stream_id = ?`, exec.ExecID, exec.StreamID).Scan(&result)
-	if cnt := cast.ToInt(result["cnt"]); cnt > 0 {
-		return StoreUpdate(t)
-	}
-
-	// insert config
-	err = Db.Clauses(clause.OnConflict{DoNothing: true}).Create(exec.Task).Error
-	if err != nil {
-		g.Error(err, "could not insert task config into local .sling.db.")
-		return
-	}
-
-	if exec.Replication != nil {
-		clauses := lo.Ternary(
-			exec.Replication.ID != nil,
-			clause.OnConflict{UpdateAll: true},
-			clause.OnConflict{DoNothing: true},
-		)
-		err = Db.Clauses(clauses).Create(exec.Replication).Error
-		if err != nil {
-			g.Error(err, "could not insert replication config into local .sling.db.")
-			return
-		}
-	}
-
-	// insert execution
-	err = Db.Create(exec).Error
-	if err != nil {
-		g.Error(err, "could not insert execution into local .sling.db.")
-		return
-	}
-
-	t.ExecID = exec.ExecID
-
-	// sync status
-	syncStatus(exec)
-
-	return
-}
-
-// Store saves the task into the local sqlite
-func StoreUpdate(t *sling.TaskExecution) (exec *Execution, err error) {
-	if Db == nil {
-		return
-	}
+func StoreSet(t *sling.TaskExecution) {
 	e := ToExecutionObject(t)
-
-	exec = &Execution{ExecID: t.ExecID, StreamID: e.StreamID, TaskExec: t}
-	err = Db.Omit("output").Where("exec_id = ? and stream_id = ?", t.ExecID, e.StreamID).First(exec).Error
-	if err != nil {
-		g.Error(err, "could not select execution from local .sling.db.")
-		return
+	key := g.F("%s-%s", e.ExecID, e.StreamID)
+	exec, ok := Store.Get(key)
+	if ok {
+		exec.StartTime = e.StartTime
+		exec.EndTime = e.EndTime
+		exec.Status = e.Status
+		exec.Err = e.Err
+		exec.Bytes = e.Bytes
+		exec.Rows = e.Rows
+		exec.Output = e.Output
+		exec.Replication = e.Replication
+		exec.Task = e.Task
+	} else {
+		exec = e
 	}
 
-	exec.StartTime = e.StartTime
-	exec.EndTime = e.EndTime
-	exec.Status = e.Status
-	exec.Err = e.Err
-	exec.Bytes = e.Bytes
-	exec.Rows = e.Rows
-	exec.Output = e.Output
-	exec.Replication = e.Replication
-	exec.Task = e.Task
-
-	err = Db.Updates(exec).Error
-	if err != nil {
-		g.Error(err, "could not update execution into local .sling.db")
-		return
-	}
+	// set in memory store
+	Store.Set(key, exec)
 
 	// sync status
 	syncStatus(exec)
-
-	return
 }
