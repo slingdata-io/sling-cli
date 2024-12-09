@@ -579,7 +579,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
 
-	df.Defer(func() { env.RemoveLocalTempFile(localPath) })
+	df.Defer(func() { env.RemoveAllLocalTempFile(localPath) })
 
 	g.Info("importing into bigquery via local storage")
 
@@ -610,6 +610,8 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
+		defer env.RemoveAllLocalTempFile(localFile.Node.Path())
+
 		g.Debug("Loading %s [%s]", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
 		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns)
