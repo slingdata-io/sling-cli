@@ -727,6 +727,8 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			return g.Error(err, "could not parse target table name")
 		} else if table.IsQuery() {
 			return g.Error("invalid table name: %s", table.Raw)
+		} else if table.Schema == "" {
+			table.Schema = cast.ToString(cfg.Target.Data["schema"])
 		}
 		cfg.Target.Object = table.FullName()
 	}

@@ -482,10 +482,6 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	}
 	defer t.df.Close()
 
-	// set schema if needed
-	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
-	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
-
 	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
 	defer t.Cleanup()
 	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
@@ -587,10 +583,6 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		t.AddCleanupTaskLast(func() { srcConn.Close() })
 		t.AddCleanupTaskLast(func() { tgtConn.Close() })
 	}
-
-	// set schema if needed
-	t.Config.Target.Object = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Object)
-	t.Config.Target.Options.TableTmp = setSchema(cast.ToString(t.Config.Target.Data["schema"]), t.Config.Target.Options.TableTmp)
 
 	// check if table exists by getting target columns
 	if cols, _ := pullTargetTableColumns(t.Config, tgtConn, false); len(cols) > 0 {
