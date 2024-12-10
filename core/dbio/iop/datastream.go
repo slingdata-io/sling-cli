@@ -1097,11 +1097,6 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 		}
 		jsNew := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 
-		// add existing columns
-		for _, col := range ds.Columns {
-			jsNew.ColumnMap[col.Name] = &col
-		}
-
 		return jsNew, nil
 	}
 
