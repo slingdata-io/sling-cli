@@ -135,8 +135,15 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		// LogLevel: aws.LogLevel(aws.LogDebugWithHTTPBody),
 	}
 
-	if profile := fs.GetProp("PROFILE"); profile != "" {
-		awsConfig.Credentials = credentials.NewSharedCredentials("", profile)
+	if _, err := credentials.NewEnvCredentials().Get(); err == nil {
+		// Use environment credentials (AWS SDK will automatically pick these up)
+	} else if profile := fs.GetProp("PROFILE"); profile != "" {
+		// Fall back to profile if specified
+		creds := credentials.NewSharedCredentials("", profile)
+		if _, err := creds.Get(); err != nil {
+			return g.Error(err, "Failed to load credentials for profile '%s'. Please check if profile exists in ~/.aws/credentials", profile)
+		}
+		awsConfig.Credentials = creds
 	} else if fs.GetProp("ACCESS_KEY_ID") != "" && fs.GetProp("SECRET_ACCESS_KEY") != "" {
 		awsConfig.Credentials = credentials.NewStaticCredentials(
 			fs.GetProp("ACCESS_KEY_ID"),
