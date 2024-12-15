@@ -306,6 +306,8 @@ var cliConns = &g.CliSC{
 					Type:        "string",
 					Description: "The SQL queries to execute. Can be in-line text or a file",
 				},
+			},
+			Flags: []g.Flag{
 				{
 					Name:        "debug",
 					ShortName:   "d",
