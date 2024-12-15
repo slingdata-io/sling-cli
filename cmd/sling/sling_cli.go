@@ -228,6 +228,12 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "Show column level metadata.",
 				},
+				{
+					Name:        "debug",
+					ShortName:   "d",
+					Type:        "bool",
+					Description: "Set logging level to DEBUG.",
+				},
 			},
 		},
 		{
@@ -243,6 +249,14 @@ var cliConns = &g.CliSC{
 					ShortName:   "",
 					Type:        "string",
 					Description: "The name of the connection to test",
+				},
+			},
+			Flags: []g.Flag{
+				{
+					Name:        "debug",
+					ShortName:   "d",
+					Type:        "bool",
+					Description: "Set logging level to DEBUG.",
 				},
 			},
 		},
@@ -291,6 +305,12 @@ var cliConns = &g.CliSC{
 					ShortName:   "",
 					Type:        "string",
 					Description: "The SQL queries to execute. Can be in-line text or a file",
+				},
+				{
+					Name:        "debug",
+					ShortName:   "d",
+					Type:        "bool",
+					Description: "Set logging level to DEBUG.",
 				},
 			},
 		},
