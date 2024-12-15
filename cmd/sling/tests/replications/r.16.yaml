@@ -5,5 +5,5 @@ defaults:
   mode: full-refresh
 
 streams:
-  system.TEST1K_ORACLE_SQLLDR:
+  system.TEST1K_ORACLE_WIDE:
     object: /tmp/test.csv
