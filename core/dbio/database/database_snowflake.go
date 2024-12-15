@@ -799,7 +799,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
 		err = conn.StagePUT(file.Node.URI, stageFolderPath)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internal_stagee")))
+			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internal_stage")))
 		}
 		pathArr := strings.Split(file.Node.Path(), "/")
 		fileName := pathArr[len(pathArr)-1]
