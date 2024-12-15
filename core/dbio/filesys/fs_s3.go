@@ -137,6 +137,7 @@ func (fs *S3FileSysClient) Connect() (err error) {
 
 	if _, err := credentials.NewEnvCredentials().Get(); err == nil {
 		// Use environment credentials (AWS SDK will automatically pick these up)
+		g.Debug("using default AWS environment credentials")
 	} else if profile := fs.GetProp("PROFILE"); profile != "" {
 		// Fall back to profile if specified
 		creds := credentials.NewSharedCredentials("", profile)
