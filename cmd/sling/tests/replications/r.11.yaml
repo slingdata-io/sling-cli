@@ -11,12 +11,11 @@ defaults:
 streams:
   test1:
     sql: |
-      select * from public.test1k
-      where date_trunc('year', create_date) = '{YEAR}-01-01'
+      select * from public.test1k_postgres_pg
+      where date_trunc('year', create_dt) = '{YEAR}-01-01'
     object: 'test1k/{YEAR}'
   
-  public.accounts:
-  public.plans:
+  public.many_jsons:
 
 env:
   # pass in env vars, e.g. YEAR=2005

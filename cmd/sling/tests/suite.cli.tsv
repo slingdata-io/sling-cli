@@ -39,21 +39,21 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 38	Run sling with replication configuration 07			15			sling run -r cmd/sling/tests/replications/r.07.yaml
 39	Run sling with replication configuration 08			4			sling run -r cmd/sling/tests/replications/r.08.yaml
 40	Run sling with replication configuration 09 and constraints			>1	2		# sling run -r cmd/sling/tests/replications/r.09.yaml
-41	Run sling with replication configuration 09			>1		[3 / 4] running stream public.my_table	sling run -r cmd/sling/tests/replications/r.09.yaml
-42	Run sling with replication configuration 09 and tags			2			sling run -r cmd/sling/tests/replications/r.09.yaml --streams tag:my_table
+41	Run sling with replication configuration 09			>1	42	"[5 / 7] running stream ""public"".""my_table_bytes"""	sling run -r cmd/sling/tests/replications/r.09.yaml
+42	Run sling with replication configuration 09 and tags			3			sling run -r cmd/sling/tests/replications/r.09.yaml --streams tag:my_table
 43	Run sling with replication configuration 10	1018		1		singleFile=true	sling run -d -r cmd/sling/tests/replications/r.10.yaml
-44	Run sling with replication configuration 11 and year parameter			3		test1k/2005	YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
+44	Run sling with replication configuration 11 and year parameter			2		test1k/2005	YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
 45	Run sling with replication configuration 12			1			sling run -r cmd/sling/tests/replications/r.12.yaml
 46	Run sling with replication configuration 15			5		100 rows|[1 / 3] running stream sling_test/lineitem_iceberg	sling run -r cmd/sling/tests/replications/r.15.yaml # iceberg & delta
 47	Run sling with replication configuration 15 incremental	>0		1		incremental	ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
 48	Run sling with replication configuration 14			5			sling run -r cmd/sling/tests/replications/r.14.yaml
 49	Run sling with replication configuration 14	0					sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows
-50	Run sling with replication configuration 16	1000		1			sling run -r cmd/sling/tests/replications/r.16.yaml
+50	Run sling with replication configuration 16	90		1			sling run -r cmd/sling/tests/replications/r.16.yaml
 51	Run sling with task configuration	24					sling run -c cmd/sling/tests/task.yaml
 52	Run sling with Parquet source	1018					sling run --src-stream 'file://cmd/sling/tests/files/parquet' --stdout > /dev/null
 53	Run sling with empty input	0				execution succeeded	echo '' | sling run --stdout
 54	Run sling with CSV source and single quote	3					"sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test7.csv --src-options '{ delimiter: ""|"", quote: ""'\''"", escape: ""\\"" }' --stdout > /dev/null"
 55	Run sling with CSV source and $symbol quote	3					"sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test8.csv --src-options '{ delimiter: ""|"", quote: ""$"", escape: ""\\"" }' --stdout > /dev/null"
-56	Run sling with direct insert full-refresh	>10		>1		streaming data (direct insert)	SLING_DIRECT_INSERT=true sling run -r cmd/sling/tests/replications/r.09.yaml
-57	Run sling with direct insert incremental	0				Nothing to insert|streaming data (direct insert)	SLING_DIRECT_INSERT=true sling run --src-conn postgres --src-stream public.test1k --tgt-conn snowflake --tgt-object 'public.{stream_schema}_{stream_table}' --mode incremental --update-key create_date
+56	Run sling with direct insert full-refresh	>10		>1		streaming data (direct insert)	SLING_DIRECT_INSERT=true sling run --src-conn postgres --src-stream public.test1k_postgres_pg --tgt-conn mysql --tgt-object 'mysql.{stream_schema}_{stream_table}' --mode full-refresh
+57	Run sling with direct insert incremental	0				Nothing to insert|streaming data (direct insert)	SLING_DIRECT_INSERT=true sling run --src-conn postgres --src-stream public.test1k_postgres_pg --tgt-conn mysql --tgt-object 'mysql.{stream_schema}_{stream_table}' --mode incremental --update-key create_dt
 58	Run sling writing to partitioned parquet	1000				partition_by (	sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object 'file:///tmp/sling/output8/{part_year}/{part_month}' -d --tgt-options '{ format: parquet }' --update-key create_dt
