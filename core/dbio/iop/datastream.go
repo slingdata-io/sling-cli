@@ -1096,6 +1096,7 @@ func (ds *Datastream) ConsumeJsonReaderChl(readerChn chan *ReaderReady, isXML bo
 			decoder = json.NewDecoder(reader2)
 		}
 		jsNew := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
+
 		return jsNew, nil
 	}
 

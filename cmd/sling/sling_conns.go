@@ -37,6 +37,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		env.SetTelVal("task_end_time", time.Now())
 	}()
 
+	if cast.ToBool(c.Vals["debug"]) {
+		os.Setenv("DEBUG", "LOW")
+		env.InitLogger()
+	}
+
 	switch c.UsedSC() {
 	case "unset":
 		name := strings.ToUpper(cast.ToString(c.Vals["name"]))

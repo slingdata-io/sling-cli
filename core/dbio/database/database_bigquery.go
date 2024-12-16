@@ -579,7 +579,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
 
-	df.Defer(func() { env.RemoveLocalTempFile(localPath) })
+	df.Defer(func() { env.RemoveAllLocalTempFile(localPath) })
 
 	g.Info("importing into bigquery via local storage")
 
@@ -610,6 +610,8 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
+		defer env.RemoveAllLocalTempFile(localFile.Node.Path())
+
 		g.Debug("Loading %s [%s]", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
 		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns)
@@ -1046,13 +1048,27 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	select {src_fields}
 	from {src_table} src
 	`
+
+	// MERGE works fine, but needs to scan the target table?
+	// sqlTempl := `
+	// merge into {tgt_table} tgt
+	// using (select {src_fields} from {src_table}) src
+	// ON ({src_tgt_pk_equal})
+	// WHEN MATCHED THEN
+	// 	UPDATE SET {set_fields}
+	// WHEN NOT MATCHED THEN
+	// 	INSERT ({insert_fields}) values  ({src_fields_values})
+	// `
+
 	sql = g.R(
 		sqlTempl,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
+		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
+		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
 	)
 
 	return

@@ -156,6 +156,10 @@ func (conn *SnowflakeConn) Connect(timeOut ...int) error {
 
 func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
 	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return "", g.Error("invalid private key data: no PEM block found or missing file")
+	}
+
 	key, err := pkcs8.ParsePKCS8PrivateKey(block.Bytes, []byte(passphrase))
 	if err != nil {
 		return "", g.Error(err, "could not parse key")
@@ -170,21 +174,36 @@ func getEncodedPrivateKey(pemStr, passphrase string) (epk string, err error) {
 }
 
 func (conn *SnowflakeConn) getOrCreateStage(schema string) string {
-	if conn.GetProp("internal_stage") == "" {
-		defStaging := "sling_staging"
+	internalStage := conn.GetProp("internal_stage")
+
+createNew:
+	if internalStage == "" {
 		if schema == "" {
 			schema = conn.GetProp("schema")
 		}
-		conn.Exec("USE SCHEMA " + schema + noDebugKey)
-		_, err := conn.Exec("CREATE STAGE IF NOT EXISTS " + defStaging + noDebugKey)
+
+		// use Table struct, but is a Snowflake Internal Stage
+		defStaging := Table{
+			Schema:  schema,
+			Name:    "SLING_STAGING",
+			Dialect: dbio.TypeDbSnowflake,
+		}
+		conn.Exec("USE SCHEMA " + defStaging.Schema + noDebugKey)
+		_, err := conn.Exec("CREATE STAGE IF NOT EXISTS " + defStaging.FullName())
 		if err != nil {
 			g.Warn("Tried to create Internal Snowflake Stage but failed.\n" + g.ErrMsgSimple(err))
 			return ""
 		}
 		conn.SetProp("schema", schema)
-		conn.SetProp("internal_stage", defStaging)
+		conn.SetProp("internal_stage", defStaging.FullName())
 	} else {
-		conn.Exec("USE SCHEMA " + schema + noDebugKey)
+		defStaging, _ := ParseTableName(internalStage, dbio.TypeDbSnowflake)
+		if defStaging.Schema != schema {
+			// create new staging if schema is different
+			internalStage = ""
+			goto createNew
+		}
+		conn.Exec("USE SCHEMA " + defStaging.Schema + noDebugKey)
 	}
 	return conn.GetProp("internal_stage")
 }
@@ -761,7 +780,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}()
 
 	// Import to staging
-	stageFolderPath := g.F("@%s.%s/%s/%s", conn.GetProp("schema"), conn.GetProp("internal_stage"), env.CleanTableName(tableFName), g.NowFileStr())
+	stageFolderPath := g.F("@%s/%s/%s", conn.GetProp("internal_stage"), env.CleanTableName(tableFName), g.NowFileStr())
 	conn.Exec("USE SCHEMA " + conn.GetProp("schema"))
 	_, err = conn.Exec("REMOVE " + stageFolderPath)
 	if err != nil {
@@ -780,7 +799,7 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 		os.Chmod(file.Node.Path(), 0777) // make file readeable everywhere
 		err = conn.StagePUT(file.Node.URI, stageFolderPath)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internal_stagee")))
+			df.Context.CaptureErr(g.Error(err, "Error copying to Snowflake Stage: "+conn.GetProp("internal_stage")))
 		}
 		pathArr := strings.Split(file.Node.Path(), "/")
 		fileName := pathArr[len(pathArr)-1]

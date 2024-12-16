@@ -44,6 +44,11 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten bool, jmespath s
 		js.ColumnMap[col.Name] = col
 		js.addColumn(*col)
 		js.ds.Inferred = true
+	} else {
+		// add existing columns
+		for _, col := range ds.Columns {
+			js.ColumnMap[col.Name] = &col
+		}
 	}
 
 	return js

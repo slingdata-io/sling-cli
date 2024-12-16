@@ -53,7 +53,7 @@ require (
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.4.0
-	github.com/sijms/go-ora/v2 v2.8.20
+	github.com/sijms/go-ora/v2 v2.8.22
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.10.0
 	github.com/spf13/cast v1.6.0
@@ -72,7 +72,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.5.7
 	gorm.io/driver/sqlite v1.5.5
-	gorm.io/gorm v1.25.10
+	gorm.io/gorm v1.25.11
 	syreclabs.com/go/faker v1.2.2
 )
 

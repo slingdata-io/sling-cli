@@ -8,9 +8,9 @@ defaults:
     add_new_columns: true
 
 streams:
-  public.test1k:
+  public.test1k_postgres_pg:
     primary_key: [id]
-    update_key: create_date
+    update_key: create_dt
     target_options:
       table_keys:
-        cluster: [ date(CREATE_DATE) ]
+        cluster: [ date(create_dt) ]

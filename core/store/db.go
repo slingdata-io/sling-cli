@@ -36,12 +36,6 @@ func InitDB() {
 		return
 	}
 
-	err = Conn.Connect()
-	if err != nil {
-		g.Debug("could not connect to local .sling.db. %s", err.Error())
-		return
-	}
-
 	Db, err = Conn.GetGormConn(&gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -51,14 +45,8 @@ func InitDB() {
 	}
 
 	allTables := []interface{}{
-		&Execution{},
-		&Task{},
-		&Replication{},
 		&Setting{},
 	}
-
-	// manual migrations
-	migrate()
 
 	for _, table := range allTables {
 		dryDB := Db.Session(&gorm.Session{DryRun: true})
@@ -75,18 +63,6 @@ func InitDB() {
 
 	// settings
 	settings()
-}
-
-func migrate() {
-	// migrations
-	Db.Migrator().RenameColumn(&Task{}, "task", "config")               // rename column for consistency
-	Db.Migrator().RenameColumn(&Replication{}, "replication", "config") // rename column for consistency
-
-	// fix bad unique index on Execution.ExecID
-	data, _ := Conn.Query(`select name from sqlite_master where type = 'index' AND sql LIKE '%UNIQUE%' /* nD */`)
-	if len(data.Rows) > 0 {
-		Db.Exec(g.F("drop index if exists %s", data.Rows[0][0]))
-	}
 }
 
 type Setting struct {
