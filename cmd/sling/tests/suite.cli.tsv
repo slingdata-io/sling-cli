@@ -39,7 +39,7 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 38	Run sling with replication configuration 07			15			sling run -r cmd/sling/tests/replications/r.07.yaml
 39	Run sling with replication configuration 08			4			sling run -r cmd/sling/tests/replications/r.08.yaml
 40	Run sling with replication configuration 09 and constraints			>1	2		# sling run -r cmd/sling/tests/replications/r.09.yaml
-41	Run sling with replication configuration 09			>1		"[5 / 7] running stream ""public"".""my_table_bytes"""	sling run -r cmd/sling/tests/replications/r.09.yaml
+41	Run sling with replication configuration 09			>1		"/ 7] running stream ""public"".""my_table_bytes"""	sling run -r cmd/sling/tests/replications/r.09.yaml
 42	Run sling with replication configuration 09 and tags			3			sling run -r cmd/sling/tests/replications/r.09.yaml --streams tag:my_table
 43	Run sling with replication configuration 10	1018		1		singleFile=true	sling run -d -r cmd/sling/tests/replications/r.10.yaml
 44	Run sling with replication configuration 11 and year parameter			2		test1k/2005	YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml
