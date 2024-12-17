@@ -27,6 +27,7 @@ type ReplicationConfig struct {
 	// Tasks are compiled tasks
 	Tasks    []*Config `json:"tasks"`
 	Compiled bool      `json:"compiled"`
+	FailErr  string    // error string to fail all (e.g. when the first tasks fails to connect)
 
 	streamsOrdered []string
 	originalCfg    string

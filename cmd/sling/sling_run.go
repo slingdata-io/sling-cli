@@ -357,6 +357,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	if cast.ToBool(cfg.Env["SLING_DRY_RUN"]) || cast.ToBool(os.Getenv("SLING_DRY_RUN")) {
 		return nil
+	} else if replication.FailErr != "" {
+		task.Status = sling.ExecStatusError
+		task.Err = g.Error(replication.FailErr)
 	}
 
 	// set log sink
@@ -364,8 +367,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.AppendOutput(ll)
 	}
 
-	sling.StoreSet(task)       // set into store
-	defer sling.StoreSet(task) // set into store after
+	sling.StoreSet(task) // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -374,6 +376,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	// set context
 	task.Context = ctx
+
+	// set into store after
+	defer sling.StoreSet(task)
 
 	// run task
 	setTM()
@@ -484,7 +489,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 			// if a connection issue, stop
 			if e, ok := err.(*g.ErrType); ok && strings.Contains(e.Debug(), "Could not connect to ") {
-				break
+				replication.FailErr = g.ErrMsg(e)
 			}
 		} else {
 			successes++
