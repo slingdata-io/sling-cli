@@ -65,7 +65,7 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
 
-	if StoreUpdate != nil {
+	if StoreSet != nil {
 		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker5s.Stop()
@@ -77,7 +77,7 @@ func (t *TaskExecution) Execute() error {
 				case <-t.Context.Ctx.Done():
 					return
 				case <-ticker5s.C:
-					StoreUpdate(t)
+					StoreSet(t)
 				}
 			}
 		}()
@@ -101,7 +101,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StoreUpdate(t)
+		StoreSet(t)
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
@@ -135,7 +135,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StoreUpdate(t)
+		StoreSet(t)
 
 		// warn constrains
 		if df := t.Df(); df != nil {

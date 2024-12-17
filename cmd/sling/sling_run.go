@@ -27,6 +27,8 @@ var (
 	totalBytes        = uint64(0)
 	constraintFails   = uint64(0)
 	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
+
+	runReplication func(string, *sling.Config, ...string) error = replicationRun
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -362,8 +364,8 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.AppendOutput(ll)
 	}
 
-	sling.StoreInsert(task)       // insert into store
-	defer sling.StoreUpdate(task) // update into store after
+	sling.StoreSet(task)       // set into store
+	defer sling.StoreSet(task) // set into store after
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -413,7 +415,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	return nil
 }
 
-func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
+func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
@@ -500,7 +502,9 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		failureStr = env.GreenString(failureStr)
 	}
 
-	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+	if streamCnt > 1 {
+		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+	}
 
 	return eG.Err()
 }
