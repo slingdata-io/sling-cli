@@ -125,14 +125,24 @@ func formatYAML(input []byte) []byte {
 
 func LoadEnvFile(path string) (ef EnvFile) {
 	bytes, _ := os.ReadFile(path)
-	err := yaml.Unmarshal(bytes, &ef)
+
+	ef.Body = string(bytes)
+	ef.Path = path
+
+	// expand variables
+	envMap := map[string]any{}
+	for _, tuple := range os.Environ() {
+		key := strings.Split(tuple, "=")[0]
+		val := strings.TrimPrefix(tuple, key+"=")
+		envMap[key] = val
+	}
+	ef.Body = g.Rme(ef.Body, envMap)
+
+	err := yaml.Unmarshal([]byte(ef.Body), &ef)
 	if err != nil {
 		err = g.Error(err, "error parsing yaml string")
 		_ = err
 	}
-
-	ef.Body = string(bytes)
-	ef.Path = path
 
 	if ef.Connections == nil {
 		ef.Connections = map[string]map[string]interface{}{}
@@ -140,14 +150,6 @@ func LoadEnvFile(path string) (ef EnvFile) {
 
 	if ef.Variables == nil {
 		ef.Variables = map[string]interface{}{}
-	}
-
-	// set env vars
-	envMap := map[string]string{}
-	for _, tuple := range os.Environ() {
-		key := strings.Split(tuple, "=")[0]
-		val := strings.TrimPrefix(tuple, key+"=")
-		envMap[key] = val
 	}
 
 	for k, v := range ef.Variables {
