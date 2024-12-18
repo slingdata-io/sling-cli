@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
 	"github.com/flarco/g"
@@ -39,6 +40,14 @@ func (conn *MySQLConn) Init() error {
 	// InsertBatchStream is faster than LoadDataInFile
 	if conn.BaseConn.GetProp("allow_bulk_import") == "" {
 		conn.BaseConn.SetProp("allow_bulk_import", "false")
+	}
+
+	// register tls
+	tlsConfig, err := conn.makeTlsConfig()
+	if err != nil {
+		return g.Error(err, "could not register tls")
+	} else if tlsConfig != nil {
+		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
 	}
 
 	instance := Connection(conn)
@@ -98,6 +107,11 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 				query.Set(libKey, val)
 			}
 		}
+	}
+
+	// make tls
+	if query.Get("tls") == "custom" {
+		query.Set("tls", conn.GetProp("sling_conn_id"))
 	}
 
 	// reconstruct the url
