@@ -136,7 +136,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		val := strings.TrimPrefix(tuple, key+"=")
 		envMap[key] = val
 	}
-	ef.Body = g.Rme(ef.Body, envMap)
+	ef.Body = g.Rmd(ef.Body, envMap)
 
 	err := yaml.Unmarshal([]byte(ef.Body), &ef)
 	if err != nil {
