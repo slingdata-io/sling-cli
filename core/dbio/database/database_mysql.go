@@ -42,14 +42,6 @@ func (conn *MySQLConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "false")
 	}
 
-	// register tls
-	tlsConfig, err := conn.makeTlsConfig()
-	if err != nil {
-		return g.Error(err, "could not register tls")
-	} else if tlsConfig != nil {
-		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
-	}
-
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
@@ -123,6 +115,19 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 	}
 
 	return u.DSN
+}
+
+func (conn *MySQLConn) Connect(timeOut ...int) (err error) {
+
+	// register tls
+	tlsConfig, err := conn.makeTlsConfig()
+	if err != nil {
+		return g.Error(err, "could not register tls")
+	} else if tlsConfig != nil {
+		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
+	}
+
+	return conn.BaseConn.Connect(timeOut...)
 }
 
 func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {

@@ -311,7 +311,6 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	}
 
 	// Init
-	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
 	conn.SetProp("orig_url", OrigURL)
 	conn.SetProp("orig_prop_keys", g.Marshal(lo.Keys(conn.Base().properties))) // used when caching conn
 
@@ -321,6 +320,10 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	}
 
 	err = conn.Init()
+
+	// set sling_conn_id
+	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
+
 	return conn, err
 }
 
