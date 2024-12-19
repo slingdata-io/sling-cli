@@ -50,6 +50,8 @@ func init() {
 	TransformsMap[TransformReplaceAccents.Name] = TransformReplaceAccents
 	TransformsMap[TransformReplaceNonPrintable.Name] = TransformReplaceNonPrintable
 	TransformsMap[TransformTrimSpace.Name] = TransformTrimSpace
+	TransformsMap[TransformLower.Name] = TransformLower
+	TransformsMap[TransformUpper.Name] = TransformUpper
 	TransformsMap[TransformSetTimezone.Name] = TransformSetTimezone
 }
 
@@ -291,6 +293,20 @@ var (
 		Name: "trim_space",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return strings.TrimSpace(val), nil
+		},
+	}
+
+	TransformLower = Transform{
+		Name: "lower",
+		FuncString: func(sp *StreamProcessor, val string) (string, error) {
+			return strings.ToLower(val), nil
+		},
+	}
+
+	TransformUpper = Transform{
+		Name: "upper",
+		FuncString: func(sp *StreamProcessor, val string) (string, error) {
+			return strings.ToUpper(val), nil
 		},
 	}
 
