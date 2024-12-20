@@ -376,6 +376,7 @@ function:
   checksum_string: length({field}::text)
   checksum_boolean: length({field}::text)
   checksum_json: length(replace({field}::text, ' ', ''))
+  now: current_timestamp
 
 variable:
   tmp_folder: /tmp

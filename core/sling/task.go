@@ -10,6 +10,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -152,6 +153,36 @@ func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	} else {
 		t.PBar.SetStatus(progressText)
 	}
+}
+
+func (t *TaskExecution) GetSourceTable() (sTable database.Table, err error) {
+	sTable, err = database.ParseTableName(t.Config.Source.Stream, t.Config.SrcConn.Type)
+	if err != nil {
+		err = g.Error(err, "Could not parse source stream text")
+	} else if !sTable.IsQuery() && sTable.Schema == "" {
+		sTable.Schema = cast.ToString(t.Config.Source.Data["schema"])
+	}
+	return
+}
+
+func (t *TaskExecution) GetTargetTable(tempTableSuffix ...string) (tTable database.Table, err error) {
+	tTable, err = database.ParseTableName(t.Config.Target.Object, t.Config.TgtConn.Type)
+	if err != nil {
+		err = g.Error(err, "Could not parse target object")
+	} else if tTable.Schema == "" {
+		tTable.Schema = cast.ToString(t.Config.Target.Data["schema"])
+	}
+
+	// add suffix to table name (for temp table)
+	if len(tempTableSuffix) > 0 {
+		tempTableSuffix[0] = strings.ToLower(tempTableSuffix[0])
+		if t.Config.TgtConn.Type.DBNameUpperCase() {
+			tempTableSuffix[0] = strings.ToUpper(tempTableSuffix[0])
+		}
+		tTable.Name = tTable.Name + tempTableSuffix[0]
+	}
+
+	return
 }
 
 // GetTotalBytes gets the inbound/oubound bytes of the task

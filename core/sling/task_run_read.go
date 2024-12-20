@@ -11,7 +11,6 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/spf13/cast"
 )
 
 // ReadFromDB reads from a source database
@@ -20,12 +19,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	setStage("3 - prepare-dataflow")
 
 	selectFieldsStr := "*"
-	sTable, err := database.ParseTableName(cfg.Source.Stream, srcConn.GetType())
+	sTable, err := t.GetSourceTable()
 	if err != nil {
 		err = g.Error(err, "Could not parse source stream text")
 		return t.df, err
-	} else if sTable.Schema == "" {
-		sTable.Schema = cast.ToString(cfg.Source.Data["schema"])
 	}
 
 	// get source columns

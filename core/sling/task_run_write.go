@@ -914,7 +914,7 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 		return err
 	}
 	if rowAffCnt > 0 {
-		g.DebugLow("%d TOTAL INSERTS / UPDATES", rowAffCnt)
+		g.DebugLow("%d rows affected", rowAffCnt)
 	}
 	return nil
 }

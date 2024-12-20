@@ -9,6 +9,21 @@ core:
   alter_columns: alter table {table} modify column {col_ddl}
   modify_column: '{column} {type}'
   update: alter table {table} update {set_fields} where {pk_fields_equal}
+  delete_where_not_exist: |
+    alter table {target_table}
+    delete where {where}
+      and {unique_id} not in (
+        select {unique_id}
+        from {temp_table}
+      )
+  update_where_not_exist: |
+    alter table {target_table}
+    update {set_fields}
+    where {where}
+      and {unique_id} not in (
+        select {unique_id}
+        from {temp_table}
+      )
 
 
 metadata:
@@ -247,6 +262,8 @@ function:
   checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
   # checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
   checksum_decimal: ABS(CAST({field} as Nullable(Int64)))
+  now: now()
+  cast_to_string: 'toString({field})'
 
 
 variable:

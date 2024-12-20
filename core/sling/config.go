@@ -1329,6 +1329,7 @@ type TargetOptions struct {
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
+	DeleteMissing    *string             `json:"delete_missing,omitempty" yaml:"delete_missing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
@@ -1492,6 +1493,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.IgnoreExisting == nil {
 		o.IgnoreExisting = targetOptions.IgnoreExisting
+	}
+	if o.DeleteMissing == nil {
+		o.DeleteMissing = targetOptions.DeleteMissing
 	}
 	if o.PreSQL == nil {
 		o.PreSQL = targetOptions.PreSQL

@@ -546,6 +546,8 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 
 // setProjectID attempts to get the first sha of the repo
 func setProjectID(cfgPath string) {
+	projectID = os.Getenv("SLING_PROJECT_ID")
+
 	if cfgPath == "" && !strings.HasPrefix(cfgPath, "{") {
 		return
 	}

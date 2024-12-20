@@ -9,6 +9,21 @@ core:
   create_unique_index: create unique index {index} on {table} ({cols})
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
+  delete_where_not_exist: |
+    delete from {target_table}
+    where {where}
+      and not exists (
+          select 1 from {temp_table}
+          where {join_where}
+      )
+  update_where_not_exist: |
+    update {target_table}
+    set {set_fields}
+    where {where}
+      and not exists (
+          select 1 from {temp_table} 
+          where {join_where}
+      )
   limit: select {fields} from {table} limit {limit} offset {offset}
   limit_offset: select {fields} from {table} limit {limit}
   limit_sql: |
@@ -359,6 +374,8 @@ function:
   checksum_decimal: 'abs(trunc({field}))'
   checksum_datetime: '0'
   checksum_boolean: 'length({field})'
+  now: current_timestamp
+  concat: 'concat({fields})'
 
 variable:
   tmp_folder: /tmp

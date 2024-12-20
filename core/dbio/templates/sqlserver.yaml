@@ -335,7 +335,7 @@ variable:
   
   bind_string: "@p{c}"
   batch_rows: 200
-  batch_values: 2000
+  batch_values: 1000
   bool_as: string
   error_filter_table_exists: already
   max_string_type: nvarchar(max)

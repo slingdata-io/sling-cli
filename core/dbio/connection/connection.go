@@ -265,6 +265,10 @@ func (c *Connection) Close() error {
 var connCache = cmap.New[*Connection]()
 
 func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
+	return c.AsDatabaseContext(c.Context().Ctx, cache...)
+}
+
+func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
@@ -279,7 +283,7 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 
 		if c.Database == nil {
 			c.Database, err = database.NewConnContext(
-				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 			)
 			if err != nil {
 				return
@@ -291,11 +295,15 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 	}
 
 	return database.NewConnContext(
-		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
 func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error) {
+	return c.AsFileContext(c.Context().Ctx, cache...)
+}
+
+func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc filesys.FileSysClient, err error) {
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
@@ -310,7 +318,7 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 
 		if c.File == nil {
 			c.File, err = filesys.NewFileSysClientFromURLContext(
-				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 			)
 			if err != nil {
 				return
@@ -322,7 +330,7 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 	}
 
 	return filesys.NewFileSysClientFromURLContext(
-		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
