@@ -431,6 +431,11 @@ func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 
+// isIncrementalStateWithUpdateKey means it has an update_key and is incremental mode via sling state
+func (t *TaskExecution) isIncrementalStateWithUpdateKey() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
+}
+
 func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	options = g.M()
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)

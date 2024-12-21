@@ -188,7 +188,19 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
+var (
+	getIncrementalValueViaState = func(*TaskExecution) (err error) {
+		g.Warn("use the official release of sling-cli to use incremental via sling state")
+		return nil
+	}
+
+	setIncrementalValueViaState = func(*TaskExecution) (err error) {
+		g.Warn("use the official release of sling-cli to use incremental via sling state")
+		return nil
+	}
+)
+
+func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
 	// check if already set from override
 	if cfg.IncrementalVal != "" {
 		return
@@ -253,7 +265,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType d
 		data.Columns[0].Type = iop.DateType // force date type
 	}
 
-	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0], srcConnType)
+	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0].Type, srcConnType)
 
 	return
 }

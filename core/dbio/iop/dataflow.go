@@ -491,6 +491,16 @@ func (df *Dataflow) SyncStats() {
 				dfCols[i].Stats.MaxDecLen = colStats.MaxDecLen
 			}
 
+			switch {
+			case col.Type.IsDecimal() || col.Type.IsFloat():
+				// skip string comparison. may cause issues for clickhouse
+				dfCols[i].Stats.LastVal = colStats.LastVal
+			default:
+				if cast.ToString(colStats.LastVal) > cast.ToString(dfCols[i].Stats.LastVal) {
+					dfCols[i].Stats.LastVal = colStats.LastVal
+				}
+			}
+
 			if col.Constraint != nil {
 				dfCols[i].Constraint.FailCnt = dfCols[i].Constraint.FailCnt + col.Constraint.FailCnt
 			}

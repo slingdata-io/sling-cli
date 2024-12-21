@@ -852,7 +852,14 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			} else {
 				cs.DateTimeZCnt++
 			}
-			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
+			em := dVal.UnixMicro()
+			sp.rowChecksum[i] = uint64(em)
+			if em > cs.Max {
+				cs.Max = em
+			}
+			if em < cs.Min {
+				cs.Min = em
+			}
 		}
 	}
 	cs.TotalCnt++
@@ -1233,6 +1240,9 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	for i, val := range row {
 		col := &columns[i]
 		row[i] = sp.CastVal(i, val, col)
+		if row[i] != nil && row[i] != "" {
+			sp.colStats[i].LastVal = row[i]
+		}
 
 		// evaluate constraint
 		if col.Constraint != nil {

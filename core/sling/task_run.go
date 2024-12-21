@@ -364,6 +364,14 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		return
 	}
 
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+	}
+
 	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
 	err = srcConn.Connect()
 	if err != nil {
@@ -397,7 +405,17 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
 
-	err = t.df.Err()
+	if err = t.df.Err(); err != nil {
+		err = g.Error(err, "Error running runDbToFile")
+	}
+
+	if cnt > 0 && t.isIncrementalStateWithUpdateKey() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
+	}
+
 	return
 
 }
@@ -438,7 +456,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
 
-		if err = getIncrementalValue(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
+		if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -578,9 +596,15 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// get watermark
-	if t.isIncrementalWithUpdateKey() {
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
-		if err = getIncrementalValue(t.Config, tgtConn, srcConn.GetType()); err != nil {
+		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -621,6 +645,13 @@ func (t *TaskExecution) runDbToDb() (err error) {
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error running runDbToDb")
+	}
+
+	if cnt > 0 && t.isIncrementalStateWithUpdateKey() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
 	}
 
 	// if delete missing is specified with incremental mode

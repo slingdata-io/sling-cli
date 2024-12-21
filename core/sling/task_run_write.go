@@ -65,6 +65,10 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 		cnt = df.Count()
+
+		df.SyncColumns()
+		df.SyncStats()
+
 	} else if cfg.Options.StdOut {
 		// apply column casing
 		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
