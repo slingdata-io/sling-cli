@@ -731,6 +731,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			table.Schema = cast.ToString(cfg.Target.Data["schema"])
 		}
 		cfg.Target.Object = table.FullName()
+
+		// fill in temp table name if specified
+		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
+			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
+		}
 	}
 
 	if connection.SchemeType(cfg.Target.Object).IsFile() {
