@@ -275,7 +275,7 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc d
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Name); ok {
+		if cc, ok := connCache.Get(c.Hash()); ok {
 			if cc.Database != nil {
 				return cc.Database, nil
 			}
@@ -288,7 +288,7 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc d
 			if err != nil {
 				return
 			}
-			connCache.Set(c.Name, c) // cache
+			connCache.Set(c.Hash(), c) // cache
 		}
 
 		return c.Database, nil
@@ -310,7 +310,7 @@ func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc files
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Name); ok {
+		if cc, ok := connCache.Get(c.Hash()); ok {
 			if cc.File != nil {
 				return cc.File, nil
 			}
@@ -323,7 +323,7 @@ func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc files
 			if err != nil {
 				return
 			}
-			connCache.Set(c.Name, c) // cache
+			connCache.Set(c.Hash(), c) // cache
 		}
 
 		return c.File, nil
