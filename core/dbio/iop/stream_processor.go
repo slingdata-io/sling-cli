@@ -405,7 +405,11 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 						g.Warn("makeFunc not found for transform '%s'. Please contact support", tName)
 						continue
 					}
-					err := t.makeFunc(&t, param)
+					var params []any
+					for _, p := range strings.Split(param, ",") {
+						params = append(params, strings.TrimSpace(p))
+					}
+					err := t.makeFunc(&t, params...)
 					if err != nil {
 						g.Warn("invalid parameter for transform '%s' (%s)", tName, err.Error())
 					} else {

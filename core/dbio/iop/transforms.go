@@ -22,37 +22,41 @@ import (
 var TransformsMap = map[string]Transform{}
 
 func init() {
-	TransformsMap[TransformDecodeLatin1.Name] = TransformDecodeLatin1
-	TransformsMap[TransformDecodeLatin5.Name] = TransformDecodeLatin5
-	TransformsMap[TransformDecodeLatin9.Name] = TransformDecodeLatin9
-	TransformsMap[TransformDecodeUtf8.Name] = TransformDecodeUtf8
-	TransformsMap[TransformDecodeUtf8Bom.Name] = TransformDecodeUtf8Bom
-	TransformsMap[TransformDecodeUtf16.Name] = TransformDecodeUtf16
-	TransformsMap[TransformDecodeWindows1250.Name] = TransformDecodeWindows1250
-	TransformsMap[TransformDecodeWindows1252.Name] = TransformDecodeWindows1252
-	TransformsMap[TransformDuckdbListToText.Name] = TransformDuckdbListToText
-	TransformsMap[TransformEncodeLatin1.Name] = TransformEncodeLatin1
-	TransformsMap[TransformEncodeLatin5.Name] = TransformEncodeLatin5
-	TransformsMap[TransformEncodeLatin9.Name] = TransformEncodeLatin9
-	TransformsMap[TransformEncodeUtf8.Name] = TransformEncodeUtf8
-	TransformsMap[TransformEncodeUtf8Bom.Name] = TransformEncodeUtf8Bom
-	TransformsMap[TransformEncodeUtf16.Name] = TransformEncodeUtf16
-	TransformsMap[TransformEncodeWindows1250.Name] = TransformEncodeWindows1250
-	TransformsMap[TransformEncodeWindows1252.Name] = TransformEncodeWindows1252
-	TransformsMap[TransformHashMd5.Name] = TransformHashMd5
-	TransformsMap[TransformHashSha256.Name] = TransformHashSha256
-	TransformsMap[TransformHashSha512.Name] = TransformHashSha512
-	TransformsMap[TransformParseBit.Name] = TransformParseBit
-	TransformsMap[TransformParseFix.Name] = TransformParseFix
-	TransformsMap[TransformParseUuid.Name] = TransformParseUuid
-	TransformsMap[TransformParseMsUuid.Name] = TransformParseMsUuid
-	TransformsMap[TransformReplace0x00.Name] = TransformReplace0x00
-	TransformsMap[TransformReplaceAccents.Name] = TransformReplaceAccents
-	TransformsMap[TransformReplaceNonPrintable.Name] = TransformReplaceNonPrintable
-	TransformsMap[TransformTrimSpace.Name] = TransformTrimSpace
-	TransformsMap[TransformLower.Name] = TransformLower
-	TransformsMap[TransformUpper.Name] = TransformUpper
-	TransformsMap[TransformSetTimezone.Name] = TransformSetTimezone
+	for _, t := range []Transform{
+		TransformDecodeLatin1,
+		TransformDecodeLatin5,
+		TransformDecodeLatin9,
+		TransformDecodeUtf8,
+		TransformDecodeUtf8Bom,
+		TransformDecodeUtf16,
+		TransformDecodeWindows1250,
+		TransformDecodeWindows1252,
+		TransformDuckdbListToText,
+		TransformEncodeLatin1,
+		TransformEncodeLatin5,
+		TransformEncodeLatin9,
+		TransformEncodeUtf8,
+		TransformEncodeUtf8Bom,
+		TransformEncodeUtf16,
+		TransformEncodeWindows1250,
+		TransformEncodeWindows1252,
+		TransformHashMd5,
+		TransformHashSha256,
+		TransformHashSha512,
+		TransformParseBit,
+		TransformParseFix,
+		TransformParseUuid,
+		TransformParseMsUuid,
+		TransformReplace0x00,
+		TransformReplaceAccents,
+		TransformReplaceNonPrintable,
+		TransformTrimSpace,
+		TransformLower,
+		TransformUpper,
+		TransformSetTimezone,
+	} {
+		TransformsMap[t.Name] = t
+	}
 }
 
 //go:embed templates/*
