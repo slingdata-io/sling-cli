@@ -170,20 +170,20 @@ func NewStreamProcessor() *StreamProcessor {
 	sp.dateLayouts = []string{
 		"2006-01-02",
 		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.000",
-		"2006-01-02 15:04:05.000000",
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02T15:04:05.000000Z",
-		"2006-01-02 15:04:05.000 Z",    // snowflake export format
-		"2006-01-02 15:04:05.000000 Z", // snowflake export format
+		"2006-01-02 15:04:05.999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02T15:04:05.999Z",
+		"2006-01-02T15:04:05.999999Z",
+		"2006-01-02 15:04:05.999 Z",    // snowflake export format
+		"2006-01-02 15:04:05.999999 Z", // snowflake export format
 		"02-Jan-06",
 		"02-Jan-06 15:04:05",
 		"02-Jan-06 03:04:05 PM",
-		"02-Jan-06 03.04.05.000000 PM",
+		"02-Jan-06 03.04.05.999999 PM",
 		"2006-01-02T15:04:05-0700",
 		"2006-01-02 15:04:05-07",        // duckdb
-		"2006-01-02 15:04:05.000-07",    // duckdb
-		"2006-01-02 15:04:05.000000-07", // duckdb
+		"2006-01-02 15:04:05.999-07",    // duckdb
+		"2006-01-02 15:04:05.999999-07", // duckdb
 		time.RFC3339,
 		"2006-01-02T15:04:05",  // iso8601 without timezone
 		"2006-01-02T15:04:05Z", // iso8601 with timezone
@@ -914,9 +914,9 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		} else if sp.Config.DatetimeFormat != "" && strings.ToLower(sp.Config.DatetimeFormat) != "auto" {
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
-			return tVal.Format("2006-01-02 15:04:05.000000") + " +00"
+			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"
 		}
-		return tVal.Format("2006-01-02 15:04:05.000000 -07")
+		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
 	default:
 		return cast.ToString(val)
 	}
@@ -958,7 +958,7 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 		if tVal.IsZero() {
 			return ""
 		}
-		return tVal.UTC().Format("2006-01-02 15:04:05.000000") + " +00"
+		return tVal.UTC().Format("2006-01-02 15:04:05.999999") + " +00"
 	default:
 		return cast.ToString(val)
 	}
@@ -997,7 +997,7 @@ func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType 
 	case typ.IsDate():
 		return "2006-01-02" // as a mask
 	case typ.IsDatetime():
-		return "2006-01-02 15:04:05.000000 +00" // as a mask
+		return "2006-01-02 15:04:05.999999 +00" // as a mask
 	default:
 		return cast.ToString(val)
 	}
