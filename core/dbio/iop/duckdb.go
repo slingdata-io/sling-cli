@@ -683,7 +683,7 @@ func (duck *DuckDb) initScanner() {
 
 type DuckDbCopyOptions struct {
 	Compression        string
-	PartitionFields    []string // part_year, part_month, part_day, etc.
+	PartitionFields    []PartitionLevel // part_year, part_month, part_day, etc.
 	PartitionKey       string
 	WritePartitionCols bool
 	FileSizeBytes      int64
@@ -699,31 +699,34 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 
 	// validate PartitionLevels
 	for _, pl := range options.PartitionFields {
-		if !g.In(pl, "part_year", "part_month", "part_week", "part_day", "part_hour", "part_minute", "part_year_month") {
+		if !pl.IsValid() {
 			return sql, g.Error("invalid partition level: %s", pl)
 		} else if options.PartitionKey == "" {
 			return "", g.Error("missing partition key")
 		}
 
-		datePart := strings.TrimPrefix(pl, "part_")
 		pe := partExpression{
-			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), datePart),
-			expression: g.F("date_part('%s', %s)", datePart, options.PartitionKey),
+			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), pl),
+			expression: g.F("date_part('%s', %s)", pl, options.PartitionKey),
 		}
 
 		switch pl {
-		case "part_year_month":
+		case PartitionLevelYear:
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y")
+		case PartitionLevelYearMonth:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y-%m")
-		case "part_month":
+		case PartitionLevelMonth:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%m")
-		case "part_week":
+		case PartitionLevelWeek:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%V")
-		case "part_day":
+		case PartitionLevelDay:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%d")
-		case "part_hour":
+		case PartitionLevelHour:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%H")
-		case "part_minute":
+		case PartitionLevelMinute:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%M")
+		default:
+			return sql, g.Error("invalid partition field: %s", pl)
 		}
 
 		partExpressions = append(partExpressions, pe)

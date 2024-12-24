@@ -19,8 +19,11 @@ import (
 func TestCLI(t *testing.T) {
 	bin := os.Getenv("SLING_BIN")
 	if bin == "" {
-		t.Fatalf("SLING_BIN environment variable is not set")
-		return
+		bin = "./sling"
+		if !g.PathExists(bin) {
+			t.Fatalf("SLING_BIN environment variable is not set")
+			return
+		}
 	}
 
 	p, err := process.NewProc("bash")

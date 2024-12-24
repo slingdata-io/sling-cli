@@ -996,6 +996,7 @@ type Config struct {
 	Prepared bool                  `json:"-" yaml:"-"`
 
 	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
+	IncrementalGTE bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`

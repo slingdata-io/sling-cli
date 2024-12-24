@@ -94,7 +94,7 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 	if err != nil {
 		return g.Error(err, "could not get db path")
 	} else if conn.GetType() != dbio.TypeDbMotherDuck && !g.PathExists(dbPath) {
-		g.Debug("The file %s does not exist, however it will be created if needed.", dbPath)
+		g.Trace("The file %s does not exist, however it will be created if needed.", dbPath)
 	}
 
 	connPool.Mux.Lock()

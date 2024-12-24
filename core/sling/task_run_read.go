@@ -86,7 +86,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 				"value", cfg.IncrementalVal,
-				"gt", ">",
+				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
 			)
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}

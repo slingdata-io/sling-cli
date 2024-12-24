@@ -855,7 +855,7 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 
 	copyOptions := iop.DuckDbCopyOptions{
 		Compression:        string(g.PtrVal(t.Config.Target.Options.Compression)),
-		PartitionFields:    extractPartFields(uri),
+		PartitionFields:    iop.ExtractPartitionFields(uri),
 		PartitionKey:       t.Config.Source.UpdateKey,
 		WritePartitionCols: true,
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
@@ -895,9 +895,20 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	}
 
 	// remove partition fields from url
-	for _, field := range copyOptions.PartitionFields {
-		uri = strings.ReplaceAll(uri, g.F("/{%s}", field), "")
+	{
+		uri = strings.ReplaceAll(uri, "://", ":/:/:") // placeholder for cleaning
+		for _, field := range copyOptions.PartitionFields {
+			uri = strings.ReplaceAll(uri, g.F("{part_%s}", field), "")
+			for {
+				if !strings.Contains(uri, "//") {
+					break
+				}
+				uri = strings.ReplaceAll(uri, "//", "/") // remove double slashes
+			}
+		}
+		uri = strings.ReplaceAll(uri, ":/:/:", "://") // reverse placeholder
 	}
+
 	bw, err = filesys.CopyFromLocalRecursive(fs, localPath, uri)
 
 	return bw, err

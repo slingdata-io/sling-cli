@@ -421,7 +421,7 @@ func (t *TaskExecution) Cleanup() {
 // at the moment, use duckdb only for partitioned target parquet files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
 	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet) {
-		return len(extractPartFields(uri)) > 0
+		return len(iop.ExtractPartitionFields(uri)) > 0
 	}
 	return false
 }
@@ -433,7 +433,7 @@ func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 
 // isIncrementalStateWithUpdateKey means it has an update_key and is incremental mode via sling state
 func (t *TaskExecution) isIncrementalStateWithUpdateKey() bool {
-	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
+	return os.Getenv("SLING_STATE") != "" && t.isIncrementalWithUpdateKey()
 }
 
 func (t *TaskExecution) getOptionsMap() (options map[string]any) {

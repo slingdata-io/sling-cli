@@ -370,6 +370,8 @@ func (t *TaskExecution) runDbToFile() (err error) {
 			return err
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
 	}
 
 	t.SetProgress("connecting to source database (%s)", srcConn.GetType())

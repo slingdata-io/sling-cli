@@ -1350,8 +1350,17 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 		return bw, nil
 	}
 
-	// For directories, walk through and copy each file
-	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+	// create context
+	concurrency := cast.ToInt(fs.GetProp("concurrency"))
+	if concurrency == 0 {
+		concurrency = 10
+	}
+	copyContext := g.NewContext(fs.Context().Ctx, concurrency)
+
+	// copy function for each file
+	copyFile := func(path string, info os.FileInfo, err error) error {
+		defer copyContext.Wg.Write.Done()
+
 		if err != nil {
 			return g.Error(err, "Error walking path: "+path)
 		}
@@ -1391,9 +1400,23 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 
 		totalBytes += bw
 		return nil
+	}
+
+	// For directories, walk through and copy each file
+	g.Debug("writing partitions to %s", remotePath)
+	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+		copyContext.Wg.Write.Add()
+		go copyFile(path, info, err)
+		return err
 	})
 
+	copyContext.Wg.Write.Wait()
+
 	if err != nil {
+		return totalBytes, g.Error(err, "Error during recursive copy")
+	}
+
+	if err = copyContext.Err(); err != nil {
 		return totalBytes, g.Error(err, "Error during recursive copy")
 	}
 
