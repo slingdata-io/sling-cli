@@ -818,7 +818,7 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	// push to temp duck file
 	var duckConn database.Connection
 
-	tempTable, _ := database.ParseTableName("main.sling_parquet_temp", dbio.TypeDbDuckDb)
+	tempTable, _ := database.ParseTableName("main.sling_temp", dbio.TypeDbDuckDb)
 	folder := path.Join(env.GetTempFolder(), "duckdb", g.RandSuffix(tempTable.Name, 3))
 	defer env.RemoveAllLocalTempFile(folder)
 
@@ -854,7 +854,8 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	duck := duckConn.(*database.DuckDbConn).DuckDb()
 
 	copyOptions := iop.DuckDbCopyOptions{
-		Compression:        string(g.PtrVal(t.Config.Target.Options.Compression)),
+		Format:             t.Config.Target.ObjectFileFormat(),
+		Compression:        g.PtrVal(t.Config.Target.Options.Compression),
 		PartitionFields:    iop.ExtractPartitionFields(uri),
 		PartitionKey:       t.Config.Source.UpdateKey,
 		WritePartitionCols: true,

@@ -682,7 +682,8 @@ func (duck *DuckDb) initScanner() {
 }
 
 type DuckDbCopyOptions struct {
-	Compression        string
+	Format             dbio.FileType
+	Compression        CompressorType
 	PartitionFields    []PartitionLevel // part_year, part_month, part_day, etc.
 	PartitionKey       string
 	WritePartitionCols bool
@@ -733,9 +734,16 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 	}
 
 	// validate compression
-	options.Compression = strings.ToLower(options.Compression)
-	if g.In(options.Compression, "", "none", "auto") {
-		options.Compression = "snappy"
+	fileExtensionExpr := ""
+	if options.Format == dbio.FileTypeParquet {
+		if g.In(options.Compression, "", "none", "auto") {
+			options.Compression = SnappyCompressorType
+		}
+	}
+	if options.Format == dbio.FileTypeCsv {
+		if g.In(options.Compression, GzipCompressorType) {
+			fileExtensionExpr = g.F("file_extension 'csv.gz',")
+		}
 	}
 
 	fileSizeBytesExpr := ""
@@ -753,22 +761,26 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 		}
 
 		sql = g.R(
-			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet_partitions"),
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_to_local_partitions"),
 			"table", fromTable,
 			"local_path", toLocalPath,
+			"format", string(options.Format),
 			"file_size_bytes_expr", fileSizeBytesExpr,
+			"file_extension_expr", fileExtensionExpr,
 			"partition_expressions", strings.Join(partSqlExpressions, ", "),
 			"partition_columns", strings.Join(partSqlColumns, ", "),
-			"compression", cast.ToString(options.Compression),
+			"compression", string(options.Compression),
 			"write_partition_columns", cast.ToString(options.WritePartitionCols),
 		)
 	} else {
 		sql = g.R(
-			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet"),
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_to_local"),
 			"table", fromTable,
 			"local_path", toLocalPath,
+			"format", string(options.Format),
 			"file_size_bytes_expr", fileSizeBytesExpr,
-			"compression", cast.ToString(options.Compression),
+			"file_extension_expr", fileExtensionExpr,
+			"compression", string(options.Compression),
 		)
 	}
 

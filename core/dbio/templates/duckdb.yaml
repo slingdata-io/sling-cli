@@ -10,16 +10,16 @@ core:
   insert_option: ""
   modify_column: 'alter {column} type {type}'
   select_stream_scanner: select {fields} from {stream_scanner} {where}
-  export_parquet: |
+  export_to_local: |
     COPY (
       select *
       from {table}
     ) TO '{local_path}' 
     (
-      format 'parquet', {file_size_bytes_expr}
+      format '{format}', {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}'
     )
-  export_parquet_partitions: |
+  export_to_local_partitions: |
     COPY (
       select
         *,
@@ -27,7 +27,7 @@ core:
       from {table}
     ) TO '{local_path}' 
     ( 
-      format 'parquet', {file_size_bytes_expr}
+      format '{format}', {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}',
       overwrite true,
       write_partition_columns {write_partition_columns},

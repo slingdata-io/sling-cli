@@ -1479,6 +1479,10 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
+	if o.Compression != nil {
+		o.Compression = o.Compression.Normalize()
+	}
+
 	if o.Format == dbio.FileTypeNone {
 		o.Format = targetOptions.Format
 	}

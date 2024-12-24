@@ -69,7 +69,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		selectFieldsStr = strings.Join(fields, ", ")
 	}
 
-	if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
+	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -145,8 +145,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
 			)
 		} else {
-			if !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
-				err = g.Error("Since using incremental/backfill mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.")
+			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
+				err = g.Error("Since using %s mode + custom SQL, with an `update_key`, the SQL text needs to contain a placeholder: {incremental_where_cond} or {incremental_value}. See https://docs.slingdata.io for help.", t.Config.Mode)
 				return t.df, err
 			}
 

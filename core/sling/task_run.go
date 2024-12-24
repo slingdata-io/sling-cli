@@ -411,7 +411,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		err = g.Error(err, "Error running runDbToFile")
 	}
 
-	if cnt > 0 && t.isIncrementalStateWithUpdateKey() {
+	if cnt > 0 && t.hasStateWithUpdateKey() {
 		if err = setIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not set incremental value")
 			return err
@@ -649,7 +649,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		err = g.Error(t.df.Err(), "Error running runDbToDb")
 	}
 
-	if cnt > 0 && t.isIncrementalStateWithUpdateKey() {
+	if cnt > 0 && t.hasStateWithUpdateKey() {
 		if err = setIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not set incremental value")
 			return err

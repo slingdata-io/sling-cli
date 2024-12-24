@@ -9,9 +9,10 @@ streams:
     update_key: update_dt
     primary_key: id
     mode: incremental
-    object: test/{stream_name}/{part_year}/{part_month}
+    object: test/{stream_name}_{format}/{part_year}/{part_month}
     target_options:
-      format: parquet
+      format: '{format}'
 
 env:
-  SLING_STATE: AWS_S3/state/r.17
+  SLING_STATE: AWS_S3/state/r.17/${FORMAT}
+  format: ${FORMAT}
