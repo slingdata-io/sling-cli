@@ -160,6 +160,11 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) {
+			// if the target object doesn't have runtime variables, consider as single
+			if !stream.ObjectHasStreamVars() {
+				stream.Single = g.Ptr(true)
+				continue
+			}
 			patterns = append(patterns, name)
 		}
 	}
@@ -593,6 +598,21 @@ type ReplicationStreamConfig struct {
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
+}
+
+func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
+	vars := []string{
+		"stream_table",
+		"stream_name",
+		"stream_file_path",
+		"stream_file_name",
+	}
+	for _, v := range vars {
+		if strings.Contains(s.Object, g.F("{%s}", v)) {
+			return true
+		}
+	}
+	return false
 }
 
 func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {
