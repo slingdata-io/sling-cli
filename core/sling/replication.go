@@ -162,7 +162,9 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		} else if hasWildcard(name) {
 			// if the target object doesn't have runtime variables, consider as single
 			if !stream.ObjectHasStreamVars() {
-				stream.Single = g.Ptr(true)
+				// if file max vars are zero as well for file targets, auto-set as single
+				value := g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxBytes) == 0 && g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxRows) == 0
+				stream.Single = g.Ptr(value)
 				continue
 			}
 			patterns = append(patterns, name)
