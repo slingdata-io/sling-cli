@@ -36,6 +36,7 @@ require (
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/klauspost/compress v1.17.9
 	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011
+	github.com/labstack/echo/v4 v4.10.2
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/mattn/go-sqlite3 v1.14.22
@@ -148,6 +149,7 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
@@ -184,6 +186,7 @@ require (
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/labstack/echo/v5 v5.0.0-20230722203903-ec5b858dab61 // indirect
+	github.com/labstack/gommon v0.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/matoous/go-nanoid/v2 v2.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
