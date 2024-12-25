@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
@@ -247,7 +248,7 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 	// start local http server
 	port, err := g.GetPort("localhost:0")
 	if err != nil {
-		err = g.Error(err, "could not acquire local port for duck http import")
+		err = g.Error(err, "could not acquire local port for duckdb http import")
 		return 0, err
 	}
 	// create reader channel to pass between handler and main flow
@@ -290,6 +291,7 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 
 	// wait for local server startup
 	importContext.Wg.Read.Wait()
+	time.Sleep(100 * time.Millisecond)
 	defer server.Shutdown(conn.Context().Ctx)
 
 	sc := conn.defaultCsvConfig()
