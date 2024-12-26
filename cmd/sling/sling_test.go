@@ -255,6 +255,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
 
 		if val := cast.ToString(rec["source_primary_key"]); val != "" {
+			if g.In(connType, dbio.TypeDbStarRocks) {
+				val = "id,email" // starrocks can't have a decimal as PK
+			}
 			streamConfig["primary_key"] = strings.Split(val, ",")
 		}
 		if val := cast.ToString(rec["source_update_key"]); val != "" {
