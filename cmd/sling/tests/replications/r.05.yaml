@@ -1,8 +1,8 @@
 source: OCRAL_R2
-target: SQLITE
+target: POSTGRES
 
 defaults:
-  object: 'main.{stream_file_name}_slack_data'
+  object: 'public.{stream_file_name}_slack_data'
   source_options:
     flatten: true
   mode: full-refresh
@@ -20,3 +20,7 @@ streams:
   s3://ocral/mlo.community.test/jobs/:
   s3://ocral/mlo.community.test/leadership/:
   s3://ocral/mlo.community.test/random/:
+
+env:
+  SLING_THREADS: 5
+  SLING_RETRIES: 2
