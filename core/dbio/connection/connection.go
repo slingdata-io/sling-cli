@@ -250,7 +250,7 @@ func (c *Connection) URL() string {
 // Close closes the connection
 func (c *Connection) Close() error {
 	// remove from cache
-	connCache.Remove(c.Name)
+	defer connCache.Remove(c.Hash())
 
 	if c.Database != nil {
 		return c.Database.Close()
@@ -265,13 +265,17 @@ func (c *Connection) Close() error {
 var connCache = cmap.New[*Connection]()
 
 func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
+	return c.AsDatabaseContext(c.Context().Ctx, cache...)
+}
+
+func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Name); ok {
+		if cc, ok := connCache.Get(c.Hash()); ok {
 			if cc.Database != nil {
 				return cc.Database, nil
 			}
@@ -279,30 +283,34 @@ func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err erro
 
 		if c.Database == nil {
 			c.Database, err = database.NewConnContext(
-				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 			)
 			if err != nil {
 				return
 			}
-			connCache.Set(c.Name, c) // cache
+			connCache.Set(c.Hash(), c) // cache
 		}
 
 		return c.Database, nil
 	}
 
 	return database.NewConnContext(
-		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 
 func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error) {
+	return c.AsFileContext(c.Context().Ctx, cache...)
+}
+
+func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc filesys.FileSysClient, err error) {
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
 
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Name); ok {
+		if cc, ok := connCache.Get(c.Hash()); ok {
 			if cc.File != nil {
 				return cc.File, nil
 			}
@@ -310,19 +318,19 @@ func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error)
 
 		if c.File == nil {
 			c.File, err = filesys.NewFileSysClientFromURLContext(
-				c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 			)
 			if err != nil {
 				return
 			}
-			connCache.Set(c.Name, c) // cache
+			connCache.Set(c.Hash(), c) // cache
 		}
 
 		return c.File, nil
 	}
 
 	return filesys.NewFileSysClientFromURLContext(
-		c.Context().Ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
 }
 

@@ -65,6 +65,10 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 		cnt = df.Count()
+
+		df.SyncColumns()
+		df.SyncStats()
+
 	} else if cfg.Options.StdOut {
 		// apply column casing
 		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
@@ -814,7 +818,7 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	// push to temp duck file
 	var duckConn database.Connection
 
-	tempTable, _ := database.ParseTableName("main.sling_parquet_temp", dbio.TypeDbDuckDb)
+	tempTable, _ := database.ParseTableName("main.sling_temp", dbio.TypeDbDuckDb)
 	folder := path.Join(env.GetTempFolder(), "duckdb", g.RandSuffix(tempTable.Name, 3))
 	defer env.RemoveAllLocalTempFile(folder)
 
@@ -850,8 +854,9 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	duck := duckConn.(*database.DuckDbConn).DuckDb()
 
 	copyOptions := iop.DuckDbCopyOptions{
-		Compression:        string(g.PtrVal(t.Config.Target.Options.Compression)),
-		PartitionFields:    extractPartFields(uri),
+		Format:             t.Config.Target.ObjectFileFormat(),
+		Compression:        g.PtrVal(t.Config.Target.Options.Compression),
+		PartitionFields:    iop.ExtractPartitionFields(uri),
 		PartitionKey:       t.Config.Source.UpdateKey,
 		WritePartitionCols: true,
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
@@ -891,9 +896,20 @@ func writeDataflowViaDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.FileS
 	}
 
 	// remove partition fields from url
-	for _, field := range copyOptions.PartitionFields {
-		uri = strings.ReplaceAll(uri, g.F("/{%s}", field), "")
+	{
+		uri = strings.ReplaceAll(uri, "://", ":/:/:") // placeholder for cleaning
+		for _, field := range copyOptions.PartitionFields {
+			uri = strings.ReplaceAll(uri, g.F("{part_%s}", field), "")
+			for {
+				if !strings.Contains(uri, "//") {
+					break
+				}
+				uri = strings.ReplaceAll(uri, "//", "/") // remove double slashes
+			}
+		}
+		uri = strings.ReplaceAll(uri, ":/:/:", "://") // reverse placeholder
 	}
+
 	bw, err = filesys.CopyFromLocalRecursive(fs, localPath, uri)
 
 	return bw, err
@@ -914,7 +930,7 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 		return err
 	}
 	if rowAffCnt > 0 {
-		g.DebugLow("%d TOTAL INSERTS / UPDATES", rowAffCnt)
+		g.DebugLow("%d rows affected", rowAffCnt)
 	}
 	return nil
 }

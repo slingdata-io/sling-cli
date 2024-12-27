@@ -10,14 +10,14 @@ import (
 	"github.com/flarco/g"
 	"github.com/segmentio/ksuid"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
 // Set in the store/store.go file for history keeping
-var StoreInsert = func(t *TaskExecution) error { return nil }
-var StoreUpdate = func(t *TaskExecution) error { return nil }
+var StoreSet = func(t *TaskExecution) error { return nil }
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {
@@ -153,6 +153,36 @@ func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	} else {
 		t.PBar.SetStatus(progressText)
 	}
+}
+
+func (t *TaskExecution) GetSourceTable() (sTable database.Table, err error) {
+	sTable, err = database.ParseTableName(t.Config.Source.Stream, t.Config.SrcConn.Type)
+	if err != nil {
+		err = g.Error(err, "Could not parse source stream text")
+	} else if !sTable.IsQuery() && sTable.Schema == "" {
+		sTable.Schema = cast.ToString(t.Config.Source.Data["schema"])
+	}
+	return
+}
+
+func (t *TaskExecution) GetTargetTable(tempTableSuffix ...string) (tTable database.Table, err error) {
+	tTable, err = database.ParseTableName(t.Config.Target.Object, t.Config.TgtConn.Type)
+	if err != nil {
+		err = g.Error(err, "Could not parse target object")
+	} else if tTable.Schema == "" {
+		tTable.Schema = cast.ToString(t.Config.Target.Data["schema"])
+	}
+
+	// add suffix to table name (for temp table)
+	if len(tempTableSuffix) > 0 {
+		tempTableSuffix[0] = strings.ToLower(tempTableSuffix[0])
+		if t.Config.TgtConn.Type.DBNameUpperCase() {
+			tempTableSuffix[0] = strings.ToUpper(tempTableSuffix[0])
+		}
+		tTable.Name = tTable.Name + tempTableSuffix[0]
+	}
+
+	return
 }
 
 // GetTotalBytes gets the inbound/oubound bytes of the task
@@ -388,10 +418,10 @@ func (t *TaskExecution) Cleanup() {
 }
 
 // shouldWriteViaDuckDB determines whether we should use duckdb
-// at the moment, use duckdb only for partitioned target parquet files
+// at the moment, use duckdb only for partitioned target parquet or csv files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
-	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet) {
-		return len(extractPartFields(uri)) > 0
+	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet, dbio.FileTypeCsv) {
+		return len(iop.ExtractPartitionFields(uri)) > 0
 	}
 	return false
 }
@@ -399,6 +429,16 @@ func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
 // isIncrementalWithUpdateKey means it has an update_key and is incremental mode
 func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
+}
+
+// isIncrementalStateWithUpdateKey means it has an update_key, with provided sling state and is incremental mode
+func (t *TaskExecution) isIncrementalStateWithUpdateKey() bool {
+	return os.Getenv("SLING_STATE") != "" && t.isIncrementalWithUpdateKey()
+}
+
+// hasStateWithUpdateKey means it has an update_key and with provided sling state
+func (t *TaskExecution) hasStateWithUpdateKey() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey()
 }
 
 func (t *TaskExecution) getOptionsMap() (options map[string]any) {

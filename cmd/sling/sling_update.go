@@ -207,17 +207,16 @@ func checkUpdate(force bool) {
 
 func getSlingPackage() string {
 	slingPackage := strings.ToLower(os.Getenv("SLING_PACKAGE"))
-	execFileName, _ := osext.Executable()
 	switch {
 	case slingPackage != "":
 		_ = slingPackage
 	case os.Getenv("SLING_SOURCE") != "" && os.Getenv("SLING_TARGET") != "":
 		slingPackage = "dagster"
-	case strings.Contains(execFileName, "homebrew"):
+	case strings.Contains(env.Executable, "homebrew"):
 		slingPackage = "homebrew"
-	case strings.Contains(execFileName, "scoop"):
+	case strings.Contains(env.Executable, "scoop"):
 		slingPackage = "scoop"
-	case strings.Contains(execFileName, "python") || strings.Contains(execFileName, "virtualenvs"):
+	case strings.Contains(env.Executable, "python") || strings.Contains(env.Executable, "virtualenvs"):
 		slingPackage = "python"
 	default:
 		slingPackage = "binary"

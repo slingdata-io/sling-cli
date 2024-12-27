@@ -17,10 +17,16 @@ import (
 )
 
 func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
-	if conn.GetProp("copy_method") == "named_pipes" {
+	switch conn.GetProp("copy_method") {
+	case "named_pipes":
 		return conn.importViaNamedPipe(tableFName, df)
+	case "csv_files":
+		return conn.importViaTempCSVs(tableFName, df)
+	case "http_server":
+		return conn.importViaHTTP(tableFName, df)
+	default:
+		return conn.importViaTempCSVs(tableFName, df)
 	}
-	return conn.importViaTempCSVs(tableFName, df)
 }
 
 func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) (count uint64, err error) {

@@ -8,6 +8,14 @@ core:
   modify_column: "{column} {type}"
   update: alter stream {table} update {set_fields} where {pk_fields_equal}
   insert_from_table: insert into {tgt_table} ({tgt_fields}) select {src_fields} from table({src_table})
+  update_where_not_exist: |
+    alter stream {target_table}
+    update {set_fields}
+    where {where}
+      and not exists (
+          select 1 from {temp_table} 
+          where {join_where}
+      )
 
 metadata:
   current_database: select current_database()
@@ -239,6 +247,7 @@ function:
   checksum_string: char_length({field})
   checksum_datetime: to_unix_timestamp64_nano(toDateTime64({field}, 6)) / 1000
   checksum_decimal: ABS(CAST({field} as nullable(int64)))
+  now: now()
 
 variable:
   # bind_string: "@p{c}"

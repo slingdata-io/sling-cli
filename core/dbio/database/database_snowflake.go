@@ -1162,6 +1162,8 @@ func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Col
 	switch {
 	case srcCol.IsString() && srcDbType != "VARIANT" && tgtDbType == "VARIANT":
 		selectStr = g.F("parse_json(%s::string) as %s", qName, qName)
+	case srcCol.IsString() && srcDbType != "FIXED" && tgtDbType == "FIXED":
+		selectStr = g.F("to_decimal(%s::string, %d, %d) as %s", qName, ddlMaxDecLength, 10, qName)
 	case srcCol.IsString() && !tgtCol.IsString():
 		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
 	case !srcCol.IsString() && tgtCol.IsString():

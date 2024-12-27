@@ -27,6 +27,7 @@ type ReplicationConfig struct {
 	// Tasks are compiled tasks
 	Tasks    []*Config `json:"tasks"`
 	Compiled bool      `json:"compiled"`
+	FailErr  string    // error string to fail all (e.g. when the first tasks fails to connect)
 
 	streamsOrdered []string
 	originalCfg    string
@@ -159,6 +160,22 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) {
+			// use a clone stream to apply defaults
+			s := ReplicationStreamConfig{}
+			if stream != nil {
+				s = *stream
+			}
+
+			// apply default
+			SetStreamDefaults(name, &s, *rd)
+
+			// if the target object doesn't have runtime variables, consider as single
+			if !s.ObjectHasStreamVars() {
+				// if file max vars are zero as well for file targets, auto-set as single
+				value := g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxBytes) == 0 && g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxRows) == 0
+				stream.Single = g.Ptr(value)
+				continue
+			}
 			patterns = append(patterns, name)
 		}
 	}
@@ -592,6 +609,21 @@ type ReplicationStreamConfig struct {
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
+}
+
+func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
+	vars := []string{
+		"stream_table",
+		"stream_name",
+		"stream_file_path",
+		"stream_file_name",
+	}
+	for _, v := range vars {
+		if strings.Contains(s.Object, g.F("{%s}", v)) {
+			return true
+		}
+	}
+	return false
 }
 
 func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {

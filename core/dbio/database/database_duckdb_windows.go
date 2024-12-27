@@ -7,5 +7,12 @@ import (
 )
 
 func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
-	return conn.importViaTempCSVs(tableFName, df)
+	switch conn.GetProp("copy_method") {
+	case "csv_files":
+		return conn.importViaTempCSVs(tableFName, df)
+	case "http_server":
+		return conn.importViaHTTP(tableFName, df)
+	default:
+		return conn.importViaTempCSVs(tableFName, df)
+	}
 }

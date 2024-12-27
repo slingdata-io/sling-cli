@@ -18,12 +18,7 @@ var Store = cmap.New[*Execution]()
 
 func init() {
 
-	sling.StoreInsert = func(t *sling.TaskExecution) error {
-		StoreSet(t)
-		return nil
-	}
-
-	sling.StoreUpdate = func(t *sling.TaskExecution) error {
+	sling.StoreSet = func(t *sling.TaskExecution) error {
 		StoreSet(t)
 		return nil
 	}

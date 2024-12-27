@@ -192,6 +192,26 @@ func (fns FileNodes) After(ts time.Time) (nodes FileNodes) {
 	return
 }
 
+// Files returns only files (no folders)
+func (fns FileNodes) Files() (nodes FileNodes) {
+	for _, fn := range fns {
+		if !fn.IsDir {
+			nodes = append(nodes, fn)
+		}
+	}
+	return
+}
+
+// Folders returns only folders (no files)
+func (fns FileNodes) Folders() (nodes FileNodes) {
+	for _, fn := range fns {
+		if fn.IsDir {
+			nodes = append(nodes, fn)
+		}
+	}
+	return
+}
+
 // Columns returns a column map
 func (fns FileNodes) Columns() map[string]iop.Column {
 	columns := map[string]iop.Column{}

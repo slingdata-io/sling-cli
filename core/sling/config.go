@@ -731,6 +731,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 			table.Schema = cast.ToString(cfg.Target.Data["schema"])
 		}
 		cfg.Target.Object = table.FullName()
+
+		// fill in temp table name if specified
+		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
+			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
+		}
 	}
 
 	if connection.SchemeType(cfg.Target.Object).IsFile() {
@@ -991,6 +996,7 @@ type Config struct {
 	Prepared bool                  `json:"-" yaml:"-"`
 
 	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
+	IncrementalGTE bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -1329,6 +1335,7 @@ type TargetOptions struct {
 	MaxDecimals      *int                `json:"max_decimals,omitempty" yaml:"max_decimals,omitempty"`
 	UseBulk          *bool               `json:"use_bulk,omitempty" yaml:"use_bulk,omitempty"`
 	IgnoreExisting   *bool               `json:"ignore_existing,omitempty" yaml:"ignore_existing,omitempty"`
+	DeleteMissing    *string             `json:"delete_missing,omitempty" yaml:"delete_missing,omitempty"`
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
@@ -1472,6 +1479,10 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.Compression == nil {
 		o.Compression = targetOptions.Compression
 	}
+	if o.Compression != nil {
+		o.Compression = o.Compression.Normalize()
+	}
+
 	if o.Format == dbio.FileTypeNone {
 		o.Format = targetOptions.Format
 	}
@@ -1492,6 +1503,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.IgnoreExisting == nil {
 		o.IgnoreExisting = targetOptions.IgnoreExisting
+	}
+	if o.DeleteMissing == nil {
+		o.DeleteMissing = targetOptions.DeleteMissing
 	}
 	if o.PreSQL == nil {
 		o.PreSQL = targetOptions.PreSQL

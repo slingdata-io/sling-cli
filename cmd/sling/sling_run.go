@@ -27,6 +27,8 @@ var (
 	totalBytes        = uint64(0)
 	constraintFails   = uint64(0)
 	lookupReplication = func(id string) (r sling.ReplicationConfig, e error) { return }
+
+	runReplication func(string, *sling.Config, ...string) error = replicationRun
 )
 
 func processRun(c *g.CliSC) (ok bool, err error) {
@@ -355,6 +357,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	if cast.ToBool(cfg.Env["SLING_DRY_RUN"]) || cast.ToBool(os.Getenv("SLING_DRY_RUN")) {
 		return nil
+	} else if replication.FailErr != "" {
+		task.Status = sling.ExecStatusError
+		task.Err = g.Error(replication.FailErr)
 	}
 
 	// set log sink
@@ -362,8 +367,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.AppendOutput(ll)
 	}
 
-	sling.StoreInsert(task)       // insert into store
-	defer sling.StoreUpdate(task) // update into store after
+	sling.StoreSet(task) // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -372,6 +376,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	// set context
 	task.Context = ctx
+
+	// set into store after
+	defer sling.StoreSet(task)
 
 	// run task
 	setTM()
@@ -413,7 +420,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	return nil
 }
 
-func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
+func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ...string) (err error) {
 	startTime := time.Now()
 
 	replication, err := sling.LoadReplicationConfigFromFile(cfgPath)
@@ -482,7 +489,7 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 			// if a connection issue, stop
 			if e, ok := err.(*g.ErrType); ok && strings.Contains(e.Debug(), "Could not connect to ") {
-				break
+				replication.FailErr = g.ErrMsg(e)
 			}
 		} else {
 			successes++
@@ -500,7 +507,9 @@ func runReplication(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		failureStr = env.GreenString(failureStr)
 	}
 
-	g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+	if streamCnt > 1 {
+		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+	}
 
 	return eG.Err()
 }
@@ -537,6 +546,8 @@ func parsePayload(payload string, validate bool) (options map[string]any, err er
 
 // setProjectID attempts to get the first sha of the repo
 func setProjectID(cfgPath string) {
+	projectID = os.Getenv("SLING_PROJECT_ID")
+
 	if cfgPath == "" && !strings.HasPrefix(cfgPath, "{") {
 		return
 	}

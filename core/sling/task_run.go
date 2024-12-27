@@ -25,12 +25,20 @@ import (
 // for each replication steps
 var connPool = map[string]database.Connection{}
 
-var start time.Time
-var slingLoadedAtColumn = "_sling_loaded_at"
-var slingStreamURLColumn = "_sling_stream_url"
-var slingRowNumColumn = "_sling_row_num"
-var slingRowIDColumn = "_sling_row_id"
-var slingExecIDColumn = "_sling_exec_id"
+var (
+	start                time.Time
+	slingLoadedAtColumn  = "_sling_loaded_at"
+	slingDeletedAtColumn = "_sling_deleted_at"
+	slingStreamURLColumn = "_sling_stream_url"
+	slingRowNumColumn    = "_sling_row_num"
+	slingRowIDColumn     = "_sling_row_id"
+	slingExecIDColumn    = "_sling_exec_id"
+)
+
+var deleteMissing func(*TaskExecution, database.Connection, database.Connection) error = func(_ *TaskExecution, _, _ database.Connection) error {
+	g.Warn("use the official release of sling-cli to use delete_missing")
+	return nil
+}
 
 func init() {
 	// we need a webserver to get the pprof webserver
@@ -65,7 +73,7 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
 
-	if StoreUpdate != nil {
+	if StoreSet != nil {
 		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker5s.Stop()
@@ -77,7 +85,7 @@ func (t *TaskExecution) Execute() error {
 				case <-t.Context.Ctx.Done():
 					return
 				case <-ticker5s.C:
-					StoreUpdate(t)
+					StoreSet(t)
 				}
 			}
 		}()
@@ -101,7 +109,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StoreUpdate(t)
+		StoreSet(t)
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
@@ -135,7 +143,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StoreUpdate(t)
+		StoreSet(t)
 
 		// warn constrains
 		if df := t.Df(); df != nil {
@@ -255,27 +263,15 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
-	srcProps := append(
-		g.MapToKVArr(t.Config.SrcConn.DataS()),
-		g.MapToKVArr(g.ToMapString(options))...,
-	)
+	// merge options
+	for k, v := range options {
+		t.Config.SrcConn.Data[k] = v
+	}
 
-	conn, err = database.NewConnContext(ctx, t.Config.SrcConn.URL(), srcProps...)
+	conn, err = t.Config.SrcConn.AsDatabaseContext(ctx, t.isUsingPool())
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
-	}
-
-	// look for conn in cache
-	if c, ok := connPool[t.Config.SrcConn.Hash()]; ok {
-		// update properties
-		c.Base().ReplaceProps(conn.Props())
-		return c, nil
-	}
-
-	// cache connection is using replication from CLI
-	if t.isUsingPool() {
-		connPool[t.Config.SrcConn.Hash()] = conn
 	}
 
 	err = conn.Connect()
@@ -296,27 +292,16 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 
 	options := g.M()
 	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
-	tgtProps := append(
-		g.MapToKVArr(t.Config.TgtConn.DataS()), g.MapToKVArr(g.ToMapString(options))...,
-	)
 
-	// Connection context should be different than task context
-	conn, err = database.NewConnContext(ctx, t.Config.TgtConn.URL(), tgtProps...)
+	// merge options
+	for k, v := range options {
+		t.Config.TgtConn.Data[k] = v
+	}
+
+	conn, err = t.Config.TgtConn.AsDatabaseContext(ctx, t.isUsingPool())
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
-	}
-
-	// look for conn in cache
-	if c, ok := connPool[t.Config.TgtConn.Hash()]; ok {
-		// update properties
-		c.Base().ReplaceProps(conn.Props())
-		return c, nil
-	}
-
-	// cache connection is using replication from CLI
-	if t.isUsingPool() {
-		connPool[t.Config.TgtConn.Hash()] = conn
 	}
 
 	err = conn.Connect()
@@ -379,6 +364,16 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		return
 	}
 
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
+	}
+
 	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
 	err = srcConn.Connect()
 	if err != nil {
@@ -412,7 +407,17 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	t.SetProgress("wrote %d rows [%s r/s] to %s", cnt, getRate(cnt), t.getTargetObjectValue())
 
-	err = t.df.Err()
+	if err = t.df.Err(); err != nil {
+		err = g.Error(err, "Error running runDbToFile")
+	}
+
+	if cnt > 0 && t.hasStateWithUpdateKey() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
+	}
+
 	return
 
 }
@@ -453,7 +458,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
 
-		if err = getIncrementalValue(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
+		if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -593,9 +598,15 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// get watermark
-	if t.isIncrementalWithUpdateKey() {
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
-		if err = getIncrementalValue(t.Config, tgtConn, srcConn.GetType()); err != nil {
+		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
@@ -637,5 +648,24 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error running runDbToDb")
 	}
+
+	if cnt > 0 && t.hasStateWithUpdateKey() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
+	}
+
+	// if delete missing is specified with incremental mode
+	if t.Config.Target.Options.DeleteMissing != nil {
+		if g.In(t.Config.Mode, IncrementalMode) && len(t.Config.Source.PrimaryKey()) > 0 {
+			if err = deleteMissing(t, srcConn, tgtConn); err != nil {
+				err = g.Error(err, "could not delete missing records")
+			}
+		} else {
+			g.Warn("must set mode to incremental with a primary-key to use `delete_missing`")
+		}
+	}
+
 	return
 }

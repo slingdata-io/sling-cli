@@ -52,6 +52,16 @@ var AllCompressorType = []struct {
 	{ZStandardCompressorType, "ZStandardCompressorType"},
 }
 
+// Normalize converts to lowercase
+func (ct CompressorType) Normalize() *CompressorType {
+	return g.Ptr(CompressorType(ct.String()))
+}
+
+// String converts to lowercase
+func (ct CompressorType) String() string {
+	return strings.ToLower(string(ct))
+}
+
 // CompressorTypePtr returns a pointer to the CompressorType value passed in.
 func CompressorTypePtr(v CompressorType) *CompressorType {
 	return &v

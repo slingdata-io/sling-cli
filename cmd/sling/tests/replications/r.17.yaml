@@ -1,0 +1,18 @@
+source: postgres
+target: aws_s3
+
+defaults:
+  mode: full-refresh
+
+streams:
+  public.test1k_postgres_pg:
+    update_key: update_dt
+    primary_key: id
+    mode: incremental
+    object: test/{stream_name}_{format}/{part_year}/{part_month}
+    target_options:
+      format: '{format}'
+
+env:
+  SLING_STATE: AWS_S3/state/r.17/${FORMAT}
+  format: ${FORMAT}

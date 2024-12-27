@@ -312,8 +312,8 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	}
 
 	sqlTempl := `
-	ALTER TABLE {tgt_table}
-	DELETE where ({pk_fields}) in (
+	alter table {tgt_table}
+	delete where ({pk_fields}) in (
 			select {pk_fields}
 			from {src_table} src
 	)

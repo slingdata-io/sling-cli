@@ -682,8 +682,9 @@ func (duck *DuckDb) initScanner() {
 }
 
 type DuckDbCopyOptions struct {
-	Compression        string
-	PartitionFields    []string // part_year, part_month, part_day, etc.
+	Format             dbio.FileType
+	Compression        CompressorType
+	PartitionFields    []PartitionLevel // part_year, part_month, part_day, etc.
 	PartitionKey       string
 	WritePartitionCols bool
 	FileSizeBytes      int64
@@ -699,40 +700,50 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 
 	// validate PartitionLevels
 	for _, pl := range options.PartitionFields {
-		if !g.In(pl, "part_year", "part_month", "part_week", "part_day", "part_hour", "part_minute", "part_year_month") {
+		if !pl.IsValid() {
 			return sql, g.Error("invalid partition level: %s", pl)
 		} else if options.PartitionKey == "" {
 			return "", g.Error("missing partition key")
 		}
 
-		datePart := strings.TrimPrefix(pl, "part_")
 		pe := partExpression{
-			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), datePart),
-			expression: g.F("date_part('%s', %s)", datePart, options.PartitionKey),
+			alias:      g.F("%s_%s", dbio.TypeDbDuckDb.Unquote(options.PartitionKey), pl),
+			expression: g.F("date_part('%s', %s)", pl, options.PartitionKey),
 		}
 
 		switch pl {
-		case "part_year_month":
+		case PartitionLevelYear:
+			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y")
+		case PartitionLevelYearMonth:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%Y-%m")
-		case "part_month":
+		case PartitionLevelMonth:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%m")
-		case "part_week":
+		case PartitionLevelWeek:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%V")
-		case "part_day":
+		case PartitionLevelDay:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%d")
-		case "part_hour":
+		case PartitionLevelHour:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%H")
-		case "part_minute":
+		case PartitionLevelMinute:
 			pe.expression = g.F("strftime(%s, '%s')", options.PartitionKey, "%M")
+		default:
+			return sql, g.Error("invalid partition field: %s", pl)
 		}
 
 		partExpressions = append(partExpressions, pe)
 	}
 
 	// validate compression
-	options.Compression = strings.ToLower(options.Compression)
-	if g.In(options.Compression, "", "none", "auto") {
-		options.Compression = "snappy"
+	fileExtensionExpr := ""
+	if options.Format == dbio.FileTypeParquet {
+		if g.In(options.Compression, "", "none", "auto") {
+			options.Compression = SnappyCompressorType
+		}
+	}
+	if options.Format == dbio.FileTypeCsv {
+		if g.In(options.Compression, GzipCompressorType) {
+			fileExtensionExpr = g.F("file_extension 'csv.gz',")
+		}
 	}
 
 	fileSizeBytesExpr := ""
@@ -750,22 +761,26 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 		}
 
 		sql = g.R(
-			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet_partitions"),
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_to_local_partitions"),
 			"table", fromTable,
 			"local_path", toLocalPath,
+			"format", string(options.Format),
 			"file_size_bytes_expr", fileSizeBytesExpr,
+			"file_extension_expr", fileExtensionExpr,
 			"partition_expressions", strings.Join(partSqlExpressions, ", "),
 			"partition_columns", strings.Join(partSqlColumns, ", "),
-			"compression", cast.ToString(options.Compression),
+			"compression", string(options.Compression),
 			"write_partition_columns", cast.ToString(options.WritePartitionCols),
 		)
 	} else {
 		sql = g.R(
-			dbio.TypeDbDuckDb.GetTemplateValue("core.export_parquet"),
+			dbio.TypeDbDuckDb.GetTemplateValue("core.export_to_local"),
 			"table", fromTable,
 			"local_path", toLocalPath,
+			"format", string(options.Format),
 			"file_size_bytes_expr", fileSizeBytesExpr,
-			"compression", cast.ToString(options.Compression),
+			"file_extension_expr", fileExtensionExpr,
+			"compression", string(options.Compression),
 		)
 	}
 

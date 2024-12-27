@@ -255,6 +255,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		env, _ := g.UnmarshalMap(cast.ToString(rec["env"]))
 
 		if val := cast.ToString(rec["source_primary_key"]); val != "" {
+			if g.In(connType, dbio.TypeDbStarRocks) {
+				val = "id" // starrocks can't have a decimal as PK
+			}
 			streamConfig["primary_key"] = strings.Split(val, ",")
 		}
 		if val := cast.ToString(rec["source_update_key"]); val != "" {
@@ -1094,7 +1097,7 @@ streams:
 		// Fifth Stream: file://tests/files/*.csv
 		// wildcard expanded
 		config := replication.Tasks[4]
-		assert.True(t, strings.HasPrefix(config.Source.Stream, "tests/files/"))
+		assert.True(t, strings.HasPrefix(config.Source.Stream, "file://tests/files/"))
 		assert.NotEqual(t, config.Source.Stream, "tests/files/*.csv")
 		assert.Equal(t, `"my_schema3"."table3"`, config.Target.Object)
 		// g.Info(g.Pretty(config))

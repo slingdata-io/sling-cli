@@ -121,6 +121,7 @@ type ColumnStats struct {
 	TotalCnt     int64  `json:"total_cnt"`
 	UniqCnt      int64  `json:"uniq_cnt"`
 	Checksum     uint64 `json:"checksum"`
+	LastVal      any    `json:"-"` // last non-empty value. useful for state incremental
 }
 
 func (cs *ColumnStats) DistinctPercent() float64 {
@@ -1221,17 +1222,17 @@ func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType Colum
 }
 
 // FormatValue format as sql expression (adds quotes)
-func FormatValue(val any, column Column, connType dbio.Type) (newVal string) {
+func FormatValue(val any, columnType ColumnType, connType dbio.Type) (newVal string) {
 	template, _ := connType.Template()
 
-	if val == nil {
+	if val == nil || val == "" {
 		return ""
-	} else if column.Type.IsDate() {
+	} else if columnType.IsDate() {
 		newVal = g.R(
 			template.Variable["date_layout_str"],
 			"value", cast.ToTime(val).Format(template.Variable["date_layout"]),
 		)
-	} else if column.Type.IsDatetime() {
+	} else if columnType.IsDatetime() {
 		// set timestampz_layout_str and timestampz_layout if missing
 		if _, ok := template.Variable["timestampz_layout_str"]; !ok {
 			template.Variable["timestampz_layout_str"] = template.Variable["timestamp_layout_str"]
@@ -1240,7 +1241,7 @@ func FormatValue(val any, column Column, connType dbio.Type) (newVal string) {
 			template.Variable["timestampz_layout"] = template.Variable["timestamp_layout"]
 		}
 
-		if column.Type == TimestampzType {
+		if columnType == TimestampzType {
 			newVal = g.R(
 				template.Variable["timestampz_layout_str"],
 				"value", cast.ToTime(val).Format(template.Variable["timestampz_layout"]),
@@ -1251,7 +1252,7 @@ func FormatValue(val any, column Column, connType dbio.Type) (newVal string) {
 				"value", cast.ToTime(val).Format(template.Variable["timestamp_layout"]),
 			)
 		}
-	} else if column.Type.IsNumber() {
+	} else if columnType.IsNumber() {
 		newVal = cast.ToString(val)
 	} else {
 		newVal = strings.ReplaceAll(cast.ToString(val), `'`, `''`)

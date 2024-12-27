@@ -170,20 +170,20 @@ func NewStreamProcessor() *StreamProcessor {
 	sp.dateLayouts = []string{
 		"2006-01-02",
 		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.000",
-		"2006-01-02 15:04:05.000000",
-		"2006-01-02T15:04:05.000Z",
-		"2006-01-02T15:04:05.000000Z",
-		"2006-01-02 15:04:05.000 Z",    // snowflake export format
-		"2006-01-02 15:04:05.000000 Z", // snowflake export format
+		"2006-01-02 15:04:05.999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02T15:04:05.999Z",
+		"2006-01-02T15:04:05.999999Z",
+		"2006-01-02 15:04:05.999 Z",    // snowflake export format
+		"2006-01-02 15:04:05.999999 Z", // snowflake export format
 		"02-Jan-06",
 		"02-Jan-06 15:04:05",
 		"02-Jan-06 03:04:05 PM",
-		"02-Jan-06 03.04.05.000000 PM",
+		"02-Jan-06 03.04.05.999999 PM",
 		"2006-01-02T15:04:05-0700",
 		"2006-01-02 15:04:05-07",        // duckdb
-		"2006-01-02 15:04:05.000-07",    // duckdb
-		"2006-01-02 15:04:05.000000-07", // duckdb
+		"2006-01-02 15:04:05.999-07",    // duckdb
+		"2006-01-02 15:04:05.999999-07", // duckdb
 		time.RFC3339,
 		"2006-01-02T15:04:05",  // iso8601 without timezone
 		"2006-01-02T15:04:05Z", // iso8601 with timezone
@@ -405,7 +405,11 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 						g.Warn("makeFunc not found for transform '%s'. Please contact support", tName)
 						continue
 					}
-					err := t.makeFunc(&t, param)
+					var params []any
+					for _, p := range strings.Split(param, ",") {
+						params = append(params, strings.TrimSpace(p))
+					}
+					err := t.makeFunc(&t, params...)
 					if err != nil {
 						g.Warn("invalid parameter for transform '%s' (%s)", tName, err.Error())
 					} else {
@@ -852,7 +856,14 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			} else {
 				cs.DateTimeZCnt++
 			}
-			sp.rowChecksum[i] = uint64(dVal.UnixMicro())
+			em := dVal.UnixMicro()
+			sp.rowChecksum[i] = uint64(em)
+			if em > cs.Max {
+				cs.Max = em
+			}
+			if em < cs.Min {
+				cs.Min = em
+			}
 		}
 	}
 	cs.TotalCnt++
@@ -903,9 +914,9 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		} else if sp.Config.DatetimeFormat != "" && strings.ToLower(sp.Config.DatetimeFormat) != "auto" {
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
-			return tVal.Format("2006-01-02 15:04:05.000000") + " +00"
+			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"
 		}
-		return tVal.Format("2006-01-02 15:04:05.000000 -07")
+		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
 	default:
 		return cast.ToString(val)
 	}
@@ -947,7 +958,7 @@ func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...C
 		if tVal.IsZero() {
 			return ""
 		}
-		return tVal.UTC().Format("2006-01-02 15:04:05.000000") + " +00"
+		return tVal.UTC().Format("2006-01-02 15:04:05.999999") + " +00"
 	default:
 		return cast.ToString(val)
 	}
@@ -986,7 +997,7 @@ func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType 
 	case typ.IsDate():
 		return "2006-01-02" // as a mask
 	case typ.IsDatetime():
-		return "2006-01-02 15:04:05.000000 +00" // as a mask
+		return "2006-01-02 15:04:05.999999 +00" // as a mask
 	default:
 		return cast.ToString(val)
 	}
@@ -1233,6 +1244,9 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 	for i, val := range row {
 		col := &columns[i]
 		row[i] = sp.CastVal(i, val, col)
+		if row[i] != nil && row[i] != "" {
+			sp.colStats[i].LastVal = row[i]
+		}
 
 		// evaluate constraint
 		if col.Constraint != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
+	"github.com/kardianos/osext"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -29,6 +30,7 @@ var (
 	HomeDirs       = map[string]string{}
 	envMux         = sync.Mutex{}
 	NoDebugKey     = " /* nD */"
+	Executable     = ""
 )
 
 const (
@@ -46,6 +48,7 @@ func init() {
 
 	HomeDir = SetHomeDir("sling")
 	HomeDirEnvFile = GetEnvFilePath(HomeDir)
+	Executable, _ = osext.Executable()
 
 	// create env file if not exists
 	os.MkdirAll(HomeDir, 0755)

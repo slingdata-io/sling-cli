@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
 	"github.com/flarco/g"
@@ -100,6 +101,11 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 		}
 	}
 
+	// make tls
+	if query.Get("tls") == "custom" {
+		query.Set("tls", conn.GetProp("sling_conn_id"))
+	}
+
 	// reconstruct the url
 	u.RawQuery = query.Encode()
 	u, err = dburl.Parse(u.String())
@@ -109,6 +115,19 @@ func (conn *MySQLConn) GetURL(newURL ...string) string {
 	}
 
 	return u.DSN
+}
+
+func (conn *MySQLConn) Connect(timeOut ...int) (err error) {
+
+	// register tls
+	tlsConfig, err := conn.makeTlsConfig()
+	if err != nil {
+		return g.Error(err, "could not register tls")
+	} else if tlsConfig != nil {
+		mysql.RegisterTLSConfig(conn.GetProp("sling_conn_id"), tlsConfig)
+	}
+
+	return conn.BaseConn.Connect(timeOut...)
 }
 
 func (conn *MySQLConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {

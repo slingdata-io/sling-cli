@@ -3,7 +3,6 @@ package sling
 import (
 	"math"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -95,25 +94,6 @@ func pullTargetTableColumns(cfg *Config, tgtConn database.Connection, force bool
 	return cfg.Target.columns, nil
 }
 
-// extractPartFields extract the partition fields from the given path
-func extractPartFields(path string) []string {
-	// Regex pattern to match {part_*} fields
-	pattern := regexp.MustCompile(`{(part_[^}]+)}`)
-
-	// Find all matches in the path
-	matches := pattern.FindAllStringSubmatch(path, -1)
-
-	// Extract the captured groups (without braces)
-	result := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if len(match) > 1 {
-			result = append(result, match[1])
-		}
-	}
-
-	return result
-}
-
 func pullTargetTempTableColumns(cfg *Config, tgtConn database.Connection, force bool) (cols iop.Columns, err error) {
 	if len(cfg.Target.columns) == 0 || force {
 		cfg.Target.columns, err = tgtConn.GetColumns(cfg.Target.Options.TableTmp)
@@ -188,7 +168,19 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 	return
 }
 
-func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
+var (
+	getIncrementalValueViaState = func(*TaskExecution) (err error) {
+		g.Warn("use the official release of sling-cli to use incremental via sling state")
+		return nil
+	}
+
+	setIncrementalValueViaState = func(*TaskExecution) (err error) {
+		g.Warn("use the official release of sling-cli to use incremental via sling state")
+		return nil
+	}
+)
+
+func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
 	// check if already set from override
 	if cfg.IncrementalVal != "" {
 		return
@@ -253,7 +245,7 @@ func getIncrementalValue(cfg *Config, tgtConn database.Connection, srcConnType d
 		data.Columns[0].Type = iop.DateType // force date type
 	}
 
-	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0], srcConnType)
+	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0].Type, srcConnType)
 
 	return
 }
