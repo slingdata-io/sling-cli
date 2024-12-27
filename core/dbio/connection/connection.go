@@ -250,7 +250,7 @@ func (c *Connection) URL() string {
 // Close closes the connection
 func (c *Connection) Close() error {
 	// remove from cache
-	connCache.Remove(c.Name)
+	defer connCache.Remove(c.Hash())
 
 	if c.Database != nil {
 		return c.Database.Close()
