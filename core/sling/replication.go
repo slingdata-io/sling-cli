@@ -160,8 +160,17 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		if name == "*" {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) {
+			// use a clone stream to apply defaults
+			s := ReplicationStreamConfig{}
+			if stream != nil {
+				s = *stream
+			}
+
+			// apply default
+			SetStreamDefaults(name, &s, *rd)
+
 			// if the target object doesn't have runtime variables, consider as single
-			if !stream.ObjectHasStreamVars() {
+			if !s.ObjectHasStreamVars() {
 				// if file max vars are zero as well for file targets, auto-set as single
 				value := g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxBytes) == 0 && g.PtrVal(g.PtrVal(stream.TargetOptions).FileMaxRows) == 0
 				stream.Single = g.Ptr(value)
