@@ -1111,6 +1111,11 @@ func (conn *BaseConn) ExecMulti(sqls ...string) (result sql.Result, err error) {
 
 // ExecContext runs a sql query with context, returns `error`
 func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interface{}) (result sql.Result, err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		err = g.Error(err, "Could not reconnect")
+		return
+	}
 
 	if strings.TrimSpace(q) == "" {
 		g.Warn("Empty Query")
