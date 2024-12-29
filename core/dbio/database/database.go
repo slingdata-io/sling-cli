@@ -1070,8 +1070,10 @@ func (conn *BaseConn) Rollback() (err error) {
 func (conn *BaseConn) Prepare(query string) (stmt *sql.Stmt, err error) {
 	if conn.tx != nil {
 		stmt, err = conn.tx.Prepare(query)
-	} else {
+	} else if conn.db != nil {
 		stmt, err = conn.db.PrepareContext(conn.Context().Ctx, query)
+	} else {
+		err = g.Error("no connection instance")
 	}
 	if err != nil {
 		err = g.Error(err, "could not prepare statement")
@@ -1125,9 +1127,11 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 	if conn.tx != nil {
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
-	} else {
+	} else if conn.db != nil {
 		conn.LogSQL(q, args...)
 		result, err = conn.db.ExecContext(ctx, q, args...)
+	} else {
+		err = g.Error("no connection instance")
 	}
 	if err != nil {
 		if strings.Contains(q, noDebugKey) {

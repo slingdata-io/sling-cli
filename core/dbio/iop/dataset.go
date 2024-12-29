@@ -20,15 +20,15 @@ import (
 
 // Dataset is a query returned dataset
 type Dataset struct {
-	Result        *sqlx.Rows
-	Columns       Columns
-	Rows          [][]interface{}
-	SQL           string
-	Duration      float64
-	Sp            *StreamProcessor
-	Inferred      bool
-	SafeInference bool
-	NoDebug       bool
+	Result        *sqlx.Rows       `json:"-"`
+	Columns       Columns          `json:"columns"`
+	Rows          [][]any          `json:"rows"`
+	SQL           string           `json:"sql"`
+	Duration      float64          `json:"duration"`
+	Sp            *StreamProcessor `json:"-"`
+	Inferred      bool             `json:"inferred"`
+	SafeInference bool             `json:"safe_inference"`
+	NoDebug       bool             `json:"no_debug"`
 }
 
 // NewDataset return a new dataset
