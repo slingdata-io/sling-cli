@@ -29,6 +29,7 @@ var (
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
 	duckDbEOFMarker    = "___end_of_duckdb_result___"
+	DuckDbURISeparator = "|-|+|"
 )
 
 // DuckDb is a Duck DB compute layer
@@ -120,7 +121,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 	switch scheme {
 	case dbio.TypeFileLocal:
-		return strings.TrimPrefix(uri, "file://")
+		return strings.ReplaceAll(uri, "file://", "")
 
 	case dbio.TypeFileS3:
 		secretKeyMap = map[string]string{
@@ -959,6 +960,11 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	where := ""
 	incrementalWhereCond := "1=1"
 
+	uris := strings.Split(uri, DuckDbURISeparator)
+	for i, val := range uris {
+		uris[i] = g.F("'%s'", val) // add quotes
+	}
+
 	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
 		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
 		where = g.F("where %s", incrementalWhereCond)
@@ -975,6 +981,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 			"incremental_where_cond", incrementalWhereCond,
 			"incremental_value", fsc.IncrementalValue,
 			"uri", uri,
+			"uris", strings.Join(uris, ", "),
 		)
 
 		if fsc.Limit > 0 {
@@ -999,6 +1006,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		g.R(selectStreamScanner, "stream_scanner", streamScanner),
 		"fields", strings.Join(fields, ","),
 		"uri", uri,
+		"uris", strings.Join(uris, ", "),
 		"where", where,
 	))
 

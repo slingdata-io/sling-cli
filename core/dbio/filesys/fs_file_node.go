@@ -10,6 +10,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	"github.com/gobwas/glob"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
@@ -209,6 +210,38 @@ func (fns FileNodes) Folders() (nodes FileNodes) {
 			nodes = append(nodes, fn)
 		}
 	}
+	return
+}
+
+// InferFormat returns the most common file format
+func (fns FileNodes) InferFormat() (format dbio.FileType) {
+	typeCntMap := map[dbio.FileType]int{
+		dbio.FileTypeCsv:     0,
+		dbio.FileTypeJson:    0,
+		dbio.FileTypeParquet: 0,
+	}
+
+	for _, fileType := range lo.Keys(typeCntMap) {
+		ext := fileType.Ext()
+		for _, node := range fns {
+			if node.IsDir {
+				continue
+			}
+			path := node.Path()
+			if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
+				typeCntMap[fileType]++
+			}
+		}
+	}
+
+	max := 0
+	for fileType, cnt := range typeCntMap {
+		if cnt > max {
+			max = cnt
+			format = fileType
+		}
+	}
+
 	return
 }
 

@@ -51,6 +51,7 @@ type FileSysClient interface {
 	WriteDataflowReady(df *iop.Dataflow, url string, fileReadyChn chan FileReady, sc iop.StreamConfig) (bw int64, err error)
 	GetProp(key string, keys ...string) (val string)
 	SetProp(key string, val string)
+	Props() map[string]string
 	MkdirAll(path string) (err error)
 	GetPath(uri string) (path string, err error)
 	Query(uri, sql string) (data iop.Dataset, err error)
@@ -565,7 +566,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	}
 
 	var nodes FileNodes
-	if Cfg.ShouldUseDuckDB() {
+	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 		nodes = FileNodes{FileNode{URI: url}}
 	} else {
 		g.Trace("listing path: %s", url)
@@ -576,7 +577,15 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 		}
 	}
 
-	df, err = GetDataflow(fs.Self(), nodes, Cfg)
+	if Cfg.Format == dbio.FileTypeNone {
+		Cfg.Format = nodes.InferFormat()
+	}
+
+	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
+		df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
+	} else {
+		df, err = GetDataflow(fs.Self(), nodes, Cfg)
+	}
 	if err != nil {
 		err = g.Error(err, "error getting dataflow")
 		return
@@ -1042,6 +1051,76 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 				ds.WaitClosed()
 			}
 		}
+
+	}()
+
+	go df.PushStreamChan(dsCh)
+
+	// wait for first ds to start streaming.
+	// columns need to be populated
+	err = df.WaitReady()
+	if err != nil {
+		return df, g.Error(err)
+	}
+
+	return df, nil
+}
+
+// GetDataflowViaDuckDB returns a dataflow from specified paths in specified FileSysClient
+func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop.FileStreamConfig) (df *iop.Dataflow, err error) {
+	if len(nodes.Files()) == 0 {
+		err = g.Error("Provided 0 files for: %#v", nodes)
+		return
+	}
+
+	df = iop.NewDataflowContext(fs.Context().Ctx, cfg.Limit)
+	dsCh := make(chan *iop.Datastream)
+	fs.setDf(df)
+
+	go func() {
+		defer close(dsCh)
+
+		ds := iop.NewDatastreamContext(fs.Context().Ctx, nil)
+		ds.SafeInference = true
+		ds.SetMetadata(fs.GetProp("METADATA"))
+		ds.Metadata.StreamURL.Value = uri
+		ds.SetConfig(fs.Props())
+
+		go func() {
+			// recover from panic
+			defer func() {
+				if r := recover(); r != nil {
+					err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+					ds.Context.CaptureErr(err)
+				}
+			}()
+
+			// manage concurrency
+			defer fs.Context().Wg.Read.Done()
+			fs.Context().Wg.Read.Add()
+
+			g.Debug("reading datastream from %s [format=%s, nodes=%d]", uri, cfg.Format, len(nodes.Files()))
+
+			uris := strings.Join(nodes.Files().URIs(), iop.DuckDbURISeparator)
+
+			// no reader needed for iceberg, delta, duckdb will handle it
+			cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
+			switch cfg.Format {
+			case dbio.FileTypeParquet:
+				err = ds.ConsumeParquetReaderDuckDb(uris, cfg)
+			case dbio.FileTypeCsv:
+				err = ds.ConsumeCsvReaderDuckDb(uris, cfg)
+			default:
+				err = g.Error("unhandled format %s", cfg.Format)
+			}
+
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "Error consuming reader for %s", uri))
+			}
+
+		}()
+
+		dsCh <- ds
 
 	}()
 

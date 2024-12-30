@@ -85,7 +85,17 @@ type FileStreamConfig struct {
 	Props            map[string]string `json:"props"`
 }
 
+func (sc *FileStreamConfig) ComputeWithDuckDB() bool {
+	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" {
+		return cast.ToBool(val)
+	}
+	return true
+}
+
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
+	if val := sc.ComputeWithDuckDB(); !val {
+		return val
+	}
 	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
 }
 
