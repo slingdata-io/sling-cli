@@ -5,7 +5,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -196,7 +194,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	defer printUpdateAvailable()
 
 runReplication:
-	g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
+
+	g.Info(g.Colorize(g.ColorBlue, "Sling CLI | https://slingdata.io"))
+
 	if replicationCfgPath != "" {
 		//  run replication
 		err = runReplication(replicationCfgPath, cfg, selectStreams...)
