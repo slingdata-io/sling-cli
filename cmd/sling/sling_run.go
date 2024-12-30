@@ -195,7 +195,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 runReplication:
 
-	g.Info(g.Colorize(g.ColorBlue, "Sling CLI | https://slingdata.io"))
+	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
 
 	if replicationCfgPath != "" {
 		//  run replication
