@@ -131,6 +131,8 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"REGION":            "REGION",
 			"SESSION_TOKEN":     "SESSION_TOKEN",
 			"ENDPOINT":          "ENDPOINT",
+			"USE_SSL":           "USE_SSL",
+			"URL_STYLE":         "URL_STYLE",
 		}
 
 		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
@@ -143,8 +145,12 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			secretProps = append(secretProps, "TYPE S3")
 		}
 
-		// clean up endpoint
-		if endpoint := fsProps["ENDPOINT"]; strings.HasPrefix(endpoint, "http") {
+		// set endpoint
+		if endpoint := fsProps["ENDPOINT"]; endpoint != "" {
+			if _, ok := fsProps["USE_SSL"]; !ok && strings.HasPrefix(endpoint, "http://") {
+				fsProps["USE_SSL"] = "false" // default is true
+			}
+			// clean up endpoint scheme
 			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "https://")
 			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "http://")
 		}
