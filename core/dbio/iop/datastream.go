@@ -81,7 +81,8 @@ type FileStreamConfig struct {
 	Format           dbio.FileType     `json:"format"`
 	IncrementalKey   string            `json:"incremental_key"`
 	IncrementalValue string            `json:"incremental_value"`
-	FileSelect       *[]string         `json:"file_select"` // a list of files to include.
+	FileSelect       *[]string         `json:"file_select"`     // a list of files to include.
+	DuckDBFilename   bool              `json:"duckdb_filename"` // stream URL
 	Props            map[string]string `json:"props"`
 }
 
@@ -1508,8 +1509,9 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig
 		return g.Error(err, "could not create ParquetDuckDb")
 	}
 
+	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
@@ -1569,8 +1571,9 @@ func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (e
 		return g.Error(err, "could not create CsvReaderDuckDb")
 	}
 
+	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
 	if err != nil {
 		return g.Error(err, "could not read csv rows")
 	}

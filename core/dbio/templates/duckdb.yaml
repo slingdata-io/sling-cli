@@ -180,9 +180,9 @@ function:
 
   iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
   delta_scanner: delta_scan('{uri}')
-  parquet_scanner: read_parquet([{uris}])
+  parquet_scanner: read_parquet([{uris}]{filename_expr})
   # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
-  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
+  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
 
 variable:
   bool_as: integer

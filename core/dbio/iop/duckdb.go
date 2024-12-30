@@ -608,6 +608,13 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		ds.Columns = columns
 	}
 
+	// handle filename, always last column
+	if cast.ToBool(opts["filename"]) {
+		// rename to _sling_stream_url
+		ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
+		ds.Metadata.StreamURL.Key = "" // so it is not added again
+	}
+
 	ds.Inferred = true
 	ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
 	ds.SetConfig(duck.Props())
@@ -990,6 +997,11 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		g.Warn("duck.MakeScanQuery: format is empty, cannot determine stream_scanner")
 	}
 
+	duckdbFilenameStr := ""
+	if fsc.DuckDBFilename {
+		duckdbFilenameStr = g.F(", filename = true")
+	}
+
 	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(format))
 	if fsc.SQL != "" {
 		sql = g.R(
@@ -998,6 +1010,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 			"incremental_value", fsc.IncrementalValue,
 			"uri", uri,
 			"uris", strings.Join(uris, ", "),
+			"filename_expr", duckdbFilenameStr,
 		)
 
 		if fsc.Limit > 0 {
@@ -1024,6 +1037,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		"uri", uri,
 		"uris", strings.Join(uris, ", "),
 		"where", where,
+		"filename_expr", duckdbFilenameStr,
 	))
 
 	if fsc.Limit > 0 {
