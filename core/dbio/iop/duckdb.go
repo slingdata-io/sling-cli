@@ -133,8 +133,8 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"ENDPOINT":          "ENDPOINT",
 		}
 
-		if strings.Contains(fsProps["endpoint"], "r2.cloudflarestorage.com") {
-			accountID := strings.Split(fsProps["endpoint"], ".")[0]
+		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
+			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
 			secretProps = append(secretProps, "ACCOUNT_ID "+accountID)
 			secretProps = append(secretProps, "TYPE R2")
 			scopeScheme = "r2"
@@ -142,6 +142,16 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		} else {
 			secretProps = append(secretProps, "TYPE S3")
 		}
+
+		// clean up endpoint
+		if endpoint := fsProps["ENDPOINT"]; strings.HasPrefix(endpoint, "http") {
+			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "https://")
+			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "http://")
+		}
+
+		// add default provider chain (https://duckdb.org/docs/extensions/httpfs/s3api.html#credential_chain-provider)
+		secretSQL := dbio.TypeDbDuckDb.GetTemplateValue("core.default_s3_secret")
+		duck.secrets = append(duck.secrets, secretSQL)
 
 	case dbio.TypeFileGoogle:
 		secretKeyMap = map[string]string{

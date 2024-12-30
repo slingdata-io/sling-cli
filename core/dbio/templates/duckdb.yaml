@@ -33,6 +33,12 @@ core:
       write_partition_columns {write_partition_columns},
       partition_by ( {partition_columns} )
     )
+  default_s3_secret: |
+    create or replace secret s3_default (
+        type s3,
+        provider credential_chain,
+        chain 'env;config'
+    )
 
 
 metadata:
@@ -174,7 +180,7 @@ function:
 
   iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
   delta_scanner: delta_scan('{uri}')
-  parquet_scanner: read_parquet([{uris}])
+  parquet_scanner: read_parquet([{uris}], filename = true)
   # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
   csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
 
