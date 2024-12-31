@@ -7,22 +7,49 @@ type HookType string
 type Hook interface {
 	Type() HookType
 	ID() string
-	Execute(*TaskExecution) error
-	ExecuteOnDone(error, *TaskExecution) error
+	Stage() HookStage
+	Execute() error
+	ExecuteOnDone(error) error
 }
 
-type Hooks []any
+type Hooks []Hook
 
-func (hks Hooks) Parse(stage string, te *TaskExecution) (hooks []Hook, err error) {
-	for i, hook := range hks {
-		parsedHook, err := ParseHook(hook, te, g.F("%s-%02d", stage, i+1))
+type HookMap struct {
+	Start []any `json:"start" yaml:"start"`
+	End   []any `json:"end" yaml:"end"`
+	Pre   []any `json:"pre" yaml:"pre"`
+	Post  []any `json:"post" yaml:"post"`
+}
+
+type ParseOptions struct {
+	stage HookStage
+	index int
+	state *RuntimeState
+}
+
+type HookStage string
+
+const (
+	HookStagePre   HookStage = "pre"
+	HookStagePost  HookStage = "post"
+	HookStageStart HookStage = "start"
+	HookStageEnd   HookStage = "end"
+)
+
+var ParseHook = func(any, ParseOptions) (Hook, error) { return nil, nil }
+
+func (hs Hooks) Execute() (err error) {
+	for _, hook := range hs {
+		if !g.In(hook.Type(), "log") {
+			g.Debug(`executing hook "%s" (type: %s)`, hook.ID(), hook.Type())
+		}
+
+		hookErr := hook.Execute()
+		err = hook.ExecuteOnDone(hookErr)
+
 		if err != nil {
-			return nil, g.Error(err, "error making %s-hook", stage)
-		} else if parsedHook != nil {
-			hooks = append(hooks, parsedHook)
+			return g.Error(err, "error executing hook")
 		}
 	}
-	return hooks, nil
+	return nil
 }
-
-var ParseHook = func(any, *TaskExecution, string) (Hook, error) { return nil, nil }

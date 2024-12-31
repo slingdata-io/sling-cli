@@ -1,0 +1,41 @@
+source: postgres
+target: sqlite
+
+defaults:
+  mode: full-refresh
+
+  hooks:
+    start:
+      - type: log
+        message: starting replication!!!!
+        id: start_msg
+
+    end:
+      - type: log
+        level: warn
+        message: |
+          ending replication 👍
+          start_msg: {hooks.start_msg.message}
+          first row => { hooks.table_cnt.result[0] }
+          all rows => { hooks.table_cnt.result }
+          hookState: {runtime_state}
+
+    post:
+      - type: log
+        message: |
+          "hooks.table_cnt.columns" => {hooks.table_cnt.columns}
+
+
+streams:
+  public.test1k_postgres_pg:
+    object: main.test1k_postgres_pg
+    hooks:
+      post:
+        - type: query
+          id: table_cnt
+          conn: sqlite
+          query: select count(1) as cnt, '1' as r2 from main.test1k_postgres_pg
+
+
+  public.my_table1:
+    object: main.my_table1

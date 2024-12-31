@@ -370,7 +370,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.AppendOutput(ll)
 	}
 
-	sling.StoreSet(task) // set into store
+	sling.StateSet(task) // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -381,7 +381,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = ctx
 
 	// set into store after
-	defer sling.StoreSet(task)
+	defer sling.StateSet(task)
 
 	// run task
 	setTM()
@@ -448,6 +448,16 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return
 	}
 
+	// parse hooks
+	startHooks, err := replication.ParseDefaultHook(sling.HookStageStart)
+	if err != nil {
+		return g.Error(err, "could not parse start hooks")
+	}
+	endHooks, err := replication.ParseDefaultHook(sling.HookStageEnd)
+	if err != nil {
+		return g.Error(err, "could not parse end hooks")
+	}
+
 	eG := g.ErrorGroup{}
 	successes := 0
 
@@ -462,6 +472,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	if streamCnt > 1 {
 		g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
+	}
+
+	// run start hooks
+	if err = startHooks.Execute(); err != nil {
+		return g.Error(err, "error executing start hooks")
 	}
 
 	counter := 0
@@ -497,6 +512,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		} else {
 			successes++
 		}
+	}
+
+	// run end hooks
+	if err = endHooks.Execute(); err != nil {
+		eG.Capture(err, "end-hooks")
 	}
 
 	println()

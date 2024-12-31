@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
@@ -13,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -32,6 +34,7 @@ type ReplicationConfig struct {
 	streamsOrdered []string
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
+	state          *RuntimeState
 }
 
 type replicationConfigMaps struct {
@@ -66,6 +69,85 @@ func (rd *ReplicationConfig) JSON() string {
 	}
 
 	return payload
+}
+
+// StateMap returns map for use
+func (rd *ReplicationConfig) RuntimeState() (rs *RuntimeState, err error) {
+	if rd.state != nil {
+		return rd.state, nil
+	}
+
+	now := time.Now()
+	rs = &RuntimeState{
+		Hooks: map[string]map[string]any{},
+		DateTime: DateTimeState{
+			Timestamp: now,
+			FileName:  now.Format("2006_01_02_150405"),
+			Rfc3339:   now.Format(time.RFC3339),
+			Date:      now.Format(time.DateOnly),
+			Datetime:  now.Format(time.DateTime),
+			YYYY:      now.Format("2006"),
+			YY:        now.Format("06"),
+			MMM:       now.Format("Jan"),
+			MM:        now.Format("01"),
+			DD:        now.Format("02"),
+			HH:        now.Format("15"),
+		},
+		Runs:   map[string]*RunState{},
+		Source: ConnState{Name: rd.Source},
+		Target: ConnState{Name: rd.Target},
+	}
+
+	if rd.Compiled {
+		for _, task := range rd.Tasks {
+			fMap, err := task.GetFormatMap()
+			if err != nil {
+				return rs, err
+			}
+
+			// populate source
+			rs.Source.Type = task.SrcConn.Type
+			rs.Source.Kind = task.SrcConn.Type.Kind()
+			rs.Source.Account = cast.ToString(fMap["source_account"])
+			rs.Source.Bucket = cast.ToString(fMap["source_bucket"])
+			rs.Source.Container = cast.ToString(fMap["source_container"])
+
+			// populate target
+			rs.Target.Type = task.TgtConn.Type
+			rs.Target.Kind = task.TgtConn.Type.Kind()
+			rs.Target.Account = cast.ToString(fMap["target_account"])
+			rs.Target.Bucket = cast.ToString(fMap["target_bucket"])
+			rs.Target.Container = cast.ToString(fMap["target_container"])
+
+			key := iop.CleanName(rd.Normalize(task.StreamName))
+			if _, ok := rs.Runs[key]; ok {
+				return rs, g.Error("duplicate cleaned up stream name? %s => %s", task.StreamName, key)
+			}
+
+			rs.Runs[key] = &RunState{
+				Status: ExecStatusCreated,
+				Stream: &StreamState{
+					FileFolder: cast.ToString(fMap["stream_file_folder"]),
+					FileName:   cast.ToString(fMap["stream_file_name"]),
+					FileExt:    cast.ToString(fMap["stream_file_ext"]),
+					FilePath:   cast.ToString(fMap["stream_file_path"]),
+					Name:       cast.ToString(fMap["stream_name"]),
+					Schema:     cast.ToString(fMap["stream_schema"]),
+					Table:      cast.ToString(fMap["stream_table"]),
+				},
+				Object: &ObjectState{
+					Name:   cast.ToString(fMap["object_name"]),
+					Schema: cast.ToString(fMap["object_schema"]),
+					Table:  cast.ToString(fMap["object_table"]),
+				},
+			}
+
+		}
+	}
+
+	rd.state = rs
+
+	return
 }
 
 // MD5 returns a md5 hash of the json payload
@@ -283,6 +365,60 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return nil
 }
 
+func (rd *ReplicationConfig) ParseDefaultHook(stage HookStage) (hooks Hooks, err error) {
+	var hooksRaw []any
+	switch stage {
+	case HookStageStart:
+		hooksRaw = rd.Defaults.Hooks.Start
+	case HookStageEnd:
+		hooksRaw = rd.Defaults.Hooks.End
+	default:
+		return nil, g.Error("invalid default hook stage: %s", stage)
+	}
+
+	if hooksRaw == nil {
+		return
+	}
+
+	for i, hook := range hooksRaw {
+		opts := ParseOptions{stage: stage, index: i, state: rd.state}
+		hook, err := ParseHook(hook, opts)
+		if err != nil {
+			return nil, g.Error(err, "error parsing %s-hook", stage)
+		} else if hook != nil {
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks, nil
+}
+
+func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStreamConfig) (hooks Hooks, err error) {
+	var hooksRaw []any
+	switch stage {
+	case HookStagePre:
+		hooksRaw = rs.Hooks.Pre
+	case HookStagePost:
+		hooksRaw = rs.Hooks.Post
+	default:
+		return nil, g.Error("invalid stream hook stage: %s", stage)
+	}
+
+	if hooksRaw == nil {
+		return
+	}
+
+	for i, hook := range hooksRaw {
+		opts := ParseOptions{stage: stage, index: i, state: rd.state}
+		hook, err := ParseHook(hook, opts)
+		if err != nil {
+			return nil, g.Error(err, "error parsing %s-hook", stage)
+		} else if hook != nil {
+			hooks = append(hooks, hook)
+		}
+	}
+	return hooks, nil
+}
+
 func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
@@ -441,6 +577,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			stream = *rd.Streams[name]
 		}
 		SetStreamDefaults(name, &stream, *rd)
+		stream.replication = rd
 
 		if stream.Object == "" {
 			return g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
@@ -578,6 +715,11 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 	rd.Compiled = true
 
+	// generate state
+	if _, err = rd.RuntimeState(); err != nil {
+		return g.Error(err, "could not make runtime state")
+	}
+
 	g.Trace("len(selectStreams) = %d, len(matchedStreams) = %d, len(replication.Streams) = %d", len(selectStreams), len(matchedStreams), len(rd.Streams))
 	streamCnt := lo.Ternary(len(selectStreams) > 0, len(matchedStreams), len(rd.Streams))
 
@@ -603,8 +745,9 @@ type ReplicationStreamConfig struct {
 	Single        *bool          `json:"single,omitempty" yaml:"single,omitempty"`
 	Transforms    any            `json:"transforms,omitempty" yaml:"transforms,omitempty"`
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
-	PreHooks      Hooks          `json:"pre_hooks,omitempty" yaml:"pre_hooks,omitempty"`
-	PostHooks     Hooks          `json:"post_hooks,omitempty" yaml:"post_hooks,omitempty"`
+	Hooks         HookMap        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
+
+	replication *ReplicationConfig `json:"-" yaml:"-"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -647,8 +790,11 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"pre_hooks":   func() { stream.PreHooks = replicationCfg.Defaults.PreHooks },
-		"post_hooks":  func() { stream.PostHooks = replicationCfg.Defaults.PostHooks },
+		"hooks": func() {
+			stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks))
+			stream.Hooks.Start = nil // stream level does not have start hook
+			stream.Hooks.End = nil   // stream level does not have end hook
+		},
 	}
 
 	for key, setFunc := range defaultSet {

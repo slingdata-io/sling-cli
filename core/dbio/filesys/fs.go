@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gobwas/glob"
@@ -1495,6 +1496,142 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 		return totalBytes, g.Error(err, "Error during recursive copy")
 	}
 
+	if err = copyContext.Err(); err != nil {
+		return totalBytes, g.Error(err, "Error during recursive copy")
+	}
+
+	return totalBytes, nil
+}
+
+// CopyFromRemoteRecursive copies a remote file or directory recursively to a local filesystem
+func CopyFromRemoteRecursive(fs FileSysClient, remotePath string, localPath string) (totalBytes int64, err error) {
+	// Check if source exists by listing files
+	nodes, err := fs.ListRecursive(remotePath)
+	if err != nil {
+		return 0, g.Error(err, "Error accessing remote path: "+remotePath)
+	}
+
+	if len(nodes) == 0 {
+		return 0, g.Error("No files found at remote path: %s", remotePath)
+	}
+
+	// If it's a single file, copy it directly
+	if len(nodes) == 1 && !nodes[0].IsDir {
+		// Create parent directory if it doesn't exist
+		err = os.MkdirAll(localPath, 0755)
+		if err != nil {
+			return 0, g.Error(err, "Error creating local directory: "+localPath)
+		}
+
+		// Get reader from remote file
+		reader, err := fs.GetReader(nodes[0].URI)
+		if err != nil {
+			return 0, g.Error(err, "Error getting reader for: "+nodes[0].URI)
+		}
+
+		// Get the filename from the remote path
+		_, filename := filepath.Split(nodes[0].Path())
+		localFilePath := filepath.Join(localPath, filename)
+
+		// Create local file
+		file, err := os.Create(localFilePath)
+		if err != nil {
+			return 0, g.Error(err, "Error creating local file: "+localFilePath)
+		}
+		defer file.Close()
+
+		// Copy the content
+		written, err := io.Copy(file, reader)
+		if err != nil {
+			return 0, g.Error(err, "Error copying file content for: "+nodes[0].URI)
+		}
+
+		g.Debug("copied %s to %s [%d bytes]", nodes[0].URI, localFilePath, written)
+		return written, nil
+	}
+
+	// Create context for managing concurrency
+	concurrency := cast.ToInt(fs.GetProp("concurrency"))
+	if concurrency == 0 {
+		concurrency = 10
+	}
+	copyContext := g.NewContext(fs.Context().Ctx, concurrency)
+
+	// Create base local directory if it doesn't exist
+	err = os.MkdirAll(localPath, 0755)
+	if err != nil {
+		return 0, g.Error(err, "Error creating local directory: "+localPath)
+	}
+
+	// Copy function for each file
+	copyFile := func(node FileNode) {
+		defer copyContext.Wg.Write.Done()
+
+		// Get relative path from the remote base path
+		remoteFullPath, err := fs.GetPath(node.URI)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting remote path: "+node.URI))
+			return
+		}
+
+		baseRemotePath, err := fs.GetPath(remotePath)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting base remote path: "+remotePath))
+			return
+		}
+
+		relPath := strings.TrimPrefix(remoteFullPath, strings.TrimSuffix(baseRemotePath, "/")+"/")
+		if relPath == "" {
+			// This is the root directory itself
+			return
+		}
+
+		// Construct local file path
+		localFilePath := filepath.Join(localPath, relPath)
+
+		// Create parent directory if it doesn't exist
+		err = os.MkdirAll(filepath.Dir(localFilePath), 0755)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error creating local directory: "+filepath.Dir(localFilePath)))
+			return
+		}
+
+		// Get reader from remote file
+		reader, err := fs.GetReader(node.URI)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting reader for: "+node.URI))
+			return
+		}
+
+		// Create local file
+		file, err := os.Create(localFilePath)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error creating local file: "+localFilePath))
+			return
+		}
+		defer file.Close()
+
+		// Copy the content
+		written, err := io.Copy(file, reader)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error copying file content for: "+node.URI))
+			return
+		}
+
+		atomic.AddInt64(&totalBytes, written)
+		g.Debug("copied %s to %s [%d bytes]", node.URI, localFilePath, written)
+	}
+
+	// Process each file concurrently
+	g.Debug("copying files from %s to %s", remotePath, localPath)
+	for _, node := range nodes {
+		if !node.IsDir {
+			copyContext.Wg.Write.Add()
+			go copyFile(node)
+		}
+	}
+
+	copyContext.Wg.Write.Wait()
 	if err = copyContext.Err(); err != nil {
 		return totalBytes, g.Error(err, "Error during recursive copy")
 	}
