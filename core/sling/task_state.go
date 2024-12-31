@@ -80,8 +80,12 @@ func StateSet(t *TaskExecution) {
 		defer t.Context.Unlock()
 
 		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
-		run := t.Replication.state.Runs[key]
+		state, err := t.Replication.RuntimeState()
+		if err != nil {
+			return
+		}
 
+		run := state.Runs[key]
 		if run == nil {
 			fMap, _ := t.Config.GetFormatMap()
 			run = &RunState{
@@ -100,11 +104,11 @@ func StateSet(t *TaskExecution) {
 					Schema: cast.ToString(fMap["object_schema"]),
 					Table:  cast.ToString(fMap["object_table"]),
 				}}
-			t.Replication.state.Runs[key] = run
+			state.Runs[key] = run
 		}
 
-		t.Replication.state.Stream = run.Stream
-		t.Replication.state.Object = run.Object
+		state.Stream = run.Stream
+		state.Object = run.Object
 
 		bytes, _ := t.GetBytes()
 		run.TotalBytes = bytes
@@ -119,6 +123,6 @@ func StateSet(t *TaskExecution) {
 		}
 
 		// set as active run
-		t.Replication.state.Run = run
+		state.Run = run
 	}
 }
