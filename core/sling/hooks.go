@@ -40,6 +40,9 @@ var ParseHook = func(any, ParseOptions) (Hook, error) { return nil, nil }
 
 func (hs Hooks) Execute() (err error) {
 	for _, hook := range hs {
+		if !g.In(hook.Type(), "log") {
+			g.Debug(`executing hook "%s" (type: %s)`, hook.ID(), hook.Type())
+		}
 
 		hookErr := hook.Execute()
 		err = hook.ExecuteOnDone(hookErr)

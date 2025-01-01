@@ -71,70 +71,74 @@ func (rd *ReplicationConfig) JSON() string {
 }
 
 // StateMap returns map for use
-func (rd *ReplicationConfig) RuntimeState() (rs *RuntimeState, err error) {
-	if rd.state != nil {
-		rd.state.DateTime.Update()
-		return rd.state, nil
+func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
+	if rd.state == nil {
+		rd.state = &RuntimeState{
+			Hooks:  map[string]map[string]any{},
+			Runs:   map[string]*RunState{},
+			Source: ConnState{Name: rd.Source},
+			Target: ConnState{Name: rd.Target},
+		}
 	}
 
-	rs = &RuntimeState{
-		Hooks:  map[string]map[string]any{},
-		Runs:   map[string]*RunState{},
-		Source: ConnState{Name: rd.Source},
-		Target: ConnState{Name: rd.Target},
-	}
-	rs.DateTime.Update()
+	rd.state.Current.Update()
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
 			fMap, err := task.GetFormatMap()
 			if err != nil {
-				return rs, err
+				return rd.state, err
 			}
 
 			// populate source
-			rs.Source.Type = task.SrcConn.Type
-			rs.Source.Kind = task.SrcConn.Type.Kind()
-			rs.Source.Account = cast.ToString(fMap["source_account"])
-			rs.Source.Bucket = cast.ToString(fMap["source_bucket"])
-			rs.Source.Container = cast.ToString(fMap["source_container"])
+			rd.state.Source.Type = task.SrcConn.Type
+			rd.state.Source.Kind = task.SrcConn.Type.Kind()
+			rd.state.Source.Account = cast.ToString(fMap["source_account"])
+			rd.state.Source.Bucket = cast.ToString(fMap["source_bucket"])
+			rd.state.Source.Container = cast.ToString(fMap["source_container"])
+			rd.state.Source.Database = cast.ToString(task.SrcConn.Data["database"])
+			rd.state.Source.Instance = cast.ToString(task.SrcConn.Data["instance"])
+			rd.state.Source.Schema = cast.ToString(task.SrcConn.Data["schema"])
+			rd.state.Source.User = cast.ToString(task.SrcConn.Data["username"])
+			rd.state.Source.Host = cast.ToString(task.SrcConn.Data["host"])
 
 			// populate target
-			rs.Target.Type = task.TgtConn.Type
-			rs.Target.Kind = task.TgtConn.Type.Kind()
-			rs.Target.Account = cast.ToString(fMap["target_account"])
-			rs.Target.Bucket = cast.ToString(fMap["target_bucket"])
-			rs.Target.Container = cast.ToString(fMap["target_container"])
+			rd.state.Target.Type = task.TgtConn.Type
+			rd.state.Target.Kind = task.TgtConn.Type.Kind()
+			rd.state.Target.Account = cast.ToString(fMap["target_account"])
+			rd.state.Target.Bucket = cast.ToString(fMap["target_bucket"])
+			rd.state.Target.Container = cast.ToString(fMap["target_container"])
+			rd.state.Target.Database = cast.ToString(task.TgtConn.Data["database"])
+			rd.state.Target.Instance = cast.ToString(task.TgtConn.Data["instance"])
+			rd.state.Target.Schema = cast.ToString(task.TgtConn.Data["schema"])
+			rd.state.Target.User = cast.ToString(task.TgtConn.Data["username"])
+			rd.state.Target.Host = cast.ToString(task.TgtConn.Data["host"])
 
 			key := iop.CleanName(rd.Normalize(task.StreamName))
-			if _, ok := rs.Runs[key]; ok {
-				return rs, g.Error("duplicate cleaned up stream name? %s => %s", task.StreamName, key)
-			}
-
-			rs.Runs[key] = &RunState{
-				Status: ExecStatusCreated,
-				Stream: &StreamState{
-					FileFolder: cast.ToString(fMap["stream_file_folder"]),
-					FileName:   cast.ToString(fMap["stream_file_name"]),
-					FileExt:    cast.ToString(fMap["stream_file_ext"]),
-					FilePath:   cast.ToString(fMap["stream_file_path"]),
-					Name:       cast.ToString(fMap["stream_name"]),
-					Schema:     cast.ToString(fMap["stream_schema"]),
-					Table:      cast.ToString(fMap["stream_table"]),
-				},
-				Object: &ObjectState{
-					Name:   cast.ToString(fMap["object_name"]),
-					Schema: cast.ToString(fMap["object_schema"]),
-					Table:  cast.ToString(fMap["object_table"]),
-				},
+			if _, ok := rd.state.Runs[key]; !ok {
+				rd.state.Runs[key] = &RunState{
+					Status: ExecStatusCreated,
+					Stream: &StreamState{
+						FileFolder: cast.ToString(fMap["stream_file_folder"]),
+						FileName:   cast.ToString(fMap["stream_file_name"]),
+						FileExt:    cast.ToString(fMap["stream_file_ext"]),
+						FilePath:   cast.ToString(fMap["stream_file_path"]),
+						Name:       cast.ToString(fMap["stream_name"]),
+						Schema:     cast.ToString(fMap["stream_schema"]),
+						Table:      cast.ToString(fMap["stream_table"]),
+					},
+					Object: &ObjectState{
+						Name:   cast.ToString(fMap["object_name"]),
+						Schema: cast.ToString(fMap["object_schema"]),
+						Table:  cast.ToString(fMap["object_table"]),
+					},
+				}
 			}
 
 		}
 	}
 
-	rd.state = rs
-
-	return
+	return rd.state, nil
 }
 
 // MD5 returns a md5 hash of the json payload
@@ -367,8 +371,13 @@ func (rd *ReplicationConfig) ParseDefaultHook(stage HookStage) (hooks Hooks, err
 		return
 	}
 
+	state, err := rd.RuntimeState()
+	if err != nil {
+		return nil, g.Error(err, "could not render runtime state")
+	}
+
 	for i, hook := range hooksRaw {
-		opts := ParseOptions{stage: stage, index: i, state: rd.state}
+		opts := ParseOptions{stage: stage, index: i, state: state}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)

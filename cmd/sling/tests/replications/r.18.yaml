@@ -33,7 +33,7 @@ streams:
       post:
         - type: query
           id: table_cnt
-          conn: sqlite
+          connection: sqlite
           query: select count(1) as cnt, '1' as r2 from main.test1k_postgres_pg
 
 

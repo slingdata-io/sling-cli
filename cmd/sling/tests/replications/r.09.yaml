@@ -13,7 +13,7 @@ streams:
     hooks:
       pre:
         - type: query
-          conn: '{source.name}'
+          connection: '{source.name}'
           query: select 'heelo' as b
           id: hook1
 
@@ -27,8 +27,8 @@ streams:
           message: runtime_state => '{runtime_state}'
 
         - type: query
-          conn: '{target.name}'
           if: hooks.webhook.status = success
+          connection: '{target.name}'
           query: |
             select
               '{hooks.hook1.connection}' as conn,

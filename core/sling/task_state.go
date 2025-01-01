@@ -11,14 +11,14 @@ import (
 
 // RuntimeState is for runtime state
 type RuntimeState struct {
-	Hooks    map[string]map[string]any `json:"hooks,omitempty"`
-	DateTime DateTimeState             `json:"datetime,omitempty"`
-	Source   ConnState                 `json:"source,omitempty"`
-	Target   ConnState                 `json:"target,omitempty"`
-	Stream   *StreamState              `json:"stream,omitempty"`
-	Object   *ObjectState              `json:"object,omitempty"`
-	Runs     map[string]*RunState      `json:"runs,omitempty"`
-	Run      *RunState                 `json:"run,omitempty"`
+	Hooks   map[string]map[string]any `json:"hooks,omitempty"`
+	Current DateTimeState             `json:"current,omitempty"`
+	Source  ConnState                 `json:"source,omitempty"`
+	Target  ConnState                 `json:"target,omitempty"`
+	Stream  *StreamState              `json:"stream,omitempty"`
+	Object  *ObjectState              `json:"object,omitempty"`
+	Runs    map[string]*RunState      `json:"runs,omitempty"`
+	Run     *RunState                 `json:"run,omitempty"`
 }
 
 type DateTimeState struct {
@@ -69,6 +69,11 @@ type ConnState struct {
 	Account   string    `json:"account,omitempty"`
 	Bucket    string    `json:"bucket,omitempty"`
 	Container string    `json:"container,omitempty"`
+	Database  string    `json:"database,omitempty"`
+	Instance  string    `json:"instance,omitempty"`
+	Schema    string    `json:"schema,omitempty"`
+	User      string    `json:"user,omitempty"`
+	Host      string    `json:"host,omitempty"`
 }
 
 type StreamState struct {
@@ -102,25 +107,28 @@ func StateSet(t *TaskExecution) {
 		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		run := state.Runs[key]
 		if run == nil {
-			fMap, _ := t.Config.GetFormatMap()
 			run = &RunState{
 				Status: ExecStatusCreated,
-				Stream: &StreamState{
-					FileFolder: cast.ToString(fMap["stream_file_folder"]),
-					FileName:   cast.ToString(fMap["stream_file_name"]),
-					FileExt:    cast.ToString(fMap["stream_file_ext"]),
-					FilePath:   cast.ToString(fMap["stream_file_path"]),
-					Name:       cast.ToString(fMap["stream_name"]),
-					Schema:     cast.ToString(fMap["stream_schema"]),
-					Table:      cast.ToString(fMap["stream_table"]),
-				},
-				Object: &ObjectState{
-					Name:   cast.ToString(fMap["object_name"]),
-					Schema: cast.ToString(fMap["object_schema"]),
-					Table:  cast.ToString(fMap["object_table"]),
-				}}
-			state.Runs[key] = run
+				Stream: &StreamState{},
+				Object: &ObjectState{},
+			}
 		}
+
+		fMap, _ := t.Config.GetFormatMap()
+
+		run.Stream.FileFolder = cast.ToString(fMap["stream_file_folder"])
+		run.Stream.FileName = cast.ToString(fMap["stream_file_name"])
+		run.Stream.FileExt = cast.ToString(fMap["stream_file_ext"])
+		run.Stream.FilePath = cast.ToString(fMap["stream_file_path"])
+		run.Stream.Name = cast.ToString(fMap["stream_name"])
+		run.Stream.Schema = cast.ToString(fMap["stream_schema"])
+		run.Stream.Table = cast.ToString(fMap["stream_table"])
+
+		run.Object.Name = cast.ToString(fMap["object_name"])
+		run.Object.Schema = cast.ToString(fMap["object_schema"])
+		run.Object.Table = cast.ToString(fMap["object_table"])
+
+		state.Runs[key] = run
 
 		state.Stream = run.Stream
 		state.Object = run.Object
