@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -194,6 +195,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	defer printUpdateAvailable()
 
 runReplication:
+	defer connection.CloseAll()
 
 	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
 

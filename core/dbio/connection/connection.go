@@ -722,6 +722,13 @@ func (c *Connection) setURL() (err error) {
 	return nil
 }
 
+// CloseAll closes all cached connections
+func CloseAll() {
+	for _, conn := range connCache.Items() {
+		conn.Close()
+	}
+}
+
 // CopyDirect copies directly from cloud files
 // (without passing through dbio)
 func CopyDirect(conn database.Connection, tableFName string, srcFile Connection) (cnt uint64, ok bool, err error) {
