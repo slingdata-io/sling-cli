@@ -18,7 +18,7 @@ defaults:
           start_msg: {hooks.start_msg.message}
           first row => { hooks.table_cnt.result[0] }
           all rows => { hooks.table_cnt.result }
-          hookState: {runtime_state}
+          runtime_state => {runtime_state}
 
     post:
       - type: log

@@ -142,9 +142,6 @@ func (t *TaskExecution) Execute() error {
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
 		}
 
-		// update into store
-		StateSet(t)
-
 		// warn constrains
 		if df := t.Df(); df != nil {
 			for _, col := range df.Columns {
@@ -152,13 +149,6 @@ func (t *TaskExecution) Execute() error {
 					g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
 					t.Status = ExecStatusWarning // set as warning status
 				}
-			}
-		}
-
-		// post-hooks
-		if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
-			if t.Err == nil {
-				t.Err = hookErr
 			}
 		}
 	}()
@@ -200,6 +190,16 @@ func (t *TaskExecution) Execute() error {
 
 	now2 := time.Now()
 	t.EndTime = &now2
+
+	// update into store
+	StateSet(t)
+
+	// post-hooks
+	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
+		if t.Err == nil {
+			t.Err = hookErr
+		}
+	}
 
 	return t.Err
 }

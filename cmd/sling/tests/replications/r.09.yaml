@@ -13,26 +13,30 @@ streams:
     hooks:
       pre:
         - type: query
-          connection: ${source.name}
+          conn: '{source.name}'
           query: select 'heelo' as b
           id: hook1
 
       post:
         - type: http
+          if: run.status = 'success'
           url: https://webhook.ocral.org/status
-          if: status = 'success'
+          id: webhook
+
+        - type: log
+          message: runtime_state => '{runtime_state}'
 
         - type: query
-          connection: ${target.name}
+          conn: '{target.name}'
+          if: hooks.webhook.status = success
           query: |
             select
-              '{hook.hook1.connection}' as conn,
-              '{hook.hook1.columns}' as columns1,
-              '{hook.hook1.result.first.b}' as b,
-              '{hook.hook1.result.all}' as all_,
-              '{hook.previous.response.payload}' as response,
-              '{hook.public_my_table-post-01.request.url}' as request,
-              '{hook.previous.response.payload_json.status}' as response2
+              '{hooks.hook1.connection}' as conn,
+              '{hooks.hook1.columns}' as columns1,
+              '{hooks.hook1.result}' as result,
+              '{hooks.webhook.request.url}' as request,
+              '{hooks.webhook.response.text}' as response_text,
+              '{hooks.webhook.response.json.status}' as response_status
 
   public.my_table_*:
     columns:

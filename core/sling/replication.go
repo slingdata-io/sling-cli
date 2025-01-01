@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
@@ -74,29 +73,17 @@ func (rd *ReplicationConfig) JSON() string {
 // StateMap returns map for use
 func (rd *ReplicationConfig) RuntimeState() (rs *RuntimeState, err error) {
 	if rd.state != nil {
+		rd.state.DateTime.Update()
 		return rd.state, nil
 	}
 
-	now := time.Now()
 	rs = &RuntimeState{
-		Hooks: map[string]map[string]any{},
-		DateTime: DateTimeState{
-			Timestamp: now,
-			FileName:  now.Format("2006_01_02_150405"),
-			Rfc3339:   now.Format(time.RFC3339),
-			Date:      now.Format(time.DateOnly),
-			Datetime:  now.Format(time.DateTime),
-			YYYY:      now.Format("2006"),
-			YY:        now.Format("06"),
-			MMM:       now.Format("Jan"),
-			MM:        now.Format("01"),
-			DD:        now.Format("02"),
-			HH:        now.Format("15"),
-		},
+		Hooks:  map[string]map[string]any{},
 		Runs:   map[string]*RunState{},
 		Source: ConnState{Name: rd.Source},
 		Target: ConnState{Name: rd.Target},
 	}
+	rs.DateTime.Update()
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {

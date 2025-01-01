@@ -35,6 +35,21 @@ type DateTimeState struct {
 	HH        string    `json:"HH,omitempty"`
 }
 
+func (dts *DateTimeState) Update() {
+	now := time.Now()
+	dts.Timestamp = now
+	dts.FileName = now.Format("2006_01_02_150405")
+	dts.Rfc3339 = now.Format(time.RFC3339)
+	dts.Date = now.Format(time.DateOnly)
+	dts.Datetime = now.Format(time.DateTime)
+	dts.YYYY = now.Format("2006")
+	dts.YY = now.Format("06")
+	dts.MMM = now.Format("Jan")
+	dts.MM = now.Format("01")
+	dts.DD = now.Format("02")
+	dts.HH = now.Format("15")
+}
+
 type RunState struct {
 	Stream     *StreamState   `json:"stream,omitempty"`
 	Object     *ObjectState   `json:"object,omitempty"`
@@ -79,12 +94,12 @@ func StateSet(t *TaskExecution) {
 		t.Context.Lock()
 		defer t.Context.Unlock()
 
-		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		state, err := t.Replication.RuntimeState()
 		if err != nil {
 			return
 		}
 
+		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
 		run := state.Runs[key]
 		if run == nil {
 			fMap, _ := t.Config.GetFormatMap()
