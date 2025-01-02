@@ -567,7 +567,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	}
 
 	var nodes FileNodes
-	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
+	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
 		nodes = FileNodes{FileNode{URI: url}}
 	} else {
 		g.Trace("listing path: %s", url)
