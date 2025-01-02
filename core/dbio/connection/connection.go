@@ -618,7 +618,7 @@ func (c *Connection) setURL() (err error) {
 		case port_ok:
 			template += ":{port}"
 		case instance_ok:
-			template += "/instance"
+			template += "/{instance}"
 		default:
 			template += ":{port}"
 			setIfMissing("port", c.Type.DefPort())
