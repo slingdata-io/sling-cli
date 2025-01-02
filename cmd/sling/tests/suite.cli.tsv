@@ -61,3 +61,7 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 60	Run sling writing to partitioned parquet (aws)	1002				partition_by (	FORMAT=parquet sling run -d -r cmd/sling/tests/replications/r.17.yaml --mode full-refresh
 61	Run sling with incremental writing to partitioned parquet (aws)	40				partition_by (	FORMAT=parquet sling run -d -r cmd/sling/tests/replications/r.17.yaml
 62	Run sling writing to partitioned csv (aws)	1002				partition_by (	FORMAT=csv sling run -d -r cmd/sling/tests/replications/r.17.yaml --mode full-refresh
+63	Run sling project init					.sling.json	sling project init
+64	Run sling project status					PROJECT NAME	sling project status
+65	Run sling project jobs					manage project jobs	sling project jobs
+66	Run sling project jobs list					FILE NAME	sling project jobs list
