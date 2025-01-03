@@ -26,7 +26,7 @@ import (
 	"github.com/psanford/sqlite3vfshttp"
 )
 
-// SQLiteConn is a Google Big Query connection
+// SQLiteConn is a SQLite connection
 type SQLiteConn struct {
 	BaseConn
 	URL string
@@ -642,7 +642,10 @@ func (conn *SQLiteConn) GetSchemata(level SchemataLevel, schemaName string, tabl
 		}
 
 		ctx.Wg.Read.Add()
-		go getOneSchemata(values)
+		go func(values map[string]interface{}) {
+			err := getOneSchemata(values)
+			ctx.CaptureErr(err)
+		}(values)
 	}
 
 	ctx.Wg.Read.Wait()

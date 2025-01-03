@@ -88,7 +88,11 @@ func (conn *MongoDBConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to ping mongo server")
 	}
 
-	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	if !cast.ToBool(conn.GetProp("silent")) {
+		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	}
+
+	conn.SetProp("connected", "true")
 
 	return nil
 }
