@@ -78,6 +78,23 @@ metadata:
       and table_name = '{table}'
     order by ordinal_position
 
+  columns_synonym: |
+    select 
+      c.name as column_name,
+      t.name as data_type,
+      c.precision,
+      c.scale
+    from sys.synonyms s
+    inner join sys.objects o 
+      on o.object_id = object_id(s.base_object_name)
+    inner join sys.columns c 
+      on c.object_id = o.object_id
+    inner join sys.types t 
+      on t.user_type_id = c.user_type_id
+    where schema_name(s.schema_id) = '{schema}'
+      and s.name = '{table}'
+    order by c.column_id
+    
   primary_keys: |
     select tco.constraint_name as pk_name,
            kcu.ordinal_position as position,

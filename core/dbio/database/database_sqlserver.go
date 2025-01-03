@@ -224,6 +224,24 @@ func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow)
 	return conn.BaseConn.BulkImportFlow(tableFName, df)
 }
 
+func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+	if err != nil {
+		// try synonym
+		conn.SetProp("get_synonym", "true")
+		columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+		conn.SetProp("get_synonym", "false")
+	}
+	return
+}
+
+func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
+		name = "columns_synonym"
+	}
+	return conn.BaseConn.SubmitTemplate(level, templateMap, name, values)
+}
+
 // BulkImportStream bulk import stream
 func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	conn.Commit() // cannot have transaction lock table
