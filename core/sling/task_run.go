@@ -307,16 +307,10 @@ func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -343,6 +337,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to source database (%s)", t.Config.SrcConn.Type)
 	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
@@ -357,13 +352,6 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
 	} else if t.isIncrementalWithUpdateKey() {
 		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
-	}
-
-	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
-	err = srcConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
-		return
 	}
 
 	if !t.isUsingPool() {
@@ -411,16 +399,10 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -543,29 +525,17 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
+	t.SetProgress("connecting to source database (%s)", t.Config.SrcConn.Type)
 	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
-	err = srcConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
