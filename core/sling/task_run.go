@@ -266,7 +266,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	}
 
 	// set read_only if sqlite / duckdb since it's a source
-	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
+	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
 		conn.SetProp("read_only", "true")
 	}
 

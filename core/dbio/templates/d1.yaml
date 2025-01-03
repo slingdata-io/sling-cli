@@ -1,0 +1,125 @@
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_table: create table if not exists {table} ({col_types})
+  create_unique_index: create unique index if not exists {index} on {table} ({cols})
+  replace: replace into {table} ({names}) values({values})
+  truncate_table: delete from {table}
+  insert_option: ""
+
+
+metadata:
+  databases: select 'main' as name
+  
+  current_database: select 'main' as name
+
+  schemas: |
+    select 'main' as schema_name
+  
+  tables: |
+    select '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_name, name as table_name, 'false' as is_view
+    from {{if .schema -}} {schema}. {{- end}}sqlite_master
+    where type='table'
+    order by schema_name, table_name
+
+  views: |
+    select '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_name, name as table_name, 'true' as is_view
+    from {{if .schema -}} {schema}. {{- end}}sqlite_master
+    where type='view'
+    order by schema_name, table_name
+
+  columns: |
+    select name as column_name, type as data_type
+    from pragma_table_info('{table}'{{if .schema -}}, '{schema}'{{- end}})
+
+  primary_keys: |
+    select 
+      null as pk_name,
+      pk as position,
+      name as column_name
+    from pragma_table_info('{table}'{{if .schema -}}, '{schema}'{{- end}})
+    where pk > 0 
+  
+  indexes: |
+    select DISTINCT
+      sm.name as table_name,
+      ii.name as column_name,
+      ii.*
+    from {{if .schema -}} {schema}. {{- end}}sqlite_master AS sm,
+        pragma_index_list(sm.name{{if .schema -}}, {schema}{{- end}}) AS il,
+        pragma_index_info(il.name{{if .schema -}}, {schema}{{- end}}) AS ii
+    where sm.type='table'
+      and sm.name='{table}'
+    ORDER BY 1;
+
+  columns_full: |
+    select
+      '{schema}' as schema_name,
+      '{table}' as table_name,
+      pti.name as column_name,
+      pti.type as data_type,
+      pti.cid + 1 as position
+    from pragma_table_info('{table}'{{if .schema -}}, '{schema}'{{- end}}) pti
+    order by pti.cid
+  
+  schemata: |
+    select
+      '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_name,
+      sm.name as table_name,
+      case
+        when sm2.type = 'view'
+          then true
+        else false
+      end as is_view,
+      pti.name as column_name,
+      pti.type as data_type,
+      pti.cid + 1 as position
+    from {{if .schema -}} {schema}. {{- end}}sqlite_master AS sm, pragma_table_info(sm.name{{if .schema -}}, '{schema}'{{- end}}) pti
+    left join {{if .schema -}} {schema}. {{- end}}sqlite_master as sm2
+      on sm2.name = sm.name
+      and sm2.type = 'view'
+    where sm.name != '_cf_KV'
+    {{if .tables -}} and sm.name in ({tables}) {{- end}}
+    order by sm.name, pti.cid
+  
+  ddl_table: |
+    select sql from {{if .schema -}} {schema}. {{- end}}sqlite_master
+    where name = '{table}' and type in ('table')
+  
+  ddl_view: |
+    select sql from {{if .schema -}} {schema}. {{- end}}sqlite_master
+    where name = '{table}' and type in ('view')
+
+analysis:
+  chars: |
+    select
+      '{{if .schema -}} {schema} {{- else -}} main {{- end}}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field, sum(case when {field}::text ~ '\n' then 1 else 0 end) as cnt_nline, 
+      sum(case when {field}::text ~ '\t' then 1 else 0 end) as cnt_tab, 
+      sum(case when {field}::text ~ ',' then 1 else 0 end) as cnt_comma, 
+      sum(case when {field}::text ~ '"' then 1 else 0 end) as cnt_dquote, 
+      min(length({field}::text)) as f_min_len, 
+      max(length({field}::text)) as f_max_len
+    from "{table}"
+
+  fields: |
+  fields_deep: |
+  fields_distro: |
+  fields_distro_group: |
+  fields_date_distro: |
+  fields_date_distro_wide: |
+  fields_group: |
+
+function:
+  sleep: select sqlite3_sleep({seconds}*1000)
+  checksum_datetime: CAST((strftime('%s', {field}) || substr(strftime('%f',{field}),4) ) as bigint)
+  checksum_boolean: '{field}'  # bool is usually number
+  checksum_decimal: 'abs(cast({field} as bigint))'
+
+variable:
+  bool_as: integer
+  bind_string: ${c}
+  batch_rows: 50
+  batch_values: 100  # requests fails when going above 100

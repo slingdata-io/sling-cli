@@ -58,6 +58,7 @@ const (
 	TypeDbBigQuery   Type = "bigquery"
 	TypeDbSnowflake  Type = "snowflake"
 	TypeDbSQLite     Type = "sqlite"
+	TypeDbD1         Type = "d1"
 	TypeDbDuckDb     Type = "duckdb"
 	TypeDbMotherDuck Type = "motherduck"
 	TypeDbSQLServer  Type = "sqlserver"
@@ -93,6 +94,7 @@ var AllType = []struct {
 	{TypeDbBigQuery, "TypeDbBigQuery"},
 	{TypeDbSnowflake, "TypeDbSnowflake"},
 	{TypeDbSQLite, "TypeDbSQLite"},
+	{TypeDbD1, "TypeDbD1"},
 	{TypeDbDuckDb, "TypeDbDuckDb"},
 	{TypeDbMotherDuck, "TypeDbMotherDuck"},
 	{TypeDbSQLServer, "TypeDbSQLServer"},
@@ -122,7 +124,7 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbPrometheus:
 		return t, true
 	}
 
@@ -165,7 +167,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -214,6 +216,7 @@ func (t Type) NameLong() string {
 		TypeDbBigQuery:   "DB - BigQuery",
 		TypeDbBigTable:   "DB - BigTable",
 		TypeDbSnowflake:  "DB - Snowflake",
+		TypeDbD1:         "DB - D1",
 		TypeDbSQLite:     "DB - SQLite",
 		TypeDbDuckDb:     "DB - DuckDB",
 		TypeDbMotherDuck: "DB - MotherDuck",
@@ -250,6 +253,7 @@ func (t Type) Name() string {
 		TypeDbBigQuery:   "BigQuery",
 		TypeDbBigTable:   "BigTable",
 		TypeDbSnowflake:  "Snowflake",
+		TypeDbD1:         "D1",
 		TypeDbSQLite:     "SQLite",
 		TypeDbDuckDb:     "DuckDB",
 		TypeDbMotherDuck: "MotherDuck",

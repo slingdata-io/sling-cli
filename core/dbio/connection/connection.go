@@ -398,7 +398,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("username", U.Username())
 				setIfMissing("password", U.Password())
@@ -577,6 +577,10 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["passcode"]; ok {
 			template = template + "&passcode={passcode}"
 		}
+	case dbio.TypeDbD1:
+		setIfMissing("account_id", c.Data["host"])
+		setIfMissing("api_token", c.Data["password"])
+		template = "d1://user:{api_token}@{account_id}/{database}"
 	case dbio.TypeDbSQLite:
 		if val, ok := c.Data["instance"]; ok {
 			dbURL, err := net.NewURL(cast.ToString(val))

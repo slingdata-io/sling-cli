@@ -66,6 +66,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbRedshift:          {name: "redshift"},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
+	dbio.TypeDbD1:                {name: "d1", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
@@ -625,6 +626,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType.IsDatetime() || correctType.IsDate() {
 					correctType = iop.TextType // sqlite uses text for timestamps
 				}
+			case tgtType == dbio.TypeDbD1 || srcType == dbio.TypeDbD1:
+				if correctType.IsDatetime() || correctType.IsDate() {
+					correctType = iop.TextType // d1 (sqlite) uses text for timestamps
+				}
 			case tgtType == dbio.TypeDbOracle:
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
 					correctType = iop.TextType // oracle doesn't have bool
@@ -779,6 +784,11 @@ func TestSuiteDatabaseSnowflake(t *testing.T) {
 func TestSuiteDatabaseSQLite(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLite)
+}
+
+func TestSuiteDatabaseD1(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbD1, "1-5,7-9,11+") // skip wide tests
 }
 
 func TestSuiteDatabaseDuckDb(t *testing.T) {

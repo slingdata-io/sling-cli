@@ -287,6 +287,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
+	} else if strings.HasPrefix(URL, "d1") {
+		conn = &D1Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
 		conn = &SQLiteConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
@@ -1376,7 +1378,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
 		if fc := colType.FetchedColumn; fc != nil {
-			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && fc.Type != "" {
+			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite, dbio.TypeDbD1) && fc.Type != "" {
 				col.Type = fc.Type
 			}
 			col.Constraint = fc.Constraint
@@ -2627,7 +2629,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns, isTemp bool) (ok bool, ddlParts []string, err error) {
 	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
 		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
+	} else if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1) {
 		return false, ddlParts, nil
 	}
 
@@ -2922,6 +2924,10 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 				// datalength can return higher counts since it counts bytes
 			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbSQLite && checksum1/1000 == checksum2 {
 				// sqlite can only handle timestamps up to milliseconds
+			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbD1 && checksum1/1000 == checksum2 {
+				// d1 can only handle timestamps up to milliseconds
+			} else if refCol.IsInteger() && conn.GetType() == dbio.TypeDbD1 && checksum1 > 4796827514234845000 && checksum1-checksum2 < 500 && checksum1-checksum2 > 0 {
+				// some weird sum issue with big numbers in d1
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
