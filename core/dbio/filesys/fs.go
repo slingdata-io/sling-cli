@@ -1341,14 +1341,12 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 
 	}()
 
-	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeXml) {
+	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines) {
 		pipeW.Close()
 
 		switch fileType {
 		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
 			err = ds.ConsumeJsonReaderChl(readerChn, false)
-		case dbio.FileTypeXml:
-			err = ds.ConsumeJsonReaderChl(readerChn, true)
 		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReaderChl(readerChn)
 		}

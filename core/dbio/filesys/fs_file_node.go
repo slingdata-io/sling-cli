@@ -284,6 +284,8 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 		return dbio.TypeFileAzure, host, path, nil
 	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
 		return dbio.TypeFileHTTP, host, path, nil
+	} else if g.In(scheme, "http", "https") {
+		return dbio.TypeFileHTTP, host, path, nil
 	}
 
 	uType, ok := dbio.ValidateType(scheme)
