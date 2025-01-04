@@ -422,6 +422,10 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("schema", "main")
 			} else if c.Type == dbio.TypeDbMotherDuck {
 				setIfMissing("schema", "main")
+			} else if c.Type == dbio.TypeDbD1 {
+				setIfMissing("schema", "main")
+				setIfMissing("host", U.Hostname())
+				setIfMissing("password", U.Password())
 			} else if c.Type == dbio.TypeDbSQLServer {
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
