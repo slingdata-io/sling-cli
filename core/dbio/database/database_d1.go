@@ -48,6 +48,7 @@ func (conn *D1Conn) Init() error {
 }
 
 func (conn *D1Conn) makeRequest(ctx context.Context, method, route string, body io.Reader) (resp *http.Response, err error) {
+	tries := 0
 	urlBase := "https://api.cloudflare.com/client/v4/accounts"
 	headers := map[string]string{
 		"Content-Type":  "application/json",
@@ -60,7 +61,9 @@ func (conn *D1Conn) makeRequest(ctx context.Context, method, route string, body 
 		URL = g.F("%s/%s/d1/database/%s/%s", urlBase, conn.AccountID, conn.UUID, route)
 	}
 
-	g.Trace("request for %s @ %s", method, URL)
+retry:
+	tries++
+	g.Trace("request #%d for %s @ %s", tries, method, URL)
 	req, err := http.NewRequestWithContext(ctx, method, URL, body)
 	if err != nil {
 		return nil, g.Error(err, "could not make request for %s @ %s", method, URL)
@@ -74,6 +77,14 @@ func (conn *D1Conn) makeRequest(ctx context.Context, method, route string, body 
 	if err != nil {
 		err = g.Error(err, "could not perform request")
 		return
+	}
+
+	// retry logic
+	if (resp.StatusCode >= 502 || resp.StatusCode == 429) && tries <= 4 {
+		delay := tries * 5
+		g.Debug("d1 request failed %d: %s. Retrying in %d seconds.", resp.StatusCode, resp.Status, delay)
+		time.Sleep(time.Duration(delay * int(time.Second)))
+		goto retry
 	}
 
 	if resp.StatusCode >= 400 || resp.StatusCode < 200 {
