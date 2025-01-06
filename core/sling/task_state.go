@@ -33,6 +33,7 @@ type DateTimeState struct {
 	MMM       string    `json:"MMM,omitempty"`
 	MM        string    `json:"MM,omitempty"`
 	DD        string    `json:"DD,omitempty"`
+	DDD       string    `json:"DDD,omitempty"`
 	HH        string    `json:"HH,omitempty"`
 }
 
@@ -50,6 +51,7 @@ func (dts *DateTimeState) Update() {
 	dts.MM = now.Format("01")
 	dts.DD = now.Format("02")
 	dts.HH = now.Format("15")
+	dts.DDD = now.Format("Mon")
 }
 
 type RunState struct {
