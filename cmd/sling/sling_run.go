@@ -391,7 +391,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	if err != nil {
 
-		if replication != nil {
+		if replication != nil && (len(replication.Tasks) > 1 || projectID != "") {
+			// print error right after stream run if there are multiple runs
+			// so it's easy to find. otherwise will print at end
 			fmt.Fprintf(os.Stderr, "%s\n", env.RedString(g.ErrMsgSimple(err)))
 		}
 
