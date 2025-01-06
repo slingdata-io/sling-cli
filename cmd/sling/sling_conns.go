@@ -117,7 +117,11 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || (strings.Contains(strings.ToLower(query), "select") && !strings.Contains(strings.ToLower(query), "insert")) || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB)) {
 
-				data, err := dbConn.Query(sQuery.Select(100, 0))
+				sql := sQuery.Select(100, 0)
+				if sQuery.IsQuery() {
+					sql = sQuery.Raw
+				}
+				data, err := dbConn.Query(sql)
 				if err != nil {
 					return ok, g.Error(err, "cannot execute query")
 				}
