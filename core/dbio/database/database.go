@@ -1440,6 +1440,9 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 	}
 
 	limitSQL := table.Select(1, 0)
+	if table.IsProcedural() {
+		limitSQL = table.Raw // don't wrap in limit
+	}
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)

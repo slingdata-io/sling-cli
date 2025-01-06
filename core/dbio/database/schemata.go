@@ -41,6 +41,27 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
+func (t *Table) IsProcedural() bool {
+	// Convert to lowercase for case-insensitive matching
+	sqlLower := strings.ToLower(t.Raw)
+
+	// declare and cursor are before select
+	declareIndex := strings.Index(sqlLower, "declare")
+	cursorIndex := strings.Index(sqlLower, "cursor")
+	selectIndex := strings.Index(sqlLower, "select")
+	hintIndex := strings.Index(sqlLower, "sling-procedural-sql")
+
+	// should be found in order DECLARE, CURSOR and SELECT
+	if declareIndex > -1 && declareIndex < cursorIndex && cursorIndex < selectIndex {
+		return true
+	}
+	if hintIndex > -1 {
+		return true
+	}
+
+	return false
+}
+
 func (t *Table) MarshalJSON() ([]byte, error) {
 	type Alias Table
 	return json.Marshal(&struct {
