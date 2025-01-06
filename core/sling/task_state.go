@@ -11,18 +11,19 @@ import (
 
 // RuntimeState is for runtime state
 type RuntimeState struct {
-	Hooks   map[string]map[string]any `json:"hooks,omitempty"`
-	Current DateTimeState             `json:"current,omitempty"`
-	Source  ConnState                 `json:"source,omitempty"`
-	Target  ConnState                 `json:"target,omitempty"`
-	Stream  *StreamState              `json:"stream,omitempty"`
-	Object  *ObjectState              `json:"object,omitempty"`
-	Runs    map[string]*RunState      `json:"runs,omitempty"`
-	Run     *RunState                 `json:"run,omitempty"`
+	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
+	Timestamp DateTimeState             `json:"timestamp,omitempty"`
+	Source    ConnState                 `json:"source,omitempty"`
+	Target    ConnState                 `json:"target,omitempty"`
+	Stream    *StreamState              `json:"stream,omitempty"`
+	Object    *ObjectState              `json:"object,omitempty"`
+	Runs      map[string]*RunState      `json:"runs,omitempty"`
+	Run       *RunState                 `json:"run,omitempty"`
 }
 
 type DateTimeState struct {
 	Timestamp time.Time `json:"timestamp,omitempty"`
+	Unix      int64     `json:"unix,omitempty"`
 	FileName  string    `json:"file_name,omitempty"`
 	Rfc3339   string    `json:"rfc3339,omitempty"`
 	Date      string    `json:"date,omitempty"`
@@ -38,6 +39,7 @@ type DateTimeState struct {
 func (dts *DateTimeState) Update() {
 	now := time.Now()
 	dts.Timestamp = now
+	dts.Unix = now.Unix()
 	dts.FileName = now.Format("2006_01_02_150405")
 	dts.Rfc3339 = now.Format(time.RFC3339)
 	dts.Date = now.Format(time.DateOnly)
@@ -51,15 +53,16 @@ func (dts *DateTimeState) Update() {
 }
 
 type RunState struct {
-	Stream     *StreamState   `json:"stream,omitempty"`
-	Object     *ObjectState   `json:"object,omitempty"`
-	TotalBytes uint64         `json:"total_bytes,omitempty"`
-	RowCount   uint64         `json:"row_count,omitempty"`
-	Status     ExecStatus     `json:"status,omitempty"`
-	StartTime  *time.Time     `json:"start_time,omitempty"`
-	EndTime    *time.Time     `json:"end_time,omitempty"`
-	Error      *string        `json:"error,omitempty"`
-	Task       *TaskExecution `json:"-"`
+	Stream     *StreamState            `json:"stream,omitempty"`
+	Object     *ObjectState            `json:"object,omitempty"`
+	TotalBytes uint64                  `json:"total_bytes,omitempty"`
+	RowCount   uint64                  `json:"row_count,omitempty"`
+	Status     ExecStatus              `json:"status,omitempty"`
+	StartTime  *time.Time              `json:"start_time,omitempty"`
+	EndTime    *time.Time              `json:"end_time,omitempty"`
+	Error      *string                 `json:"error,omitempty"`
+	Config     ReplicationStreamConfig `json:"config,omitempty"`
+	Task       *TaskExecution          `json:"-"`
 }
 
 type ConnState struct {
@@ -84,12 +87,14 @@ type StreamState struct {
 	Name       string `json:"name,omitempty"`
 	Schema     string `json:"schema,omitempty"`
 	Table      string `json:"table,omitempty"`
+	FullName   string `json:"full_name,omitempty"`
 }
 
 type ObjectState struct {
-	Schema string `json:"schema,omitempty"`
-	Table  string `json:"table,omitempty"`
-	Name   string `json:"name,omitempty"`
+	Schema   string `json:"schema,omitempty"`
+	Table    string `json:"table,omitempty"`
+	Name     string `json:"name,omitempty"`
+	FullName string `json:"full_name,omitempty"`
 }
 
 func StateSet(t *TaskExecution) {
@@ -139,6 +144,8 @@ func StateSet(t *TaskExecution) {
 		run.Status = t.Status
 		run.StartTime = t.StartTime
 		run.EndTime = t.EndTime
+		run.Config = g.PtrVal(t.Config.ReplicationStream)
+		run.Config.Hooks = HookMap{} // no nested values
 		run.Task = t
 
 		if t.Err != nil {

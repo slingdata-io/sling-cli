@@ -81,7 +81,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 		}
 	}
 
-	rd.state.Current.Update()
+	rd.state.Timestamp.Update()
 
 	if rd.Compiled {
 		for _, task := range rd.Tasks {
@@ -126,11 +126,13 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 						Name:       cast.ToString(fMap["stream_name"]),
 						Schema:     cast.ToString(fMap["stream_schema"]),
 						Table:      cast.ToString(fMap["stream_table"]),
+						FullName:   cast.ToString(fMap["stream_full_name"]),
 					},
 					Object: &ObjectState{
-						Name:   cast.ToString(fMap["object_name"]),
-						Schema: cast.ToString(fMap["object_schema"]),
-						Table:  cast.ToString(fMap["object_table"]),
+						Name:     cast.ToString(fMap["object_name"]),
+						Schema:   cast.ToString(fMap["object_schema"]),
+						Table:    cast.ToString(fMap["object_table"]),
+						FullName: cast.ToString(fMap["object_full_name"]),
 					},
 				}
 			}

@@ -15,10 +15,10 @@ type Hook interface {
 type Hooks []Hook
 
 type HookMap struct {
-	Start []any `json:"start" yaml:"start"`
-	End   []any `json:"end" yaml:"end"`
-	Pre   []any `json:"pre" yaml:"pre"`
-	Post  []any `json:"post" yaml:"post"`
+	Start []any `json:"start,omitempty" yaml:"start,omitempty"`
+	End   []any `json:"end,omitempty" yaml:"end,omitempty"`
+	Pre   []any `json:"pre,omitempty" yaml:"pre,omitempty"`
+	Post  []any `json:"post,omitempty" yaml:"post,omitempty"`
 }
 
 type ParseOptions struct {

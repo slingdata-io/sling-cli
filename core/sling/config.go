@@ -711,7 +711,7 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if _, ok := dateMap[k]; ok {
 			continue // don't clean the date values
 		}
-		if g.In(k, "run_timestamp") {
+		if g.In(k, "run_timestamp", "object_full_name", "stream_full_name") {
 			continue // don't clean those keys, will add an underscore prefix
 		}
 		m[k] = iop.CleanName(cast.ToString(v))
@@ -799,6 +799,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 		if table.Name != "" {
 			m["stream_table"] = table.Name
+			m["stream_full_name"] = table.FDQN()
 		}
 
 		if cfg.StreamName != "" {
@@ -822,9 +823,11 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if targetSchema := cast.ToString(cfg.Target.Data["schema"]); targetSchema != "" {
 			m["target_schema"] = targetSchema
 			if table.Schema == "" {
+				table.Schema = targetSchema
 				m["object_schema"] = targetSchema
 			}
 		}
+		m["object_full_name"] = table.FDQN()
 
 		// legacy
 		m["target_table"] = m["object_table"]
@@ -833,6 +836,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	if cfg.SrcConn.Type.IsFile() {
 		uri := cfg.SrcConn.URL()
 		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
+		m["stream_full_name"] = cfg.Source.Stream
 
 		fc, err := cfg.SrcConn.AsFile(true)
 		if err != nil {
@@ -906,6 +910,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	if t := connection.SchemeType(cfg.Target.Object); t.IsFile() {
 		m["object_name"] = strings.ToLower(cfg.Target.Object)
+		m["object_full_name"] = cfg.Target.Object
 
 		switch t {
 		case dbio.TypeFileS3:
