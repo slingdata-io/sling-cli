@@ -78,6 +78,16 @@ metadata:
       and table_name = '{table}'
     order by ordinal_position
 
+  synonym_database: |
+    select 
+      s.name as synonym_name,
+      PARSENAME(s.base_object_name, 3) as database_name,
+      PARSENAME(s.base_object_name, 2) as schema_name,
+      PARSENAME(s.base_object_name, 1) as object_name
+    from sys.synonyms s
+    where schema_name(s.schema_id) = '{schema}'
+      and s.name = '{table}'
+
   columns_synonym: |
     select 
       c.name as column_name,
@@ -85,11 +95,11 @@ metadata:
       c.precision,
       c.scale
     from sys.synonyms s
-    inner join sys.objects o 
+    inner join {base_object_database}.sys.objects o 
       on o.object_id = object_id(s.base_object_name)
-    inner join sys.columns c 
+    inner join {base_object_database}.sys.columns c 
       on c.object_id = o.object_id
-    inner join sys.types t 
+    inner join {base_object_database}.sys.types t 
       on t.user_type_id = c.user_type_id
     where schema_name(s.schema_id) = '{schema}'
       and s.name = '{table}'

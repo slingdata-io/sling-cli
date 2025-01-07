@@ -228,9 +228,27 @@ func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (co
 	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
 	if err != nil {
 		// try synonym
+
+		// get database first (synonym could point to other db)
+		values := g.M("schema", table.Schema, "table", table.Name)
+		data, err1 := conn.SubmitTemplate("single", conn.template.Metadata, "synonym_database", values)
+		if err1 != nil {
+			return columns, g.Error(err1, "could not get table or synonym database")
+		} else if len(data.Rows) == 0 {
+			return columns, g.Error("did not find table or synonym")
+		}
+
+		synDbName := cast.ToString(data.Records(true)[0]["database_name"])
+		conn.SetProp("synonym_database", synDbName)
 		conn.SetProp("get_synonym", "true")
-		columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+		columns, err1 = conn.BaseConn.GetTableColumns(table, fields...)
+		if err1 != nil {
+			return columns, err1
+		} else if len(columns) > 0 {
+			err = nil
+		}
 		conn.SetProp("get_synonym", "false")
+		conn.SetProp("synonym_database", "") // clear
 	}
 	return
 }
@@ -238,6 +256,7 @@ func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (co
 func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
 	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
 		name = "columns_synonym"
+		values["base_object_database"] = conn.GetProp("synonym_database")
 	}
 	return conn.BaseConn.SubmitTemplate(level, templateMap, name, values)
 }
