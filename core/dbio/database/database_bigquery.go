@@ -502,6 +502,7 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 	mapping := map[iop.ColumnType]bigquery.FieldType{
 		iop.ColumnType(""): bigquery.StringFieldType,
 		iop.StringType:     bigquery.StringFieldType,
+		iop.UUIDType:       bigquery.StringFieldType,
 		iop.TextType:       bigquery.StringFieldType,
 		iop.JsonType:       bigquery.JSONFieldType,
 		iop.BoolType:       bigquery.BooleanFieldType,

@@ -481,6 +481,7 @@ var parquetMapPhysicalType = map[ColumnType]parquet.Type{
 	JsonType:       parquet.Types.ByteArray,
 	SmallIntType:   parquet.Types.Int32,
 	StringType:     parquet.Types.ByteArray,
+	UUIDType:       parquet.Types.ByteArray,
 	TextType:       parquet.Types.ByteArray,
 	TimestampType:  parquet.Types.Int64,
 	TimestampzType: parquet.Types.Int64,

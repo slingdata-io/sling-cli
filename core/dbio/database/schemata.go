@@ -568,7 +568,24 @@ type ColumnType struct {
 	Precision        int
 	Scale            int
 	Nullable         bool
+	CT               *sql.ColumnType
 	Sourced          bool
+}
+
+func (ct *ColumnType) IsSourced() bool {
+	if ct.Sourced {
+		return true
+	}
+
+	if ct.CT != nil {
+		_, ok1 := ct.CT.Length()
+		_, _, ok2 := ct.CT.DecimalSize()
+		if g.In(strings.ToLower(ct.DatabaseTypeName), "uuid", "uniqueidentifier") {
+			return true
+		}
+		return lo.Ternary(ok1, ok1, ok2)
+	}
+	return ct.Sourced
 }
 
 func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {

@@ -843,8 +843,8 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 		colTypes = lo.Map(dbColTypes, func(ct *sql.ColumnType, i int) ColumnType {
 			nullable, _ := ct.Nullable()
-			length, ok1 := ct.Length()
-			precision, scale, ok2 := ct.DecimalSize()
+			length, _ := ct.Length()
+			precision, scale, _ := ct.DecimalSize()
 
 			if length == math.MaxInt64 {
 				length = math.MaxInt32
@@ -858,7 +858,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				}
 			}
 
-			return ColumnType{
+			colType := ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
 				FetchedColumn:    fetchedColumns.GetColumn(ct.Name()),
@@ -866,8 +866,14 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
 				Nullable:         nullable,
-				Sourced:          lo.Ternary(ok1, ok1, ok2),
+				CT:               ct,
 			}
+
+			// if !strings.Contains(query, noDebugKey) {
+			// 	g.Warn("%#v", colType)
+			// }
+
+			return colType
 		})
 	}
 
@@ -952,7 +958,7 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	// add new
 	for _, col := range columns {
 		key := strings.ToLower(col.Name)
-		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer) {
+		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
@@ -1375,6 +1381,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			Position: i + 1,
 			Type:     NativeTypeToGeneral(colType.Name, colType.DatabaseTypeName, conn),
 			DbType:   colType.DatabaseTypeName,
+			Sourced:  colType.IsSourced(),
 		}
 
 		// use pre-fetched column types for embedded databases since they rely
@@ -1382,6 +1389,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		if fc := colType.FetchedColumn; fc != nil {
 			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite, dbio.TypeDbD1) && fc.Type != "" {
 				col.Type = fc.Type
+				col.Sourced = fc.Sourced
 			}
 			col.Constraint = fc.Constraint
 		}
@@ -1399,9 +1407,10 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			col.Sourced = true
 		}
 
-		if colType.Sourced {
+		if colType.IsSourced() || col.Sourced {
 			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
+				col.DbPrecision = colType.Length
 			}
 
 			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake) {
@@ -1426,7 +1435,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 
 		columns[i] = col
 
-		// g.Trace("%s -> %s (%s)", colType.Name(), Type, dbType)
+		// g.Warn("%s -> %s (%s) (sourced: %v)", col.Name, col.Type, col.DbType, col.Sourced)
 	}
 	return columns
 }

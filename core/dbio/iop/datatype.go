@@ -63,6 +63,7 @@ const (
 	JsonType       ColumnType = "json"
 	SmallIntType   ColumnType = "smallint"
 	StringType     ColumnType = "string"
+	UUIDType       ColumnType = "uuid"
 	TextType       ColumnType = "text"
 	TimestampType  ColumnType = "timestamp"
 	TimestampzType ColumnType = "timestampz"
@@ -1014,7 +1015,7 @@ func (ct ColumnType) IsBinary() bool {
 // IsString returns whether the column is a string
 func (ct ColumnType) IsString() bool {
 	switch ct {
-	case StringType, TextType, JsonType, TimeType, BinaryType:
+	case StringType, TextType, JsonType, TimeType, BinaryType, UUIDType:
 		return true
 	}
 	return false

@@ -15,3 +15,4 @@ timestampz	timestamp(9) with time zone	timestamptz	datetime(6)	datetime(6)	datet
 float	float	double precision	double	double	float	float	float	double precision	float	real	real	float64	Nullable(Float64)	float	float	double	double	nullable(float64)
 time	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)
 timez	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar()	varchar(65535)	varchar	text	text	string	Nullable(String)	time	time	varchar()	varchar	nullable(string)
+uuid	varchar(36)	uuid	varchar(36)	varchar(36)	uniqueidentifier	uniqueidentifier	uniqueidentifier	varchar(36)	varchar(36)	text	text	string	Nullable(UUID)	uuid	uuid	varchar(36)	uuid	nullable(string)

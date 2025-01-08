@@ -4,7 +4,7 @@ azuredwh	binary	binary	col_binary binary(100)	TRUE	FALSE
 azuredwh	bit	smallint	col_bit bit	FALSE	FALSE	
 azuredwh	char	string	col_char char	TRUE	TRUE	
 azuredwh	date	date	col_date date	TRUE	TRUE	
-azuredwh	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
+azuredwh	uniqueidentifier	uuid	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 azuredwh	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 azuredwh	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
 azuredwh	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	
@@ -27,6 +27,7 @@ azuredwh	varbinary	binary	col_varbinary varbinary(100)	FALSE	FALSE
 azuredwh	varchar	text	col_varchar varchar	TRUE	TRUE	
 azuresql	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 azuresql	binary	binary	col_binary binary(100)	TRUE	TRUE	
+azuresql	uniqueidentifier	uuid	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 azuresql	bit	smallint	col_bit bit	TRUE	TRUE	
 azuresql	char	string	col_char char	TRUE	TRUE	
 azuresql	date	date	col_date date	TRUE	TRUE	
@@ -72,7 +73,7 @@ bigquery	struct	json		FALSE	FALSE
 bigquery	time	time	col_time time	FALSE	FALSE	
 bigquery	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	
 clickhouse	array	json	col_array array	FALSE	FALSE	
-clickhouse	uuid	string	col_uuid array	FALSE	FALSE	
+clickhouse	uuid	uuid	col_uuid array	FALSE	FALSE	
 clickhouse	date	date	col_date date	TRUE	TRUE	
 clickhouse	datetime	datetime	col_datetime datetime	TRUE	TRUE	
 clickhouse	datetime64	datetime	col_datetime64 datetime64	TRUE	TRUE	
@@ -124,7 +125,7 @@ duckdb	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE
 duckdb	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
 duckdb	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
 duckdb	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
-duckdb	uuid	string	col_uuid uuid	TRUE	TRUE	
+duckdb	uuid	uuid	col_uuid uuid	TRUE	TRUE	
 duckdb	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
 duckdb	interval	string	col_interval interval	TRUE	TRUE	
 mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
@@ -196,7 +197,7 @@ motherduck	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE
 motherduck	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	
 motherduck	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	
 motherduck	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	
-motherduck	uuid	string	col_uuid uuid	TRUE	TRUE	
+motherduck	uuid	uuid	col_uuid uuid	TRUE	TRUE	
 motherduck	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
 motherduck	interval	string	col_interval interval	TRUE	TRUE	
 mysql	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
@@ -318,7 +319,7 @@ postgres	timetz	timez	col_timetz timetz	TRUE	TRUE	time of day, including time zo
 postgres	tsquery	string	col_tsquery tsquery	FALSE	FALSE	text search query
 postgres	tsvector	string	col_tsvector tsvector	FALSE	FALSE	text search document
 postgres	txid_snapshot	string	col_txid_snapshot txid_snapshot	FALSE	FALSE	user-level transaction ID snapshot
-postgres	uuid	string	col_uuid uuid	FALSE	FALSE	universally unique identifier
+postgres	uuid	uuid	col_uuid uuid	FALSE	FALSE	universally unique identifier
 postgres	varbit	string	col_varbit varbit	FALSE	FALSE	variable-length bit string
 postgres	varchar	text	col_varchar varchar	TRUE	TRUE	variable-length character string
 postgres	xml	string	col_xml xml	FALSE	FALSE	XML data
@@ -475,7 +476,7 @@ d1	boolean	bool	col_boolean boolean	TRUE	TRUE
 d1	float	float	col_float float	TRUE	TRUE	
 sqlserver	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 sqlserver	binary	binary	col_binary binary(100)	TRUE	FALSE	
-sqlserver	uniqueidentifier	string	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
+sqlserver	uniqueidentifier	uuid	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 sqlserver	bit	smallint	col_bit bit	FALSE	FALSE	
 sqlserver	char	string	col_char char(17)	TRUE	TRUE	
 sqlserver	date	date	col_date date	TRUE	TRUE	
