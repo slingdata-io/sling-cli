@@ -167,6 +167,7 @@ mariadb	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	A variable-leng
 mariadb	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
 mariadb	year	string	col_year year	FALSE	FALSE	A year value in CCYY or YY format
 mongodb	json	json		FALSE	FALSE	
+elascticsearch	json	json		FALSE	FALSE	
 motherduck	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 motherduck	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
 motherduck	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB

@@ -193,7 +193,7 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
-	case dbio.TypeDbMongoDB:
+	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {
 			m = g.M()

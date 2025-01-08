@@ -270,6 +270,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &MySQLConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mongo") {
 		conn = &MongoDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "elasticsearch") {
+		conn = &ElasticsearchConn{URL: URL}
 	} else if strings.HasPrefix(URL, "prometheus") {
 		conn = &PrometheusConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {

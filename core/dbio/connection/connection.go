@@ -538,6 +538,26 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = "mongodb://{username}:{password}@{host}:{port}"
+	case dbio.TypeDbElasticsearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		if cloudID := cast.ToString(c.Data["cloud_id"]); cloudID != "" {
+			template = "elasticsearch://"
+		} else {
+			template = "elasticsearch://{username}:{password}@{host}:{port}"
+		}
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())
