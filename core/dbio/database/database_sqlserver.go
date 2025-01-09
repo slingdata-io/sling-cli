@@ -473,7 +473,8 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	version := 14
 	versionOut, err := exec.Command(conn.bcpPath(), "-v").Output()
 	if err != nil {
-		return 0, g.Error(err, "could not get bcp version")
+		g.Debug("could not get bcp version running `bcp -v` (%s)", err.Error())
+		version = 0
 	}
 	regex := *regexp.MustCompile(`Version: (\d+)`)
 	verRes := regex.FindStringSubmatch(string(versionOut))
