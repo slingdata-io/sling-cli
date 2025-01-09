@@ -137,10 +137,10 @@ func (conn *ElasticsearchConn) NewTransaction(ctx context.Context, options ...*s
 func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
 	// Get mapping for the index
 	mapping, err := conn.Client.Indices.GetMapping(
-		conn.Client.Indices.GetMapping.WithIndex(table.Schema),
+		conn.Client.Indices.GetMapping.WithIndex(table.Name),
 	)
 	if err != nil {
-		return columns, g.Error(err, "could not get mapping for index %s", table.Schema)
+		return columns, g.Error(err, "could not get mapping for index %s", table.Name)
 	}
 	defer mapping.Body.Close()
 
@@ -150,14 +150,14 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 	}
 
 	// Navigate to properties
-	indexMapping, ok := mappingResponse[table.Schema].(map[string]interface{})
+	indexMapping, ok := mappingResponse[table.Name].(map[string]interface{})
 	if !ok {
-		return columns, g.Error("unexpected mapping structure for index %s", table.Schema)
+		return columns, g.Error("unexpected mapping structure for index %s", table.Name)
 	}
 
 	mappings, ok := indexMapping["mappings"].(map[string]interface{})
 	if !ok {
-		return columns, g.Error("no mappings found for index %s", table.Schema)
+		return columns, g.Error("no mappings found for index %s", table.Name)
 	}
 
 	properties, ok := mappings["properties"].(map[string]interface{})
@@ -264,7 +264,7 @@ func (conn *ElasticsearchConn) ExecContext(ctx context.Context, sql string, args
 
 func (conn *ElasticsearchConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	options, _ := g.UnmarshalMap(table.SQL)
-	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.FullName(), options)
+	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.Name, options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
 	}
@@ -337,7 +337,7 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 
 	// Create the search request
 	table, _ := ParseTableName(tableName, conn.Type)
-	indexName := table.Schema
+	indexName := table.Name
 	res, err := conn.Client.Search(
 		conn.Client.Search.WithContext(ctx),
 		conn.Client.Search.WithIndex(indexName),
