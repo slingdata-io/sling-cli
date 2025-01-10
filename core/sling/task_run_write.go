@@ -668,6 +668,22 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 }
 
 func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
+
+	// if final target column is string and source col is uuid, we need to match type
+	// otherwise, there could be a upper case/lower case difference, since sling now supports uuid type
+	for i, srcCol := range df.Columns {
+		tgtCol := t.Config.Target.columns.GetColumn(srcCol.Name)
+		if srcCol.Type == iop.UUIDType && tgtCol != nil {
+			df.Columns[i].Type = tgtCol.Type // match type
+			for _, ds := range df.Streams {
+				// apply to datastream level
+				if col := ds.Columns.GetColumn(srcCol.Name); col != nil {
+					col.Type = tgtCol.Type
+				}
+			}
+		}
+	}
+
 	// apply column casing
 	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
