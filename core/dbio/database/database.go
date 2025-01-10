@@ -2563,14 +2563,14 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
 	exprs = map[string]string{
-		"src_tgt_pk_equal": strings.Join(pkEqualFields, " and "),
-		"src_upd_pk_equal": strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
-		"src_fields":       strings.Join(srcFields, ", "),
-		"tgt_fields":       strings.Join(tgtFields, ", "),
-		"insert_fields":    strings.Join(insertFields, ", "),
-		"pk_fields":        strings.Join(pkFields, ", "),
-		"set_fields":       strings.Join(setFields, ", "),
-		"placehold_fields": strings.Join(placeholdFields, ", "),
+		"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
+		"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+		"src_fields":         strings.Join(srcFields, ", "),
+		"tgt_fields":         strings.Join(tgtFields, ", "),
+		"insert_fields":      strings.Join(insertFields, ", "),
+		"pk_fields":          strings.Join(pkFields, ", "),
+		"set_fields":         strings.Join(setFields, ", "),
+		"placeholder_fields": strings.Join(placeholderFields, ", "),
 	}
 
 	return

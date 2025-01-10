@@ -647,7 +647,7 @@ func (conn *MsSQLServerConn) GenerateUpsertSQL(srcTable string, tgtTable string,
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return

@@ -986,7 +986,7 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields_values", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return
