@@ -842,3 +842,20 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 
 	return cnt, nil
 }
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+	srcDbType := strings.ToLower(srcCol.DbType)
+	tgtDbType := strings.ToLower(tgtCol.DbType)
+
+	switch {
+	// maintain lower case if inserting from uniqueidentifier into nvarchar
+	case srcDbType == "uniqueidentifier" && tgtDbType == "nvarchar":
+		selectStr = g.F("cast(%s as nvarchar(max))", qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
+}

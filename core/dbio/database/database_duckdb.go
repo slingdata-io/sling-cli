@@ -432,9 +432,9 @@ func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column
 
 	switch {
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	default:
 		selectStr = qName
 	}

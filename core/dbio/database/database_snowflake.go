@@ -1103,7 +1103,6 @@ func (conn *SnowflakeConn) GetTablesAndViews(schema string) (iop.Dataset, error)
 	return dataTables, nil
 }
 
-// CastColumnForSelect casts to the correct target column type
 func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 
 	values := make([]string, len(cols))
@@ -1161,17 +1160,17 @@ func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Col
 
 	switch {
 	case srcCol.IsString() && srcDbType != "VARIANT" && tgtDbType == "VARIANT":
-		selectStr = g.F("parse_json(%s::string) as %s", qName, qName)
+		selectStr = g.F("parse_json(%s::string)", qName)
 	case srcCol.IsString() && srcDbType != "FIXED" && tgtDbType == "FIXED":
-		selectStr = g.F("to_decimal(%s::string, %d, %d) as %s", qName, ddlMaxDecLength, 10, qName)
+		selectStr = g.F("to_decimal(%s::string, %d, %d)", qName, ddlMaxDecLength, 10)
 	case srcCol.IsString() && !tgtCol.IsString():
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case !srcCol.IsString() && tgtCol.IsString():
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	default:
 		selectStr = qName
 	}

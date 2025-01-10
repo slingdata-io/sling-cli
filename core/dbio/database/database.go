@@ -2078,7 +2078,9 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 			selectExpr = conn.Self().CastColumnForSelect(srcCol, tgtCol)
 		}
 
-		selectExprs = append(selectExprs, selectExpr)
+		// add alias
+		qName := conn.Self().Quote(srcCol.Name)
+		selectExprs = append(selectExprs, g.F("%s as %s", selectExpr, qName))
 	}
 
 	return selectExprs
