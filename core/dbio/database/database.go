@@ -2539,22 +2539,34 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		pkFieldMap[pkField] = ""
 	}
 
-	srcCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), true)
+	cols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := srcCols.Names()
+	tgtFields := conn.Type.QuoteNames(cols.Names()...)
 	setFields := []string{}
 	insertFields := []string{}
-	placeholdFields := []string{}
-	for _, colName := range srcCols.Names() {
-		insertFields = append(insertFields, colName)
-		placeholdFields = append(placeholdFields, g.F("ph.%s", colName))
-		if _, ok := pkFieldMap[colName]; !ok {
+	placeholderFields := []string{}
+	for _, srcColName := range cols.Names() {
+		srcCol := g.PtrVal(srcColumns.GetColumn(srcColName)) // should be found
+		colNameQ := conn.Quote(srcCol.Name)
+		tgtCol := tgtColumns.GetColumn(srcCol.Name)
+		if tgtCol == nil {
+			return nil, g.Error("did not find target column: %s (has %s)", srcCol.Name, g.Marshal(tgtColumns.Names()))
+		}
+
+		colExpr := conn.Self().CastColumnForSelect(srcCol, *tgtCol)
+
+		insertFields = append(insertFields, colNameQ)
+
+		phExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("ph.%s", colNameQ))
+		placeholderFields = append(placeholderFields, phExpr)
+		if _, ok := pkFieldMap[colNameQ]; !ok {
 			// is not a pk field
-			setField := g.F("%s = src.%s", colName, colName)
+			setSrcExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("src.%s", colNameQ))
+			setField := g.F("%s = %s", colNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
 	}
