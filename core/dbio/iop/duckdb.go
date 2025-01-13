@@ -240,6 +240,10 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		args = append(args, "-readonly")
 	}
 
+	if workingDir := duck.GetProp("working_dir"); workingDir != "" {
+		duck.Proc.WorkDir = workingDir
+	}
+
 	if instance := duck.GetProp("instance"); instance != "" {
 		args = append(args, instance)
 	}
@@ -984,11 +988,18 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	incrementalWhereCond := "1=1"
 
 	uris := strings.Split(uri, DuckDbURISeparator)
+	workDir := duck.GetProp("working_dir")
 	for i, val := range uris {
+		if workDir != "" {
+			val = strings.TrimPrefix(strings.TrimPrefix(val, workDir), "/")
+		}
 		uris[i] = g.F("'%s'", val) // add quotes
 	}
 
-	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
+	// reserved word to use for timestamp comparison (when listing)
+	const slingLoadedAtColumn = "_sling_loaded_at"
+	if fsc.IncrementalKey != "" && fsc.IncrementalKey != slingLoadedAtColumn &&
+		fsc.IncrementalValue != "" {
 		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
 		where = g.F("where %s", incrementalWhereCond)
 	}

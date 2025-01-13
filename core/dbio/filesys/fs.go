@@ -583,7 +583,30 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	}
 
 	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
-		df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
+		if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
+			// duckdb read natively
+			df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
+		} else {
+			localRoot := path.Join(env.GetTempFolder(), g.NewTsID("duck.temp"))
+
+			// copy to local first
+			_, localNodes, err := CopyFromRemoteNodes(fs.Self(), url, nodes, localRoot)
+			if err != nil {
+				return nil, g.Error(err, "could not copy files locally to use duckdb compute")
+			}
+
+			localFs, _ := NewFileSysClientContext(fs.context.Ctx, dbio.TypeFileLocal, g.MapToKVArr(fs.properties)...)
+			Cfg.SetProp("working_dir", localRoot) // for duckdb working dir
+			df, err = GetDataflowViaDuckDB(localFs, url, localNodes, Cfg)
+			if err != nil {
+				err = g.Error(err, "error getting dataflow")
+				return df, err
+			}
+
+			df.Defer(func() { env.RemoveAllLocalTempFile(localRoot) })
+
+			return df, err
+		}
 	} else {
 		df, err = GetDataflow(fs.Self(), nodes, Cfg)
 	}
@@ -1105,7 +1128,7 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 			uris := strings.Join(nodes.Files().URIs(), iop.DuckDbURISeparator)
 
 			// no reader needed for iceberg, delta, duckdb will handle it
-			cfg.Props = map[string]string{"fs_props": g.Marshal(fs.Props())}
+			cfg.SetProp("fs_props", g.Marshal(fs.Props()))
 			switch cfg.Format {
 			case dbio.FileTypeParquet:
 				err = ds.ConsumeParquetReaderDuckDb(uris, cfg)
@@ -1499,6 +1522,100 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 	}
 
 	return totalBytes, nil
+}
+
+// CopyFromRemoteNodes copies the nodes to local path maintaining the same folder structure
+func CopyFromRemoteNodes(fs FileSysClient, url string, nodes FileNodes, localRoot string) (totalBytes int64, localNodes FileNodes, err error) {
+	if len(nodes) == 0 {
+		return 0, nil, g.Error("No files provided in nodes")
+	}
+
+	// Create context for managing concurrency
+	concurrency := cast.ToInt(fs.GetProp("concurrency"))
+	if concurrency == 0 {
+		concurrency = 10
+	}
+	copyContext := g.NewContext(fs.Context().Ctx, concurrency)
+
+	// Find the deepest common parent path
+	commonParent := GetDeepestParent(url)
+
+	// Create base local directory if it doesn't exist
+	err = os.MkdirAll(localRoot, 0755)
+	if err != nil {
+		return 0, nil, g.Error(err, "Error creating local directory: "+localRoot)
+	}
+
+	// Copy function for each file
+	copyFile := func(node FileNode) {
+		defer copyContext.Wg.Read.Done()
+
+		if node.IsDir {
+			return
+		}
+
+		// Get relative path from the common parent
+		relPath := strings.TrimPrefix(node.Path(), commonParent)
+		relPath = strings.TrimPrefix(relPath, "/")
+
+		// Construct local file path
+		localFilePath := filepath.Join(localRoot, relPath)
+
+		// Create parent directory if it doesn't exist
+		err = os.MkdirAll(filepath.Dir(localFilePath), 0755)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error creating local directory: "+filepath.Dir(localFilePath)))
+			return
+		}
+
+		// Get reader from remote file
+		reader, err := fs.GetReader(node.URI)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting reader for: "+node.URI))
+			return
+		}
+
+		// Create local file
+		file, err := os.Create(localFilePath)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error creating local file: "+localFilePath))
+			return
+		}
+		defer file.Close()
+
+		// Copy the content
+		written, err := io.Copy(file, reader)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error copying file content for: "+node.URI))
+			return
+		}
+
+		atomic.AddInt64(&totalBytes, written)
+
+		// Add to localNodes with updated local path
+		localNode := node
+		localNode.Size = cast.ToUint64(written)
+		localNode.URI = "file://" + localFilePath
+		copyContext.Mux.Lock()
+		localNodes = append(localNodes, localNode)
+		copyContext.Mux.Unlock()
+
+		g.Trace("copied %s to %s [%d bytes]", node.URI, localFilePath, written)
+	}
+
+	// Process each file concurrently
+	g.Debug("copying %d files from remote to %s for local processing", len(nodes), localRoot)
+	for _, node := range nodes {
+		copyContext.Wg.Read.Add()
+		go copyFile(node)
+	}
+
+	copyContext.Wg.Read.Wait()
+	if err = copyContext.Err(); err != nil {
+		return totalBytes, localNodes, g.Error(err, "Error during remote nodes copy")
+	}
+
+	return totalBytes, localNodes, nil
 }
 
 // CopyFromRemoteRecursive copies a remote file or directory recursively to a local filesystem

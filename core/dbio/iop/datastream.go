@@ -100,6 +100,20 @@ func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
 	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
 }
 
+func (sc *FileStreamConfig) GetProp(key string) string {
+	if sc.Props == nil {
+		sc.Props = map[string]string{}
+	}
+	return sc.Props[key]
+}
+
+func (sc *FileStreamConfig) SetProp(key, val string) {
+	if sc.Props == nil {
+		sc.Props = map[string]string{}
+	}
+	sc.Props[key] = val
+}
+
 type KeyValue struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
