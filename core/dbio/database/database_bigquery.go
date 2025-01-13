@@ -1011,9 +1011,9 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("cast(%s as int64)", qName)
 	case !srcCol.IsString() && tgtCol.IsString():
 		selectStr = g.F("cast(%s as string)", qName)
-	case srcCol.IsString() && tgtCol.IsDatetime():
+	case (srcCol.IsString() || tgtCol.IsDate()) && tgtCol.IsDatetime():
 		selectStr = g.F("cast(%s as timestamp)", qName)
-	case srcCol.IsString() && tgtCol.IsDate():
+	case (srcCol.IsString() || srcCol.IsDatetime()) && tgtCol.IsDate():
 		selectStr = g.F("cast(%s as date)", qName)
 	case !strings.EqualFold(srcCol.DbType, "datetime") && strings.EqualFold(tgtCol.DbType, "datetime"):
 		selectStr = g.F("cast(%s as datetime)", qName)
