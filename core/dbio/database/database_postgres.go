@@ -101,15 +101,15 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 	_, err = exec.LookPath("psql")
 	if err != nil {
 		g.Trace("psql not found in path. Using cursor...")
-		return conn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+		return conn.StreamRows(table.Select(), g.M("columns", table.Columns))
 	}
 
 	if conn.BaseConn.GetProp("allow_bulk_export") != "true" {
-		return conn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+		return conn.StreamRows(table.Select(), g.M("columns", table.Columns))
 	}
 
 	copyCtx := g.NewContext(conn.Context().Ctx)
-	stdOutReader, err := conn.CopyToStdout(copyCtx, table.Select(0, 0))
+	stdOutReader, err := conn.CopyToStdout(copyCtx, table.Select())
 	if err != nil {
 		return ds, err
 	}

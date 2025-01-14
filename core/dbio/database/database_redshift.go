@@ -99,7 +99,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 
 		defer conn.Context().Wg.Write.Done()
 
-		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0, 0), "\n", " "), "'", "''")
+		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(), "\n", " "), "'", "''")
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],

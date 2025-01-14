@@ -324,7 +324,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],
-			"sql", table.Select(0, 0),
+			"sql", table.Select(),
 			"s3_path", s3PathPart,
 			"aws_access_key_id", AwsID,
 			"aws_secret_access_key", AwsAccessKey,
@@ -385,7 +385,7 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_azure"],
-			"sql", table.Select(0, 0),
+			"sql", table.Select(),
 			"azure_path", azPath,
 			"azure_sas_token", azToken,
 		)
@@ -698,7 +698,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unl
 	for i, table := range tables {
 		stagePathPart := fmt.Sprintf("%s/%02d_", stageFolderPath, i+1)
 		context.Wg.Write.Add()
-		go unload(table.Select(0, 0), stagePathPart)
+		go unload(table.Select(), stagePathPart)
 	}
 
 	context.Wg.Write.Wait()

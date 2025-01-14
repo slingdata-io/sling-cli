@@ -399,6 +399,7 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 			SourceOptions: cfg.Source.Options,
 			TargetOptions: cfg.Target.Options,
 			Select:        cfg.Source.Select,
+			Where:         cfg.Source.Where,
 			Object:        cfg.Target.Object,
 			Mode:          cfg.Mode,
 			PrimaryKeyI:   cfg.Source.PrimaryKeyI,
@@ -1210,6 +1211,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	Where       string         `json:"where,omitempty" yaml:"where,omitempty"`
 	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`

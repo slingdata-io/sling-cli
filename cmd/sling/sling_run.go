@@ -154,6 +154,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
+		case "where":
+			cfg.Source.Where = cast.ToString(v)
 		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":

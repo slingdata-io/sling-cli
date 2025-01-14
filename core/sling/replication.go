@@ -672,6 +672,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 				Stream:      name,
 				Query:       stream.SQL,
 				Select:      stream.Select,
+				Where:       stream.Where,
 				PrimaryKeyI: stream.PrimaryKey(),
 				UpdateKey:   stream.UpdateKey,
 			},
@@ -732,6 +733,7 @@ type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
+	Where         string         `json:"where,omitempty" yaml:"where,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	SQL           string         `json:"sql,omitempty" yaml:"sql,omitempty"`
@@ -779,6 +781,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"mode":        func() { stream.Mode = replicationCfg.Defaults.Mode },
 		"object":      func() { stream.Object = replicationCfg.Defaults.Object },
 		"select":      func() { stream.Select = replicationCfg.Defaults.Select },
+		"where":       func() { stream.Where = replicationCfg.Defaults.Where },
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },
 		"sql":         func() { stream.SQL = replicationCfg.Defaults.SQL },

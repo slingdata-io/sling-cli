@@ -184,11 +184,22 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+type SelectOptions struct {
+	Fields []string
+	Offset int
+	Limit  int
+	Where  string
+}
 
+func (t *Table) Select(Opts ...SelectOptions) (sql string) {
+	opts := SelectOptions{}
+	if len(Opts) > 0 {
+		opts = Opts[0]
+	}
 	// set to internal value if not specified
-	limit = lo.Ternary(limit == 0, t.limit, limit)
-	offset = lo.Ternary(offset == 0, t.offset, offset)
+	limit := lo.Ternary(opts.Limit == 0, t.limit, opts.Limit)
+	offset := lo.Ternary(opts.Offset == 0, t.offset, opts.Offset)
+	fields := opts.Fields
 
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
@@ -198,10 +209,19 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		if m == nil {
 			m = g.M()
 		}
+		if opts.Where != "" {
+			var where any
+			g.Unmarshal(opts.Where, &where)
+			m["where"] = where // json array or object
+		}
+
 		if len(fields) > 0 && fields[0] != "*" {
 			m["fields"] = lo.Map(fields, func(v string, i int) string {
 				return strings.TrimSpace(v)
 			})
+		}
+
+		if len(m) > 0 {
 			return g.Marshal(m)
 		}
 		return t.SQL
@@ -231,10 +251,15 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		} else {
 			sql = t.SQL
 		}
-	} else if t.Dialect == dbio.TypeDbProton {
-		sql = g.F("select %s from table(%s)", fieldsStr, t.FDQN())
 	} else {
-		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
+		if t.Dialect == dbio.TypeDbProton {
+			sql = g.F("select %s from table(%s)", fieldsStr, t.FDQN())
+		} else {
+			sql = g.F("select %s from %s", fieldsStr, t.FDQN())
+		}
+		if opts.Where != "" {
+			sql = g.F("%s where %s", sql, opts.Where)
+		}
 	}
 
 	if limit > 0 && !strings.Contains(sql, "{limit}") {
@@ -260,7 +285,11 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 	}
 
 	// replace any provided placeholders
-	sql = g.R(sql, "limit", cast.ToString(limit), "offset", cast.ToString(offset))
+	sql = g.R(sql,
+		"limit", cast.ToString(limit),
+		"offset", cast.ToString(offset),
+		"where", opts.Where,
+	)
 
 	return
 }

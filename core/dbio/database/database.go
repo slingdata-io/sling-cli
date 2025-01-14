@@ -773,7 +773,7 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -1450,7 +1450,7 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(1, 0)
+	limitSQL := table.Select(SelectOptions{Limit: 1})
 	if table.IsProcedural() {
 		limitSQL = table.Raw // don't wrap in limit
 	}

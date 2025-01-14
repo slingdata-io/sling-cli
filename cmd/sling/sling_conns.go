@@ -117,7 +117,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 
 			if len(database.ParseSQLMultiStatements(query)) == 1 && (!sQuery.IsQuery() || (strings.Contains(strings.ToLower(query), "select") && !strings.Contains(strings.ToLower(query), "insert")) || g.In(conn.Connection.Type, dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch)) {
 
-				sql := sQuery.Select(100, 0)
+				sql := sQuery.Select(database.SelectOptions{Limit: 100})
 				if sQuery.IsQuery() || sQuery.IsProcedural() {
 					sql = sQuery.Raw
 				}
