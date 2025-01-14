@@ -633,7 +633,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				}
 			case tgtType == dbio.TypeDbOracle:
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // oracle doesn't have bool
+					correctType = iop.StringType // oracle doesn't have bool
 				}
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "date") {
 					correctType = iop.TimestampType /// oracle uses datetime for date

@@ -2665,7 +2665,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		return strings.ToLower(c.Name)
 	})
 
-	colsChanging := iop.Columns{}
+	var oldCols, colsChanging iop.Columns
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
@@ -2726,6 +2726,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		table.Columns[i].Type = newCol.Type
 		table.Columns[i].DbType = newNativeType
 		colsChanging = append(colsChanging, table.Columns[i])
+		oldCols = append(oldCols, col)
 	}
 
 	if len(colsChanging) == 0 {
@@ -2737,7 +2738,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		ddlParts = append(ddlParts, index.DropDDL())
 	}
 
-	for _, col := range colsChanging {
+	for index, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
 
@@ -2763,11 +2764,15 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		))
 
 		// update set to cast old values
-		oldColCasted := g.R(
-			conn.GetTemplateValue("function.cast_as"),
-			"field", conn.Self().Quote(col.Name),
-			"type", col.DbType,
-		)
+		oldColCasted := conn.Self().CastColumnForSelect(oldCols[index], col)
+		if oldColCasted == conn.Self().Quote(col.Name) {
+			oldColCasted = g.R(
+				conn.GetTemplateValue("function.cast_as"),
+				"field", conn.Self().Quote(col.Name),
+				"type", col.DbType,
+			)
+		}
+
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
 		fields = conn.GetType().QuoteNames(fields...) // add quotes
