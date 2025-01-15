@@ -549,7 +549,15 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 		if err != nil {
 			return database.Table{}, g.Error(err, "could not parse object table name")
 		}
-		suffix := lo.Ternary(tgtConn.GetType().DBNameUpperCase(), "_TMP", "_tmp")
+
+		// tmp table name normalization to not have mixed case
+		suffix := "_tmp"
+		tableTmp.Name = strings.ToLower(tableTmp.Name)
+		if tgtConn.GetType().DBNameUpperCase() {
+			tableTmp.Name = strings.ToUpper(tableTmp.Name)
+			suffix = "_TMP"
+		}
+
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
 			if len(tableTmp.Name) > 24 {
 				tableTmp.Name = tableTmp.Name[:24] // Max 30 chars
