@@ -670,6 +670,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
 				}
+			case tgtType == dbio.TypeDbRedshift:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // redshift uses text for json
+				}
+			case srcType == dbio.TypeDbRedshift && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // redshift uses text for json
+				}
 			case srcType == dbio.TypeDbSQLServer && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.BoolType {
 					correctType = iop.TextType // sqlserver doesn't have bool
