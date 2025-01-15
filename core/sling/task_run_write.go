@@ -549,7 +549,15 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 		if err != nil {
 			return database.Table{}, g.Error(err, "could not parse object table name")
 		}
-		suffix := lo.Ternary(tgtConn.GetType().DBNameUpperCase(), "_TMP", "_tmp")
+
+		// tmp table name normalization to not have mixed case
+		suffix := "_tmp"
+		tableTmp.Name = strings.ToLower(tableTmp.Name)
+		if tgtConn.GetType().DBNameUpperCase() {
+			tableTmp.Name = strings.ToUpper(tableTmp.Name)
+			suffix = "_TMP"
+		}
+
 		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
 			if len(tableTmp.Name) > 24 {
 				tableTmp.Name = tableTmp.Name[:24] // Max 30 chars
@@ -668,6 +676,22 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 }
 
 func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
+
+	// if final target column is string and source col is uuid, we need to match type
+	// otherwise, there could be a upper case/lower case difference, since sling now supports uuid type
+	for i, srcCol := range df.Columns {
+		tgtCol := t.Config.Target.columns.GetColumn(srcCol.Name)
+		if srcCol.Type == iop.UUIDType && tgtCol != nil {
+			df.Columns[i].Type = tgtCol.Type // match type
+			for _, ds := range df.Streams {
+				// apply to datastream level
+				if col := ds.Columns.GetColumn(srcCol.Name); col != nil {
+					col.Type = tgtCol.Type
+				}
+			}
+		}
+	}
+
 	// apply column casing
 	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 

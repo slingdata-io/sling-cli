@@ -41,6 +41,27 @@ func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
 
+func (t *Table) IsProcedural() bool {
+	// Convert to lowercase for case-insensitive matching
+	sqlLower := strings.ToLower(t.Raw)
+
+	// declare and cursor are before select
+	declareIndex := strings.Index(sqlLower, "declare")
+	cursorIndex := strings.Index(sqlLower, "cursor")
+	selectIndex := strings.Index(sqlLower, "select")
+	hintIndex := strings.Index(sqlLower, "sling-procedural-sql")
+
+	// should be found in order DECLARE, CURSOR and SELECT
+	if declareIndex > -1 && declareIndex < cursorIndex && cursorIndex < selectIndex {
+		return true
+	}
+	if hintIndex > -1 {
+		return true
+	}
+
+	return false
+}
+
 func (t *Table) MarshalJSON() ([]byte, error) {
 	type Alias Table
 	return json.Marshal(&struct {
@@ -163,24 +184,44 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 	return columns
 }
 
-func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
+type SelectOptions struct {
+	Fields []string
+	Offset int
+	Limit  int
+	Where  string
+}
 
+func (t *Table) Select(Opts ...SelectOptions) (sql string) {
+	opts := SelectOptions{}
+	if len(Opts) > 0 {
+		opts = Opts[0]
+	}
 	// set to internal value if not specified
-	limit = lo.Ternary(limit == 0, t.limit, limit)
-	offset = lo.Ternary(offset == 0, t.offset, offset)
+	limit := lo.Ternary(opts.Limit == 0, t.limit, opts.Limit)
+	offset := lo.Ternary(opts.Offset == 0, t.offset, opts.Offset)
+	fields := opts.Fields
 
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
-	case dbio.TypeDbMongoDB:
+	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {
 			m = g.M()
 		}
+		if opts.Where != "" {
+			var where any
+			g.Unmarshal(opts.Where, &where)
+			m["where"] = where // json array or object
+		}
+
 		if len(fields) > 0 && fields[0] != "*" {
 			m["fields"] = lo.Map(fields, func(v string, i int) string {
 				return strings.TrimSpace(v)
 			})
+		}
+
+		if len(m) > 0 {
 			return g.Marshal(m)
 		}
 		return t.SQL
@@ -210,10 +251,15 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 		} else {
 			sql = t.SQL
 		}
-	} else if t.Dialect == dbio.TypeDbProton {
-		sql = g.F("select %s from table(%s)", fieldsStr, t.FDQN())
 	} else {
-		sql = g.F("select %s from %s", fieldsStr, t.FDQN())
+		if t.Dialect == dbio.TypeDbProton {
+			sql = g.F("select %s from table(%s)", fieldsStr, t.FDQN())
+		} else {
+			sql = g.F("select %s from %s", fieldsStr, t.FDQN())
+		}
+		if opts.Where != "" {
+			sql = g.F("%s where %s", sql, opts.Where)
+		}
 	}
 
 	if limit > 0 && !strings.Contains(sql, "{limit}") {
@@ -239,7 +285,11 @@ func (t *Table) Select(limit, offset int, fields ...string) (sql string) {
 	}
 
 	// replace any provided placeholders
-	sql = g.R(sql, "limit", cast.ToString(limit), "offset", cast.ToString(offset))
+	sql = g.R(sql,
+		"limit", cast.ToString(limit),
+		"offset", cast.ToString(offset),
+		"where", opts.Where,
+	)
 
 	return
 }
@@ -547,7 +597,24 @@ type ColumnType struct {
 	Precision        int
 	Scale            int
 	Nullable         bool
+	CT               *sql.ColumnType
 	Sourced          bool
+}
+
+func (ct *ColumnType) IsSourced() bool {
+	if ct.Sourced {
+		return true
+	}
+
+	if ct.CT != nil {
+		_, ok1 := ct.CT.Length()
+		_, _, ok2 := ct.CT.DecimalSize()
+		if g.In(strings.ToLower(ct.DatabaseTypeName), "uuid", "uniqueidentifier") {
+			return true
+		}
+		return lo.Ternary(ok1, ok1, ok2)
+	}
+	return ct.Sourced
 }
 
 func ParseTableName(text string, dialect dbio.Type) (table Table, err error) {

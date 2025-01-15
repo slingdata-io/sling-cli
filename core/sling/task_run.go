@@ -85,7 +85,7 @@ func (t *TaskExecution) Execute() error {
 				case <-t.Context.Ctx.Done():
 					return
 				case <-ticker5s.C:
-					StoreSet(t)
+					StateSet(t)
 				}
 			}
 		}()
@@ -109,7 +109,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StoreSet(t)
+		StateSet(t)
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
@@ -118,7 +118,7 @@ func (t *TaskExecution) Execute() error {
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
 		// pre-hooks
-		if t.Err = t.ExecuteHooks("pre"); t.Err != nil {
+		if t.Err = t.ExecuteHooks(HookStagePre); t.Err != nil {
 			return
 		} else if t.skipStream {
 			t.SetProgress("skipping stream")
@@ -142,9 +142,6 @@ func (t *TaskExecution) Execute() error {
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
 		}
 
-		// update into store
-		StoreSet(t)
-
 		// warn constrains
 		if df := t.Df(); df != nil {
 			for _, col := range df.Columns {
@@ -152,13 +149,6 @@ func (t *TaskExecution) Execute() error {
 					g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
 					t.Status = ExecStatusWarning // set as warning status
 				}
-			}
-		}
-
-		// post-hooks
-		if hookErr := t.ExecuteHooks("post"); hookErr != nil {
-			if t.Err == nil {
-				t.Err = hookErr
 			}
 		}
 	}()
@@ -201,35 +191,30 @@ func (t *TaskExecution) Execute() error {
 	now2 := time.Now()
 	t.EndTime = &now2
 
+	// update into store
+	StateSet(t)
+
+	// post-hooks
+	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
+		if t.Err == nil {
+			t.Err = hookErr
+		}
+	}
+
 	return t.Err
 }
 
-func (t *TaskExecution) ExecuteHooks(stage string) (err error) {
+func (t *TaskExecution) ExecuteHooks(stage HookStage) (err error) {
 	if t.Config == nil || t.Config.ReplicationStream == nil {
 		return nil
 	}
 
-	var hooks []Hook
-	if stage == "pre" {
-		hooks, err = t.Config.ReplicationStream.PreHooks.Parse(stage, t)
-	} else if stage == "post" {
-		hooks, err = t.Config.ReplicationStream.PostHooks.Parse(stage, t)
-	} else {
-		return g.Error("invalid hook stage")
-	}
+	hooks, err := t.Replication.ParseStreamHook(stage, t.Config.ReplicationStream)
 	if err != nil {
-		return g.Error(err, "could not make hooks")
-	}
-
-	for _, hook := range hooks {
-		data := g.M("stage", stage, "id", hook.ID(), "type", hook.Type())
-		g.Debug("executing hook", data)
-
-		hookErr := hook.Execute(t)
-		err = hook.ExecuteOnDone(hookErr, t)
-
-		if err != nil {
-			return g.Error(err, "error executing hook")
+		return g.Error(err, "could not parse hooks")
+	} else if len(hooks) > 0 {
+		if err = hooks.Execute(); err != nil {
+			return g.Error(err, "error executing %s hooks", stage)
 		}
 	}
 
@@ -281,7 +266,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	}
 
 	// set read_only if sqlite / duckdb since it's a source
-	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
+	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck) {
 		conn.SetProp("read_only", "true")
 	}
 
@@ -322,16 +307,10 @@ func (t *TaskExecution) runDbSQL() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -358,6 +337,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to source database (%s)", t.Config.SrcConn.Type)
 	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
@@ -372,13 +352,6 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
 	} else if t.isIncrementalWithUpdateKey() {
 		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
-	}
-
-	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
-	err = srcConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
-		return
 	}
 
 	if !t.isUsingPool() {
@@ -426,16 +399,10 @@ func (t *TaskExecution) runFileToDB() (err error) {
 
 	start = time.Now()
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 
@@ -558,29 +525,17 @@ func (t *TaskExecution) runDbToDb() (err error) {
 	}
 
 	// Initiate connections
+	t.SetProgress("connecting to source database (%s)", t.Config.SrcConn.Type)
 	srcConn, err := t.getSrcDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
 	}
 
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
 	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
-		return
-	}
-
-	t.SetProgress("connecting to source database (%s)", srcConn.GetType())
-	err = srcConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.SrcConn.Info().Name, srcConn.GetType())
-		return
-	}
-
-	t.SetProgress("connecting to target database (%s)", tgtConn.GetType())
-	err = tgtConn.Connect()
-	if err != nil {
-		err = g.Error(err, "Could not connect to: %s (%s)", t.Config.TgtConn.Info().Name, tgtConn.GetType())
 		return
 	}
 

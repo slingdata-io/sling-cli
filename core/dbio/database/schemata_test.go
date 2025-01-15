@@ -102,7 +102,7 @@ func TestRegexMatch(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	sql := table.Select(10, 0)
+	sql := table.Select(SelectOptions{Limit: 10})
 	assert.True(t, strings.HasPrefix(sql, `with () select id`), sql)
 }
 

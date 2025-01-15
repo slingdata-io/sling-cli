@@ -88,7 +88,11 @@ func (conn *MongoDBConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to ping mongo server")
 	}
 
-	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	if !cast.ToBool(conn.GetProp("silent")) {
+		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	}
+
+	conn.SetProp("connected", "true")
 
 	return nil
 }
@@ -190,14 +194,39 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	endValue := cast.ToString(opts["end_value"])
 
 	filter := bson.D{}
+	if filterOpt, ok := opts["filter"]; ok {
+		// Convert filter option to bson.D
+		switch v := filterOpt.(type) {
+		case map[any]any:
+			// Simple filter format: {"field": "value", "field2": {"$gt": 100}}
+			for key, val := range v {
+				filter = append(filter, bson.E{Key: cast.ToString(key), Value: val})
+			}
+		case map[string]any:
+			// Simple filter format: {"field": "value", "field2": {"$gt": 100}}
+			for key, val := range v {
+				filter = append(filter, bson.E{Key: key, Value: val})
+			}
+		case []any:
+			// Complex filter format for $and/$or:
+			// [{"$or": [{"field1": "value1"}, {"field2": "value2"}]}]
+			var filterD bson.D
+			g.JSONConvert(v, &filterD)
+			filter = filterD
+		default:
+			return nil, g.Error("unsupported filter format: %#v", filterOpt)
+		}
+	}
+
+	// Add incremental/backfill filters if specified
 	if updateKey != "" && incrementalValue != "" {
 		// incremental mode
 		incrementalValue = strings.Trim(incrementalValue, "'")
-		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$gt", Value: incrementalValue}}}}...)
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gt", Value: incrementalValue}}})
 	} else if updateKey != "" && startValue != "" && endValue != "" {
 		// backfill mode
-		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$gte", Value: startValue}}}}...)
-		filter = append(filter, bson.D{{Key: updateKey, Value: bson.D{{Key: "$lte", Value: endValue}}}}...)
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$gte", Value: startValue}}})
+		filter = append(filter, bson.E{Key: updateKey, Value: bson.D{{Key: "$lte", Value: endValue}}})
 	}
 
 	if strings.TrimSpace(collectionName) == "" {

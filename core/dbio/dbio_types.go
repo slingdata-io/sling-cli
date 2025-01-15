@@ -48,26 +48,28 @@ const (
 	TypeFileSftp   Type = "sftp"
 	TypeFileHTTP   Type = "http"
 
-	TypeDbPostgres   Type = "postgres"
-	TypeDbRedshift   Type = "redshift"
-	TypeDbStarRocks  Type = "starrocks"
-	TypeDbMySQL      Type = "mysql"
-	TypeDbMariaDB    Type = "mariadb"
-	TypeDbOracle     Type = "oracle"
-	TypeDbBigTable   Type = "bigtable"
-	TypeDbBigQuery   Type = "bigquery"
-	TypeDbSnowflake  Type = "snowflake"
-	TypeDbSQLite     Type = "sqlite"
-	TypeDbDuckDb     Type = "duckdb"
-	TypeDbMotherDuck Type = "motherduck"
-	TypeDbSQLServer  Type = "sqlserver"
-	TypeDbAzure      Type = "azuresql"
-	TypeDbAzureDWH   Type = "azuredwh"
-	TypeDbTrino      Type = "trino"
-	TypeDbClickhouse Type = "clickhouse"
-	TypeDbMongoDB    Type = "mongodb"
-	TypeDbPrometheus Type = "prometheus"
-	TypeDbProton     Type = "proton"
+	TypeDbPostgres      Type = "postgres"
+	TypeDbRedshift      Type = "redshift"
+	TypeDbStarRocks     Type = "starrocks"
+	TypeDbMySQL         Type = "mysql"
+	TypeDbMariaDB       Type = "mariadb"
+	TypeDbOracle        Type = "oracle"
+	TypeDbBigTable      Type = "bigtable"
+	TypeDbBigQuery      Type = "bigquery"
+	TypeDbSnowflake     Type = "snowflake"
+	TypeDbSQLite        Type = "sqlite"
+	TypeDbD1            Type = "d1"
+	TypeDbDuckDb        Type = "duckdb"
+	TypeDbMotherDuck    Type = "motherduck"
+	TypeDbSQLServer     Type = "sqlserver"
+	TypeDbAzure         Type = "azuresql"
+	TypeDbAzureDWH      Type = "azuredwh"
+	TypeDbTrino         Type = "trino"
+	TypeDbClickhouse    Type = "clickhouse"
+	TypeDbMongoDB       Type = "mongodb"
+	TypeDbElasticsearch Type = "elasticsearch"
+	TypeDbPrometheus    Type = "prometheus"
+	TypeDbProton        Type = "proton"
 )
 
 var AllType = []struct {
@@ -93,6 +95,7 @@ var AllType = []struct {
 	{TypeDbBigQuery, "TypeDbBigQuery"},
 	{TypeDbSnowflake, "TypeDbSnowflake"},
 	{TypeDbSQLite, "TypeDbSQLite"},
+	{TypeDbD1, "TypeDbD1"},
 	{TypeDbDuckDb, "TypeDbDuckDb"},
 	{TypeDbMotherDuck, "TypeDbMotherDuck"},
 	{TypeDbSQLServer, "TypeDbSQLServer"},
@@ -100,6 +103,7 @@ var AllType = []struct {
 	{TypeDbAzureDWH, "TypeDbAzureDWH"},
 	{TypeDbTrino, "TypeDbTrino"},
 	{TypeDbClickhouse, "TypeDbClickhouse"},
+	{TypeDbElasticsearch, "TypeDbElasticsearch"},
 	{TypeDbMongoDB, "TypeDbMongoDB"},
 	{TypeDbPrometheus, "TypeDbPrometheus"},
 	{TypeDbProton, "TypeDbProton"},
@@ -122,7 +126,7 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
 	}
 
@@ -137,21 +141,22 @@ func (t Type) String() string {
 // DefPort returns the default port
 func (t Type) DefPort() int {
 	connTypesDefPort := map[Type]int{
-		TypeDbPostgres:   5432,
-		TypeDbRedshift:   5439,
-		TypeDbStarRocks:  9030,
-		TypeDbMySQL:      3306,
-		TypeDbMariaDB:    3306,
-		TypeDbOracle:     1521,
-		TypeDbSQLServer:  1433,
-		TypeDbAzure:      1433,
-		TypeDbTrino:      8080,
-		TypeDbClickhouse: 9000,
-		TypeDbMongoDB:    27017,
-		TypeDbPrometheus: 9090,
-		TypeDbProton:     8463,
-		TypeFileFtp:      21,
-		TypeFileSftp:     22,
+		TypeDbPostgres:      5432,
+		TypeDbRedshift:      5439,
+		TypeDbStarRocks:     9030,
+		TypeDbMySQL:         3306,
+		TypeDbMariaDB:       3306,
+		TypeDbOracle:        1521,
+		TypeDbSQLServer:     1433,
+		TypeDbAzure:         1433,
+		TypeDbTrino:         8080,
+		TypeDbClickhouse:    9000,
+		TypeDbMongoDB:       27017,
+		TypeDbElasticsearch: 9200,
+		TypeDbPrometheus:    9090,
+		TypeDbProton:        8463,
+		TypeFileFtp:         21,
+		TypeFileSftp:        22,
 	}
 	return connTypesDefPort[t]
 }
@@ -165,7 +170,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -196,34 +201,36 @@ func (t Type) IsUnknown() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
-		TypeFileLocal:    "FileSys - Local",
-		TypeFileHDFS:     "FileSys - HDFS",
-		TypeFileS3:       "FileSys - S3",
-		TypeFileAzure:    "FileSys - Azure",
-		TypeFileGoogle:   "FileSys - Google",
-		TypeFileSftp:     "FileSys - Sftp",
-		TypeFileFtp:      "FileSys - Ftp",
-		TypeFileHTTP:     "FileSys - HTTP",
-		Type("https"):    "FileSys - HTTP",
-		TypeDbPostgres:   "DB - PostgreSQL",
-		TypeDbRedshift:   "DB - Redshift",
-		TypeDbStarRocks:  "DB - StarRocks",
-		TypeDbMySQL:      "DB - MySQL",
-		TypeDbMariaDB:    "DB - MariaDB",
-		TypeDbOracle:     "DB - Oracle",
-		TypeDbBigQuery:   "DB - BigQuery",
-		TypeDbBigTable:   "DB - BigTable",
-		TypeDbSnowflake:  "DB - Snowflake",
-		TypeDbSQLite:     "DB - SQLite",
-		TypeDbDuckDb:     "DB - DuckDB",
-		TypeDbMotherDuck: "DB - MotherDuck",
-		TypeDbSQLServer:  "DB - SQLServer",
-		TypeDbAzure:      "DB - Azure",
-		TypeDbTrino:      "DB - Trino",
-		TypeDbClickhouse: "DB - Clickhouse",
-		TypeDbPrometheus: "DB - Prometheus",
-		TypeDbMongoDB:    "DB - MongoDB",
-		TypeDbProton:     "DB - Proton",
+		TypeFileLocal:       "FileSys - Local",
+		TypeFileHDFS:        "FileSys - HDFS",
+		TypeFileS3:          "FileSys - S3",
+		TypeFileAzure:       "FileSys - Azure",
+		TypeFileGoogle:      "FileSys - Google",
+		TypeFileSftp:        "FileSys - Sftp",
+		TypeFileFtp:         "FileSys - Ftp",
+		TypeFileHTTP:        "FileSys - HTTP",
+		Type("https"):       "FileSys - HTTP",
+		TypeDbPostgres:      "DB - PostgreSQL",
+		TypeDbRedshift:      "DB - Redshift",
+		TypeDbStarRocks:     "DB - StarRocks",
+		TypeDbMySQL:         "DB - MySQL",
+		TypeDbMariaDB:       "DB - MariaDB",
+		TypeDbOracle:        "DB - Oracle",
+		TypeDbBigQuery:      "DB - BigQuery",
+		TypeDbBigTable:      "DB - BigTable",
+		TypeDbSnowflake:     "DB - Snowflake",
+		TypeDbD1:            "DB - D1",
+		TypeDbSQLite:        "DB - SQLite",
+		TypeDbDuckDb:        "DB - DuckDB",
+		TypeDbMotherDuck:    "DB - MotherDuck",
+		TypeDbSQLServer:     "DB - SQLServer",
+		TypeDbAzure:         "DB - Azure",
+		TypeDbTrino:         "DB - Trino",
+		TypeDbClickhouse:    "DB - Clickhouse",
+		TypeDbPrometheus:    "DB - Prometheus",
+		TypeDbElasticsearch: "DB - Elasticsearch",
+		TypeDbMongoDB:       "DB - MongoDB",
+		TypeDbProton:        "DB - Proton",
 	}
 
 	return mapping[t]
@@ -232,34 +239,36 @@ func (t Type) NameLong() string {
 // Name return the type name
 func (t Type) Name() string {
 	mapping := map[Type]string{
-		TypeFileLocal:    "Local",
-		TypeFileHDFS:     "HDFS",
-		TypeFileS3:       "S3",
-		TypeFileAzure:    "Azure",
-		TypeFileGoogle:   "Google",
-		TypeFileSftp:     "Sftp",
-		TypeFileFtp:      "Ftp",
-		TypeFileHTTP:     "HTTP",
-		Type("https"):    "HTTP",
-		TypeDbPostgres:   "PostgreSQL",
-		TypeDbRedshift:   "Redshift",
-		TypeDbStarRocks:  "StarRocks",
-		TypeDbMySQL:      "MySQL",
-		TypeDbMariaDB:    "MariaDB",
-		TypeDbOracle:     "Oracle",
-		TypeDbBigQuery:   "BigQuery",
-		TypeDbBigTable:   "BigTable",
-		TypeDbSnowflake:  "Snowflake",
-		TypeDbSQLite:     "SQLite",
-		TypeDbDuckDb:     "DuckDB",
-		TypeDbMotherDuck: "MotherDuck",
-		TypeDbSQLServer:  "SQLServer",
-		TypeDbTrino:      "Trino",
-		TypeDbClickhouse: "Clickhouse",
-		TypeDbPrometheus: "Prometheus",
-		TypeDbMongoDB:    "MongoDB",
-		TypeDbAzure:      "Azure",
-		TypeDbProton:     "Proton",
+		TypeFileLocal:       "Local",
+		TypeFileHDFS:        "HDFS",
+		TypeFileS3:          "S3",
+		TypeFileAzure:       "Azure",
+		TypeFileGoogle:      "Google",
+		TypeFileSftp:        "Sftp",
+		TypeFileFtp:         "Ftp",
+		TypeFileHTTP:        "HTTP",
+		Type("https"):       "HTTP",
+		TypeDbPostgres:      "PostgreSQL",
+		TypeDbRedshift:      "Redshift",
+		TypeDbStarRocks:     "StarRocks",
+		TypeDbMySQL:         "MySQL",
+		TypeDbMariaDB:       "MariaDB",
+		TypeDbOracle:        "Oracle",
+		TypeDbBigQuery:      "BigQuery",
+		TypeDbBigTable:      "BigTable",
+		TypeDbSnowflake:     "Snowflake",
+		TypeDbD1:            "D1",
+		TypeDbSQLite:        "SQLite",
+		TypeDbDuckDb:        "DuckDB",
+		TypeDbMotherDuck:    "MotherDuck",
+		TypeDbSQLServer:     "SQLServer",
+		TypeDbTrino:         "Trino",
+		TypeDbClickhouse:    "Clickhouse",
+		TypeDbPrometheus:    "Prometheus",
+		TypeDbElasticsearch: "Elasticsearch",
+		TypeDbMongoDB:       "MongoDB",
+		TypeDbAzure:         "Azure",
+		TypeDbProton:        "Proton",
 	}
 
 	return mapping[t]

@@ -29,6 +29,7 @@ var (
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
 	duckDbEOFMarker    = "___end_of_duckdb_result___"
+	DuckDbURISeparator = "|-|+|"
 )
 
 // DuckDb is a Duck DB compute layer
@@ -120,7 +121,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 	switch scheme {
 	case dbio.TypeFileLocal:
-		return strings.TrimPrefix(uri, "file://")
+		return strings.ReplaceAll(uri, "file://", "")
 
 	case dbio.TypeFileS3:
 		secretKeyMap = map[string]string{
@@ -130,10 +131,12 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"REGION":            "REGION",
 			"SESSION_TOKEN":     "SESSION_TOKEN",
 			"ENDPOINT":          "ENDPOINT",
+			"USE_SSL":           "USE_SSL",
+			"URL_STYLE":         "URL_STYLE",
 		}
 
-		if strings.Contains(fsProps["endpoint"], "r2.cloudflarestorage.com") {
-			accountID := strings.Split(fsProps["endpoint"], ".")[0]
+		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
+			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
 			secretProps = append(secretProps, "ACCOUNT_ID "+accountID)
 			secretProps = append(secretProps, "TYPE R2")
 			scopeScheme = "r2"
@@ -141,6 +144,20 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		} else {
 			secretProps = append(secretProps, "TYPE S3")
 		}
+
+		// set endpoint
+		if endpoint := fsProps["ENDPOINT"]; endpoint != "" {
+			if _, ok := fsProps["USE_SSL"]; !ok && strings.HasPrefix(endpoint, "http://") {
+				fsProps["USE_SSL"] = "false" // default is true
+			}
+			// clean up endpoint scheme
+			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "https://")
+			fsProps["ENDPOINT"] = strings.TrimPrefix(endpoint, "http://")
+		}
+
+		// add default provider chain (https://duckdb.org/docs/extensions/httpfs/s3api.html#credential_chain-provider)
+		secretSQL := dbio.TypeDbDuckDb.GetTemplateValue("core.default_s3_secret")
+		duck.secrets = append(duck.secrets, secretSQL)
 
 	case dbio.TypeFileGoogle:
 		secretKeyMap = map[string]string{
@@ -221,6 +238,10 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 	if cast.ToBool(duck.GetProp("read_only")) {
 		args = append(args, "-readonly")
+	}
+
+	if workingDir := duck.GetProp("working_dir"); workingDir != "" {
+		duck.Proc.WorkDir = workingDir
 	}
 
 	if instance := duck.GetProp("instance"); instance != "" {
@@ -591,6 +612,13 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		ds.Columns = columns
 	}
 
+	// handle filename, always last column
+	if cast.ToBool(opts["filename"]) {
+		// rename to _sling_stream_url
+		ds.Columns[len(ds.Columns)-1].Name = ds.Metadata.StreamURL.Key
+		ds.Metadata.StreamURL.Key = "" // so it is not added again
+	}
+
 	ds.Inferred = true
 	ds.NoDebug = strings.Contains(sql, env.NoDebugKey)
 	ds.SetConfig(duck.Props())
@@ -959,13 +987,30 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	where := ""
 	incrementalWhereCond := "1=1"
 
-	if fsc.IncrementalKey != "" && fsc.IncrementalValue != "" {
+	uris := strings.Split(uri, DuckDbURISeparator)
+	workDir := duck.GetProp("working_dir")
+	for i, val := range uris {
+		if workDir != "" {
+			val = strings.TrimPrefix(strings.TrimPrefix(val, workDir), "/")
+		}
+		uris[i] = g.F("'%s'", val) // add quotes
+	}
+
+	// reserved word to use for timestamp comparison (when listing)
+	const slingLoadedAtColumn = "_sling_loaded_at"
+	if fsc.IncrementalKey != "" && fsc.IncrementalKey != slingLoadedAtColumn &&
+		fsc.IncrementalValue != "" {
 		incrementalWhereCond = g.F("%s > %s", dbio.TypeDbDuckDb.Quote(fsc.IncrementalKey), fsc.IncrementalValue)
 		where = g.F("where %s", incrementalWhereCond)
 	}
 
 	if format == dbio.FileTypeNone {
 		g.Warn("duck.MakeScanQuery: format is empty, cannot determine stream_scanner")
+	}
+
+	duckdbFilenameStr := ""
+	if fsc.DuckDBFilename {
+		duckdbFilenameStr = g.F(", filename = true")
 	}
 
 	streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(format))
@@ -975,6 +1020,8 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 			"incremental_where_cond", incrementalWhereCond,
 			"incremental_value", fsc.IncrementalValue,
 			"uri", uri,
+			"uris", strings.Join(uris, ", "),
+			"filename_expr", duckdbFilenameStr,
 		)
 
 		if fsc.Limit > 0 {
@@ -999,7 +1046,9 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 		g.R(selectStreamScanner, "stream_scanner", streamScanner),
 		"fields", strings.Join(fields, ","),
 		"uri", uri,
+		"uris", strings.Join(uris, ", "),
 		"where", where,
+		"filename_expr", duckdbFilenameStr,
 	))
 
 	if fsc.Limit > 0 {

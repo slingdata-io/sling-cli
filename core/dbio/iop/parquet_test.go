@@ -359,7 +359,7 @@ func TestParquetDuckDb(t *testing.T) {
 	t.Run("Test FormatQuery", func(t *testing.T) {
 		// Test FormatQuery method
 		inputSQL := "SELECT * FROM {stream_scanner} WHERE column1 > 10"
-		expectedSQL := g.F("SELECT * FROM parquet_scan('%s') WHERE column1 > 10", p.URI)
+		expectedSQL := g.F("SELECT * FROM read_parquet(['%s']) WHERE column1 > 10", p.URI)
 
 		formattedSQL := p.MakeQuery(FileStreamConfig{SQL: inputSQL})
 		assert.Equal(t, expectedSQL, formattedSQL, "Formatted query should match expected query")

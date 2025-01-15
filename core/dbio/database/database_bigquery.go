@@ -502,6 +502,7 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 	mapping := map[iop.ColumnType]bigquery.FieldType{
 		iop.ColumnType(""): bigquery.StringFieldType,
 		iop.StringType:     bigquery.StringFieldType,
+		iop.UUIDType:       bigquery.StringFieldType,
 		iop.TextType:       bigquery.StringFieldType,
 		iop.JsonType:       bigquery.JSONFieldType,
 		iop.BoolType:       bigquery.BooleanFieldType,
@@ -952,7 +953,7 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 
 func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if table.IsQuery() || table.IsView {
-		return conn.ExportToGCS(table.Select(0, 0), gcsURI)
+		return conn.ExportToGCS(table.Select(), gcsURI)
 	}
 
 	client, err := conn.getNewClient()
@@ -999,25 +1000,25 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 
 	switch {
 	case srcCol.IsString() && !srcCol.Type.IsJSON() && tgtCol.Type.IsJSON():
-		selectStr = g.F("to_json(%s) as %s", qName, qName)
+		selectStr = g.F("to_json(%s)", qName)
 	case !srcCol.IsFloat() && tgtCol.IsFloat():
-		selectStr = g.F("cast(%s as float64) as %s", qName, qName)
+		selectStr = g.F("cast(%s as float64)", qName)
 	case srcCol.IsString() && tgtCol.IsDecimal():
-		selectStr = g.F("parse_numeric(%s) as %s", qName, qName)
+		selectStr = g.F("parse_numeric(%s)", qName)
 	case !srcCol.IsDecimal() && tgtCol.IsDecimal():
-		selectStr = g.F("cast(%s as numeric) as %s", qName, qName)
+		selectStr = g.F("cast(%s as numeric)", qName)
 	case !srcCol.IsInteger() && tgtCol.IsInteger():
-		selectStr = g.F("cast(%s as int64) as %s", qName, qName)
+		selectStr = g.F("cast(%s as int64)", qName)
 	case !srcCol.IsString() && tgtCol.IsString():
-		selectStr = g.F("cast(%s as string) as %s", qName, qName)
-	case srcCol.IsString() && tgtCol.IsDatetime():
-		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
-	case srcCol.IsString() && tgtCol.IsDate():
-		selectStr = g.F("cast(%s as date) as %s", qName, qName)
+		selectStr = g.F("cast(%s as string)", qName)
+	case (srcCol.IsString() || tgtCol.IsDate()) && tgtCol.IsDatetime():
+		selectStr = g.F("cast(%s as timestamp)", qName)
+	case (srcCol.IsString() || srcCol.IsDatetime()) && tgtCol.IsDate():
+		selectStr = g.F("cast(%s as date)", qName)
 	case !strings.EqualFold(srcCol.DbType, "datetime") && strings.EqualFold(tgtCol.DbType, "datetime"):
-		selectStr = g.F("cast(%s as datetime) as %s", qName, qName)
+		selectStr = g.F("cast(%s as datetime)", qName)
 	case !strings.EqualFold(srcCol.DbType, "timestamp") && strings.EqualFold(tgtCol.DbType, "timestamp"):
-		selectStr = g.F("cast(%s as timestamp) as %s", qName, qName)
+		selectStr = g.F("cast(%s as timestamp)", qName)
 	default:
 		selectStr = qName
 	}
@@ -1068,7 +1069,7 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields_values", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return

@@ -224,6 +224,43 @@ func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow)
 	return conn.BaseConn.BulkImportFlow(tableFName, df)
 }
 
+func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	columns, err = conn.BaseConn.GetTableColumns(table, fields...)
+	if err != nil {
+		// try synonym
+
+		// get database first (synonym could point to other db)
+		values := g.M("schema", table.Schema, "table", table.Name)
+		data, err1 := conn.SubmitTemplate("single", conn.template.Metadata, "synonym_database", values)
+		if err1 != nil {
+			return columns, g.Error(err1, "could not get table or synonym database")
+		} else if len(data.Rows) == 0 {
+			return columns, g.Error("did not find table or synonym")
+		}
+
+		synDbName := cast.ToString(data.Records(true)[0]["database_name"])
+		conn.SetProp("synonym_database", synDbName)
+		conn.SetProp("get_synonym", "true")
+		columns, err1 = conn.BaseConn.GetTableColumns(table, fields...)
+		if err1 != nil {
+			return columns, err1
+		} else if len(columns) > 0 {
+			err = nil
+		}
+		conn.SetProp("get_synonym", "false")
+		conn.SetProp("synonym_database", "") // clear
+	}
+	return
+}
+
+func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
+		name = "columns_synonym"
+		values["base_object_database"] = conn.GetProp("synonym_database")
+	}
+	return conn.BaseConn.SubmitTemplate(level, templateMap, name, values)
+}
+
 // BulkImportStream bulk import stream
 func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	conn.Commit() // cannot have transaction lock table
@@ -436,7 +473,8 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	version := 14
 	versionOut, err := exec.Command(conn.bcpPath(), "-v").Output()
 	if err != nil {
-		return 0, g.Error(err, "could not get bcp version")
+		g.Debug("could not get bcp version running `bcp -v` (%s)", err.Error())
+		version = 0
 	}
 	regex := *regexp.MustCompile(`Version: (\d+)`)
 	verRes := regex.FindStringSubmatch(string(versionOut))
@@ -609,7 +647,7 @@ func (conn *MsSQLServerConn) GenerateUpsertSQL(srcTable string, tgtTable string,
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return
@@ -803,4 +841,21 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 	}
 
 	return cnt, nil
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+	srcDbType := strings.ToLower(srcCol.DbType)
+	tgtDbType := strings.ToLower(tgtCol.DbType)
+
+	switch {
+	// maintain lower case if inserting from uniqueidentifier into nvarchar
+	case srcDbType == "uniqueidentifier" && tgtDbType == "nvarchar":
+		selectStr = g.F("cast(%s as nvarchar(max))", qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }

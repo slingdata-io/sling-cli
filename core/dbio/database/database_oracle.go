@@ -14,6 +14,7 @@ import (
 	"time"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/samber/lo"
 	go_ora "github.com/sijms/go-ora/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -539,7 +540,7 @@ func (conn *OracleConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return
@@ -579,4 +580,23 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, cols iop.Colum
 		"intosStr", strings.Join(intos, "\n"),
 	)
 	return statement
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *OracleConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+	srcDbType := strings.ToLower(srcCol.DbType)
+	tgtDbType := strings.ToLower(tgtCol.DbType)
+	tgtCol.DbPrecision = lo.Ternary(tgtCol.DbPrecision == 0, 4000, tgtCol.DbPrecision)
+
+	switch {
+	case srcDbType != "clob" && tgtDbType == "clob":
+		selectStr = g.F("to_clob(%s)", qName)
+	case srcDbType == "clob" && tgtCol.IsString() && tgtDbType != "clob":
+		selectStr = g.F("cast(%s as varchar2(%d))", qName, tgtCol.DbPrecision)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }

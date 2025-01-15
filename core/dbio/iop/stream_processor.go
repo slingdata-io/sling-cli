@@ -225,6 +225,7 @@ func NewStreamProcessor() *StreamProcessor {
 		"2006/01/02 15:04:05",
 		"02-01-2006",
 		"02-01-2006 15:04:05",
+		"Mon, 02 Jan 2006 15:04:05 -0700",
 	}
 
 	// up to 90 digits. This is done for CastToStringSafeMask

@@ -3,7 +3,9 @@ package database
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
 
@@ -95,26 +97,59 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
 
 	g.Info("unloading from redshift to s3")
+	queryContext := g.NewContext(ctx.Ctx)
 	unload := func(table Table, s3PathPart string) {
 
-		defer conn.Context().Wg.Write.Done()
+		defer queryContext.Wg.Write.Done()
 
-		sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(0, 0), "\n", " "), "'", "''")
+		// if it is limited, create temp table first, unload and drop
+		matched, _ := regexp.MatchString(`limit\s+\d+`, strings.ToLower(table.Select()))
+		if matched || table.limit > 0 {
+			// create temp table
+			tempTable := table.Clone()
+			tempTable.Name = fmt.Sprintf("temp_unload_%d", time.Now().UnixNano())
 
-		unloadSQL := g.R(
-			conn.template.Core["copy_to_s3"],
-			"sql", sql,
-			"s3_path", s3PathPart,
-			"aws_access_key_id", AwsID,
-			"aws_secret_access_key", AwsAccessKey,
-			"parallel", conn.GetProp("PARALLEL"),
-		)
-		_, err = conn.Exec(unloadSQL)
-		if err != nil {
-			cleanSQL := strings.ReplaceAll(unloadSQL, AwsID, "*****")
-			cleanSQL = strings.ReplaceAll(cleanSQL, AwsAccessKey, "*****")
-			err = g.Error(err, fmt.Sprintf("SQL Error for %s:\n%s", s3PathPart, cleanSQL))
-			ctx.CaptureErr(err)
+			createSQL := g.F("create temporary table %s as %s", tempTable.Name, table.Select())
+
+			// update unload SQL to use temp table
+			unloadSQL := g.R(
+				conn.template.Core["copy_to_s3"],
+				"sql", g.F("select * from %s", tempTable.Name),
+				"s3_path", s3PathPart,
+				"aws_access_key_id", AwsID,
+				"aws_secret_access_key", AwsAccessKey,
+				"parallel", conn.GetProp("PARALLEL"),
+			)
+
+			dropTableSQL := g.F("drop table if exists %s", tempTable.Name)
+
+			_, err = conn.ExecMulti(createSQL, unloadSQL, dropTableSQL)
+			if err != nil {
+				err = g.Error(err, "could not create temp table for unload")
+				queryContext.CaptureErr(err)
+				return
+			}
+
+		} else {
+
+			sql := strings.ReplaceAll(strings.ReplaceAll(table.Select(), "\n", " "), "'", "''")
+
+			unloadSQL := g.R(
+				conn.template.Core["copy_to_s3"],
+				"sql", sql,
+				"s3_path", s3PathPart,
+				"aws_access_key_id", AwsID,
+				"aws_secret_access_key", AwsAccessKey,
+				"parallel", conn.GetProp("PARALLEL"),
+			)
+
+			_, err = conn.Exec(unloadSQL)
+			if err != nil {
+				cleanSQL := strings.ReplaceAll(unloadSQL, AwsID, "*****")
+				cleanSQL = strings.ReplaceAll(cleanSQL, AwsAccessKey, "*****")
+				err = g.Error(err, fmt.Sprintf("SQL Error for %s:\n%s", s3PathPart, cleanSQL))
+				queryContext.CaptureErr(err)
+			}
 		}
 
 	}
@@ -130,12 +165,12 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
 		s3PathPart := fmt.Sprintf("%s/u%02d-", s3Path, i+1)
-		conn.Context().Wg.Write.Add()
+		queryContext.Wg.Write.Add()
 		go unload(table, s3PathPart)
 	}
 
-	conn.Context().Wg.Write.Wait()
-	err = conn.Context().Err()
+	queryContext.Wg.Write.Wait()
+	err = queryContext.Err()
 
 	if err == nil {
 		g.Debug("Unloaded to %s", s3Path)
@@ -346,9 +381,9 @@ func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 
 	switch {
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	default:
 		selectStr = qName
 	}

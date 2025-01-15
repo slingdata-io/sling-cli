@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -153,6 +154,8 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			}
 		case "select":
 			cfg.Source.Select = strings.Split(cast.ToString(v), ",")
+		case "where":
+			cfg.Source.Where = cast.ToString(v)
 		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
 		case "debug":
@@ -194,6 +197,10 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	defer printUpdateAvailable()
 
 runReplication:
+	defer connection.CloseAll()
+
+	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+
 	if replicationCfgPath != "" {
 		//  run replication
 		err = runReplication(replicationCfgPath, cfg, selectStreams...)
@@ -367,7 +374,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.AppendOutput(ll)
 	}
 
-	sling.StoreSet(task) // set into store
+	sling.StateSet(task) // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -378,7 +385,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = ctx
 
 	// set into store after
-	defer sling.StoreSet(task)
+	defer sling.StateSet(task)
 
 	// run task
 	setTM()
@@ -386,7 +393,9 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	if err != nil {
 
-		if replication != nil {
+		if replication != nil && (len(replication.Tasks) > 1 || projectID != "") {
+			// print error right after stream run if there are multiple runs
+			// so it's easy to find. otherwise will print at end
 			fmt.Fprintf(os.Stderr, "%s\n", env.RedString(g.ErrMsgSimple(err)))
 		}
 
@@ -445,6 +454,16 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return
 	}
 
+	// parse hooks
+	startHooks, err := replication.ParseDefaultHook(sling.HookStageStart)
+	if err != nil {
+		return g.Error(err, "could not parse start hooks")
+	}
+	endHooks, err := replication.ParseDefaultHook(sling.HookStageEnd)
+	if err != nil {
+		return g.Error(err, "could not parse end hooks")
+	}
+
 	eG := g.ErrorGroup{}
 	successes := 0
 
@@ -459,6 +478,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	if streamCnt > 1 {
 		g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
+	}
+
+	// run start hooks
+	if err = startHooks.Execute(); err != nil {
+		return g.Error(err, "error executing start hooks")
 	}
 
 	counter := 0
@@ -494,6 +518,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		} else {
 			successes++
 		}
+	}
+
+	// run end hooks
+	if err = endHooks.Execute(); err != nil {
+		eG.Capture(err, "end-hooks")
 	}
 
 	println()

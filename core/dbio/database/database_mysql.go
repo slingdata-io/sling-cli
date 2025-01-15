@@ -160,17 +160,17 @@ func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err er
 	_, err = exec.LookPath("mysql")
 	if err != nil {
 		g.Trace("mysql not found in path. Using cursor...")
-		return conn.BaseConn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+		return conn.BaseConn.StreamRows(table.Select(), g.M("columns", table.Columns))
 	} else if runtime.GOOS == "windows" {
-		return conn.BaseConn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+		return conn.BaseConn.StreamRows(table.Select(), g.M("columns", table.Columns))
 	}
 
 	if conn.BaseConn.GetProp("allow_bulk_export") != "true" {
-		return conn.BaseConn.StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+		return conn.BaseConn.StreamRows(table.Select(), g.M("columns", table.Columns))
 	}
 
 	copyCtx := g.NewContext(conn.Context().Ctx)
-	stdOutReader, err := conn.LoadDataOutFile(copyCtx, table.Select(0, 0))
+	stdOutReader, err := conn.LoadDataOutFile(copyCtx, table.Select())
 	if err != nil {
 		return ds, err
 	}

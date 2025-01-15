@@ -556,7 +556,8 @@ function:
   cast_to_text: '{field}::text'
   date_to_int: trunc(extract(epoch from {field})/(60*60*24))::int
   number_to_int: round({field}, 0)
-  checksum_datetime: date_part('epoch', {field})::bigint
+  checksum_date: date_part('epoch', {field}::timestamp)::bigint
+  checksum_datetime: date_part('epoch', {field}::timestamp)::bigint
   checksum_string: length({field}::text)
   checksum_boolean: length(case when {field} = true then 'true' when {field} = false then 'false' end)
   checksum_json: length(replace({field}::text, ' ', ''))

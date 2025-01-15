@@ -81,12 +81,37 @@ type FileStreamConfig struct {
 	Format           dbio.FileType     `json:"format"`
 	IncrementalKey   string            `json:"incremental_key"`
 	IncrementalValue string            `json:"incremental_value"`
-	FileSelect       *[]string         `json:"file_select"` // a list of files to include.
+	FileSelect       *[]string         `json:"file_select"`     // a list of files to include.
+	DuckDBFilename   bool              `json:"duckdb_filename"` // stream URL
 	Props            map[string]string `json:"props"`
 }
 
+func (sc *FileStreamConfig) ComputeWithDuckDB() bool {
+	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" {
+		return cast.ToBool(val)
+	}
+	return true
+}
+
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
+	if val := sc.ComputeWithDuckDB(); !val {
+		return val
+	}
 	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
+}
+
+func (sc *FileStreamConfig) GetProp(key string) string {
+	if sc.Props == nil {
+		sc.Props = map[string]string{}
+	}
+	return sc.Props[key]
+}
+
+func (sc *FileStreamConfig) SetProp(key, val string) {
+	if sc.Props == nil {
+		sc.Props = map[string]string{}
+	}
+	sc.Props[key] = val
 }
 
 type KeyValue struct {
@@ -1498,8 +1523,9 @@ func (ds *Datastream) ConsumeParquetReaderDuckDb(uri string, sc FileStreamConfig
 		return g.Error(err, "could not create ParquetDuckDb")
 	}
 
+	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
 	if err != nil {
 		return g.Error(err, "could not read parquet rows")
 	}
@@ -1559,8 +1585,9 @@ func (ds *Datastream) ConsumeCsvReaderDuckDb(uri string, sc FileStreamConfig) (e
 		return g.Error(err, "could not create CsvReaderDuckDb")
 	}
 
+	sc.DuckDBFilename = ds.Metadata.StreamURL.Key != ""
 	sql := r.MakeQuery(sc)
-	ds, err = r.Duck.Stream(sql, g.M("datastream", ds))
+	ds, err = r.Duck.Stream(sql, g.M("datastream", ds, "filename", sc.DuckDBFilename))
 	if err != nil {
 		return g.Error(err, "could not read csv rows")
 	}

@@ -324,7 +324,7 @@ func (conn *SnowflakeConn) CopyToS3(tables ...Table) (s3Path string, err error) 
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_s3"],
-			"sql", table.Select(0, 0),
+			"sql", table.Select(),
 			"s3_path", s3PathPart,
 			"aws_access_key_id", AwsID,
 			"aws_secret_access_key", AwsAccessKey,
@@ -385,7 +385,7 @@ func (conn *SnowflakeConn) CopyToAzure(tables ...Table) (azPath string, err erro
 
 		unloadSQL := g.R(
 			conn.template.Core["copy_to_azure"],
-			"sql", table.Select(0, 0),
+			"sql", table.Select(),
 			"azure_path", azPath,
 			"azure_sas_token", azToken,
 		)
@@ -698,7 +698,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unl
 	for i, table := range tables {
 		stagePathPart := fmt.Sprintf("%s/%02d_", stageFolderPath, i+1)
 		context.Wg.Write.Add()
-		go unload(table.Select(0, 0), stagePathPart)
+		go unload(table.Select(), stagePathPart)
 	}
 
 	context.Wg.Write.Wait()
@@ -986,7 +986,7 @@ func (conn *SnowflakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, p
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"src_fields_values", strings.ReplaceAll(upsertMap["placehold_fields"], "ph.", "src."),
+		"src_fields_values", strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src."),
 	)
 
 	return
@@ -1103,7 +1103,6 @@ func (conn *SnowflakeConn) GetTablesAndViews(schema string) (iop.Dataset, error)
 	return dataTables, nil
 }
 
-// CastColumnForSelect casts to the correct target column type
 func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 
 	values := make([]string, len(cols))
@@ -1161,17 +1160,17 @@ func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Col
 
 	switch {
 	case srcCol.IsString() && srcDbType != "VARIANT" && tgtDbType == "VARIANT":
-		selectStr = g.F("parse_json(%s::string) as %s", qName, qName)
+		selectStr = g.F("parse_json(%s::string)", qName)
 	case srcCol.IsString() && srcDbType != "FIXED" && tgtDbType == "FIXED":
-		selectStr = g.F("to_decimal(%s::string, %d, %d) as %s", qName, ddlMaxDecLength, 10, qName)
+		selectStr = g.F("to_decimal(%s::string, %d, %d)", qName, ddlMaxDecLength, 10)
 	case srcCol.IsString() && !tgtCol.IsString():
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case !srcCol.IsString() && tgtCol.IsString():
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	case srcCol.Type == iop.TimestampzType && tgtCol.Type != iop.TimestampzType:
-		selectStr = g.F("%s::%s as %s", qName, tgtCol.DbType, qName)
+		selectStr = g.F("%s::%s", qName, tgtCol.DbType)
 	default:
 		selectStr = qName
 	}

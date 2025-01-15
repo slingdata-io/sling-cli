@@ -171,7 +171,7 @@ func upgradeScoop() (err error) {
 }
 
 func checkUpdate(force bool) {
-	if core.Version == "dev" {
+	if strings.Contains(core.Version, "dev") {
 		return
 	} else if time.Now().Second()%4 != 0 && !force {
 		// a way to check/notify about a new version less frequently

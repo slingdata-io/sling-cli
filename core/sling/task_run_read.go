@@ -168,7 +168,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	// construct select statement for selected fields
 	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
-		sTable.SQL = sTable.Select(cfg.Source.Limit(), cfg.Source.Offset(), strings.Split(selectFieldsStr, ",")...)
+		sTable.SQL = sTable.Select(database.SelectOptions{
+			Fields: strings.Split(selectFieldsStr, ","),
+			Where:  cfg.Source.Where,
+			Limit:  cfg.Source.Limit(),
+			Offset: cfg.Source.Offset(),
+		})
 	}
 
 	// set constraints

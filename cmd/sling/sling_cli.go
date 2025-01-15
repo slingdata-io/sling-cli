@@ -93,6 +93,11 @@ var cliRunFlags = []g.Flag{
 		Description: "Select or exclude specific columns from the source stream. (comma separated). Use '-' prefix to exclude.",
 	},
 	{
+		Name:        "where",
+		Type:        "string",
+		Description: "Specify the WHERE clause to filter (if not providing custom SQL)",
+	},
+	{
 		Name:        "transforms",
 		ShortName:   "",
 		Type:        "string",

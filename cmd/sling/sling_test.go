@@ -66,11 +66,13 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbRedshift:          {name: "redshift"},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
+	dbio.TypeDbD1:                {name: "d1", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 
@@ -625,9 +627,13 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType.IsDatetime() || correctType.IsDate() {
 					correctType = iop.TextType // sqlite uses text for timestamps
 				}
+			case tgtType == dbio.TypeDbD1 || srcType == dbio.TypeDbD1:
+				if correctType.IsDatetime() || correctType.IsDate() {
+					correctType = iop.TextType // d1 (sqlite) uses text for timestamps
+				}
 			case tgtType == dbio.TypeDbOracle:
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "target") {
-					correctType = iop.TextType // oracle doesn't have bool
+					correctType = iop.StringType // oracle doesn't have bool
 				}
 				if srcType == dbio.TypeDbPostgres && strings.EqualFold(colName, "date") {
 					correctType = iop.TimestampType /// oracle uses datetime for date
@@ -663,6 +669,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
+				}
+			case tgtType == dbio.TypeDbRedshift:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // redshift uses text for json
+				}
+			case srcType == dbio.TypeDbRedshift && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // redshift uses text for json
 				}
 			case srcType == dbio.TypeDbSQLServer && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.BoolType {
@@ -732,11 +746,11 @@ func TestSuiteDatabasePostgres(t *testing.T) {
 	testSuite(t, dbio.TypeDbPostgres)
 }
 
-// func TestSuiteDatabaseRedshift(t *testing.T) {
-// 	t.Parallel()
-// 	os.Setenv("SAMPLE_SIZE", "1200") // adjust_column_type does not work in Redshift
-// 	testSuite(t, dbio.TypeDbRedshift)
-// }
+func TestSuiteDatabaseRedshift(t *testing.T) {
+	t.Skip()
+	os.Setenv("SAMPLE_SIZE", "1200") // adjust_column_type does not work in Redshift
+	testSuite(t, dbio.TypeDbRedshift)
+}
 
 func TestSuiteDatabaseStarRocks(t *testing.T) {
 	t.Parallel()
@@ -779,6 +793,11 @@ func TestSuiteDatabaseSnowflake(t *testing.T) {
 func TestSuiteDatabaseSQLite(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLite)
+}
+
+func TestSuiteDatabaseD1(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbD1, "1-5,7-9,11+") // skip wide tests
 }
 
 func TestSuiteDatabaseDuckDb(t *testing.T) {

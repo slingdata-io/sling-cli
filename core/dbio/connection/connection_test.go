@@ -247,10 +247,13 @@ func TestConnectionDiscover(t *testing.T) {
 			}
 
 			// assert that the streams are correct
-			assert.Equal(t, len(test.expected), len(results))
 			for _, result := range results {
 				assert.Contains(t, test.expected, result)
 			}
+			for _, expected := range test.expected {
+				assert.Contains(t, results, expected)
+			}
+			assert.Equal(t, len(test.expected), len(results))
 		})
 	}
 }

@@ -398,7 +398,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("username", U.Username())
 				setIfMissing("password", U.Password())
@@ -422,6 +422,10 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("schema", "main")
 			} else if c.Type == dbio.TypeDbMotherDuck {
 				setIfMissing("schema", "main")
+			} else if c.Type == dbio.TypeDbD1 {
+				setIfMissing("schema", "main")
+				setIfMissing("host", U.Hostname())
+				setIfMissing("password", U.Password())
 			} else if c.Type == dbio.TypeDbSQLServer {
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
@@ -534,6 +538,26 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = "mongodb://{username}:{password}@{host}:{port}"
+	case dbio.TypeDbElasticsearch:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+
+		// parse http url
+		if httpUrlStr, ok := c.Data["http_url"]; ok {
+			u, err := url.Parse(cast.ToString(httpUrlStr))
+			if err != nil {
+				g.Warn("invalid http_url: %s", err.Error())
+			} else {
+				setIfMissing("host", u.Hostname())
+			}
+		}
+
+		if cloudID := cast.ToString(c.Data["cloud_id"]); cloudID != "" {
+			template = "elasticsearch://"
+		} else {
+			template = "elasticsearch://{username}:{password}@{host}:{port}"
+		}
 	case dbio.TypeDbPrometheus:
 		setIfMissing("api_key", "")
 		setIfMissing("port", c.Type.DefPort())
@@ -577,6 +601,10 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["passcode"]; ok {
 			template = template + "&passcode={passcode}"
 		}
+	case dbio.TypeDbD1:
+		setIfMissing("account_id", c.Data["host"])
+		setIfMissing("api_token", c.Data["password"])
+		template = "d1://user:{api_token}@{account_id}/{database}"
 	case dbio.TypeDbSQLite:
 		if val, ok := c.Data["instance"]; ok {
 			dbURL, err := net.NewURL(cast.ToString(val))
@@ -618,7 +646,7 @@ func (c *Connection) setURL() (err error) {
 		case port_ok:
 			template += ":{port}"
 		case instance_ok:
-			template += "/instance"
+			template += "/{instance}"
 		default:
 			template += ":{port}"
 			setIfMissing("port", c.Type.DefPort())
@@ -720,6 +748,13 @@ func (c *Connection) setURL() (err error) {
 	setIfMissing("url", g.Rm(template, urlData))
 
 	return nil
+}
+
+// CloseAll closes all cached connections
+func CloseAll() {
+	for _, conn := range connCache.Items() {
+		conn.Close()
+	}
 }
 
 // CopyDirect copies directly from cloud files

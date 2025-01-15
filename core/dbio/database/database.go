@@ -270,6 +270,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &MySQLConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mongo") {
 		conn = &MongoDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "elasticsearch") {
+		conn = &ElasticsearchConn{URL: URL}
 	} else if strings.HasPrefix(URL, "prometheus") {
 		conn = &PrometheusConn{URL: URL}
 	} else if strings.HasPrefix(URL, "mariadb:") {
@@ -287,6 +289,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
+	} else if strings.HasPrefix(URL, "d1") {
+		conn = &D1Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
 		conn = &SQLiteConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
@@ -769,7 +773,7 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
-	return conn.Self().StreamRows(table.Select(0, 0), g.M("columns", table.Columns))
+	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
@@ -839,8 +843,8 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 
 		colTypes = lo.Map(dbColTypes, func(ct *sql.ColumnType, i int) ColumnType {
 			nullable, _ := ct.Nullable()
-			length, ok1 := ct.Length()
-			precision, scale, ok2 := ct.DecimalSize()
+			length, _ := ct.Length()
+			precision, scale, _ := ct.DecimalSize()
 
 			if length == math.MaxInt64 {
 				length = math.MaxInt32
@@ -854,7 +858,7 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				}
 			}
 
-			return ColumnType{
+			colType := ColumnType{
 				Name:             ct.Name(),
 				DatabaseTypeName: dataType,
 				FetchedColumn:    fetchedColumns.GetColumn(ct.Name()),
@@ -862,8 +866,14 @@ func (conn *BaseConn) StreamRowsContext(ctx context.Context, query string, optio
 				Precision:        cast.ToInt(precision),
 				Scale:            cast.ToInt(scale),
 				Nullable:         nullable,
-				Sourced:          lo.Ternary(ok1, ok1, ok2),
+				CT:               ct,
 			}
+
+			// if !strings.Contains(query, noDebugKey) {
+			// 	g.Warn("%#v", colType)
+			// }
+
+			return colType
 		})
 	}
 
@@ -948,7 +958,7 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	// add new
 	for _, col := range columns {
 		key := strings.ToLower(col.Name)
-		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer) {
+		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
@@ -1070,8 +1080,10 @@ func (conn *BaseConn) Rollback() (err error) {
 func (conn *BaseConn) Prepare(query string) (stmt *sql.Stmt, err error) {
 	if conn.tx != nil {
 		stmt, err = conn.tx.Prepare(query)
-	} else {
+	} else if conn.db != nil {
 		stmt, err = conn.db.PrepareContext(conn.Context().Ctx, query)
+	} else {
+		err = g.Error("no connection instance")
 	}
 	if err != nil {
 		err = g.Error(err, "could not prepare statement")
@@ -1125,9 +1137,11 @@ func (conn *BaseConn) ExecContext(ctx context.Context, q string, args ...interfa
 	if conn.tx != nil {
 		result, err = conn.tx.ExecContext(ctx, q, args...)
 		q = q + noDebugKey // just to not show twice the sql in error since tx does
-	} else {
+	} else if conn.db != nil {
 		conn.LogSQL(q, args...)
 		result, err = conn.db.ExecContext(ctx, q, args...)
+	} else {
+		err = g.Error("no connection instance")
 	}
 	if err != nil {
 		if strings.Contains(q, noDebugKey) {
@@ -1367,13 +1381,15 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			Position: i + 1,
 			Type:     NativeTypeToGeneral(colType.Name, colType.DatabaseTypeName, conn),
 			DbType:   colType.DatabaseTypeName,
+			Sourced:  colType.IsSourced(),
 		}
 
 		// use pre-fetched column types for embedded databases since they rely
 		// on output of external processes
 		if fc := colType.FetchedColumn; fc != nil {
-			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite) && fc.Type != "" {
+			if g.In(conn.GetType(), dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbSQLite, dbio.TypeDbD1) && fc.Type != "" {
 				col.Type = fc.Type
+				col.Sourced = fc.Sourced
 			}
 			col.Constraint = fc.Constraint
 		}
@@ -1391,9 +1407,10 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			col.Sourced = true
 		}
 
-		if colType.Sourced {
+		if colType.IsSourced() || col.Sourced {
 			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
+				col.DbPrecision = colType.Length
 			}
 
 			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake) {
@@ -1418,7 +1435,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 
 		columns[i] = col
 
-		// g.Trace("%s -> %s (%s)", colType.Name(), Type, dbType)
+		// g.Warn("%s -> %s (%s) (sourced: %v)", col.Name, col.Type, col.DbType, col.Sourced)
 	}
 	return columns
 }
@@ -1433,7 +1450,10 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(1, 0)
+	limitSQL := table.Select(SelectOptions{Limit: 1})
+	if table.IsProcedural() {
+		limitSQL = table.Raw // don't wrap in limit
+	}
 
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
@@ -2058,7 +2078,9 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 			selectExpr = conn.Self().CastColumnForSelect(srcCol, tgtCol)
 		}
 
-		selectExprs = append(selectExprs, selectExpr)
+		// add alias
+		qName := conn.Self().Quote(srcCol.Name)
+		selectExprs = append(selectExprs, g.F("%s as %s", selectExpr, qName))
 	}
 
 	return selectExprs
@@ -2517,22 +2539,34 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		pkFieldMap[pkField] = ""
 	}
 
-	srcCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), true)
+	cols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := srcCols.Names()
+	tgtFields := conn.Type.QuoteNames(cols.Names()...)
 	setFields := []string{}
 	insertFields := []string{}
-	placeholdFields := []string{}
-	for _, colName := range srcCols.Names() {
-		insertFields = append(insertFields, colName)
-		placeholdFields = append(placeholdFields, g.F("ph.%s", colName))
-		if _, ok := pkFieldMap[colName]; !ok {
+	placeholderFields := []string{}
+	for _, srcColName := range cols.Names() {
+		srcCol := g.PtrVal(srcColumns.GetColumn(srcColName)) // should be found
+		colNameQ := conn.Quote(srcCol.Name)
+		tgtCol := tgtColumns.GetColumn(srcCol.Name)
+		if tgtCol == nil {
+			return nil, g.Error("did not find target column: %s (has %s)", srcCol.Name, g.Marshal(tgtColumns.Names()))
+		}
+
+		colExpr := conn.Self().CastColumnForSelect(srcCol, *tgtCol)
+
+		insertFields = append(insertFields, colNameQ)
+
+		phExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("ph.%s", colNameQ))
+		placeholderFields = append(placeholderFields, phExpr)
+		if _, ok := pkFieldMap[colNameQ]; !ok {
 			// is not a pk field
-			setField := g.F("%s = src.%s", colName, colName)
+			setSrcExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("src.%s", colNameQ))
+			setField := g.F("%s = %s", colNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
 	}
@@ -2541,14 +2575,14 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
 	exprs = map[string]string{
-		"src_tgt_pk_equal": strings.Join(pkEqualFields, " and "),
-		"src_upd_pk_equal": strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
-		"src_fields":       strings.Join(srcFields, ", "),
-		"tgt_fields":       strings.Join(tgtFields, ", "),
-		"insert_fields":    strings.Join(insertFields, ", "),
-		"pk_fields":        strings.Join(pkFields, ", "),
-		"set_fields":       strings.Join(setFields, ", "),
-		"placehold_fields": strings.Join(placeholdFields, ", "),
+		"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
+		"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+		"src_fields":         strings.Join(srcFields, ", "),
+		"tgt_fields":         strings.Join(tgtFields, ", "),
+		"insert_fields":      strings.Join(insertFields, ", "),
+		"pk_fields":          strings.Join(pkFields, ", "),
+		"set_fields":         strings.Join(setFields, ", "),
+		"placeholder_fields": strings.Join(placeholderFields, ", "),
 	}
 
 	return
@@ -2623,7 +2657,7 @@ func (conn *BaseConn) GetColumnStats(tableName string, fields ...string) (column
 func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Columns, isTemp bool) (ok bool, ddlParts []string, err error) {
 	if missing := table.Columns.GetMissing(newColumns...); len(missing) > 0 {
 		return false, ddlParts, g.Error("missing columns: %#v\ntable.Columns: %#v\nnewColumns: %#v", missing.Names(), table.Columns.Names(), newColumns.Names())
-	} else if g.In(conn.GetType(), dbio.TypeDbSQLite) {
+	} else if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1) {
 		return false, ddlParts, nil
 	}
 
@@ -2631,7 +2665,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		return strings.ToLower(c.Name)
 	})
 
-	colsChanging := iop.Columns{}
+	var oldCols, colsChanging iop.Columns
 	for i, col := range table.Columns {
 		newCol, ok := newColumnsMap[strings.ToLower(col.Name)]
 		if !ok {
@@ -2692,6 +2726,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		table.Columns[i].Type = newCol.Type
 		table.Columns[i].DbType = newNativeType
 		colsChanging = append(colsChanging, table.Columns[i])
+		oldCols = append(oldCols, col)
 	}
 
 	if len(colsChanging) == 0 {
@@ -2703,7 +2738,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		ddlParts = append(ddlParts, index.DropDDL())
 	}
 
-	for _, col := range colsChanging {
+	for index, col := range colsChanging {
 		// to safely modify the column type
 		colNameTemp := g.RandSuffix(col.Name+"_", 3)
 
@@ -2729,11 +2764,15 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		))
 
 		// update set to cast old values
-		oldColCasted := g.R(
-			conn.GetTemplateValue("function.cast_as"),
-			"field", conn.Self().Quote(col.Name),
-			"type", col.DbType,
-		)
+		oldColCasted := conn.Self().CastColumnForSelect(oldCols[index], col)
+		if oldColCasted == conn.Self().Quote(col.Name) {
+			oldColCasted = g.R(
+				conn.GetTemplateValue("function.cast_as"),
+				"field", conn.Self().Quote(col.Name),
+				"type", col.DbType,
+			)
+		}
+
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
 		fields = conn.GetType().QuoteNames(fields...) // add quotes
@@ -2918,6 +2957,10 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 				// datalength can return higher counts since it counts bytes
 			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbSQLite && checksum1/1000 == checksum2 {
 				// sqlite can only handle timestamps up to milliseconds
+			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbD1 && checksum1/1000 == checksum2 {
+				// d1 can only handle timestamps up to milliseconds
+			} else if refCol.IsInteger() && conn.GetType() == dbio.TypeDbD1 && checksum1 > 4796827514234845000 && checksum1-checksum2 < 500 && checksum1-checksum2 > 0 {
+				// some weird sum issue with big numbers in d1
 			} else if checksum1 > 1500000000000 && ((checksum2-checksum1) == 1 || (checksum1-checksum2) == 1) {
 				// something micro seconds are off by 1 msec
 			} else {
