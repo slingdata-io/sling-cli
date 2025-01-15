@@ -6,10 +6,10 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 5	Run sling with CSV source and POSTGRES target	18					sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
 6	Run sling with CSV source and MSSQL target	18					sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options 'use_bulk: false'
 7	Run sling with CSV source and custom options	4					"sling run --src-stream file://cmd/sling/tests/files/test4.csv --src-options '{ delimiter: ""|"", escape: ""\\"" }' --stdout > /dev/null"
-8	Run sling with gzipped CSV source and POSTGRES target	18					cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh
+8	Run sling with gzipped CSV source and POSTGRES target	18					cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table1 --mode full-refresh
 9	Run sling with gzipped CSV source and MYSQL target	18					sling run --src-stream 'file://cmd/sling/tests/files/test1.1.csv.gz' --tgt-conn MYSQL --tgt-object mysql.my_table --mode full-refresh --tgt-options 'use_bulk: false'
-10	Run sling with JSON source and POSTGRES target	1					"cat cmd/sling/tests/files/test3.json | sling run --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh"
-11	Run sling with JSON source and POSTGRES target	1					"sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table1 --tgt-options 'use_bulk: false' --mode full-refresh"
+10	Run sling with JSON source and POSTGRES target	1					"cat cmd/sling/tests/files/test3.json | sling run --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table2 --tgt-options 'use_bulk: false' --mode full-refresh"
+11	Run sling with JSON source and POSTGRES target	1					"sling run --src-stream 'file://cmd/sling/tests/files/test3.json'  --src-options ""flatten: true"" --tgt-conn POSTGRES --tgt-object public.my_table3 --tgt-options 'use_bulk: false' --mode full-refresh"
 12	Run sling with CSV source and no header	2					sling run --src-stream 'file://cmd/sling/tests/files/test6.csv' --stdout -d --src-options '{ header: false }' > /dev/null
 13	Run sling with echo input and empty allowed	0	6			execution succeeded	echo 'a,b,c' | SLING_ALLOW_EMPTY=true sling  run --tgt-object file:///tmp/test.csv
 14	Run sling with POSTGRES source and CSV output	18					sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv
