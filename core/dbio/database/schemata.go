@@ -212,7 +212,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		if opts.Where != "" {
 			var where any
 			g.Unmarshal(opts.Where, &where)
-			m["where"] = where // json array or object
+			m["filter"] = where // json array or object
 		}
 
 		if len(fields) > 0 && fields[0] != "*" {
