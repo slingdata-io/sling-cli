@@ -157,6 +157,14 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"incremental_value", cfg.IncrementalVal,
 			)
 		}
+
+		// fill in the where clause
+		cfg.Source.Where = g.R(
+			cfg.Source.Where,
+			"incremental_where_cond", incrementalWhereCond,
+			"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+			"incremental_value", cfg.IncrementalVal,
+		)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
