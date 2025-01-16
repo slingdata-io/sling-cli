@@ -166,8 +166,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
-	// construct select statement for selected fields
-	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
+	// construct select statement for selected fields or where condition
+	if selectFieldsStr != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
 		sTable.SQL = sTable.Select(database.SelectOptions{
 			Fields: strings.Split(selectFieldsStr, ","),
 			Where:  cfg.Source.Where,

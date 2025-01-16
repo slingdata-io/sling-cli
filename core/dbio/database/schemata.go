@@ -229,6 +229,8 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 
 	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
 	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(t.SQL)), "with")
+	whereClause := lo.Ternary(opts.Where != "", g.F(" where (%s)", opts.Where), "")
+	whereAnd := lo.Ternary(opts.Where != "", g.F(" and (%s)", opts.Where), "")
 
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
@@ -269,6 +271,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			sql = g.R(
 				template.Core["limit_sql"],
 				"sql", sql,
+				"where_cond", opts.Where,
+				"where_clause", whereClause,
+				"where_and", whereAnd,
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
@@ -278,6 +283,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 				template.Core[key],
 				"fields", fieldsStr,
 				"table", t.FDQN(),
+				"where_cond", opts.Where,
+				"where_clause", whereClause,
+				"where_and", whereAnd,
 				"limit", cast.ToString(limit),
 				"offset", cast.ToString(offset),
 			)
@@ -288,7 +296,9 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	sql = g.R(sql,
 		"limit", cast.ToString(limit),
 		"offset", cast.ToString(offset),
-		"where", opts.Where,
+		"where_cond", opts.Where,
+		"where_clause", whereClause,
+		"where_and", whereAnd,
 	)
 
 	return
