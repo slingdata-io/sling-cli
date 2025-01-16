@@ -633,8 +633,9 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error(err, "could not get format map for sql")
 	}
 
-	// sql prop
-	cfg.Source.Query = g.Rm(cfg.Source.Query, fMap)
+	// sql & where prop
+	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
+	cfg.Source.Query = g.R(g.Rm(cfg.Source.Query, fMap), "where_cond", cfg.Source.Where)
 	if cfg.ReplicationStream != nil {
 		cfg.ReplicationStream.SQL = cfg.Source.Query
 	}
