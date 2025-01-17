@@ -737,6 +737,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// fill in temp table name if specified
 		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
 			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
+			if tgtOpts.TableTmp != "" {
+				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, cfg.TgtConn.Type)
+				if err != nil {
+					return g.Error(err, "could not parse temp table name")
+				} else if tableTmp.Schema == "" {
+					tableTmp.Schema = cast.ToString(cfg.Target.Data["schema"])
+				}
+				tgtOpts.TableTmp = tableTmp.FullName()
+			}
 		}
 	}
 
