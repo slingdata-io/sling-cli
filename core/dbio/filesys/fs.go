@@ -1188,13 +1188,13 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	}
 
 	if cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")) > 0 {
-		g.Warn("splitting files with file_max_rows is not supported with duckdb, using file_max_bytes = 16000000")
+		g.Warn("splitting files with `file_max_rows` is not supported with duckdb, using `file_max_bytes = 16000000`")
 		sc.FileMaxBytes = 16000000
 	}
 
 	// merge into single stream to push into duckdb
 	duckSc := duck.DefaultCsvConfig()
-	duckSc.FileMaxRows = 0
+	duckSc.FileMaxRows = 0 // if we want to manually split by rows, multiple duck.Exec
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
@@ -1252,6 +1252,15 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			if err != nil {
 				err = g.Error(err, "Could not write to file")
 				return bw, err
+			}
+
+			// get bytes written
+			if fs.FsType() == dbio.TypeFileLocal {
+				bw, _ = g.PathSize(duckURI)
+			} else {
+				path, _ := fs.GetPath(uri)
+				nodes, _ := fs.ListRecursive(path)
+				bw = cast.ToInt64(nodes.TotalSize())
 			}
 		default:
 			// copy to temp file locally, then upload
