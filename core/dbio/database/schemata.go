@@ -247,6 +247,49 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	}
 
 	fieldsStr := lo.Ternary(len(fields) > 0, strings.Join(fields, ", "), "*")
+
+	// auto convert to json if needed
+	{
+		switch t.Dialect {
+		case dbio.TypeDbBigQuery:
+			var toJsonCols iop.Columns
+
+			for _, col := range t.Columns {
+				dtType := strings.ToLower(col.DbType)
+				if strings.HasPrefix(dtType, "array") ||
+					strings.HasPrefix(dtType, "record") ||
+					strings.HasPrefix(dtType, "struct") {
+					toJsonCols = append(toJsonCols, col)
+				}
+			}
+
+			if len(fields) == 0 {
+				replaceExprs := []string{}
+				for _, col := range toJsonCols {
+					colQ := t.Dialect.Quote(col.Name)
+					expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
+					replaceExprs = append(replaceExprs, expr)
+				}
+				if len(replaceExprs) > 0 {
+					// append replace
+					fieldsStr = g.F("* replace(%s)", strings.Join(replaceExprs, ", "))
+				}
+			} else {
+				fieldsExprs := []string{}
+				for _, field := range opts.Fields {
+					colQ := t.Dialect.Quote(field)
+					if col := toJsonCols.GetColumn(field); col != nil {
+						expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
+						fieldsExprs = append(fieldsExprs, expr)
+					} else {
+						fieldsExprs = append(fieldsExprs, colQ)
+					}
+				}
+				fieldsStr = strings.Join(fieldsExprs, ", ")
+			}
+		}
+	}
+
 	if t.IsQuery() {
 		if len(fields) > 0 && !(len(fields) == 1 && fields[0] == "*") && !(isSQLServer && startsWith) {
 			sql = g.F("select %s from (\n%s\n) t", fieldsStr, t.SQL)
