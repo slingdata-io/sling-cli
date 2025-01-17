@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.1.1"
+	DuckDbVersion      = "1.1.3"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -789,7 +789,7 @@ func (duck *DuckDb) GenerateCopyStatement(fromTable, toLocalPath string, options
 
 	fileSizeBytesExpr := ""
 	if options.FileSizeBytes > 0 {
-		fileSizeBytesExpr = g.F("file_size_bytes %d,", options.FileSizeBytes)
+		fileSizeBytesExpr = g.F("per_thread_output true, file_size_bytes %d,", options.FileSizeBytes)
 	}
 
 	if len(partExpressions) > 0 {
@@ -966,6 +966,7 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 		col.DbType = cast.ToString(rec["column_type"])
 		col.Type = NativeTypeToGeneral(col.Name, cast.ToString(rec["column_type"]), dbio.TypeDbDuckDb)
 		col.Position = k + 1
+		col.Sourced = true
 
 		columns = append(columns, col)
 	}
@@ -995,15 +996,20 @@ func (duck *DuckDb) GetScannerFunc(format dbio.FileType) (scanFunc string) {
 	return
 }
 
-func (duck *DuckDb) DataflowToHttpStream(df *Dataflow) (fromExprChn chan string, err error) {
+type HttpStreamPart struct {
+	Index    int
+	FromExpr string
+}
+
+func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamPartChn chan HttpStreamPart, err error) {
 	// create fromExprChn channel
-	fromExprChn = make(chan string)
+	streamPartChn = make(chan HttpStreamPart)
 
 	// start local http server
 	port, err := g.GetPort("localhost:0")
 	if err != nil {
 		err = g.Error(err, "could not acquire local port for duckdb http import")
-		return fromExprChn, err
+		return streamPartChn, err
 	}
 	// create reader channel to pass between handler and main flow
 	readerCh := make(chan io.Reader, 1)
@@ -1048,13 +1054,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow) (fromExprChn chan string,
 	time.Sleep(100 * time.Millisecond)
 	df.Defer(func() { server.Shutdown(importContext.Ctx) })
 
-	sc := duck.DefaultCsvConfig()
-	sc.FileMaxRows = 0 // infinite since we're streaming
 	df.SetBatchLimit(sc.BatchLimit)
 	ds := MergeDataflow(df)
 
 	go func() {
-		defer close(fromExprChn)
+		defer close(streamPartChn)
+		var partIndex int
 		for batchR := range ds.NewCsvReaderChnl(sc) {
 			g.Trace("processing duckdb batch %s", batchR.Batch.ID())
 			readerCh <- batchR.Reader
@@ -1062,11 +1067,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow) (fromExprChn chan string,
 			// can use this as a from table
 			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N')`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
 
-			fromExprChn <- fromExpr
+			streamPartChn <- HttpStreamPart{Index: partIndex, FromExpr: fromExpr}
+			partIndex++
 		}
 	}()
 
-	return fromExprChn, nil
+	return streamPartChn, nil
 }
 
 func (duck *DuckDb) DefaultCsvConfig() (config StreamConfig) {

@@ -1187,8 +1187,15 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		sc.FileMaxBytes = cast.ToInt64(val)
 	}
 
+	if cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")) > 0 {
+		g.Warn("splitting files with file_max_rows is not supported with duckdb, using file_max_bytes = 16000000")
+		sc.FileMaxBytes = 16000000
+	}
+
 	// merge into single stream to push into duckdb
-	fromExprChn, err := duck.DataflowToHttpStream(df)
+	duckSc := duck.DefaultCsvConfig()
+	duckSc.FileMaxRows = 0
+	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
 	}
@@ -1199,7 +1206,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	}
 
 	streamDone := false
-	for fromExpr := range fromExprChn {
+	for streamPart := range streamPartChn {
 		if streamDone {
 			return bw, g.Error("stream has finished")
 		}
@@ -1224,7 +1231,19 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				duckURI = strings.TrimRight(duckURI, "/")
 			}
 
-			sql, err := duck.GenerateCopyStatement(fromExpr, duckURI, copyOptions)
+			// create the parent folder if needed
+			if fs.FsType() == dbio.TypeFileLocal {
+				parent := duckURI
+				if sc.FileMaxBytes == 0 {
+					parent = path.Dir(duckURI)
+				}
+				if err = os.MkdirAll(parent, 0755); err != nil {
+					err = g.Error(err, "Could not create output folder")
+					return bw, err
+				}
+			}
+
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, duckURI, copyOptions)
 			if err != nil {
 				err = g.Error(err, "Could not generate duckdb copy statement")
 				return bw, err
@@ -1237,7 +1256,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		default:
 			// copy to temp file locally, then upload
 			localPath := env.CleanWindowsPath(path.Join(folder, "output"))
-			sql, err := duck.GenerateCopyStatement(fromExpr, localPath, copyOptions)
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
 			if err != nil {
 				err = g.Error(err, "Could not generate duckdb copy statement")
 				return bw, err
