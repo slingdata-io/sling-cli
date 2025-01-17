@@ -177,7 +177,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// construct select statement for selected fields or where condition
 	if selectFieldsStr != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
 		sTable.SQL = sTable.Select(database.SelectOptions{
-			Fields: strings.Split(selectFieldsStr, ","),
+			Fields: strings.Split(selectFieldsStr, ", "),
 			Where:  cfg.Source.Where,
 			Limit:  cfg.Source.Limit(),
 			Offset: cfg.Source.Offset(),

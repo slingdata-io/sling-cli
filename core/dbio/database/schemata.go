@@ -277,6 +277,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			} else {
 				fieldsExprs := []string{}
 				for _, field := range opts.Fields {
+					field = strings.TrimSpace(field)
 					colQ := t.Dialect.Quote(field)
 					if col := toJsonCols.GetColumn(field); col != nil {
 						expr := g.F("safe.parse_json(to_json_string(%s)) as %s", colQ, colQ)
