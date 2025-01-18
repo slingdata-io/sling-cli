@@ -607,7 +607,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// config overwrite
 		taskEnv := g.ToMapString(rd.Env)
-		var incrementalVal string
+		var incrementalValStr string
 
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
@@ -656,7 +656,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			if newFileSelect := cfgOverwrite.Source.Options.FileSelect; newFileSelect != nil {
 				stream.SourceOptions.FileSelect = newFileSelect
 			}
-			incrementalVal = cfgOverwrite.IncrementalVal
+			incrementalValStr = cfgOverwrite.IncrementalValStr
 
 			// merge to existing replication env, overwrite if key already exists
 			if cfgOverwrite.Env != nil {
@@ -685,7 +685,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			Transforms:        stream.Transforms,
 			Env:               taskEnv,
 			StreamName:        name,
-			IncrementalVal:    incrementalVal,
+			IncrementalValStr: incrementalValStr,
 			ReplicationStream: &stream,
 		}
 

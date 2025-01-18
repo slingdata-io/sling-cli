@@ -1011,8 +1011,9 @@ type Config struct {
 	TgtConn  connection.Connection `json:"-" yaml:"-"`
 	Prepared bool                  `json:"-" yaml:"-"`
 
-	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
-	IncrementalGTE bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
+	IncrementalVal    any    `json:"incremental_val" yaml:"incremental_val"`
+	IncrementalValStr string `json:"incremental_val_str" yaml:"incremental_val_str"`
+	IncrementalGTE    bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -1040,7 +1041,7 @@ func (cfg *Config) IgnoreExisting() bool {
 
 // HasIncrementalVal returns true there is a non-null incremental value
 func (cfg *Config) HasIncrementalVal() bool {
-	return cfg.IncrementalVal != "" && cfg.IncrementalVal != "null"
+	return cfg.IncrementalValStr != "" && cfg.IncrementalValStr != "null"
 }
 
 // ColumnsPrepared returns the prepared columns

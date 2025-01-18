@@ -349,7 +349,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() {
 		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
 	}
@@ -419,7 +419,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
-	if t.isIncrementalWithUpdateKey() {
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
@@ -429,7 +435,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	}
 
 	if t.Config.Options.StdIn && t.Config.SrcConn.Type.IsUnknown() {
@@ -441,7 +447,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -484,7 +490,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -558,14 +564,14 @@ func (t *TaskExecution) runDbToDb() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	}
 
 	t.SetProgress("reading from source database")
