@@ -594,8 +594,8 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 }
 
 // GetISO8601DateMap return a map of date parts for string formatting
-func GetISO8601DateMap(t time.Time) map[string]interface{} {
-	m := map[string]interface{}{}
+func GetISO8601DateMap(t time.Time) map[string]any {
+	m := map[string]any{}
 	for _, v := range []string{"YYYY", "YY", "MMM", "MM", "DD", "DDD", "HH", "hh", "mm", "ss"} {
 		m[v] = t.Format(Iso8601ToGoLayout(v))
 	}
