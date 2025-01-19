@@ -22,6 +22,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
 	mssql "github.com/microsoft/go-mssqldb"
+	"github.com/microsoft/go-mssqldb/azuread"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
@@ -180,6 +181,24 @@ func (conn *MsSQLServerConn) ConnString() string {
 	for key, new_key := range propMapping {
 		if val := conn.GetProp(key); val != "" {
 			U.SetParam(new_key, val)
+		}
+	}
+
+	AdAuthStrings := []string{
+		azuread.ActiveDirectoryPassword,
+		azuread.ActiveDirectoryIntegrated,
+		azuread.ActiveDirectoryMSI,
+		azuread.ActiveDirectoryServicePrincipal,
+		azuread.ActiveDirectoryInteractive,
+		azuread.ActiveDirectoryDeviceCode,
+	}
+	if fedAuth := conn.GetProp("fedauth"); g.In(fedAuth, AdAuthStrings...) {
+		// https://github.com/microsoft/go-sqlcmd/blob/main/pkg/sqlcmd/azure_auth.go#L18
+		U.SetParam("applicationclientid", "a94f9c62-97fe-4d19-b06d-472bed8d2bcf")
+
+		// https://github.com/microsoft/go-sqlcmd/blob/main/pkg/sqlcmd/azure_auth.go#L40
+		if g.In(fedAuth, azuread.ActiveDirectoryServicePrincipal, azuread.ActiveDirectoryApplication) {
+			U.SetParam("clientcertpath", os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"))
 		}
 	}
 
