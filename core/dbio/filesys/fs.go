@@ -292,6 +292,27 @@ func GetDeepestParent(path string) string {
 	return strings.Join(parentParts, "/")
 }
 
+func GetDeepestPartitionParent(path string) string {
+	parts := strings.Split(path, "/")
+	parentParts := []string{}
+	for i, part := range parts {
+		if strings.Contains(part, "*") || strings.Contains(part, "?") {
+			break
+		} else if len(iop.ExtractPartitionFields(part)) > 0 {
+			break
+		} else if len(iop.ExtractISO8601DateFields(part)) > 0 {
+			break
+		} else if i == len(parts)-1 {
+			break
+		}
+		parentParts = append(parentParts, part)
+	}
+	if len(parentParts) > 0 && len(parentParts) < len(parts) {
+		parentParts = append(parentParts, "") // suffix is "/"
+	}
+	return strings.Join(parentParts, "/")
+}
+
 ////////////////////// BASE
 
 // BaseFileSysClient is the base file system type.
@@ -569,6 +590,17 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	var nodes FileNodes
 	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
 		nodes = FileNodes{FileNode{URI: url}}
+	} else if prefixes := g.PtrVal(Cfg.FileSelect); len(prefixes) > 0 {
+		rootPath := GetDeepestPartitionParent(url)
+		g.Trace("listing path: %s", rootPath)
+		nodes, err = fs.Self().ListRecursive(rootPath)
+		if err != nil {
+			err = g.Error(err, "Error getting paths")
+			return
+		}
+
+		// select only prefixes
+		nodes = nodes.SelectWithPrefix(prefixes...)
 	} else {
 		g.Trace("listing path: %s", url)
 		nodes, err = fs.Self().ListRecursive(url)
@@ -617,6 +649,48 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 
 	df.FsURL = url
 	return
+}
+
+// GetFirstDatePartURI determines the first part for the URI mask provided
+func GetFirstDatePartURI(fs FileSysClient, mask string) (uri string, err error) {
+	// remove * or ?
+	mask = GetDeepestParent(mask)
+
+	// to determine the matching number of parts in the uri
+	origURIParts := len(iop.ExtractPartitionFields(mask)) + len(iop.ExtractISO8601DateFields(mask))
+
+	// determine uri if it has part fields, find first parent folder
+	uri = mask
+	if origURIParts > 0 {
+		// determine deepest partition parent (remove part fields)
+		parent := GetDeepestPartitionParent(mask)
+		if parent == "" {
+			return uri, g.Error("could not get deepest parent for: %s", uri)
+		}
+
+		// list and get first folder
+	reEval:
+		nodes, err := fs.List(parent)
+		if err != nil {
+			return uri, g.Error(err, "could not list parent path: %s", parent)
+		} else if len(nodes.Folders()) == 0 {
+			return uri, g.Error("did not find any folders in parent path: %s", parent)
+		}
+
+		// get first folder, ev
+		uri = nodes.Folders()[0].URI
+		if uri == parent {
+			return uri, g.Error("did not find any child folders in parent path: %s", parent)
+		}
+
+		// the number of parts need to match
+		if !iop.MatchedPartitionMask(mask, uri) {
+			parent = strings.TrimRight(uri, "/") + "/" // go deeper
+			goto reEval                                // re-evaluate so uri matches mask
+		}
+	}
+
+	return uri, nil
 }
 
 // WriteDataflow writes a dataflow to a file sys.

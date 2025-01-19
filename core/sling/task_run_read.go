@@ -11,6 +11,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 // ReadFromDB reads from a source database
@@ -221,7 +222,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
-	if t.Config.HasIncrementalVal() {
+	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 		// file stream incremental mode
 		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
 			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalValStr
@@ -253,6 +254,60 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			FileSelect:       cfg.Source.Options.FileSelect,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
+		}
+
+		// format the uri if it has placeholders
+		// determine uri if it has part fields, find first parent folder
+		if t.Config.IsFileStreamWithStateAndParts() {
+			mask := filesys.GetDeepestParent(uri) // mask is without glob symbols
+
+			// if backfill mode, generate the range of uris to read from
+			if t.Config.Mode == BackfillMode {
+				rangeArr := strings.Split(*cfg.Source.Options.Range, ",")
+				start, err := cast.ToTimeE(rangeArr[0])
+				if err != nil {
+					return df, g.Error(err, "invalid start timestamp value: %s", rangeArr[0])
+				}
+				end, err := cast.ToTimeE(rangeArr[1])
+				if err != nil {
+					return df, g.Error(err, "invalid end timestamp value: %s", rangeArr[1])
+				}
+
+				rangeURIs, err := iop.GeneratePartURIsFromRange(mask, cfg.Source.UpdateKey, start, end)
+				if err != nil {
+					return df, g.Error(err, "could not generate uris from range")
+				}
+
+				fsCfg.FileSelect = g.Ptr(rangeURIs)
+
+				// set as end value
+				cfg.IncrementalVal = end
+
+			} else if cfg.IncrementalVal != nil {
+				valueTime, err := cast.ToTimeE(cfg.IncrementalVal)
+				if err != nil {
+					return df, g.Error(err, "could not parse time incremental value: %#v", cfg.IncrementalVal)
+				}
+
+				uri = g.Rm(uri, iop.GetISO8601DateMap(valueTime))
+				uri = g.Rm(uri, iop.GetPartitionDateMap(cfg.Source.UpdateKey, valueTime))
+			} else {
+				uri, err = filesys.GetFirstDatePartURI(fs, mask)
+				if err != nil {
+					return t.df, g.Error(err, "could not get first partition path")
+				}
+
+				// extract current incremental value
+				cfg.IncrementalVal, err = iop.ExtractPartitionTimeValue(mask, uri)
+				if err != nil {
+					return t.df, g.Error(err, "could not extract time partition  incremental value")
+				}
+			}
+			cfg.SrcConn.Data["url"] = uri // set compiled uri
+
+			// unset fsCfg.IncrementalValue to not further filter.
+			// since we're filtering at folder level
+			fsCfg.IncrementalValue = ""
 		}
 
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {

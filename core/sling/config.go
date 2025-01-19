@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -250,9 +249,16 @@ func (cfg *Config) Unmarshal(cfgStr string) (err error) {
 	return nil
 }
 
-
 func (cfg *Config) sourceIsFile() bool {
 	return cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+}
+
+func (cfg *Config) IsFileStreamWithStateAndParts() bool {
+	uri := cfg.StreamName
+	return os.Getenv("SLING_STATE") != "" &&
+		cfg.SrcConn.Info().Type.IsFile() &&
+		(len(iop.ExtractPartitionFields(uri)) > 0 ||
+			len(iop.ExtractISO8601DateFields(uri)) > 0)
 }
 
 func (cfg *Config) DetermineType() (Type JobType, err error) {
@@ -290,6 +296,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			if cfg.Source.UpdateKey == "" {
 				cfg.Source.UpdateKey = "_bigtable_timestamp"
 			}
+		} else if cfg.IsFileStreamWithStateAndParts() {
+			// OK, no need for update key
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)

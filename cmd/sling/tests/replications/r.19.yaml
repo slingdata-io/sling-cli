@@ -1,0 +1,34 @@
+source: aws_s3
+target: postgres
+
+env:
+  SLING_STATE: aws_s3/sling-state/test/r.19
+  RESET: ${RESET}
+
+defaults:
+  hooks:
+    start:
+      - type: log
+        message: 'runtime_state => {runtime_state}'
+
+      # - type: query
+      #   connection: postgres
+      #   query: 'drop table public.test1k_postgres_pg_parquet'
+        
+      - type: delete
+        if: env.RESET = 'true'
+        connection: aws_s3
+        path: sling-state/test/r.19 # delete state on replication start
+    
+    # end:
+    #   - type: log
+    #     message: 'runtime_state => {runtime_state}'
+
+streams:
+  test/public_test1k_postgres_pg_parquet/{part_year}/{part_month}/:
+    object: public.test1k_postgres_pg_parquet
+    mode: incremental
+    primary_key: [id]
+    update_key: update_dt
+    source_options:
+      format: parquet

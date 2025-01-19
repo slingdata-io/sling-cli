@@ -419,7 +419,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
-	if t.isIncrementalStateWithUpdateKey() {
+	if t.Config.IsFileStreamWithStateAndParts() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
@@ -471,9 +471,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	elapsed := int(time.Since(start).Seconds())
 	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
 
-	if err != nil {
-		err = g.Error(t.df.Err(), "error in transfer")
+	if cnt > 0 && t.Config.IsFileStreamWithStateAndParts() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
 	}
+
 	return
 }
 

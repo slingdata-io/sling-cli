@@ -213,6 +213,19 @@ func (fns FileNodes) Folders() (nodes FileNodes) {
 	return
 }
 
+// SelectWithPrefix returns only nodes with one of the prefixes
+func (fns FileNodes) SelectWithPrefix(prefixes ...string) (nodes FileNodes) {
+	for _, fn := range fns {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(fn.URI, prefix) {
+				nodes = append(nodes, fn)
+				break
+			}
+		}
+	}
+	return
+}
+
 // InferFormat returns the most common file format
 func (fns FileNodes) InferFormat() (format dbio.FileType) {
 	typeCntMap := map[dbio.FileType]int{
