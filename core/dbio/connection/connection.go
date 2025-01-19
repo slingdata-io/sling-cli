@@ -731,7 +731,7 @@ func (c *Connection) setURL() (err error) {
 		return nil
 	default:
 		if c.Type.IsUnknown() {
-			g.Trace("no type detected")
+			g.Trace("no type detected for %s", c.Name)
 		}
 		return nil
 	}

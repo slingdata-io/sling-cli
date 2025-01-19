@@ -75,6 +75,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 	if rd.state == nil {
 		rd.state = &RuntimeState{
 			Hooks:  map[string]map[string]any{},
+			Env:    rd.Env,
 			Runs:   map[string]*RunState{},
 			Source: ConnState{Name: rd.Source},
 			Target: ConnState{Name: rd.Target},
@@ -93,26 +94,20 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type
 			rd.state.Source.Kind = task.SrcConn.Type.Kind()
-			rd.state.Source.Account = cast.ToString(fMap["source_account"])
 			rd.state.Source.Bucket = cast.ToString(fMap["source_bucket"])
 			rd.state.Source.Container = cast.ToString(fMap["source_container"])
 			rd.state.Source.Database = cast.ToString(task.SrcConn.Data["database"])
 			rd.state.Source.Instance = cast.ToString(task.SrcConn.Data["instance"])
 			rd.state.Source.Schema = cast.ToString(task.SrcConn.Data["schema"])
-			rd.state.Source.User = cast.ToString(task.SrcConn.Data["username"])
-			rd.state.Source.Host = cast.ToString(task.SrcConn.Data["host"])
 
 			// populate target
 			rd.state.Target.Type = task.TgtConn.Type
 			rd.state.Target.Kind = task.TgtConn.Type.Kind()
-			rd.state.Target.Account = cast.ToString(fMap["target_account"])
 			rd.state.Target.Bucket = cast.ToString(fMap["target_bucket"])
 			rd.state.Target.Container = cast.ToString(fMap["target_container"])
 			rd.state.Target.Database = cast.ToString(task.TgtConn.Data["database"])
 			rd.state.Target.Instance = cast.ToString(task.TgtConn.Data["instance"])
 			rd.state.Target.Schema = cast.ToString(task.TgtConn.Data["schema"])
-			rd.state.Target.User = cast.ToString(task.TgtConn.Data["username"])
-			rd.state.Target.Host = cast.ToString(task.TgtConn.Data["host"])
 
 			key := iop.CleanName(rd.Normalize(task.StreamName))
 			if _, ok := rd.state.Runs[key]; !ok {

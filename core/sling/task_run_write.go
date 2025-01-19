@@ -923,7 +923,7 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		uri = filesys.GetDeepestParent(uri) // get target folder, since split by files
 	}
 
-	// remove partition fields from url
+	// if any, remove partition fields from url. GetDeepestParent may remove
 	{
 		uri = strings.ReplaceAll(uri, "://", ":/:/:") // placeholder for cleaning
 		for _, field := range copyOptions.PartitionFields {

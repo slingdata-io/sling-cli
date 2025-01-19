@@ -10,7 +10,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/flarco/g"
@@ -589,42 +588,6 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 		err = errors.New("could not detect delimiter")
 		return
 	}
-
-	return
-}
-
-// GetISO8601DateMap return a map of date parts for string formatting
-func GetISO8601DateMap(t time.Time) map[string]any {
-	m := map[string]any{}
-	for _, v := range []string{"YYYY", "YY", "MMM", "MM", "DD", "DDD", "HH", "hh", "mm", "ss"} {
-		m[v] = t.Format(Iso8601ToGoLayout(v))
-	}
-	return m
-}
-
-// https://www.w3.org/QA/Tips/iso-date
-// https://www.w3.org/TR/NOTE-datetime
-// https://www.iso.org/iso-8601-date-and-time-format.html
-func Iso8601ToGoLayout(dateFormat string) (goDateFormat string) {
-	goDateFormat = strings.TrimSpace(dateFormat)
-	goDateFormat = strings.ReplaceAll(goDateFormat, "TZD", "-07:00")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "YYYY", "2006")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "YY", "06")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "MMM", "Jan")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "MM", "01")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "DD", "02")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "DDD", "Mon")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "HH", "15")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "hh", "03")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "mm", "04")
-	goDateFormat = strings.ReplaceAll(goDateFormat, ".ss", ".000")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "ss", "05")
-	goDateFormat = strings.ReplaceAll(goDateFormat, ".s", ".000")
-	goDateFormat = strings.ReplaceAll(goDateFormat, "ISO8601", "2006-01-02T15:04:05Z")
-
-	goDateFormat = regexp.MustCompile(`Z\d\d:?\d\d$`).ReplaceAllString(goDateFormat, "Z0700")
-	goDateFormat = regexp.MustCompile(`-\d\d:?\d\d$`).ReplaceAllString(goDateFormat, "-0700")
-	goDateFormat = regexp.MustCompile(`\+\d\d:?\d\d$`).ReplaceAllString(goDateFormat, "+0700")
 
 	return
 }

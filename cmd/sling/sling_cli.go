@@ -428,10 +428,7 @@ func Track(event string, props ...map[string]interface{}) {
 			"User-Agent":   g.F("sling-cli/%s (%s) %s", core.Version, runtime.GOOS, machineID),
 		}
 		body := strings.NewReader(g.Marshal(payload))
-		resp, respBytes, _ := net.ClientDo(http.MethodPost, env.PlausibleURL, body, h, 5)
-		if resp != nil {
-			g.Trace("post event response: %s\n%s", resp.Status, string(respBytes))
-		}
+		net.ClientDo(http.MethodPost, env.PlausibleURL, body, h, 5)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 // RuntimeState is for runtime state
 type RuntimeState struct {
 	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
+	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Source    ConnState                 `json:"source,omitempty"`
 	Target    ConnState                 `json:"target,omitempty"`
@@ -71,14 +72,11 @@ type ConnState struct {
 	Name      string    `json:"name,omitempty"`
 	Type      dbio.Type `json:"type,omitempty"`
 	Kind      dbio.Kind `json:"kind,omitempty"`
-	Account   string    `json:"account,omitempty"`
 	Bucket    string    `json:"bucket,omitempty"`
 	Container string    `json:"container,omitempty"`
 	Database  string    `json:"database,omitempty"`
 	Instance  string    `json:"instance,omitempty"`
 	Schema    string    `json:"schema,omitempty"`
-	User      string    `json:"user,omitempty"`
-	Host      string    `json:"host,omitempty"`
 }
 
 type StreamState struct {
@@ -128,10 +126,12 @@ func StateSet(t *TaskExecution) {
 		run.Stream.FileExt = cast.ToString(fMap["stream_file_ext"])
 		run.Stream.FilePath = cast.ToString(fMap["stream_file_path"])
 		run.Stream.Name = cast.ToString(fMap["stream_name"])
+		run.Stream.FullName = cast.ToString(fMap["stream_full_name"])
 		run.Stream.Schema = cast.ToString(fMap["stream_schema"])
 		run.Stream.Table = cast.ToString(fMap["stream_table"])
 
 		run.Object.Name = cast.ToString(fMap["object_name"])
+		run.Object.FullName = cast.ToString(fMap["object_full_name"])
 		run.Object.Schema = cast.ToString(fMap["object_schema"])
 		run.Object.Table = cast.ToString(fMap["object_table"])
 
