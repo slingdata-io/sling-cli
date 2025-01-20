@@ -1379,64 +1379,181 @@ func testManyCSV(t *testing.T) {
 	}
 }
 
-// func TestPatterns(t *testing.T) {
+func TestCopyRecursive(t *testing.T) {
+	// Setup local filesystem clients
+	localFs1, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
 
-// 	// local
-// 	// s3
-// 	// google
-// 	// azure
-// 	// sftp
-// 	// ftp
+	localFs2, err := NewFileSysClient(dbio.TypeFileLocal)
+	assert.NoError(t, err)
 
-// 	type test struct {
-// 		pattern  string // the input glob pattern
-// 		expected int    // number of files expected
-// 	}
+	// Setup S3 filesystem client
+	s3Fs, err := NewFileSysClient(dbio.TypeFileS3)
+	assert.NoError(t, err)
 
-// 	type input struct {
-// 		Type  dbio.Type
-// 		Props []string
-// 		Tests []test
-// 	}
+	azureFs, err := NewFileSysClient(dbio.TypeFileAzure, "container=testcont")
+	assert.NoError(t, err)
 
-// 	inputs := []input{
-// 		{
-// 			dbio.TypeFileLocal,
-// 			[]string{},
-// 			[]test{},
-// 		},
-// 		{
-// 			dbio.TypeFileFtp,
-// 			[]string{"URL=" + os.Getenv("FTP_TEST_URL")},
-// 			[]test{},
-// 		},
-// 		{
-// 			dbio.TypeFileSftp,
-// 			[]string{"URL=" + os.Getenv("SSH_TEST_PASSWD_URL")},
-// 			[]test{},
-// 		},
-// 		{
-// 			dbio.TypeFileGoogle,
-// 			[]string{"BUCKET=flarco_us_bucket"},
-// 			[]test{},
-// 		},
-// 		{
-// 			dbio.TypeFileAzure,
-// 			[]string{"container=testcont"},
-// 			[]test{},
-// 		},
-// 		{
-// 			dbio.TypeFileS3,
-// 			[]string{},
-// 			[]test{},
-// 		},
-// 	}
+	// Create test scenarios
+	tests := []struct {
+		name     string
+		fromFs   FileSysClient
+		toFs     FileSysClient
+		fromPath string
+		toPath   string
+		wantErr  bool
+	}{
+		{
+			name:     "local to local - single directory",
+			fromFs:   localFs1,
+			toFs:     localFs2,
+			fromPath: "test/test1/csv",
+			toPath:   "/tmp/test/test_copy/local_to_local",
+			wantErr:  false,
+		},
+		{
+			name:     "local to local - multiple files with pattern",
+			fromFs:   localFs1,
+			toFs:     localFs2,
+			fromPath: "test/test1/csv/*.csv",
+			toPath:   "/tmp/test/test_copy/local_to_local_pattern",
+			wantErr:  false,
+		},
+		{
+			name:     "local to s3",
+			fromFs:   localFs1,
+			toFs:     s3Fs,
+			fromPath: "test/test1/csv",
+			toPath:   "s3://ocral-data-1/test/test_copy/local_to_s3",
+			wantErr:  false,
+		},
+		{
+			name:     "s3 to local",
+			fromFs:   s3Fs,
+			toFs:     localFs1,
+			fromPath: "s3://ocral-data-1/test/test_copy/local_to_s3",
+			toPath:   "/tmp/test/test_copy/s3_to_local",
+			wantErr:  false,
+		},
+		{
+			name:     "s3 to azure",
+			fromFs:   s3Fs,
+			toFs:     azureFs,
+			fromPath: "test/test_copy/local_to_s3",
+			toPath:   "test/test_copy/s3_to_azure",
+			wantErr:  false,
+		},
+		{
+			name:     "azure to s3",
+			fromFs:   azureFs,
+			toFs:     s3Fs,
+			fromPath: "test/test_copy/s3_to_azure",
+			toPath:   "test/test_copy/azure_to_s3",
+			wantErr:  false,
+		},
+		{
+			name:     "invalid source path",
+			fromFs:   localFs1,
+			toFs:     localFs2,
+			fromPath: "test/nonexistent/path",
+			toPath:   "test/test_copy/invalid",
+			wantErr:  true,
+		},
+	}
 
-// 	for _, input := range inputs {
-// 		fs, err := NewFileSysClient(input.Type, input.Props...)
-// 		if !g.AssertNoError(t, err) {
-// 			return
-// 		}
-// 	}
+	// Run test cases
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			tt.fromPath = NormalizeURI(tt.fromFs, tt.fromPath)
+			tt.toPath = NormalizeURI(tt.toFs, tt.toPath)
 
-// }
+			// Clean up destination before test
+			_ = Delete(tt.toFs, tt.toPath)
+
+			// Perform copy
+			totalBytes, err := CopyRecursive(tt.fromFs, tt.toFs, tt.fromPath, tt.toPath)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Greater(t, totalBytes, int64(0))
+
+			// Verify copy by listing files
+			fromNodes, err := tt.fromFs.ListRecursive(tt.fromPath)
+			assert.NoError(t, err)
+
+			toNodes, err := tt.toFs.ListRecursive(tt.toPath)
+			assert.NoError(t, err)
+
+			// Count actual files (excluding directories)
+			fromFileCount := 0
+			for _, node := range fromNodes {
+				if !node.IsDir {
+					fromFileCount++
+				}
+			}
+
+			toFileCount := 0
+			for _, node := range toNodes {
+				if !node.IsDir {
+					toFileCount++
+				}
+			}
+
+			// Verify file counts match
+			assert.Equal(t, fromFileCount, toFileCount)
+
+			// Verify content of a sample file
+			if fromFileCount > 0 {
+				// Get first file from source
+				var firstSourceFile FileNode
+				for _, node := range fromNodes {
+					if !node.IsDir {
+						firstSourceFile = node
+						break
+					}
+				}
+
+				// Read source content
+				sourceReader, err := tt.fromFs.GetReader(firstSourceFile.URI)
+				assert.NoError(t, err)
+				sourceContent, err := io.ReadAll(sourceReader)
+				assert.NoError(t, err)
+
+				// Find corresponding destination file
+				commonParent := tt.fromPath
+				if strings.Contains(tt.fromPath, "*") || strings.Contains(tt.fromPath, "?") {
+					commonParent = GetDeepestParent(tt.fromPath)
+				}
+				relPath := strings.TrimPrefix(firstSourceFile.URI, commonParent)
+				relPath = strings.TrimPrefix(relPath, "/")
+				destPath := tt.toPath + "/" + relPath
+
+				// Read destination content
+				destReader, err := tt.toFs.GetReader(destPath)
+				if !assert.NoError(t, err) {
+					return
+				}
+				destContent, err := io.ReadAll(destReader)
+				assert.NoError(t, err)
+
+				// Compare contents
+				assert.Equal(t, len(sourceContent), len(destContent))
+			}
+
+		})
+
+		if t.Failed() {
+			return
+		}
+	}
+
+	for _, tt := range tests {
+		// Clean up
+		_ = Delete(tt.toFs, tt.toPath)
+	}
+}

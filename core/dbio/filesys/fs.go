@@ -1963,3 +1963,83 @@ func CopyFromRemoteRecursive(fs FileSysClient, remotePath string, localPath stri
 
 	return totalBytes, nil
 }
+
+// CopyRecursive copies from/to remote systems by streaming. The folder
+// structure should be maintained. The read/write operations should be done concurrently.
+func CopyRecursive(fromFs, toFs FileSysClient, fromPath, toPath string) (totalBytes int64, err error) {
+	fromPath = NormalizeURI(fromFs, fromPath)
+	toPath = NormalizeURI(toFs, toPath)
+
+	// List all files from source
+	nodes, err := fromFs.ListRecursive(fromPath)
+	if err != nil {
+		return 0, g.Error(err, "Error listing source path: "+fromPath)
+	}
+
+	if len(nodes) == 0 {
+		return 0, g.Error("No files found at source path: %s", fromPath)
+	}
+
+	// Create context for managing concurrency
+	concurrency := cast.ToInt(fromFs.GetProp("concurrency"))
+	if concurrency == 0 {
+		concurrency = 10
+	}
+	copyContext := g.NewContext(fromFs.Context().Ctx, concurrency)
+
+	// Find the deepest common parent path for maintaining structure
+	commonParent := fromPath
+	if strings.Contains(fromPath, "*") || strings.Contains(fromPath, "?") {
+		commonParent = GetDeepestParent(fromPath)
+	}
+
+	// Process each file concurrently
+	processFile := func(node FileNode) {
+		defer copyContext.Wg.Read.Done()
+
+		if node.IsDir {
+			return
+		}
+
+		// Get relative path from the common parent
+		relPath := strings.TrimPrefix(node.URI, commonParent)
+		relPath = strings.TrimPrefix(relPath, "/")
+		// g.Warn("node.URI = %s || commonParent = %s  || relPath = %s", node.URI, commonParent, relPath)
+
+		// Construct local and destination paths
+		destPath := toPath + "/" + relPath
+
+		// Get reader from source file
+		reader, err := fromFs.GetReader(node.URI)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting reader for: "+node.URI))
+			return
+		}
+
+		// Write to destination
+		writtenDest, err := toFs.Write(destPath, reader)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error writing to destination: "+destPath))
+			return
+		}
+
+		atomic.AddInt64(&totalBytes, writtenDest)
+		g.Debug("copied %s to %s [%d bytes]", node.URI, destPath, writtenDest)
+	}
+
+	// Process files concurrently
+	g.Debug("copying %d files from %s to %s", len(nodes), fromPath, toPath)
+	for _, node := range nodes {
+		if !node.IsDir {
+			copyContext.Wg.Read.Add()
+			go processFile(node)
+		}
+	}
+
+	copyContext.Wg.Read.Wait()
+	if err = copyContext.Err(); err != nil {
+		return totalBytes, g.Error(err, "Error during recursive copy")
+	}
+
+	return totalBytes, nil
+}

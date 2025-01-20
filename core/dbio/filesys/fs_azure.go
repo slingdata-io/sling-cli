@@ -283,18 +283,28 @@ func (fs *AzureFileSysClient) delete(uri string) (err error) {
 	return
 }
 
+type azureWriteCounter struct {
+	counter *int64
+}
+
+func (w *azureWriteCounter) Write(p []byte) (int, error) {
+	*w.counter += int64(len(p))
+	return len(p), nil
+}
+
 func (fs *AzureFileSysClient) Write(uri string, reader io.Reader) (bw int64, err error) {
 	path, err := fs.GetPath(uri)
 	if err != nil {
 		return
 	}
 
-	resp, err := fs.client.UploadStream(fs.Context().Ctx, fs.container, path, reader, &blockblob.UploadStreamOptions{})
+	countingReader := io.TeeReader(reader, &azureWriteCounter{&bw})
+
+	_, err = fs.client.UploadStream(fs.Context().Ctx, fs.container, path, countingReader, &blockblob.UploadStreamOptions{})
 	if err != nil {
 		err = g.Error(err, "Error UploadStream: "+uri)
 		return
 	}
-	_ = resp
 
 	return
 }
