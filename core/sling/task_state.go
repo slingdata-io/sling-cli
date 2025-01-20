@@ -64,6 +64,7 @@ type RunState struct {
 	Status     ExecStatus              `json:"status,omitempty"`
 	StartTime  *time.Time              `json:"start_time,omitempty"`
 	EndTime    *time.Time              `json:"end_time,omitempty"`
+	Duration   int64                   `json:"duration,omitempty"`
 	Error      *string                 `json:"error,omitempty"`
 	Config     ReplicationStreamConfig `json:"config,omitempty"`
 	Task       *TaskExecution          `json:"-"`
@@ -153,6 +154,13 @@ func StateSet(t *TaskExecution) {
 		run.EndTime = t.EndTime
 		run.Config = g.PtrVal(t.Config.ReplicationStream)
 		run.Config.Hooks = HookMap{} // no nested values
+		if run.StartTime != nil {
+			if run.EndTime != nil {
+				run.Duration = cast.ToInt64(run.EndTime.Sub(g.PtrVal(run.StartTime)).Seconds())
+			} else {
+				run.Duration = cast.ToInt64(time.Since(g.PtrVal(run.StartTime)).Seconds())
+			}
+		}
 		run.Task = t
 
 		if t.Err != nil {
