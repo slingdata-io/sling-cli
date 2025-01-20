@@ -51,9 +51,16 @@ defaults:
 
 streams:
   test/public_test1k_postgres_pg_parquet/{part_year}/{part_month}/:
+    id: test1k_postgres_pg_parquet
     object: public.test1k_postgres_pg_parquet
     mode: incremental
     primary_key: [id]
     update_key: update_dt
     source_options:
       format: parquet
+    hooks:
+      post:
+        - type: log
+          message: |
+            run-output ==> {run}
+      

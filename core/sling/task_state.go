@@ -56,6 +56,7 @@ func (dts *DateTimeState) Update() {
 }
 
 type RunState struct {
+	ID         string                  `json:"id,omitempty"`
 	Stream     *StreamState            `json:"stream,omitempty"`
 	Object     *ObjectState            `json:"object,omitempty"`
 	TotalBytes uint64                  `json:"total_bytes,omitempty"`
@@ -109,8 +110,14 @@ func StateSet(t *TaskExecution) {
 			return
 		}
 
-		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
-		run := state.Runs[key]
+		fMap, _ := t.Config.GetFormatMap()
+
+		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
+		if id := cast.ToString(fMap["stream_run_id"]); id != "" {
+			runID = id
+		}
+
+		run := state.Runs[runID]
 		if run == nil {
 			run = &RunState{
 				Status: ExecStatusCreated,
@@ -118,8 +125,6 @@ func StateSet(t *TaskExecution) {
 				Object: &ObjectState{},
 			}
 		}
-
-		fMap, _ := t.Config.GetFormatMap()
 
 		run.Stream.FileFolder = cast.ToString(fMap["stream_file_folder"])
 		run.Stream.FileName = cast.ToString(fMap["stream_file_name"])
@@ -135,7 +140,7 @@ func StateSet(t *TaskExecution) {
 		run.Object.Schema = cast.ToString(fMap["object_schema"])
 		run.Object.Table = cast.ToString(fMap["object_table"])
 
-		state.Runs[key] = run
+		state.Runs[runID] = run
 
 		state.Stream = run.Stream
 		state.Object = run.Object

@@ -109,9 +109,14 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 			rd.state.Target.Instance = cast.ToString(task.TgtConn.Data["instance"])
 			rd.state.Target.Schema = cast.ToString(task.TgtConn.Data["schema"])
 
-			key := iop.CleanName(rd.Normalize(task.StreamName))
-			if _, ok := rd.state.Runs[key]; !ok {
-				rd.state.Runs[key] = &RunState{
+			runID := iop.CleanName(rd.Normalize(task.StreamName))
+			if id := cast.ToString(fMap["stream_run_id"]); id != "" {
+				runID = id
+			}
+
+			if _, ok := rd.state.Runs[runID]; !ok {
+				rd.state.Runs[runID] = &RunState{
+					ID:     runID,
 					Status: ExecStatusCreated,
 					Stream: &StreamState{
 						FileFolder: cast.ToString(fMap["stream_file_folder"]),
@@ -175,6 +180,8 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 	gc, err := glob.Compile(strings.ToLower(pattern))
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
+			streams[streamName] = streamCfg
+		} else if streamCfg.ID == pattern {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
@@ -724,6 +731,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 }
 
 type ReplicationStreamConfig struct {
+	ID            string         `json:"id,omitempty" yaml:"id,omitempty"`
 	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`

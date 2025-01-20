@@ -788,6 +788,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
 	}
 
+	if cfg.ReplicationStream != nil && cfg.ReplicationStream.ID != "" {
+		m["stream_run_id"] = cfg.ReplicationStream.ID
+	}
+
 	if cfg.SrcConn.Type.IsDb() {
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
