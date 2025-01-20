@@ -20,7 +20,7 @@ streams:
 
       post:
         - type: http
-          if: run.status = 'success'
+          if: run.status == "success"
           url: https://webhook.ocral.org/status
           id: webhook
 
@@ -28,7 +28,7 @@ streams:
           message: runtime_state => '{runtime_state}'
 
         - type: query
-          if: hooks.webhook.status = success
+          if: hooks.webhook.status == "success"
           connection: '{target.name}'
           query: |
             select
