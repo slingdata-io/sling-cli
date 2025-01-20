@@ -41,4 +41,4 @@ streams:
 
   public.my_table_*:
     columns:
-      there: string | value_len = 3
+      there: string | value_len == 3
