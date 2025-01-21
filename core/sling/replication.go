@@ -21,6 +21,7 @@ import (
 type ReplicationConfig struct {
 	Source   string                              `json:"source,omitempty" yaml:"source,omitempty"`
 	Target   string                              `json:"target,omitempty" yaml:"target,omitempty"`
+	Hooks    HookMap                             `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 	Defaults ReplicationStreamConfig             `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
@@ -51,6 +52,7 @@ func (rd *ReplicationConfig) JSON() string {
 	payload := g.Marshal([]any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
+		g.M("hooks", rd.Hooks),
 		g.M("defaults", rd.Defaults),
 		g.M("streams", rd.Streams),
 		g.M("env", rd.Env),
@@ -360,13 +362,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return nil
 }
 
-func (rd *ReplicationConfig) ParseDefaultHook(stage HookStage) (hooks Hooks, err error) {
+func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks, err error) {
 	var hooksRaw []any
 	switch stage {
 	case HookStageStart:
-		hooksRaw = rd.Defaults.Hooks.Start
+		hooksRaw = rd.Hooks.Start
 	case HookStageEnd:
-		hooksRaw = rd.Defaults.Hooks.End
+		hooksRaw = rd.Hooks.End
 	default:
 		return nil, g.Error("invalid default hook stage: %s", stage)
 	}
@@ -794,11 +796,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"hooks": func() {
-			stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks))
-			stream.Hooks.Start = nil // stream level does not have start hook
-			stream.Hooks.End = nil   // stream level does not have end hook
-		},
+		"hooks":       func() { stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks)) },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -874,6 +872,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		defaults = g.M() // defaults not mandatory
 	}
 
+	hooks, ok := m["hooks"]
+	if !ok {
+		hooks = HookMap{} // hooks not mandatory
+	}
+
 	streams, ok := m["streams"]
 	if !ok {
 		err = g.Error("did not find 'streams' key")
@@ -903,6 +906,13 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	err = g.Unmarshal(g.Marshal(streams), &config.Streams)
 	if err != nil {
 		err = g.Error(err, "could not parse 'streams'")
+		return
+	}
+
+	// parse hooks
+	err = g.Unmarshal(g.Marshal(hooks), &config.Hooks)
+	if err != nil {
+		err = g.Error(err, "could not parse 'hooks'")
 		return
 	}
 

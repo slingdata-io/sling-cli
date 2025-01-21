@@ -446,7 +446,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
+			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")

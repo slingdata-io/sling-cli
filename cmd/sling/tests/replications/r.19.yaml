@@ -5,49 +5,48 @@ env:
   SLING_STATE: aws_s3/sling-state/test/r.19
   RESET: ${RESET}
 
-defaults:
-  hooks:
-    start:
-      - type: log
-        message: 'runtime_state => {runtime_state}'
-        
-      - type: delete
-        if: env.RESET == "true"
-        connection: aws_s3
-        path: sling-state/test/r.19 # delete state on replication start
+hooks:
+  start:
+    - type: log
+      message: 'runtime_state => {runtime_state}'
+      
+    - type: delete
+      if: env.RESET == "true"
+      connection: aws_s3
+      path: sling-state/test/r.19 # delete state on replication start
 
-      - type: inspect
-        id: inspect_file
-        location: aws_s3/test/public_test1k_postgres_pg_parquet
-        message: 'runtime_state ==> {runtime_state}'
+    - type: inspect
+      id: inspect_file
+      location: aws_s3/test/public_test1k_postgres_pg_parquet
+      message: 'runtime_state ==> {runtime_state}'
 
-      # test check, should fail and warn
-      - type: check
-        id: inspect_file_check
-        check: hooks.inspect_file.is_dir != true
-        on_failure: warn
+    # test check, should fail and warn
+    - type: check
+      id: inspect_file_check
+      check: hooks.inspect_file.is_dir != true
+      on_failure: warn
 
-      - type: query
-        connection: postgres
-        if: env.RESET == "true"
-        query: 'drop table public.test1k_postgres_pg_parquet'
-    
-    end:
+    - type: query
+      connection: postgres
+      if: env.RESET == "true"
+      query: 'drop table public.test1k_postgres_pg_parquet'
+  
+  end:
 
-      - type: log
-        message: |
-          inspect-output ==> {hooks.inspect_file}
+    - type: log
+      message: |
+        inspect-output ==> {hooks.inspect_file}
 
-          runtime_state ==> {runtime_state}
+        runtime_state ==> {runtime_state}
 
-      - type: copy
-        id: file-copy
-        from: aws_s3/sling-state/test/r.19
-        to: local//tmp/test/sling-state/test/r.19
+    - type: copy
+      id: file-copy
+      from: aws_s3/sling-state/test/r.19
+      to: local//tmp/test/sling-state/test/r.19
 
-      - type: check
-        check: hooks["file-copy"].bytes_written > 0
-        on_failure: warn
+    - type: check
+      check: hooks["file-copy"].bytes_written > 0
+      on_failure: warn
 
 streams:
   test/public_test1k_postgres_pg_parquet/{part_year}/{part_month}/:
