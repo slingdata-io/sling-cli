@@ -60,7 +60,7 @@ type RunState struct {
 	Stream     *StreamState            `json:"stream,omitempty"`
 	Object     *ObjectState            `json:"object,omitempty"`
 	TotalBytes uint64                  `json:"total_bytes,omitempty"`
-	RowCount   uint64                  `json:"row_count,omitempty"`
+	TotalRows  uint64                  `json:"total_rows,omitempty"`
 	Status     ExecStatus              `json:"status,omitempty"`
 	StartTime  *time.Time              `json:"start_time,omitempty"`
 	EndTime    *time.Time              `json:"end_time,omitempty"`
@@ -148,7 +148,7 @@ func StateSet(t *TaskExecution) {
 
 		bytes, _ := t.GetBytes()
 		run.TotalBytes = bytes
-		run.RowCount = t.GetCount()
+		run.TotalRows = t.GetCount()
 		run.Status = t.Status
 		run.StartTime = t.StartTime
 		run.EndTime = t.EndTime
