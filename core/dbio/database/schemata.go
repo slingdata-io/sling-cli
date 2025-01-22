@@ -274,6 +274,8 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 					// append replace
 					fieldsStr = g.F("* replace(%s)", strings.Join(replaceExprs, ", "))
 				}
+			} else if len(fields) == 1 && fields[0] == "*" {
+				fieldsStr = "*"
 			} else {
 				fieldsExprs := []string{}
 				for _, field := range opts.Fields {
