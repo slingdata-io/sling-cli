@@ -175,6 +175,9 @@ func (conn *MsSQLServerConn) ConnString() string {
 		// Azure Active Directory authentication (https://github.com/microsoft/go-mssqldb?tab=readme-ov-file#azure-active-directory-authentication)
 		"fedauth":  "fedauth",
 		"fed_auth": "fedauth",
+
+		"clientcertpath":   "clientcertpath",
+		"client_cert_path": "clientcertpath",
 	}
 
 	U, _ := net.NewURL(conn.GetURL())
@@ -185,21 +188,24 @@ func (conn *MsSQLServerConn) ConnString() string {
 	}
 
 	AdAuthStrings := []string{
-		azuread.ActiveDirectoryPassword,
-		azuread.ActiveDirectoryIntegrated,
+		// azuread.ActiveDirectoryPassword,
+		// azuread.ActiveDirectoryIntegrated,
 		azuread.ActiveDirectoryMSI,
-		azuread.ActiveDirectoryServicePrincipal,
 		azuread.ActiveDirectoryInteractive,
+		azuread.ActiveDirectoryDefault,
+		azuread.ActiveDirectoryManagedIdentity,
+		azuread.ActiveDirectoryServicePrincipal,
+		azuread.ActiveDirectoryAzCli,
 		azuread.ActiveDirectoryDeviceCode,
+		azuread.ActiveDirectoryApplication,
 	}
 	if fedAuth := conn.GetProp("fedauth"); g.In(fedAuth, AdAuthStrings...) {
-		// https://github.com/microsoft/go-sqlcmd/blob/main/pkg/sqlcmd/azure_auth.go#L18
-		U.SetParam("applicationclientid", "a94f9c62-97fe-4d19-b06d-472bed8d2bcf")
+		conn.SetProp("driver", "azuresql")
+	}
 
+	if certPath := os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"); certPath != "" {
 		// https://github.com/microsoft/go-sqlcmd/blob/main/pkg/sqlcmd/azure_auth.go#L40
-		if g.In(fedAuth, azuread.ActiveDirectoryServicePrincipal, azuread.ActiveDirectoryApplication) {
-			U.SetParam("clientcertpath", os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"))
-		}
+		U.SetParam("clientcertpath", certPath)
 	}
 
 	if val := conn.GetProp("log"); val != "" {
