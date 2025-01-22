@@ -455,11 +455,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	// parse hooks
-	startHooks, err := replication.ParseDefaultHook(sling.HookStageStart)
+	startHooks, err := replication.ParseReplicationHook(sling.HookStageStart)
 	if err != nil {
 		return g.Error(err, "could not parse start hooks")
 	}
-	endHooks, err := replication.ParseDefaultHook(sling.HookStageEnd)
+	endHooks, err := replication.ParseReplicationHook(sling.HookStageEnd)
 	if err != nil {
 		return g.Error(err, "could not parse end hooks")
 	}

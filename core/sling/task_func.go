@@ -182,7 +182,10 @@ var (
 
 func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnType dbio.Type) (err error) {
 	// check if already set from override
-	if cfg.IncrementalVal != "" {
+	if cfg.IncrementalValStr != "" {
+		if cfg.IncrementalVal == nil {
+			cfg.IncrementalVal = strings.Trim(cfg.IncrementalValStr, "\"'")
+		}
 		return
 	}
 
@@ -238,14 +241,14 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 	}
 
 	// set null for empty value (e.g. if target table exists but is empty)
-	incrementalVal := lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
+	cfg.IncrementalVal = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
 	if data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
 		data.Columns[0].Type = iop.DateType // force date type
 	}
 
-	cfg.IncrementalVal = iop.FormatValue(incrementalVal, data.Columns[0].Type, srcConnType)
+	cfg.IncrementalValStr = iop.FormatValue(cfg.IncrementalVal, data.Columns[0].Type, srcConnType)
 
 	return
 }

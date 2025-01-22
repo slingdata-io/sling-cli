@@ -29,6 +29,7 @@ import (
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/microsoft/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb/azuread"
 	_ "github.com/microsoft/go-mssqldb/integratedauth/krb5"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	_ "github.com/snowflakedb/gosnowflake"
@@ -331,7 +332,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	return conn, err
 }
 
-func getDriverName(dbType dbio.Type) (driverName string) {
+func getDriverName(conn Connection) (driverName string) {
+	dbType := conn.GetType()
 	switch dbType {
 	case dbio.TypeDbPostgres, dbio.TypeDbRedshift:
 		driverName = "postgres"
@@ -356,6 +358,12 @@ func getDriverName(dbType dbio.Type) (driverName string) {
 	default:
 		driverName = dbType.String()
 	}
+
+	// for custom specified driver
+	if driver := conn.GetProp("driver"); driver != "" {
+		return driver
+	}
+
 	return
 }
 
@@ -629,9 +637,9 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		g.Trace("connURL -> %s", connURL)
 
 		if !usePool || !poolOk {
-			db, err = sqlx.Open(getDriverName(conn.Type), connURL)
+			db, err = sqlx.Open(getDriverName(conn), connURL)
 			if err != nil {
-				return g.Error(err, "Could not connect to DB: "+getDriverName(conn.Type))
+				return g.Error(err, "Could not connect to DB: "+getDriverName(conn))
 			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))

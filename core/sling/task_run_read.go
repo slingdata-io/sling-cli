@@ -11,6 +11,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 // ReadFromDB reads from a source database
@@ -81,17 +82,17 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if cfg.IncrementalVal != "" {
+		if cfg.IncrementalValStr != "" {
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"value", cfg.IncrementalVal,
+				"value", cfg.IncrementalValStr,
 				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
 			)
 		} else {
 			// allows the use of coalesce in custom SQL using {incremental_value}
 			// this will be null when target table does not exists
-			cfg.IncrementalVal = "null"
+			cfg.IncrementalValStr = "null"
 		}
 
 		if t.Config.Mode == BackfillMode {
@@ -154,22 +155,30 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
-				"incremental_value", cfg.IncrementalVal,
+				"incremental_value", cfg.IncrementalValStr,
 			)
 		}
+
+		// fill in the where clause
+		cfg.Source.Where = g.R(
+			cfg.Source.Where,
+			"incremental_where_cond", incrementalWhereCond,
+			"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+			"incremental_value", cfg.IncrementalValStr,
+		)
 	}
 
 	if srcConn.GetType() == dbio.TypeDbBigTable {
-		srcConn.SetProp("start_time", t.Config.IncrementalVal)
+		srcConn.SetProp("start_time", t.Config.IncrementalValStr)
 	}
 
 	sTable.SQL = g.R(sTable.SQL, "incremental_where_cond", "1=1") // if running non-incremental mode
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
-	// construct select statement for selected fields
-	if selectFieldsStr != "*" || cfg.Source.Limit() > 0 {
+	// construct select statement for selected fields or where condition
+	if selectFieldsStr != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
 		sTable.SQL = sTable.Select(database.SelectOptions{
-			Fields: strings.Split(selectFieldsStr, ","),
+			Fields: strings.Split(selectFieldsStr, ", "),
 			Where:  cfg.Source.Where,
 			Limit:  cfg.Source.Limit(),
 			Offset: cfg.Source.Offset(),
@@ -213,15 +222,15 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	options := t.getOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
-	if t.Config.HasIncrementalVal() {
+	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
 		// file stream incremental mode
 		if t.Config.Source.UpdateKey == slingLoadedAtColumn {
-			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalVal
-			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+			options["SLING_FS_TIMESTAMP"] = t.Config.IncrementalValStr
+			g.Debug(`file stream using file_sys_timestamp=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
 		} else {
 			options["SLING_INCREMENTAL_COL"] = t.Config.Source.UpdateKey
-			options["SLING_INCREMENTAL_VAL"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalVal, "'"), "'") // remove quotes
-			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalVal, t.Config.Source.UpdateKey)
+			options["SLING_INCREMENTAL_VAL"] = strings.TrimSuffix(strings.TrimPrefix(t.Config.IncrementalValStr, "'"), "'") // remove quotes
+			g.Debug(`file stream using incremental_val=%#v and update_key=%s`, t.Config.IncrementalValStr, t.Config.Source.UpdateKey)
 		}
 	}
 
@@ -244,12 +253,61 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			SQL:              cfg.Source.Query,
 			FileSelect:       cfg.Source.Options.FileSelect,
 			IncrementalKey:   cfg.Source.UpdateKey,
-			IncrementalValue: cfg.IncrementalVal,
+			IncrementalValue: cfg.IncrementalValStr,
 		}
 
-		// set incrementalValue if incremental or backfill
-		if t.isIncrementalWithUpdateKey() || t.Config.Mode == BackfillMode {
-			fsCfg.IncrementalValue = cfg.IncrementalVal
+		// format the uri if it has placeholders
+		// determine uri if it has part fields, find first parent folder
+		if t.Config.IsFileStreamWithStateAndParts() {
+			mask := filesys.GetDeepestParent(uri) // mask is without glob symbols
+
+			// if backfill mode, generate the range of uris to read from
+			if t.Config.Mode == BackfillMode {
+				rangeArr := strings.Split(*cfg.Source.Options.Range, ",")
+				start, err := cast.ToTimeE(rangeArr[0])
+				if err != nil {
+					return df, g.Error(err, "invalid start timestamp value: %s", rangeArr[0])
+				}
+				end, err := cast.ToTimeE(rangeArr[1])
+				if err != nil {
+					return df, g.Error(err, "invalid end timestamp value: %s", rangeArr[1])
+				}
+
+				rangeURIs, err := iop.GeneratePartURIsFromRange(mask, cfg.Source.UpdateKey, start, end)
+				if err != nil {
+					return df, g.Error(err, "could not generate uris from range")
+				}
+
+				fsCfg.FileSelect = g.Ptr(rangeURIs)
+
+				// set as end value
+				cfg.IncrementalVal = end
+
+			} else if cfg.IncrementalVal != nil {
+				valueTime, err := cast.ToTimeE(cfg.IncrementalVal)
+				if err != nil {
+					return df, g.Error(err, "could not parse time incremental value: %#v", cfg.IncrementalVal)
+				}
+
+				uri = g.Rm(uri, iop.GetISO8601DateMap(valueTime))
+				uri = g.Rm(uri, iop.GetPartitionDateMap(cfg.Source.UpdateKey, valueTime))
+			} else {
+				uri, err = filesys.GetFirstDatePartURI(fs, mask)
+				if err != nil {
+					return t.df, g.Error(err, "could not get first partition path")
+				}
+
+				// extract current incremental value
+				cfg.IncrementalVal, err = iop.ExtractPartitionTimeValue(mask, uri)
+				if err != nil {
+					return t.df, g.Error(err, "could not extract time partition  incremental value")
+				}
+			}
+			cfg.SrcConn.Data["url"] = uri // set compiled uri
+
+			// unset fsCfg.IncrementalValue to not further filter.
+			// since we're filtering at folder level
+			fsCfg.IncrementalValue = ""
 		}
 
 		if ffmt := cfg.Source.Options.Format; ffmt != nil {

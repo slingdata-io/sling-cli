@@ -16,7 +16,7 @@ core:
       from {table}
     ) TO '{local_path}' 
     (
-      format '{format}', {file_size_bytes_expr} {file_extension_expr}
+      format '{format}', overwrite true, {file_size_bytes_expr} {file_extension_expr}
       compression '{compression}'
     )
   export_to_local_partitions: |
@@ -38,6 +38,13 @@ core:
         type s3,
         provider credential_chain,
         chain 'env;config'
+    )
+  default_azure_secret: |
+    create or replace secret azure_default (
+        type azure,
+        provider credential_chain,
+        chain 'default;env;managed_identity;cli',
+        account_name '{account}'
     )
 
 

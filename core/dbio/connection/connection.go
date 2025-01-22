@@ -451,7 +451,9 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("bucket", U.U.Host)
 		}
 		if c.Type == dbio.TypeFileAzure {
-			setIfMissing("account", strings.ReplaceAll(U.U.Host, ".blob.core.windows.net", ""))
+			account := strings.ReplaceAll(U.U.Host, ".blob.core.windows.net", "")
+			account = strings.ReplaceAll(account, ".dfs.core.windows.net", "")
+			setIfMissing("account", account)
 			setIfMissing("container", strings.ReplaceAll(U.U.Path, "/", ""))
 		}
 	}
@@ -729,7 +731,7 @@ func (c *Connection) setURL() (err error) {
 		return nil
 	default:
 		if c.Type.IsUnknown() {
-			g.Trace("no type detected")
+			g.Trace("no type detected for %s", c.Name)
 		}
 		return nil
 	}

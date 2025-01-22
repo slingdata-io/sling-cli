@@ -292,6 +292,27 @@ func GetDeepestParent(path string) string {
 	return strings.Join(parentParts, "/")
 }
 
+func GetDeepestPartitionParent(path string) string {
+	parts := strings.Split(path, "/")
+	parentParts := []string{}
+	for i, part := range parts {
+		if strings.Contains(part, "*") || strings.Contains(part, "?") {
+			break
+		} else if len(iop.ExtractPartitionFields(part)) > 0 {
+			break
+		} else if len(iop.ExtractISO8601DateFields(part)) > 0 {
+			break
+		} else if i == len(parts)-1 {
+			break
+		}
+		parentParts = append(parentParts, part)
+	}
+	if len(parentParts) > 0 && len(parentParts) < len(parts) {
+		parentParts = append(parentParts, "") // suffix is "/"
+	}
+	return strings.Join(parentParts, "/")
+}
+
 ////////////////////// BASE
 
 // BaseFileSysClient is the base file system type.
@@ -569,6 +590,17 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	var nodes FileNodes
 	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
 		nodes = FileNodes{FileNode{URI: url}}
+	} else if prefixes := g.PtrVal(Cfg.FileSelect); len(prefixes) > 0 {
+		rootPath := GetDeepestPartitionParent(url)
+		g.Trace("listing path: %s", rootPath)
+		nodes, err = fs.Self().ListRecursive(rootPath)
+		if err != nil {
+			err = g.Error(err, "Error getting paths")
+			return
+		}
+
+		// select only prefixes
+		nodes = nodes.SelectWithPrefix(prefixes...)
 	} else {
 		g.Trace("listing path: %s", url)
 		nodes, err = fs.Self().ListRecursive(url)
@@ -583,7 +615,9 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	}
 
 	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
-		if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
+		// if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
+		// azure read gives issues...
+		if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3) {
 			// duckdb read natively
 			df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
 		} else {
@@ -617,6 +651,48 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 
 	df.FsURL = url
 	return
+}
+
+// GetFirstDatePartURI determines the first part for the URI mask provided
+func GetFirstDatePartURI(fs FileSysClient, mask string) (uri string, err error) {
+	// remove * or ?
+	mask = GetDeepestParent(mask)
+
+	// to determine the matching number of parts in the uri
+	origURIParts := len(iop.ExtractPartitionFields(mask)) + len(iop.ExtractISO8601DateFields(mask))
+
+	// determine uri if it has part fields, find first parent folder
+	uri = mask
+	if origURIParts > 0 {
+		// determine deepest partition parent (remove part fields)
+		parent := GetDeepestPartitionParent(mask)
+		if parent == "" {
+			return uri, g.Error("could not get deepest parent for: %s", uri)
+		}
+
+		// list and get first folder
+	reEval:
+		nodes, err := fs.List(parent)
+		if err != nil {
+			return uri, g.Error(err, "could not list parent path: %s", parent)
+		} else if len(nodes.Folders()) == 0 {
+			return uri, g.Error("did not find any folders in parent path: %s", parent)
+		}
+
+		// get first folder, ev
+		uri = nodes.Folders()[0].URI
+		if uri == parent {
+			return uri, g.Error("did not find any child folders in parent path: %s", parent)
+		}
+
+		// the number of parts need to match
+		if !iop.MatchedPartitionMask(mask, uri) {
+			parent = strings.TrimRight(uri, "/") + "/" // go deeper
+			goto reEval                                // re-evaluate so uri matches mask
+		}
+	}
+
+	return uri, nil
 }
 
 // WriteDataflow writes a dataflow to a file sys.
@@ -1158,6 +1234,142 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 	}
 
 	return df, nil
+}
+
+// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
+func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw int64, err error) {
+	folder := path.Join(env.GetTempFolder(), g.RandSuffix("duckdb", 3))
+	df.Defer(func() { env.RemoveAllLocalTempFile(folder) })
+
+	// export to local file
+	if err = os.MkdirAll(folder, 0755); err != nil {
+		err = g.Error(err, "Could not create temp output folder")
+		return bw, err
+	}
+
+	props := g.MapToKVArr(fs.Props())
+	duck := iop.NewDuckDb(context.Background(), props...)
+	duckURI := duck.PrepareFsSecretAndURI(uri)
+
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+	sc := sp.Config
+
+	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
+		sc.Compression = iop.CompressorType(strings.ToLower(val))
+	}
+
+	if val := fs.GetProp("FILE_MAX_BYTES"); val != "" && sc.FileMaxBytes == 0 {
+		sc.FileMaxBytes = cast.ToInt64(val)
+	}
+
+	if cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")) > 0 {
+		g.Warn("splitting files with `file_max_rows` is not supported with duckdb, using `file_max_bytes = 16000000`")
+		sc.FileMaxBytes = 16000000
+	}
+
+	// merge into single stream to push into duckdb
+	duckSc := duck.DefaultCsvConfig()
+	duckSc.FileMaxRows = 0 // if we want to manually split by rows, multiple duck.Exec
+	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
+	if err != nil {
+		return bw, g.Error(err)
+	}
+
+	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
+	if fileFormat == dbio.FileTypeNone {
+		fileFormat = InferFileFormat(uri)
+	}
+
+	streamDone := false
+	for streamPart := range streamPartChn {
+		if streamDone {
+			return bw, g.Error("stream has finished")
+		}
+
+		copyOptions := iop.DuckDbCopyOptions{
+			Format:        fileFormat,
+			Compression:   sc.Compression,
+			FileSizeBytes: sc.FileMaxBytes,
+		}
+
+		// if * is specified, set default FileSizeBytes,
+		if strings.Contains(uri, "*") && copyOptions.FileSizeBytes == 0 {
+			copyOptions.FileSizeBytes = 50 * 1024 * 1024 // 50MB default file size
+		}
+
+		// generate sql for export
+		switch fs.FsType() {
+		case dbio.TypeFileS3, dbio.TypeFileLocal:
+			// copy files bytes recursively to target
+			if strings.Contains(duckURI, "*") {
+				duckURI = GetDeepestParent(duckURI) // get target folder, since split by files
+				duckURI = strings.TrimRight(duckURI, "/")
+			}
+
+			// create the parent folder if needed
+			if fs.FsType() == dbio.TypeFileLocal {
+				parent := duckURI
+				if sc.FileMaxBytes == 0 {
+					parent = path.Dir(duckURI)
+				}
+				if err = os.MkdirAll(parent, 0755); err != nil {
+					err = g.Error(err, "Could not create output folder")
+					return bw, err
+				}
+			}
+
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, duckURI, copyOptions)
+			if err != nil {
+				err = g.Error(err, "Could not generate duckdb copy statement")
+				return bw, err
+			}
+			_, err = duck.Exec(sql)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+
+			// get bytes written
+			if fs.FsType() == dbio.TypeFileLocal {
+				bw, _ = g.PathSize(duckURI)
+			} else {
+				path, _ := fs.GetPath(uri)
+				nodes, _ := fs.ListRecursive(path)
+				bw = cast.ToInt64(nodes.TotalSize())
+			}
+		default:
+			// copy to temp file locally, then upload
+			localPath := env.CleanWindowsPath(path.Join(folder, "output"))
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
+			if err != nil {
+				err = g.Error(err, "Could not generate duckdb copy statement")
+				return bw, err
+			}
+
+			_, err = duck.Exec(sql)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+
+			// copy files bytes recursively to target
+			if strings.Contains(uri, "*") {
+				uri = GetDeepestParent(uri) // get target folder, since split by files
+			}
+
+			written, err := CopyFromLocalRecursive(fs, localPath, uri)
+			if err != nil {
+				err = g.Error(err, "Could not write to file")
+				return bw, err
+			}
+			bw += written
+		}
+
+		streamDone = true // only 1 reader batch
+	}
+
+	return
 }
 
 // MakeDatastream create a datastream from a reader
@@ -1747,6 +1959,86 @@ func CopyFromRemoteRecursive(fs FileSysClient, remotePath string, localPath stri
 	}
 
 	copyContext.Wg.Write.Wait()
+	if err = copyContext.Err(); err != nil {
+		return totalBytes, g.Error(err, "Error during recursive copy")
+	}
+
+	return totalBytes, nil
+}
+
+// CopyRecursive copies from/to remote systems by streaming. The folder
+// structure should be maintained. The read/write operations should be done concurrently.
+func CopyRecursive(fromFs, toFs FileSysClient, fromPath, toPath string) (totalBytes int64, err error) {
+	fromPath = NormalizeURI(fromFs, fromPath)
+	toPath = NormalizeURI(toFs, toPath)
+
+	// List all files from source
+	nodes, err := fromFs.ListRecursive(fromPath)
+	if err != nil {
+		return 0, g.Error(err, "Error listing source path: "+fromPath)
+	}
+
+	if len(nodes) == 0 {
+		return 0, g.Error("No files found at source path: %s", fromPath)
+	}
+
+	// Create context for managing concurrency
+	concurrency := cast.ToInt(fromFs.GetProp("concurrency"))
+	if concurrency == 0 {
+		concurrency = 10
+	}
+	copyContext := g.NewContext(fromFs.Context().Ctx, concurrency)
+
+	// Find the deepest common parent path for maintaining structure
+	commonParent := fromPath
+	if strings.Contains(fromPath, "*") || strings.Contains(fromPath, "?") {
+		commonParent = GetDeepestParent(fromPath)
+	}
+
+	// Process each file concurrently
+	processFile := func(node FileNode) {
+		defer copyContext.Wg.Read.Done()
+
+		if node.IsDir {
+			return
+		}
+
+		// Get relative path from the common parent
+		relPath := strings.TrimPrefix(node.URI, commonParent)
+		relPath = strings.TrimPrefix(relPath, "/")
+		// g.Warn("node.URI = %s || commonParent = %s  || relPath = %s", node.URI, commonParent, relPath)
+
+		// Construct local and destination paths
+		destPath := toPath + "/" + relPath
+
+		// Get reader from source file
+		reader, err := fromFs.GetReader(node.URI)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error getting reader for: "+node.URI))
+			return
+		}
+
+		// Write to destination
+		writtenDest, err := toFs.Write(destPath, reader)
+		if err != nil {
+			copyContext.CaptureErr(g.Error(err, "Error writing to destination: "+destPath))
+			return
+		}
+
+		atomic.AddInt64(&totalBytes, writtenDest)
+		g.Debug("copied %s to %s [%d bytes]", node.URI, destPath, writtenDest)
+	}
+
+	// Process files concurrently
+	g.Debug("copying %d files from %s to %s", len(nodes), fromPath, toPath)
+	for _, node := range nodes {
+		if !node.IsDir {
+			copyContext.Wg.Read.Add()
+			go processFile(node)
+		}
+	}
+
+	copyContext.Wg.Read.Wait()
 	if err = copyContext.Err(); err != nil {
 		return totalBytes, g.Error(err, "Error during recursive copy")
 	}

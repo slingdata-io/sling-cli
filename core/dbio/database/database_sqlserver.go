@@ -21,6 +21,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	mssql "github.com/microsoft/go-mssqldb"
+	"github.com/microsoft/go-mssqldb/azuread"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/xo/dburl"
@@ -77,6 +79,20 @@ func (conn *MsSQLServerConn) GetURL(newURL ...string) string {
 	}
 
 	return url.String()
+}
+
+type SqlServerLogger struct{}
+
+func (l *SqlServerLogger) Printf(format string, v ...any) {
+	env.Print(g.F(format, v...))
+}
+func (l *SqlServerLogger) Println(v ...any) {
+	if len(v) == 1 {
+		env.Println(cast.ToString(v[0]))
+	}
+	if len(v) > 1 {
+		env.Println(g.F(cast.ToString(v[0]), v...))
+	}
 }
 
 func (conn *MsSQLServerConn) ConnString() string {
@@ -159,6 +175,9 @@ func (conn *MsSQLServerConn) ConnString() string {
 		// Azure Active Directory authentication (https://github.com/microsoft/go-mssqldb?tab=readme-ov-file#azure-active-directory-authentication)
 		"fedauth":  "fedauth",
 		"fed_auth": "fedauth",
+
+		"clientcertpath":   "clientcertpath",
+		"client_cert_path": "clientcertpath",
 	}
 
 	U, _ := net.NewURL(conn.GetURL())
@@ -166,6 +185,31 @@ func (conn *MsSQLServerConn) ConnString() string {
 		if val := conn.GetProp(key); val != "" {
 			U.SetParam(new_key, val)
 		}
+	}
+
+	AdAuthStrings := []string{
+		// azuread.ActiveDirectoryPassword,
+		// azuread.ActiveDirectoryIntegrated,
+		azuread.ActiveDirectoryMSI,
+		azuread.ActiveDirectoryInteractive,
+		azuread.ActiveDirectoryDefault,
+		azuread.ActiveDirectoryManagedIdentity,
+		azuread.ActiveDirectoryServicePrincipal,
+		azuread.ActiveDirectoryAzCli,
+		azuread.ActiveDirectoryDeviceCode,
+		azuread.ActiveDirectoryApplication,
+	}
+	if fedAuth := conn.GetProp("fedauth"); g.In(fedAuth, AdAuthStrings...) {
+		conn.SetProp("driver", "azuresql")
+	}
+
+	if certPath := os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"); certPath != "" {
+		// https://github.com/microsoft/go-sqlcmd/blob/main/pkg/sqlcmd/azure_auth.go#L40
+		U.SetParam("clientcertpath", certPath)
+	}
+
+	if val := conn.GetProp("log"); val != "" {
+		mssql.SetLogger(&SqlServerLogger{})
 	}
 
 	return U.String()

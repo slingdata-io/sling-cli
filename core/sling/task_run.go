@@ -113,7 +113,7 @@ func (t *TaskExecution) Execute() error {
 
 		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
-		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms)))
+		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms, "select", t.Config.Source.Select)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
 		g.Debug("using target options: %s", g.Marshal(t.Config.Target.Options))
 
@@ -349,7 +349,7 @@ func (t *TaskExecution) runDbToFile() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() {
 		return g.Error("Please use the SLING_STATE environment variable for writing to files incrementally")
 	}
@@ -419,7 +419,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
-	if t.isIncrementalWithUpdateKey() {
+	if t.Config.IsFileStreamWithStateAndParts() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
+	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
@@ -429,7 +435,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	}
 
 	if t.Config.Options.StdIn && t.Config.SrcConn.Type.IsUnknown() {
@@ -440,8 +446,8 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	t.df, err = t.ReadFromFile(t.Config)
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
-			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -465,9 +471,13 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	elapsed := int(time.Since(start).Seconds())
 	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
 
-	if err != nil {
-		err = g.Error(t.df.Err(), "error in transfer")
+	if cnt > 0 && t.Config.IsFileStreamWithStateAndParts() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
 	}
+
 	return
 }
 
@@ -484,7 +494,7 @@ func (t *TaskExecution) runFileToFile() (err error) {
 	if err != nil {
 		if strings.Contains(err.Error(), "Provided 0 files") {
 			if t.isIncrementalWithUpdateKey() && t.Config.HasIncrementalVal() {
-				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalVal), 0))
+				t.SetProgress("no new files found since latest timestamp (%s)", time.Unix(cast.ToInt64(t.Config.IncrementalValStr), 0))
 			} else {
 				t.SetProgress("no files found")
 			}
@@ -558,14 +568,14 @@ func (t *TaskExecution) runDbToDb() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() {
 		t.SetProgress("getting checkpoint value")
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		t.Context.Map.Set("incremental_value", t.Config.IncrementalVal)
+		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	}
 
 	t.SetProgress("reading from source database")

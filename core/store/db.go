@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+
 	"github.com/denisbrodbeck/machineid"
 	"github.com/flarco/g"
 	"github.com/jmoiron/sqlx"
@@ -81,6 +83,7 @@ func settings() {
 	}
 
 	Db.Create(&Setting{"machine-id", machineID})
+	os.Setenv("MACHINE_ID", machineID)
 }
 
 func GetMachineID() string {

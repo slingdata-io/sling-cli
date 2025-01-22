@@ -12,7 +12,9 @@ import (
 // RuntimeState is for runtime state
 type RuntimeState struct {
 	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
+	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
+	Execution ExecutionState            `json:"execution,omitempty"`
 	Source    ConnState                 `json:"source,omitempty"`
 	Target    ConnState                 `json:"target,omitempty"`
 	Stream    *StreamState              `json:"stream,omitempty"`
@@ -54,14 +56,38 @@ func (dts *DateTimeState) Update() {
 	dts.DDD = now.Format("Mon")
 }
 
+type ExecutionState struct {
+	ID         string     `json:"id,omitempty"`
+	FilePath   string     `json:"string,omitempty"`
+	TotalBytes uint64     `json:"total_bytes,omitempty"`
+	TotalRows  uint64     `json:"total_rows,omitempty"`
+	Status     StatusMap  `json:"status,omitempty"`
+	StartTime  *time.Time `json:"start_time,omitempty"`
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	Duration   int64      `json:"duration,omitempty"`
+	Error      *string    `json:"error,omitempty"`
+}
+
+type StatusMap struct {
+	Count     int `json:"count"`
+	Success   int `json:"success"`
+	Running   int `json:"running"`
+	Skipped   int `json:"skipped"`
+	Cancelled int `json:"cancelled"`
+	Warning   int `json:"warning"`
+	Error     int `json:"error"`
+}
+
 type RunState struct {
+	ID         string                  `json:"id,omitempty"`
 	Stream     *StreamState            `json:"stream,omitempty"`
 	Object     *ObjectState            `json:"object,omitempty"`
 	TotalBytes uint64                  `json:"total_bytes,omitempty"`
-	RowCount   uint64                  `json:"row_count,omitempty"`
+	TotalRows  uint64                  `json:"total_rows,omitempty"`
 	Status     ExecStatus              `json:"status,omitempty"`
 	StartTime  *time.Time              `json:"start_time,omitempty"`
 	EndTime    *time.Time              `json:"end_time,omitempty"`
+	Duration   int64                   `json:"duration,omitempty"`
 	Error      *string                 `json:"error,omitempty"`
 	Config     ReplicationStreamConfig `json:"config,omitempty"`
 	Task       *TaskExecution          `json:"-"`
@@ -71,14 +97,11 @@ type ConnState struct {
 	Name      string    `json:"name,omitempty"`
 	Type      dbio.Type `json:"type,omitempty"`
 	Kind      dbio.Kind `json:"kind,omitempty"`
-	Account   string    `json:"account,omitempty"`
 	Bucket    string    `json:"bucket,omitempty"`
 	Container string    `json:"container,omitempty"`
 	Database  string    `json:"database,omitempty"`
 	Instance  string    `json:"instance,omitempty"`
 	Schema    string    `json:"schema,omitempty"`
-	User      string    `json:"user,omitempty"`
-	Host      string    `json:"host,omitempty"`
 }
 
 type StreamState struct {
@@ -111,8 +134,16 @@ func StateSet(t *TaskExecution) {
 			return
 		}
 
-		key := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
-		run := state.Runs[key]
+		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
+
+		fMap, _ := t.Config.GetFormatMap()
+
+		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
+		if id := cast.ToString(fMap["stream_run_id"]); id != "" {
+			runID = id
+		}
+
+		run := state.Runs[runID]
 		if run == nil {
 			run = &RunState{
 				Status: ExecStatusCreated,
@@ -121,37 +152,85 @@ func StateSet(t *TaskExecution) {
 			}
 		}
 
-		fMap, _ := t.Config.GetFormatMap()
-
 		run.Stream.FileFolder = cast.ToString(fMap["stream_file_folder"])
 		run.Stream.FileName = cast.ToString(fMap["stream_file_name"])
 		run.Stream.FileExt = cast.ToString(fMap["stream_file_ext"])
 		run.Stream.FilePath = cast.ToString(fMap["stream_file_path"])
 		run.Stream.Name = cast.ToString(fMap["stream_name"])
+		run.Stream.FullName = cast.ToString(fMap["stream_full_name"])
 		run.Stream.Schema = cast.ToString(fMap["stream_schema"])
 		run.Stream.Table = cast.ToString(fMap["stream_table"])
 
 		run.Object.Name = cast.ToString(fMap["object_name"])
+		run.Object.FullName = cast.ToString(fMap["object_full_name"])
 		run.Object.Schema = cast.ToString(fMap["object_schema"])
 		run.Object.Table = cast.ToString(fMap["object_table"])
 
-		state.Runs[key] = run
+		state.Runs[runID] = run
 
 		state.Stream = run.Stream
 		state.Object = run.Object
 
 		bytes, _ := t.GetBytes()
 		run.TotalBytes = bytes
-		run.RowCount = t.GetCount()
+		run.TotalRows = t.GetCount()
 		run.Status = t.Status
 		run.StartTime = t.StartTime
 		run.EndTime = t.EndTime
 		run.Config = g.PtrVal(t.Config.ReplicationStream)
 		run.Config.Hooks = HookMap{} // no nested values
+		if run.StartTime != nil {
+			if run.EndTime != nil {
+				run.Duration = cast.ToInt64(run.EndTime.Sub(g.PtrVal(run.StartTime)).Seconds())
+			} else {
+				run.Duration = cast.ToInt64(time.Since(g.PtrVal(run.StartTime)).Seconds())
+			}
+		}
 		run.Task = t
 
 		if t.Err != nil {
 			run.Error = g.Ptr(t.Err.Error())
+		}
+
+		// aggregate statuses, rows and bytes
+		errGroup := g.ErrorGroup{}
+		state.Execution.Status = StatusMap{}
+		state.Execution.TotalBytes = 0
+		state.Execution.TotalRows = 0
+
+		for _, run := range state.Runs {
+			state.Execution.TotalBytes = state.Execution.TotalBytes + run.TotalBytes
+			state.Execution.TotalRows = state.Execution.TotalRows + run.TotalRows
+
+			switch run.Status {
+			case ExecStatusSuccess:
+				state.Execution.Status.Success++
+			case ExecStatusError:
+				state.Execution.Status.Error++
+			case ExecStatusWarning:
+				state.Execution.Status.Warning++
+			case ExecStatusSkipped:
+				state.Execution.Status.Skipped++
+			case ExecStatusRunning:
+				state.Execution.Status.Running++
+			}
+			state.Execution.Status.Count++
+
+			if run.Error != nil {
+				errGroup.Add(g.Error(*run.Error))
+			}
+		}
+
+		// determine if ended
+		if state.Execution.Status.Count == (state.Execution.Status.Success+state.Execution.Status.Error+state.Execution.Status.Warning+state.Execution.Status.Skipped) && state.Execution.Status.Running == 0 {
+			state.Execution.EndTime = g.Ptr(time.Now())
+			state.Execution.Duration = state.Execution.EndTime.Unix() - state.Execution.StartTime.Unix()
+		} else {
+			state.Execution.Duration = time.Now().Unix() - state.Execution.StartTime.Unix()
+		}
+
+		if err := errGroup.Err(); err != nil {
+			state.Execution.Error = g.Ptr(err.Error())
 		}
 
 		// set as active run

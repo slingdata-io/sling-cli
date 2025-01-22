@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -250,19 +249,16 @@ func (cfg *Config) Unmarshal(cfgStr string) (err error) {
 	return nil
 }
 
-// setSchema sets the default schema
-func setSchema(schema string, obj string) string {
-
-	// fill table schema if needed
-	if schema != "" && obj != "" && !strings.Contains(obj, ".") {
-		obj = g.F("%s.%s", schema, obj)
-	}
-
-	return obj
-}
-
 func (cfg *Config) sourceIsFile() bool {
 	return cfg.Options.StdIn || cfg.SrcConn.Info().Type.IsFile()
+}
+
+func (cfg *Config) IsFileStreamWithStateAndParts() bool {
+	uri := cfg.StreamName
+	return os.Getenv("SLING_STATE") != "" &&
+		cfg.SrcConn.Info().Type.IsFile() &&
+		(len(iop.ExtractPartitionFields(uri)) > 0 ||
+			len(iop.ExtractISO8601DateFields(uri)) > 0)
 }
 
 func (cfg *Config) DetermineType() (Type JobType, err error) {
@@ -300,6 +296,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			if cfg.Source.UpdateKey == "" {
 				cfg.Source.UpdateKey = "_bigtable_timestamp"
 			}
+		} else if cfg.IsFileStreamWithStateAndParts() {
+			// OK, no need for update key
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
@@ -409,6 +407,7 @@ func (cfg *Config) AsReplication() (rc ReplicationConfig) {
 			cfg.Source.Stream: {},
 		},
 	}
+	cfg.StreamName = cfg.Source.Stream
 
 	return rc
 }
@@ -633,8 +632,9 @@ func (cfg *Config) Prepare() (err error) {
 		return g.Error(err, "could not get format map for sql")
 	}
 
-	// sql prop
-	cfg.Source.Query = g.Rm(cfg.Source.Query, fMap)
+	// sql & where prop
+	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
+	cfg.Source.Query = g.R(g.Rm(cfg.Source.Query, fMap), "where_cond", cfg.Source.Where)
 	if cfg.ReplicationStream != nil {
 		cfg.ReplicationStream.SQL = cfg.Source.Query
 	}
@@ -736,6 +736,15 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		// fill in temp table name if specified
 		if tgtOpts := cfg.Target.Options; tgtOpts != nil {
 			tgtOpts.TableTmp = strings.TrimSpace(g.Rm(tgtOpts.TableTmp, m))
+			if tgtOpts.TableTmp != "" {
+				tableTmp, err := database.ParseTableName(tgtOpts.TableTmp, cfg.TgtConn.Type)
+				if err != nil {
+					return g.Error(err, "could not parse temp table name")
+				} else if tableTmp.Schema == "" {
+					tableTmp.Schema = cast.ToString(cfg.Target.Data["schema"])
+				}
+				tgtOpts.TableTmp = tableTmp.FullName()
+			}
 		}
 	}
 
@@ -757,10 +766,6 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 
 // GetFormatMap returns a map to format a string with provided with variables
 func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
-	replacePattern := regexp.MustCompile("[^_0-9a-zA-Z]+") // to clean name
-	cleanUp := func(o string) string {
-		return string(replacePattern.ReplaceAll([]byte(o), []byte("_")))
-	}
 
 	m = g.M(
 		"run_timestamp", time.Now().Format("2006_01_02_150405"),
@@ -781,6 +786,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	if cfg.Target.Conn != "" {
 		m["target_name"] = strings.ToLower(cfg.Target.Conn)
+	}
+
+	if cfg.ReplicationStream != nil && cfg.ReplicationStream.ID != "" {
+		m["stream_run_id"] = cfg.ReplicationStream.ID
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
@@ -835,31 +844,32 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsFile() {
-		uri := cfg.SrcConn.URL()
-		m["stream_name"] = strings.ToLower(cfg.Source.Stream)
-		m["stream_full_name"] = cfg.Source.Stream
+		m["stream_name"] = strings.ToLower(cfg.StreamName)
 
 		fc, err := cfg.SrcConn.AsFile(true)
 		if err != nil {
 			return m, g.Error(err, "could not init source conn as file")
 		}
 
+		uri := cfg.SrcConn.URL()
+		m["stream_full_name"] = filesys.NormalizeURI(fc, uri)
+
 		filePath, err := fc.GetPath(uri)
 		if err != nil {
 			return m, g.Error(err, "could not parse file path")
 		}
 		if filePath != "" {
-			m["stream_file_path"] = cleanUp(filePath)
+			m["stream_file_path"] = strings.Trim(filePath, "/")
 		}
 
 		pathArr := strings.Split(strings.TrimPrefix(strings.TrimSuffix(filePath, "/"), "/"), "/")
 		fileName := pathArr[len(pathArr)-1]
-		m["stream_file_name"] = cleanUp(fileName)
+		m["stream_file_name"] = fileName
 
 		fileFolder := ""
 		if len(pathArr) > 1 {
 			fileFolder = pathArr[len(pathArr)-2]
-			m["stream_file_folder"] = cleanUp(strings.TrimPrefix(fileFolder, "/"))
+			m["stream_file_folder"] = strings.Trim(fileFolder, "/")
 		}
 
 		switch cfg.SrcConn.Type {
@@ -909,9 +919,15 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 	}
 
-	if t := connection.SchemeType(cfg.Target.Object); t.IsFile() {
+	if t := cfg.TgtConn.Type; t.IsFile() {
+
+		fc, err := cfg.TgtConn.AsFile(true)
+		if err != nil {
+			return m, g.Error(err, "could not init target conn as file")
+		}
+
 		m["object_name"] = strings.ToLower(cfg.Target.Object)
-		m["object_full_name"] = cfg.Target.Object
+		m["object_full_name"] = filesys.NormalizeURI(fc, cfg.Target.Object)
 
 		switch t {
 		case dbio.TypeFileS3:
@@ -1001,8 +1017,9 @@ type Config struct {
 	TgtConn  connection.Connection `json:"-" yaml:"-"`
 	Prepared bool                  `json:"-" yaml:"-"`
 
-	IncrementalVal string `json:"incremental_val" yaml:"incremental_val"`
-	IncrementalGTE bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
+	IncrementalVal    any    `json:"incremental_val" yaml:"incremental_val"`
+	IncrementalValStr string `json:"incremental_val_str" yaml:"incremental_val_str"`
+	IncrementalGTE    bool   `json:"incremental_gte,omitempty" yaml:"incremental_gte,omitempty"`
 
 	MetadataLoadedAt  *bool `json:"-" yaml:"-"`
 	MetadataStreamURL bool  `json:"-" yaml:"-"`
@@ -1030,7 +1047,7 @@ func (cfg *Config) IgnoreExisting() bool {
 
 // HasIncrementalVal returns true there is a non-null incremental value
 func (cfg *Config) HasIncrementalVal() bool {
-	return cfg.IncrementalVal != "" && cfg.IncrementalVal != "null"
+	return cfg.IncrementalValStr != "" && cfg.IncrementalValStr != "null"
 }
 
 // ColumnsPrepared returns the prepared columns
@@ -1186,11 +1203,19 @@ func (cfg *Config) MD5() string {
 }
 
 func (cfg *Config) SrcConnMD5() string {
-	return g.MD5(cfg.SrcConn.URL())
+	c := cfg.SrcConn.Copy()
+	if c.Type.IsFile() {
+		delete(c.Data, "url") // so we can reset to base url
+	}
+	return g.MD5(c.URL())
 }
 
 func (cfg *Config) TgtConnMD5() string {
-	return g.MD5(cfg.TgtConn.URL())
+	c := cfg.TgtConn.Copy()
+	if c.Type.IsFile() {
+		delete(c.Data, "url") // so we can reset to base url
+	}
+	return g.MD5(c.URL())
 }
 
 func (cfg *Config) StreamID() string {

@@ -4,11 +4,12 @@ target: sqlite
 defaults:
   mode: full-refresh
   object: 'main.pg_{stream_table}'
-  sql: "select *, 'hi' there from {stream_name} limit 10"
+  sql: "select *, 'hi' there from {stream_name} {where_clause} limit 10"
 
 streams:
   public.my_table?:
     tags: [ my_table ]
+    where: '2 > 1'
   public.my_table:
     hooks:
       pre:
@@ -19,7 +20,7 @@ streams:
 
       post:
         - type: http
-          if: run.status = 'success'
+          if: run.status == "success"
           url: https://webhook.ocral.org/status
           id: webhook
 
@@ -27,7 +28,7 @@ streams:
           message: runtime_state => '{runtime_state}'
 
         - type: query
-          if: hooks.webhook.status = success
+          if: hooks.webhook.status == "success"
           connection: '{target.name}'
           query: |
             select
@@ -40,4 +41,4 @@ streams:
 
   public.my_table_*:
     columns:
-      there: string | value_len = 3
+      there: string | value_len == 3

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
@@ -21,6 +22,7 @@ import (
 type ReplicationConfig struct {
 	Source   string                              `json:"source,omitempty" yaml:"source,omitempty"`
 	Target   string                              `json:"target,omitempty" yaml:"target,omitempty"`
+	Hooks    HookMap                             `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 	Defaults ReplicationStreamConfig             `json:"defaults,omitempty" yaml:"defaults,omitempty"`
 	Streams  map[string]*ReplicationStreamConfig `json:"streams,omitempty" yaml:"streams,omitempty"`
 	Env      map[string]any                      `json:"env,omitempty" yaml:"env,omitempty"`
@@ -51,6 +53,7 @@ func (rd *ReplicationConfig) JSON() string {
 	payload := g.Marshal([]any{
 		g.M("source", rd.Source),
 		g.M("target", rd.Target),
+		g.M("hooks", rd.Hooks),
 		g.M("defaults", rd.Defaults),
 		g.M("streams", rd.Streams),
 		g.M("env", rd.Env),
@@ -74,10 +77,17 @@ func (rd *ReplicationConfig) JSON() string {
 func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 	if rd.state == nil {
 		rd.state = &RuntimeState{
-			Hooks:  map[string]map[string]any{},
-			Runs:   map[string]*RunState{},
-			Source: ConnState{Name: rd.Source},
-			Target: ConnState{Name: rd.Target},
+			Hooks:     map[string]map[string]any{},
+			Env:       rd.Env,
+			Runs:      map[string]*RunState{},
+			Execution: ExecutionState{},
+			Source:    ConnState{Name: rd.Source},
+			Target:    ConnState{Name: rd.Target},
+		}
+
+		rd.state.Execution = ExecutionState{
+			ID:        os.Getenv("SLING_EXEC_ID"),
+			StartTime: g.Ptr(time.Now()),
 		}
 	}
 
@@ -93,30 +103,29 @@ func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type
 			rd.state.Source.Kind = task.SrcConn.Type.Kind()
-			rd.state.Source.Account = cast.ToString(fMap["source_account"])
 			rd.state.Source.Bucket = cast.ToString(fMap["source_bucket"])
 			rd.state.Source.Container = cast.ToString(fMap["source_container"])
 			rd.state.Source.Database = cast.ToString(task.SrcConn.Data["database"])
 			rd.state.Source.Instance = cast.ToString(task.SrcConn.Data["instance"])
 			rd.state.Source.Schema = cast.ToString(task.SrcConn.Data["schema"])
-			rd.state.Source.User = cast.ToString(task.SrcConn.Data["username"])
-			rd.state.Source.Host = cast.ToString(task.SrcConn.Data["host"])
 
 			// populate target
 			rd.state.Target.Type = task.TgtConn.Type
 			rd.state.Target.Kind = task.TgtConn.Type.Kind()
-			rd.state.Target.Account = cast.ToString(fMap["target_account"])
 			rd.state.Target.Bucket = cast.ToString(fMap["target_bucket"])
 			rd.state.Target.Container = cast.ToString(fMap["target_container"])
 			rd.state.Target.Database = cast.ToString(task.TgtConn.Data["database"])
 			rd.state.Target.Instance = cast.ToString(task.TgtConn.Data["instance"])
 			rd.state.Target.Schema = cast.ToString(task.TgtConn.Data["schema"])
-			rd.state.Target.User = cast.ToString(task.TgtConn.Data["username"])
-			rd.state.Target.Host = cast.ToString(task.TgtConn.Data["host"])
 
-			key := iop.CleanName(rd.Normalize(task.StreamName))
-			if _, ok := rd.state.Runs[key]; !ok {
-				rd.state.Runs[key] = &RunState{
+			runID := iop.CleanName(rd.Normalize(task.StreamName))
+			if id := cast.ToString(fMap["stream_run_id"]); id != "" {
+				runID = id
+			}
+
+			if _, ok := rd.state.Runs[runID]; !ok {
+				rd.state.Runs[runID] = &RunState{
+					ID:     runID,
 					Status: ExecStatusCreated,
 					Stream: &StreamState{
 						FileFolder: cast.ToString(fMap["stream_file_folder"]),
@@ -180,6 +189,8 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 	gc, err := glob.Compile(strings.ToLower(pattern))
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
+			streams[streamName] = streamCfg
+		} else if streamCfg != nil && streamCfg.ID == pattern {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
@@ -358,13 +369,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return nil
 }
 
-func (rd *ReplicationConfig) ParseDefaultHook(stage HookStage) (hooks Hooks, err error) {
+func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks, err error) {
 	var hooksRaw []any
 	switch stage {
 	case HookStageStart:
-		hooksRaw = rd.Defaults.Hooks.Start
+		hooksRaw = rd.Hooks.Start
 	case HookStageEnd:
-		hooksRaw = rd.Defaults.Hooks.End
+		hooksRaw = rd.Hooks.End
 	default:
 		return nil, g.Error("invalid default hook stage: %s", stage)
 	}
@@ -607,7 +618,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 		// config overwrite
 		taskEnv := g.ToMapString(rd.Env)
-		var incrementalVal string
+		var incrementalValStr string
 
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
@@ -656,7 +667,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			if newFileSelect := cfgOverwrite.Source.Options.FileSelect; newFileSelect != nil {
 				stream.SourceOptions.FileSelect = newFileSelect
 			}
-			incrementalVal = cfgOverwrite.IncrementalVal
+			incrementalValStr = cfgOverwrite.IncrementalValStr
 
 			// merge to existing replication env, overwrite if key already exists
 			if cfgOverwrite.Env != nil {
@@ -685,7 +696,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			Transforms:        stream.Transforms,
 			Env:               taskEnv,
 			StreamName:        name,
-			IncrementalVal:    incrementalVal,
+			IncrementalValStr: incrementalValStr,
 			ReplicationStream: &stream,
 		}
 
@@ -729,6 +740,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 }
 
 type ReplicationStreamConfig struct {
+	ID            string         `json:"id,omitempty" yaml:"id,omitempty"`
 	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
@@ -791,11 +803,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"hooks": func() {
-			stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks))
-			stream.Hooks.Start = nil // stream level does not have start hook
-			stream.Hooks.End = nil   // stream level does not have end hook
-		},
+		"hooks":       func() { stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks)) },
 	}
 
 	for key, setFunc := range defaultSet {
@@ -871,6 +879,11 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 		defaults = g.M() // defaults not mandatory
 	}
 
+	hooks, ok := m["hooks"]
+	if !ok {
+		hooks = HookMap{} // hooks not mandatory
+	}
+
 	streams, ok := m["streams"]
 	if !ok {
 		err = g.Error("did not find 'streams' key")
@@ -900,6 +913,13 @@ func UnmarshalReplication(replicYAML string) (config ReplicationConfig, err erro
 	err = g.Unmarshal(g.Marshal(streams), &config.Streams)
 	if err != nil {
 		err = g.Error(err, "could not parse 'streams'")
+		return
+	}
+
+	// parse hooks
+	err = g.Unmarshal(g.Marshal(hooks), &config.Hooks)
+	if err != nil {
+		err = g.Error(err, "could not parse 'hooks'")
 		return
 	}
 
