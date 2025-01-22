@@ -190,7 +190,7 @@ func (rd ReplicationConfig) MatchStreams(pattern string) (streams map[string]*Re
 	for streamName, streamCfg := range rd.Streams {
 		if rd.Normalize(streamName) == rd.Normalize(pattern) {
 			streams[streamName] = streamCfg
-		} else if streamCfg.ID == pattern {
+		} else if streamCfg != nil && streamCfg.ID == pattern {
 			streams[streamName] = streamCfg
 		} else if err == nil && gc.Match(strings.ToLower(rd.Normalize(streamName))) {
 			streams[streamName] = streamCfg
