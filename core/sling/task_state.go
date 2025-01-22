@@ -14,6 +14,7 @@ type RuntimeState struct {
 	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
+	Execution ExecutionState            `json:"execution,omitempty"`
 	Source    ConnState                 `json:"source,omitempty"`
 	Target    ConnState                 `json:"target,omitempty"`
 	Stream    *StreamState              `json:"stream,omitempty"`
@@ -53,6 +54,28 @@ func (dts *DateTimeState) Update() {
 	dts.DD = now.Format("02")
 	dts.HH = now.Format("15")
 	dts.DDD = now.Format("Mon")
+}
+
+type ExecutionState struct {
+	ID         string     `json:"id,omitempty"`
+	FilePath   string     `json:"string,omitempty"`
+	TotalBytes uint64     `json:"total_bytes,omitempty"`
+	TotalRows  uint64     `json:"total_rows,omitempty"`
+	Status     StatusMap  `json:"status,omitempty"`
+	StartTime  *time.Time `json:"start_time,omitempty"`
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	Duration   int64      `json:"duration,omitempty"`
+	Error      *string    `json:"error,omitempty"`
+}
+
+type StatusMap struct {
+	Count     int `json:"count"`
+	Success   int `json:"success"`
+	Running   int `json:"running"`
+	Skipped   int `json:"skipped"`
+	Cancelled int `json:"cancelled"`
+	Warning   int `json:"warning"`
+	Error     int `json:"error"`
 }
 
 type RunState struct {
@@ -111,6 +134,8 @@ func StateSet(t *TaskExecution) {
 			return
 		}
 
+		state.Execution.FilePath = t.Config.Env["SLING_CONFIG_PATH"]
+
 		fMap, _ := t.Config.GetFormatMap()
 
 		runID := iop.CleanName(t.Replication.Normalize(t.Config.StreamName))
@@ -165,6 +190,47 @@ func StateSet(t *TaskExecution) {
 
 		if t.Err != nil {
 			run.Error = g.Ptr(t.Err.Error())
+		}
+
+		// aggregate statuses, rows and bytes
+		errGroup := g.ErrorGroup{}
+		state.Execution.Status = StatusMap{}
+		state.Execution.TotalBytes = 0
+		state.Execution.TotalRows = 0
+
+		for _, run := range state.Runs {
+			state.Execution.TotalBytes = state.Execution.TotalBytes + run.TotalBytes
+			state.Execution.TotalRows = state.Execution.TotalRows + run.TotalRows
+
+			switch run.Status {
+			case ExecStatusSuccess:
+				state.Execution.Status.Success++
+			case ExecStatusError:
+				state.Execution.Status.Error++
+			case ExecStatusWarning:
+				state.Execution.Status.Warning++
+			case ExecStatusSkipped:
+				state.Execution.Status.Skipped++
+			case ExecStatusRunning:
+				state.Execution.Status.Running++
+			}
+			state.Execution.Status.Count++
+
+			if run.Error != nil {
+				errGroup.Add(g.Error(*run.Error))
+			}
+		}
+
+		// determine if ended
+		if state.Execution.Status.Count == (state.Execution.Status.Success+state.Execution.Status.Error+state.Execution.Status.Warning+state.Execution.Status.Skipped) && state.Execution.Status.Running == 0 {
+			state.Execution.EndTime = g.Ptr(time.Now())
+			state.Execution.Duration = state.Execution.EndTime.Unix() - state.Execution.StartTime.Unix()
+		} else {
+			state.Execution.Duration = time.Now().Unix() - state.Execution.StartTime.Unix()
+		}
+
+		if err := errGroup.Err(); err != nil {
+			state.Execution.Error = g.Ptr(err.Error())
 		}
 
 		// set as active run

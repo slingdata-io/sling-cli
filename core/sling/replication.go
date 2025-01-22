@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
@@ -76,11 +77,17 @@ func (rd *ReplicationConfig) JSON() string {
 func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
 	if rd.state == nil {
 		rd.state = &RuntimeState{
-			Hooks:  map[string]map[string]any{},
-			Env:    rd.Env,
-			Runs:   map[string]*RunState{},
-			Source: ConnState{Name: rd.Source},
-			Target: ConnState{Name: rd.Target},
+			Hooks:     map[string]map[string]any{},
+			Env:       rd.Env,
+			Runs:      map[string]*RunState{},
+			Execution: ExecutionState{},
+			Source:    ConnState{Name: rd.Source},
+			Target:    ConnState{Name: rd.Target},
+		}
+
+		rd.state.Execution = ExecutionState{
+			ID:        os.Getenv("SLING_EXEC_ID"),
+			StartTime: g.Ptr(time.Now()),
 		}
 	}
 
