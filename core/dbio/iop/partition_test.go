@@ -310,12 +310,12 @@ func TestGetLowestPartTimeUnit(t *testing.T) {
 		{
 			name: "month partition",
 			mask: "data/{part_month}/file.csv",
-			want: 30 * 24 * time.Hour,
+			want: 31 * 24 * time.Hour,
 		},
 		{
 			name: "year_month partition",
 			mask: "data/{part_year_month}/file.csv",
-			want: 30 * 24 * time.Hour,
+			want: 31 * 24 * time.Hour,
 		},
 		{
 			name: "year partition",
