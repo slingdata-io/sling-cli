@@ -39,6 +39,13 @@ core:
         provider credential_chain,
         chain 'env;config'
     )
+  default_azure_secret: |
+    create or replace secret azure_default (
+        type azure,
+        provider credential_chain,
+        chain 'default;env;managed_identity;cli',
+        account_name '{account}'
+    )
 
 
 metadata:

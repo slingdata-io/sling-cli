@@ -176,8 +176,15 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 	case dbio.TypeFileAzure:
 		secretKeyMap = map[string]string{
-			"CONN_STR": "CONNECTION_STRING",
-			"ACCOUNT":  "ACCOUNT_NAME",
+			"CONN_STR":                "CONNECTION_STRING",
+			"ACCOUNT":                 "ACCOUNT_NAME",
+			"HTTP_PROXY":              "HTTP_PROXY",
+			"PROXY_USER_NAME":         "PROXY_USER_NAME",
+			"PROXY_PASSWORD":          "PROXY_PASSWORD",
+			"CLIENT_CERTIFICATE_PATH": "CLIENT_CERTIFICATE_PATH",
+			"TENANT_ID":               "TENANT_ID",
+			"CLIENT_ID":               "CLIENT_ID",
+			"PROVIDER":                "PROVIDER",
 		}
 		secretProps = append(secretProps, "TYPE AZURE")
 
@@ -187,6 +194,16 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		if strings.Contains(uri, ".dfs.core.windows.net/") {
 			uri = strings.ReplaceAll(uri, "https://", "abfss://")
 		}
+
+		// need to provide CONNECTION_STRING
+		if fsProps["SAS_SVC_URL"] != "" && fsProps["CONN_STR"] == "" && g.IsDebug() {
+			g.Warn("to use duckdb to read from Azure, need to provide 'conn_str' instead of 'sas_svc_url'. See https://docs.slingdata.io/connections/file-connections/azure")
+		}
+
+		// add default provider chain (https://duckdb.org/docs/extensions/azure.html#credential_chain-provider)
+		secretSQL := dbio.TypeDbDuckDb.GetTemplateValue("core.default_azure_secret")
+		secretSQL = g.R(secretSQL, "account", fsProps["ACCOUNT"])
+		duck.secrets = append(duck.secrets, secretSQL)
 	}
 
 	// populate secret props and make secret sql
@@ -224,6 +241,7 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 // getCreateSecretSQL generates SQL statements to create secrets
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 	for _, secret := range duck.secrets {
+		env.LogSQL(nil, secret+env.NoDebugKey)
 		sql += fmt.Sprintf(";%s;", secret)
 	}
 	return
