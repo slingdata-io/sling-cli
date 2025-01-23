@@ -332,7 +332,7 @@ func (fs *FtpFileSysClient) cleanUpNodeURI(uri string) string {
 
 // Delete list objects in path
 func (fs *FtpFileSysClient) delete(uri string) (err error) {
-	path, err := fs.GetPath(uri)
+	_, err = fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
 		return
@@ -343,30 +343,20 @@ func (fs *FtpFileSysClient) delete(uri string) (err error) {
 		return g.Error(err, "error listing path")
 	}
 
-	for _, node := range nodes {
-		if node.IsDir {
-			err = fs.client.RemoveDirRecur(strings.TrimSuffix(node.Path(), "/"))
-		} else {
-			err = fs.client.Delete(strings.TrimSuffix(node.Path(), "/"))
-		}
+	for _, node := range nodes.Files() {
+		err = fs.client.Delete(strings.TrimSuffix(node.Path(), "/"))
 		if err != nil && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "550") {
 			return g.Error(err, "error deleting path "+node.URI)
 		}
 	}
 
-	path = strings.TrimSuffix(path, "/")
-	file, err := fs.client.GetEntry(path)
-	if err == nil {
-		if file.Type == ftp.EntryTypeFolder {
-			err = fs.client.RemoveDirRecur(path)
-		} else {
-			err = fs.client.Delete(path)
+	for _, node := range nodes.Folders() {
+		err = fs.client.RemoveDirRecur(strings.TrimSuffix(node.Path(), "/"))
+		if err != nil && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "550") {
+			return g.Error(err, "error deleting path "+node.URI)
 		}
 	}
 
-	if err != nil && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "550") {
-		return g.Error(err, "error deleting path")
-	}
 	return nil
 }
 
