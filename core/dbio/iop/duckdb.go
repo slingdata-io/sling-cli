@@ -233,7 +233,11 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 // getLoadExtensionSQL generates SQL statements to load extensions
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
-		sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
+			sql += fmt.Sprintf("; LOAD %s;", extension)
+		} else {
+			sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+		}
 	}
 	return
 }
