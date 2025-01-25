@@ -115,7 +115,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 				}
 
 				if len(batchR.Columns) != len(df.Columns) {
-					err = g.Error(err, "number columns have changed, not compatible with stdout.")
+					err = g.Error("number columns have changed, not compatible with stdout.")
 					return
 				}
 				bufStdout := bufio.NewWriter(os.Stdout)
