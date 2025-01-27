@@ -9,8 +9,15 @@ import (
 	"github.com/spf13/cast"
 )
 
-// RuntimeState is for runtime state
-type RuntimeState struct {
+type RuntimeState interface {
+	SetHookData(id string, data map[string]any)
+	SetHookKeyValue(id, key string, value any)
+	Marshall() string
+	TaskExecution() *TaskExecution
+}
+
+// ReplicationState is for runtime state
+type ReplicationState struct {
 	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
@@ -21,6 +28,25 @@ type RuntimeState struct {
 	Object    *ObjectState              `json:"object,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (rs *ReplicationState) SetHookData(id string, data map[string]any) {
+	rs.Hooks[id] = data
+}
+
+func (rs *ReplicationState) SetHookKeyValue(id, key string, value any) {
+	rs.Hooks[id][key] = value
+}
+
+func (rs *ReplicationState) Marshall() string {
+	return g.Marshal(rs)
+}
+
+func (rs *ReplicationState) TaskExecution() *TaskExecution {
+	if rs.Run != nil && rs.Run.Task != nil {
+		return rs.Run.Task
+	}
+	return nil
 }
 
 type DateTimeState struct {

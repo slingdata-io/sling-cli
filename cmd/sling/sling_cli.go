@@ -47,6 +47,12 @@ var cliRunFlags = []g.Flag{
 		Description: "The replication config file to use (JSON or YAML).\n",
 	},
 	{
+		Name:        "pipeline",
+		ShortName:   "p",
+		Type:        "string",
+		Description: "The pipeline config file to use (JSON or YAML).\n",
+	},
+	{
 		Name:        "config",
 		ShortName:   "c",
 		Type:        "string",

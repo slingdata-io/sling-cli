@@ -35,7 +35,7 @@ type ReplicationConfig struct {
 	streamsOrdered []string
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
-	state          *RuntimeState
+	state          *ReplicationState
 }
 
 type replicationConfigMaps struct {
@@ -74,9 +74,9 @@ func (rd *ReplicationConfig) JSON() string {
 }
 
 // StateMap returns map for use
-func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
+func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	if rd.state == nil {
-		rd.state = &RuntimeState{
+		rd.state = &ReplicationState{
 			Hooks:     map[string]map[string]any{},
 			Env:       rd.Env,
 			Runs:      map[string]*RunState{},
@@ -390,7 +390,7 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks,
 	}
 
 	for i, hook := range hooksRaw {
-		opts := ParseOptions{stage: stage, index: i, state: state}
+		opts := ParseOptions{stage: stage, index: i, state: state, kind: HookKindHook}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)
@@ -417,7 +417,7 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 	}
 
 	for i, hook := range hooksRaw {
-		opts := ParseOptions{stage: stage, index: i, state: rd.state}
+		opts := ParseOptions{stage: stage, index: i, state: rd.state, kind: HookKindHook}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)

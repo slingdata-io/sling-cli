@@ -67,3 +67,4 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 66	Run sling project jobs list					FILE NAME	sling project jobs list
 67	Run sling hooks & source partitioned (backfill)	551				"executed hook ""start-02"" (type: delete)|writing incremental state (value => 2019-06-01"	RESET=true sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01
 68	Run sling hooks & source partitioned (incremental)	>78				"skipped hook ""start-02""|hook (inspect_file_check) failed => check failure|writing incremental state (value => 2019-07-01"	sling run -r cmd/sling/tests/replications/r.19.yaml -d --streams 'test1k_postgres_pg_parquet'
+69	Run sling pipeline					executed hook "step-02" (type: replication)	sling run -p cmd/sling/tests/pipelines/p.01.yaml -d

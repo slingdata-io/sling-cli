@@ -39,6 +39,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		Target: sling.Target{Options: &sling.TargetOptions{}},
 	}
 	replicationCfgPath := ""
+	pipelineCfgPath := ""
 	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
@@ -65,6 +66,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "replication":
 			env.SetTelVal("run_mode", "replication")
 			replicationCfgPath = cast.ToString(v)
+		case "pipeline":
+			env.SetTelVal("run_mode", "pipeline")
+			pipelineCfgPath = cast.ToString(v)
 		case "config":
 			env.SetTelVal("run_mode", "task")
 			taskCfgStr = cast.ToString(v)
@@ -201,7 +205,12 @@ runReplication:
 
 	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
 
-	if replicationCfgPath != "" {
+	if pipelineCfgPath != "" {
+		err = runPipeline(pipelineCfgPath)
+		if err != nil {
+			return ok, g.Error(err, "failure running pipeline (see docs @ https://docs.slingdata.io)")
+		}
+	} else if replicationCfgPath != "" {
 		//  run replication
 		err = runReplication(replicationCfgPath, cfg, selectStreams...)
 		if err != nil {
@@ -541,6 +550,20 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	return eG.Err()
+}
+
+func runPipeline(pipelineCfgPath string) (err error) {
+	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath)
+	if err != nil {
+		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)
+	}
+
+	// set function here due to scoping
+	sling.HookRunReplication = runReplication
+
+	err = pipeline.Execute()
+
+	return
 }
 
 func parsePayload(payload string, validate bool) (options map[string]any, err error) {

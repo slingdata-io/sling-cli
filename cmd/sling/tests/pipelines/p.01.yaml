@@ -1,0 +1,10 @@
+pipeline:
+  - type: log
+    message: '{runtime_state}'
+
+  - type: replication
+    path: cmd/sling/tests/replications/r.19.yaml
+
+  - type: log
+    message: '{runtime_state}'
+    level: warn

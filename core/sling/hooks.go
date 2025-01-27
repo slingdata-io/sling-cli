@@ -3,10 +3,19 @@ package sling
 import "github.com/flarco/g"
 
 type HookType string
+type HookKind string
+
+const (
+	HookKindHook HookKind = "hook"
+	HookKindStep HookKind = "step"
+)
+
+var HookRunReplication func(string, *Config, ...string) error
 
 type Hook interface {
 	Type() HookType
 	ID() string
+	Data() map[string]any
 	Stage() HookStage
 	Execute() error
 	ExecuteOnDone(error) error
@@ -23,8 +32,9 @@ type HookMap struct {
 
 type ParseOptions struct {
 	stage HookStage
+	kind  HookKind
 	index int
-	state *RuntimeState
+	state RuntimeState
 }
 
 type HookStage string
