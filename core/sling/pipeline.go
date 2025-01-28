@@ -70,17 +70,17 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		return
 	}
 
-	values, ok := m["pipeline"]
+	values, ok := m["steps"]
 	if !ok {
-		err = g.Error("did not find 'pipeline' key")
+		err = g.Error("did not find 'steps' key")
 		return
 	}
 
 	// parse pipeline
-	var pipelineRaw []any
-	err = g.Unmarshal(g.Marshal(values), &pipelineRaw)
+	var stepsRaw []any
+	err = g.Unmarshal(g.Marshal(values), &stepsRaw)
 	if err != nil {
-		err = g.Error(err, "could not parse 'pipeline'")
+		err = g.Error(err, "could not parse 'steps'")
 		return
 	}
 
@@ -89,7 +89,7 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		return nil, g.Error(err, "could not render runtime state")
 	}
 
-	for i, stepRaw := range pipelineRaw {
+	for i, stepRaw := range stepsRaw {
 		opts := ParseOptions{
 			index: i,
 			state: state,

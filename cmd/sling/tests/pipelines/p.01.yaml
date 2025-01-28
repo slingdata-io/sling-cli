@@ -1,4 +1,4 @@
-pipeline:
+steps:
   - type: log
     message: '{runtime_state}'
 
