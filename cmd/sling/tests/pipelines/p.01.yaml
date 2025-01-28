@@ -8,3 +8,7 @@ steps:
   - type: log
     message: '{runtime_state}'
     level: warn
+
+  - type: command
+    command: [ls, -l, /tmp]
+    print: true
