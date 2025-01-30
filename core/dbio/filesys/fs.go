@@ -2009,7 +2009,7 @@ func CopyRecursive(fromFs, toFs FileSysClient, fromPath, toPath string) (totalBy
 		// g.Warn("node.URI = %s || commonParent = %s  || relPath = %s", node.URI, commonParent, relPath)
 
 		// Construct local and destination paths
-		destPath := toPath + "/" + relPath
+		destPath := strings.TrimSuffix(toPath, "/") + "/" + relPath
 
 		// Get reader from source file
 		reader, err := fromFs.GetReader(node.URI)
