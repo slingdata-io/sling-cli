@@ -93,7 +93,7 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		opts := ParseOptions{
 			index: i,
 			state: state,
-			stage: HookStage(g.F("step-%02d", i)),
+			stage: HookStage(g.F("step-%02d", i+1)),
 			kind:  HookKindStep,
 		}
 		step, err := ParseHook(stepRaw, opts)
@@ -128,7 +128,7 @@ func (pl *Pipeline) Execute() (err error) {
 func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 	if pl.state == nil {
 		pl.state = &PipelineState{
-			Steps: map[string]map[string]any{},
+			State: map[string]map[string]any{},
 			Env:   pl.Env,
 			Runs:  map[string]*RunState{},
 		}
@@ -140,19 +140,19 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 }
 
 type PipelineState struct {
-	Steps     map[string]map[string]any `json:"steps,omitempty"`
+	State     map[string]map[string]any `json:"state,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
 }
 
-func (ps *PipelineState) SetHookData(id string, data map[string]any) {
-	ps.Steps[id] = data
+func (ps *PipelineState) SetStateData(id string, data map[string]any) {
+	ps.State[id] = data
 }
 
-func (ps *PipelineState) SetHookKeyValue(id, key string, value any) {
-	ps.Steps[id][key] = value
+func (ps *PipelineState) SetStateKeyValue(id, key string, value any) {
+	ps.State[id][key] = value
 }
 
 func (ps *PipelineState) Marshall() string {

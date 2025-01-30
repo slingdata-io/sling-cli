@@ -16,6 +16,7 @@ type Hook interface {
 	Type() HookType
 	ID() string
 	Data() map[string]any
+	SetExtra(map[string]any)
 	Stage() HookStage
 	Execute() error
 	ExecuteOnDone(error) error

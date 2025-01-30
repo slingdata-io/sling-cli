@@ -77,7 +77,7 @@ func (rd *ReplicationConfig) JSON() string {
 func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	if rd.state == nil {
 		rd.state = &ReplicationState{
-			Hooks:     map[string]map[string]any{},
+			State:     map[string]map[string]any{},
 			Env:       rd.Env,
 			Runs:      map[string]*RunState{},
 			Execution: ExecutionState{},

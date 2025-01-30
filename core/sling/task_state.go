@@ -10,15 +10,15 @@ import (
 )
 
 type RuntimeState interface {
-	SetHookData(id string, data map[string]any)
-	SetHookKeyValue(id, key string, value any)
+	SetStateData(id string, data map[string]any)
+	SetStateKeyValue(id, key string, value any)
 	Marshall() string
 	TaskExecution() *TaskExecution
 }
 
 // ReplicationState is for runtime state
 type ReplicationState struct {
-	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
+	State     map[string]map[string]any `json:"state,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Execution ExecutionState            `json:"execution,omitempty"`
@@ -30,12 +30,12 @@ type ReplicationState struct {
 	Run       *RunState                 `json:"run,omitempty"`
 }
 
-func (rs *ReplicationState) SetHookData(id string, data map[string]any) {
-	rs.Hooks[id] = data
+func (rs *ReplicationState) SetStateData(id string, data map[string]any) {
+	rs.State[id] = data
 }
 
-func (rs *ReplicationState) SetHookKeyValue(id, key string, value any) {
-	rs.Hooks[id][key] = value
+func (rs *ReplicationState) SetStateKeyValue(id, key string, value any) {
+	rs.State[id][key] = value
 }
 
 func (rs *ReplicationState) Marshall() string {
