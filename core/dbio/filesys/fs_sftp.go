@@ -141,6 +141,12 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, url))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+url)
+		return
+	}
+
 	var files []os.FileInfo
 	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
 	if err == nil && (!stat.IsDir() || !strings.HasSuffix(path, "/")) {
@@ -175,7 +181,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 			Size:    cast.ToUint64(file.Size()),
 			IsDir:   file.IsDir(),
 		}
-		nodes.Add(node)
+		nodes.AddWhere(pattern, 0, node)
 	}
 
 	return

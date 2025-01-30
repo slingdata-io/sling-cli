@@ -167,6 +167,12 @@ func (fs *FtpFileSysClient) List(url string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, url))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+url)
+		return
+	}
+
 	// to ensure correct working dir
 	fs.client.ChangeDir("/")
 
@@ -187,7 +193,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes FileNodes, err error) {
 			IsDir:   file.Type == ftp.EntryTypeFolder,
 		}
 		if !node.IsDir {
-			nodes.Add(node)
+			nodes.AddWhere(pattern, 0, node)
 			return
 		} else if !strings.HasSuffix(url, "/") && !strings.Contains(url, "*") {
 			nodes.Add(node)

@@ -269,6 +269,12 @@ func (fs *LocalFileSysClient) List(uri string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
 	s, err := os.Stat(path)
 	if err == nil && (!s.IsDir() || !strings.HasSuffix(path, "/")) {
 		node := FileNode{
@@ -305,7 +311,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes FileNodes, err error) {
 			IsDir:   file.IsDir(),
 		}
 		node.URI = strings.ReplaceAll(node.URI, `\`, "/")
-		nodes.Add(node)
+		nodes.AddWhere(pattern, 0, node)
 	}
 	return
 }
