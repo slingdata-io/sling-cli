@@ -2003,13 +2003,22 @@ func CopyRecursive(fromFs, toFs FileSysClient, fromPath, toPath string) (totalBy
 			return
 		}
 
-		// Get relative path from the common parent
-		relPath := strings.TrimPrefix(node.URI, commonParent)
-		relPath = strings.TrimPrefix(relPath, "/")
+		// if we're copying from one file, we just use the name
+		relPath := node.Name()
+
+		// Get relative path from the common parent if some nested file
+		if fromPath != node.URI {
+			relPath = strings.TrimPrefix(node.URI, commonParent)
+			relPath = strings.TrimPrefix(relPath, "/")
+		}
+
 		// g.Warn("node.URI = %s || commonParent = %s  || relPath = %s", node.URI, commonParent, relPath)
 
-		// Construct local and destination paths
-		destPath := strings.TrimSuffix(toPath, "/") + "/" + relPath
+		destPath := toPath
+		// Construct local and destination paths if toPath is folder
+		if strings.HasSuffix(toPath, "/") {
+			destPath = toPath + relPath
+		}
 
 		// Get reader from source file
 		reader, err := fromFs.GetReader(node.URI)
