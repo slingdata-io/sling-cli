@@ -114,7 +114,7 @@ func (pl *Pipeline) Execute() (err error) {
 		}
 
 		stepErr := step.Execute()
-		err = step.ExecuteOnDone(stepErr)
+		_, err = step.ExecuteOnDone(stepErr)
 
 		if err != nil {
 			return g.Error(err, "error executing step")

@@ -4,6 +4,7 @@ import "github.com/flarco/g"
 
 type HookType string
 type HookKind string
+type OnFailType string
 
 const (
 	HookKindHook HookKind = "hook"
@@ -19,7 +20,7 @@ type Hook interface {
 	SetExtra(map[string]any)
 	Stage() HookStage
 	Execute() error
-	ExecuteOnDone(error) error
+	ExecuteOnDone(error) (OnFailType, error)
 }
 
 type Hooks []Hook
@@ -56,7 +57,7 @@ func (hs Hooks) Execute() (err error) {
 		}
 
 		hookErr := hook.Execute()
-		err = hook.ExecuteOnDone(hookErr)
+		_, err = hook.ExecuteOnDone(hookErr)
 
 		if err != nil {
 			return g.Error(err, "error executing hook")
