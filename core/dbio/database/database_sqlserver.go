@@ -897,6 +897,10 @@ func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.C
 	// maintain lower case if inserting from uniqueidentifier into nvarchar
 	case srcDbType == "uniqueidentifier" && tgtDbType == "nvarchar":
 		selectStr = g.F("cast(%s as nvarchar(max))", qName)
+	case srcCol.IsString() && tgtCol.IsInteger():
+		// assume bool, convert from true/false to 1/0
+		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 end`
+		selectStr = g.R(sql, "col", qName)
 	default:
 		selectStr = qName
 	}
