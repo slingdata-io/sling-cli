@@ -806,9 +806,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 		if table.Schema != "" {
 			m["stream_schema"] = table.Schema
+			m["stream_schema_lower"] = strings.ToLower(table.Schema)
+			m["stream_schema_upper"] = strings.ToUpper(table.Schema)
 		}
 		if table.Name != "" {
 			m["stream_table"] = table.Name
+			m["stream_table_lower"] = strings.ToLower(table.Name)
+			m["stream_table_upper"] = strings.ToUpper(table.Name)
 			m["stream_full_name"] = table.FDQN()
 		}
 
