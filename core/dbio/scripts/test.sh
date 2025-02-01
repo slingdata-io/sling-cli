@@ -13,9 +13,7 @@ cd -
 
 cd database
 go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName'
-# go test -v -run 'TestPostgres|TestMySQL|TestOracle|TestSnowflake|TestSqlServer|TestBigQuery|TestSQLite|TestClickhouse' -timeout 10m
-# ALLOW_BULK_IMPORT=FALSE go test -run 'TestPostgres|TestMySQL|TestOracle|TestSqlServer|TestSQLite|TestClickhouse' -timeout 10m # test without bulk loading, using transaction batch
-# go test -v -run TestLargeDataset
+go test -run TestChunkByColumnRange
 cd -
 
 cd filesys
