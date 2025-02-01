@@ -23,7 +23,7 @@ hooks:
     # test check, should fail and warn
     - type: check
       id: inspect_file_check
-      check: hooks.inspect_file.is_dir != true
+      check: state.inspect_file.is_dir != true
       on_failure: warn
 
     - type: query
@@ -35,7 +35,7 @@ hooks:
 
     - type: log
       message: |
-        inspect-output ==> {hooks.inspect_file}
+        inspect-output ==> {state.inspect_file}
 
         runtime_state ==> {runtime_state}
 
@@ -45,7 +45,7 @@ hooks:
       to: local//tmp/test/sling-state/test/r.19
 
     - type: check
-      check: hooks["file-copy"].bytes_written > 0
+      check: state["file-copy"].bytes_written > 0
       on_failure: warn
 
 streams:

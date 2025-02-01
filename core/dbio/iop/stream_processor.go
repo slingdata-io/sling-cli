@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/flarco/g"
 	"github.com/shopspring/decimal"
@@ -871,6 +872,24 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	return nVal
 }
 
+// Pre-computed hex digits to avoid runtime computation
+var hexDigits = []byte("0123456789abcdef")
+
+func (sp *StreamProcessor) bytesToHexEscape(b []byte) string {
+	// Each byte becomes \xXX (4 chars)
+	result := make([]byte, len(b)*4)
+
+	for i, v := range b {
+		pos := i * 4
+		result[pos] = '\\'
+		result[pos+1] = 'x'
+		result[pos+2] = hexDigits[v>>4]
+		result[pos+3] = hexDigits[v&0x0f]
+	}
+
+	return string(result)
+}
+
 // CastToString to string. used for csv writing
 // slows processing down 5% with upstream CastRow or 35% without upstream CastRow
 func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...ColumnType) string {
@@ -919,7 +938,14 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		}
 		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
 	default:
-		return cast.ToString(val)
+		strVal := cast.ToString(val)
+		if !utf8.ValidString(strVal) {
+			// Replace invalid chars with Unicode replacement character
+			return strings.ToValidUTF8(strVal, "�")
+			// if not valid utf8, return hex
+			return sp.bytesToHexEscape([]byte(strVal))
+		}
+		return strVal
 	}
 }
 

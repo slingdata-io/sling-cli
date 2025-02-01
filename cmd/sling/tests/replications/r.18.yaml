@@ -15,15 +15,15 @@ defaults:
         level: warn
         message: |
           ending replication 👍
-          start_msg: {hooks.start_msg.message}
-          first row => { hooks.table_cnt.result[0] }
-          all rows => { hooks.table_cnt.result }
+          start_msg: {state.start_msg.message}
+          first row => { state.table_cnt.result[0] }
+          all rows => { state.table_cnt.result }
           runtime_state => {runtime_state}
 
     post:
       - type: log
         message: |
-          "hooks.table_cnt.columns" => {hooks.table_cnt.columns}
+          "state.table_cnt.columns" => {state.table_cnt.columns}
 
 
 streams:

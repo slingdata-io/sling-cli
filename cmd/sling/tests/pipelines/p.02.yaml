@@ -1,0 +1,36 @@
+steps:
+  - type: log
+    message: '{runtime_state}'
+
+  - type: group
+    id: group1
+    steps:
+      - type: log
+        message: 'Hello from group 1'
+
+  - type: group
+    id: group2
+    loop: [11, 22, 33]
+    steps:
+      - type: log
+        message: 'Hello from group 2: {runtime_state}'
+
+      - type: log
+        message: 'value: {state.group2.loop_value} ({state.group2.loop_index})'
+      
+
+  - type: list
+    id: file_list
+    location: aws_s3/test/
+
+  - type: group
+    id: group3
+    loop: state.file_list.result
+    steps:
+      - type: log
+        if: loop_value.is_dir == false
+        message: 'file name is: {loop_value.name} ({loop_index})'
+
+  - type: log
+    message: '{runtime_state}'
+    level: warn

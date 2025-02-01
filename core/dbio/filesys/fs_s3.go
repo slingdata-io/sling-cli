@@ -459,6 +459,12 @@ func (fs *S3FileSysClient) List(uri string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
 	g.Trace("path = %s", path)
 
 	input := &s3.ListObjectsV2Input{
@@ -470,7 +476,7 @@ func (fs *S3FileSysClient) List(uri string) (nodes FileNodes, err error) {
 	// Create S3 service client
 	svc := s3.New(fs.getSession())
 
-	nodes, err = fs.doList(svc, input, fs.Prefix("/"), nil)
+	nodes, err = fs.doList(svc, input, fs.Prefix("/"), pattern)
 	if err != nil {
 		return
 	} else if path == "" {

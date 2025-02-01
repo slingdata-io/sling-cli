@@ -173,6 +173,12 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
 	baseKeys := map[string]int{}
 	keyArr := strings.Split(key, "/")
 	counter := 0
@@ -220,7 +226,7 @@ func (fs *GoogleFileSysClient) List(uri string) (nodes FileNodes, err error) {
 				node.Owner = attrs.Owner
 				node.IsDir = strings.HasSuffix(attrs.Name, "/")
 			}
-			nodes.Add(node)
+			nodes.AddWhere(pattern, 0, node)
 		}
 	}
 	return
