@@ -769,6 +769,8 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 	vars := []string{
 		"stream_table",
+		"stream_table_lower",
+		"stream_table_upper",
 		"stream_name",
 		"stream_file_path",
 		"stream_file_name",
