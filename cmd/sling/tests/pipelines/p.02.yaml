@@ -20,16 +20,34 @@ steps:
       
 
   - type: list
-    id: file_list
-    location: aws_s3/test/
+    id: s3_list
+    location: aws_s3/sling_test/files/
+    recursive: true
+    only: files
 
   - type: group
-    id: group3
-    loop: state.file_list.result
+    loop: state.s3_list.result
     steps:
       - type: log
-        if: loop_value.is_dir == false
-        message: 'file name is: {loop_value.name} ({loop_index})'
+        message: 'file: ({loop_index}) {loop_value.location}'
+
+  - type: list
+    id: sftp_list
+    location: sftp//tmp/*.csv
+    only: files
+
+  - type: delete
+    location: azure_storage/sftp-test/
+
+  - type: group
+    loop: state.sftp_list.result
+    steps:
+      - type: log
+        message: 'file: ({loop_index}) {loop_value.location}'
+      
+      - type: copy
+        from: '{loop_value.location}'
+        to: azure_storage/sftp-test/{loop_value.name}
 
   - type: log
     message: '{runtime_state}'
