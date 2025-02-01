@@ -141,6 +141,12 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, url))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+url)
+		return
+	}
+
 	var files []os.FileInfo
 	stat, err := fs.client.Stat(strings.TrimSuffix(path, "/"))
 	if err == nil && (!stat.IsDir() || !strings.HasSuffix(path, "/")) {
@@ -175,7 +181,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 			Size:    cast.ToUint64(file.Size()),
 			IsDir:   file.IsDir(),
 		}
-		nodes.Add(node)
+		nodes.AddWhere(pattern, 0, node)
 	}
 
 	return
@@ -244,7 +250,7 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes FileNodes, err err
 
 // Delete list objects in path
 func (fs *SftpFileSysClient) delete(uri string) (err error) {
-	path, err := fs.GetPath(uri)
+	_, err = fs.GetPath(uri)
 	if err != nil {
 		err = g.Error(err, "Error Parsing url: "+uri)
 		return
@@ -255,17 +261,20 @@ func (fs *SftpFileSysClient) delete(uri string) (err error) {
 		return g.Error(err, "error listing path")
 	}
 
-	for _, sNode := range nodes {
+	for _, sNode := range nodes.Files() {
 		err = fs.client.Remove(sNode.Path())
 		if err != nil {
 			return g.Error(err, "error deleting path "+sNode.URI)
 		}
 	}
 
-	err = fs.client.Remove(path)
-	if err != nil && !strings.Contains(err.Error(), "not exist") {
-		return g.Error(err, "error deleting path")
+	for _, sNode := range nodes.Folders() {
+		err = fs.client.Remove(sNode.Path())
+		if err != nil {
+			return g.Error(err, "error deleting path "+sNode.URI)
+		}
 	}
+
 	return nil
 }
 

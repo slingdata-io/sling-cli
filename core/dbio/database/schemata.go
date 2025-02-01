@@ -37,6 +37,10 @@ var ChunkByColumn = func(conn Connection, table Table, c string, p int) ([]Table
 	return []Table{table}, nil
 }
 
+var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max string) ([]string, error) {
+	return []string{}, nil
+}
+
 func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
@@ -235,7 +239,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	fields = lo.Map(fields, func(f string, i int) string {
 		q := GetQualifierQuote(t.Dialect)
 		f = strings.TrimSpace(f)
-		if f == "*" {
+		if f == "*" || strings.Contains(f, "(") {
 			return f
 		}
 		return q + strings.ReplaceAll(f, q, "") + q

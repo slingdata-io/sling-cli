@@ -28,16 +28,16 @@ streams:
           message: runtime_state => '{runtime_state}'
 
         - type: query
-          if: hooks.webhook.status == "success"
+          if: state.webhook.status == "success"
           connection: '{target.name}'
           query: |
             select
-              '{hooks.hook1.connection}' as conn,
-              '{hooks.hook1.columns}' as columns1,
-              '{hooks.hook1.result}' as result,
-              '{hooks.webhook.request.url}' as request,
-              '{hooks.webhook.response.text}' as response_text,
-              '{hooks.webhook.response.json.status}' as response_status
+              '{state.hook1.connection}' as conn,
+              '{state.hook1.columns}' as columns1,
+              '{state.hook1.result}' as result,
+              '{state.webhook.request.url}' as request,
+              '{state.webhook.response.text}' as response_text,
+              '{state.webhook.response.json.status}' as response_status
 
   public.my_table_*:
     columns:

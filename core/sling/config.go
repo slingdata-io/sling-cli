@@ -742,6 +742,13 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					return g.Error(err, "could not parse temp table name")
 				} else if tableTmp.Schema == "" {
 					tableTmp.Schema = cast.ToString(cfg.Target.Data["schema"])
+					if tableTmp.Schema == "" && table.Schema != "" {
+						tableTmp.Schema = table.Schema
+					}
+				}
+
+				if cfg.TgtConn.Type.DBNameUpperCase() {
+					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
 				tgtOpts.TableTmp = tableTmp.FullName()
 			}
@@ -806,9 +813,13 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 		if table.Schema != "" {
 			m["stream_schema"] = table.Schema
+			m["stream_schema_lower"] = strings.ToLower(table.Schema)
+			m["stream_schema_upper"] = strings.ToUpper(table.Schema)
 		}
 		if table.Name != "" {
 			m["stream_table"] = table.Name
+			m["stream_table_lower"] = strings.ToLower(table.Name)
+			m["stream_table_upper"] = strings.ToUpper(table.Name)
 			m["stream_full_name"] = table.FDQN()
 		}
 
@@ -1345,12 +1356,22 @@ type SourceOptions struct {
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
-	ParallelChunks *int                `json:"parallel_chunks,omitempty" yaml:"parallel_chunks,omitempty"`
+	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
 	Columns    any `json:"columns,omitempty" yaml:"columns,omitempty"`       // legacy
 	Transforms any `json:"transforms,omitempty" yaml:"transforms,omitempty"` // legacy
+}
+
+func (so *SourceOptions) RangeStartEnd() (start, end string) {
+	if so != nil && so.Range != nil {
+		values := strings.Split(g.PtrVal(so.Range), ",")
+		if len(values) >= 2 {
+			return values[0], values[1]
+		}
+	}
+	return
 }
 
 // TargetOptions are target connection and stream processing options

@@ -12,7 +12,6 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
-	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -115,7 +114,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 				}
 
 				if len(batchR.Columns) != len(df.Columns) {
-					err = g.Error(err, "number columns have changed, not compatible with stdout.")
+					err = g.Error("number columns have changed, not compatible with stdout.")
 					return
 				}
 				bufStdout := bufio.NewWriter(os.Stdout)
@@ -544,6 +543,31 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 	return targetTable, nil
 }
 
+func makeTempTableName(connType dbio.Type, base database.Table, suffix string) (tableTmp database.Table) {
+	tableTmp = base
+
+	// tmp table name normalization to not have mixed case
+	tableTmp.Name = strings.ToLower(tableTmp.Name)
+	if connType.DBNameUpperCase() {
+		tableTmp.Name = strings.ToUpper(tableTmp.Name)
+		suffix = strings.ToUpper(suffix)
+	}
+
+	if g.In(connType, dbio.TypeDbOracle) {
+		if len(tableTmp.Name) > 30-len(suffix)-2 {
+			tableTmp.Name = tableTmp.Name[:(30 - len(suffix) - 2 - 1)] // Max 30 chars
+		}
+
+		// some weird column / commit error, not picking up latest columns
+		suffix2 := g.RandString(g.NumericRunes, 1) + strings.ToUpper(g.RandString(g.AlphaNumericRunes, 1))
+		suffix += suffix2
+	}
+
+	tableTmp.Name += suffix
+
+	return
+}
+
 func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable database.Table) (database.Table, error) {
 	var tableTmp database.Table
 	var err error
@@ -553,31 +577,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 		if err != nil {
 			return database.Table{}, g.Error(err, "could not parse object table name")
 		}
-
-		// tmp table name normalization to not have mixed case
-		suffix := "_tmp"
-		tableTmp.Name = strings.ToLower(tableTmp.Name)
-		if tgtConn.GetType().DBNameUpperCase() {
-			tableTmp.Name = strings.ToUpper(tableTmp.Name)
-			suffix = "_TMP"
-		}
-
-		if g.In(tgtConn.GetType(), dbio.TypeDbOracle) {
-			if len(tableTmp.Name) > 24 {
-				tableTmp.Name = tableTmp.Name[:24] // Max 30 chars
-			}
-
-			// some weird column / commit error, not picking up latest columns
-			suffix2 := g.RandString(g.NumericRunes, 1) + g.RandString(g.AlphaNumericRunes, 1)
-			suffix2 = lo.Ternary(
-				tgtConn.GetType().DBNameUpperCase(),
-				strings.ToUpper(suffix2),
-				strings.ToLower(suffix2),
-			)
-			suffix += suffix2
-		}
-
-		tableTmp.Name += suffix
+		tableTmp = makeTempTableName(tgtConn.GetType(), tableTmp, "_tmp")
 		cfg.Target.Options.TableTmp = tableTmp.FullName()
 	} else {
 		tableTmp, err = database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())

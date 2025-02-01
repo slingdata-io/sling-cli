@@ -1,0 +1,28 @@
+source: postgres
+target: oracle
+
+defaults:
+  mode: backfill
+  object: oracle.{stream_table_lower}
+  primary_key: [id]
+
+streams:
+  public.test1k_mariadb_pg:
+    mode: backfill
+    update_key: update_dt
+    source_options:
+      range: '2018-11-01,2018-12-01'
+      chunk_size: 10d
+
+  public.test1k_sqlserver_pg:
+    update_key: date
+    source_options:
+      range: '2019-01-01,2019-06-01'
+      chunk_size: 2m
+
+  public.test1k_snowflake_pg:
+    update_key: id
+    source_options:
+      range: '1,800'
+      chunk_size: 200
+      

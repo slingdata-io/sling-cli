@@ -9,9 +9,16 @@ import (
 	"github.com/spf13/cast"
 )
 
-// RuntimeState is for runtime state
-type RuntimeState struct {
-	Hooks     map[string]map[string]any `json:"hooks,omitempty"`
+type RuntimeState interface {
+	SetStateData(id string, data map[string]any)
+	SetStateKeyValue(id, key string, value any)
+	Marshall() string
+	TaskExecution() *TaskExecution
+}
+
+// ReplicationState is for runtime state
+type ReplicationState struct {
+	State     map[string]map[string]any `json:"state,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Execution ExecutionState            `json:"execution,omitempty"`
@@ -21,6 +28,25 @@ type RuntimeState struct {
 	Object    *ObjectState              `json:"object,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (rs *ReplicationState) SetStateData(id string, data map[string]any) {
+	rs.State[id] = data
+}
+
+func (rs *ReplicationState) SetStateKeyValue(id, key string, value any) {
+	rs.State[id][key] = value
+}
+
+func (rs *ReplicationState) Marshall() string {
+	return g.Marshal(rs)
+}
+
+func (rs *ReplicationState) TaskExecution() *TaskExecution {
+	if rs.Run != nil && rs.Run.Task != nil {
+		return rs.Run.Task
+	}
+	return nil
 }
 
 type DateTimeState struct {
@@ -105,14 +131,18 @@ type ConnState struct {
 }
 
 type StreamState struct {
-	FileFolder string `json:"file_folder,omitempty"`
-	FileName   string `json:"file_name,omitempty"`
-	FileExt    string `json:"file_ext,omitempty"`
-	FilePath   string `json:"file_path,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Schema     string `json:"schema,omitempty"`
-	Table      string `json:"table,omitempty"`
-	FullName   string `json:"full_name,omitempty"`
+	FileFolder  string `json:"file_folder,omitempty"`
+	FileName    string `json:"file_name,omitempty"`
+	FileExt     string `json:"file_ext,omitempty"`
+	FilePath    string `json:"file_path,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Schema      string `json:"schema,omitempty"`
+	SchemaLower string `json:"schema_lower,omitempty"`
+	SchemaUpper string `json:"schema_upper,omitempty"`
+	Table       string `json:"table,omitempty"`
+	TableLower  string `json:"table_lower,omitempty"`
+	TableUpper  string `json:"table_upper,omitempty"`
+	FullName    string `json:"full_name,omitempty"`
 }
 
 type ObjectState struct {
@@ -159,7 +189,11 @@ func StateSet(t *TaskExecution) {
 		run.Stream.Name = cast.ToString(fMap["stream_name"])
 		run.Stream.FullName = cast.ToString(fMap["stream_full_name"])
 		run.Stream.Schema = cast.ToString(fMap["stream_schema"])
+		run.Stream.SchemaLower = cast.ToString(fMap["stream_schema_lower"])
+		run.Stream.SchemaUpper = cast.ToString(fMap["stream_schema_upper"])
 		run.Stream.Table = cast.ToString(fMap["stream_table"])
+		run.Stream.TableLower = cast.ToString(fMap["stream_table_lower"])
+		run.Stream.TableUpper = cast.ToString(fMap["stream_table_upper"])
 
 		run.Object.Name = cast.ToString(fMap["object_name"])
 		run.Object.FullName = cast.ToString(fMap["object_full_name"])

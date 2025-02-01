@@ -233,7 +233,11 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 // getLoadExtensionSQL generates SQL statements to load extensions
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
-		sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
+			sql += fmt.Sprintf("; LOAD %s;", extension)
+		} else {
+			sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+		}
 	}
 	return
 }
@@ -1017,6 +1021,7 @@ func (duck *DuckDb) GetScannerFunc(format dbio.FileType) (scanFunc string) {
 type HttpStreamPart struct {
 	Index    int
 	FromExpr string
+	Columns  Columns
 }
 
 func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamPartChn chan HttpStreamPart, err error) {
@@ -1085,7 +1090,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			// can use this as a from table
 			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N')`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
 
-			streamPartChn <- HttpStreamPart{Index: partIndex, FromExpr: fromExpr}
+			streamPartChn <- HttpStreamPart{
+				Index:    partIndex,
+				FromExpr: fromExpr,
+				Columns:  batchR.Columns,
+			}
+
 			partIndex++
 		}
 	}()
@@ -1114,6 +1124,13 @@ func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
 		if err != nil {
 			g.Warn(err.Error())
 		}
+
+		// CSVs cannot handle binary data, so let's set to varchar.
+		// https://duckdb.org/docs/sql/functions/blob.html
+		if nativeType == "binary" {
+			nativeType = "varchar"
+		}
+
 		colsArr[i] = g.F("'%s':'%s'", col.Name, nativeType)
 	}
 

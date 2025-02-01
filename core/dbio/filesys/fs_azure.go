@@ -157,6 +157,12 @@ func (fs *AzureFileSysClient) List(uri string) (nodes FileNodes, err error) {
 		return
 	}
 
+	pattern, err := makeGlob(NormalizeURI(fs, uri))
+	if err != nil {
+		err = g.Error(err, "Error Parsing url pattern: "+uri)
+		return
+	}
+
 	baseKeys := map[string]int{}
 	keyArr := strings.Split(key, "/")
 	counter := 0
@@ -207,7 +213,7 @@ func (fs *AzureFileSysClient) List(uri string) (nodes FileNodes, err error) {
 					node.Updated = blob.Properties.LastModified.Unix()
 					node.IsDir = strings.HasSuffix(blobName, "/")
 				}
-				nodes.Add(node)
+				nodes.AddWhere(pattern, 0, node)
 			}
 		}
 	}

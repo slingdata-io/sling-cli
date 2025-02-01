@@ -18,6 +18,7 @@ azuredwh	ntext	text	col_ntext ntext	TRUE	TRUE
 azuredwh	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 azuredwh	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
 azuredwh	real	decimal	col_real real	TRUE	TRUE	
+azuredwh	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
 azuredwh	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
 azuredwh	smallint	smallint	col_smallint smallint	TRUE	TRUE	
 azuredwh	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
@@ -27,6 +28,7 @@ azuredwh	varbinary	binary	col_varbinary varbinary(100)	FALSE	FALSE
 azuredwh	varchar	text	col_varchar varchar	TRUE	TRUE	
 azuresql	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 azuresql	binary	binary	col_binary binary(100)	TRUE	TRUE	
+azuresql	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
 azuresql	uniqueidentifier	uuid	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
 azuresql	bit	smallint	col_bit bit	TRUE	TRUE	
 azuresql	char	string	col_char char	TRUE	TRUE	
@@ -498,6 +500,7 @@ sqlserver	smallint	smallint	col_smallint smallint	TRUE	TRUE
 sqlserver	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
 sqlserver	text	text	col_text text	TRUE	TRUE	
 sqlserver	time	time	col_time time	TRUE	TRUE	
+sqlserver	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
 sqlserver	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
 sqlserver	varbinary	binary	col_varbinary varbinary(100)	TRUE	FALSE	
 sqlserver	varchar	text	col_varchar varchar(100)	TRUE	TRUE	

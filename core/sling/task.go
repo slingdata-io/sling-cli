@@ -364,10 +364,17 @@ func (t *TaskExecution) setGetMetadata() (metadata iop.Metadata) {
 }
 
 func (t *TaskExecution) isUsingPool() bool {
-	if val := os.Getenv("SLING_POOL"); val != "" && !cast.ToBool(val) {
-		return false
+	if val := os.Getenv("SLING_POOL"); val != "" {
+		return cast.ToBool(val)
 	}
-	return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode()
+	// return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode()
+
+	// disabling pool by default connections are opened based on
+	// source/target options, causing opening new connections anyways
+	// this builds up the open connections for each stream.
+	// TODO: refactor the way source/target options and metadata are passed
+	// which is a big refactor.
+	return false
 }
 
 func (t *TaskExecution) getTargetObjectValue() string {
@@ -421,6 +428,10 @@ func (t *TaskExecution) Cleanup() {
 // at the moment, use duckdb only for parquet or partitioned
 // target parquet or csv files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
+	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" && !cast.ToBool(val) {
+		return false
+	}
+
 	if g.In(t.Config.Target.ObjectFileFormat(), dbio.FileTypeParquet, dbio.FileTypeCsv) && len(iop.ExtractPartitionFields(uri)) > 0 {
 		return true
 	}

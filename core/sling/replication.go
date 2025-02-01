@@ -35,7 +35,7 @@ type ReplicationConfig struct {
 	streamsOrdered []string
 	originalCfg    string
 	maps           replicationConfigMaps // raw maps for validation
-	state          *RuntimeState
+	state          *ReplicationState
 }
 
 type replicationConfigMaps struct {
@@ -74,10 +74,10 @@ func (rd *ReplicationConfig) JSON() string {
 }
 
 // StateMap returns map for use
-func (rd *ReplicationConfig) RuntimeState() (_ *RuntimeState, err error) {
+func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	if rd.state == nil {
-		rd.state = &RuntimeState{
-			Hooks:     map[string]map[string]any{},
+		rd.state = &ReplicationState{
+			State:     map[string]map[string]any{},
 			Env:       rd.Env,
 			Runs:      map[string]*RunState{},
 			Execution: ExecutionState{},
@@ -390,7 +390,7 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks,
 	}
 
 	for i, hook := range hooksRaw {
-		opts := ParseOptions{stage: stage, index: i, state: state}
+		opts := ParseOptions{stage: stage, index: i, state: state, kind: HookKindHook}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)
@@ -417,7 +417,7 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 	}
 
 	for i, hook := range hooksRaw {
-		opts := ParseOptions{stage: stage, index: i, state: rd.state}
+		opts := ParseOptions{stage: stage, index: i, state: rd.state, kind: HookKindHook}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)
@@ -426,6 +426,146 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 		}
 	}
 	return hooks, nil
+}
+
+func (rd *ReplicationConfig) ProcessChunks() (err error) {
+	// determine which stream is backfill mode, has range and chunk_size
+	type Stream struct {
+		name   string
+		config ReplicationStreamConfig
+		chunks []Stream
+	}
+	streamsToChunk := []Stream{}
+	for _, name := range rd.streamsOrdered {
+		stream := rd.Streams[name]
+
+		// use a clone stream to apply defaults
+		s := ReplicationStreamConfig{}
+		if stream != nil {
+			s = *stream
+		}
+
+		// apply default
+		SetStreamDefaults(name, &s, *rd)
+
+		chunkSize := ""
+		if g.PtrVal(s.SourceOptions).ChunkSize != nil {
+			chunkSize = cast.ToString(s.SourceOptions.ChunkSize)
+		}
+
+		if s.Mode != BackfillMode || chunkSize == "" {
+			continue
+		}
+
+		// process stream
+		streamsToChunk = append(streamsToChunk, Stream{name, s, []Stream{}})
+	}
+
+	if len(streamsToChunk) == 0 {
+		return nil
+	}
+
+	sourceConn := connection.GetLocalConns().Get(rd.Source)
+	if sourceConn.Name == "" {
+		return g.Error("did not find connection: %s", rd.Source)
+	} else if !sourceConn.Connection.Type.IsDb() {
+		return g.Error("must be a database connection for chunking: %s", rd.Source)
+	}
+
+	targetConn := connection.GetLocalConns().Get(rd.Target)
+	if targetConn.Name == "" {
+		return g.Error("did not find connection: %s", rd.Target)
+	} else if !targetConn.Connection.Type.IsDb() {
+		return g.Error("must be a database connection for chunking: %s", rd.Target)
+	}
+
+	sourceConnDB, err := sourceConn.Connection.AsDatabase()
+	if err != nil {
+		return g.Error(err)
+	}
+
+	for i, stream := range streamsToChunk {
+		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
+		min, max := stream.config.SourceOptions.RangeStartEnd()
+		table, err := database.ParseTableName(stream.name, sourceConn.Connection.Type)
+
+		if err != nil {
+			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
+		}
+
+		object, err := database.ParseTableName(stream.config.Object, targetConn.Connection.Type)
+		if err != nil {
+			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
+		}
+
+		if stream.config.UpdateKey == "" {
+			return g.Error(err, "did not provided update_key for stream chunking: %s", stream.name)
+		}
+
+		chunkRanges, err := database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
+		if err != nil {
+			return g.Error(err, "could not generate chunk ranges: %s", stream.name)
+		}
+
+		if len(chunkRanges) == 0 {
+			continue
+		}
+
+		streamsToChunk[i].chunks = make([]Stream, len(chunkRanges))
+		for j, chunkRange := range chunkRanges {
+			chunkedStream := Stream{
+				name:   table.FullName() + g.F(" (part-%03d)", j+1),
+				config: stream.config,
+			}
+
+			// set range in a copy of source options
+			so := SourceOptions{}
+			g.Unmarshal(g.Marshal(stream.config.SourceOptions), &so)
+			so.Range = g.Ptr(chunkRange)
+			chunkedStream.config.SourceOptions = &so
+
+			// set temp table
+			to := TargetOptions{}
+			g.Unmarshal(g.Marshal(stream.config.TargetOptions), &to)
+			suffix := g.F("_%03d", j+1)
+			tempTable := makeTempTableName(targetConn.Connection.Type, object, suffix)
+			tempTable.Name = strings.ToLower(tempTable.Name)
+			to.TableTmp = tempTable.FullName()
+
+			chunkedStream.config.TargetOptions = &to
+
+			// pass as table name to enumerate stream name
+			chunkedStream.config.SQL = table.FullName()
+
+			streamsToChunk[i].chunks[j] = chunkedStream
+		}
+	}
+
+	// generate ranges
+	// arrange order to reflect original
+	newStreamNames := []string{}
+	for _, origName := range rd.streamsOrdered {
+		matched := false
+		for _, stream := range streamsToChunk {
+			if stream.name == origName {
+				matched = true
+				for _, chunkedStream := range stream.chunks {
+					rd.AddStream(chunkedStream.name, &chunkedStream.config)
+					newStreamNames = append(newStreamNames, chunkedStream.name)
+				}
+
+				// remove original stream
+				rd.DeleteStream(origName)
+			}
+		}
+		if !matched {
+			newStreamNames = append(newStreamNames, origName)
+		}
+	}
+
+	rd.streamsOrdered = newStreamNames
+
+	return nil
 }
 
 func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
@@ -556,6 +696,11 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 	err = rd.ProcessWildcards()
 	if err != nil {
 		return g.Error(err, "could not process streams using wildcard")
+	}
+
+	err = rd.ProcessChunks()
+	if err != nil {
+		return g.Error(err, "could not process chunks")
 	}
 
 	// clean up selectStreams
@@ -769,6 +914,8 @@ func (s *ReplicationStreamConfig) PrimaryKey() []string {
 func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 	vars := []string{
 		"stream_table",
+		"stream_table_lower",
+		"stream_table_upper",
 		"stream_name",
 		"stream_file_path",
 		"stream_file_name",
