@@ -1300,7 +1300,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 
 		// generate sql for export
 		switch fs.FsType() {
-		case dbio.TypeFileS3, dbio.TypeFileLocal:
+		case dbio.TypeFileLocal:
 			// copy files bytes recursively to target
 			if strings.Contains(duckURI, "*") {
 				duckURI = GetDeepestParent(duckURI) // get target folder, since split by files
