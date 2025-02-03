@@ -95,6 +95,12 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
+
+	AwsSessionTokenExpr := ""
+	if AwsSessionToken != "" {
+		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
+	}
 
 	g.Info("unloading from redshift to s3")
 	queryContext := g.NewContext(ctx.Ctx)
@@ -118,6 +124,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 				"s3_path", s3PathPart,
 				"aws_access_key_id", AwsID,
 				"aws_secret_access_key", AwsAccessKey,
+				"aws_session_token_expr", AwsSessionTokenExpr,
 				"parallel", conn.GetProp("PARALLEL"),
 			)
 
@@ -347,9 +354,15 @@ func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
-	if AwsID == "" || AwsAccessKey == "" {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' to copy to snowflake from S3")
+	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
+	if (AwsID == "" || AwsAccessKey == "") && (AwsSessionToken == "") {
+		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' or 'AWS_SESSION_TOKEN' to copy to redshift from S3")
 		return
+	}
+
+	AwsSessionTokenExpr := ""
+	if AwsSessionToken != "" {
+		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
 	}
 
 	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
@@ -363,6 +376,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		"s3_path", s3Path,
 		"aws_access_key_id", AwsID,
 		"aws_secret_access_key", AwsAccessKey,
+		"aws_session_token_expr", AwsSessionTokenExpr,
 	)
 	sql = conn.setEmptyAsNull(sql)
 
