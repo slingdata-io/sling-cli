@@ -97,6 +97,11 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
 	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
 
+	AwsSessionTokenExpr := ""
+	if AwsSessionToken != "" {
+		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
+	}
+
 	g.Info("unloading from redshift to s3")
 	queryContext := g.NewContext(ctx.Ctx)
 	unload := func(table Table, s3PathPart string) {
@@ -119,7 +124,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 				"s3_path", s3PathPart,
 				"aws_access_key_id", AwsID,
 				"aws_secret_access_key", AwsAccessKey,
-				"aws_session_token", AwsSessionToken,
+				"aws_session_token_expr", AwsSessionTokenExpr,
 				"parallel", conn.GetProp("PARALLEL"),
 			)
 
@@ -355,6 +360,11 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		return
 	}
 
+	AwsSessionTokenExpr := ""
+	if AwsSessionToken != "" {
+		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
+	}
+
 	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
 
 	g.Debug("copying into redshift from s3")
@@ -366,7 +376,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		"s3_path", s3Path,
 		"aws_access_key_id", AwsID,
 		"aws_secret_access_key", AwsAccessKey,
-		"aws_session_token", AwsSessionToken,
+		"aws_session_token_expr", AwsSessionTokenExpr,
 	)
 	sql = conn.setEmptyAsNull(sql)
 

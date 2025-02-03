@@ -34,12 +34,12 @@ core:
   copy_from_s3: |
     COPY {tgt_table} ({tgt_columns})
     from '{s3_path}'
-    credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key};token={aws_session_token}'
+    credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key}{aws_session_token_expr}'
     CSV delimiter ',' EMPTYASNULL BLANKSASNULL GZIP IGNOREHEADER 1 DATEFORMAT 'auto' TIMEFORMAT 'auto'
   copy_to_s3: |
     unload ('{sql}')   
     to '{s3_path}'
-    credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key};token={aws_session_token}'
+    credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key}{aws_session_token_expr}'
     gzip allowoverwrite CSV PARALLEL {parallel} NULL '\\N' HEADER DELIMITER ','
   alter_columns: |
     alter table {table} {col_ddl}
