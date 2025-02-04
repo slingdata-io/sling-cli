@@ -966,7 +966,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 	}
 
-	if len(blankKeys) > 0 {
+	if len(blankKeys) > 0 && g.IsDebug() {
 		// return g.Error("blank values for: %s", strings.Join(blankKeys, ", "))
 		g.Warn("Could not successfully get format values. Blank values for: %s", strings.Join(blankKeys, ", "))
 	}
