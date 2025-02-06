@@ -345,6 +345,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	quoteRep := `$~q$~`
 	newlRep := `$~n$~`
 	carrRep := `$~r$~`
+	emptyRep := `$~e$~`
 	postUpdateCol := map[int]uint64{}
 
 	// transformation to correctly post process quotes, newlines, and delimiter afterwards
@@ -369,12 +370,12 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 				nRow[i] = strings.ReplaceAll(
 					nRow[i].(string), "\n", newlRep,
 				)
+				// bcp treats empty space as null
+				if !ds.Sp.Config.EmptyAsNull && v == "" {
+					nRow[i] = emptyRep
+				}
 				if nRow[i].(string) != val.(string) {
-					if _, ok := postUpdateCol[i]; ok {
-						postUpdateCol[i]++
-					} else {
-						postUpdateCol[i] = 1
-					}
+					postUpdateCol[i]++
 				}
 			default:
 				_ = v
@@ -451,25 +452,31 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 				"delimiter", ",",
 			)
 			replExpr2 := g.R(
-				`REPLACE({replExpr1}, '{quoteRep}', '{quote}')`,
-				"replExpr1", replExpr1,
+				`REPLACE({replExpr}, '{quoteRep}', '{quote}')`,
+				"replExpr", replExpr1,
 				"quoteRep", quoteRep,
 				"quote", `"`,
 			)
 			replExpr3 := g.R(
-				`REPLACE({replExpr2}, '{newlRep}', {newl})`,
-				"replExpr2", replExpr2,
-				"newlRep", carrRep,
-				"newl", `CHAR(13)`,
+				`REPLACE({replExpr}, '{placeholder}', {newVal})`,
+				"replExpr", replExpr2,
+				"placeholder", carrRep,
+				"newVal", `CHAR(13)`,
 			)
 			replExpr4 := g.R(
-				`REPLACE({replExpr2}, '{newlRep}', {newl})`,
-				"replExpr2", replExpr3,
-				"newlRep", newlRep,
-				"newl", `CHAR(10)`,
+				`REPLACE({replExpr}, '{placeholder}', {newVal})`,
+				"replExpr", replExpr3,
+				"placeholder", newlRep,
+				"newVal", `CHAR(10)`,
+			)
+			replExpr5 := g.R(
+				`REPLACE({replExpr}, '{placeholder}', {newVal})`,
+				"replExpr", replExpr4,
+				"placeholder", emptyRep,
+				"newVal", `''`,
 			)
 			setCols = append(
-				setCols, fmt.Sprintf(`%s = %s`, col.Name, replExpr4),
+				setCols, fmt.Sprintf(`%s = %s`, col.Name, replExpr5),
 			)
 		}
 
