@@ -1263,14 +1263,13 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		sc.FileMaxBytes = cast.ToInt64(val)
 	}
 
-	if cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")) > 0 {
-		g.Warn("splitting files with `file_max_rows` is not supported with duckdb, using `file_max_bytes = 16000000`")
-		sc.FileMaxBytes = 16000000
+	if val := cast.ToInt64(fs.GetProp("FILE_MAX_ROWS")); val > 0 {
+		sc.FileMaxRows = val
 	}
 
 	// merge into single stream to push into duckdb
 	duckSc := duck.DefaultCsvConfig()
-	duckSc.FileMaxRows = 0 // if we want to manually split by rows, multiple duck.Exec
+	duckSc.FileMaxRows = sc.FileMaxRows
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
@@ -1281,12 +1280,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		fileFormat = InferFileFormat(uri)
 	}
 
-	streamDone := false
 	for streamPart := range streamPartChn {
-		if streamDone {
-			return bw, g.Error("stream has finished")
-		}
-
 		copyOptions := iop.DuckDbCopyOptions{
 			Format:        fileFormat,
 			Compression:   sc.Compression,
@@ -1294,32 +1288,35 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		}
 
 		// if * is specified, set default FileSizeBytes,
-		if strings.Contains(uri, "*") && copyOptions.FileSizeBytes == 0 {
+		if strings.Contains(uri, "*") && copyOptions.FileSizeBytes == 0 && duckSc.FileMaxRows == 0 {
 			copyOptions.FileSizeBytes = 50 * 1024 * 1024 // 50MB default file size
 		}
 
 		// generate sql for export
 		switch fs.FsType() {
 		case dbio.TypeFileLocal:
+			localPath := duckURI
 			// copy files bytes recursively to target
-			if strings.Contains(duckURI, "*") {
-				duckURI = GetDeepestParent(duckURI) // get target folder, since split by files
-				duckURI = strings.TrimRight(duckURI, "/")
+			if strings.Contains(localPath, "*") {
+				localPath = GetDeepestParent(localPath) // get target folder, since split by files
+				localPath = strings.TrimRight(localPath, "/")
 			}
 
 			// create the parent folder if needed
 			if fs.FsType() == dbio.TypeFileLocal {
-				parent := duckURI
-				if sc.FileMaxBytes == 0 {
-					parent = path.Dir(duckURI)
-				}
+				parent := path.Dir(localPath)
 				if err = os.MkdirAll(parent, 0755); err != nil {
 					err = g.Error(err, "Could not create output folder")
 					return bw, err
 				}
+				if duckSc.FileMaxRows > 0 {
+					copyOptions.FileSizeBytes = 0 // since we are splitting by rows already
+					os.MkdirAll(localPath, 0755)  // make root dir first
+					localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
+				}
 			}
 
-			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, duckURI, copyOptions)
+			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
 			if err != nil {
 				err = g.Error(err, "Could not generate duckdb copy statement")
 				return bw, err
@@ -1340,7 +1337,15 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			}
 		default:
 			// copy to temp file locally, then upload
-			localPath := env.CleanWindowsPath(path.Join(folder, "output"))
+			localRoot := env.CleanWindowsPath(path.Join(folder, "output")) // could be file or dir
+			localPath := localRoot
+
+			if duckSc.FileMaxRows > 0 {
+				copyOptions.FileSizeBytes = 0 // since we are splitting by rows already
+				os.MkdirAll(localRoot, 0755)  // make root dir first
+				localPath = g.F("%s/data_%03d.parquet", localRoot, streamPart.Index+1)
+			}
+
 			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
 			if err != nil {
 				err = g.Error(err, "Could not generate duckdb copy statement")
@@ -1358,7 +1363,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				uri = GetDeepestParent(uri) // get target folder, since split by files
 			}
 
-			written, err := CopyFromLocalRecursive(fs, localPath, uri)
+			written, err := CopyFromLocalRecursive(fs, localRoot, uri)
 			if err != nil {
 				err = g.Error(err, "Could not write to file")
 				return bw, err
@@ -1366,7 +1371,6 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			bw += written
 		}
 
-		streamDone = true // only 1 reader batch
 	}
 
 	return

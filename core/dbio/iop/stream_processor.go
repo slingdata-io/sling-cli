@@ -714,19 +714,27 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	case col.Type.IsInteger():
 		iVal, err := cast.ToInt64E(val)
 		if err != nil {
-			fVal, err := sp.toFloat64E(val)
-			if err != nil || sp.ds == nil {
-				// is string
-				sp.ds.ChangeColumn(i, StringType)
-				cs.StringCnt++
-				cs.TotalCnt++
-				sVal = cast.ToString(val)
-				sp.rowChecksum[i] = uint64(len(sVal))
-				return sVal
+			// if value is boolean casted as int
+			switch val {
+			case "true", true:
+				iVal = 1
+			case "false", false:
+				iVal = 0
+			default:
+				fVal, err := sp.toFloat64E(val)
+				if err != nil || sp.ds == nil {
+					// is string
+					sp.ds.ChangeColumn(i, StringType)
+					cs.StringCnt++
+					cs.TotalCnt++
+					sVal = cast.ToString(val)
+					sp.rowChecksum[i] = uint64(len(sVal))
+					return sVal
+				}
+				// is decimal
+				sp.ds.ChangeColumn(i, DecimalType)
+				return fVal
 			}
-			// is decimal
-			sp.ds.ChangeColumn(i, DecimalType)
-			return fVal
 		}
 
 		if iVal > cs.Max {

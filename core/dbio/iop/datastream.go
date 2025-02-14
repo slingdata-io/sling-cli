@@ -2189,6 +2189,16 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 
 				rec := g.M()
 				for i, val := range row0 {
+					if sVal, ok := val.(string); ok && batch.Columns[i].Type.IsJSON() {
+						if looksLikeJson(sVal) {
+							var v any
+							if err := g.Unmarshal(sVal, &v); err == nil {
+								val = v
+							}
+						} else if sVal == "null" {
+							val = nil
+						}
+					}
 					rec[fields[i]] = val
 				}
 
@@ -2262,6 +2272,16 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 
 				rec := g.M()
 				for i, val := range row0 {
+					if sVal, ok := val.(string); ok && batch.Columns[i].Type.IsJSON() {
+						if looksLikeJson(sVal) {
+							var v any
+							if err := g.Unmarshal(sVal, &v); err == nil {
+								val = v
+							}
+						} else if sVal == "null" {
+							val = nil
+						}
+					}
 					rec[fields[i]] = val
 				}
 

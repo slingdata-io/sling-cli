@@ -517,10 +517,6 @@ func cliInit(done chan struct{}) int {
 	setSentry()
 	ok, err := g.CliProcess()
 
-	if time.Now().UnixMicro()%20 == 0 {
-		defer SlingMedia.PrintFollowUs()
-	}
-
 	if err != nil || env.TelMap["error"] != nil {
 		if err == nil && env.TelMap["error"] != nil {
 			err = g.Error(cast.ToString(env.TelMap["error"]))

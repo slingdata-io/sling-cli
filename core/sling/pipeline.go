@@ -62,6 +62,9 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 	Env = lo.Ternary(Env == nil, map[string]any{}, Env)
 	content = g.Rm(content, Env)
 
+	// set env
+	pipeline.Env = Env
+
 	// parse again
 	m = g.M()
 	err = yaml.Unmarshal([]byte(content), &m)
