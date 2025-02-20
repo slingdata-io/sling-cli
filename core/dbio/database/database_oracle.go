@@ -336,7 +336,11 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 			return 0, err
 		}
 
-		defer func() { env.RemoveLocalTempFile(dataPath) }()
+		defer func() {
+			file.Close()
+			env.RemoveLocalTempFile(dataPath)
+		}()
+
 		defer func() { env.RemoveLocalTempFile(logPath) }()
 	}
 
