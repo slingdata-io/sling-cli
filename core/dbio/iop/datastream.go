@@ -2090,7 +2090,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 
 			// new reader
 			pipeR, pipeW = io.Pipe()
-			w = csv.NewWriter(pipeW)
+			w = csv.NewWriterSize(pipeW, 40960*10)
 			w.Comma = ','
 			if sp.Config.Delimiter != "" {
 				w.Comma = []rune(sp.Config.Delimiter)[0]
@@ -2568,7 +2568,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 		}
 
 		c := int64(0) // local counter
-		w := csv.NewWriter(pipeW)
+		w := csv.NewWriterSize(pipeW, 40960*10)
 		w.Comma = ','
 		if sp.Config.Delimiter != "" {
 			w.Comma = []rune(sp.Config.Delimiter)[0]
