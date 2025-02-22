@@ -104,7 +104,67 @@ type Transformers struct {
 func NewTransformers() Transformers {
 	win16be := encUnicode.UTF16(encUnicode.BigEndian, encUnicode.IgnoreBOM)
 	return Transformers{
-		Accent: transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
+		Accent: transform.Chain(
+			norm.NFD,
+			runes.Remove(runes.In(unicode.Mn)),
+			runes.Map(func(r rune) rune {
+				switch r {
+				// Polish special characters
+				case 'Ł', 'Ɫ':
+					return 'L'
+				case 'ł':
+					return 'l'
+				// Other special characters and their variations
+				case 'Æ', 'Ǽ':
+					return 'A'
+				case 'æ', 'ǽ':
+					return 'a'
+				case 'Ø', 'Ǿ':
+					return 'O'
+				case 'ø', 'ǿ':
+					return 'o'
+				case 'Þ':
+					return 'T'
+				case 'þ':
+					return 't'
+				case 'Ð':
+					return 'D'
+				case 'ð':
+					return 'd'
+				case 'ß', 'ẞ':
+					return 's'
+				case 'Œ':
+					return 'O'
+				case 'œ':
+					return 'o'
+				case 'Ĳ':
+					return 'I'
+				case 'ĳ':
+					return 'i'
+				case 'ƒ':
+					return 'f'
+				case 'Ŋ':
+					return 'N'
+				case 'ŋ':
+					return 'n'
+				case 'Ɲ':
+					return 'N'
+				case 'ɲ':
+					return 'n'
+				case 'Ƴ':
+					return 'Y'
+				case 'ƴ':
+					return 'y'
+				case 'Ɣ':
+					return 'G'
+				case 'ɣ':
+					return 'g'
+				default:
+					return r
+				}
+			}),
+			norm.NFC,
+		),
 
 		DecodeUTF8:        encUnicode.UTF8.NewDecoder(),
 		DecodeUTF8BOM:     encUnicode.UTF8BOM.NewDecoder(),
