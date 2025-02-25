@@ -293,8 +293,7 @@ func (fs *LocalFileSysClient) List(uri string) (nodes FileNodes, err error) {
 
 	files, err := os.ReadDir(path)
 	if err != nil {
-		err = g.Error(err, "Error listing "+path)
-		return
+		return nodes, nil // should not error if path doesn't exist
 	}
 
 	// path is dir
