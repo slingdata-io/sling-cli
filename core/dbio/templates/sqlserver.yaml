@@ -72,7 +72,12 @@ metadata:
     order by table_schema, table_name
 
   columns: |
-    select column_name, data_type
+    select
+      column_name,
+      data_type,
+      character_maximum_length as maximum_length,
+      numeric_precision as precision, 
+      numeric_scale as scale
     from INFORMATION_SCHEMA.COLUMNS
     where table_schema = '{schema}'
       and table_name = '{table}'

@@ -1402,7 +1402,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 			col.Constraint = fc.Constraint
 		}
 
-		col.Stats.MaxLen = colType.Length
+		if colType.Length > 0 {
+			col.Stats.MaxLen = colType.Length
+		}
 		col.Stats.MaxDecLen = 0
 
 		// if length is provided, set as string if less than 4000
@@ -1416,12 +1418,14 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		}
 
 		if colType.IsSourced() || col.Sourced {
-			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
+			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
-				col.DbPrecision = colType.Length
+				if colType.Length > 0 {
+					col.DbPrecision = colType.Length
+				}
 			}
 
-			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbSnowflake) {
+			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake) {
 				col.Sourced = true
 				col.DbPrecision = colType.Precision
 				col.DbScale = colType.Scale
@@ -1551,6 +1555,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 				Name:             cast.ToString(rec["column_name"]),
 				DatabaseTypeName: cast.ToString(rec["data_type"]),
 				Precision:        cast.ToInt(rec["precision"]),
+				Length:           cast.ToInt(cast.ToInt(rec["maximum_length"])),
 				Scale:            cast.ToInt(rec["scale"]),
 				Sourced:          true,
 			})
@@ -1567,6 +1572,7 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 				DatabaseTypeName: cast.ToString(rec["data_type"]),
 				Precision:        cast.ToInt(rec["precision"]),
 				Scale:            cast.ToInt(rec["scale"]),
+				Length:           cast.ToInt(cast.ToInt(rec["maximum_length"])),
 			}
 		})
 
@@ -2813,7 +2819,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if g.In(conn.GetType(), dbio.TypeDbSQLServer) {
+		if g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
@@ -2961,7 +2967,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		} else if checksum1 != checksum2 {
 			if refCol.Type != col.Type {
 				// don't compare
-			} else if refCol.IsString() && conn.GetType() == dbio.TypeDbSQLServer && checksum2 >= checksum1 {
+			} else if refCol.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) && checksum2 >= checksum1 {
 				// datalength can return higher counts since it counts bytes
 			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbSQLite && checksum1/1000 == checksum2 {
 				// sqlite can only handle timestamps up to milliseconds
