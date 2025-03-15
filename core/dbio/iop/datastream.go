@@ -1328,7 +1328,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		it.Row = make([]any, len(row))
 		var val any
 		for i, val0 := range row {
-			if !it.ds.Columns[i].IsString() {
+			if col := it.ds.Columns[i]; col.Type != "" && !col.IsString() {
 				val0 = strings.TrimSpace(val0)
 				if val0 == "" {
 					val = nil
