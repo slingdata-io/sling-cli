@@ -111,6 +111,7 @@ func (conn *OracleConn) ConnString() string {
 		"ssl_verify":        "ssl verify",
 		"wallet":            "wallet",
 		"auth_type":         "AUTH TYPE",
+		"auth_serv":         "AUTH SERV",
 		"os_user":           "OS USER",
 		"os_password":       "OS PASS",
 		"domain":            "DOMAIN",
