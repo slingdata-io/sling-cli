@@ -641,6 +641,20 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	// lists / arrays do not conform to JSON spec and can error out
 	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
 
+	// add any specified transforms
+	fsProps := map[string]string{}
+	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
+	if transformsPayload, ok := fsProps["transforms"]; ok {
+		columnTransforms := map[string][]string{}
+		g.Unmarshal(transformsPayload, &columnTransforms)
+		if val, ok := columnTransforms["*"]; ok {
+			columnTransforms["*"] = append(val, transforms["*"]...)
+		} else {
+			columnTransforms["*"] = transforms["*"]
+		}
+		transforms = columnTransforms
+	}
+
 	if cds, ok := opts["datastream"]; ok {
 		// if provided, use it
 		ds = cds.(*Datastream)

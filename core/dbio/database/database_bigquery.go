@@ -95,7 +95,7 @@ func (conn *BigQueryConn) Init() error {
 }
 
 func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client, err error) {
-	var authOption option.ClientOption
+	var authOptions []option.ClientOption
 	var credJsonBody string
 
 	to := 15
@@ -103,31 +103,44 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 		to = timeOut[0]
 	}
 
+	// Add specified scopes for BigQuery such as:
+	// "https://www.googleapis.com/auth/drive"
+	// "https://www.googleapis.com/auth/spreadsheets"
+	scopes := []string{"https://www.googleapis.com/auth/bigquery"}
+	if val := conn.GetProp("extra_scopes"); val != "" {
+		var extraScopes []string
+		g.Unmarshal(val, &extraScopes)
+		scopes = append(scopes, extraScopes...)
+	}
+
 	if val := conn.GetProp("GC_KEY_BODY"); val != "" {
 		credJsonBody = val
-		authOption = option.WithCredentialsJSON([]byte(val))
+		authOptions = append(authOptions, option.WithCredentialsJSON([]byte(val)))
+		authOptions = append(authOptions, option.WithScopes(scopes...))
 	} else if val := conn.GetProp("GC_KEY_FILE"); val != "" {
-		authOption = option.WithCredentialsFile(val)
+		authOptions = append(authOptions, option.WithCredentialsFile(val))
+		authOptions = append(authOptions, option.WithScopes(scopes...))
 		b, err := os.ReadFile(val)
 		if err != nil {
 			return client, g.Error(err, "could not read google cloud key file")
 		}
 		credJsonBody = string(b)
 	} else if val := conn.GetProp("GC_CRED_API_KEY"); val != "" {
-		authOption = option.WithAPIKey(val)
+		authOptions = append(authOptions, option.WithAPIKey(val))
 	} else if val := conn.GetProp("GOOGLE_APPLICATION_CREDENTIALS"); val != "" {
-		authOption = option.WithCredentialsFile(val)
+		authOptions = append(authOptions, option.WithCredentialsFile(val))
+		authOptions = append(authOptions, option.WithScopes(scopes...))
 		b, err := os.ReadFile(val)
 		if err != nil {
 			return client, g.Error(err, "could not read google cloud key file")
 		}
 		credJsonBody = string(b)
 	} else {
-		creds, err := google.FindDefaultCredentials(conn.BaseConn.Context().Ctx)
+		creds, err := google.FindDefaultCredentials(conn.BaseConn.Context().Ctx, scopes...)
 		if err != nil {
 			return client, g.Error(err, "No Google credentials provided or could not find Application Default Credentials.")
 		}
-		authOption = option.WithCredentials(creds)
+		authOptions = append(authOptions, option.WithCredentials(creds))
 	}
 
 	if conn.ProjectID == "" && credJsonBody != "" {
@@ -139,7 +152,7 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, time.Duration(to)*time.Second)
 	defer cancel()
 
-	client, err = bigquery.NewClient(ctx, conn.ProjectID, authOption)
+	client, err = bigquery.NewClient(ctx, conn.ProjectID, authOptions...)
 	if err != nil {
 		return nil, g.Error(err, "Failed to create BigQuery client")
 	}

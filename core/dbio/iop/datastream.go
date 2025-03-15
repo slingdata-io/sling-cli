@@ -1328,7 +1328,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		it.Row = make([]any, len(row))
 		var val any
 		for i, val0 := range row {
-			if !it.ds.Columns[i].IsString() {
+			if col := it.ds.Columns[i]; col.Type != "" && !col.IsString() {
 				val0 = strings.TrimSpace(val0)
 				if val0 == "" {
 					val = nil
@@ -2090,7 +2090,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 
 			// new reader
 			pipeR, pipeW = io.Pipe()
-			w = csv.NewWriter(pipeW)
+			w = csv.NewWriterSize(pipeW, 40960*10)
 			w.Comma = ','
 			if sp.Config.Delimiter != "" {
 				w.Comma = []rune(sp.Config.Delimiter)[0]
@@ -2568,7 +2568,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 		}
 
 		c := int64(0) // local counter
-		w := csv.NewWriter(pipeW)
+		w := csv.NewWriterSize(pipeW, 40960*10)
 		w.Comma = ','
 		if sp.Config.Delimiter != "" {
 			w.Comma = []rune(sp.Config.Delimiter)[0]

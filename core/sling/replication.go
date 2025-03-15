@@ -488,6 +488,11 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
 		min, max := stream.config.SourceOptions.RangeStartEnd()
 		table, err := database.ParseTableName(stream.name, sourceConn.Connection.Type)
+		if stream.config.SQL != "" {
+			table, err = database.ParseTableName(stream.config.SQL, sourceConn.Connection.Type)
+			table.SQL = g.R(table.SQL, "incremental_where_cond", "1=1")
+			table.SQL = g.R(table.SQL, "incremental_value", "null")
+		}
 
 		if err != nil {
 			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
@@ -507,14 +512,23 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not generate chunk ranges: %s", stream.name)
 		}
 
+		g.Debug("determined %d chunks (size=%s, stream=%s): %s", len(chunkRanges), chunkSize, stream.name, g.Marshal(chunkRanges))
+
 		if len(chunkRanges) == 0 {
 			continue
 		}
 
+		if table.IsQuery() && strings.Contains(stream.config.Object, "{stream_") {
+			// when using custom SQL + chunking + var, causes issues in cfg.GetFormatMap
+			// must specify object name manually
+			g.Warn("please specify object name without {stream_*} runtime variables when chunking (stream=%s)", stream.name)
+		}
+
 		streamsToChunk[i].chunks = make([]Stream, len(chunkRanges))
 		for j, chunkRange := range chunkRanges {
+			prefix := lo.Ternary(table.IsQuery(), stream.name, table.FullName())
 			chunkedStream := Stream{
-				name:   table.FullName() + g.F(" (part-%03d)", j+1),
+				name:   prefix + g.F(" (part-%03d)", j+1),
 				config: stream.config,
 			}
 
@@ -534,8 +548,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 			chunkedStream.config.TargetOptions = &to
 
-			// pass as table name to enumerate stream name
-			chunkedStream.config.SQL = table.FullName()
+			// pass as table name to enumerate stream name if not custom SQL
+			if chunkedStream.config.SQL == "" {
+				chunkedStream.config.SQL = table.FullName()
+			}
 
 			streamsToChunk[i].chunks[j] = chunkedStream
 		}

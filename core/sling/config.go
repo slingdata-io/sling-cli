@@ -906,7 +906,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 			m["stream_file_name"] = strings.TrimSuffix(
 				cast.ToString(m["stream_file_name"]),
-				"_"+cast.ToString(m["stream_file_ext"]),
+				"."+cast.ToString(m["stream_file_ext"]),
 			)
 		}
 

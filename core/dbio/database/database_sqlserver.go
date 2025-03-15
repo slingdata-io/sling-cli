@@ -446,7 +446,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 			}
 
 			replExpr1 := g.R(
-				`REPLACE(CONVERT(VARCHAR(MAX), {field}), '{delimiterRep}', '{delimiter}')`,
+				`REPLACE(CONVERT(NVARCHAR(MAX), {field}), '{delimiterRep}', '{delimiter}')`,
 				"field", col.Name,
 				"delimiterRep", delimiterRep,
 				"delimiter", ",",
