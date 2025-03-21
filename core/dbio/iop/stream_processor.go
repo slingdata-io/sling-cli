@@ -666,7 +666,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 				cs.NullCnt++
 				return nil
 			}
-		} else if sp.Config.NullIf == sVal {
+		} else if sp.Config.NullIf != "" && sp.Config.NullIf == sVal {
 			cs.TotalCnt++
 			cs.NullCnt++
 			return nil
