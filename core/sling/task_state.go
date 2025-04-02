@@ -12,6 +12,7 @@ import (
 type RuntimeState interface {
 	SetStateData(id string, data map[string]any)
 	SetStateKeyValue(id, key string, value any)
+	SetStoreData(key string, value any, del bool)
 	Marshall() string
 	TaskExecution() *TaskExecution
 }
@@ -19,6 +20,7 @@ type RuntimeState interface {
 // ReplicationState is for runtime state
 type ReplicationState struct {
 	State     map[string]map[string]any `json:"state,omitempty"`
+	Store     map[string]any            `json:"store,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Execution ExecutionState            `json:"execution,omitempty"`
@@ -28,6 +30,14 @@ type ReplicationState struct {
 	Object    *ObjectState              `json:"object,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {
+	if del {
+		delete(rs.Store, key)
+	} else {
+		rs.Store[key] = value
+	}
 }
 
 func (rs *ReplicationState) SetStateData(id string, data map[string]any) {

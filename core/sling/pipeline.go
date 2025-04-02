@@ -132,6 +132,7 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 	if pl.state == nil {
 		pl.state = &PipelineState{
 			State: map[string]map[string]any{},
+			Store: map[string]any{},
 			Env:   pl.Env,
 			Runs:  map[string]*RunState{},
 		}
@@ -144,10 +145,19 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 
 type PipelineState struct {
 	State     map[string]map[string]any `json:"state,omitempty"`
+	Store     map[string]any            `json:"store,omitempty"`
 	Env       map[string]any            `json:"env,omitempty"`
 	Timestamp DateTimeState             `json:"timestamp,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (ps *PipelineState) SetStoreData(key string, value any, del bool) {
+	if del {
+		delete(ps.Store, key)
+	} else {
+		ps.Store[key] = value
+	}
 }
 
 func (ps *PipelineState) SetStateData(id string, data map[string]any) {

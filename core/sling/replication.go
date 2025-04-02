@@ -78,6 +78,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	if rd.state == nil {
 		rd.state = &ReplicationState{
 			State:     map[string]map[string]any{},
+			Store:     map[string]any{},
 			Env:       rd.Env,
 			Runs:      map[string]*RunState{},
 			Execution: ExecutionState{},
