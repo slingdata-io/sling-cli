@@ -94,7 +94,7 @@ metadata:
     INNER JOIN pg_catalog.pg_namespace ON pg_class.relnamespace = pg_namespace.oid
     INNER JOIN pg_catalog.pg_attribute ON pg_class.oid = pg_attribute.attrelid
     where 1=1
-      and pg_class.relkind in ('r', 'v', 'm', 'f')
+      and pg_class.relkind in ('r', 'v', 'm', 'f', 'p')
       and pg_namespace.nspname = '{schema}'
       and pg_class.relname = '{table}'
       and pg_attribute.attnum >= 1
@@ -149,7 +149,7 @@ metadata:
       join pg_namespace s on t.relnamespace = s.oid
     where a.attnum > 0 
       and not a.attisdropped
-      and t.relkind in ('r', 'v', 'm', 'f')
+      and t.relkind in ('r', 'v', 'm', 'f', 'p')
       {{if .schema -}} and s.nspname = '{schema}' {{- end}}
       {{if .table -}} and t.relname = '{table}' {{- end}}
     order by s.nspname, t.relname, a.attnum
@@ -170,7 +170,7 @@ metadata:
       join pg_namespace s on t.relnamespace = s.oid
     where a.attnum > 0 
       and not a.attisdropped
-      and t.relkind in ('r', 'v', 'm', 'f')
+      and t.relkind in ('r', 'v', 'm', 'f', 'p')
       {{if .schema -}} and s.nspname = '{schema}' {{- end}}
       {{if .tables -}} and t.relname in ({tables}) {{- end}}
     order by s.nspname, t.relname, a.attnum
@@ -183,7 +183,7 @@ metadata:
     from pg_class c
     left join pg_namespace n on (n.oid = c.relnamespace)
     where nspname not in ('pg_catalog', 'information_schema', '_timescaledb_internal')
-      and relkind = 'r' 
+      and relkind in ('r', 'v', 'm', 'f', 'p')
       {{if .schema -}} and nspname = '{schema}' {{- end}}
       {{if .table -}} and relnam = '{table}' {{- end}}
     order by reltuples desc
