@@ -176,8 +176,16 @@ func (t *TaskExecution) Execute() error {
 			t.Status = ExecStatusSuccess
 		}
 	} else {
-		t.SetProgress("execution failed")
-		t.Status = ExecStatusError
+
+		// check for timeout
+		deadline, ok := t.Context.Map.Get("timeout-deadline")
+		if ok && cast.ToInt64(deadline) <= (time.Now().Unix()+1) {
+			t.SetProgress("execution failed (timed-out)")
+			t.Status = ExecStatusTimedOut
+		} else {
+			t.SetProgress("execution failed")
+			t.Status = ExecStatusError
+		}
 		if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
 			eG := g.ErrorGroup{}
 			eG.Add(err)

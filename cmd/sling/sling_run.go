@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -230,6 +231,9 @@ runReplication:
 			defer os.Remove(replicationCfgPath)
 			goto runReplication // run replication
 		}
+
+		// set global timeout
+		setTimeout(os.Getenv("SLING_TIMEOUT"))
 
 		err = runTask(cfg, &rc)
 		if err != nil {
@@ -660,4 +664,24 @@ func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	}
 
 	return nil
+}
+
+func setTimeout(values ...string) {
+	for _, timeout := range values {
+		if timeout == "" {
+			continue
+		}
+		// only process first non-empty value
+		duration := time.Duration(cast.ToFloat64(timeout) * float64(time.Minute))
+		parent, cancel := context.WithTimeout(context.Background(), duration)
+		_ = cancel
+
+		ctx = g.NewContext(parent) // overwrite global context
+		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
+
+		// set deadline for status setting later
+		deadline := time.Now().Add(duration)
+		ctx.Map.Set("timeout-deadline", deadline.Unix())
+		break
+	}
 }
