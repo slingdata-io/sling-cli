@@ -191,11 +191,15 @@ func (t *TaskExecution) Execute() error {
 			t.SetProgress("execution failed")
 			t.Status = ExecStatusError
 		}
-		if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
-			eG := g.ErrorGroup{}
-			eG.Add(err)
-			eG.Add(t.Err)
-			t.Err = g.Error(eG.Err())
+		if t.df != nil {
+			if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
+				eG := g.ErrorGroup{}
+				eG.Add(err)
+				eG.Add(t.Err)
+				t.Err = g.Error(eG.Err())
+			} else {
+				t.Err = g.Error(t.Err)
+			}
 		} else {
 			t.Err = g.Error(t.Err)
 		}
