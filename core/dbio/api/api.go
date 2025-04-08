@@ -3,16 +3,13 @@ package api
 import (
 	"context"
 	"encoding/base64"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
-	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -134,7 +131,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string) (df *iop.Dataflow, er
 		// set endpoint conn
 		endpoint.conn = ac
 
-		if err = ValidateAndSetDefaults(endpoint, ac.Spec); err != nil {
+		if err = validateAndSetDefaults(endpoint, ac.Spec); err != nil {
 			return nil, g.Error(err, "endpoint validation failed")
 		}
 
@@ -372,215 +369,7 @@ var (
 	streamRequests = func(ep *Endpoint) (ds *iop.Datastream, err error) {
 		return nil, g.Error("please use the official sling-cli release for reading APIs")
 	}
+	validateAndSetDefaults = func(ep *Endpoint, spec Spec) (err error) {
+		return g.Error("please use the official sling-cli release for reading APIs")
+	}
 )
-
-// ValidateAndSetDefaults checks and sets defaults
-func ValidateAndSetDefaults(ep *Endpoint, spec Spec) (err error) {
-	var eG g.ErrorGroup
-
-	{
-		if ep.Name == "" {
-			ep.Name = spec.Defaults.Name
-		}
-		if ep.Description == "" {
-			ep.Description = spec.Defaults.Description
-		}
-		if ep.Request.URL == "" {
-			ep.Request.URL = spec.Defaults.Request.URL
-		}
-		if ep.Request.Timeout == 0 {
-			ep.Request.Timeout = spec.Defaults.Request.Timeout
-		}
-		if ep.Request.Method == "" {
-			ep.Request.Method = spec.Defaults.Request.Method
-		}
-		if ep.Request.Headers == nil {
-			ep.Request.Headers = spec.Defaults.Request.Headers
-		}
-		if ep.Request.Parameters == nil {
-			ep.Request.Parameters = spec.Defaults.Request.Parameters
-		}
-		if ep.Request.Payload == nil {
-			ep.Request.Payload = spec.Defaults.Request.Payload
-		}
-		if ep.Request.Loop == "" {
-			ep.Request.Loop = spec.Defaults.Request.Loop
-		}
-		if ep.Request.Rate == 0 {
-			ep.Request.Rate = spec.Defaults.Request.Rate
-		}
-		if ep.Request.Concurrency == 0 {
-			ep.Request.Concurrency = spec.Defaults.Request.Concurrency
-		}
-		if ep.Pagination.StopCondition == "" {
-			ep.Pagination.StopCondition = spec.Defaults.Pagination.StopCondition
-		}
-		if ep.Pagination.NextState == nil {
-			ep.Pagination.NextState = spec.Defaults.Pagination.NextState
-		}
-		if ep.Response.Records.JmesPath == "" {
-			ep.Response.Records.JmesPath = spec.Defaults.Response.Records.JmesPath
-		}
-		if ep.Response.Records.UpdateKey == "" {
-			ep.Response.Records.UpdateKey = spec.Defaults.Response.Records.UpdateKey
-		}
-		if ep.Response.Records.PrimaryKey == nil {
-			ep.Response.Records.PrimaryKey = spec.Defaults.Response.Records.PrimaryKey
-		}
-		if ep.Response.Records.Limit == 0 {
-			ep.Response.Records.Limit = spec.Defaults.Response.Records.Limit
-		}
-		if ep.Response.Processors == nil {
-			ep.Response.Processors = spec.Defaults.Response.Processors
-		}
-		if ep.Response.Rules == nil {
-			ep.Response.Rules = spec.Defaults.Response.Rules
-		}
-	}
-
-	// for state, merge the default into endpoint's
-	if len(ep.State) == 0 {
-		ep.State = spec.Defaults.State
-	} else {
-		for k, v := range spec.Defaults.State {
-			if _, ok := ep.State[k]; !ok {
-				ep.State[k] = v
-			}
-		}
-	}
-
-	// check request
-	if ep.Request.URL == "" {
-		eG.Add(g.Error("empty request url"))
-	}
-	if ep.Request.Method == "" {
-		ep.Request.Method = MethodGet
-	}
-	ep.Request.Method = HTTPMethod(strings.ToUpper(string(ep.Request.Method)))
-
-	if ep.Request.Headers == nil {
-		ep.Request.Headers = g.M()
-	}
-	if ep.Request.Parameters == nil {
-		ep.Request.Parameters = g.M()
-	}
-
-	// check response
-	for _, processor := range ep.Response.Processors {
-		if strings.TrimSpace(processor.Expression) == "" {
-			eG.Add(g.Error("empty response processor expression"))
-		}
-		if strings.TrimSpace(processor.Output) == "" &&
-			!strings.Contains(processor.Expression, "log(") {
-			eG.Add(g.Error("empty response processor output"))
-		}
-	}
-
-	// set defaults
-	ep.eval = goval.NewEvaluator()
-	ep.client = http.Client{}
-	if ep.Request.Timeout > 0 {
-		to := time.Duration(ep.Request.Timeout) * time.Second
-		ep.client = http.Client{Timeout: to}
-	}
-
-	if ep.Request.Rate == 0 {
-		ep.Request.Rate = 10 // default max new requests per second
-	}
-
-	if ep.Request.Concurrency == 0 {
-		ep.Request.Concurrency = 10 // default max concurrent requests
-	}
-
-	// append default rules: retry on 429, fail if 400 or above
-	// we can override with "Action: RuleTypeContinue", rules are evaluated in order
-	rule429 := Rule{
-		Action:      RuleTypeRetry,
-		Condition:   "response.status == 429",
-		MaxAttempts: 3,
-		BackoffBase: 2,
-		Backoff:     BackoffTypeLinear,
-	}
-	ep.Response.Rules = append(ep.Response.Rules, rule429)
-
-	rule400 := Rule{Action: RuleTypeFail, Condition: "response.status >= 400"}
-	ep.Response.Rules = append(ep.Response.Rules, rule400)
-
-	// determine order render
-	order := []string{}
-	{
-		remaining := lo.Keys(ep.State)
-		processing := map[string]bool{} // track variables being processed in current chain
-
-		addAndRemove := func(key string) {
-			if !g.In(key, order...) {
-				order = append(order, key)
-				remaining = lo.Filter(remaining, func(k string, i int) bool {
-					return k != key // remove from remaining
-				})
-			}
-		}
-
-		var processVar func(key string) error
-		processVar = func(key string) error {
-			// Check for circular dependency
-			if processing[key] {
-				return g.Error("circular dependency detected for state variable: %s", key)
-			}
-
-			// Skip if already processed
-			if g.In(key, order...) {
-				return nil
-			}
-
-			// Mark as being processed
-			processing[key] = true
-			defer func() { processing[key] = false }()
-
-			expr := cast.ToString(ep.State[key])
-			matches := bracketRegex.FindAllStringSubmatch(expr, -1)
-			if len(matches) > 0 {
-				for _, match := range matches {
-					varsReferenced := extractVars(match[1])
-					for _, varReferenced := range varsReferenced {
-						if strings.HasPrefix(varReferenced, "state.") {
-							refKey := strings.TrimPrefix(varReferenced, "state.")
-							// Process dependency first
-							if err := processVar(refKey); err != nil {
-								return g.Error(err, "while processing dependency chain for %s", key)
-							}
-						}
-					}
-				}
-			}
-			addAndRemove(key)
-			return nil
-		}
-
-		// Process all remaining variables
-		for len(remaining) > 0 {
-			key := remaining[0] // take first remaining key
-			if err := processVar(key); err != nil {
-				return g.Error(err, "error determining render order")
-			}
-		}
-	}
-
-	// render initial state
-	for _, k := range order {
-		if expr := cast.ToString(ep.State[k]); hasBrackets(expr) {
-			val, err := ep.renderAny(ep.State[k])
-			if err != nil {
-				if strings.Contains(err.Error(), `"require" - input required`) {
-					return g.Error("state variable input was required but not provided: %s = %s", k, expr)
-				}
-				return g.Error(err, "could not render state var (%s) : %s", k, expr)
-			}
-			ep.State[k] = val
-		}
-	}
-
-	g.Trace("endpoint: %s", g.Marshal(ep))
-
-	return eG.Err()
-}
