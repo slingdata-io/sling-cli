@@ -267,9 +267,10 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
+	srcApiProvided := cfg.SrcConn.Info().Type.IsAPI()
 	srcStreamProvided := cfg.Source.Stream != ""
 
-	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided)
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcApiProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcApiProvided, srcStreamProvided)
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
@@ -341,6 +342,10 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
+	} else if srcApiProvided && tgtFileProvided {
+		Type = ApiToFile
+	} else if srcApiProvided && tgtDbProvided {
+		Type = ApiToDB
 	}
 
 	if Type == "" {
@@ -455,7 +460,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
-	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
+	if len(cfg.Target.Data) == 0 {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = *c.Connection.Copy()
@@ -513,7 +518,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
-	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
+	if len(cfg.Source.Data) == 0 {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = *c.Connection.Copy()

@@ -16,6 +16,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -137,6 +138,10 @@ func (t *TaskExecution) Execute() error {
 			t.Err = t.runDbToFile()
 		case FileToFile:
 			t.Err = t.runFileToFile()
+		case ApiToDB:
+			t.Err = t.runApiToDb()
+		case ApiToFile:
+			t.Err = t.runApiToFile()
 		default:
 			t.SetProgress("task execution configuration is invalid")
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
@@ -246,6 +251,21 @@ func (t *TaskExecution) GetStateMap() map[string]any {
 	}
 
 	return sMap
+}
+
+func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnection, err error) {
+
+	conn, err = t.Config.SrcConn.AsAPIContext(ctx, t.isUsingPool())
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	if err := conn.Authenticate(); err != nil {
+		return nil, g.Error(err, "could not authenticate")
+	}
+
+	return conn, nil
 }
 
 func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
@@ -484,6 +504,93 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			err = g.Error(err, "Could not set incremental value")
 			return err
 		}
+	}
+
+	return
+}
+
+func (t *TaskExecution) runApiToDb() (err error) {
+
+	start = time.Now()
+
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize target connection")
+		return
+	}
+
+	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+
+	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	if err != nil {
+		err = g.Error(err, "Could not ReadFromApi")
+		return
+	}
+	defer t.df.Close()
+
+	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
+	defer t.Cleanup()
+	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
+	if err != nil {
+		err = g.Error(err, "could not write to database")
+		return
+	}
+
+	elapsed := int(time.Since(start).Seconds())
+	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+
+	if cnt > 0 && t.Config.IsFileStreamWithStateAndParts() {
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
+	}
+
+	return
+}
+
+func (t *TaskExecution) runApiToFile() (err error) {
+
+	start = time.Now()
+	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+
+	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	if err != nil {
+		err = g.Error(err, "Could not ReadFromApi")
+		return
+	}
+	defer t.df.Close()
+
+	if t.Config.Options.StdOut {
+		t.SetProgress("writing to target stream (stdout)")
+	} else {
+		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	}
+	defer t.Cleanup()
+	cnt, err := t.WriteToFile(t.Config, t.df)
+	if err != nil {
+		err = g.Error(err, "Could not WriteToFile")
+		return
+	}
+
+	elapsed := int(time.Since(start).Seconds())
+	t.SetProgress("wrote %d rows to %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+
+	if t.df.Err() != nil {
+		err = g.Error(t.df.Err(), "Error in runApiToFile")
 	}
 
 	return

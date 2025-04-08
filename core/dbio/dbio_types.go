@@ -20,6 +20,8 @@ const (
 	KindDatabase Kind = "database"
 	// KindFile for files (cloud, sftp)
 	KindFile Kind = "file"
+	// KindAPI for apis
+	KindAPI Kind = "api"
 	// KindUnknown for unknown
 	KindUnknown Kind = ""
 )
@@ -30,6 +32,7 @@ var AllKind = []struct {
 }{
 	{KindDatabase, "KindDatabase"},
 	{KindFile, "KindFile"},
+	{KindAPI, "KindAPI"},
 	{KindUnknown, "KindUnknown"},
 }
 
@@ -38,6 +41,8 @@ type Type string
 
 const (
 	TypeUnknown Type = ""
+
+	TypeApi Type = "api"
 
 	TypeFileLocal  Type = "file"
 	TypeFileHDFS   Type = "hdfs"
@@ -77,6 +82,7 @@ var AllType = []struct {
 	TSName string
 }{
 	{TypeUnknown, "TypeUnknown"},
+	{TypeApi, "TypeApi"},
 	{TypeFileLocal, "TypeFileLocal"},
 	{TypeFileHDFS, "TypeFileHDFS"},
 	{TypeFileS3, "TypeFileS3"},
@@ -125,6 +131,7 @@ func ValidateType(tStr string) (Type, bool) {
 
 	switch t {
 	case
+		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
 		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
@@ -174,6 +181,8 @@ func (t Type) Kind() Kind {
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
+	case TypeApi:
+		return KindAPI
 	}
 	return KindUnknown
 }
@@ -193,6 +202,11 @@ func (t Type) IsFile() bool {
 	return t.Kind() == KindFile
 }
 
+// IsAPI returns true if api connection
+func (t Type) IsAPI() bool {
+	return t.Kind() == KindAPI
+}
+
 // IsUnknown returns true if unknown
 func (t Type) IsUnknown() bool {
 	return t.Kind() == KindUnknown
@@ -201,6 +215,7 @@ func (t Type) IsUnknown() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
+		TypeApi:             "API - Generic",
 		TypeFileLocal:       "FileSys - Local",
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
@@ -239,6 +254,7 @@ func (t Type) NameLong() string {
 // Name return the type name
 func (t Type) Name() string {
 	mapping := map[Type]string{
+		TypeApi:             "API",
 		TypeFileLocal:       "Local",
 		TypeFileHDFS:        "HDFS",
 		TypeFileS3:          "S3",

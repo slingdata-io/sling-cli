@@ -1,0 +1,59 @@
+name: attio
+
+defaults:
+  state:
+    base_url: https://api.attio.com/v2
+  
+  request:
+    method: POST
+    url: ${state.base_url}/objects/${state.object_id}/records/query
+
+    headers:
+      Authorization: 'Bearer ${secrets.api_key}'
+      Content-Type: application/json
+
+    concurrency: 10
+    rate: 10
+
+  response:
+    records:
+      jmespath: data[*]
+    
+    rules:
+      - condition: response.status == 429
+        action: retry
+
+      - condition: response.status >= 400
+        action: fail
+      
+
+endpoints:
+  - name: people
+    
+    state:
+      object_id: ${secrets.people_object_id}
+      limit: 250
+      offset: 0
+    
+    request:
+      payload:
+        limit: ${state.limit}
+        offset: ${state.offset}
+          
+    pagination:
+      # stop if condition is met
+      stop_condition: length(records) == 0 || state.offset > 2500
+
+      # set state for next page
+      next_state:
+        offset: ${state.offset + state.limit}
+    
+    response:
+      
+      processors:
+        - expression: record.id.record_id
+          output: record.record_id
+
+        # - expression: log(record, "warn")
+        
+      

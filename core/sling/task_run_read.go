@@ -8,6 +8,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -350,6 +351,22 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	setStage("3 - dataflow-stream")
 
 	return
+}
+
+// ReadFromApi reads from a source api
+func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df *iop.Dataflow, err error) {
+	setStage("3 - prepare-dataflow")
+
+	// sets metadata
+	// metadata := t.setGetMetadata()
+
+	df, err = srcConn.ReadDataflow(cfg.StreamName)
+	if err != nil {
+		err = g.Error(err, "Could not ReadDataflow for %s", cfg.SrcConn.Type)
+		return t.df, err
+	}
+
+	return df, err
 }
 
 // setColumnKeys sets the column keys
