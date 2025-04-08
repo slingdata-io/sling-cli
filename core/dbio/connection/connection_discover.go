@@ -2,18 +2,21 @@ package connection
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 )
 
 func (c *Connection) Test() (ok bool, err error) {
+	os.Setenv("SLING_TEST_MODE", "true")
 
 	switch {
 	case c.Type.IsDb():
@@ -49,6 +52,38 @@ func (c *Connection) Test() (ok bool, err error) {
 		if len(nodes) <= 10 {
 			g.Debug(g.Marshal(nodes.Paths()))
 		}
+	case c.Type.IsAPI():
+		apiClient, err := c.AsAPI()
+		if err != nil {
+			return ok, g.Error(err, "could not initiate %s", c.Name)
+		}
+
+		// set testing mode to limit requests
+		apiClient.Context.Map.Set("testing", true)
+
+		if err := apiClient.Authenticate(); err != nil {
+			return ok, g.Error(err, "could not authenticate to %s", c.Name)
+		}
+
+		for i, endpoint := range apiClient.Spec.Endpoints {
+			// set limits for testing
+			endpoint.Response.Records.Limit = 10
+			apiClient.Spec.Endpoints[i] = endpoint
+
+			g.Info("testing endpoint: %#v", endpoint.Name)
+			df, err := apiClient.ReadDataflow(endpoint.Name)
+			if err != nil {
+				return ok, g.Error(err, "error testing endpoint: %s", endpoint.Name)
+			}
+
+			data, err := df.Collect()
+			if err != nil {
+				return ok, g.Error(err, "could collect data from endpoint: %s", endpoint.Name)
+			}
+
+			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
+		}
+
 	}
 
 	return true, nil
@@ -60,7 +95,7 @@ type DiscoverOptions struct {
 	Recursive bool                   `json:"recursive,omitempty"`
 }
 
-func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.FileNodes, schemata database.Schemata, err error) {
+func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.FileNodes, schemata database.Schemata, endpoints api.Endpoints, err error) {
 
 	patterns := []string{}
 	globPatterns := []glob.Glob{}
@@ -91,11 +126,11 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 	case c.Type.IsDb():
 		dbConn, err := c.AsDatabase()
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not initiate %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}
 		err = dbConn.Connect(10)
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not connect to %s", c.Name)
 		}
 
 		var table database.Table
@@ -119,7 +154,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 
 		schemata, err = dbConn.GetSchemata(opt.Level, table.Schema, table.Name)
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not discover %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not discover %s", c.Name)
 		}
 
 		if opt.Level == database.SchemataLevelColumn {
@@ -142,7 +177,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 	case c.Type.IsFile():
 		fileClient, err := c.AsFile()
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not initiate %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}
 
 		parent, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -150,7 +185,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 
 		err = fileClient.Init(parent)
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not connect to %s", c.Name)
 		}
 
 		url := c.URL()
@@ -171,7 +206,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			nodes, err = fileClient.List(url)
 		}
 		if err != nil {
-			return ok, nodes, schemata, g.Error(err, "could not connect to %s", c.Name)
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not connect to %s", c.Name)
 		}
 		g.Debug("unfiltered nodes returned: %d", len(nodes))
 		if len(nodes) <= 20 {
@@ -229,12 +264,23 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 			ctx.Wg.Read.Wait()
 
 			if err = ctx.Err(); err != nil {
-				return ok, nodes, schemata, g.Error(err, "could not read files")
+				return ok, nodes, schemata, endpoints, g.Error(err, "could not read files")
 			}
 		}
 
+	case c.Type.IsAPI():
+		apiConn, err := c.AsAPI()
+		if err != nil {
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
+		}
+
+		endpoints, err = apiConn.ListEndpoints(opt.Pattern)
+		if err != nil {
+			return ok, nodes, schemata, endpoints, g.Error(err, "could not list endpoints from: %s", c.Name)
+		}
+
 	default:
-		return ok, nodes, schemata, g.Error("Unhandled connection type: %s", c.Type)
+		return ok, nodes, schemata, endpoints, g.Error("Unhandled connection type: %s", c.Type)
 	}
 
 	ok = true

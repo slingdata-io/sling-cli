@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	return
 }
 
+// Spec defines the complete API specification with endpoints and authentication
 type Spec struct {
 	Name           string         `yaml:"string" json:"string"`
 	Description    string         `yaml:"description" json:"description"`
@@ -47,6 +49,16 @@ type Spec struct {
 	OriginalMap map[string]any
 }
 
+func (s *Spec) IsDynamic() bool {
+	for _, e := range s.Endpoints {
+		if e.Dynamic.Iterate != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// Authentication defines how to authenticate with the API
 type Authentication struct {
 	Type              AuthType           `yaml:"type" json:"type"`
 	Token             string             `yaml:"token" json:"token"`
@@ -73,6 +85,7 @@ const (
 
 type AuthenticationFlow string
 
+// Endpoints is a collection of API endpoints
 type Endpoints []Endpoint
 
 // Endpoint is the top-level configuration structure
@@ -93,15 +106,22 @@ type Endpoint struct {
 	totalReqs int
 }
 
+func (eps Endpoints) Sort() {
+	sort.Slice(eps, func(i, j int) bool {
+		return eps[i].Name < eps[j].Name
+	})
+}
+
 // DynamicEndpoint is for configuring dynamic streams
 type DynamicEndpoint struct {
 	Iterate string `yaml:"iterate" json:"iterate,omitempty"`
 	Into    string `yaml:"into" json:"into,omitempty"`
 }
 
-// Calls are steps that are executed at different stages
+// Calls are steps that are executed at different stages of the API request lifecycle
 type Calls []Call
 
+// Call defines an executable action to be performed at a specific stage
 type Call interface {
 	ID() string
 	Type() CallType
@@ -125,14 +145,8 @@ const (
 	CallStagePost  CallStage = "post"  // called right after each stream finishes
 )
 
-// StateMap is a map of the state
+// StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any
-
-// StateValue represents the value of a state
-type StateValue struct {
-	Initial any  `yaml:"initial"`
-	Sync    bool `yaml:"sync"`
-}
 
 type HTTPMethod string
 
@@ -148,7 +162,7 @@ const (
 	MethodTrace   HTTPMethod = "TRACE"
 )
 
-// Request represents the request configuration
+// Request defines how to construct an HTTP request to the API
 type Request struct {
 	URL         string         `yaml:"url" json:"url,omitempty"`
 	Timeout     int            `yaml:"timeout" json:"timeout,omitempty"`
@@ -161,29 +175,21 @@ type Request struct {
 	Concurrency int            `yaml:"concurrency" json:"concurrency,omitempty"` // maximum concurrent requests
 }
 
-// Pagination represents the pagination configuration
+// Pagination configures how to navigate through multiple pages of API results
+
 type Pagination struct {
 	NextState     map[string]any `yaml:"next_state" json:"next_state,omitempty"`
 	StopCondition string         `yaml:"stop_condition" json:"stop_condition,omitempty"`
 }
 
-type PaginationType string
-
-const (
-	PaginationTypeNone   PaginationType = ""
-	PaginationTypeStep   PaginationType = "step"
-	PaginationTypeCursor PaginationType = "cursor"
-	PaginationTypeLink   PaginationType = "link"
-)
-
-// Response represents the response configuration
+// Response defines how to process the API response and extract records
 type Response struct {
 	Records    Records     `yaml:"records" json:"records"`
 	Processors []Processor `yaml:"processors" json:"processors,omitempty"`
 	Rules      []Rule      `yaml:"rules" json:"rules,omitempty"`
 }
 
-// Records represents the records configuration
+// Records configures how to extract and process data records from a response
 type Records struct {
 	JmesPath   string   `yaml:"jmespath" json:"jmespath,omitempty"` // for json or xml
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
@@ -194,12 +200,12 @@ type Records struct {
 type AggregationType string
 
 const (
-	AggregationTypeNone    AggregationType = ""
-	AggregationTypeMaximum AggregationType = "maximum"
-	AggregationTypeMinimum AggregationType = "minimum"
-	AggregationTypeFlatten AggregationType = "flatten"
-	AggregationTypeFirst   AggregationType = "first"
-	AggregationTypeLast    AggregationType = "last"
+	AggregationTypeNone    AggregationType = ""        // No aggregation, apply transformation at record level
+	AggregationTypeMaximum AggregationType = "maximum" // Keep the maximum value across records
+	AggregationTypeMinimum AggregationType = "minimum" // Keep the minimum value across records
+	AggregationTypeFlatten AggregationType = "flatten" // Collect all values into an array
+	AggregationTypeFirst   AggregationType = "first"   // Keep only the first encountered value
+	AggregationTypeLast    AggregationType = "last"    // Keep only the last encountered value
 )
 
 // Processor represents a way to process data
@@ -214,20 +220,33 @@ type Processor struct {
 type RuleType string
 
 const (
-	RuleTypeRetry RuleType = "retry"
-	RuleTypeStop  RuleType = "stop"
-	RuleTypeFail  RuleType = "fail"
+	RuleTypeRetry    RuleType = "retry"    // Retry the request up to MaxAttempts times
+	RuleTypeContinue RuleType = "continue" // Continue processing responses and rules
+	RuleTypeStop     RuleType = "stop"     // Stop processing requests for this endpoint
+	RuleTypeFail     RuleType = "fail"     // Stop processing and return an error
+)
+
+type BackoffType string
+
+const (
+	BackoffTypeNone        BackoffType = ""            // No delay between retries
+	BackoffTypeConstant    BackoffType = "constant"    // Fixed delay between retries
+	BackoffTypeLinear      BackoffType = "linear"      // Delay increases linearly with each attempt
+	BackoffTypeExponential BackoffType = "exponential" // Delay increases exponentially (common pattern)
+	BackoffTypeJitter      BackoffType = "jitter"      // Exponential backoff with randomization to avoid thundering herd
 )
 
 // Rule represents a response rule
 type Rule struct {
-	Action      RuleType `yaml:"action" json:"action"`
-	Condition   string   `yaml:"condition" json:"condition"` // an expression
-	MaxAttempts int      `yaml:"max_attempts" json:"max_attempts"`
-	Backoff     string   `yaml:"backoff" json:"backoff"`
-	Message     string   `yaml:"message" json:"message"`
+	Action      RuleType    `yaml:"action" json:"action"`
+	Condition   string      `yaml:"condition" json:"condition"` // an expression
+	MaxAttempts int         `yaml:"max_attempts" json:"max_attempts"`
+	Backoff     BackoffType `yaml:"backoff" json:"backoff"`
+	BackoffBase int         `yaml:"backoff_base" json:"backoff_base"` // base duration, number of seconds. default is 1
+	Message     string      `yaml:"message" json:"message"`
 }
 
+// SingleRequest represents a single HTTP request/response cycle
 type SingleRequest struct {
 	Records    []any          `yaml:"records" json:"records"`
 	Request    *RequestState  `yaml:"request" json:"request"`
@@ -262,6 +281,7 @@ func (lrs *SingleRequest) Map() map[string]any {
 	return vars
 }
 
+// RequestState captures the state of the HTTP request for reference and debugging
 type RequestState struct {
 	Method   string         `yaml:"method" json:"method"`
 	URL      string         `yaml:"url" json:"url"`
@@ -270,6 +290,7 @@ type RequestState struct {
 	Attempts int            `yaml:"attempts" json:"attempts"`
 }
 
+// ResponseState captures the state of the HTTP response for reference and debugging
 type ResponseState struct {
 	Status  int            `yaml:"status" json:"status"`
 	Headers map[string]any `yaml:"headers" json:"headers"`
@@ -277,6 +298,7 @@ type ResponseState struct {
 	JSON    any            `yaml:"json" json:"json"`
 }
 
+// AggregateState stores aggregated values during response processing
 type AggregateState struct {
 	value any
 	array []any

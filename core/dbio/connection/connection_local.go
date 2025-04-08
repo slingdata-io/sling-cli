@@ -11,6 +11,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/env"
@@ -44,14 +45,14 @@ func (ce ConnEntries) List() (fields []string, rows [][]any) {
 	return fields, rows
 }
 
-func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, err error) {
+func (ce ConnEntries) Discover(name string, opt *DiscoverOptions) (nodes filesys.FileNodes, schemata database.Schemata, endpoints api.Endpoints, err error) {
 	conn := ce.Get(name)
 	if name == "" {
-		return nodes, schemata, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
+		return nodes, schemata, endpoints, g.Error("Invalid Connection name: %s. Make sure it is created. See https://docs.slingdata.io/sling-cli/environment", name)
 	}
 
 	defer conn.Connection.Close()
-	_, nodes, schemata, err = conn.Connection.Discover(opt)
+	_, nodes, schemata, endpoints, err = conn.Connection.Discover(opt)
 	return
 }
 

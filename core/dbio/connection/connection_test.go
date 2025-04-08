@@ -232,7 +232,7 @@ func TestConnectionDiscover(t *testing.T) {
 			results := []string{}
 
 			opts := &DiscoverOptions{Pattern: test.pattern}
-			_, files, schemata, err := conn.Discover(opts)
+			_, files, schemata, endpoints, err := conn.Discover(opts)
 			if test.err {
 				assert.Error(t, err)
 				return
@@ -244,6 +244,9 @@ func TestConnectionDiscover(t *testing.T) {
 			}
 			for _, table := range schemata.Tables() {
 				results = append(results, table.FullName())
+			}
+			for _, endpoint := range endpoints {
+				results = append(results, endpoint.Name)
 			}
 
 			// assert that the streams are correct
