@@ -103,7 +103,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string) (df *iop.Dataflow, er
 				break
 			}
 		}
-		if endpoint.Name == "" {
+		if endpoint == nil {
 			return nil, g.Error("endpoint not found: %s", endpointName)
 		}
 		// set endpoint conn

@@ -237,12 +237,15 @@ type SingleRequest struct {
 	httpRespWg sync.WaitGroup `yaml:"-" json:"-"`
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
+	endpoint   *Endpoint      `yaml:"-" json:"-"`
 }
 
-func NewSingleRequest() *SingleRequest {
+func NewSingleRequest(ep *Endpoint) *SingleRequest {
+	ep.totalReqs++
 	return &SingleRequest{
-		id:        "r." + g.RandString(g.AlphaRunesLower, 4),
+		id:        g.F("r.%04d.%s", ep.totalReqs, g.RandString(g.AlphaRunesLower, 3)),
 		timestamp: time.Now().UnixMilli(),
+		endpoint:  ep,
 	}
 }
 

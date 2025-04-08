@@ -1065,6 +1065,11 @@ func ParseLocation(location string) (conn Connection, objectExpr string, err err
 	}
 
 	connName := stateConnParts[0]
+	if strings.TrimSpace(connName) == "" {
+		err = g.Error("invalid location value: '%s'. See docs for help", location)
+		return
+	}
+
 	objectExpr = strings.TrimPrefix(location, connName+"/")
 
 	entry := GetLocalConns().Get(connName)

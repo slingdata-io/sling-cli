@@ -26,6 +26,8 @@ func TestFunctions(t *testing.T) {
 		"someNil":   nil,
 		"someEmpty": "",
 		"null":      nil,
+		// Add a sample date with various parts for testing date_extract
+		"sampleDate": time.Date(2022, 3, 15, 14, 30, 45, 0, time.UTC),
 	}
 
 	testSuites := map[string][]test{}
@@ -744,6 +746,48 @@ func TestFunctions(t *testing.T) {
 		{"sort_map_keys", `sort(keys({"c": 1, "a": 2, "b": 3}))`, []any{"a", "b", "c"}, false},
 		// Fix the expected type to match the Range function's output (int64 instead of int)
 		{"sort_range", `equals(sort(range(5, 1, -1)), [1, 2, 3, 4, 5])`, true, false},
+	}
+
+	// Tests for date_extract operation
+	testSuites["date_extract"] = []test{
+		{"no_args", `date_extract()`, nil, true},
+		{"one_arg", `date_extract(sampleDate)`, nil, true},
+		{"invalid_time", `date_extract("not a time", "day")`, nil, true},
+		{"invalid_unit", `date_extract(sampleDate, "invalid")`, nil, true},
+		{"non_string_unit", `date_extract(sampleDate, 123)`, nil, true},
+
+		// Test extracting various parts
+		{"extract_second", `date_extract(sampleDate, "second")`, int64(45), false},
+		{"extract_minute", `date_extract(sampleDate, "minute")`, int64(30), false},
+		{"extract_hour", `date_extract(sampleDate, "hour")`, int64(14), false},
+		{"extract_day", `date_extract(sampleDate, "day")`, int64(15), false},
+		{"extract_month", `date_extract(sampleDate, "month")`, int64(3), false},
+		{"extract_quarter", `date_extract(sampleDate, "quarter")`, int64(1), false},
+		{"extract_year", `date_extract(sampleDate, "year")`, int64(2022), false},
+
+		// Test week extraction (March 15, 2022 is in week 11)
+		{"extract_week", `date_extract(sampleDate, "week")`, int64(11), false},
+
+		// Test day of week (March 15, 2022 is a Tuesday = 2)
+		{"extract_dayofweek", `date_extract(sampleDate, "dow")`, int64(2), false},
+
+		// Test day of year (March 15 is day 74 of the year)
+		{"extract_dayofyear", `date_extract(sampleDate, "doy")`, int64(74), false},
+
+		// Test abbreviations and plurals
+		{"extract_seconds_plural", `date_extract(sampleDate, "seconds")`, int64(45), false},
+		{"extract_minute_abbrev", `date_extract(sampleDate, "m")`, int64(30), false},
+		{"extract_hour_plural", `date_extract(sampleDate, "hours")`, int64(14), false},
+		{"extract_day_abbrev", `date_extract(sampleDate, "d")`, int64(15), false},
+		{"extract_month_plural", `date_extract(sampleDate, "months")`, int64(3), false},
+		{"extract_quarter_abbrev", `date_extract(sampleDate, "q")`, int64(1), false},
+		{"extract_year_abbrev", `date_extract(sampleDate, "y")`, int64(2022), false},
+
+		// Combination tests with other functions
+		{"extract_with_parsed_date", `date_extract(date_parse("2022-05-20 10:15:30", "auto"), "hour")`, int64(10), false},
+		{"extract_with_date_add", `date_extract(date_add(sampleDate, 1, "day"), "day")`, int64(16), false},
+		{"int_format_with_extract", `int_format(date_extract(sampleDate, "year"), "")`, "2022", false},
+		{"comparison_with_extract", `is_greater(date_extract(t2, "year"), date_extract(t1, "year"))`, true, false},
 	}
 
 	eval := goval.NewEvaluator()

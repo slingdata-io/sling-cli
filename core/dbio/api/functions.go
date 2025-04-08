@@ -45,6 +45,7 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	// default/fallback values
 	fMap["coalesce"] = fns.coalesce
 	fMap["value"] = fns.value
+	fMap["require"] = fns.require
 
 	// casting and conversions
 	fMap["date_parse"] = fns.dateParse
@@ -96,6 +97,7 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	fMap["date_trunc"] = fns.dateTrunc
 	fMap["date_last"] = fns.dateLastDay
 	fMap["date_first"] = fns.dateFirstDay
+	fMap["date_extract"] = fns.dateExtract
 
 	// utility functions
 	fMap["if"] = fns.ifThen
@@ -131,11 +133,24 @@ func (fns functions) coalesce(args ...any) (any, error) {
 	return nil, g.Error("invalid input")
 }
 
+// require: errors if no value is provided or value is nil
+func (fns functions) require(args ...any) (any, error) {
+	if len(args) == 0 {
+		return nil, g.Error("no input provided for require")
+	} else if len(args) != 1 {
+		return nil, g.Error("only one argument accepted for require")
+	}
+	if args[0] == nil {
+		return nil, g.Error("input required")
+	}
+	return args[0], nil // pass value as output
+}
+
 // value: return val2 if val1 is empty or null.
 func (fns functions) value(args ...any) (any, error) {
 	switch {
 	case len(args) == 0:
-		return nil, g.Error("no input provided for value")
+		return nil, g.Error("no arguments provided for value")
 	case len(args) == 1:
 		return args[0], nil
 	default:
@@ -152,13 +167,13 @@ func (fns functions) value(args ...any) (any, error) {
 	return nil, g.Error("invalid input")
 }
 
-// intParse: return casted to int64
+// intParse: return casted to int
 func (fns functions) intParse(args ...any) (any, error) {
 	if len(args) == 0 {
 		return nil, g.Error("no input provided for int")
 	}
 
-	val, err := cast.ToInt64E(args[0])
+	val, err := cast.ToIntE(args[0])
 	if err != nil {
 		return nil, g.Error("could not cast to int: %v", args[0])
 	}
@@ -219,7 +234,7 @@ func (fns functions) cast(args ...any) (any, error) {
 		return fns.dateParse(val, "auto")
 
 	case "integer", "int":
-		return cast.ToInt64E(val)
+		return cast.ToIntE(val)
 
 	case "float", "decimal":
 		return cast.ToFloat64E(val)
@@ -280,19 +295,19 @@ func (fns functions) Range(args ...any) (any, error) {
 		return nil, g.Error("range requires at least 2 arguments: start and end")
 	}
 
-	start, err := cast.ToInt64E(args[0])
+	start, err := cast.ToIntE(args[0])
 	if err != nil {
 		return nil, g.Error("could not cast start value to int: %v", args[0])
 	}
 
-	end, err := cast.ToInt64E(args[1])
+	end, err := cast.ToIntE(args[1])
 	if err != nil {
 		return nil, g.Error("could not cast end value to int: %v", args[1])
 	}
 
-	step := int64(1)
+	step := 1
 	if len(args) >= 3 {
-		step, err = cast.ToInt64E(args[2])
+		step, err = cast.ToIntE(args[2])
 		if err != nil {
 			return nil, g.Error("could not cast step value to int: %v", args[2])
 		}
@@ -301,7 +316,7 @@ func (fns functions) Range(args ...any) (any, error) {
 		}
 	}
 
-	result := []int64{}
+	result := []int{}
 	if step > 0 {
 		for i := start; i <= end; i += step {
 			result = append(result, i)
@@ -624,7 +639,7 @@ func (fns functions) intFormat(args ...any) (any, error) {
 		return nil, g.Error("intFormat requires at least 2 arguments: value and format")
 	}
 
-	val, err := cast.ToInt64E(args[0])
+	val, err := cast.ToIntE(args[0])
 	if err != nil {
 		return nil, g.Error("could not cast to int: %v", args[0])
 	}
@@ -1145,6 +1160,57 @@ func (fns functions) dateFirstDay(args ...any) (any, error) {
 	return fns.dateTrunc(args[0], truncUnit)
 }
 
+// dateExtract: requires 2 arguments, first is time, second is part/unit
+// Extracts the specified date/time part from a time var
+// units include: second, minute, hour, day, week, month, quarter, year
+func (fns functions) dateExtract(args ...any) (any, error) {
+	if len(args) < 2 {
+		return nil, g.Error("date_extract requires at least 2 arguments: time and unit")
+	}
+
+	t, err := fns.sp.CastToTime(args[0])
+	if err != nil {
+		return nil, g.Error("could not cast to time: %v", args[0])
+	}
+
+	unit, ok := args[1].(string)
+	if !ok {
+		return nil, g.Error("unit must be a string")
+	}
+
+	// Extract the specified part from the time
+	switch unit {
+	case "second", "seconds", "s":
+		return cast.ToInt(t.Second()), nil
+	case "minute", "minutes", "m":
+		return cast.ToInt(t.Minute()), nil
+	case "hour", "hours", "h":
+		return cast.ToInt(t.Hour()), nil
+	case "day", "days", "d":
+		return cast.ToInt(t.Day()), nil
+	case "week", "weeks", "w":
+		// Week of year (1-53)
+		_, week := t.ISOWeek()
+		return cast.ToInt(week), nil
+	case "month", "months":
+		return cast.ToInt(t.Month()), nil
+	case "quarter", "quarters", "q":
+		// Calculate quarter (1-4) based on month
+		quarter := (int(t.Month())-1)/3 + 1
+		return cast.ToInt(quarter), nil
+	case "year", "years", "y":
+		return cast.ToInt(t.Year()), nil
+	case "dow", "dayofweek":
+		// Day of week (0-6, Sunday=0)
+		return cast.ToInt(t.Weekday()), nil
+	case "doy", "dayofyear":
+		// Day of year (1-366)
+		return cast.ToInt(t.YearDay()), nil
+	default:
+		return nil, g.Error("unsupported unit for date_extract: %s", unit)
+	}
+}
+
 // dateAdd: add duration to a time
 func (fns functions) dateAdd(args ...any) (any, error) {
 	if len(args) < 2 {
@@ -1158,7 +1224,7 @@ func (fns functions) dateAdd(args ...any) (any, error) {
 
 	// If we have a third argument, it should be the unit
 	if len(args) >= 3 {
-		amount, err := cast.ToInt64E(args[1])
+		amount, err := cast.ToIntE(args[1])
 		if err != nil {
 			return nil, g.Error("invalid duration amount: %v", args[1])
 		}
@@ -1220,7 +1286,7 @@ func (fns functions) dateAdd(args ...any) (any, error) {
 		return t.Add(duration), nil
 	case int, int64, float64:
 		// If only seconds are provided
-		seconds, err := cast.ToInt64E(durArg)
+		seconds, err := cast.ToIntE(durArg)
 		if err != nil {
 			return nil, g.Error("invalid duration: %v", durArg)
 		}

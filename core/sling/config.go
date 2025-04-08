@@ -342,9 +342,9 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
-	} else if srcApiProvided && tgtFileProvided {
+	} else if srcApiProvided && srcStreamProvided && tgtFileProvided {
 		Type = ApiToFile
-	} else if srcApiProvided && tgtDbProvided {
+	} else if srcApiProvided && srcStreamProvided && tgtDbProvided {
 		Type = ApiToDB
 	}
 
