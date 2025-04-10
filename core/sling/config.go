@@ -702,6 +702,9 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
+	// set flatten to int
+	cfg.Source.Options.Flatten = cfg.Source.Flatten()
+
 	// done
 	cfg.Prepared = true
 	return
@@ -1297,6 +1300,20 @@ func (s *Source) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
+// Flatten returns the flatten depth
+func (s *Source) Flatten() int {
+	switch {
+	case s.Options.Flatten == nil:
+		return -1
+	case s.Options.Flatten == false || s.Options.Flatten == "false":
+		return -1
+	case s.Options.Flatten == true || s.Options.Flatten == "true":
+		return 0 // infinite depth
+	default:
+		return cast.ToInt(s.Options.Flatten)
+	}
+}
+
 func (s *Source) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", s.Conn),
@@ -1350,7 +1367,7 @@ func (t *Target) MD5() string {
 type SourceOptions struct {
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
-	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
+	Flatten        any                 `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Format         *dbio.FileType      `json:"format,omitempty" yaml:"format,omitempty"`

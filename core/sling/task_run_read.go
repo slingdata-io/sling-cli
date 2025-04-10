@@ -359,8 +359,12 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 
 	// sets metadata
 	// metadata := t.setGetMetadata()
-
-	df, err = srcConn.ReadDataflow(cfg.StreamName)
+	sCfg := api.APIStreamConfig{
+		Flatten:  cfg.Source.Flatten(),
+		JmesPath: g.PtrVal(cfg.Source.Options.JmesPath),
+		Select:   cfg.Source.Select,
+	}
+	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {
 		err = g.Error(err, "Could not ReadDataflow for %s", cfg.SrcConn.Type)
 		return t.df, err

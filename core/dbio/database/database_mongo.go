@@ -270,9 +270,9 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 	ds = iop.NewDatastreamContext(queryContext.Ctx, nil)
 
-	flatten := true
+	flatten := 0
 	if val := conn.GetProp("flatten"); val != "" {
-		flatten = cast.ToBool(val)
+		flatten = cast.ToInt(val)
 	}
 	js := iop.NewJSONStream(ds, cur, flatten, conn.GetProp("jmespath"))
 	js.HasMapPayload = true

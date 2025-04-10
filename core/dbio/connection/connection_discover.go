@@ -93,7 +93,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			println()
 			g.Info("testing endpoint: %#v", endpoint.Name)
-			df, err := apiClient.ReadDataflow(endpoint.Name)
+			df, err := apiClient.ReadDataflow(endpoint.Name, api.APIStreamConfig{Flatten: 1})
 			if err != nil {
 				return ok, g.Error(err, "error testing endpoint: %s", endpoint.Name)
 			}

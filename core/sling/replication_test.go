@@ -6,6 +6,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,7 +26,7 @@ streams:
 	replication, err := UnmarshalReplication(yaml)
 	assert.NoError(t, err)
 	if assert.NotEmpty(t, replication.Defaults.SourceOptions) {
-		assert.True(t, *replication.Defaults.SourceOptions.Flatten)
+		assert.True(t, cast.ToBool(replication.Defaults.SourceOptions.Flatten))
 		g.PP(replication.Defaults.SourceOptions)
 	}
 

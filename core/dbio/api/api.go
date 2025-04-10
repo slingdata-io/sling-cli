@@ -140,7 +140,13 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 	return endpoints, nil
 }
 
-func (ac *APIConnection) ReadDataflow(endpointName string) (df *iop.Dataflow, err error) {
+type APIStreamConfig struct {
+	Flatten  int
+	JmesPath string
+	Select   []string // select specific columns
+}
+
+func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
 	if !ac.State.Auth.Authenticated {
 		return nil, g.Error("not authenticated")
 	}
@@ -172,7 +178,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string) (df *iop.Dataflow, er
 	}
 
 	// start request process
-	ds, err := streamRequests(endpoint)
+	ds, err := streamRequests(endpoint, sCfg)
 	if err != nil {
 		return nil, g.Error(err, "could not stream requests")
 	}
@@ -481,7 +487,7 @@ func hasBrackets(expr string) bool {
 }
 
 var (
-	streamRequests = func(ep *Endpoint) (ds *iop.Datastream, err error) {
+	streamRequests = func(ep *Endpoint, sCfg APIStreamConfig) (ds *iop.Datastream, err error) {
 		return nil, g.Error("please use the official sling-cli release for reading APIs")
 	}
 	validateAndSetDefaults = func(ep *Endpoint, spec Spec) (err error) {

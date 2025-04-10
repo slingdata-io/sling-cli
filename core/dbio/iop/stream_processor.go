@@ -60,7 +60,7 @@ type StreamConfig struct {
 	FileMaxBytes      int64                    `json:"file_max_bytes"`
 	BatchLimit        int64                    `json:"batch_limit"`
 	MaxDecimals       int                      `json:"max_decimals"`
-	Flatten           bool                     `json:"flatten"`
+	Flatten           int                      `json:"flatten"`
 	FieldsPerRec      int                      `json:"fields_per_rec"`
 	Jmespath          string                   `json:"jmespath"`
 	Sheet             string                   `json:"sheet"`
@@ -372,7 +372,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 
 	if val, ok := configMap["flatten"]; ok {
-		sp.Config.Flatten = cast.ToBool(val)
+		sp.Config.Flatten = cast.ToInt(val)
 	}
 
 	if configMap["max_decimals"] != "" && configMap["max_decimals"] != "-1" {

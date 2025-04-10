@@ -368,9 +368,9 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 	ds = iop.NewDatastreamContext(ctx, iop.Columns{})
 
 	// Handle flattening option
-	flatten := true
+	flatten := 0
 	if val := conn.GetProp("flatten"); val != "" {
-		flatten = cast.ToBool(val)
+		flatten = cast.ToInt(val)
 	}
 
 	// Create a custom decoder for Elasticsearch scrolling
