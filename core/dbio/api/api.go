@@ -27,8 +27,9 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	ac = &APIConnection{
 		Context: g.NewContext(ctx),
 		State: &APIState{
-			Env:   g.KVArrToMap(os.Environ()...),
-			State: g.M(),
+			Env:    g.KVArrToMap(os.Environ()...),
+			State:  g.M(),
+			Queues: make(map[string]*Queue),
 		},
 		Spec: spec,
 		eval: goval.NewEvaluator(),
@@ -42,6 +43,22 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	}
 	if secrets, ok := data["secrets"]; ok {
 		if err = g.JSONConvert(secrets, &ac.State.Secrets); err != nil {
+			return ac, g.Error(err)
+		}
+	}
+
+	// set endpoint contexts
+	for i := range ac.Spec.Endpoints {
+		ac.Spec.Endpoints[i].context = g.NewContext(ac.Context.Ctx)
+	}
+
+	// register queues
+	for _, queueName := range ac.Spec.Queues {
+		if val := os.Getenv("SLING_THREADS"); cast.ToInt(val) > 1 {
+			g.Warn("API queues may not work correctly for multiple threads.")
+		}
+		_, err = ac.RegisterQueue(queueName)
+		if err != nil {
 			return ac, g.Error(err)
 		}
 	}
@@ -62,6 +79,8 @@ func (ac *APIConnection) Authenticate() (err error) {
 		token, err := ac.renderString(auth.Token)
 		if err != nil {
 			return g.Error(err, "could not render token")
+		} else if token == "" {
+			return g.Error(err, "no token was provided for bearer authentication")
 		}
 		ac.State.Auth.Authenticated = true
 		ac.State.Auth.Headers = map[string]string{
@@ -89,9 +108,19 @@ func (ac *APIConnection) Authenticate() (err error) {
 	return
 }
 
+// Close performs cleanup of all resources
+func (ac *APIConnection) Close() error {
+	ac.CloseAllQueues()
+	return nil
+}
+
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
-	endpoints = ac.Spec.Endpoints
+	for _, endpoint := range ac.Spec.Endpoints {
+		if !endpoint.Disabled {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
 
 	if ac.Spec.IsDynamic() {
 		// TODO: generate/obtain list of dynamic endpoints
@@ -138,6 +167,10 @@ func (ac *APIConnection) ReadDataflow(endpointName string) (df *iop.Dataflow, er
 		// TODO: perform pre-endpoint calls
 	}
 
+	if endpoint.Disabled {
+		return nil, g.Error(err, "endpoint is disabled in spec")
+	}
+
 	// start request process
 	ds, err := streamRequests(endpoint)
 	if err != nil {
@@ -156,6 +189,7 @@ type APIState struct {
 	Env     map[string]string `json:"env,omitempty"`
 	State   map[string]any    `json:"state,omitempty"`
 	Secrets map[string]any    `json:"secrets,omitempty"`
+	Queues  map[string]*Queue `json:"queues,omitempty"` // appends to file
 	Auth    APIStateAuth      `json:"auth,omitempty"`
 }
 
@@ -169,10 +203,22 @@ var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
 
 func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []string) map[string]any {
 
-	sections := []string{"env", "state", "secrets", "auth"}
+	sections := []string{"env", "state", "secrets", "auth", "sync"}
 
+	ac.Context.Lock()
 	statePayload := g.Marshal(ac.State)
 	stateMap, _ := g.UnmarshalMap(statePayload)
+
+	// Add queues to the state map
+	if ac.State.Queues != nil {
+		queueMap := g.M()
+		for name, queue := range ac.State.Queues {
+			queueMap[name] = queue // Store the queue name as a reference
+		}
+		stateMap["queue"] = queueMap
+	}
+
+	ac.Context.Unlock()
 
 	for mapKey, newVal := range extraMaps {
 		// non-map values
@@ -301,6 +347,75 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 	return output, nil
 }
 
+// GetSyncedState cycles through each endpoint, and collects the values
+// for each of the Endpoint.Sync values. Output is a
+// map[Endpoint.Name]map[Sync.value] = Endpoint.syncMap[Sync.value]
+func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]map[string]any, err error) {
+	data = make(map[string]map[string]any)
+
+	// Iterate through all endpoints
+	for _, endpoint := range ac.Spec.Endpoints {
+		// Skip if no sync values defined
+		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) {
+			continue
+		}
+
+		// Initialize map for this endpoint
+		data[endpoint.Name] = make(map[string]any)
+
+		// Collect each sync value from endpoint's state
+		for _, syncKey := range endpoint.Sync {
+			if val, ok := endpoint.syncMap[syncKey]; ok {
+				data[endpoint.Name][syncKey] = val
+			}
+		}
+	}
+
+	return data, nil
+}
+
+// PutSyncedState restores the state from previous run in each endpoint
+// using the Endpoint.Sync values.
+// Inputs is map[Endpoint.Name]map[Sync.value] = Endpoint.syncMap[Sync.value]
+func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map[string]any) (err error) {
+	// Iterate through all endpoints
+	for i := range ac.Spec.Endpoints {
+		endpoint := &ac.Spec.Endpoints[i]
+
+		// Skip if no sync values defined or no data for this endpoint
+		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) {
+			continue
+		}
+
+		endpointData, exists := data[endpoint.Name]
+		if !exists {
+			continue
+		}
+
+		// Initialize state map if nil
+		if endpoint.syncMap == nil {
+			endpoint.syncMap = make(StateMap)
+		}
+
+		// Restore each sync value to endpoint's state
+		for key, val := range endpointData {
+			// Only restore if it's in the sync list
+			for _, syncKey := range endpoint.Sync {
+				if syncKey == key {
+					endpoint.syncMap[key] = val
+					break
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Loop) (err error) {
+	return
+}
+
 // extractVars identifies variable references in a string expression,
 // ignoring those inside double quotes. It recognizes patterns like env.VAR,
 // state.VAR, secrets.VAR, and auth.VAR.
@@ -310,7 +425,7 @@ func extractVars(expr string) []string {
 
 	// Regular expression for finding variable references
 	// Matches env., state., secrets., auth. followed by a variable name
-	refRegex := regexp.MustCompile(`(env|state|secrets|auth|response|request)\.\w+`)
+	refRegex := regexp.MustCompile(`(env|state|secrets|auth|response|request|sync)\.\w+`)
 
 	// First, we need to identify string literals to exclude them
 	// Track positions of string literals
@@ -373,3 +488,62 @@ var (
 		return g.Error("please use the official sling-cli release for reading APIs")
 	}
 )
+
+// RegisterQueue creates a new queue with the given name
+// If a queue with the same name already exists, it is returned
+func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
+	ac.Context.Lock()
+	defer ac.Context.Unlock()
+
+	// Return existing queue if it exists
+	if q, exists := ac.State.Queues[name]; exists {
+		return q, nil
+	}
+
+	// Create new queue
+	q, err := NewQueue(name)
+	if err != nil {
+		return nil, err
+	}
+
+	// Register the queue
+	ac.State.Queues[name] = q
+	return q, nil
+}
+
+// GetQueue retrieves a queue by name
+func (ac *APIConnection) GetQueue(name string) (*Queue, bool) {
+	ac.Context.Lock()
+	defer ac.Context.Unlock()
+
+	q, exists := ac.State.Queues[name]
+	return q, exists
+}
+
+// RemoveQueue closes and removes a queue
+func (ac *APIConnection) RemoveQueue(name string) error {
+	ac.Context.Lock()
+	defer ac.Context.Unlock()
+
+	q, exists := ac.State.Queues[name]
+	if !exists {
+		return nil
+	}
+
+	err := q.Close()
+	delete(ac.State.Queues, name)
+	return err
+}
+
+// CloseAllQueues closes all queues associated with this connection
+func (ac *APIConnection) CloseAllQueues() {
+	ac.Context.Lock()
+	defer ac.Context.Unlock()
+
+	for name, queue := range ac.State.Queues {
+		if err := queue.Close(); err != nil {
+			g.Warn("failed to close queue %s: %v", name, err)
+		}
+		delete(ac.State.Queues, name)
+	}
+}

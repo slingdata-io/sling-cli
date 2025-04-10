@@ -30,6 +30,7 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	asJSON := os.Getenv("SLING_OUTPUT") == "json"
 
 	entries := connection.GetLocalConns()
+	defer connection.CloseAll()
 
 	env.SetTelVal("task_start_time", time.Now())
 	defer func() {
@@ -176,9 +177,15 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 	case "test":
 		env.SetTelVal("task", g.Marshal(g.M("type", sling.ConnTest)))
 		name := cast.ToString(c.Vals["name"])
+
 		if conn := entries.Get(name); conn.Name != "" {
 			env.SetTelVal("conn_type", conn.Connection.Type.String())
 			env.SetTelVal("conn_keys", lo.Keys(conn.Connection.Data))
+		}
+
+		// for testing specific endpoints
+		if endpoints := cast.ToString(c.Vals["endpoints"]); endpoints != "" {
+			os.Setenv("SLING_TEST_ENDPOINTS", endpoints)
 		}
 
 		ok, err = entries.Test(name)

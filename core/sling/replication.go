@@ -683,6 +683,7 @@ func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patter
 	} else if err = ac.Authenticate(); err != nil {
 		return wildcards, g.Error(err, "could not authenticate to api system for wildcard processing: %s", rd.Source)
 	}
+	defer c.Close() // close so we can re-initiate the queues on replication
 
 	for _, pattern := range patterns {
 		wildcard := Wildcard{Pattern: pattern, EndpointMap: map[string]api.Endpoint{}}

@@ -299,6 +299,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			}
 		} else if cfg.IsFileStreamWithStateAndParts() {
 			// OK, no need for update key
+		} else if srcApiProvided {
+			// OK, no need for update key/pk, API uses SLING_STATE for tracking
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
@@ -954,6 +956,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			m["target_account"] = cfg.Target.Data["account"]
 			m["target_container"] = cfg.Target.Data["container"]
 		}
+	}
+
+	if cfg.SrcConn.Type.IsAPI() {
+		m["stream_name"] = strings.ToLower(cfg.StreamName)
 	}
 
 	// pass env values

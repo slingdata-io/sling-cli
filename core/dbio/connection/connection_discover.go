@@ -65,11 +65,33 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not authenticate to %s", c.Name)
 		}
 
-		for i, endpoint := range apiClient.Spec.Endpoints {
+		var testEndpoints []string
+		if val := os.Getenv("SLING_TEST_ENDPOINTS"); val != "" {
+			testEndpoints = strings.Split(os.Getenv("SLING_TEST_ENDPOINTS"), ",")
+		}
+
+		endpoints, err := apiClient.ListEndpoints()
+		if err != nil {
+			return ok, g.Error(err, "could not list endpoints")
+		}
+
+		for i, endpoint := range endpoints {
+			// check for match to test (if provided)
+			allowTest := len(testEndpoints) == 0
+			for _, testEndpoint := range testEndpoints {
+				if strings.EqualFold(testEndpoint, endpoint.Name) {
+					allowTest = true
+				}
+			}
+			if !allowTest {
+				continue
+			}
+
 			// set limits for testing
 			endpoint.Response.Records.Limit = 10
 			apiClient.Spec.Endpoints[i] = endpoint
 
+			println()
 			g.Info("testing endpoint: %#v", endpoint.Name)
 			df, err := apiClient.ReadDataflow(endpoint.Name)
 			if err != nil {
@@ -82,6 +104,13 @@ func (c *Connection) Test() (ok bool, err error) {
 			}
 
 			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
+
+			records := data.Records()
+			if len(records) > 0 {
+				record := records[0]
+				g.Debug("   columns = %s", g.Marshal(lo.Keys(record)))
+			}
+
 		}
 
 	}

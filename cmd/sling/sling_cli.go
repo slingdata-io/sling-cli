@@ -269,6 +269,11 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "Set logging level to DEBUG.",
 				},
+				{
+					Name:        "endpoints",
+					Type:        "string",
+					Description: "The endpoint(s) to test, for API connections only",
+				},
 			},
 		},
 		{

@@ -261,6 +261,10 @@ func (c *Connection) Close() error {
 	if c.File != nil {
 		return c.File.Close()
 	}
+
+	if c.API != nil {
+		return c.API.Close()
+	}
 	return nil
 }
 

@@ -42,6 +42,7 @@ type Spec struct {
 	Name           string         `yaml:"string" json:"string"`
 	Description    string         `yaml:"description" json:"description"`
 	Calls          Calls          `yaml:"calls" json:"calls"`
+	Queues         []string       `yaml:"queues" json:"queues"`
 	Defaults       Endpoint       `yaml:"defaults" json:"defaults"`
 	Authentication Authentication `yaml:"authentication" json:"authentication"`
 	Endpoints      Endpoints      `yaml:"endpoints" json:"endpoints"`
@@ -90,20 +91,32 @@ type Endpoints []Endpoint
 
 // Endpoint is the top-level configuration structure
 type Endpoint struct {
-	Name        string          `yaml:"name" json:"name"`
-	Description string          `yaml:"description" json:"description,omitempty"`
-	State       StateMap        `yaml:"state" json:"state"`
-	Request     Request         `yaml:"request" json:"request"`
-	Pagination  Pagination      `yaml:"pagination" json:"pagination"`
-	Response    Response        `yaml:"response" json:"response"`
-	Dynamic     DynamicEndpoint `yaml:"dynamic" json:"dynamic"`
+	Name        string     `yaml:"name" json:"name"`
+	Description string     `yaml:"description" json:"description,omitempty"`
+	Docs        string     `yaml:"docs" json:"docs,omitempty"`
+	Disabled    bool       `yaml:"disabled" json:"disabled"`
+	State       StateMap   `yaml:"state" json:"state"`
+	Sync        []string   `yaml:"sync" json:"sync,omitempty"`
+	Request     Request    `yaml:"request" json:"request"`
+	Pagination  Pagination `yaml:"pagination" json:"pagination"`
+	Response    Response   `yaml:"response" json:"response"`
+	Dynamic     Loop       `yaml:"dynamic" json:"dynamic"`
 
-	index     int  // for jmespath lookup
-	stop      bool // whether we should stop
-	conn      *APIConnection
-	client    http.Client
-	eval      *goval.Evaluator
-	totalReqs int
+	index        int  // for jmespath lookup
+	stop         bool // whether we should stop the endpoint process
+	conn         *APIConnection
+	client       http.Client
+	eval         *goval.Evaluator
+	totalRecords int
+	totalReqs    int
+	syncMap      StateMap // values to sync
+	context      *g.Context
+}
+
+func (ep *Endpoint) SetStateVal(key string, val any) {
+	ep.context.Lock()
+	ep.State[key] = val
+	ep.context.Unlock()
 }
 
 func (eps Endpoints) Sort() {
@@ -112,10 +125,18 @@ func (eps Endpoints) Sort() {
 	})
 }
 
-// DynamicEndpoint is for configuring dynamic streams
-type DynamicEndpoint struct {
-	Iterate string `yaml:"iterate" json:"iterate,omitempty"`
-	Into    string `yaml:"into" json:"into,omitempty"`
+// Loop is for configuring looping values for requests
+type Loop struct {
+	Iterate    any    `yaml:"iterate" json:"iterate,omitempty"` // expression
+	Into       string `yaml:"into" json:"into,omitempty"`       // expression
+	iterations chan *Iteration
+}
+
+type Iteration struct {
+	counter int
+	field   string // state field
+	value   any    // state value
+	stop    bool   // whether to stop the iteration
 }
 
 // Calls are steps that are executed at different stages of the API request lifecycle
@@ -170,7 +191,7 @@ type Request struct {
 	Headers     map[string]any `yaml:"headers" json:"headers,omitempty"`
 	Parameters  map[string]any `yaml:"parameters" json:"parameters,omitempty"`
 	Payload     any            `yaml:"payload" json:"payload,omitempty"`
-	Loop        string         `yaml:"loop" json:"loop,omitempty"`               // state expression to use to loop
+	Loop        Loop           `yaml:"loop" json:"loop,omitempty"`               // state expression to use to loop
 	Rate        float64        `yaml:"rate" json:"rate,omitempty"`               // maximum request per second
 	Concurrency int            `yaml:"concurrency" json:"concurrency,omitempty"` // maximum concurrent requests
 }
@@ -207,6 +228,12 @@ const (
 	AggregationTypeFirst   AggregationType = "first"   // Keep only the first encountered value
 	AggregationTypeLast    AggregationType = "last"    // Keep only the last encountered value
 )
+
+var AggregationTypes = []AggregationType{
+	AggregationTypeNone, AggregationTypeMaximum,
+	AggregationTypeMinimum, AggregationTypeFlatten,
+	AggregationTypeFirst, AggregationTypeLast,
+}
 
 // Processor represents a way to process data
 // without aggregation, represents a transformation applied at record level
@@ -248,7 +275,6 @@ type Rule struct {
 
 // SingleRequest represents a single HTTP request/response cycle
 type SingleRequest struct {
-	Records    []any          `yaml:"records" json:"records"`
 	Request    *RequestState  `yaml:"request" json:"request"`
 	Response   *ResponseState `yaml:"response" json:"response"`
 	Aggregate  AggregateState `yaml:"-" json:"-"`
@@ -256,16 +282,25 @@ type SingleRequest struct {
 	httpRespWg sync.WaitGroup `yaml:"-" json:"-"`
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
+	iter       *Iteration     `yaml:"-" json:"-"` // the iteration that the req belongs to
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
 }
 
-func NewSingleRequest(ep *Endpoint) *SingleRequest {
+func NewSingleRequest(ep *Endpoint, iter *Iteration) *SingleRequest {
 	ep.totalReqs++
 	return &SingleRequest{
 		id:        g.F("r.%04d.%s", ep.totalReqs, g.RandString(g.AlphaRunesLower, 3)),
 		timestamp: time.Now().UnixMilli(),
 		endpoint:  ep,
+		iter:      iter,
 	}
+}
+
+func (lrs *SingleRequest) Records() []any {
+	if lrs.Response == nil || len(lrs.Response.Records) == 0 {
+		return make([]any, 0)
+	}
+	return lrs.Response.Records
 }
 
 func (lrs *SingleRequest) Debug(text string, args ...any) {
@@ -296,6 +331,7 @@ type ResponseState struct {
 	Headers map[string]any `yaml:"headers" json:"headers"`
 	Text    string         `yaml:"text" json:"text"`
 	JSON    any            `yaml:"json" json:"json"`
+	Records []any          `yaml:"records" json:"records"`
 }
 
 // AggregateState stores aggregated values during response processing

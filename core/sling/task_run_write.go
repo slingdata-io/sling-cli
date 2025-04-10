@@ -155,6 +155,10 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if len(df.Columns) == 0 {
 		err = g.Error("no stream columns detected")
 		return 0, err
+	} else if df.Columns[0].Name == "_sling_api_stream_no_data_" {
+		df.Collect()
+		g.Warn("no data or records found in source api stream, therefore no columns were detected. Sling cannot create a target table without columns.")
+		return 0, nil
 	}
 
 	// write directly to the final table (no temp table)

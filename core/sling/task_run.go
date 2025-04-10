@@ -259,7 +259,8 @@ func (t *TaskExecution) GetStateMap() map[string]any {
 
 func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnection, err error) {
 
-	conn, err = t.Config.SrcConn.AsAPIContext(ctx, t.isUsingPool())
+	// use cached connection so that we re-use the queues
+	conn, err = t.Config.SrcConn.AsAPIContext(ctx, true)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -524,12 +525,36 @@ func (t *TaskExecution) runApiToDb() (err error) {
 		return
 	}
 
+	if !t.isUsingPool() {
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
+	}
+
 	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
 
 	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
+	}
+
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		var syncState map[string]map[string]any
+		err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+		if err != nil {
+			err = g.Error(err, "Could not parse sync state value")
+			return err
+		}
+
+		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
+			err = g.Error(err, "Could not put API sync state value")
+			return err
+		}
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for storing state for APIs")
 	}
 
 	t.df, err = t.ReadFromApi(t.Config, srcConn)
@@ -548,11 +573,23 @@ func (t *TaskExecution) runApiToDb() (err error) {
 	}
 
 	elapsed := int(time.Since(start).Seconds())
-	t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+	if len(t.df.Columns) > 0 {
+		t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+	} else {
+		t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+	}
 
-	if cnt > 0 && t.Config.IsFileStreamWithStateAndParts() {
+	syncState, err := srcConn.GetSyncedState(t.Config.StreamName)
+	if err != nil {
+		err = g.Error(err, "could not get state to sync")
+		return
+	}
+
+	if cnt > 0 && len(syncState) > 0 && t.isIncrementalStateWithUpdateKey() {
+		syncStatePayload := g.Marshal(syncState)
+		t.Context.Map.Set("sync_state_payload", syncStatePayload)
 		if err = setIncrementalValueViaState(t); err != nil {
-			err = g.Error(err, "Could not set incremental value")
+			err = g.Error(err, "Could not set sync state")
 			return err
 		}
 	}
@@ -569,6 +606,27 @@ func (t *TaskExecution) runApiToFile() (err error) {
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
+	}
+
+	if t.isIncrementalStateWithUpdateKey() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+
+		var syncState map[string]map[string]any
+		err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+		if err != nil {
+			err = g.Error(err, "Could not parse sync state value")
+			return err
+		}
+
+		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
+			err = g.Error(err, "Could not put API sync state value")
+			return err
+		}
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for storing state for APIs")
 	}
 
 	t.df, err = t.ReadFromApi(t.Config, srcConn)
@@ -595,6 +653,21 @@ func (t *TaskExecution) runApiToFile() (err error) {
 
 	if t.df.Err() != nil {
 		err = g.Error(t.df.Err(), "Error in runApiToFile")
+	}
+
+	syncState, err := srcConn.GetSyncedState(t.Config.StreamName)
+	if err != nil {
+		err = g.Error(err, "could not get state to sync")
+		return
+	}
+
+	if cnt > 0 && len(syncState) > 0 && t.isIncrementalStateWithUpdateKey() {
+		syncStatePayload := g.Marshal(syncState)
+		t.Context.Map.Set("sync_state_payload", syncStatePayload)
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set sync state")
+			return err
+		}
 	}
 
 	return

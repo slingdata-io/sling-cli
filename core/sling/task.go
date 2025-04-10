@@ -380,16 +380,9 @@ func (t *TaskExecution) isUsingPool() bool {
 func (t *TaskExecution) getTargetObjectValue() string {
 
 	switch t.Type {
-	case FileToDB:
+	case FileToDB, ApiToDB, DbToDb:
 		return t.Config.Target.Object
-	case DbToDb:
-		return t.Config.Target.Object
-	case DbToFile:
-		if t.Config.Options.StdOut {
-			return "stdout"
-		}
-		return t.Config.TgtConn.URL()
-	case FileToFile:
+	case DbToFile, ApiToFile, FileToFile:
 		if t.Config.Options.StdOut {
 			return "stdout"
 		}
