@@ -439,10 +439,19 @@ func (data *Dataset) InferColumnTypes() {
 		}
 
 		for j, val := range row {
-			val = data.Sp.ParseString(strings.TrimSpace(cast.ToString(val)), j)
+			// cast.ToString does not work with maps
+			valStr, err := cast.ToStringE(val)
+			if err != nil {
+				valStr = g.Marshal(val)
+			}
+
+			val = data.Sp.ParseString(strings.TrimSpace(valStr), j)
 			columns[j].Stats.TotalCnt++
 
-			valStr := cast.ToString(val)
+			valStr, err = cast.ToStringE(val)
+			if err != nil {
+				valStr = g.Marshal(val)
+			}
 			l := len(valStr)
 			if val == nil || l == 0 || (data.Sp.Config.NullIf != "" && data.Sp.Config.NullIf == valStr) {
 				columns[j].Stats.NullCnt++
