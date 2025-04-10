@@ -148,7 +148,8 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 func (conn *DuckDbConn) Close() (err error) {
 	if conn.duck != nil {
 		err = conn.duck.Close()
-		if err == nil && !cast.ToBool(conn.GetProp("silent")) {
+		if err == nil && !cast.ToBool(conn.GetProp("silent")) &&
+			cast.ToBool(conn.GetProp("connected")) {
 			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 	}
