@@ -22,6 +22,9 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	// set endpoint index
 	for i := range spec.Endpoints {
 		spec.Endpoints[i].index = i
+		if spec.Endpoints[i].State == nil {
+			spec.Endpoints[i].State = g.M()
+		}
 	}
 
 	// set maps
