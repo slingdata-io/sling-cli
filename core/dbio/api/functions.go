@@ -79,6 +79,7 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	fMap["range"] = fns.Range
 	fMap["int_range"] = fns.intRange
 	fMap["date_range"] = fns.dateRange
+	fMap["chunk"] = fns.chunk
 
 	// comparison operations
 	fMap["is_greater"] = fns.isGreater
@@ -2280,6 +2281,99 @@ func (fns functions) dateDiff(args ...any) (any, error) {
 	default:
 		return nil, g.Error("unknown time unit: %s", unit)
 	}
+}
+
+type chunkResult struct {
+	Chan chan []any
+}
+
+// chunk : splits an array or queue into groups.
+func (fns functions) chunk(args ...any) (any, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("chunk expects at 2 arguments: object and chunk_size")
+	}
+
+	object := args[0]
+
+	chunkSize, err := cast.ToIntE(args[1])
+	if err != nil {
+		return nil, g.Error(err, "invalid chunk_size value: %#v", args[1])
+	}
+
+	if chunkSize <= 0 {
+		return nil, fmt.Errorf("chunk_size must be greater than 0")
+	}
+
+	// Use buffered channel to prevent blocking
+	chunkedChan := make(chan []any, 100)
+
+	switch objectV := object.(type) {
+	case *Queue:
+		go func() {
+			defer close(chunkedChan)
+
+			// Reset the queue to start from beginning
+			if err := objectV.Reset(); err != nil {
+				g.LogError(err, "failed to reset queue for chunking")
+				return
+			}
+
+			currentChunk := make([]any, 0, chunkSize)
+
+			for {
+				item, hasMore, err := objectV.Next()
+				if err != nil {
+					g.LogError(err, "error reading from queue")
+					return
+				}
+
+				if !hasMore {
+					// Send final chunk if not empty
+					if len(currentChunk) > 0 {
+						chunkedChan <- currentChunk
+					}
+					return
+				}
+
+				currentChunk = append(currentChunk, item)
+
+				if len(currentChunk) == chunkSize {
+					chunkedChan <- currentChunk
+					currentChunk = make([]any, 0, chunkSize)
+				}
+			}
+		}()
+
+	case []any:
+		go func() {
+			defer close(chunkedChan)
+
+			totalItems := len(objectV)
+			// Empty array fast path
+			if totalItems == 0 {
+				return
+			}
+
+			for i := 0; i < totalItems; i += chunkSize {
+				end := i + chunkSize
+				if end > totalItems {
+					end = totalItems
+				}
+
+				// Create a new slice for each chunk
+				chunk := make([]any, end-i)
+				copy(chunk, objectV[i:end])
+
+				chunkedChan <- chunk
+			}
+		}()
+
+	default:
+		close(chunkedChan) // Ensure channel is closed for invalid types
+		return nil, g.Error("invalid object for chunking, must be array or queue: %#v", object)
+	}
+
+	return chunkedChan, nil
 }
 
 func (fns functions) sort(args ...any) (any, error) {

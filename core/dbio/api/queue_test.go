@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -471,4 +472,149 @@ func TestQueue_CloseAndReopenScenario(t *testing.T) {
 		assert.True(t, hasMore)
 		assert.Equal(t, "session 1 data", item)
 	}
+}
+
+func TestChunkFunction(t *testing.T) {
+	// Create function instance
+	fns := functions{}
+
+	// Test array chunking
+	t.Run("Array Chunking", func(t *testing.T) {
+		// Create a test array
+		testArray := []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+		// Chunk with size 3
+		result, err := fns.chunk(testArray, 3)
+		assert.NoError(t, err)
+
+		// Verify result is a channel
+		chunkedChan, ok := result.(chan []any)
+		assert.True(t, ok, "Result should be a channel")
+
+		// Add timeout to prevent test hanging
+		chunks := [][]any{}
+		timeout := time.After(3 * time.Second)
+
+		done := make(chan bool)
+		go func() {
+			for chunk := range chunkedChan {
+				chunks = append(chunks, chunk)
+			}
+			done <- true
+		}()
+
+		// Wait for either completion or timeout
+		select {
+		case <-done:
+			// Success - continue with assertions
+		case <-timeout:
+			t.Fatal("Test timed out waiting for chunks")
+		}
+
+		// Verify chunks
+		assert.Equal(t, 4, len(chunks), "Should have 4 chunks")
+		assert.Equal(t, []any{1, 2, 3}, chunks[0])
+		assert.Equal(t, []any{4, 5, 6}, chunks[1])
+		assert.Equal(t, []any{7, 8, 9}, chunks[2])
+		assert.Equal(t, []any{10}, chunks[3], "Last chunk should have remaining elements")
+	})
+
+	t.Run("Queue Chunking", func(t *testing.T) {
+		// Create a test queue
+		q, err := NewQueue("test-chunk-queue")
+		assert.NoError(t, err)
+		defer q.Close()
+
+		// Add test data
+		for i := 1; i <= 10; i++ {
+			err = q.Append(i)
+			assert.NoError(t, err)
+		}
+
+		// Chunk with size 4
+		result, err := fns.chunk(q, 4)
+		assert.NoError(t, err)
+
+		// Verify result is a channel
+		chunkedChan, ok := result.(chan []any)
+		assert.True(t, ok, "Result should be a channel")
+
+		// Read all chunks
+		chunks := [][]any{}
+		for chunk := range chunkedChan {
+			chunks = append(chunks, chunk)
+		}
+
+		// Verify chunks
+		assert.Equal(t, 3, len(chunks), "Should have 3 chunks")
+		assert.Equal(t, 4, len(chunks[0]), "First chunk should have 4 elements")
+		assert.Equal(t, 4, len(chunks[1]), "Second chunk should have 4 elements")
+		assert.Equal(t, 2, len(chunks[2]), "Third chunk should have 2 elements")
+
+		// Check values (accounting for JSON numbers as float64)
+		assert.Equal(t, float64(1), chunks[0][0])
+		assert.Equal(t, float64(5), chunks[1][0])
+		assert.Equal(t, float64(9), chunks[2][0])
+	})
+
+	t.Run("Invalid Arguments", func(t *testing.T) {
+		// Test with wrong number of arguments
+		_, err := fns.chunk([]any{1, 2, 3})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "expects at 2 arguments")
+
+		// Test with invalid chunk size
+		_, err = fns.chunk([]any{1, 2, 3}, "not-a-number")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid chunk_size")
+
+		// Test with negative chunk size
+		_, err = fns.chunk([]any{1, 2, 3}, -1)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be greater than 0")
+
+		// Test with invalid object type
+		_, err = fns.chunk("not-an-array-or-queue", 2)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid object for chunking")
+	})
+
+	t.Run("Empty Array", func(t *testing.T) {
+		// Test with empty array
+		result, err := fns.chunk([]any{}, 3)
+		assert.NoError(t, err)
+
+		chunkedChan, ok := result.(chan []any)
+		assert.True(t, ok, "Result should be a channel")
+
+		// Channel should close without sending any chunks
+		chunks := [][]any{}
+		for chunk := range chunkedChan {
+			chunks = append(chunks, chunk)
+		}
+
+		assert.Equal(t, 0, len(chunks), "Should have no chunks for empty array")
+	})
+
+	t.Run("Empty Queue", func(t *testing.T) {
+		// Create an empty queue
+		q, err := NewQueue("test-empty-queue")
+		assert.NoError(t, err)
+		defer q.Close()
+
+		// Chunk the empty queue
+		result, err := fns.chunk(q, 3)
+		assert.NoError(t, err)
+
+		chunkedChan, ok := result.(chan []any)
+		assert.True(t, ok, "Result should be a channel")
+
+		// Channel should close without sending any chunks
+		chunks := [][]any{}
+		for chunk := range chunkedChan {
+			chunks = append(chunks, chunk)
+		}
+
+		assert.Equal(t, 0, len(chunks), "Should have no chunks for empty queue")
+	})
 }
