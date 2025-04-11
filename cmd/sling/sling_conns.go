@@ -38,7 +38,10 @@ func processConns(c *g.CliSC) (ok bool, err error) {
 		env.SetTelVal("task_end_time", time.Now())
 	}()
 
-	if cast.ToBool(c.Vals["debug"]) {
+	if cast.ToBool(c.Vals["trace"]) {
+		os.Setenv("DEBUG", "TRACE")
+		env.InitLogger()
+	} else if cast.ToBool(c.Vals["debug"]) {
 		os.Setenv("DEBUG", "LOW")
 		env.InitLogger()
 	}

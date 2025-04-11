@@ -163,15 +163,19 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Source.Where = cast.ToString(v)
 		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
-		case "debug":
-			cfg.Options.Debug = cast.ToBool(v)
-			if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
-				os.Setenv("DEBUG", "LOW")
-				env.SetLogger()
-			}
 		case "examples":
 			showExamples = cast.ToBool(v)
 		}
+	}
+
+	if val := c.Vals["trace"]; val != nil {
+		cfg.Options.Debug = cast.ToBool(val)
+		os.Setenv("DEBUG", "TRACE")
+		env.InitLogger()
+	} else if val := c.Vals["debug"]; val != nil {
+		cfg.Options.Debug = cast.ToBool(val)
+		os.Setenv("DEBUG", "LOW")
+		env.InitLogger()
 	}
 
 	if showExamples {
