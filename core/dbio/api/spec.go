@@ -114,6 +114,7 @@ type Endpoint struct {
 	totalReqs    int
 	syncMap      StateMap // values to sync
 	context      *g.Context
+	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
