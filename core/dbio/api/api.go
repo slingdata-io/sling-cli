@@ -233,6 +233,7 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []str
 	ac.Context.Lock()
 	statePayload := g.Marshal(ac.State)
 	stateMap, _ := g.UnmarshalMap(statePayload)
+	stateMap["null"] = nil
 
 	// Add queues to the state map
 	if ac.State.Queues != nil {
