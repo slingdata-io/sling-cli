@@ -3,6 +3,7 @@ package connection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -1100,6 +1101,34 @@ func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
 		parsedURL, err := url.Parse(gitURL)
 		if err != nil {
 			return "", err
+		}
+
+		// Check if it's a GitHub Gist
+		if parsedURL.Host == "gist.github.com" {
+			// Gist URL format: https://gist.github.com/username/gistid
+			pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+			if len(pathParts) < 2 {
+				return "", errors.New("invalid GitHub Gist URL format")
+			}
+
+			// Extract username and gistID
+			username := pathParts[0]
+			gistID := pathParts[1]
+
+			// Filename would be the third component if specified
+			filename := ""
+			if len(pathParts) > 2 {
+				filename = pathParts[2]
+			}
+
+			// If no specific file is requested, we'll get all raw files
+			if filename == "" {
+				// Format: https://gist.githubusercontent.com/username/gistid/raw
+				return fmt.Sprintf("https://gist.githubusercontent.com/%s/%s/raw", username, gistID), nil
+			}
+
+			// Format: https://gist.githubusercontent.com/username/gistid/raw/filename
+			return fmt.Sprintf("https://gist.githubusercontent.com/%s/%s/raw/%s", username, gistID, filename), nil
 		}
 
 		// Determine the host and set raw domain

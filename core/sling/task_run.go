@@ -537,16 +537,18 @@ func (t *TaskExecution) runApiToDb() (err error) {
 		return
 	}
 
-	if t.isIncrementalStateWithUpdateKey() {
+	if t.isIncrementalState() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
 		var syncState map[string]map[string]any
-		err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
-		if err != nil {
-			err = g.Error(err, "Could not parse sync state value")
-			return err
+		if t.Config.IncrementalVal != nil {
+			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+			if err != nil {
+				err = g.Error(err, "Could not parse sync state value")
+				return err
+			}
 		}
 
 		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
@@ -585,7 +587,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 		return
 	}
 
-	if cnt > 0 && len(syncState) > 0 && t.isIncrementalStateWithUpdateKey() {
+	if cnt > 0 && len(syncState) > 0 && t.isIncrementalState() {
 		syncStatePayload := g.Marshal(syncState)
 		t.Context.Map.Set("sync_state_payload", syncStatePayload)
 		if err = setIncrementalValueViaState(t); err != nil {
@@ -608,17 +610,19 @@ func (t *TaskExecution) runApiToFile() (err error) {
 		return
 	}
 
-	if t.isIncrementalStateWithUpdateKey() {
+	if t.isIncrementalState() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
 
 		var syncState map[string]map[string]any
-		err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
-		if err != nil {
-			err = g.Error(err, "Could not parse sync state value")
-			return err
+		if t.Config.IncrementalVal != nil {
+			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+			if err != nil {
+				err = g.Error(err, "Could not parse sync state value")
+				return err
+			}
 		}
 
 		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
@@ -661,7 +665,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 		return
 	}
 
-	if cnt > 0 && len(syncState) > 0 && t.isIncrementalStateWithUpdateKey() {
+	if cnt > 0 && len(syncState) > 0 && t.isIncrementalState() {
 		syncStatePayload := g.Marshal(syncState)
 		t.Context.Map.Set("sync_state_payload", syncStatePayload)
 		if err = setIncrementalValueViaState(t); err != nil {

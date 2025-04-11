@@ -71,10 +71,22 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 // save payload in APIState.Auth
 func (ac *APIConnection) Authenticate() (err error) {
 	auth := ac.Spec.Authentication
+
+	// set auth data
+	setAuthenticated := func() {
+		ac.State.Auth.Authenticated = true
+		for i := range ac.Spec.Endpoints {
+			for k, v := range ac.State.Auth.Headers {
+				ac.Spec.Endpoints[i].Request.Headers[k] = v
+			}
+		}
+	}
+
 	switch auth.Type {
 	case AuthTypeNone:
 		ac.State.Auth.Authenticated = true
 		return nil
+
 	case AuthTypeBearer:
 		token, err := ac.renderString(auth.Token)
 		if err != nil {
@@ -82,26 +94,25 @@ func (ac *APIConnection) Authenticate() (err error) {
 		} else if token == "" {
 			return g.Error(err, "no token was provided for bearer authentication")
 		}
-		ac.State.Auth.Authenticated = true
-		ac.State.Auth.Headers = map[string]string{
-			"Authorization": g.F("Bearer %s", token),
-		}
+		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
+		setAuthenticated()
 		return nil
+
 	case AuthTypeBasic:
 		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
 		if err != nil {
 			return g.Error(err, "could not render user-password")
 		}
 		credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
-		ac.State.Auth.Headers = map[string]string{
-			"Authorization": g.F("Basic %s", credentialsB64),
-		}
-		ac.State.Auth.Authenticated = true
+		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
+		setAuthenticated()
 		return nil
+
 	case AuthTypeOAuth2:
 		// TODO: implement various OAuth2 flows
+
 	default:
-		ac.State.Auth.Authenticated = true
+		setAuthenticated()
 		return nil
 	}
 
@@ -186,6 +197,14 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	df, err = iop.MakeDataFlow(ds)
 	if err != nil {
 		return nil, g.Error(err, "could not make dataflow")
+	}
+
+	// now that columns are detected, set the metadata for PK
+	if len(df.Buffer) > 0 {
+		err = df.Columns.SetKeys(iop.PrimaryKey, endpoint.Response.Records.PrimaryKey...)
+		if err != nil {
+			return nil, g.Error(err, "could not set primary key column")
+		}
 	}
 
 	return
@@ -371,7 +390,7 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 
 		// Collect each sync value from endpoint's state
 		for _, syncKey := range endpoint.Sync {
-			if val, ok := endpoint.syncMap[syncKey]; ok {
+			if val, ok := endpoint.State[syncKey]; ok {
 				data[endpoint.Name][syncKey] = val
 			}
 		}
@@ -389,7 +408,7 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 		endpoint := &ac.Spec.Endpoints[i]
 
 		// Skip if no sync values defined or no data for this endpoint
-		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) {
+		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) || len(data) == 0 {
 			continue
 		}
 
