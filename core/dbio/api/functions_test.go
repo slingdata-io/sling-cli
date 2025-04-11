@@ -60,9 +60,9 @@ func TestFunctions(t *testing.T) {
 
 	testSuites["int_parse"] = []test{
 		{"no_args", `int_parse()`, nil, true},
-		{"int_value", `int_parse(42)`, int64(42), false},
-		{"float_value", `int_parse(42.0)`, int64(42), false},
-		{"string_numeric", `int_parse("42")`, int64(42), false},
+		{"int_value", `int_parse(42)`, 42, false},
+		{"float_value", `int_parse(42.0)`, 42, false},
+		{"string_numeric", `int_parse("42")`, 42, false},
 		{"invalid_string", `int_parse("abc")`, nil, true},
 	}
 
@@ -77,20 +77,20 @@ func TestFunctions(t *testing.T) {
 		{"non-string_second_arg", `split("a,b,c", 123)`, []string{"a,b,c"}, false},
 	}
 
-	testSuites["range"] = []test{
-		{"no_args", `range()`, nil, true},
-		{"one_arg", `range(5)`, nil, true},
-		{"simple_range", `range(1, 5)`, []int64{1, 2, 3, 4, 5}, false},
-		{"single_value_range", `range(3, 3)`, []int64{3}, false},
-		{"range_with_step", `range(1, 10, 2)`, []int64{1, 3, 5, 7, 9}, false},
-		{"negative_range", `range(5, 1, -1)`, []int64{5, 4, 3, 2, 1}, false},
-		{"zero_step", `range(1, 5, 0)`, nil, true},
-		{"string_start", `range("1", 5)`, []int64{1, 2, 3, 4, 5}, false},
-		{"string_end", `range(1, "5")`, []int64{1, 2, 3, 4, 5}, false},
-		{"string_step", `range(1, 10, "2")`, []int64{1, 3, 5, 7, 9}, false},
-		{"non-numeric_start", `range("abc", 5)`, nil, true},
-		{"non-numeric_end", `range(1, "abc")`, nil, true},
-		{"non-numeric_step", `range(1, 5, "abc")`, nil, true},
+	testSuites["int_range"] = []test{
+		{"no_args", `int_range()`, nil, true},
+		{"one_arg", `int_range(5)`, nil, true},
+		{"simple_range", `int_range(1, 5)`, []int{1, 2, 3, 4, 5}, false},
+		{"single_value_range", `int_range(3, 3)`, []int{3}, false},
+		{"range_with_step", `int_range(1, 10, 2)`, []int{1, 3, 5, 7, 9}, false},
+		{"negative_range", `int_range(5, 1, -1)`, []int{5, 4, 3, 2, 1}, false},
+		{"zero_step", `int_range(1, 5, 0)`, nil, true},
+		{"string_start", `int_range("1", 5)`, []int{1, 2, 3, 4, 5}, false},
+		{"string_end", `int_range(1, "5")`, []int{1, 2, 3, 4, 5}, false},
+		{"string_step", `int_range(1, 10, "2")`, []int{1, 3, 5, 7, 9}, false},
+		{"non-numeric_start", `int_range("abc", 5)`, nil, true},
+		{"non-numeric_end", `int_range(1, "abc")`, nil, true},
+		{"non-numeric_step", `int_range(1, 5, "abc")`, nil, true},
 	}
 
 	testSuites["greatest"] = []test{
@@ -120,10 +120,10 @@ func TestFunctions(t *testing.T) {
 	}
 
 	testSuites["combined"] = []test{
-		{"range_with_max", `greatest(range(1, 10))`, int64(10), false},
-		{"range_with_min", `least(range(1, 10))`, int64(1), false},
+		{"range_with_max", `greatest(int_range(1, 10))`, 10, false},
+		{"range_with_min", `least(int_range(1, 10))`, 1, false},
 		{"split_with_max", `greatest(split("1,5,3,7", ","))`, "7", false},
-		{"int_with_split", `int_parse(element(split("1,5,3", ","), 1))`, int64(5), false},
+		{"int_with_split", `int_parse(element(split("1,5,3", ","), 1))`, 5, false},
 		{"value_with_variables", `value(someVar, "default")`, "actual", false},
 		{"value_with_nil_variables", `value(someNil, "default")`, "default", false},
 		{"value_with_empty_variables", `value(someEmpty, "default")`, "default", false},
@@ -234,11 +234,11 @@ func TestFunctions(t *testing.T) {
 		{"to_string_from_nil", `cast(nil, "string")`, nil, false},
 
 		// Int casting
-		{"int_parse_from_string", `cast("42", "int")`, int64(42), false},
+		{"int_parse_from_string", `cast("42", "int")`, 42, false},
 		{"int_parse_from_invalid_string", `cast("abc", "int")`, nil, true},
-		{"int_parse_from_float", `cast(42.7, "int")`, int64(42), false},
-		{"int_parse_from_bool_true", `cast(true, "int")`, int64(1), false},
-		{"int_parse_from_bool_false", `cast(false, "int")`, int64(0), false},
+		{"int_parse_from_float", `cast(42.7, "int")`, 42, false},
+		{"int_parse_from_bool_true", `cast(true, "int")`, 1, false},
+		{"int_parse_from_bool_false", `cast(false, "int")`, 0, false},
 		{"int_parse_from_nil", `cast(nil, "int")`, nil, false},
 
 		// Float casting
@@ -745,7 +745,7 @@ func TestFunctions(t *testing.T) {
 		{"sort_split", `sort(split("c,a,b", ","))`, []any{"a", "b", "c"}, false},
 		{"sort_map_keys", `sort(keys({"c": 1, "a": 2, "b": 3}))`, []any{"a", "b", "c"}, false},
 		// Fix the expected type to match the Range function's output (int64 instead of int)
-		{"sort_range", `equals(sort(range(5, 1, -1)), [1, 2, 3, 4, 5])`, true, false},
+		{"sort_range", `equals(sort(int_range(5, 1, -1)), [1, 2, 3, 4, 5])`, true, false},
 	}
 
 	// Tests for date_extract operation
@@ -757,37 +757,141 @@ func TestFunctions(t *testing.T) {
 		{"non_string_unit", `date_extract(sampleDate, 123)`, nil, true},
 
 		// Test extracting various parts
-		{"extract_second", `date_extract(sampleDate, "second")`, int64(45), false},
-		{"extract_minute", `date_extract(sampleDate, "minute")`, int64(30), false},
-		{"extract_hour", `date_extract(sampleDate, "hour")`, int64(14), false},
-		{"extract_day", `date_extract(sampleDate, "day")`, int64(15), false},
-		{"extract_month", `date_extract(sampleDate, "month")`, int64(3), false},
-		{"extract_quarter", `date_extract(sampleDate, "quarter")`, int64(1), false},
-		{"extract_year", `date_extract(sampleDate, "year")`, int64(2022), false},
+		{"extract_second", `date_extract(sampleDate, "second")`, 45, false},
+		{"extract_minute", `date_extract(sampleDate, "minute")`, 30, false},
+		{"extract_hour", `date_extract(sampleDate, "hour")`, 14, false},
+		{"extract_day", `date_extract(sampleDate, "day")`, 15, false},
+		{"extract_month", `date_extract(sampleDate, "month")`, 3, false},
+		{"extract_quarter", `date_extract(sampleDate, "quarter")`, 1, false},
+		{"extract_year", `date_extract(sampleDate, "year")`, 2022, false},
 
 		// Test week extraction (March 15, 2022 is in week 11)
-		{"extract_week", `date_extract(sampleDate, "week")`, int64(11), false},
+		{"extract_week", `date_extract(sampleDate, "week")`, 11, false},
 
 		// Test day of week (March 15, 2022 is a Tuesday = 2)
-		{"extract_dayofweek", `date_extract(sampleDate, "dow")`, int64(2), false},
+		{"extract_dayofweek", `date_extract(sampleDate, "dow")`, 2, false},
 
 		// Test day of year (March 15 is day 74 of the year)
-		{"extract_dayofyear", `date_extract(sampleDate, "doy")`, int64(74), false},
+		{"extract_dayofyear", `date_extract(sampleDate, "doy")`, 74, false},
 
 		// Test abbreviations and plurals
-		{"extract_seconds_plural", `date_extract(sampleDate, "seconds")`, int64(45), false},
-		{"extract_minute_abbrev", `date_extract(sampleDate, "m")`, int64(30), false},
-		{"extract_hour_plural", `date_extract(sampleDate, "hours")`, int64(14), false},
-		{"extract_day_abbrev", `date_extract(sampleDate, "d")`, int64(15), false},
-		{"extract_month_plural", `date_extract(sampleDate, "months")`, int64(3), false},
-		{"extract_quarter_abbrev", `date_extract(sampleDate, "q")`, int64(1), false},
-		{"extract_year_abbrev", `date_extract(sampleDate, "y")`, int64(2022), false},
+		{"extract_seconds_plural", `date_extract(sampleDate, "seconds")`, 45, false},
+		{"extract_minute_abbrev", `date_extract(sampleDate, "m")`, 30, false},
+		{"extract_hour_plural", `date_extract(sampleDate, "hours")`, 14, false},
+		{"extract_day_abbrev", `date_extract(sampleDate, "d")`, 15, false},
+		{"extract_month_plural", `date_extract(sampleDate, "months")`, 3, false},
+		{"extract_quarter_abbrev", `date_extract(sampleDate, "q")`, 1, false},
+		{"extract_year_abbrev", `date_extract(sampleDate, "y")`, 2022, false},
 
 		// Combination tests with other functions
-		{"extract_with_parsed_date", `date_extract(date_parse("2022-05-20 10:15:30", "auto"), "hour")`, int64(10), false},
-		{"extract_with_date_add", `date_extract(date_add(sampleDate, 1, "day"), "day")`, int64(16), false},
+		{"extract_with_parsed_date", `date_extract(date_parse("2022-05-20 10:15:30", "auto"), "hour")`, 10, false},
+		{"extract_with_date_add", `date_extract(date_add(sampleDate, 1, "day"), "day")`, 16, false},
 		{"int_format_with_extract", `int_format(date_extract(sampleDate, "year"), "")`, "2022", false},
 		{"comparison_with_extract", `is_greater(date_extract(t2, "year"), date_extract(t1, "year"))`, true, false},
+	}
+
+	testSuites["date_range"] = []test{
+		{"no_args", `date_range()`, nil, true},
+		{"one_arg", `date_range(t1)`, nil, true},
+		{"invalid_start", `date_range("not a date", t2)`, nil, true},
+		{"invalid_end", `date_range(t1, "not a date")`, nil, true},
+		{"zero_step", `date_range(t1, t2, 0, "day")`, nil, true},
+		{"negative_step", `date_range(t1, t2, -1, "day")`, nil, true},
+		{"invalid_unit", `date_range(t1, t2, 1, "invalid")`, nil, true},
+
+		// Test with duration string format - test full array values
+		{"minute_duration_string", `date_range(date_parse("2022-01-01 00:00:00", "auto"), date_parse("2022-01-01 00:04:00", "auto"), "1m")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 1, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 2, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 3, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 4, 0, 0, time.UTC),
+			}, false},
+		{"day_duration_string", `date_range(date_parse("2022-01-01", "auto"), date_parse("2022-01-05", "auto"), "1d")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 2, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 3, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 4, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 5, 0, 0, 0, 0, time.UTC),
+			}, false},
+		{"month_duration_string", `date_range(date_parse("2022-01-01", "auto"), date_parse("2022-03-01", "auto"), "1m")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 2, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 3, 1, 0, 0, 0, 0, time.UTC),
+			}, false},
+
+		// Test with step and unit format
+		{"minute_step_unit", `date_range(date_parse("2022-01-01 00:00:00", "auto"), date_parse("2022-01-01 00:04:00", "auto"), 1, "minute")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 1, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 2, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 3, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 4, 0, 0, time.UTC),
+			}, false},
+
+		// Test with larger steps
+		{"two_day_step", `date_range(date_parse("2022-01-01", "auto"), date_parse("2022-01-07", "auto"), 2, "days")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 3, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 5, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 7, 0, 0, 0, 0, time.UTC),
+			}, false},
+		{"two_month_step", `date_range(date_parse("2022-01-01", "auto"), date_parse("2022-07-01", "auto"), 2, "months")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 3, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 5, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 7, 1, 0, 0, 0, 0, time.UTC),
+			}, false},
+
+		// Test edge cases like month boundaries
+		{"month_with_day_preservation", `date_range(date_parse("2022-01-31", "auto"), date_parse("2022-04-30", "auto"), "1m")`,
+			[]time.Time{
+				time.Date(2022, 1, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 2, 28, 0, 0, 0, 0, time.UTC), // February has only 28 days in 2022
+				time.Date(2022, 3, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 4, 30, 0, 0, 0, 0, time.UTC),
+			}, false},
+		{"leap_year_handling", `date_range(date_parse("2020-01-31", "auto"), date_parse("2020-03-31", "auto"), "1m")`,
+			[]time.Time{
+				time.Date(2020, 1, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2020, 2, 29, 0, 0, 0, 0, time.UTC), // February has 29 days in 2020 (leap year)
+				time.Date(2020, 3, 31, 0, 0, 0, 0, time.UTC),
+			}, false},
+
+		// Test with hour steps
+		{"hour_step", `date_range(date_parse("2022-01-01 00:00:00", "auto"), date_parse("2022-01-01 04:00:00", "auto"), "2h")`,
+			[]time.Time{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 2, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 4, 0, 0, 0, time.UTC),
+			}, false},
+
+		// Keep one existing test to ensure backward compatibility
+		{"verify_days", `date_format(element(date_range(date_parse("2022-01-01", "auto"), date_parse("2022-01-03", "auto"), "1d"), 1), "%Y-%m-%d")`, "2022-01-02", false},
+
+		// Test crossing year boundary
+		{"year_boundary", `date_range(date_parse("2022-12-30", "auto"), date_parse("2023-01-02", "auto"), "1d")`,
+			[]time.Time{
+				time.Date(2022, 12, 30, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 12, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC),
+			}, false},
+
+		// Test year increment
+		{"year_increment", `date_range(date_parse("2020-01-01", "auto"), date_parse("2023-01-01", "auto"), "1y")`,
+			[]time.Time{
+				time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+			}, false},
 	}
 
 	eval := goval.NewEvaluator()
