@@ -363,6 +363,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Flatten:  cfg.Source.Flatten(),
 		JmesPath: g.PtrVal(cfg.Source.Options.JmesPath),
 		Select:   cfg.Source.Select,
+		Limit:    cfg.Source.Limit(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {

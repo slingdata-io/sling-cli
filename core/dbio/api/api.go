@@ -155,6 +155,7 @@ type APIStreamConfig struct {
 	Flatten  int
 	JmesPath string
 	Select   []string // select specific columns
+	Limit    int
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
