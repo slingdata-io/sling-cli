@@ -84,7 +84,7 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
 		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
 	}
 	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)

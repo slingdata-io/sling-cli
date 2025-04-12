@@ -505,7 +505,15 @@ func (t Type) Quote(field string, normalize ...bool) string {
 func (t Type) QuoteNames(names ...string) (newNames []string) {
 	newNames = make([]string, len(names))
 	for i := range names {
-		newNames[i] = t.Quote(names[i])
+		newNames[i] = t.Quote(names[i], false)
+	}
+	return newNames
+}
+
+func (t Type) QuoteNamesNormalize(names ...string) (newNames []string) {
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = t.Quote(names[i], true)
 	}
 	return newNames
 }

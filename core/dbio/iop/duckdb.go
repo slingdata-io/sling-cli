@@ -1203,7 +1203,7 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	if len(fields) == 0 || fields[0] == "*" {
 		fields = []string{"*"}
 	} else {
-		fields = dbio.TypeDbDuckDb.QuoteNames(fields...)
+		fields = dbio.TypeDbDuckDb.QuoteNamesNormalize(fields...)
 	}
 
 	selectStreamScanner := dbio.TypeDbDuckDb.GetTemplateValue("core.select_stream_scanner")

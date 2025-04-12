@@ -126,18 +126,17 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		}
 	}
 
-	// TODO: need to validate the source table types are casted
-	// into the target column type
 	tgtCols, err := tgtConn.ValidateColumnNames(
 		tgtColumns,
 		tmpColumns.Names(),
-		true,
+		false,
 	)
 	if err != nil {
 		err = g.Error(err, "columns mismatched")
 		return
 	}
 
+	tgtFields := tgtConn.GetType().QuoteNames(tgtCols.Names()...)
 	srcFields := tgtConn.CastColumnsForSelect(tmpColumns, tgtColumns)
 
 	srcTable, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
@@ -156,7 +155,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		tgtConn.Template().Core["insert_from_table"],
 		"tgt_table", tgtTable.FullName(),
 		"src_table", srcTable.FullName(),
-		"tgt_fields", strings.Join(tgtCols.Names(), ", "),
+		"tgt_fields", strings.Join(tgtFields, ", "),
 		"src_fields", strings.Join(srcFields, ", "),
 	)
 	_, err = tgtConn.Exec(sql)

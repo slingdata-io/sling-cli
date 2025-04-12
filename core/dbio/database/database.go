@@ -2548,39 +2548,48 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	pkFieldMap := map[string]string{}
 	pkEqualFields := []string{}
 	for _, pkField := range pkFields {
-		pkEqualField := g.F("src.%s = tgt.%s", pkField, pkField)
+		// don't normalize, use raw name
+		srcCol := srcColumns.GetColumn(conn.Unquote(pkField))
+		tgtCol := tgtColumns.GetColumn(conn.Unquote(pkField))
+		srcField := conn.Quote(srcCol.Name, false)
+		tgtField := conn.Quote(tgtCol.Name, false)
+
+		pkEqualField := g.F("src.%s = tgt.%s", srcField, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
 		pkFieldMap[pkField] = ""
 	}
 
-	cols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
+	tgtCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := conn.Type.QuoteNames(cols.Names()...)
+	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
 	insertFields := []string{}
 	placeholderFields := []string{}
-	for _, srcColName := range cols.Names() {
-		srcCol := g.PtrVal(srcColumns.GetColumn(srcColName)) // should be found
-		colNameQ := conn.Quote(srcCol.Name)
-		tgtCol := tgtColumns.GetColumn(srcCol.Name)
+	for _, tgtColName := range tgtCols.Names() {
+		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
+		tgtCol := tgtColumns.GetColumn(tgtColName)
 		if tgtCol == nil {
-			return nil, g.Error("did not find target column: %s (has %s)", srcCol.Name, g.Marshal(tgtColumns.Names()))
+			return nil, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
 		}
+
+		// don't normalize, use raw name
+		srcColNameQ := conn.Quote(srcCol.Name, false)
+		tgtColNameQ := conn.Quote(tgtCol.Name, false)
 
 		colExpr := conn.Self().CastColumnForSelect(srcCol, *tgtCol)
 
-		insertFields = append(insertFields, colNameQ)
+		insertFields = append(insertFields, tgtColNameQ)
 
-		phExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("ph.%s", colNameQ))
+		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
-		if _, ok := pkFieldMap[colNameQ]; !ok {
+		if _, ok := pkFieldMap[srcColNameQ]; !ok {
 			// is not a pk field
-			setSrcExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("src.%s", colNameQ))
-			setField := g.F("%s = %s", colNameQ, setSrcExpr)
+			setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+			setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
 	}
@@ -2789,9 +2798,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.GetType().QuoteNamesNormalize(fields...) // add quotes
 		updatedFields := append(
-			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
+			conn.GetType().QuoteNamesNormalize(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -2830,9 +2839,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.GetType().QuoteNamesNormalize(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
+		updatedFields = conn.GetType().QuoteNamesNormalize(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),

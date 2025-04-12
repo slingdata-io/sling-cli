@@ -90,7 +90,7 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
