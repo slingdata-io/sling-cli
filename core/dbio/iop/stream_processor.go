@@ -448,6 +448,7 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	columnTransforms := makeColumnTransforms(transformsPayload)
 	sp.Config.transforms = map[string]TransformList{}
 	for key, names := range columnTransforms {
+		key = strings.ToLower(key)
 		sp.Config.transforms[key] = TransformList{}
 		for _, name := range names {
 			t, ok := TransformsMap[name]

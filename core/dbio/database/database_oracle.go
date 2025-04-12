@@ -589,7 +589,7 @@ func (conn *OracleConn) GenerateInsertStatement(tableName string, cols iop.Colum
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *OracleConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name, false)
+	qName := conn.Self().Quote(srcCol.Name)
 	srcDbType := strings.ToLower(srcCol.DbType)
 	tgtDbType := strings.ToLower(tgtCol.DbType)
 	tgtCol.DbPrecision = lo.Ternary(tgtCol.DbPrecision == 0, 4000, tgtCol.DbPrecision)

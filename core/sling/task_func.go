@@ -126,11 +126,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		}
 	}
 
-	tgtCols, err := tgtConn.ValidateColumnNames(
-		tgtColumns,
-		tmpColumns.Names(),
-		false,
-	)
+	tgtCols, err := tgtConn.ValidateColumnNames(tgtColumns, tmpColumns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatched")
 		return
@@ -205,16 +201,19 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 
 	// get target columns to match update-key
 	// in case column casing needs adjustment
-	targetCols, _ := pullTargetTableColumns(cfg, tgtConn, false)
+	targetCols, err := pullTargetTableColumns(cfg, tgtConn, false)
 	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
-		return // target table does not exist
+		if err == nil {
+			g.Warn(`did not find update_key "%s" in target table: %s`, tgtUpdateKey, table.FullName())
+		}
+		return // target columns does not exist
 	}
 
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		tgtConn.Quote(tgtUpdateKey, false),
+		tgtConn.Quote(tgtUpdateKey),
 		table.FDQN(),
 	)
 

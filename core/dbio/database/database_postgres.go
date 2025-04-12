@@ -84,7 +84,7 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
 	}
 	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
@@ -228,7 +228,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name, false)
+	qName := conn.Self().Quote(srcCol.Name)
 
 	switch {
 	case srcCol.IsString() && srcCol.Type != iop.JsonType && tgtCol.Type == iop.JsonType:

@@ -90,7 +90,7 @@ func (conn *ProtonConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{partition_by}", partitionBy)
@@ -150,7 +150,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				defer conn.Rollback()
 			}
 
-			insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
+			insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names())
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}

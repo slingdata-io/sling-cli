@@ -545,7 +545,6 @@ func (cols Columns) Dataset() Dataset {
 // Coerce casts columns into specified types
 func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 	newCols = cols
-	colMap := castCols.FieldMap(true)
 	for i, col := range newCols {
 		if !hasHeader && len(castCols) == len(newCols) {
 			// assume same order since same number of columns and no header
@@ -563,8 +562,8 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 			continue
 		}
 
-		if j, found := colMap[strings.ToLower(col.Name)]; found {
-			col = castCols[j]
+		if castCol := castCols.GetColumn(col.Name); castCol != nil {
+			col = *castCol
 			if col.Type.IsValid() {
 				g.Debug("casting column '%s' as '%s'", col.Name, col.Type)
 				newCols[i].Type = col.Type
@@ -1266,11 +1265,14 @@ func FormatValue(val any, columnType ColumnType, connType dbio.Type) (newVal str
 type ColumnCasing string
 
 const (
-	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
-	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
-	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
-	UpperColumnCasing  ColumnCasing = "upper"  // make it upper case
-	LowerColumnCasing  ColumnCasing = "lower"  // make it lower case
+	// see https://github.com/slingdata-io/sling-cli/issues/538
+	NormalizeColumnCasing ColumnCasing = "normalize" // normalize to target, leaves mixed cases columns as it
+	SourceColumnCasing    ColumnCasing = "source"    // keeps source column name casing. The default.
+	TargetColumnCasing    ColumnCasing = "target"    // converts casing according to target database. Lower-case for files.
+	SnakeColumnCasing     ColumnCasing = "snake"     // converts snake casing according to target database. Lower-case for files.
+	UpperColumnCasing     ColumnCasing = "upper"     // make it upper case
+	LowerColumnCasing     ColumnCasing = "lower"     // make it lower case
+
 )
 
 // Equals evaluates equality for column casing (pointer safe)
@@ -1294,7 +1296,17 @@ var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
 // Apply applies column casing to provided name.
 // If cc is nil or SourceColumnCasing, it returns the original value
 func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
-	if cc.IsEmpty() || cc.Equals(SourceColumnCasing) {
+	if cc.IsEmpty() || cc.Equals(NormalizeColumnCasing) {
+		// use legacy behavior, so that we don't need to qualify column name where querying
+		if !dbio.HasVariedCase(name) && !dbio.HasStrangeChar(name) {
+			if tgtConnType.DBNameUpperCase() {
+				name = strings.ToUpper(name)
+			} else {
+				name = strings.ToLower(name)
+			}
+		}
+		return name
+	} else if cc.Equals(SourceColumnCasing) {
 		return name
 	}
 

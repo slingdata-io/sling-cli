@@ -482,16 +482,16 @@ func (t Type) Unquote(field string) string {
 }
 
 // Quote adds quotes to the field name
-func (t Type) Quote(field string, normalize ...bool) string {
-	Normalize := true
-	if len(normalize) > 0 {
-		Normalize = normalize[0]
-	}
+func (t Type) Quote(field string) string {
+	// don't normalize, causes issues.
+	// see https://github.com/slingdata-io/sling-cli/issues/538
+	// we should determine the casing upstream, configuration phase
+	Normalize := false
 
 	template, _ := t.Template()
 	// always normalize if case is uniform. Why would you quote and not normalize?
-	if !hasVariedCase(field) && Normalize {
-		if g.In(t, TypeDbOracle, TypeDbSnowflake) {
+	if !HasVariedCase(field) && Normalize {
+		if t.DBNameUpperCase() {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
@@ -505,20 +505,12 @@ func (t Type) Quote(field string, normalize ...bool) string {
 func (t Type) QuoteNames(names ...string) (newNames []string) {
 	newNames = make([]string, len(names))
 	for i := range names {
-		newNames[i] = t.Quote(names[i], false)
+		newNames[i] = t.Quote(names[i])
 	}
 	return newNames
 }
 
-func (t Type) QuoteNamesNormalize(names ...string) (newNames []string) {
-	newNames = make([]string, len(names))
-	for i := range names {
-		newNames[i] = t.Quote(names[i], true)
-	}
-	return newNames
-}
-
-func hasVariedCase(text string) bool {
+func HasVariedCase(text string) bool {
 	hasUpper := false
 	hasLower := false
 	for _, c := range text {
@@ -534,6 +526,17 @@ func hasVariedCase(text string) bool {
 	}
 
 	return hasUpper && hasLower
+}
+
+// HasStrangeChar returns true if the text has a non-typical SQL database ID character.
+// Should only allow characters: a-z, A-Z, 0-9 and _
+func HasStrangeChar(text string) bool {
+	for _, r := range text {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return true
+		}
+	}
+	return false
 }
 
 func (t Type) GetTemplateValue(path string) (value string) {

@@ -71,14 +71,14 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	distKey := ""
 	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{dist_key}", distKey)
 
 	sortKey := ""
 	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{sort_key}", sortKey)
@@ -365,7 +365,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
 	}
 
-	tgtColumns := conn.GetType().QuoteNamesNormalize(columns.Names()...)
+	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
 
 	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)
@@ -391,7 +391,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name, false)
+	qName := conn.Self().Quote(srcCol.Name)
 
 	switch {
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:

@@ -423,7 +423,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 	transactColumns, err := conn.GetColumns(db.schema + ".transact")
 	g.AssertNoError(t, err)
 
-	insCols, err := conn.ValidateColumnNames(personColumns, []string{"first_name", "last_name", "email"}, true)
+	insCols, err := conn.ValidateColumnNames(personColumns, []string{"first_name", "last_name", "email"})
 	g.AssertNoError(t, err)
 	personInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".person",
@@ -431,7 +431,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 		1,
 	)
 
-	insCols, err = conn.ValidateColumnNames(placeColumns, []string{"country", "city", "telcode"}, true)
+	insCols, err = conn.ValidateColumnNames(placeColumns, []string{"country", "city", "telcode"})
 	g.AssertNoError(t, err)
 	placeInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".place",
@@ -439,7 +439,7 @@ func DBTest(t *testing.T, db *testDB, conn Connection) {
 		1,
 	)
 
-	insCols, err = conn.ValidateColumnNames(transactColumns, []string{"date_time", "description", "amount"}, true)
+	insCols, err = conn.ValidateColumnNames(transactColumns, []string{"date_time", "description", "amount"})
 	g.AssertNoError(t, err)
 	transactInsertStatement := conn.GenerateInsertStatement(
 		db.schema+".transact",
@@ -1109,7 +1109,6 @@ func TestCastColumnsForSelect(t *testing.T) {
 	tgtFields, err := conn.ValidateColumnNames(
 		tgtColumns,
 		srcColumns.Names(),
-		true,
 	)
 	g.AssertNoError(t, err)
 
@@ -1123,6 +1122,7 @@ func TestCastColumnsForSelect(t *testing.T) {
 	g.P(srcFields)
 
 	err = conn.DropTable(`public.tgt1`, `public.src1`)
+	g.AssertNoError(t, err)
 }
 
 func TestGetSQLColumnsLarge(t *testing.T) {

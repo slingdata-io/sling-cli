@@ -180,7 +180,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		mux.Lock()
 		defer mux.Unlock()
 
-		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names())
 		if err != nil {
 			return g.Error(err, "columns mismatch")
 		}
@@ -319,20 +319,20 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 
 	if len(primaryKeyCols) > 0 {
 		tableDistro = "primary"
-		distroColNames = conn.GetType().QuoteNamesNormalize(primaryKeyCols.Names()...)
+		distroColNames = conn.GetType().QuoteNames(primaryKeyCols.Names()...)
 	} else if len(dupKeyCols) > 0 {
 		tableDistro = "duplicate"
-		distroColNames = conn.GetType().QuoteNamesNormalize(dupKeyCols.Names()...)
+		distroColNames = conn.GetType().QuoteNames(dupKeyCols.Names()...)
 	} else if len(aggKeyCols) > 0 {
 		tableDistro = "aggregate"
-		distroColNames = conn.GetType().QuoteNamesNormalize(aggKeyCols.Names()...)
+		distroColNames = conn.GetType().QuoteNames(aggKeyCols.Names()...)
 	} else if len(uniqueKeyCols) > 0 {
 		tableDistro = "unique"
-		distroColNames = conn.GetType().QuoteNamesNormalize(uniqueKeyCols.Names()...)
+		distroColNames = conn.GetType().QuoteNames(uniqueKeyCols.Names()...)
 	}
 
 	// set hash key
-	hashColNames := conn.GetType().QuoteNamesNormalize(hashKeyCols.Names()...)
+	hashColNames := conn.GetType().QuoteNames(hashKeyCols.Names()...)
 	ddl = strings.ReplaceAll(ddl, "{hash_key}", strings.Join(hashColNames, ", "))
 
 	// set table distribution type & keys

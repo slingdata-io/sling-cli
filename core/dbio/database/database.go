@@ -121,7 +121,7 @@ type Connection interface {
 	PropsArr() []string
 	Query(sql string, options ...map[string]interface{}) (iop.Dataset, error)
 	QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (iop.Dataset, error)
-	Quote(field string, normalize ...bool) string
+	Quote(field string) string
 	RenameTable(table string, newTable string) (err error)
 	Rollback() error
 	RunAnalysis(string, map[string]interface{}) (iop.Dataset, error)
@@ -137,7 +137,7 @@ type Connection interface {
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
-	ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error)
+	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
@@ -2056,7 +2056,7 @@ func (conn *BaseConn) GetAnalysis(analysisName string, values map[string]interfa
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *BaseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) string {
-	return conn.Self().Quote(srcCol.Name, false)
+	return conn.Self().Quote(srcCol.Name)
 }
 
 // CastColumnsForSelect cast the source columns into the target Column types
@@ -2076,7 +2076,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 		}
 
 		// don't normalize name, leave as is
-		selectExpr := conn.Self().Quote(srcCol.Name, false)
+		selectExpr := conn.Self().Quote(srcCol.Name)
 
 		if srcCol.DbType != tgtCol.DbType {
 			g.Debug(
@@ -2103,7 +2103,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 
 // ValidateColumnNames verifies that source fields are present in the target table
 // It will return quoted field names as `newColNames`, the same length as `colNames`
-func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error) {
+func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error) {
 
 	mismatches := []string{}
 	for _, colName := range colNames {
@@ -2112,11 +2112,6 @@ func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string
 			// src field is missing in tgt field
 			mismatches = append(mismatches, g.F("source field '%s' is missing in target table", colName))
 			continue
-		}
-		if quote {
-			newCol.Name = conn.Self().Quote(newCol.Name)
-		} else {
-			newCol.Name = conn.Self().Unquote(newCol.Name)
 		}
 		newCols = append(newCols, *newCol)
 	}
@@ -2165,8 +2160,8 @@ func (conn *BaseConn) Unquote(field string) string {
 }
 
 // Quote adds quotes to the field name
-func (conn *BaseConn) Quote(field string, normalize ...bool) string {
-	return conn.Type.Quote(field, normalize...)
+func (conn *BaseConn) Quote(field string) string {
+	return conn.Type.Quote(field)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2298,7 +2293,6 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(col.Stats))
 		}
 
-		// normalize column name uppercase/lowercase
 		columnDDL := conn.Self().Quote(col.Name) + " " + nativeType
 		columnsDDL = append(columnsDDL, columnDDL)
 	}
@@ -2539,21 +2533,21 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		return
 	}
 
-	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields, true)
+	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields)
 	if err != nil {
 		err = g.Error(err, "PK columns mismatch")
 		return
 	}
 
 	var pkEqualFields, srcPkFields, tgtPkFields []string
-	pkFields = pkCols.Names()
+	pkFields = conn.Type.QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
-	for _, pkField := range pkFields {
+	for _, pkField := range pkCols.Names() {
 		// don't normalize, use raw name
-		srcCol := srcColumns.GetColumn(conn.Unquote(pkField))
-		tgtCol := tgtColumns.GetColumn(conn.Unquote(pkField))
-		srcField := conn.Quote(srcCol.Name, false)
-		tgtField := conn.Quote(tgtCol.Name, false)
+		srcCol := srcColumns.GetColumn(pkField)
+		tgtCol := tgtColumns.GetColumn(pkField)
+		srcField := conn.Quote(srcCol.Name)
+		tgtField := conn.Quote(tgtCol.Name)
 
 		srcPkFields = append(srcPkFields, srcField)
 		tgtPkFields = append(tgtPkFields, tgtField)
@@ -2563,7 +2557,7 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		pkFieldMap[pkField] = ""
 	}
 
-	tgtCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
+	tgtCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
@@ -2581,8 +2575,8 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		}
 
 		// don't normalize, use raw name
-		srcColNameQ := conn.Quote(srcCol.Name, false)
-		tgtColNameQ := conn.Quote(tgtCol.Name, false)
+		srcColNameQ := conn.Quote(srcCol.Name)
+		tgtColNameQ := conn.Quote(tgtCol.Name)
 
 		colExpr := conn.Self().CastColumnForSelect(srcCol, *tgtCol)
 
@@ -2590,7 +2584,7 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 
 		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
-		if _, ok := pkFieldMap[srcColNameQ]; !ok {
+		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
 			setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
 			setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
@@ -2804,9 +2798,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = conn.GetType().QuoteNamesNormalize(fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			conn.GetType().QuoteNamesNormalize(table.Columns.Names()...), // add quotes
+			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -2845,9 +2839,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = conn.GetType().QuoteNamesNormalize(fields...) // add quotes
+		fields = conn.GetType().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = conn.GetType().QuoteNamesNormalize(updatedFields...) // add quotes
+		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),
@@ -2909,7 +2903,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	}
 
 	// make sure columns exist in table, get common columns into cols
-	cols, err := conn.ValidateColumnNames(tColumns, columns.Names(), false)
+	cols, err := conn.ValidateColumnNames(tColumns, columns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return

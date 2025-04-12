@@ -220,7 +220,7 @@ func (conn *SnowflakeConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 		// allow custom SQL expression for clustering
 		clusterBy = g.F("cluster by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNamesNormalize(keyCols.Names()...)
+		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F("cluster by (%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{cluster_by}", clusterBy)
@@ -1154,7 +1154,7 @@ func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Co
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name, false)
+	qName := conn.Self().Quote(srcCol.Name)
 	srcDbType := strings.ToUpper(string(srcCol.DbType))
 	tgtDbType := strings.ToUpper(string(tgtCol.DbType))
 

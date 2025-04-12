@@ -182,6 +182,8 @@ func (t *TaskExecution) GetTargetTable(tempTableSuffix ...string) (tTable databa
 		tTable.Name = tTable.Name + tempTableSuffix[0]
 	}
 
+	tTable.Columns = t.Config.Target.columns
+
 	return
 }
 

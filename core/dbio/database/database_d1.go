@@ -623,7 +623,7 @@ func (conn *D1Conn) InsertBatchStream(tableFName string, ds *iop.Datastream) (co
 	insertBatch := func(bColumns iop.Columns, rows [][]interface{}) error {
 		defer insertContext.Wg.Write.Done()
 
-		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names())
 		if err != nil {
 			return g.Error(err, "columns mismatch")
 		}

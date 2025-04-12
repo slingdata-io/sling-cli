@@ -212,7 +212,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Prepare dataflow
-	sampleData, err := prepareDataflow(t, df, tgtConn)
+	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
 	if err != nil {
 		return 0, err
 	}
@@ -410,7 +410,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// Prepare dataflow
-	sampleData, err := prepareDataflow(t, df, tgtConn)
+	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
 	if err != nil {
 		return 0, err
 	}
@@ -695,7 +695,7 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 	return nil
 }
 
-func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
+func prepareDataflowForWriteDB(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
 
 	// if final target column is string and source col is uuid, we need to match type
 	// otherwise, there could be a upper case/lower case difference, since sling now supports uuid type

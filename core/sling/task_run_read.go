@@ -88,7 +88,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if cfg.IncrementalValStr != "" {
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"value", cfg.IncrementalValStr,
 				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
 			)
@@ -125,7 +125,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.backfill_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"start_value", startValue,
 				"end_value", endValue,
 			)
@@ -146,7 +146,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			)
 		} else {
 			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
@@ -157,7 +157,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"incremental_value", cfg.IncrementalValStr,
 			)
 		}
@@ -166,7 +166,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		cfg.Source.Where = g.R(
 			cfg.Source.Where,
 			"incremental_where_cond", incrementalWhereCond,
-			"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+			"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			"incremental_value", cfg.IncrementalValStr,
 		)
 	}

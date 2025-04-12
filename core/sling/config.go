@@ -1480,7 +1480,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
-	ColumnCasing:   g.Ptr(iop.SourceColumnCasing),
+	ColumnCasing:   g.Ptr(iop.NormalizeColumnCasing),
 }
 
 var TargetDBOptionsDefault = TargetOptions{
@@ -1494,7 +1494,7 @@ var TargetDBOptionsDefault = TargetOptions{
 	AdjustColumnType: g.Bool(false),
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
-	ColumnCasing:     g.Ptr(iop.SourceColumnCasing),
+	ColumnCasing:     g.Ptr(iop.NormalizeColumnCasing),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
@@ -1639,7 +1639,7 @@ func castKeyArray(keyI any) (key []string) {
 		if keyV == nil {
 			return []string{}
 		}
-		return keyV
+		return append([]string{}, keyV...)
 	case string:
 		if keyV == "" {
 			return []string{}

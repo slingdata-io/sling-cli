@@ -1001,7 +1001,7 @@ func (t *Table) AddPrimaryKeyToDDL(ddl string, columns iop.Columns) (string, err
 			prefix = g.F("constraint %s_pkey primary key", strings.ToLower(t.Name))
 		}
 
-		quotedNames := t.Dialect.QuoteNamesNormalize(pkCols.Names()...)
+		quotedNames := t.Dialect.QuoteNames(pkCols.Names()...)
 		ddl = ddl[:lastParen] + g.F(", %s (%s)", prefix, strings.Join(quotedNames, ", ")) + ddl[lastParen:]
 	}
 
@@ -1017,7 +1017,7 @@ type TableIndex struct {
 
 func (ti *TableIndex) CreateDDL() string {
 	dialect := ti.Table.Dialect
-	quotedNames := dialect.QuoteNamesNormalize(ti.Columns.Names()...)
+	quotedNames := dialect.QuoteNames(ti.Columns.Names()...)
 
 	if ti.Unique {
 		return g.R(
