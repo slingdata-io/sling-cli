@@ -1434,7 +1434,7 @@ type TargetOptions struct {
 }
 
 var SourceFileOptionsDefault = SourceOptions{
-	EmptyAsNull:    g.Bool(true),
+	EmptyAsNull:    g.Bool(false),
 	Header:         g.Bool(true),
 	Flatten:        g.Bool(false),
 	Compression:    iop.CompressorTypePtr(iop.AutoCompressorType),
