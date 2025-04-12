@@ -264,7 +264,7 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 			}
 		}
 		if !found && !g.In(keyType, ClusterKey, PartitionKey, SortKey) {
-			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+			return g.Error("could not set %s key. Did not find column %s\navailable: %s", keyType, colName, g.Marshal(cols.Names()))
 		}
 	}
 	return

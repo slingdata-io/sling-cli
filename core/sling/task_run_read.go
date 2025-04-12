@@ -392,7 +392,9 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
-			eG.Capture(df.Columns.SetKeys(tableKey, keys...))
+			// ignore error if column is not found, it is set again later
+			// see https://github.com/slingdata-io/sling-cli/issues/532
+			_ = df.Columns.SetKeys(tableKey, keys...)
 		}
 	}
 
