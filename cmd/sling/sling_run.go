@@ -168,12 +168,12 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		}
 	}
 
-	if val := c.Vals["trace"]; val != nil {
-		cfg.Options.Debug = cast.ToBool(val)
+	if cast.ToBool(c.Vals["trace"]) {
+		cfg.Options.Debug = true
 		os.Setenv("DEBUG", "TRACE")
 		env.InitLogger()
-	} else if val := c.Vals["debug"]; val != nil {
-		cfg.Options.Debug = cast.ToBool(val)
+	} else if cast.ToBool(c.Vals["debug"]) {
+		cfg.Options.Debug = true
 		os.Setenv("DEBUG", "LOW")
 		env.InitLogger()
 	}
