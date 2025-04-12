@@ -274,7 +274,7 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		if cfg.Source.PrimaryKeyI != nil || cfg.Source.UpdateKey != "" {
+		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.UpdateKey != "" {
 			cfg.Mode = IncrementalMode
 		} else {
 			cfg.Mode = FullRefreshMode
@@ -638,6 +638,9 @@ func (cfg *Config) Prepare() (err error) {
 	if err != nil {
 		return g.Error(err, "could not get format map for sql")
 	}
+
+	// log format map
+	g.Trace("object format map: %s", g.Marshal(fMap))
 
 	// sql & where prop
 	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
@@ -1024,9 +1027,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	for k, v := range nm {
 		m[k] = v
 	}
-
-	// log format map
-	g.Trace("object format map: %s", g.Marshal(m))
 
 	return
 }

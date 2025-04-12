@@ -699,6 +699,10 @@ func (ds *Datastream) Start() (err error) {
 		}
 	}()
 
+	if !ds.NoDebug {
+		g.Trace("new ds.Start %s", ds.ID)
+	}
+
 	if ds.it == nil {
 		err = g.Error("iterator not defined")
 		return g.Error(err, "need to define iterator")
@@ -727,7 +731,7 @@ loop:
 			break loop
 		default:
 			if ds.it.Counter == 1 && !ds.NoDebug {
-				g.Trace("%#v", ds.it.Row) // trace first row for debugging
+				g.Trace("first row of %s => %#v", ds.ID, ds.it.Row) // trace first row for debugging
 			}
 
 			row := ds.Sp.ProcessRow(ds.it.Row)
@@ -882,8 +886,8 @@ skipBuffer:
 
 	go ds.processBwRows()
 
-	if !ds.NoDebug {
-		g.Trace("new ds.Start %s [%s]", ds.ID, ds.Metadata.StreamURL.Value)
+	if !ds.NoDebug && ds.Metadata.StreamURL.Value != nil {
+		g.Trace("%s.StreamURL => %s", ds.ID, ds.Metadata.StreamURL.Value)
 	}
 
 	ds.SetReady()
