@@ -2056,7 +2056,7 @@ func (conn *BaseConn) GetAnalysis(analysisName string, values map[string]interfa
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *BaseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) string {
-	return conn.Self().Quote(srcCol.Name)
+	return conn.Self().Quote(srcCol.Name, false)
 }
 
 // CastColumnsForSelect cast the source columns into the target Column types
@@ -2075,10 +2075,11 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 			continue
 		}
 
-		selectExpr := conn.Self().Quote(srcCol.Name)
+		// don't normalize name, leave as is
+		selectExpr := conn.Self().Quote(srcCol.Name, false)
 
 		if srcCol.DbType != tgtCol.DbType {
-			g.DebugLow(
+			g.Debug(
 				"inserting %s [%s] into %s [%s]",
 				srcCol.Name, srcCol.DbType, tgtCol.Name, tgtCol.DbType,
 			)

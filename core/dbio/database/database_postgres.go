@@ -228,7 +228,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Self().Quote(srcCol.Name, false)
 
 	switch {
 	case srcCol.IsString() && srcCol.Type != iop.JsonType && tgtCol.Type == iop.JsonType:

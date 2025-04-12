@@ -1154,7 +1154,7 @@ func (conn *SnowflakeConn) GenerateInsertStatement(tableName string, cols iop.Co
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *SnowflakeConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Self().Quote(srcCol.Name, false)
 	srcDbType := strings.ToUpper(string(srcCol.DbType))
 	tgtDbType := strings.ToUpper(string(tgtCol.DbType))
 

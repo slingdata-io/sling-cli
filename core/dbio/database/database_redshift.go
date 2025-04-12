@@ -391,7 +391,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *RedshiftConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Self().Quote(srcCol.Name, false)
 
 	switch {
 	case srcCol.Type != iop.TimestampzType && tgtCol.Type == iop.TimestampzType:

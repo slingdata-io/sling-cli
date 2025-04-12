@@ -896,7 +896,7 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Self().Quote(srcCol.Name, false)
 	srcDbType := strings.ToLower(srcCol.DbType)
 	tgtDbType := strings.ToLower(tgtCol.DbType)
 

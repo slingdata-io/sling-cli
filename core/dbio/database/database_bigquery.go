@@ -1009,7 +1009,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 
 // CastColumnForSelect casts to the correct target column type
 func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
-	qName := conn.Self().Quote(srcCol.Name)
+	qName := conn.Self().Quote(srcCol.Name, false)
 
 	switch {
 	case srcCol.IsString() && !srcCol.Type.IsJSON() && tgtCol.Type.IsJSON():
