@@ -2544,15 +2544,18 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		return
 	}
 
+	var pkEqualFields, srcPkFields, tgtPkFields []string
 	pkFields = pkCols.Names()
 	pkFieldMap := map[string]string{}
-	pkEqualFields := []string{}
 	for _, pkField := range pkFields {
 		// don't normalize, use raw name
 		srcCol := srcColumns.GetColumn(conn.Unquote(pkField))
 		tgtCol := tgtColumns.GetColumn(conn.Unquote(pkField))
 		srcField := conn.Quote(srcCol.Name, false)
 		tgtField := conn.Quote(tgtCol.Name, false)
+
+		srcPkFields = append(srcPkFields, srcField)
+		tgtPkFields = append(tgtPkFields, tgtField)
 
 		pkEqualField := g.F("src.%s = tgt.%s", srcField, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
@@ -2604,6 +2607,8 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		"tgt_fields":         strings.Join(tgtFields, ", "),
 		"insert_fields":      strings.Join(insertFields, ", "),
 		"pk_fields":          strings.Join(pkFields, ", "),
+		"src_pk_fields":      strings.Join(srcPkFields, ", "),
+		"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
 		"set_fields":         strings.Join(setFields, ", "),
 		"placeholder_fields": strings.Join(placeholderFields, ", "),
 	}

@@ -342,7 +342,6 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
 	)
 
 	return

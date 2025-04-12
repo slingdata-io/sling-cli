@@ -361,7 +361,6 @@ func (conn *MySQLConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFie
 		"tgt_table", tgtTable,
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"pk_fields", upsertMap["pk_fields"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],

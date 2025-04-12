@@ -578,7 +578,7 @@ func (conn *D1Conn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields
 	select {src_fields}
 	from {src_table} as src
 	where true
-	ON CONFLICT ({pk_fields})
+	ON CONFLICT ({tgt_pk_fields})
 	DO UPDATE 
 	SET {set_fields}
 	`
@@ -590,7 +590,7 @@ func (conn *D1Conn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
+		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
 		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
 		"insert_fields", upsertMap["insert_fields"],
 	)
