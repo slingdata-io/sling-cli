@@ -972,9 +972,11 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 				if vals, ok := colTransforms[key]; ok {
 					// only add transform parse_ms_uuid if parse_uuid is not specified
 					if !lo.Contains(vals, "parse_uuid") {
+						g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
 						colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
 					}
 				} else {
+					g.Debug(`setting transform "parse_ms_uuid" for column %s`, col.Name)
 					colTransforms[key] = []string{"parse_ms_uuid"}
 				}
 			}
