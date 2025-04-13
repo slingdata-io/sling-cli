@@ -152,10 +152,12 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 }
 
 type APIStreamConfig struct {
-	Flatten  int
-	JmesPath string
-	Select   []string // select specific columns
-	Limit    int
+	Flatten     int
+	JmesPath    string
+	Select      []string // select specific columns
+	Limit       int
+	Metadata    iop.Metadata
+	DsConfigMap map[string]any // stream processor options
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {

@@ -357,13 +357,13 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df *iop.Dataflow, err error) {
 	setStage("3 - prepare-dataflow")
 
-	// sets metadata
-	// metadata := t.setGetMetadata()
 	sCfg := api.APIStreamConfig{
-		Flatten:  cfg.Source.Flatten(),
-		JmesPath: g.PtrVal(cfg.Source.Options.JmesPath),
-		Select:   cfg.Source.Select,
-		Limit:    cfg.Source.Limit(),
+		Flatten:     cfg.Source.Flatten(),
+		JmesPath:    g.PtrVal(cfg.Source.Options.JmesPath),
+		Select:      cfg.Source.Select,
+		Limit:       cfg.Source.Limit(),
+		Metadata:    t.setGetMetadata(),
+		DsConfigMap: t.getOptionsMap(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {
