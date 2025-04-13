@@ -755,7 +755,7 @@ skipBuffer:
 		sampleData.InferColumnTypes()
 		ds.Columns = sampleData.Columns
 		ds.Inferred = true
-	} else if len(ds.Sp.Config.Columns) > 0 {
+	} else if len(ds.Sp.Config.Columns) > 0 || !ds.config.ColumnCasing.IsEmpty() {
 		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true, ds.config.ColumnCasing, ds.config.TargetType)
 	}
 
@@ -772,6 +772,7 @@ skipBuffer:
 	{
 		// ensure there are no duplicates
 		ensureName := func(name string) string {
+			name = ds.config.ColumnCasing.Apply(name, ds.config.TargetType)
 			colNames := lo.Keys(ds.Columns.FieldMap(true))
 			for lo.Contains(colNames, strings.ToLower(name)) {
 				name = name + "_"
