@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/env"
 
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 
@@ -425,6 +426,11 @@ func (conn *RedshiftConn) WarnStlLoadErrors(err error) {
 				rec[strings.TrimSpace(k)] = strings.TrimSpace(cast.ToString(v))
 			}
 			g.Warn("stl_load_errors => " + g.Marshal(rec))
+			if strings.Contains(g.Marshal(rec), "String length exceeds DDL") {
+				env.Println("")
+				env.Println(env.MagentaString("If you'd like to dynamically multiply the DDL string length, try using `target_options.type_generation`"))
+				env.Println("")
+			}
 		}
 	}
 }

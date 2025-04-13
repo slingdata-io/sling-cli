@@ -1061,7 +1061,7 @@ type Config struct {
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
-func (cfg *Config) Scan(value interface{}) error {
+func (cfg *Config) Scan(value any) error {
 	return g.JSONScanner(cfg, value)
 }
 
@@ -1272,7 +1272,7 @@ type Source struct {
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	Data map[string]interface{} `json:"-" yaml:"-"`
+	Data map[string]any `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -1341,7 +1341,7 @@ type Target struct {
 	Columns any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	Data map[string]interface{} `json:"-" yaml:"-"`
+	Data map[string]any `json:"-" yaml:"-"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
@@ -1425,6 +1425,7 @@ type TargetOptions struct {
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
+	TypeGeneration   *iop.TypeGeneration `json:"type_generation,omitempty" yaml:"type_generation,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1622,6 +1623,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.ColumnCasing == nil {
 		o.ColumnCasing = targetOptions.ColumnCasing
+	}
+	if o.TypeGeneration == nil {
+		o.TypeGeneration = targetOptions.TypeGeneration
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys

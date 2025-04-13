@@ -322,3 +322,4 @@ variable:
   timestampz_layout: "2006-01-02 15:04:05.000000 -07:00"
   timestampz_layout_str: TO_TIMESTAMP_TZ('{value}', 'YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')
   max_string_type: varchar(4000)
+  max_string_length: 4000

@@ -333,3 +333,5 @@ variable:
   tmp_folder: /tmp
   bind_string: '?'
   error_filter_table_exists: already exists
+  max_string_type: varchar
+  max_string_length: 1000000

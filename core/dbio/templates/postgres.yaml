@@ -383,3 +383,4 @@ variable:
   bind_string: ${c}
   error_filter_table_exists: already exists
   max_string_type: varchar(65500)
+  max_string_length: 65500

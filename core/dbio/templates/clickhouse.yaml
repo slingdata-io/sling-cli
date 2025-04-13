@@ -275,3 +275,5 @@ variable:
   quote_char: '`'
   timestamp_layout: '2006-01-02 15:04:05.000000000 -07'
   timestamp_layout_str: parseDateTime64BestEffortOrNull('{value}')
+  max_string_type: String
+  max_string_length: 1000000000

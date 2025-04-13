@@ -547,7 +547,7 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 	newCols = cols
 	// apply casing first
 	nameMap := map[string]string{}
-	if !casing.IsEmpty() {
+	if !casing.IsEmpty() && tgtType != "" {
 		g.Debug(`applying column casing (%s) for target type (%s)`, casing, tgtType)
 		for i, col := range newCols {
 			newName := casing.Apply(col.Name, tgtType)
@@ -1123,7 +1123,7 @@ func (cc *ColumnConstraint) parse() {
 }
 
 // GetNativeType returns the native column type from generic
-func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
+func (col *Column) GetNativeType(t dbio.Type, tg TypeGeneration) (nativeType string, err error) {
 	template, _ := t.Template()
 	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
 	if !ok {
@@ -1142,12 +1142,22 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 
 	// Add precision as needed
 	if strings.HasSuffix(nativeType, "()") {
+		maxStringLength := cast.ToInt(template.Value("variable.max_string_length"))
+		maxStringType := template.Value("variable.max_string_type")
+
 		length := col.Stats.MaxLen
 		if col.IsString() {
 			isSourced := col.Sourced && col.DbPrecision > 0
 			if isSourced {
 				// string length was manually provided
 				length = col.DbPrecision
+				if tg.String != nil {
+					newLength := tg.String.Apply(length, maxStringLength)
+					if newLength != length {
+						g.Debug(`  applied length type mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
+					}
+					length = newLength
+				}
 			} else if length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
@@ -1155,10 +1165,9 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 				}
 			}
 
-			maxStringType := template.Value("variable.max_string_type")
 			if !isSourced && maxStringType != "" {
 				nativeType = maxStringType // use specified default
-			} else if length > 255 {
+			} else if length >= maxStringLength {
 				// let's make text since high
 				nativeType = template.GeneralTypeMap["text"]
 			} else {
@@ -1354,4 +1363,39 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 	}
 
 	return name
+}
+
+// TypeGeneration contains type-specific mapping configurations
+type TypeGeneration struct {
+	String *StringTypeMapping `json:"string,omitempty" yaml:"string,omitempty"`
+}
+
+// StringTypeMapping contains string type mapping configurations
+type StringTypeMapping struct {
+	LengthFactor int  `json:"length_factor,omitempty" yaml:"length_factor,omitempty"`
+	MaxLength    int  `json:"max_length,omitempty" yaml:"max_length,omitempty"`
+	UseMax       bool `json:"use_max,omitempty" yaml:"use_max,omitempty"`
+}
+
+func (stm *StringTypeMapping) Apply(length, max int) (newLength int) {
+	if stm.MaxLength > max {
+		max = stm.MaxLength
+	}
+	if max == 0 {
+		max = 4000 // some safe large max
+	}
+
+	if stm.UseMax {
+		return max
+	}
+
+	if stm.LengthFactor > 0 {
+		newLength = length * stm.LengthFactor
+		if newLength > max {
+			return max
+		}
+		return newLength
+	}
+
+	return length
 }
