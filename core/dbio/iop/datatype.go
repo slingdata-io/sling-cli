@@ -1123,7 +1123,7 @@ func (cc *ColumnConstraint) parse() {
 }
 
 // GetNativeType returns the native column type from generic
-func (col *Column) GetNativeType(t dbio.Type, tg TypeGeneration) (nativeType string, err error) {
+func (col *Column) GetNativeType(t dbio.Type, tg ColumnTyping) (nativeType string, err error) {
 	template, _ := t.Template()
 	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
 	if !ok {
@@ -1365,32 +1365,32 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 	return name
 }
 
-// TypeGeneration contains type-specific mapping configurations
-type TypeGeneration struct {
-	String *StringTypeMapping `json:"string,omitempty" yaml:"string,omitempty"`
+// ColumnTyping contains type-specific mapping configurations
+type ColumnTyping struct {
+	String *StringColumnTyping `json:"string,omitempty" yaml:"string,omitempty"`
 }
 
-// StringTypeMapping contains string type mapping configurations
-type StringTypeMapping struct {
+// StringColumnTyping contains string type mapping configurations
+type StringColumnTyping struct {
 	LengthFactor int  `json:"length_factor,omitempty" yaml:"length_factor,omitempty"`
 	MaxLength    int  `json:"max_length,omitempty" yaml:"max_length,omitempty"`
 	UseMax       bool `json:"use_max,omitempty" yaml:"use_max,omitempty"`
 }
 
-func (stm *StringTypeMapping) Apply(length, max int) (newLength int) {
-	if stm.MaxLength > max {
-		max = stm.MaxLength
+func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
+	if sct.MaxLength > max {
+		max = sct.MaxLength
 	}
 	if max == 0 {
 		max = 4000 // some safe large max
 	}
 
-	if stm.UseMax {
+	if sct.UseMax {
 		return max
 	}
 
-	if stm.LengthFactor > 0 {
-		newLength = length * stm.LengthFactor
+	if sct.LengthFactor > 0 {
+		newLength = length * sct.LengthFactor
 		if newLength > max {
 			return max
 		}

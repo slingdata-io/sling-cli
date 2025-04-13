@@ -1425,7 +1425,7 @@ type TargetOptions struct {
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
-	TypeGeneration   *iop.TypeGeneration `json:"type_generation,omitempty" yaml:"type_generation,omitempty"`
+	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1624,8 +1624,8 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.ColumnCasing == nil {
 		o.ColumnCasing = targetOptions.ColumnCasing
 	}
-	if o.TypeGeneration == nil {
-		o.TypeGeneration = targetOptions.TypeGeneration
+	if o.ColumnTyping == nil {
+		o.ColumnTyping = targetOptions.ColumnTyping
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys

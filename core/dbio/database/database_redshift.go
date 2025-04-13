@@ -428,7 +428,7 @@ func (conn *RedshiftConn) WarnStlLoadErrors(err error) {
 			g.Warn("stl_load_errors => " + g.Marshal(rec))
 			if strings.Contains(g.Marshal(rec), "String length exceeds DDL") {
 				env.Println("")
-				env.Println(env.MagentaString("If you'd like to dynamically multiply the DDL string length, try using `target_options.type_generation`"))
+				env.Println(env.MagentaString("If you'd like to dynamically multiply the DDL string length, try using `target_options.column_typing`"))
 				env.Println("")
 			}
 		}

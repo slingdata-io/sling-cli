@@ -1134,7 +1134,7 @@ func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
 
 	colsArr := make([]string, len(columns))
 	for i, col := range columns {
-		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb, TypeGeneration{})
+		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb, ColumnTyping{})
 		if err != nil {
 			g.Warn(err.Error())
 		}

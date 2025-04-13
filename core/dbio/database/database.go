@@ -2250,11 +2250,11 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
-	var tg iop.TypeGeneration
-	if val := conn.GetProp("type_generation"); val != "" {
-		g.Unmarshal(val, &tg)
+	var ct iop.ColumnTyping
+	if val := conn.GetProp("column_typing"); val != "" {
+		g.Unmarshal(val, &ct)
 	}
-	return col.GetNativeType(conn.GetType(), tg)
+	return col.GetNativeType(conn.GetType(), ct)
 }
 
 // GenerateDDL genrate a DDL based on a dataset
