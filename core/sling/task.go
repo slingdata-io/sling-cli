@@ -466,6 +466,14 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 		// set as string so that StreamProcessor parses it
 		options["transforms"] = g.Marshal(colTransforms)
 	}
+
+	if cc := t.Config.Target.Options.ColumnCasing; cc != nil {
+		// set as string so that StreamProcessor parses it
+		options["column_casing"] = string(*cc)
+		// set target type for column casing
+		options["target_type"] = string(t.Config.TgtConn.Type)
+	}
+
 	return
 }
 

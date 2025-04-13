@@ -17,6 +17,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
@@ -65,6 +66,7 @@ type StreamConfig struct {
 	Jmespath          string                   `json:"jmespath"`
 	Sheet             string                   `json:"sheet"`
 	ColumnCasing      ColumnCasing             `json:"column_casing"`
+	TargetType        dbio.Type                `json:"target_type"`
 	BoolAsInt         bool                     `json:"-"`
 	Columns           Columns                  `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string]TransformList // array of transform functions to apply
@@ -411,6 +413,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["column_casing"]; ok {
 		sp.Config.ColumnCasing = ColumnCasing(val)
+	}
+
+	if val, ok := configMap["target_type"]; ok {
+		sp.Config.TargetType = dbio.Type(val)
 	}
 
 	if val, ok := configMap["bool_at_int"]; ok {

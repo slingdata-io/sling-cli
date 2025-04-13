@@ -49,9 +49,6 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 
-		// apply column casing
-		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
-
 		// use duckdb for writing parquet
 		if t.shouldWriteViaDuckDB(uri) {
 			// push to temp duck file
@@ -73,8 +70,6 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		df.SyncStats()
 
 	} else if cfg.Options.StdOut {
-		// apply column casing
-		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
 
 		limit := cast.ToUint64(cfg.Source.Limit())
 
@@ -711,9 +706,6 @@ func prepareDataflowForWriteDB(t *TaskExecution, df *iop.Dataflow, tgtConn datab
 			}
 		}
 	}
-
-	// apply column casing
-	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
 	sampleData := df.BufferDataset()
 	if !sampleData.Inferred {

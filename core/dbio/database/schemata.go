@@ -847,6 +847,16 @@ func getColumnsProp(conn Connection) (coerceCols iop.Columns, ok bool) {
 	return coerceCols, false
 }
 
+// getColumnsProp returns the colCasing from the column_casing property
+func getColumnCasingProp(conn Connection) (colCasing iop.ColumnCasing, ok bool) {
+	if colCasingV := conn.GetProp("column_casing"); colCasingV != "" {
+		if err := g.Unmarshal(colCasingV, &colCasing); err == nil {
+			return colCasing, true
+		}
+	}
+	return colCasing, false
+}
+
 func GetQualifierQuote(dialect dbio.Type) string {
 	quote := `"`
 	switch dialect {

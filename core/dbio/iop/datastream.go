@@ -756,7 +756,7 @@ skipBuffer:
 		ds.Columns = sampleData.Columns
 		ds.Inferred = true
 	} else if len(ds.Sp.Config.Columns) > 0 {
-		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true)
+		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true, ds.config.ColumnCasing, ds.config.TargetType)
 	}
 
 	// set to have it loop process

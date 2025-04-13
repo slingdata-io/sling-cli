@@ -543,8 +543,22 @@ func (cols Columns) Dataset() Dataset {
 }
 
 // Coerce casts columns into specified types
-func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
+func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing, tgtType dbio.Type) (newCols Columns) {
 	newCols = cols
+	// apply casing first
+	nameMap := map[string]string{}
+	if !casing.IsEmpty() {
+		g.Debug(`applying column casing (%s) for target type (%s)`, casing, tgtType)
+		for i, col := range newCols {
+			newName := casing.Apply(col.Name, tgtType)
+			nameMap[strings.ToLower(newName)] = col.Name // map new name to old name
+			newCols[i].Name = newName
+			if col.Name != newName {
+				g.Debug("   %s => %s", col.Name, newName)
+			}
+		}
+	}
+
 	for i, col := range newCols {
 		if !hasHeader && len(castCols) == len(newCols) {
 			// assume same order since same number of columns and no header
@@ -562,7 +576,15 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 			continue
 		}
 
-		if castCol := castCols.GetColumn(col.Name); castCol != nil {
+		castCol := castCols.GetColumn(col.Name)
+		if castCol == nil && !casing.IsEmpty() {
+			// check old name
+			if oldName, ok := nameMap[strings.ToLower(col.Name)]; ok {
+				castCol = castCols.GetColumn(oldName)
+			}
+		}
+
+		if castCol != nil {
 			col = *castCol
 			if col.Type.IsValid() {
 				g.Debug("casting column '%s' as '%s'", col.Name, col.Type)
@@ -1296,7 +1318,9 @@ var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
 // Apply applies column casing to provided name.
 // If cc is nil or SourceColumnCasing, it returns the original value
 func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
-	if cc.IsEmpty() || cc.Equals(NormalizeColumnCasing) {
+	if cc.IsEmpty() || cc.Equals(SourceColumnCasing) {
+		return name
+	} else if cc.Equals(NormalizeColumnCasing) {
 		// use legacy behavior, so that we don't need to qualify column name where querying
 		if !dbio.HasVariedCase(name) && !dbio.HasStrangeChar(name) {
 			if tgtConnType.DBNameUpperCase() {
@@ -1305,8 +1329,6 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 				name = strings.ToLower(name)
 			}
 		}
-		return name
-	} else if cc.Equals(SourceColumnCasing) {
 		return name
 	}
 
