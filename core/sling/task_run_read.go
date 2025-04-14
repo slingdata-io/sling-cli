@@ -254,7 +254,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			Select:           cfg.Source.Select,
 			Limit:            cfg.Source.Limit(),
 			SQL:              cfg.Source.Query,
-			FileSelect:       cfg.Source.Options.FileSelect,
+			FileSelect:       cfg.Source.Files,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
 		}

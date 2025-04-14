@@ -1266,6 +1266,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	Files       *[]string      `json:"files,omitempty" yaml:"files,omitempty"`   // include/exclude files
 	Where       string         `json:"where,omitempty" yaml:"where,omitempty"`
 	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
@@ -1388,7 +1389,6 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
-	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 
 	// columns & transforms were moved out of source_options
