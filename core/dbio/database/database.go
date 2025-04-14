@@ -1426,26 +1426,34 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 					col.DbPrecision = colType.Length
 				}
 			}
+		}
 
-			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake) {
+		if col.IsString() {
+			if col.DbPrecision == 0 && colType.Length > 0 && colType.Length < 999999 {
+				col.DbPrecision = colType.Length
+				col.Stats.MaxDecLen = colType.Length
 				col.Sourced = true
-				col.DbPrecision = colType.Precision
-				col.DbScale = colType.Scale
-				col.Stats.MaxDecLen = lo.Ternary(colType.Scale > ddlMinDecScale, colType.Scale, ddlMinDecScale)
 			}
+		}
 
-			if g.In(conn.GetType(), dbio.TypeDbMySQL) {
-				// TODO: cannot use sourced length/scale, unreliable.
-				col.DbPrecision = 0
-				col.DbScale = 0
-				col.Stats.MaxDecLen = 0
+		if col.IsDecimal() {
+			if col.DbPrecision == 0 && colType.Precision < 99 {
+				col.DbPrecision = colType.Precision
+			}
+			if col.DbScale == 0 && colType.Scale < 30 {
+				col.DbScale = colType.Scale
+				col.Stats.MaxDecLen = colType.Scale
+			}
+			if col.DbPrecision > 0 {
+				col.Sourced = true
 			}
 		}
 
 		// parse length, precision, scale manually specified in mapping
 		col.SetLengthPrecisionScale()
 
-		// g.Trace("col %s (%s -> %s) has %d length, %d scale, sourced: %t", colType.Name(), colType.DatabaseTypeName(), Type, length, scale, ok)
+		g.Trace(`database col => "%s" native_type=%s generic_type=%s length=%d precision=%d scale=%d sourced=%v`, col.Name, col.DbType, col.Type, col.Stats.MaxLen, col.DbPrecision, col.DbScale, col.Sourced)
+		// g.Trace(`   colType=%#v`, colType)
 
 		columns[i] = col
 
