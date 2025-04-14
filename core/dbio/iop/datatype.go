@@ -1123,7 +1123,7 @@ func (cc *ColumnConstraint) parse() {
 }
 
 // GetNativeType returns the native column type from generic
-func (col *Column) GetNativeType(t dbio.Type, tg ColumnTyping) (nativeType string, err error) {
+func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType string, err error) {
 	template, _ := t.Template()
 	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
 	if !ok {
@@ -1151,8 +1151,8 @@ func (col *Column) GetNativeType(t dbio.Type, tg ColumnTyping) (nativeType strin
 			if isSourced {
 				// string length was manually provided
 				length = col.DbPrecision
-				if tg.String != nil {
-					newLength := tg.String.Apply(length, maxStringLength)
+				if ct.String != nil {
+					newLength := ct.String.Apply(length, maxStringLength)
 					if newLength != length {
 						g.Debug(`  applied length type mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
 					}
@@ -1192,20 +1192,11 @@ func (col *Column) GetNativeType(t dbio.Type, tg ColumnTyping) (nativeType strin
 		precision := col.DbPrecision
 		scale := col.DbScale
 
-		if !col.Sourced || col.DbPrecision == 0 {
-			scale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-			scale = lo.Ternary(scale > env.DdlMaxDecScale, env.DdlMaxDecScale, scale)
-			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-				scale = maxDecimals
+		if col.IsDecimal() {
+			if ct.Decimal == nil {
+				ct.Decimal = &DecimalColumnTyping{}
 			}
-
-			precision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, env.DdlMinDecLength, col.DbPrecision)
-			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-			precision = lo.Ternary(precision > env.DdlMaxDecLength, env.DdlMaxDecLength, precision)
-
-			minPrecision := col.Stats.MaxLen + scale
-			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+			precision, scale = ct.Decimal.Apply(col)
 		}
 
 		nativeType = strings.ReplaceAll(
@@ -1367,7 +1358,8 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 
 // ColumnTyping contains type-specific mapping configurations
 type ColumnTyping struct {
-	String *StringColumnTyping `json:"string,omitempty" yaml:"string,omitempty"`
+	String  *StringColumnTyping  `json:"string,omitempty" yaml:"string,omitempty"`
+	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
 }
 
 // StringColumnTyping contains string type mapping configurations
@@ -1406,4 +1398,47 @@ func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
 	}
 
 	return length
+}
+
+// DecimalColumnTyping contains decimal type mapping configurations
+type DecimalColumnTyping struct {
+	MinPrecision *int `json:"min_precision,omitempty" yaml:"min_precision,omitempty"` // Total number of digits
+	MaxPrecision int  `json:"max_precision,omitempty" yaml:"max_precision,omitempty"` // Total number of digits
+	MinScale     *int `json:"min_scale,omitempty" yaml:"min_scale,omitempty"`         // Number of digits after decimal point
+	MaxScale     int  `json:"max_scale,omitempty" yaml:"max_scale,omitempty"`         // Number of digits after decimal point
+}
+
+func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
+
+	precision = col.DbPrecision
+	scale = col.DbScale
+
+	if precision == 0 {
+		minPrecision := col.Stats.MaxLen + scale
+		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+	}
+
+	dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
+	dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
+	dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
+	dct.MaxPrecision = lo.Ternary(dct.MaxPrecision == 0, env.DdlMaxDecLength, dct.MaxPrecision)
+
+	if precision < *dct.MinPrecision {
+		precision = *dct.MinPrecision
+	}
+
+	if precision > dct.MaxPrecision {
+		precision = dct.MaxPrecision
+	}
+
+	if scale < *dct.MinScale {
+		scale = *dct.MinScale
+	}
+
+	if scale > dct.MaxScale {
+		scale = dct.MaxScale
+	}
+
+	return
 }
