@@ -185,7 +185,7 @@ Here are the links of the official development builds, which are the latest buil
 - **Mac (arm64)**: https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz
 - **Windows (x64)**: https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz
 
-If you're using the python wrapper, decompress the downloaded the binary and put the path in the environment variable `SLING_BINARY` before running your python program.
+If you're using the python wrapper, decompress the downloaded binary and put the path in the environment variable `SLING_BINARY` before running your python program.
 
 ## Contributing
 
