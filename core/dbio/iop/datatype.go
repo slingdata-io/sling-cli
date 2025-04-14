@@ -1373,6 +1373,7 @@ type ColumnTyping struct {
 // StringColumnTyping contains string type mapping configurations
 type StringColumnTyping struct {
 	LengthFactor int  `json:"length_factor,omitempty" yaml:"length_factor,omitempty"`
+	MinLength    int  `json:"min_length,omitempty" yaml:"min_length,omitempty"`
 	MaxLength    int  `json:"max_length,omitempty" yaml:"max_length,omitempty"`
 	UseMax       bool `json:"use_max,omitempty" yaml:"use_max,omitempty"`
 }
@@ -1394,7 +1395,14 @@ func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
 		if newLength > max {
 			return max
 		}
+		if newLength < sct.MinLength {
+			return sct.MinLength
+		}
 		return newLength
+	}
+
+	if length < sct.MinLength {
+		return sct.MinLength
 	}
 
 	return length
