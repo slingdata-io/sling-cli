@@ -250,6 +250,11 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "Set logging level to DEBUG.",
 				},
+				{
+					Name:        "trace",
+					Type:        "bool",
+					Description: "Set logging level to TRACE (do not use in production).",
+				},
 			},
 		},
 		{
