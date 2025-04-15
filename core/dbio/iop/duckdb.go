@@ -1102,7 +1102,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			readerCh <- batchR.Reader
 
 			// can use this as a from table
-			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N')`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
 
 			streamPartChn <- HttpStreamPart{
 				Index:    partIndex,

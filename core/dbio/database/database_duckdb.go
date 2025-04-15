@@ -210,7 +210,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -314,7 +314,7 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), httpURL, conn.generateCsvColumns(batchR.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), httpURL, conn.generateCsvColumns(batchR.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
