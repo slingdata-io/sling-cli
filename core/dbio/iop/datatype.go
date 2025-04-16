@@ -765,7 +765,8 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 
 		if colStats.TotalCnt == 0 || colStats.NullCnt == colStats.TotalCnt || col.Sourced {
 			// do nothing, keep existing type if defined
-		} else if colStats.StringCnt > 0 {
+		} else if colStats.StringCnt > 0 && colStats.BoolCnt == 0 && colStats.IntCnt == 0 && colStats.DecCnt == 0 && colStats.DateCnt == 0 && colStats.DateTimeCnt == 0 && colStats.DateTimeZCnt == 0 && colStats.JsonCnt == 0 {
+			// Only string values and no other types detected
 			col.Sourced = true // do not allow type change
 
 			if colStats.MaxLen > 255 {
@@ -782,15 +783,16 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			if colStats.NullCnt == colStats.TotalCnt {
 				colStats.MinLen = 0
 			}
-		} else if colStats.JsonCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.JsonCnt > 0 && colStats.JsonCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = JsonType
 			col.goType = reflect.TypeOf("json")
-		} else if colStats.BoolCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.BoolCnt > 0 && colStats.BoolCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
-			if colStats.Min*10 < -2147483648 || colStats.Max*10 > 2147483647 {
+		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
+			// Check if the values are too large for a regular int
+			if colStats.Min < -2147483648 || colStats.Max > 2147483647 {
 				col.Type = BigIntType
 			} else {
 				col.Type = IntegerType
@@ -801,11 +803,11 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 				// cast as bigint for safety
 				col.Type = BigIntType
 			}
-		} else if colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DateCnt > 0 && colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt > 0 && colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			if colStats.DateTimeZCnt > 0 {
 				col.Type = TimestampzType
 			} else {
@@ -813,9 +815,17 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DecCnt > 0 && colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DecimalType
 			col.goType = reflect.TypeOf(float64(0.0))
+		} else {
+			// Mixed types or unrecognized - default to string/text
+			if colStats.MaxLen >= 4000 {
+				col.Type = TextType
+			} else {
+				col.Type = StringType
+			}
+			col.goType = reflect.TypeOf("string")
 		}
 		if !noDebug {
 			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(colStats))

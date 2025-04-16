@@ -703,6 +703,13 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		l := len(sVal)
 		if l > cs.MaxLen {
 			cs.MaxLen = l
+		} else if l == 0 {
+			cs.TotalCnt++
+			if col.Type == JsonType {
+				cs.NullCnt++
+				return nil // if json, empty should be null
+			}
+			return sVal
 		}
 
 		if looksLikeJson(sVal) {
@@ -742,6 +749,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			if col.Type == BinaryType {
 				nVal = []byte(sVal)
 			} else if col.Type == JsonType && sVal == "" {
+				cs.NullCnt++
 				nVal = nil // if json, empty should be null
 			} else {
 				nVal = sVal
