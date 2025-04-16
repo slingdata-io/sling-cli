@@ -167,7 +167,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 	}
 	files, err = fs.client.ReadDir(path)
 	if err != nil {
-		return nodes, g.Error(err, "error listing path: %#v", path)
+		return nodes, g.Error(err, "error listing path")
 	}
 
 	if path == "/" {
@@ -223,7 +223,7 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes FileNodes, err err
 	path = strings.TrimSuffix(path, "/")
 	files, err = fs.client.ReadDir(path)
 	if err != nil {
-		return nodes, g.Error(err, "error listing path: %#v", path)
+		return nodes, g.Error(err, "error listing path")
 	}
 
 	for _, file := range files {
