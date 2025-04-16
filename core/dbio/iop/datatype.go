@@ -1423,14 +1423,12 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 	precision = col.DbPrecision
 	scale = col.DbScale
 
-	if col.Sourced {
-		return
-	}
-
 	if precision == 0 {
 		minPrecision := col.Stats.MaxLen + scale
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
 		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+	} else if col.Sourced {
+		return
 	}
 
 	dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)

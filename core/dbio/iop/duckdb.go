@@ -639,7 +639,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 	// so that lists are treated as TEXT and not JSON
 	// lists / arrays do not conform to JSON spec and can error out
-	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
+	transforms := map[string][]string{"*": {TransformDuckdbListToText.Name}}
 
 	// add any specified transforms
 	fsProps := map[string]string{}
