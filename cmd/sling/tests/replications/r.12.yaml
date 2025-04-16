@@ -1,6 +1,12 @@
 source: postgres
 target: snowflake
 
+hooks:
+  start:
+    - type: query
+      connection: snowflake
+      query: drop table if exists public.public_test1k_postgres_pg
+
 defaults:
   mode: incremental
   object: 'public.{stream_schema}_{stream_table}'
