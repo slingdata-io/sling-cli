@@ -455,6 +455,15 @@ func (t *TaskExecution) hasStateWithUpdateKey() bool {
 
 func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	options = g.M()
+
+	if t.Config.SrcConn.Type.IsAPI() && t.Config.Source.Options.Flatten == nil {
+		// if api source, set default depth to 1
+		t.Config.Source.Options.Flatten = 1
+	} else {
+		// set flatten to int
+		t.Config.Source.Options.Flatten = t.Config.Source.Flatten()
+	}
+
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 
 	if columns := t.Config.ColumnsPrepared(); len(columns) > 0 {

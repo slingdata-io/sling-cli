@@ -705,14 +705,6 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	}
 
-	if cfg.SrcConn.Type.IsAPI() && cfg.Source.Options.Flatten == nil {
-		// if api source, set default depth to 1
-		cfg.Source.Options.Flatten = 1
-	} else {
-		// set flatten to int
-		cfg.Source.Options.Flatten = cfg.Source.Flatten()
-	}
-
 	// done
 	cfg.Prepared = true
 	return

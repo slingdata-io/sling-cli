@@ -357,6 +357,10 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df *iop.Dataflow, err error) {
 	setStage("3 - prepare-dataflow")
 
+	if cfg.Source.Options.Flatten == nil {
+		cfg.Source.Options.Flatten = 1 // flatten level 1 by default
+	}
+
 	sCfg := api.APIStreamConfig{
 		Flatten:     cfg.Source.Flatten(),
 		JmesPath:    g.PtrVal(cfg.Source.Options.JmesPath),
