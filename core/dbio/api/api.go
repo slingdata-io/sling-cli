@@ -127,8 +127,7 @@ func (ac *APIConnection) Close() error {
 
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
-	for key, endpoint := range ac.Spec.Endpoints {
-		endpoint.Name = key
+	for _, endpoint := range ac.Spec.Endpoints {
 		if !endpoint.Disabled {
 			endpoints = append(endpoints, endpoint)
 		}
