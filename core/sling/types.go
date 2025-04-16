@@ -57,6 +57,8 @@ const (
 	ExecStatusCreated ExecStatus = "created"
 	// ExecStatusQueued = queued
 	ExecStatusQueued ExecStatus = "queued"
+	// ExecStatusSubmitted = submitted
+	ExecStatusSubmitted ExecStatus = "submitted"
 	// ExecStatusStarted = started
 	ExecStatusStarted ExecStatus = "started"
 	// ExecStatusRunning = running
