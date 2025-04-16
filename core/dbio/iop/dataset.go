@@ -512,8 +512,8 @@ func (data *Dataset) InferColumnTypes() {
 					columns[j].Stats.Min = val0
 				}
 
-				if strings.Contains(valStr, ".") {
-					decLen := len(strings.Split(cast.ToString(val), ".")[1])
+				if parts := strings.Split(cast.ToString(val), "."); len(parts) == 2 {
+					decLen := len(parts[1])
 					if decLen > columns[j].Stats.MaxDecLen {
 						columns[j].Stats.MaxDecLen = decLen
 					}
