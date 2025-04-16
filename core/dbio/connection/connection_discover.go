@@ -43,7 +43,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 		url := c.URL()
 
-		g.Debug("file test inputs: %s", g.Marshal(g.M("url", url)))
+		g.Trace("file test inputs: %s", g.Marshal(g.M("url", url)))
 		nodes, err := fileClient.List(url)
 		if err != nil {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
