@@ -1,0 +1,21 @@
+source: postgres
+target: mssql
+
+streams:
+  dbo.test1k_clickhouse_pg:
+    sql: >
+      select id, first_name as "firstName" 
+      from public.test1k_clickhouse_pg
+      -- where 1=0
+    object: main.{stream_table}
+    transforms:
+      id: [hash_md5]
+    columns:
+      id: string(32)
+      first_name: string(100)
+    
+    target_options:
+      column_casing: snake
+      table_keys:
+        primary: [id]
+        index: [first_name]
