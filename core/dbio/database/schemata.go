@@ -34,11 +34,11 @@ type Table struct {
 }
 
 var ChunkByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
-	return []Table{table}, nil
+	return []Table{table}, g.Error("please use the official sling-cli release for chunking columns")
 }
 
 var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max string) ([]string, error) {
-	return []string{}, nil
+	return []string{}, g.Error("please use the official sling-cli release for chunking")
 }
 
 func (t *Table) IsQuery() bool {
