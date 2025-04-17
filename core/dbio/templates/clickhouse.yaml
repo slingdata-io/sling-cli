@@ -277,3 +277,4 @@ variable:
   timestamp_layout_str: parseDateTime64BestEffortOrNull('{value}')
   max_string_type: String
   max_string_length: 1000000000
+  max_column_length: 256

@@ -559,6 +559,9 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 		}
 	}
 
+	// validate column name lengths, truncate if needed
+	newCols = newCols.ValidateNames(tgtType)
+
 	for i, col := range newCols {
 		if !hasHeader && len(castCols) == len(newCols) {
 			// assume same order since same number of columns and no header
@@ -865,6 +868,60 @@ func (col *Column) SetConstraint() {
 	if cc.EvalFunc != nil {
 		col.Constraint = cc
 	}
+}
+
+// ValidateNames truncates the column name it exceed the max column length
+func (cols Columns) ValidateNames(tgtType dbio.Type) (newCols Columns) {
+	newCols = cols
+	maxLength := cast.ToInt(tgtType.GetTemplateValue("variable.max_column_length"))
+	if maxLength == 0 {
+		return
+	}
+
+	nameMap := newCols.FieldMap(true)
+	truncations := []string{}
+
+	for i, col := range newCols {
+		if len(col.Name) > maxLength {
+			newName := col.Name[:maxLength]
+			// look for existing name to not have duplicate name
+			// shorten again and append number, need to recheck if new name again doesn't exist
+			suffix := 1
+			baseNewName := newName
+			for {
+				if _, ok := nameMap[strings.ToLower(newName)]; ok {
+					// Name collision, adjust the name
+					// Need to ensure the base name plus suffix stays within maxLength
+					suffixStr := fmt.Sprintf("_%d", suffix)
+					if len(baseNewName)+len(suffixStr) > maxLength {
+						baseNewName = baseNewName[:maxLength-len(suffixStr)]
+					}
+					newName = baseNewName + suffixStr
+					suffix++
+				} else {
+					break
+				}
+			}
+
+			// Update the name map with the new name
+			delete(nameMap, strings.ToLower(col.Name))
+			nameMap[strings.ToLower(newName)] = i
+
+			// Update the column name
+			truncations = append(truncations, g.F("%s => %s", newCols[i].Name, newName))
+			newCols[i].Name = newName
+		}
+	}
+
+	// log
+	if len(truncations) > 0 {
+		g.Debug(`truncated column names (exceeds max length of %d for "%s")`, maxLength, tgtType)
+		for _, truncation := range truncations {
+			g.Debug("   %s", truncation)
+		}
+	}
+
+	return
 }
 
 // SetLengthPrecisionScale parse length, precision, scale
