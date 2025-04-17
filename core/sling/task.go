@@ -438,6 +438,16 @@ func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 
+// isFullRefreshWithState means with provided sling state and is full-refresh mode
+func (t *TaskExecution) isFullRefreshWithState() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == FullRefreshMode
+}
+
+// isTruncateWithState means with provided sling state and is truncate mode
+func (t *TaskExecution) isTruncateWithState() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == TruncateMode
+}
+
 // isIncrementalState means with provided sling state and is incremental mode
 func (t *TaskExecution) isIncrementalState() bool {
 	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == IncrementalMode

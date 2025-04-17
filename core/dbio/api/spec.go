@@ -9,29 +9,53 @@ import (
 	"github.com/flarco/g"
 	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
 func LoadSpec(specBody string) (spec Spec, err error) {
-
-	// load spec from body
-	if err = yaml.Unmarshal([]byte(specBody), &spec); err != nil {
-		return spec, g.Error(err, "error loading API spec")
-	}
-
-	// set endpoint index
-	for i := range spec.Endpoints {
-		spec.Endpoints[i].index = i
-		if spec.Endpoints[i].State == nil {
-			spec.Endpoints[i].State = g.M()
-		}
-	}
 
 	// set maps
 	err = yaml.Unmarshal([]byte(specBody), &spec.OriginalMap)
 	if err != nil {
 		err = g.Error(err, "Error parsing yaml content")
 		return
+	}
+
+	// load spec from body
+	if err = yaml.Unmarshal([]byte(specBody), &spec); err != nil {
+		return spec, g.Error(err, "error loading API spec")
+	}
+
+	rootMap := yaml.MapSlice{}
+	err = yaml.Unmarshal([]byte(specBody), &rootMap)
+	if err != nil {
+		err = g.Error(err, "Error parsing yaml content")
+		return
+	}
+
+	// get endpoint order
+	for _, rootNode := range rootMap {
+		if cast.ToString(rootNode.Key) == "endpoints" {
+			endpointNodes, ok := rootNode.Value.(yaml.MapSlice)
+			if !ok {
+				continue
+			}
+			for _, endpointNode := range endpointNodes {
+				key := cast.ToString(endpointNode.Key)
+				spec.endpointsOrdered = append(spec.endpointsOrdered, key)
+			}
+		}
+	}
+
+	// set endpoint index
+	for _, endpointName := range spec.endpointsOrdered {
+		endpoint := spec.EndpointMap[endpointName]
+		endpoint.Name = endpointName
+		if endpoint.State == nil {
+			endpoint.State = g.M() // set default state
+		}
+		spec.EndpointMap[endpointName] = endpoint
 	}
 
 	// so that JMESPath works
@@ -42,24 +66,21 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 
 // Spec defines the complete API specification with endpoints and authentication
 type Spec struct {
-	Name           string         `yaml:"string" json:"string"`
-	Description    string         `yaml:"description" json:"description"`
-	Calls          Calls          `yaml:"calls" json:"calls"`
-	Queues         []string       `yaml:"queues" json:"queues"`
-	Defaults       Endpoint       `yaml:"defaults" json:"defaults"`
-	Authentication Authentication `yaml:"authentication" json:"authentication"`
-	Endpoints      Endpoints      `yaml:"endpoints" json:"endpoints"`
+	Name             string         `yaml:"string" json:"string"`
+	Description      string         `yaml:"description" json:"description"`
+	Calls            Calls          `yaml:"calls" json:"calls"`
+	Queues           []string       `yaml:"queues" json:"queues"`
+	Defaults         Endpoint       `yaml:"defaults" json:"defaults"`
+	Authentication   Authentication `yaml:"authentication" json:"authentication"`
+	EndpointMap      EndpointMap    `yaml:"endpoints" json:"endpoints"`
+	DynamicEndpoints Endpoints      `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
-	OriginalMap map[string]any
+	OriginalMap      map[string]any
+	endpointsOrdered []string
 }
 
 func (s *Spec) IsDynamic() bool {
-	for _, e := range s.Endpoints {
-		if e.Dynamic.Iterate != "" {
-			return true
-		}
-	}
-	return false
+	return len(s.DynamicEndpoints) > 0
 }
 
 // Authentication defines how to authenticate with the API
@@ -90,6 +111,7 @@ const (
 type AuthenticationFlow string
 
 // Endpoints is a collection of API endpoints
+type EndpointMap map[string]Endpoint
 type Endpoints []Endpoint
 
 // Endpoint is the top-level configuration structure
@@ -103,9 +125,8 @@ type Endpoint struct {
 	Request     Request    `yaml:"request" json:"request"`
 	Pagination  Pagination `yaml:"pagination" json:"pagination"`
 	Response    Response   `yaml:"response" json:"response"`
-	Dynamic     Loop       `yaml:"dynamic" json:"dynamic"`
+	Iterate     Iterate    `yaml:"iterate" json:"iterate,omitempty"` // state expression to use to loop
 
-	index        int  // for jmespath lookup
 	stop         bool // whether we should stop the endpoint process
 	conn         *APIConnection
 	client       http.Client
@@ -129,14 +150,16 @@ func (eps Endpoints) Sort() {
 	})
 }
 
-// Loop is for configuring looping values for requests
-type Loop struct {
-	Iterate    any    `yaml:"iterate" json:"iterate,omitempty"` // expression
-	Into       string `yaml:"into" json:"into,omitempty"`       // expression
+// Iterate is for configuring looping values for requests
+type Iterate struct {
+	Over       any    `yaml:"over" json:"iterate,omitempty"` // expression
+	Into       string `yaml:"into" json:"into,omitempty"`    // state variable
+	If         string `yaml:"id" json:"id,omitempty"`        // if we should iterate
 	iterations chan *Iteration
 }
 
 type Iteration struct {
+	state   StateMap // each iteration has its own state
 	counter int
 	field   string // state field
 	value   any    // state value
@@ -195,7 +218,6 @@ type Request struct {
 	Headers     map[string]any `yaml:"headers" json:"headers,omitempty"`
 	Parameters  map[string]any `yaml:"parameters" json:"parameters,omitempty"`
 	Payload     any            `yaml:"payload" json:"payload,omitempty"`
-	Loop        Loop           `yaml:"loop" json:"loop,omitempty"`               // state expression to use to loop
 	Rate        float64        `yaml:"rate" json:"rate,omitempty"`               // maximum request per second
 	Concurrency int            `yaml:"concurrency" json:"concurrency,omitempty"` // maximum concurrent requests
 }

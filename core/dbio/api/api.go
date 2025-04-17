@@ -48,8 +48,9 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	}
 
 	// set endpoint contexts
-	for i := range ac.Spec.Endpoints {
-		ac.Spec.Endpoints[i].context = g.NewContext(ac.Context.Ctx)
+	for key, endpoint := range ac.Spec.EndpointMap {
+		endpoint.context = g.NewContext(ac.Context.Ctx)
+		ac.Spec.EndpointMap[key] = endpoint
 	}
 
 	// register queues
@@ -75,10 +76,11 @@ func (ac *APIConnection) Authenticate() (err error) {
 	// set auth data
 	setAuthenticated := func() {
 		ac.State.Auth.Authenticated = true
-		for i := range ac.Spec.Endpoints {
+		for key, endpoint := range ac.Spec.EndpointMap {
 			for k, v := range ac.State.Auth.Headers {
-				ac.Spec.Endpoints[i].Request.Headers[k] = v
+				endpoint.Request.Headers[k] = v
 			}
+			ac.Spec.EndpointMap[key] = endpoint
 		}
 	}
 
@@ -127,7 +129,8 @@ func (ac *APIConnection) Close() error {
 
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
-	for _, endpoint := range ac.Spec.Endpoints {
+	for _, endpointName := range ac.Spec.endpointsOrdered {
+		endpoint := ac.Spec.EndpointMap[endpointName]
 		if !endpoint.Disabled {
 			endpoints = append(endpoints, endpoint)
 		}
@@ -168,7 +171,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	// get endpoint, match to name
 	var endpoint *Endpoint
 	{
-		for _, ep := range ac.Spec.Endpoints {
+		for _, ep := range ac.Spec.EndpointMap {
 			if strings.EqualFold(ep.Name, endpointName) {
 				endpoint = &ep
 				break
@@ -383,7 +386,7 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 	data = make(map[string]map[string]any)
 
 	// Iterate through all endpoints
-	for _, endpoint := range ac.Spec.Endpoints {
+	for _, endpoint := range ac.Spec.EndpointMap {
 		// Skip if no sync values defined
 		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) {
 			continue
@@ -408,8 +411,7 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 // Inputs is map[Endpoint.Name]map[Sync.value] = Endpoint.syncMap[Sync.value]
 func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map[string]any) (err error) {
 	// Iterate through all endpoints
-	for i := range ac.Spec.Endpoints {
-		endpoint := &ac.Spec.Endpoints[i]
+	for key, endpoint := range ac.Spec.EndpointMap {
 
 		// Skip if no sync values defined or no data for this endpoint
 		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) || len(data) == 0 {
@@ -436,12 +438,13 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 				}
 			}
 		}
+		ac.Spec.EndpointMap[key] = endpoint
 	}
 
 	return nil
 }
 
-func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Loop) (err error) {
+func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Iterate) (err error) {
 	return
 }
 

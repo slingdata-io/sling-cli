@@ -13,6 +13,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 func (c *Connection) Test() (ok bool, err error) {
@@ -65,7 +66,7 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not authenticate to %s", c.Name)
 		}
 
-		var testEndpoints []string
+		var testEndpoints, testedEndpoints []string
 		if val := os.Getenv("SLING_TEST_ENDPOINTS"); val != "" {
 			testEndpoints = strings.Split(os.Getenv("SLING_TEST_ENDPOINTS"), ",")
 		}
@@ -75,7 +76,10 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not list endpoints")
 		}
 
-		for i, endpoint := range endpoints {
+		limit := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_LIMIT", "10"))
+		g.Debug("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)
+
+		for _, endpoint := range endpoints {
 			// check for match to test (if provided)
 			allowTest := len(testEndpoints) == 0
 			for _, testEndpoint := range testEndpoints {
@@ -87,13 +91,13 @@ func (c *Connection) Test() (ok bool, err error) {
 				continue
 			}
 
-			// set limits for testing
-			endpoint.Response.Records.Limit = 10
-			apiClient.Spec.Endpoints[i] = endpoint
-
 			println()
 			g.Info("testing endpoint: %#v", endpoint.Name)
-			df, err := apiClient.ReadDataflow(endpoint.Name, api.APIStreamConfig{Flatten: 1})
+			testedEndpoints = append(testedEndpoints, endpoint.Name)
+
+			// set limits for testing
+			options := api.APIStreamConfig{Flatten: 1, Limit: limit}
+			df, err := apiClient.ReadDataflow(endpoint.Name, options)
 			if err != nil {
 				return ok, g.Error(err, "error testing endpoint: %s", endpoint.Name)
 			}
@@ -111,6 +115,18 @@ func (c *Connection) Test() (ok bool, err error) {
 				g.Debug("   columns = %s", g.Marshal(lo.Keys(record)))
 			}
 
+		}
+
+		for _, testEndpoint := range testEndpoints {
+			tested := false
+			for _, testedEndpoint := range testedEndpoints {
+				if strings.EqualFold(testedEndpoint, testEndpoint) {
+					tested = true
+				}
+			}
+			if !tested {
+				g.Warn(`did not test endpoint "%s" (not found)`, testEndpoint)
+			}
 		}
 
 	}

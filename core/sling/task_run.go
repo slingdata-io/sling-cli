@@ -587,12 +587,16 @@ func (t *TaskExecution) runApiToDb() (err error) {
 		return
 	}
 
-	if cnt > 0 && len(syncState) > 0 && t.isIncrementalState() {
-		syncStatePayload := g.Marshal(syncState)
-		t.Context.Map.Set("sync_state_payload", syncStatePayload)
-		if err = setIncrementalValueViaState(t); err != nil {
-			err = g.Error(err, "Could not set sync state")
-			return err
+	if cnt > 0 && len(syncState) > 0 {
+		// sync state if we're truncating/full-refreshing
+		if t.isIncrementalState() || t.isFullRefreshWithState() || t.isTruncateWithState() {
+			// if t.isIncrementalState() {
+			syncStatePayload := g.Marshal(syncState)
+			t.Context.Map.Set("sync_state_payload", syncStatePayload)
+			if err = setIncrementalValueViaState(t); err != nil {
+				err = g.Error(err, "Could not set sync state")
+				return err
+			}
 		}
 	}
 
