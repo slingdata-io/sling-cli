@@ -40,7 +40,11 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	}
 
 	if !lo.Contains(schemas, schemaName) {
-		_, err = conn.Exec(g.F("create schema %s", conn.Quote(schemaName)))
+		sql := g.R(
+			conn.Template().Value("core.create_schema"),
+			"schema", conn.Quote(schemaName),
+		)
+		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "Error creating schema %s", conn.Quote(schemaName))
 		}
@@ -126,18 +130,13 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		}
 	}
 
-	// TODO: need to validate the source table types are casted
-	// into the target column type
-	tgtCols, err := tgtConn.ValidateColumnNames(
-		tgtColumns,
-		tmpColumns.Names(),
-		true,
-	)
+	tgtCols, err := tgtConn.ValidateColumnNames(tgtColumns, tmpColumns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatched")
 		return
 	}
 
+	tgtFields := tgtConn.GetType().QuoteNames(tgtCols.Names()...)
 	srcFields := tgtConn.CastColumnsForSelect(tmpColumns, tgtColumns)
 
 	srcTable, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())
@@ -156,7 +155,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		tgtConn.Template().Core["insert_from_table"],
 		"tgt_table", tgtTable.FullName(),
 		"src_table", srcTable.FullName(),
-		"tgt_fields", strings.Join(tgtCols.Names(), ", "),
+		"tgt_fields", strings.Join(tgtFields, ", "),
 		"src_fields", strings.Join(srcFields, ", "),
 	)
 	_, err = tgtConn.Exec(sql)
@@ -210,12 +209,12 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 	if updateCol := targetCols.GetColumn(tgtUpdateKey); updateCol != nil && updateCol.Name != "" {
 		tgtUpdateKey = updateCol.Name // overwrite with correct casing
 	} else if len(targetCols) == 0 {
-		return // target table does not exist
+		return // target columns does not exist
 	}
 
 	sql := g.F(
 		"select max(%s) as max_val from %s",
-		tgtConn.Quote(tgtUpdateKey, false),
+		tgtConn.Quote(tgtUpdateKey),
 		table.FDQN(),
 	)
 

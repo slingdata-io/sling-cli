@@ -5,6 +5,8 @@ defaults:
   mode: backfill
   object: oracle.{stream_table_lower}
   primary_key: [id]
+  target_options:
+    use_bulk: false
 
 streams:
   public.test1k_mariadb_pg:

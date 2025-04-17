@@ -283,7 +283,9 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 
 	// set column coercion if specified
 	if coerceCols, ok := getColumnsProp(conn); ok {
-		columns.Coerce(coerceCols, true)
+		cc, _ := getColumnCasingProp(conn)
+		tgtType := dbio.Type(conn.GetProp("target_type"))
+		columns.Coerce(coerceCols, true, cc, tgtType)
 	}
 
 	fs.SetProp("format", "csv")

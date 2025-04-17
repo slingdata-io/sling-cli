@@ -494,6 +494,7 @@ variable:
   tmp_folder: /tmp
   column_upper: true
   max_string_type: varchar
+  max_string_length: 16777216
 
 error_filter:
   table_not_exist: exist

@@ -3,6 +3,7 @@ package connection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/spf13/cast"
@@ -54,6 +56,7 @@ type Connection struct {
 
 	File     filesys.FileSysClient
 	Database database.Connection
+	API      *api.APIConnection
 }
 
 // NewConnection creates a new connection
@@ -259,6 +262,10 @@ func (c *Connection) Close() error {
 	if c.File != nil {
 		return c.File.Close()
 	}
+
+	if c.API != nil {
+		return c.API.Close()
+	}
 	return nil
 }
 
@@ -332,6 +339,43 @@ func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc files
 	return filesys.NewFileSysClientFromURLContext(
 		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
 	)
+}
+
+func (c *Connection) AsAPI(cache ...bool) (ac *api.APIConnection, err error) {
+	return c.AsAPIContext(c.Context().Ctx, cache...)
+}
+
+func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.APIConnection, err error) {
+	if !c.Type.IsAPI() {
+		return nil, g.Error("not a api connection type: %s", c.Type)
+	}
+
+	// load spec
+	spec, err := LoadAPISpec(cast.ToString(c.Data["spec"]))
+	if err != nil {
+		return nil, g.Error(err, "could not load spec")
+	}
+
+	// default cache to true
+	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
+		if cc, ok := connCache.Get(c.Hash()); ok {
+			if cc.API != nil {
+				return cc.API, nil
+			}
+		}
+
+		if c.API == nil {
+			c.API, err = api.NewAPIConnection(ctx, spec, c.Data)
+			if err != nil {
+				return
+			}
+			connCache.Set(c.Hash(), c) // cache
+		}
+
+		return c.API, nil
+	}
+
+	return api.NewAPIConnection(ctx, spec, c.Data)
 }
 
 func (c *Connection) setFromEnv() {
@@ -1016,4 +1060,180 @@ func SchemeType(url string) dbio.Type {
 	scheme := strings.Split(url, "://")[0]
 	t, _ := dbio.ValidateType(scheme)
 	return t
+}
+
+func ParseLocation(location string) (conn Connection, objectExpr string, err error) {
+	stateConnParts := strings.Split(location, "/")
+	if len(stateConnParts) == 1 {
+		err = g.Error("invalid location value: '%s'. See docs for help", location)
+		return
+	}
+
+	connName := stateConnParts[0]
+	if strings.TrimSpace(connName) == "" {
+		err = g.Error("invalid location value: '%s'. See docs for help", location)
+		return
+	}
+
+	objectExpr = strings.TrimPrefix(location, connName+"/")
+
+	entry := GetLocalConns().Get(connName)
+	if entry.Name == "" {
+		err = g.Error("did not find connection: %s", connName)
+		return
+	}
+
+	return entry.Connection, objectExpr, nil
+}
+
+// LoadAPISpec loads the spec from the spec location
+func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
+
+	if specLocation == "" {
+		return spec, g.Error("invalid or missing spec")
+	}
+
+	// maps a github/gitlab url to raw
+	// https://github.com/slingdata-io/sling-cli/blob/main/examples/example.go
+	// https://raw.githubusercontent.com/slingdata-io/sling-cli/refs/heads/main/examples/example.go
+	transformToRawGitURL := func(gitURL string) (string, error) {
+		// Parse the URL
+		parsedURL, err := url.Parse(gitURL)
+		if err != nil {
+			return "", err
+		}
+
+		// Check if it's a GitHub Gist
+		if parsedURL.Host == "gist.github.com" {
+			// Gist URL format: https://gist.github.com/username/gistid
+			pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+			if len(pathParts) < 2 {
+				return "", errors.New("invalid GitHub Gist URL format")
+			}
+
+			// Extract username and gistID
+			username := pathParts[0]
+			gistID := pathParts[1]
+
+			// Filename would be the third component if specified
+			filename := ""
+			if len(pathParts) > 2 {
+				filename = pathParts[2]
+			}
+
+			// If no specific file is requested, we'll get all raw files
+			if filename == "" {
+				// Format: https://gist.githubusercontent.com/username/gistid/raw
+				return fmt.Sprintf("https://gist.githubusercontent.com/%s/%s/raw", username, gistID), nil
+			}
+
+			// Format: https://gist.githubusercontent.com/username/gistid/raw/filename
+			return fmt.Sprintf("https://gist.githubusercontent.com/%s/%s/raw/%s", username, gistID, filename), nil
+		}
+
+		// Determine the host and set raw domain
+		var rawHost string
+		isGitHub := false
+		switch parsedURL.Host {
+		case "github.com":
+			rawHost = "raw.githubusercontent.com"
+			isGitHub = true
+		case "gitlab.com":
+			rawHost = "gitlab.com"
+		default:
+			// return original
+			return gitURL, nil
+		}
+
+		// Split the path into components
+		pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+		if len(pathParts) < 4 || pathParts[2] != "blob" {
+			return "", errors.New("invalid Git repository file URL format")
+		}
+
+		// Extract components
+		owner := pathParts[0]
+		repo := pathParts[1]
+		branch := pathParts[3]
+		filePath := strings.Join(pathParts[4:], "/")
+
+		// Construct the raw URL based on platform
+		var rawURL *url.URL
+		if isGitHub {
+			// GitHub format
+			rawURL = &url.URL{
+				Scheme: "https",
+				Host:   rawHost,
+				Path:   "/" + owner + "/" + repo + "/refs/heads/" + branch + "/" + filePath,
+			}
+		} else {
+			// GitLab format
+			rawURL = &url.URL{
+				Scheme: "https",
+				Host:   rawHost,
+				Path:   "/" + owner + "/" + repo + "/-/raw/" + branch + "/" + filePath,
+			}
+		}
+
+		return rawURL.String(), nil
+	}
+
+	var specBody string
+	switch {
+	// load from location
+	case strings.HasPrefix(specLocation, "file://"):
+		specPath := strings.TrimPrefix(specLocation, "file://")
+		bytes, err := os.ReadFile(specPath)
+		if err != nil {
+			return spec, g.Error(err, "could not read api spec from: %s", specPath)
+		}
+		specBody = string(bytes)
+	case strings.HasPrefix(specLocation, "https://"), strings.HasPrefix(specLocation, "http://"):
+		// download raw http
+		specURL, err := transformToRawGitURL(specLocation)
+		if err != nil {
+			return spec, g.Error(err, "could not make git spec URL for download: %s", specLocation)
+		}
+	redirect:
+		resp, respBytes, err := net.ClientDo("GET", specURL, nil, nil)
+		if err != nil {
+			return spec, g.Error(err, "could not download spec from: %s", specURL)
+		} else if resp != nil && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
+			redirectUrl, _ := resp.Location()
+			if redirectUrl != nil {
+				specURL = redirectUrl.String()
+				goto redirect
+			}
+		}
+		specBody = string(respBytes)
+	default:
+		// connect to location and download
+		specConn, specPath, err := ParseLocation(specLocation)
+		if err != nil {
+			return spec, g.Error(err, "could not read api spec from location: %s", specLocation)
+		}
+		fc, err := specConn.AsFile()
+		if err != nil {
+			return spec, g.Error(err, "could not connection to location: %s", specLocation)
+		}
+
+		reader, err := fc.GetReader(specPath)
+		if err != nil {
+			return spec, g.Error(err, "could not read from file: %s", specPath)
+		}
+
+		bytes, err := io.ReadAll(reader)
+		if err != nil {
+			return spec, g.Error(err, "could not read api spec from: %s", specPath)
+		}
+		specBody = string(bytes)
+	}
+
+	// load spec
+	spec, err = api.LoadSpec(specBody)
+	if err != nil {
+		return spec, g.Error(err, "could not load spec from %s", specLocation)
+	}
+
+	return
 }

@@ -150,7 +150,7 @@ func (conn *ProtonConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 				defer conn.Rollback()
 			}
 
-			insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
+			insFields, err := conn.ValidateColumnNames(columns, batch.Columns.Names())
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}
@@ -342,7 +342,6 @@ func (conn *ProtonConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
 	)
 
 	return

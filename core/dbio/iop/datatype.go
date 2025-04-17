@@ -264,7 +264,7 @@ func (cols Columns) SetKeys(keyType KeyType, colNames ...string) (err error) {
 			}
 		}
 		if !found && !g.In(keyType, ClusterKey, PartitionKey, SortKey) {
-			return g.Error("could not set %s key. Did not find column %s", keyType, colName)
+			return g.Error("could not set %s key. Did not find column %s\navailable: %s", keyType, colName, g.Marshal(cols.Names()))
 		}
 	}
 	return
@@ -543,9 +543,25 @@ func (cols Columns) Dataset() Dataset {
 }
 
 // Coerce casts columns into specified types
-func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
+func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing, tgtType dbio.Type) (newCols Columns) {
 	newCols = cols
-	colMap := castCols.FieldMap(true)
+	// apply casing first
+	nameMap := map[string]string{}
+	if !casing.IsEmpty() && tgtType != "" {
+		g.Debug(`applying column casing (%s) for target type (%s)`, casing, tgtType)
+		for i, col := range newCols {
+			newName := casing.Apply(col.Name, tgtType)
+			nameMap[strings.ToLower(newName)] = col.Name // map new name to old name
+			newCols[i].Name = newName
+			if col.Name != newName {
+				g.Debug("   %s => %s", col.Name, newName)
+			}
+		}
+	}
+
+	// validate column name lengths, truncate if needed
+	newCols = newCols.ValidateNames(tgtType)
+
 	for i, col := range newCols {
 		if !hasHeader && len(castCols) == len(newCols) {
 			// assume same order since same number of columns and no header
@@ -563,8 +579,16 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool) (newCols Columns) {
 			continue
 		}
 
-		if j, found := colMap[strings.ToLower(col.Name)]; found {
-			col = castCols[j]
+		castCol := castCols.GetColumn(col.Name)
+		if castCol == nil && !casing.IsEmpty() {
+			// check old name
+			if oldName, ok := nameMap[strings.ToLower(col.Name)]; ok {
+				castCol = castCols.GetColumn(oldName)
+			}
+		}
+
+		if castCol != nil {
+			col = *castCol
 			if col.Type.IsValid() {
 				g.Debug("casting column '%s' as '%s'", col.Name, col.Type)
 				newCols[i].Type = col.Type
@@ -744,7 +768,8 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 
 		if colStats.TotalCnt == 0 || colStats.NullCnt == colStats.TotalCnt || col.Sourced {
 			// do nothing, keep existing type if defined
-		} else if colStats.StringCnt > 0 {
+		} else if colStats.StringCnt > 0 && colStats.BoolCnt == 0 && colStats.IntCnt == 0 && colStats.DecCnt == 0 && colStats.DateCnt == 0 && colStats.DateTimeCnt == 0 && colStats.DateTimeZCnt == 0 && colStats.JsonCnt == 0 {
+			// Only string values and no other types detected
 			col.Sourced = true // do not allow type change
 
 			if colStats.MaxLen > 255 {
@@ -761,15 +786,16 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			if colStats.NullCnt == colStats.TotalCnt {
 				colStats.MinLen = 0
 			}
-		} else if colStats.JsonCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.JsonCnt > 0 && colStats.JsonCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = JsonType
 			col.goType = reflect.TypeOf("json")
-		} else if colStats.BoolCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.BoolCnt > 0 && colStats.BoolCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
-			if colStats.Min*10 < -2147483648 || colStats.Max*10 > 2147483647 {
+		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
+			// Check if the values are too large for a regular int
+			if colStats.Min < -2147483648 || colStats.Max > 2147483647 {
 				col.Type = BigIntType
 			} else {
 				col.Type = IntegerType
@@ -780,11 +806,11 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 				// cast as bigint for safety
 				col.Type = BigIntType
 			}
-		} else if colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DateCnt > 0 && colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DateTimeCnt+colStats.DateTimeZCnt > 0 && colStats.DateTimeCnt+colStats.DateTimeZCnt+colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			if colStats.DateTimeZCnt > 0 {
 				col.Type = TimestampzType
 			} else {
@@ -792,9 +818,17 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.DecCnt > 0 && colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DecimalType
 			col.goType = reflect.TypeOf(float64(0.0))
+		} else {
+			// Mixed types or unrecognized - default to string/text
+			if colStats.MaxLen >= 4000 {
+				col.Type = TextType
+			} else {
+				col.Type = StringType
+			}
+			col.goType = reflect.TypeOf("string")
 		}
 		if !noDebug {
 			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(colStats))
@@ -834,6 +868,60 @@ func (col *Column) SetConstraint() {
 	if cc.EvalFunc != nil {
 		col.Constraint = cc
 	}
+}
+
+// ValidateNames truncates the column name it exceed the max column length
+func (cols Columns) ValidateNames(tgtType dbio.Type) (newCols Columns) {
+	newCols = cols
+	maxLength := cast.ToInt(tgtType.GetTemplateValue("variable.max_column_length"))
+	if maxLength == 0 {
+		return
+	}
+
+	nameMap := newCols.FieldMap(true)
+	truncations := []string{}
+
+	for i, col := range newCols {
+		if len(col.Name) > maxLength {
+			newName := col.Name[:maxLength]
+			// look for existing name to not have duplicate name
+			// shorten again and append number, need to recheck if new name again doesn't exist
+			suffix := 1
+			baseNewName := newName
+			for {
+				if _, ok := nameMap[strings.ToLower(newName)]; ok {
+					// Name collision, adjust the name
+					// Need to ensure the base name plus suffix stays within maxLength
+					suffixStr := fmt.Sprintf("_%d", suffix)
+					if len(baseNewName)+len(suffixStr) > maxLength {
+						baseNewName = baseNewName[:maxLength-len(suffixStr)]
+					}
+					newName = baseNewName + suffixStr
+					suffix++
+				} else {
+					break
+				}
+			}
+
+			// Update the name map with the new name
+			delete(nameMap, strings.ToLower(col.Name))
+			nameMap[strings.ToLower(newName)] = i
+
+			// Update the column name
+			truncations = append(truncations, g.F("%s => %s", newCols[i].Name, newName))
+			newCols[i].Name = newName
+		}
+	}
+
+	// log
+	if len(truncations) > 0 {
+		g.Debug(`truncated column names (exceeds max length of %d for "%s")`, maxLength, tgtType)
+		for _, truncation := range truncations {
+			g.Debug("   %s", truncation)
+		}
+	}
+
+	return
 }
 
 // SetLengthPrecisionScale parse length, precision, scale
@@ -1102,7 +1190,7 @@ func (cc *ColumnConstraint) parse() {
 }
 
 // GetNativeType returns the native column type from generic
-func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
+func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType string, err error) {
 	template, _ := t.Template()
 	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
 	if !ok {
@@ -1121,12 +1209,22 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 
 	// Add precision as needed
 	if strings.HasSuffix(nativeType, "()") {
+		maxStringLength := cast.ToInt(template.Value("variable.max_string_length"))
+		maxStringType := template.Value("variable.max_string_type")
+
 		length := col.Stats.MaxLen
 		if col.IsString() {
 			isSourced := col.Sourced && col.DbPrecision > 0
 			if isSourced {
 				// string length was manually provided
 				length = col.DbPrecision
+				if ct.String != nil {
+					newLength := ct.String.Apply(length, maxStringLength)
+					if newLength != length {
+						g.Debug(`  applied length type mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
+					}
+					length = newLength
+				}
 			} else if length <= 0 {
 				length = col.Stats.MaxLen * 2
 				if length < 255 {
@@ -1134,10 +1232,9 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 				}
 			}
 
-			maxStringType := template.Value("variable.max_string_type")
 			if !isSourced && maxStringType != "" {
 				nativeType = maxStringType // use specified default
-			} else if length > 255 {
+			} else if length >= maxStringLength {
 				// let's make text since high
 				nativeType = template.GeneralTypeMap["text"]
 			} else {
@@ -1162,20 +1259,11 @@ func (col *Column) GetNativeType(t dbio.Type) (nativeType string, err error) {
 		precision := col.DbPrecision
 		scale := col.DbScale
 
-		if !col.Sourced || col.DbPrecision == 0 {
-			scale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
-			scale = lo.Ternary(scale < col.Stats.MaxDecLen, col.Stats.MaxDecLen, scale)
-			scale = lo.Ternary(scale > env.DdlMaxDecScale, env.DdlMaxDecScale, scale)
-			if maxDecimals := cast.ToInt(os.Getenv("MAX_DECIMALS")); maxDecimals > scale {
-				scale = maxDecimals
+		if col.IsDecimal() {
+			if ct.Decimal == nil {
+				ct.Decimal = &DecimalColumnTyping{}
 			}
-
-			precision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, env.DdlMinDecLength, col.DbPrecision)
-			precision = lo.Ternary(precision < (scale*2), scale*2, precision)
-			precision = lo.Ternary(precision > env.DdlMaxDecLength, env.DdlMaxDecLength, precision)
-
-			minPrecision := col.Stats.MaxLen + scale
-			precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+			precision, scale = ct.Decimal.Apply(col)
 		}
 
 		nativeType = strings.ReplaceAll(
@@ -1266,11 +1354,14 @@ func FormatValue(val any, columnType ColumnType, connType dbio.Type) (newVal str
 type ColumnCasing string
 
 const (
-	SourceColumnCasing ColumnCasing = "source" // keeps source column name casing. The default.
-	TargetColumnCasing ColumnCasing = "target" // converts casing according to target database. Lower-case for files.
-	SnakeColumnCasing  ColumnCasing = "snake"  // converts snake casing according to target database. Lower-case for files.
-	UpperColumnCasing  ColumnCasing = "upper"  // make it upper case
-	LowerColumnCasing  ColumnCasing = "lower"  // make it lower case
+	// see https://github.com/slingdata-io/sling-cli/issues/538
+	NormalizeColumnCasing ColumnCasing = "normalize" // normalize to target, leaves mixed cases columns as it
+	SourceColumnCasing    ColumnCasing = "source"    // keeps source column name casing. The default.
+	TargetColumnCasing    ColumnCasing = "target"    // converts casing according to target database. Lower-case for files.
+	SnakeColumnCasing     ColumnCasing = "snake"     // converts snake casing according to target database. Lower-case for files.
+	UpperColumnCasing     ColumnCasing = "upper"     // make it upper case
+	LowerColumnCasing     ColumnCasing = "lower"     // make it lower case
+
 )
 
 // Equals evaluates equality for column casing (pointer safe)
@@ -1296,6 +1387,16 @@ var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
 func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 	if cc.IsEmpty() || cc.Equals(SourceColumnCasing) {
 		return name
+	} else if cc.Equals(NormalizeColumnCasing) {
+		// use legacy behavior, so that we don't need to qualify column name where querying
+		if !dbio.HasVariedCase(name) && !dbio.HasStrangeChar(name) {
+			if tgtConnType.DBNameUpperCase() {
+				name = strings.ToUpper(name)
+			} else {
+				name = strings.ToLower(name)
+			}
+		}
+		return name
 	}
 
 	// convert to snake case
@@ -1320,4 +1421,93 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 	}
 
 	return name
+}
+
+// ColumnTyping contains type-specific mapping configurations
+type ColumnTyping struct {
+	String  *StringColumnTyping  `json:"string,omitempty" yaml:"string,omitempty"`
+	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
+}
+
+// StringColumnTyping contains string type mapping configurations
+type StringColumnTyping struct {
+	LengthFactor int  `json:"length_factor,omitempty" yaml:"length_factor,omitempty"`
+	MinLength    int  `json:"min_length,omitempty" yaml:"min_length,omitempty"`
+	MaxLength    int  `json:"max_length,omitempty" yaml:"max_length,omitempty"`
+	UseMax       bool `json:"use_max,omitempty" yaml:"use_max,omitempty"`
+}
+
+func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
+	if sct.MaxLength > max {
+		max = sct.MaxLength
+	}
+	if max == 0 {
+		max = 4000 // some safe large max
+	}
+
+	if sct.UseMax {
+		return max
+	}
+
+	if sct.LengthFactor > 0 {
+		newLength = length * sct.LengthFactor
+		if newLength > max {
+			return max
+		}
+		if newLength < sct.MinLength {
+			return sct.MinLength
+		}
+		return newLength
+	}
+
+	if length < sct.MinLength {
+		return sct.MinLength
+	}
+
+	return length
+}
+
+// DecimalColumnTyping contains decimal type mapping configurations
+type DecimalColumnTyping struct {
+	MinPrecision *int `json:"min_precision,omitempty" yaml:"min_precision,omitempty"` // Total number of digits
+	MaxPrecision int  `json:"max_precision,omitempty" yaml:"max_precision,omitempty"` // Total number of digits
+	MinScale     *int `json:"min_scale,omitempty" yaml:"min_scale,omitempty"`         // Number of digits after decimal point
+	MaxScale     int  `json:"max_scale,omitempty" yaml:"max_scale,omitempty"`         // Number of digits after decimal point
+}
+
+func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
+
+	precision = col.DbPrecision
+	scale = col.DbScale
+
+	if precision == 0 {
+		minPrecision := col.Stats.MaxLen + scale
+		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
+	} else if col.Sourced {
+		return
+	}
+
+	dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
+	dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
+	dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
+	dct.MaxPrecision = lo.Ternary(dct.MaxPrecision == 0, env.DdlMaxDecLength, dct.MaxPrecision)
+
+	if precision < *dct.MinPrecision {
+		precision = *dct.MinPrecision
+	}
+
+	if precision > dct.MaxPrecision {
+		precision = dct.MaxPrecision
+	}
+
+	if scale < *dct.MinScale {
+		scale = *dct.MinScale
+	}
+
+	if scale > dct.MaxScale {
+		scale = dct.MaxScale
+	}
+
+	return
 }

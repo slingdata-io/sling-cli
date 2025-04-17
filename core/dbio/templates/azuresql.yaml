@@ -322,3 +322,5 @@ variable:
   bool_as: string
   batch_rows: 200
   max_string_type: nvarchar(max)
+  max_string_length: 4000
+  max_column_length: 128

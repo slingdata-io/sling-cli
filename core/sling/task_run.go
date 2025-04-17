@@ -16,6 +16,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -137,6 +138,10 @@ func (t *TaskExecution) Execute() error {
 			t.Err = t.runDbToFile()
 		case FileToFile:
 			t.Err = t.runFileToFile()
+		case ApiToDB:
+			t.Err = t.runApiToDb()
+		case ApiToFile:
+			t.Err = t.runApiToFile()
 		default:
 			t.SetProgress("task execution configuration is invalid")
 			t.Err = g.Error("Cannot Execute. Task Type is not specified")
@@ -176,13 +181,25 @@ func (t *TaskExecution) Execute() error {
 			t.Status = ExecStatusSuccess
 		}
 	} else {
-		t.SetProgress("execution failed")
-		t.Status = ExecStatusError
-		if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
-			eG := g.ErrorGroup{}
-			eG.Add(err)
-			eG.Add(t.Err)
-			t.Err = g.Error(eG.Err())
+
+		// check for timeout
+		deadline, ok := t.Context.Map.Get("timeout-deadline")
+		if ok && cast.ToInt64(deadline) <= (time.Now().Unix()+1) {
+			t.SetProgress("execution failed (timed-out)")
+			t.Status = ExecStatusTimedOut
+		} else {
+			t.SetProgress("execution failed")
+			t.Status = ExecStatusError
+		}
+		if t.df != nil {
+			if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
+				eG := g.ErrorGroup{}
+				eG.Add(err)
+				eG.Add(t.Err)
+				t.Err = g.Error(eG.Err())
+			} else {
+				t.Err = g.Error(t.Err)
+			}
 		} else {
 			t.Err = g.Error(t.Err)
 		}
@@ -238,6 +255,22 @@ func (t *TaskExecution) GetStateMap() map[string]any {
 	}
 
 	return sMap
+}
+
+func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnection, err error) {
+
+	// use cached connection so that we re-use the queues
+	conn, err = t.Config.SrcConn.AsAPIContext(ctx, true)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	if err := conn.Authenticate(); err != nil {
+		return nil, g.Error(err, "could not authenticate")
+	}
+
+	return conn, nil
 }
 
 func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connection, err error) {
@@ -474,6 +507,173 @@ func (t *TaskExecution) runFileToDB() (err error) {
 	if cnt > 0 && t.Config.IsFileStreamWithStateAndParts() {
 		if err = setIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not set incremental value")
+			return err
+		}
+	}
+
+	return
+}
+
+func (t *TaskExecution) runApiToDb() (err error) {
+
+	start = time.Now()
+
+	t.SetProgress("connecting to target database (%s)", t.Config.TgtConn.Type)
+	tgtConn, err := t.getTgtDBConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize target connection")
+		return
+	}
+
+	if !t.isUsingPool() {
+		t.AddCleanupTaskLast(func() { tgtConn.Close() })
+	}
+
+	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+
+	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	if t.isIncrementalState() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+		var syncState map[string]map[string]any
+		if t.Config.IncrementalVal != nil {
+			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+			if err != nil {
+				err = g.Error(err, "Could not parse sync state value")
+				return err
+			}
+		}
+
+		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
+			err = g.Error(err, "Could not put API sync state value")
+			return err
+		}
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for storing state for APIs")
+	}
+
+	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	if err != nil {
+		err = g.Error(err, "Could not ReadFromApi")
+		return
+	}
+	defer t.df.Close()
+
+	t.SetProgress("writing to target database [mode: %s]", t.Config.Mode)
+	defer t.Cleanup()
+	cnt, err := t.WriteToDb(t.Config, t.df, tgtConn)
+	if err != nil {
+		err = g.Error(err, "could not write to database")
+		return
+	}
+
+	elapsed := int(time.Since(start).Seconds())
+	if len(t.df.Columns) > 0 {
+		t.SetProgress("inserted %d rows into %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+	} else {
+		t.SetProgress("inserted %d rows in %d secs [%s r/s]", cnt, elapsed, getRate(cnt))
+	}
+
+	syncState, err := srcConn.GetSyncedState(t.Config.StreamName)
+	if err != nil {
+		err = g.Error(err, "could not get state to sync")
+		return
+	}
+
+	if cnt > 0 && len(syncState) > 0 {
+		// sync state if we're truncating/full-refreshing
+		if t.isIncrementalState() || t.isFullRefreshWithState() || t.isTruncateWithState() {
+			// if t.isIncrementalState() {
+			syncStatePayload := g.Marshal(syncState)
+			t.Context.Map.Set("sync_state_payload", syncStatePayload)
+			if err = setIncrementalValueViaState(t); err != nil {
+				err = g.Error(err, "Could not set sync state")
+				return err
+			}
+		}
+	}
+
+	return
+}
+
+func (t *TaskExecution) runApiToFile() (err error) {
+
+	start = time.Now()
+	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+
+	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
+	if err != nil {
+		err = g.Error(err, "Could not initialize source connection")
+		return
+	}
+
+	if t.isIncrementalState() {
+		if err = getIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not get incremental value")
+			return err
+		}
+
+		var syncState map[string]map[string]any
+		if t.Config.IncrementalVal != nil {
+			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+			if err != nil {
+				err = g.Error(err, "Could not parse sync state value")
+				return err
+			}
+		}
+
+		if err = srcConn.PutSyncedState(t.Config.StreamName, syncState); err != nil {
+			err = g.Error(err, "Could not put API sync state value")
+			return err
+		}
+	} else if t.isIncrementalWithUpdateKey() {
+		return g.Error("Please use the SLING_STATE environment variable for storing state for APIs")
+	}
+
+	t.df, err = t.ReadFromApi(t.Config, srcConn)
+	if err != nil {
+		err = g.Error(err, "Could not ReadFromApi")
+		return
+	}
+	defer t.df.Close()
+
+	if t.Config.Options.StdOut {
+		t.SetProgress("writing to target stream (stdout)")
+	} else {
+		t.SetProgress("writing to target file system (%s)", t.Config.TgtConn.Type)
+	}
+	defer t.Cleanup()
+	cnt, err := t.WriteToFile(t.Config, t.df)
+	if err != nil {
+		err = g.Error(err, "Could not WriteToFile")
+		return
+	}
+
+	elapsed := int(time.Since(start).Seconds())
+	t.SetProgress("wrote %d rows to %s in %d secs [%s r/s]", cnt, t.getTargetObjectValue(), elapsed, getRate(cnt))
+
+	if t.df.Err() != nil {
+		err = g.Error(t.df.Err(), "Error in runApiToFile")
+	}
+
+	syncState, err := srcConn.GetSyncedState(t.Config.StreamName)
+	if err != nil {
+		err = g.Error(err, "could not get state to sync")
+		return
+	}
+
+	if cnt > 0 && len(syncState) > 0 && t.isIncrementalState() {
+		syncStatePayload := g.Marshal(syncState)
+		t.Context.Map.Set("sync_state_payload", syncStatePayload)
+		if err = setIncrementalValueViaState(t); err != nil {
+			err = g.Error(err, "Could not set sync state")
 			return err
 		}
 	}

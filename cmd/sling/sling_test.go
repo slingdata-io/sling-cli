@@ -566,7 +566,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			Level:   d.SchemataLevelColumn,
 			Pattern: taskCfg.Target.Object,
 		}
-		_, nodes, schemata, err := taskCfg.TgtConn.Discover(&opt)
+		_, nodes, schemata, _, err := taskCfg.TgtConn.Discover(&opt)
 		var columns iop.Columns
 		if g.AssertNoError(t, err) {
 			if taskCfg.TgtConn.Type.IsDb() {
@@ -1186,7 +1186,7 @@ func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbi
 	}
 
 	g.Info("sling conns discover %s %s", conn.name, g.Marshal(opt))
-	files, schemata, err := conns.Discover(conn.name, &opt)
+	files, schemata, endpoints, err := conns.Discover(conn.name, &opt)
 	if !g.AssertNoError(t, err) {
 		return
 	}
@@ -1360,6 +1360,44 @@ func testDiscover(t *testing.T, pattern string, env map[string]any, connType dbi
 			for _, word := range valNotContains {
 				found := containsMap[word]
 				assert.False(t, found, "found '%s' in %s for %s", word, resultType, connType)
+			}
+		}
+	}
+
+	if connType.IsAPI() {
+
+		if valRowCount > 0 {
+			assert.Equal(t, valRowCount, len(endpoints), "expected %d endpoints, got %d", valRowCount, len(endpoints))
+		} else {
+			assert.Greater(t, len(endpoints), 0)
+		}
+
+		if valRowCountMin > -1 {
+			assert.Greater(t, len(endpoints), valRowCountMin, "expected more than %d endpoints, got %d", valRowCountMin, len(endpoints))
+		}
+
+		if len(containsMap) > 0 {
+			resultType := "endpoints"
+
+			// Extract endpoint names and check against containsMap
+			names := []string{}
+			for _, ep := range endpoints {
+				names = append(names, ep.Name)
+				for word := range containsMap {
+					if strings.EqualFold(word, ep.Name) {
+						containsMap[word] = true
+					}
+				}
+			}
+
+			for _, word := range valContains {
+				found := containsMap[word]
+				assert.True(t, found, "did not find '%s' in %s for %s: %v", word, resultType, connType, names)
+			}
+
+			for _, word := range valNotContains {
+				found := containsMap[word]
+				assert.False(t, found, "found '%s' in %s for %s: %v", word, resultType, connType, names)
 			}
 		}
 	}

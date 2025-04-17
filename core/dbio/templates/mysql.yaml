@@ -391,6 +391,8 @@ variable:
   batch_rows: 500
   bool_as: integer
   max_string_type: mediumtext
+  max_string_length: 16777215
+  max_column_length: 64
 
 error_filter:
   table_not_exist: exist

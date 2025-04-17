@@ -121,7 +121,7 @@ type Connection interface {
 	PropsArr() []string
 	Query(sql string, options ...map[string]interface{}) (iop.Dataset, error)
 	QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (iop.Dataset, error)
-	Quote(field string, normalize ...bool) string
+	Quote(field string) string
 	RenameTable(table string, newTable string) (err error)
 	Rollback() error
 	RunAnalysis(string, map[string]interface{}) (iop.Dataset, error)
@@ -137,7 +137,7 @@ type Connection interface {
 	Tx() Transaction
 	Unquote(string) string
 	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
-	ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error)
+	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
 
@@ -970,12 +970,14 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 
 				if vals, ok := colTransforms[key]; ok {
-					// only add transform parse_uuid if parse_ms_uuid is not specified
-					if !lo.Contains(vals, "parse_ms_uuid") {
-						colTransforms[key] = append([]string{"parse_uuid"}, vals...)
+					// only add transform parse_ms_uuid if parse_uuid is not specified
+					if !lo.Contains(vals, "parse_uuid") {
+						g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
+						colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
 					}
 				} else {
-					colTransforms[key] = []string{"parse_uuid"}
+					g.Debug(`setting transform "parse_ms_uuid" for column %s`, col.Name)
+					colTransforms[key] = []string{"parse_ms_uuid"}
 				}
 			}
 		}
@@ -1424,26 +1426,34 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 					col.DbPrecision = colType.Length
 				}
 			}
+		}
 
-			if col.IsNumber() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake) {
+		if col.IsString() {
+			if col.DbPrecision == 0 && colType.Length > 0 && colType.Length < 999999 {
+				col.DbPrecision = colType.Length
+				col.Stats.MaxDecLen = colType.Length
 				col.Sourced = true
-				col.DbPrecision = colType.Precision
-				col.DbScale = colType.Scale
-				col.Stats.MaxDecLen = lo.Ternary(colType.Scale > ddlMinDecScale, colType.Scale, ddlMinDecScale)
 			}
+		}
 
-			if g.In(conn.GetType(), dbio.TypeDbMySQL) {
-				// TODO: cannot use sourced length/scale, unreliable.
-				col.DbPrecision = 0
-				col.DbScale = 0
-				col.Stats.MaxDecLen = 0
+		if col.IsDecimal() {
+			if col.DbPrecision == 0 && colType.Precision < 99 {
+				col.DbPrecision = colType.Precision
+			}
+			if col.DbScale == 0 && colType.Scale < 30 {
+				col.DbScale = colType.Scale
+				col.Stats.MaxDecLen = colType.Scale
+			}
+			if col.DbPrecision > 0 {
+				col.Sourced = true
 			}
 		}
 
 		// parse length, precision, scale manually specified in mapping
 		col.SetLengthPrecisionScale()
 
-		// g.Trace("col %s (%s -> %s) has %d length, %d scale, sourced: %t", colType.Name(), colType.DatabaseTypeName(), Type, length, scale, ok)
+		g.Trace(`database col => "%s" native_type=%s generic_type=%s length=%d precision=%d scale=%d sourced=%v`, col.Name, col.DbType, col.Type, col.Stats.MaxLen, col.DbPrecision, col.DbScale, col.Sourced)
+		// g.Trace(`   colType=%#v`, colType)
 
 		columns[i] = col
 
@@ -2075,10 +2085,11 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 			continue
 		}
 
+		// don't normalize name, leave as is
 		selectExpr := conn.Self().Quote(srcCol.Name)
 
 		if srcCol.DbType != tgtCol.DbType {
-			g.DebugLow(
+			g.Debug(
 				"inserting %s [%s] into %s [%s]",
 				srcCol.Name, srcCol.DbType, tgtCol.Name, tgtCol.DbType,
 			)
@@ -2102,7 +2113,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 
 // ValidateColumnNames verifies that source fields are present in the target table
 // It will return quoted field names as `newColNames`, the same length as `colNames`
-func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string, quote bool) (newCols iop.Columns, err error) {
+func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error) {
 
 	mismatches := []string{}
 	for _, colName := range colNames {
@@ -2111,11 +2122,6 @@ func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string
 			// src field is missing in tgt field
 			mismatches = append(mismatches, g.F("source field '%s' is missing in target table", colName))
 			continue
-		}
-		if quote {
-			newCol.Name = conn.Self().Quote(newCol.Name)
-		} else {
-			newCol.Name = conn.Self().Unquote(newCol.Name)
 		}
 		newCols = append(newCols, *newCol)
 	}
@@ -2164,8 +2170,8 @@ func (conn *BaseConn) Unquote(field string) string {
 }
 
 // Quote adds quotes to the field name
-func (conn *BaseConn) Quote(field string, normalize ...bool) string {
-	return conn.Type.Quote(field, normalize...)
+func (conn *BaseConn) Quote(field string) string {
+	return conn.Type.Quote(field)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2252,7 +2258,11 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
-	return col.GetNativeType(conn.GetType())
+	var ct iop.ColumnTyping
+	if val := conn.GetProp("column_typing"); val != "" {
+		g.Unmarshal(val, &ct)
+	}
+	return col.GetNativeType(conn.GetType(), ct)
 }
 
 // GenerateDDL genrate a DDL based on a dataset
@@ -2297,7 +2307,6 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 			g.Trace("%s - %s %s", col.Name, col.Type, g.Marshal(col.Stats))
 		}
 
-		// normalize column name uppercase/lowercase
 		columnDDL := conn.Self().Quote(col.Name) + " " + nativeType
 		columnsDDL = append(columnsDDL, columnDDL)
 	}
@@ -2538,49 +2547,61 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		return
 	}
 
-	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields, true)
+	pkCols, err := conn.ValidateColumnNames(tgtColumns, pkFields)
 	if err != nil {
 		err = g.Error(err, "PK columns mismatch")
 		return
 	}
 
-	pkFields = pkCols.Names()
+	var pkEqualFields, srcPkFields, tgtPkFields []string
+	pkFields = conn.Type.QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
-	pkEqualFields := []string{}
-	for _, pkField := range pkFields {
-		pkEqualField := g.F("src.%s = tgt.%s", pkField, pkField)
+	for _, pkField := range pkCols.Names() {
+		// don't normalize, use raw name
+		srcCol := srcColumns.GetColumn(pkField)
+		tgtCol := tgtColumns.GetColumn(pkField)
+		srcField := conn.Quote(srcCol.Name)
+		tgtField := conn.Quote(tgtCol.Name)
+
+		srcPkFields = append(srcPkFields, srcField)
+		tgtPkFields = append(tgtPkFields, tgtField)
+
+		pkEqualField := g.F("src.%s = tgt.%s", srcField, tgtField)
 		pkEqualFields = append(pkEqualFields, pkEqualField)
 		pkFieldMap[pkField] = ""
 	}
 
-	cols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names(), false)
+	tgtCols, err := conn.ValidateColumnNames(tgtColumns, srcColumns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return
 	}
 
-	tgtFields := conn.Type.QuoteNames(cols.Names()...)
+	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
 	insertFields := []string{}
 	placeholderFields := []string{}
-	for _, srcColName := range cols.Names() {
-		srcCol := g.PtrVal(srcColumns.GetColumn(srcColName)) // should be found
-		colNameQ := conn.Quote(srcCol.Name)
-		tgtCol := tgtColumns.GetColumn(srcCol.Name)
+	for _, tgtColName := range tgtCols.Names() {
+		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
+		tgtCol := tgtColumns.GetColumn(tgtColName)
 		if tgtCol == nil {
-			return nil, g.Error("did not find target column: %s (has %s)", srcCol.Name, g.Marshal(tgtColumns.Names()))
+			return nil, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
 		}
+
+		// don't normalize, use raw name
+		srcColNameQ := conn.Quote(srcCol.Name)
+		tgtColNameQ := conn.Quote(tgtCol.Name)
 
 		colExpr := conn.Self().CastColumnForSelect(srcCol, *tgtCol)
 
-		insertFields = append(insertFields, colNameQ)
+		insertFields = append(insertFields, tgtColNameQ)
 
-		phExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("ph.%s", colNameQ))
+		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
-		if _, ok := pkFieldMap[colNameQ]; !ok {
+		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
-			setSrcExpr := strings.ReplaceAll(colExpr, colNameQ, g.F("src.%s", colNameQ))
-			setField := g.F("%s = %s", colNameQ, setSrcExpr)
+			setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+			setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
 	}
@@ -2595,6 +2616,8 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		"tgt_fields":         strings.Join(tgtFields, ", "),
 		"insert_fields":      strings.Join(insertFields, ", "),
 		"pk_fields":          strings.Join(pkFields, ", "),
+		"src_pk_fields":      strings.Join(srcPkFields, ", "),
+		"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
 		"set_fields":         strings.Join(setFields, ", "),
 		"placeholder_fields": strings.Join(placeholderFields, ", "),
 	}
@@ -2894,7 +2917,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 	}
 
 	// make sure columns exist in table, get common columns into cols
-	cols, err := conn.ValidateColumnNames(tColumns, columns.Names(), false)
+	cols, err := conn.ValidateColumnNames(tColumns, columns.Names())
 	if err != nil {
 		err = g.Error(err, "columns mismatch")
 		return

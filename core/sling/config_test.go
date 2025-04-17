@@ -61,6 +61,7 @@ func TestConfig(t *testing.T) {
 func TestColumnCasing(t *testing.T) {
 	df := iop.NewDataflow(0)
 
+	normalizeCasing := iop.NormalizeColumnCasing
 	sourceCasing := iop.SourceColumnCasing
 	snakeCasing := iop.SnakeColumnCasing
 	targetCasing := iop.TargetColumnCasing
@@ -74,6 +75,11 @@ func TestColumnCasing(t *testing.T) {
 	assert.Equal(t, "MY_COL", df.Columns[0].Name)
 	assert.Equal(t, "HEY_HEY", df.Columns[1].Name)
 
+	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"}, iop.Column{Name: "hey-hey"})
+	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &normalizeCasing)
+	assert.Equal(t, "myCol", df.Columns[0].Name)
+	assert.Equal(t, "hey-hey", df.Columns[1].Name)
+
 	df.Columns = iop.NewColumns(iop.Column{Name: "myCol"})
 	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &targetCasing)
 	assert.Equal(t, "MYCOL", df.Columns[0].Name)
@@ -85,4 +91,14 @@ func TestColumnCasing(t *testing.T) {
 	df.Columns = iop.NewColumns(iop.Column{Name: "DHL OriginalTracking-Number"})
 	applyColumnCasingToDf(df, dbio.TypeDbDuckDb, &snakeCasing)
 	assert.Equal(t, "dhl_original_tracking_number", df.Columns[0].Name)
+
+	df.Columns = iop.NewColumns(iop.Column{Name: "DHL OriginalTracking-Number"})
+	applyColumnCasingToDf(df, dbio.TypeDbDuckDb, &normalizeCasing)
+	assert.Equal(t, "DHL OriginalTracking-Number", df.Columns[0].Name)
+
+	df.Columns = iop.NewColumns(iop.Column{Name: "HAPPY"})
+	applyColumnCasingToDf(df, dbio.TypeDbDuckDb, &normalizeCasing)
+	assert.Equal(t, "happy", df.Columns[0].Name)
+	applyColumnCasingToDf(df, dbio.TypeDbSnowflake, &normalizeCasing)
+	assert.Equal(t, "HAPPY", df.Columns[0].Name)
 }

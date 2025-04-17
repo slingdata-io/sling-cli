@@ -49,9 +49,6 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			return cnt, err
 		}
 
-		// apply column casing
-		applyColumnCasingToDf(df, fs.FsType(), t.Config.Target.Options.ColumnCasing)
-
 		// use duckdb for writing parquet
 		if t.shouldWriteViaDuckDB(uri) {
 			// push to temp duck file
@@ -73,8 +70,6 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		df.SyncStats()
 
 	} else if cfg.Options.StdOut {
-		// apply column casing
-		applyColumnCasingToDf(df, dbio.TypeFileLocal, t.Config.Target.Options.ColumnCasing)
 
 		limit := cast.ToUint64(cfg.Source.Limit())
 
@@ -155,6 +150,22 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if len(df.Columns) == 0 {
 		err = g.Error("no stream columns detected")
 		return 0, err
+	} else if df.Columns[0].Name == "_sling_api_stream_no_data_" {
+		df.Collect()
+
+		// check table existence
+		exists, _ := database.TableExists(tgtConn, cfg.Target.Object)
+		if exists {
+			if cfg.Mode == IncrementalMode {
+				g.Info("no new data or records found in source api stream.")
+			} else {
+				g.Warn("no data or records found in source api stream.")
+			}
+		} else {
+			g.Warn("no data or records found in source api stream, therefore no columns were detected. Sling cannot create a target table without columns.")
+		}
+
+		return 0, nil
 	}
 
 	// write directly to the final table (no temp table)
@@ -196,7 +207,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// Prepare dataflow
-	sampleData, err := prepareDataflow(t, df, tgtConn)
+	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
 	if err != nil {
 		return 0, err
 	}
@@ -394,7 +405,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// Prepare dataflow
-	sampleData, err := prepareDataflow(t, df, tgtConn)
+	sampleData, err := prepareDataflowForWriteDB(t, df, tgtConn)
 	if err != nil {
 		return 0, err
 	}
@@ -679,7 +690,7 @@ func configureColumnHandlers(t *TaskExecution, cfg *Config, df *iop.Dataflow, tg
 	return nil
 }
 
-func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
+func prepareDataflowForWriteDB(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connection) (iop.Dataset, error) {
 
 	// if final target column is string and source col is uuid, we need to match type
 	// otherwise, there could be a upper case/lower case difference, since sling now supports uuid type
@@ -695,9 +706,6 @@ func prepareDataflow(t *TaskExecution, df *iop.Dataflow, tgtConn database.Connec
 			}
 		}
 	}
-
-	// apply column casing
-	applyColumnCasingToDf(df, tgtConn.GetType(), t.Config.Target.Options.ColumnCasing)
 
 	sampleData := df.BufferDataset()
 	if !sampleData.Inferred {

@@ -1,0 +1,16 @@
+source: stripe_sling
+target: postgres
+
+defaults:
+  mode: incremental
+  object: apis.{source_name}_{stream_name}
+
+  source_options:
+    flatten: 1 # flatten records 1 level only
+
+streams:
+  '*':
+
+env:
+  SLING_STATE: postgres/sling_state.stripe # one state table per replication
+  SLING_LOADED_AT_COLUMN: timestamp

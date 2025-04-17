@@ -176,6 +176,11 @@ var cliRunFlags = []g.Flag{
 		Description: "Set logging level to DEBUG.",
 	},
 	{
+		Name:        "trace",
+		Type:        "bool",
+		Description: "Set logging level to TRACE (do not use in production).",
+	},
+	{
 		Name:        "examples",
 		ShortName:   "e",
 		Type:        "bool",
@@ -245,6 +250,11 @@ var cliConns = &g.CliSC{
 					Type:        "bool",
 					Description: "Set logging level to DEBUG.",
 				},
+				{
+					Name:        "trace",
+					Type:        "bool",
+					Description: "Set logging level to TRACE (do not use in production).",
+				},
 			},
 		},
 		{
@@ -268,6 +278,16 @@ var cliConns = &g.CliSC{
 					ShortName:   "d",
 					Type:        "bool",
 					Description: "Set logging level to DEBUG.",
+				},
+				{
+					Name:        "trace",
+					Type:        "bool",
+					Description: "Set logging level to TRACE (do not use in production).",
+				},
+				{
+					Name:        "endpoints",
+					Type:        "string",
+					Description: "The endpoint(s) to test, for API connections only",
 				},
 			},
 		},
@@ -324,6 +344,11 @@ var cliConns = &g.CliSC{
 					ShortName:   "d",
 					Type:        "bool",
 					Description: "Set logging level to DEBUG.",
+				},
+				{
+					Name:        "trace",
+					Type:        "bool",
+					Description: "Set logging level to TRACE (do not use in production).",
 				},
 			},
 		},

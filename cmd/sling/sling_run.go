@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -162,15 +163,19 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 			cfg.Source.Where = cast.ToString(v)
 		case "streams":
 			selectStreams = strings.Split(cast.ToString(v), ",")
-		case "debug":
-			cfg.Options.Debug = cast.ToBool(v)
-			if cfg.Options.Debug && os.Getenv("DEBUG") == "" {
-				os.Setenv("DEBUG", "LOW")
-				env.SetLogger()
-			}
 		case "examples":
 			showExamples = cast.ToBool(v)
 		}
+	}
+
+	if cast.ToBool(c.Vals["trace"]) {
+		cfg.Options.Debug = true
+		os.Setenv("DEBUG", "TRACE")
+		env.InitLogger()
+	} else if cast.ToBool(c.Vals["debug"]) {
+		cfg.Options.Debug = true
+		os.Setenv("DEBUG", "LOW")
+		env.InitLogger()
 	}
 
 	if showExamples {
@@ -230,6 +235,9 @@ runReplication:
 			defer os.Remove(replicationCfgPath)
 			goto runReplication // run replication
 		}
+
+		// set global timeout
+		setTimeout(os.Getenv("SLING_TIMEOUT"))
 
 		err = runTask(cfg, &rc)
 		if err != nil {
@@ -660,4 +668,24 @@ func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	}
 
 	return nil
+}
+
+func setTimeout(values ...string) {
+	for _, timeout := range values {
+		if timeout == "" {
+			continue
+		}
+		// only process first non-empty value
+		duration := time.Duration(cast.ToFloat64(timeout) * float64(time.Minute))
+		parent, cancel := context.WithTimeout(context.Background(), duration)
+		_ = cancel
+
+		ctx = g.NewContext(parent) // overwrite global context
+		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
+
+		// set deadline for status setting later
+		deadline := time.Now().Add(duration)
+		ctx.Map.Set("timeout-deadline", deadline.Unix())
+		break
+	}
 }

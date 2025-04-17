@@ -20,6 +20,8 @@ const (
 	KindDatabase Kind = "database"
 	// KindFile for files (cloud, sftp)
 	KindFile Kind = "file"
+	// KindAPI for apis
+	KindAPI Kind = "api"
 	// KindUnknown for unknown
 	KindUnknown Kind = ""
 )
@@ -30,6 +32,7 @@ var AllKind = []struct {
 }{
 	{KindDatabase, "KindDatabase"},
 	{KindFile, "KindFile"},
+	{KindAPI, "KindAPI"},
 	{KindUnknown, "KindUnknown"},
 }
 
@@ -38,6 +41,8 @@ type Type string
 
 const (
 	TypeUnknown Type = ""
+
+	TypeApi Type = "api"
 
 	TypeFileLocal  Type = "file"
 	TypeFileHDFS   Type = "hdfs"
@@ -77,6 +82,7 @@ var AllType = []struct {
 	TSName string
 }{
 	{TypeUnknown, "TypeUnknown"},
+	{TypeApi, "TypeApi"},
 	{TypeFileLocal, "TypeFileLocal"},
 	{TypeFileHDFS, "TypeFileHDFS"},
 	{TypeFileS3, "TypeFileS3"},
@@ -125,6 +131,7 @@ func ValidateType(tStr string) (Type, bool) {
 
 	switch t {
 	case
+		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
 		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
@@ -174,6 +181,8 @@ func (t Type) Kind() Kind {
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
+	case TypeApi:
+		return KindAPI
 	}
 	return KindUnknown
 }
@@ -193,6 +202,11 @@ func (t Type) IsFile() bool {
 	return t.Kind() == KindFile
 }
 
+// IsAPI returns true if api connection
+func (t Type) IsAPI() bool {
+	return t.Kind() == KindAPI
+}
+
 // IsUnknown returns true if unknown
 func (t Type) IsUnknown() bool {
 	return t.Kind() == KindUnknown
@@ -201,6 +215,7 @@ func (t Type) IsUnknown() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
+		TypeApi:             "API - Generic",
 		TypeFileLocal:       "FileSys - Local",
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
@@ -239,6 +254,7 @@ func (t Type) NameLong() string {
 // Name return the type name
 func (t Type) Name() string {
 	mapping := map[Type]string{
+		TypeApi:             "API",
 		TypeFileLocal:       "Local",
 		TypeFileHDFS:        "HDFS",
 		TypeFileS3:          "S3",
@@ -466,16 +482,16 @@ func (t Type) Unquote(field string) string {
 }
 
 // Quote adds quotes to the field name
-func (t Type) Quote(field string, normalize ...bool) string {
-	Normalize := true
-	if len(normalize) > 0 {
-		Normalize = normalize[0]
-	}
+func (t Type) Quote(field string) string {
+	// don't normalize, causes issues.
+	// see https://github.com/slingdata-io/sling-cli/issues/538
+	// we should determine the casing upstream, configuration phase
+	Normalize := false
 
 	template, _ := t.Template()
 	// always normalize if case is uniform. Why would you quote and not normalize?
-	if !hasVariedCase(field) && Normalize {
-		if g.In(t, TypeDbOracle, TypeDbSnowflake) {
+	if !HasVariedCase(field) && Normalize {
+		if t.DBNameUpperCase() {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
@@ -494,7 +510,7 @@ func (t Type) QuoteNames(names ...string) (newNames []string) {
 	return newNames
 }
 
-func hasVariedCase(text string) bool {
+func HasVariedCase(text string) bool {
 	hasUpper := false
 	hasLower := false
 	for _, c := range text {
@@ -510,6 +526,17 @@ func hasVariedCase(text string) bool {
 	}
 
 	return hasUpper && hasLower
+}
+
+// HasStrangeChar returns true if the text has a non-typical SQL database ID character.
+// Should only allow characters: a-z, A-Z, 0-9 and _
+func HasStrangeChar(text string) bool {
+	for _, r := range text {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return true
+		}
+	}
+	return false
 }
 
 func (t Type) GetTemplateValue(path string) (value string) {

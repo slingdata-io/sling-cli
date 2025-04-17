@@ -125,3 +125,5 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
+  max_string_type: text
+  max_string_length: 1000000000

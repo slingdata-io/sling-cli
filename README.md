@@ -169,6 +169,14 @@ cd sling-cli
 .\sling --help
 ```
 
+### Installing via Python Wrapper
+
+`pip install sling`
+
+Then you should be able to run `sling --help` from command line. 
+
+Repository link: https://github.com/slingdata-io/sling-python
+
 ### Automated Dev Builds
 
 Here are the links of the official development builds, which are the latest builds of the upcoming release.
@@ -177,12 +185,7 @@ Here are the links of the official development builds, which are the latest buil
 - **Mac (arm64)**: https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz
 - **Windows (x64)**: https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz
 
-### Installing via Python Wrapper
-
-`pip install sling`
-
-Then you should be able to run `sling --help` from command line.
-
+If you're using the python wrapper, decompress the downloaded binary and put the path in the environment variable `SLING_BINARY` before running your python program.
 
 ## Contributing
 

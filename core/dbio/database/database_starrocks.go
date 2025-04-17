@@ -180,7 +180,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		mux.Lock()
 		defer mux.Unlock()
 
-		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names(), true)
+		insCols, err := conn.ValidateColumnNames(columns, bColumns.Names())
 		if err != nil {
 			return g.Error(err, "columns mismatch")
 		}

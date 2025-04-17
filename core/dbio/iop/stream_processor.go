@@ -17,6 +17,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding/charmap"
 	encUnicode "golang.org/x/text/encoding/unicode"
@@ -60,11 +61,12 @@ type StreamConfig struct {
 	FileMaxBytes      int64                    `json:"file_max_bytes"`
 	BatchLimit        int64                    `json:"batch_limit"`
 	MaxDecimals       int                      `json:"max_decimals"`
-	Flatten           bool                     `json:"flatten"`
+	Flatten           int                      `json:"flatten"`
 	FieldsPerRec      int                      `json:"fields_per_rec"`
 	Jmespath          string                   `json:"jmespath"`
 	Sheet             string                   `json:"sheet"`
 	ColumnCasing      ColumnCasing             `json:"column_casing"`
+	TargetType        dbio.Type                `json:"target_type"`
 	BoolAsInt         bool                     `json:"-"`
 	Columns           Columns                  `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms        map[string]TransformList // array of transform functions to apply
@@ -372,7 +374,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 
 	if val, ok := configMap["flatten"]; ok {
-		sp.Config.Flatten = cast.ToBool(val)
+		sp.Config.Flatten = cast.ToInt(val)
 	}
 
 	if configMap["max_decimals"] != "" && configMap["max_decimals"] != "-1" {
@@ -413,6 +415,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		sp.Config.ColumnCasing = ColumnCasing(val)
 	}
 
+	if val, ok := configMap["target_type"]; ok {
+		sp.Config.TargetType = dbio.Type(val)
+	}
+
 	if val, ok := configMap["bool_at_int"]; ok {
 		sp.Config.BoolAsInt = cast.ToBool(val)
 	}
@@ -448,6 +454,7 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	columnTransforms := makeColumnTransforms(transformsPayload)
 	sp.Config.transforms = map[string]TransformList{}
 	for key, names := range columnTransforms {
+		key = strings.ToLower(key)
 		sp.Config.transforms[key] = TransformList{}
 		for _, name := range names {
 			t, ok := TransformsMap[name]
@@ -666,7 +673,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 				cs.NullCnt++
 				return nil
 			}
-		} else if sp.Config.NullIf == sVal {
+		} else if sp.Config.NullIf != "" && sp.Config.NullIf == sVal {
 			cs.TotalCnt++
 			cs.NullCnt++
 			return nil
@@ -696,6 +703,13 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		l := len(sVal)
 		if l > cs.MaxLen {
 			cs.MaxLen = l
+		} else if l == 0 {
+			cs.TotalCnt++
+			if col.Type == JsonType {
+				cs.NullCnt++
+				return nil // if json, empty should be null
+			}
+			return sVal
 		}
 
 		if looksLikeJson(sVal) {
@@ -735,6 +749,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			if col.Type == BinaryType {
 				nVal = []byte(sVal)
 			} else if col.Type == JsonType && sVal == "" {
+				cs.NullCnt++
 				nVal = nil // if json, empty should be null
 			} else {
 				nVal = sVal

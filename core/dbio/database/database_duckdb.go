@@ -148,7 +148,8 @@ func (conn *DuckDbConn) ExecContext(ctx context.Context, sql string, args ...int
 func (conn *DuckDbConn) Close() (err error) {
 	if conn.duck != nil {
 		err = conn.duck.Close()
-		if err == nil && !cast.ToBool(conn.GetProp("silent")) {
+		if err == nil && !cast.ToBool(conn.GetProp("silent")) &&
+			cast.ToBool(conn.GetProp("connected")) {
 			g.Debug(`closed "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 		}
 	}
@@ -209,7 +210,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), file.Node.Path(), conn.generateCsvColumns(file.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -313,7 +314,7 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 		})
 
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), httpURL, conn.generateCsvColumns(batchR.Columns)),
+			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), httpURL, conn.generateCsvColumns(batchR.Columns)),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -375,7 +376,7 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	// select {src_fields}
 	// from {src_table} as src
 	// where true
-	// ON CONFLICT ({pk_fields})
+	// ON CONFLICT ({tgt_pk_fields})
 	// DO UPDATE
 	// SET {set_fields}
 	// `
@@ -399,7 +400,7 @@ func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
+		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
 		"set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
 		"insert_fields", upsertMap["insert_fields"],
 	)

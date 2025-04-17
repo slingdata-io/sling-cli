@@ -95,7 +95,7 @@ func (conn *DuckDbConn) importViaNamedPipe(tableFName string, df *iop.Dataflow) 
 	})
 
 	sqlLines := []string{
-		g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', auto_detect=False, header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N');`, table.FDQN(), strings.Join(columnNames, ", "), pipePath, conn.generateCsvColumns(df.Columns)),
+		g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', auto_detect=False, header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), pipePath, conn.generateCsvColumns(df.Columns)),
 	}
 
 	sql := strings.Join(sqlLines, ";\n")

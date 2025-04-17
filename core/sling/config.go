@@ -267,13 +267,14 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	tgtFileProvided := cfg.Options.StdOut || cfg.TgtConn.Info().Type.IsFile()
 	srcDbProvided := cfg.SrcConn.Info().Type.IsDb()
 	tgtDbProvided := cfg.TgtConn.Info().Type.IsDb()
+	srcApiProvided := cfg.SrcConn.Info().Type.IsAPI()
 	srcStreamProvided := cfg.Source.Stream != ""
 
-	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcStreamProvided)
+	summary := g.F("srcFileProvided: %t, tgtFileProvided: %t, srcDbProvided: %t, tgtDbProvided: %t, srcApiProvided: %t, srcStreamProvided: %t", srcFileProvided, tgtFileProvided, srcDbProvided, tgtDbProvided, srcApiProvided, srcStreamProvided)
 	g.Trace(summary)
 
 	if cfg.Mode == "" {
-		if cfg.Source.PrimaryKeyI != nil || cfg.Source.UpdateKey != "" {
+		if len(cfg.Source.PrimaryKey()) > 0 || cfg.Source.UpdateKey != "" {
 			cfg.Mode = IncrementalMode
 		} else {
 			cfg.Mode = FullRefreshMode
@@ -298,6 +299,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 			}
 		} else if cfg.IsFileStreamWithStateAndParts() {
 			// OK, no need for update key
+		} else if srcApiProvided {
+			// OK, no need for update key/pk, API uses SLING_STATE for tracking
 		} else if srcFileProvided && cfg.Source.UpdateKey == slingLoadedAtColumn {
 			// need to loaded_at column for file incremental
 			cfg.MetadataLoadedAt = g.Bool(true)
@@ -341,6 +344,10 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
+	} else if srcApiProvided && srcStreamProvided && tgtFileProvided {
+		Type = ApiToFile
+	} else if srcApiProvided && srcStreamProvided && tgtDbProvided {
+		Type = ApiToDB
 	}
 
 	if Type == "" {
@@ -455,7 +462,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
-	if cfg.Target.Data == nil || len(cfg.Target.Data) == 0 {
+	if len(cfg.Target.Data) == 0 {
 		cfg.Target.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Target.Conn)]; ok {
 			cfg.TgtConn = *c.Connection.Copy()
@@ -513,7 +520,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// Set Source
 	cfg.Source.Stream = strings.TrimSpace(cfg.Source.Stream)
-	if cfg.Source.Data == nil || len(cfg.Source.Data) == 0 {
+	if len(cfg.Source.Data) == 0 {
 		cfg.Source.Data = g.M()
 		if c, ok := connsMap[strings.ToLower(cfg.Source.Conn)]; ok {
 			cfg.SrcConn = *c.Connection.Copy()
@@ -631,6 +638,9 @@ func (cfg *Config) Prepare() (err error) {
 	if err != nil {
 		return g.Error(err, "could not get format map for sql")
 	}
+
+	// log format map
+	g.Trace("object format map: %s", g.Marshal(fMap))
 
 	// sql & where prop
 	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
@@ -951,6 +961,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		}
 	}
 
+	if cfg.SrcConn.Type.IsAPI() {
+		m["stream_name"] = strings.ToLower(cfg.StreamName)
+	}
+
 	// pass env values
 	for k, v := range cfg.Env {
 		if _, found := m[k]; !found && v != "" {
@@ -1006,9 +1020,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		m[k] = v
 	}
 
-	// log format map
-	g.Trace("object format map: %s", g.Marshal(m))
-
 	return
 }
 
@@ -1042,7 +1053,7 @@ type Config struct {
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
-func (cfg *Config) Scan(value interface{}) error {
+func (cfg *Config) Scan(value any) error {
 	return g.JSONScanner(cfg, value)
 }
 
@@ -1247,13 +1258,14 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
+	Files       *[]string      `json:"files,omitempty" yaml:"files,omitempty"`   // include/exclude files
 	Where       string         `json:"where,omitempty" yaml:"where,omitempty"`
 	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`
 	UpdateKey   string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
 	Options     *SourceOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	Data map[string]interface{} `json:"-" yaml:"-"`
+	Data map[string]any `json:"-" yaml:"-"`
 }
 
 func (s *Source) Limit() int {
@@ -1286,6 +1298,20 @@ func (s *Source) PrimaryKey() []string {
 	return castKeyArray(s.PrimaryKeyI)
 }
 
+// Flatten returns the flatten depth
+func (s *Source) Flatten() int {
+	switch {
+	case s.Options.Flatten == nil:
+		return -1
+	case s.Options.Flatten == false || s.Options.Flatten == "false":
+		return -1
+	case s.Options.Flatten == true || s.Options.Flatten == "true":
+		return 0 // infinite depth
+	default:
+		return cast.ToInt(s.Options.Flatten)
+	}
+}
+
 func (s *Source) MD5() string {
 	payload := g.Marshal([]any{
 		g.M("conn", s.Conn),
@@ -1308,7 +1334,7 @@ type Target struct {
 	Columns any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Options *TargetOptions `json:"options,omitempty" yaml:"options,omitempty"`
 
-	Data map[string]interface{} `json:"-" yaml:"-"`
+	Data map[string]any `json:"-" yaml:"-"`
 
 	TmpTableCreated bool        `json:"-" yaml:"-"`
 	columns         iop.Columns `json:"-" yaml:"-"`
@@ -1339,7 +1365,7 @@ func (t *Target) MD5() string {
 type SourceOptions struct {
 	EmptyAsNull    *bool               `json:"empty_as_null,omitempty" yaml:"empty_as_null,omitempty"`
 	Header         *bool               `json:"header,omitempty" yaml:"header,omitempty"`
-	Flatten        *bool               `json:"flatten,omitempty" yaml:"flatten,omitempty"`
+	Flatten        any                 `json:"flatten,omitempty" yaml:"flatten,omitempty"`
 	FieldsPerRec   *int                `json:"fields_per_rec,omitempty" yaml:"fields_per_rec,omitempty"`
 	Compression    *iop.CompressorType `json:"compression,omitempty" yaml:"compression,omitempty"`
 	Format         *dbio.FileType      `json:"format,omitempty" yaml:"format,omitempty"`
@@ -1355,7 +1381,6 @@ type SourceOptions struct {
 	Range          *string             `json:"range,omitempty" yaml:"range,omitempty"`
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
-	FileSelect     *[]string           `json:"file_select,omitempty" yaml:"file_select,omitempty"` // include/exclude files
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 
 	// columns & transforms were moved out of source_options
@@ -1392,6 +1417,7 @@ type TargetOptions struct {
 	AddNewColumns    *bool               `json:"add_new_columns,omitempty" yaml:"add_new_columns,omitempty"`
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
+	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
 
 	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1401,7 +1427,7 @@ type TargetOptions struct {
 }
 
 var SourceFileOptionsDefault = SourceOptions{
-	EmptyAsNull:    g.Bool(true),
+	EmptyAsNull:    g.Bool(false),
 	Header:         g.Bool(true),
 	Flatten:        g.Bool(false),
 	Compression:    iop.CompressorTypePtr(iop.AutoCompressorType),
@@ -1415,7 +1441,6 @@ var SourceFileOptionsDefault = SourceOptions{
 
 var SourceDBOptionsDefault = SourceOptions{
 	EmptyAsNull:    g.Bool(false),
-	NullIf:         g.String("NULL"),
 	DatetimeFormat: "AUTO",
 	MaxDecimals:    g.Int(-1),
 }
@@ -1448,7 +1473,7 @@ var TargetFileOptionsDefault = TargetOptions{
 	DatetimeFormat: "auto",
 	Delimiter:      ",",
 	MaxDecimals:    g.Int(-1),
-	ColumnCasing:   g.Ptr(iop.SourceColumnCasing),
+	ColumnCasing:   g.Ptr(iop.NormalizeColumnCasing),
 }
 
 var TargetDBOptionsDefault = TargetOptions{
@@ -1462,7 +1487,7 @@ var TargetDBOptionsDefault = TargetOptions{
 	AdjustColumnType: g.Bool(false),
 	DatetimeFormat:   "auto",
 	MaxDecimals:      g.Int(-1),
-	ColumnCasing:     g.Ptr(iop.SourceColumnCasing),
+	ColumnCasing:     g.Ptr(iop.NormalizeColumnCasing),
 }
 
 func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
@@ -1591,6 +1616,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	if o.ColumnCasing == nil {
 		o.ColumnCasing = targetOptions.ColumnCasing
 	}
+	if o.ColumnTyping == nil {
+		o.ColumnTyping = targetOptions.ColumnTyping
+	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys
 		if o.TableKeys == nil {
@@ -1607,7 +1635,7 @@ func castKeyArray(keyI any) (key []string) {
 		if keyV == nil {
 			return []string{}
 		}
-		return keyV
+		return append([]string{}, keyV...)
 	case string:
 		if keyV == "" {
 			return []string{}

@@ -10,5 +10,5 @@ steps:
     level: warn
 
   - type: command
-    command: [ls, -l, /tmp]
+    command: [ls, -l]
     print: true

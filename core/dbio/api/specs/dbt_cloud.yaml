@@ -1,0 +1,99 @@
+name: "dbt Cloud API"
+description: "API for interacting with dbt Cloud to retrieve jobs, runs, and users"
+
+defaults:
+  state:
+    base_url: https://cloud.getdbt.com/api/v2
+    account_id: ${ require(secrets.account_id) } # error if account_id is not provided
+  
+  request:
+    method: "GET"
+    headers:
+      Accept: "application/json"
+      Content-Type: "application/json"
+      Authorization: Token ${secrets.api_token}
+  
+endpoints:
+  jobs:
+    description: "Retrieve a list of jobs from dbt Cloud"
+    state:
+      limit: 100
+      offset: 0
+
+    request:
+      url: "${state.base_url}/accounts/${state.account_id}/jobs/"
+      method: "GET"
+      parameters:
+        limit: "${state.limit}"
+        offset: "${state.offset}"
+
+    pagination:
+      next_state:
+        offset: ${state.offset + state.limit}
+      stop_condition: length(response.records) < state.limit
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+  runs:
+    description: "Retrieve a list of job runs from dbt Cloud"
+
+    state:
+      limit: 100
+      offset: 0
+      id__gt: ${ coalesce(env.RUN_START_ID, sync.last_max_id, 0) }
+      
+    sync: [ last_max_id ]
+
+    request:
+      url: "${state.base_url}/accounts/${state.account_id}/runs/"
+      method: "GET"
+      parameters:
+        limit: "${state.limit}"
+        offset: "${state.offset}"
+        id__gt: "${state.id__gt}"
+
+    pagination:
+      next_state:
+        offset: "${state.offset + state.limit}"
+      stop_condition: length(response.records) < state.limit
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+        limit: 2000
+
+      processors:
+        - expression: record.id
+          output: state.last_max_id  # will be synced
+          aggregation: maximum
+
+  users:
+    description: "Retrieve a list of users from dbt Cloud"
+    state:
+      limit: 100
+      offset: 0
+
+    request:
+      url: "${state.base_url}/accounts/${state.account_id}/users/"
+      method: "GET"
+      parameters:
+        limit: "${state.limit}"
+        offset: "${state.offset}"
+
+    pagination:
+      next_state:
+        offset: "${state.offset + state.limit}"
+      stop_condition: length(response.records) < state.limit
+
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: nil
+          output: record.licenses # remove license data

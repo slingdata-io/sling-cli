@@ -1,0 +1,568 @@
+name: "Stripe API"
+description: "API for extracting data from Stripe payment processing platform. See https://docs.stripe.com/api."
+
+# we declare queues for pass values between endpoints
+queues: 
+  - customer_ids
+  - invoice_ids
+  - credit_note_ids
+  - subscription_ids
+
+defaults:
+  state:
+    base_url: "https://api.stripe.com/v1"
+    limit: 100
+  
+  request:
+    method: "GET"
+    headers:
+      Accept: "application/json"
+      Authorization: Bearer ${secrets.api_key}
+      Content-Type: "application/json"
+      Stripe-Version: "2023-10-16"  # Can be overridden through secrets.api_version
+    parameters:
+      limit: ${state.limit}
+    rate: 20        # Default rate limit of 20 requests per second to avoid hitting rate limits
+    concurrency: 5  # Default concurrency of 5
+  
+  response:
+    # rules:
+    #   - action: "retry"
+    #     condition: "response.status >= 500"
+    #     max_attempts: 3
+    #     backoff: "exponential"
+    #     backoff_base: 2
+    #   - action: "fail"
+    #     condition: "response.status == 429"
+    #     message: "Rate limit exceeded"
+
+endpoints:
+
+  account:
+    description: "Retrieve Stripe account information"
+    docs: https://docs.stripe.com/api/accounts
+    
+    request:
+      url: ${state.base_url}/accounts
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+
+  charge:
+    description: "Retrieve list of charges"
+    docs: https://docs.stripe.com/api/charges
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/charges
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: s${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  coupon:
+    description: "Retrieve list of coupons"
+    docs: https://docs.stripe.com/api/coupons
+    
+    request:
+      url: ${state.base_url}/coupons
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+
+  credit_note:
+    description: "Retrieve list of credit notes"
+    docs: https://docs.stripe.com/api/credit_notes
+    
+    request:
+      url: ${state.base_url}/credit_notes
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+      processors:
+        - expression: "record.id"
+          output: "queue.credit_note_ids"
+
+
+  credit_note_line_item:
+    description: "Retrieve credit note line items"
+    docs: https://docs.stripe.com/api/credit_notes/line_items
+    disabled: true
+    
+    state:
+      credit_note_ids: []  # This should be populated with credit note IDs from a 
+
+    iterate:
+      over: queue.credit_note_ids
+      into: state.credit_note_idprevious run
+    
+    request:
+      url: ${state.base_url}/credit_notes/${state.credit_note_id}/lines
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "state.credit_note_id"
+          output: "record.credit_note_id"
+
+
+
+  customer:
+    description: "Retrieve list of customers"
+    docs: https://docs.stripe.com/api/customers
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/customers
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+        - expression: "record.id"
+          output: "queue.customer_ids"
+
+
+  customer_balance_transaction:
+    description: "Retrieve customer balance transactions"
+    docs: https://docs.stripe.com/api/customers/balance_transactions
+    
+    state:
+      customer_ids: []  # This should be populated with customer IDs from a previous run
+
+    # loop over each invoice id processed
+    iterate:
+      over: "queue.customer_ids"
+      into: "state.customer_id"
+    
+    request:
+      url: ${state.base_url}/customers/${state.customer_id}/balance_transactions
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "state.customer_id"
+          output: "record.customer_id"
+
+
+  invoice:
+    description: "Retrieve list of invoices"
+    docs: https://docs.stripe.com/api/invoices
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/invoices
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+        - expression: "record.id"
+          output: "queue.invoice_ids"
+
+
+
+  invoice_item:
+    description: "Retrieve list of invoice items"
+    docs: https://docs.stripe.com/api/invoiceitems
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/invoiceitems
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  invoice_line_item:
+    description: "Retrieve invoice line items"
+    docs: https://docs.stripe.com/api/invoice-line-item
+
+    # loop over each invoice id processed
+    iterate:
+      over: "queue.invoice_ids"
+      into: "state.invoice_id"
+    
+    request:
+      url: ${state.base_url}/invoices/${state.invoice_id}/lines
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+
+  payment_intent:
+    description: "Retrieve list of payment intents"
+    docs: https://docs.stripe.com/api/payment_intents
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/payment_intents
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  payout:
+    description: "Retrieve list of payouts"
+    docs: https://docs.stripe.com/api/payouts
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/payouts
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  plan:
+    description: "Retrieve list of plans"
+    docs: https://docs.stripe.com/api/plans
+    
+    request:
+      url: ${state.base_url}/plans
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+
+
+  price:
+    description: "Retrieve list of prices"
+    docs: https://docs.stripe.com/api/prices
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/prices
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  product:
+    description: "Retrieve list of products"
+    docs: https://docs.stripe.com/api/products
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/products
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+  refund:
+    description: "Retrieve list of refunds"
+    docs: https://docs.stripe.com/api/refunds
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/refunds
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+
+
+
+  subscriptions:
+    description: "Retrieve subscriptions"
+    docs: https://docs.stripe.com/api/subscriptions
+    
+    state:
+      limit: 100
+    
+    request:
+      url: ${state.base_url}/subscriptions
+
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: record.id
+          output: queue.subscription_ids
+
+
+  subscription_item:
+    description: "Retrieve subscription items"
+    docs: https://docs.stripe.com/api/subscription_items
+
+    iterate:
+      over: queue.subscription_ids
+      into: state.subscription_id
+    
+    request:
+      url: ${state.base_url}/subscription_items
+
+      parameters:
+        limit: null # remove default
+        subscription: ${state.subscription_id}
+        
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "state.subscription_id"
+          output: "record.subscription_id"
+
+
+  events:
+    description: "Retrieve events"
+    docs: https://docs.stripe.com/api/events
+    
+    state:
+      starting_after: ${ sync.last_id }  # will be null on first run
+      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+    
+    sync: [ last_id ]
+    
+    request:
+      url: ${state.base_url}/events
+      parameters:
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        # created[gte]: ${state.created_gte}
+        # types: customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
+    
+    pagination:
+      next_state:
+        starting_after: ${response.records[-1].id}
+      stop_condition: "response.json.has_more == false || length(response.records) < 1"
+    
+    response:
+      records:
+        jmespath: "data[]"
+        primary_key: ["id"]
+      
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"

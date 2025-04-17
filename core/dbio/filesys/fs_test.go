@@ -204,6 +204,7 @@ func TestFileSysLocalJson(t *testing.T) {
 	fs, err := NewFileSysClient(dbio.TypeFileLocal)
 	assert.NoError(t, err)
 
+	fs.SetProp("flatten", "-1") // don't flatten at first
 	df1, err := fs.ReadDataflow("test/test1/json")
 	assert.NoError(t, err)
 
@@ -213,7 +214,7 @@ func TestFileSysLocalJson(t *testing.T) {
 		assert.Equal(t, len(df1.Columns), len(data1.Rows[len(data1.Rows)-1]))
 	}
 
-	fs.SetProp("flatten", "true")
+	fs.SetProp("flatten", "0")
 	df1, err = fs.ReadDataflow("test/test1/json")
 	assert.NoError(t, err)
 
@@ -224,7 +225,7 @@ func TestFileSysLocalJson(t *testing.T) {
 		assert.Equal(t, len(df1.Columns), len(lastRow), "cols: %s \n lastRow: %s", g.Marshal(df1.Columns.Names()), g.Marshal(lastRow))
 	}
 
-	fs.SetProp("flatten", "false")
+	fs.SetProp("flatten", "-1")
 	df2, err := fs.ReadDataflow("test/test2/json")
 	assert.NoError(t, err)
 
@@ -233,7 +234,7 @@ func TestFileSysLocalJson(t *testing.T) {
 	assert.EqualValues(t, 20, len(data2.Rows))
 	assert.EqualValues(t, 1, len(data2.Columns))
 
-	fs.SetProp("flatten", "true")
+	fs.SetProp("flatten", "0")
 	df2, err = fs.ReadDataflow("test/test2/json")
 	assert.NoError(t, err)
 

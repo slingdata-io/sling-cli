@@ -25,11 +25,11 @@ type jsonStream struct {
 	sp       *StreamProcessor
 	decoder  decoderLike
 	jmespath string
-	flatten  bool
+	flatten  int
 	buffer   chan []interface{}
 }
 
-func NewJSONStream(ds *Datastream, decoder decoderLike, flatten bool, jmespath string) *jsonStream {
+func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath string) *jsonStream {
 	js := &jsonStream{
 		ColumnMap: map[string]*Column{},
 		ds:        ds,
@@ -39,7 +39,7 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten bool, jmespath s
 		buffer:    make(chan []interface{}, 100000),
 		sp:        NewStreamProcessor(),
 	}
-	if !flatten {
+	if flatten < 0 {
 		col := &Column{Position: 1, Name: "data", Type: JsonType, FileURI: cast.ToString(js.ds.Metadata.StreamURL.Value)}
 		js.ColumnMap[col.Name] = col
 		js.addColumn(*col)
@@ -183,12 +183,12 @@ func (js *jsonStream) addColumn(cols ...Column) {
 func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 
 	for _, rec := range records {
-		if !js.flatten {
+		if js.flatten < 0 {
 			js.buffer <- []interface{}{g.Marshal(rec)}
 			continue
 		}
 
-		newRec, _ := flat.Flatten(rec, &flat.Options{Delimiter: "__", Safe: true})
+		newRec, _ := flat.Flatten(rec, &flat.Options{Delimiter: "__", Safe: true, MaxDepth: js.flatten})
 		keys := lo.Keys(newRec)
 		sort.Strings(keys)
 
@@ -204,7 +204,6 @@ func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 			if !ok {
 				col = &Column{
 					Name:     colName,
-					Type:     js.ds.Sp.GetType(newRec[colName]),
 					Position: len(js.ds.Columns) + len(colsToAdd) + 1,
 					FileURI:  cast.ToString(js.ds.Metadata.StreamURL.Value),
 				}
@@ -226,7 +225,7 @@ func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 }
 
 func (js *jsonStream) extractNestedArray(rec map[string]interface{}) (recordsInterf []map[string]interface{}) {
-	if !js.flatten {
+	if js.flatten < 0 {
 		return []map[string]interface{}{rec}
 	}
 

@@ -196,6 +196,7 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 1000
-  max_string_type: text
   timestamp_layout: '2006-01-02 15:04:05.000000'
   timestampz_layout: '2006-01-02 15:04:05.000000-07:00'
+  max_string_type: text
+  max_string_length: 2147483647

@@ -566,3 +566,5 @@ function:
 
 variable:
   max_string_type: varchar(65535)
+  max_string_length: 65535
+  max_column_length: 127

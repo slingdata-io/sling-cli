@@ -26,10 +26,20 @@ steps:
     only: files
 
   - type: group
+    id: group3
     loop: state.s3_list.result
     steps:
       - type: log
         message: 'file: ({loop_index}) {loop_value.location}'
+      
+      - type: copy
+        id: my_copy
+        from: '{loop_value.location}'
+        to: azure_storage/sftp-test/{loop_value.name}
+
+      - type: log
+        message: 'bytes_written: {state.my_copy.bytes_written}'
+        level: warn
 
   - type: list
     id: sftp_list
@@ -44,11 +54,20 @@ steps:
     steps:
       - type: log
         message: 'file: ({loop_index}) {loop_value.location}'
+
+      - type: log
+        message: 'group3.my_copy.bytes_written: {state.my_copy.bytes_written}'
+        level: warn
       
       - type: copy
         from: '{loop_value.location}'
         to: azure_storage/sftp-test/{loop_value.name}
 
   - type: log
-    message: '{runtime_state}'
+    message: 'group3.my_copy.bytes_written: {state.my_copy.bytes_written}'
     level: warn
+
+  # - type: log
+  #   message: '{runtime_state}'
+  #   level: warn
+  

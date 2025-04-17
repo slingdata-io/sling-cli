@@ -146,7 +146,7 @@ func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
 	t.ProgressHist = append(t.ProgressHist, progressText)
 	t.Progress = progressText
 	if !t.PBar.started || t.PBar.finished {
-		if strings.HasSuffix(progressText, "failed") {
+		if strings.Contains(progressText, "execution failed") {
 			progressText = env.RedString(progressText)
 		}
 		g.Info(progressText)
@@ -181,6 +181,8 @@ func (t *TaskExecution) GetTargetTable(tempTableSuffix ...string) (tTable databa
 		}
 		tTable.Name = tTable.Name + tempTableSuffix[0]
 	}
+
+	tTable.Columns = t.Config.Target.columns
 
 	return
 }
@@ -380,16 +382,9 @@ func (t *TaskExecution) isUsingPool() bool {
 func (t *TaskExecution) getTargetObjectValue() string {
 
 	switch t.Type {
-	case FileToDB:
+	case FileToDB, ApiToDB, DbToDb:
 		return t.Config.Target.Object
-	case DbToDb:
-		return t.Config.Target.Object
-	case DbToFile:
-		if t.Config.Options.StdOut {
-			return "stdout"
-		}
-		return t.Config.TgtConn.URL()
-	case FileToFile:
+	case DbToFile, ApiToFile, FileToFile:
 		if t.Config.Options.StdOut {
 			return "stdout"
 		}
@@ -443,6 +438,21 @@ func (t *TaskExecution) isIncrementalWithUpdateKey() bool {
 	return t.Config.Source.HasUpdateKey() && t.Config.Mode == IncrementalMode
 }
 
+// isFullRefreshWithState means with provided sling state and is full-refresh mode
+func (t *TaskExecution) isFullRefreshWithState() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == FullRefreshMode
+}
+
+// isTruncateWithState means with provided sling state and is truncate mode
+func (t *TaskExecution) isTruncateWithState() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == TruncateMode
+}
+
+// isIncrementalState means with provided sling state and is incremental mode
+func (t *TaskExecution) isIncrementalState() bool {
+	return os.Getenv("SLING_STATE") != "" && t.Config.Mode == IncrementalMode
+}
+
 // isIncrementalStateWithUpdateKey means it has an update_key, with provided sling state and is incremental mode
 func (t *TaskExecution) isIncrementalStateWithUpdateKey() bool {
 	return os.Getenv("SLING_STATE") != "" && t.isIncrementalWithUpdateKey()
@@ -455,6 +465,15 @@ func (t *TaskExecution) hasStateWithUpdateKey() bool {
 
 func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	options = g.M()
+
+	if t.Config.SrcConn.Type.IsAPI() && t.Config.Source.Options.Flatten == nil {
+		// if api source, set default depth to 1
+		t.Config.Source.Options.Flatten = 1
+	} else {
+		// set flatten to int
+		t.Config.Source.Options.Flatten = t.Config.Source.Flatten()
+	}
+
 	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
 
 	if columns := t.Config.ColumnsPrepared(); len(columns) > 0 {
@@ -466,6 +485,15 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 		// set as string so that StreamProcessor parses it
 		options["transforms"] = g.Marshal(colTransforms)
 	}
+
+	if cc := t.Config.Target.Options.ColumnCasing; cc != nil {
+		// set as string so that StreamProcessor parses it
+		options["column_casing"] = string(*cc)
+	}
+
+	// set target type for column casing, name length validation
+	options["target_type"] = string(t.Config.TgtConn.Type)
+
 	return
 }
 

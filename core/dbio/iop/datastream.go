@@ -458,7 +458,7 @@ func (ds *Datastream) Close() {
 // SetColumns sets the columns
 func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns) {
 	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
-	ds.Columns = mergedCols
+	ds.Columns = mergedCols.ValidateNames(ds.Sp.Config.TargetType)
 	added = colsAdded.AddedCols
 
 	ds.schemaChgChan <- colsAdded
@@ -699,6 +699,10 @@ func (ds *Datastream) Start() (err error) {
 		}
 	}()
 
+	if !ds.NoDebug {
+		g.Trace("new ds.Start %s", ds.ID)
+	}
+
 	if ds.it == nil {
 		err = g.Error("iterator not defined")
 		return g.Error(err, "need to define iterator")
@@ -727,7 +731,7 @@ loop:
 			break loop
 		default:
 			if ds.it.Counter == 1 && !ds.NoDebug {
-				g.Trace("%#v", ds.it.Row) // trace first row for debugging
+				g.Trace("first row of %s => %#v", ds.ID, ds.it.Row) // trace first row for debugging
 			}
 
 			row := ds.Sp.ProcessRow(ds.it.Row)
@@ -751,8 +755,8 @@ skipBuffer:
 		sampleData.InferColumnTypes()
 		ds.Columns = sampleData.Columns
 		ds.Inferred = true
-	} else if len(ds.Sp.Config.Columns) > 0 {
-		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true)
+	} else if len(ds.Sp.Config.Columns) > 0 || !ds.config.ColumnCasing.IsEmpty() {
+		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true, ds.config.ColumnCasing, ds.config.TargetType)
 	}
 
 	// set to have it loop process
@@ -768,6 +772,7 @@ skipBuffer:
 	{
 		// ensure there are no duplicates
 		ensureName := func(name string) string {
+			name = ds.config.ColumnCasing.Apply(name, ds.config.TargetType)
 			colNames := lo.Keys(ds.Columns.FieldMap(true))
 			for lo.Contains(colNames, strings.ToLower(name)) {
 				name = name + "_"
@@ -882,8 +887,8 @@ skipBuffer:
 
 	go ds.processBwRows()
 
-	if !ds.NoDebug {
-		g.Trace("new ds.Start %s [%s]", ds.ID, ds.Metadata.StreamURL.Value)
+	if !ds.NoDebug && ds.Metadata.StreamURL.Value != nil {
+		g.Trace("%s.StreamURL => %s", ds.ID, ds.Metadata.StreamURL.Value)
 	}
 
 	ds.SetReady()

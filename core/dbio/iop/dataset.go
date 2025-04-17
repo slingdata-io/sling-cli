@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -418,6 +419,13 @@ func (data *Dataset) InferColumnTypes() {
 
 	if len(data.Rows) == 0 {
 		g.Trace("skipping InferColumnTypes [no rows]")
+		// For empty datasets, set default types to StringType for all columns
+		for i, column := range data.Columns {
+			column.Type = StringType
+			column.Position = i + 1
+			data.Columns[i] = column
+		}
+		data.Inferred = true
 		return
 	}
 
@@ -439,21 +447,41 @@ func (data *Dataset) InferColumnTypes() {
 		}
 
 		for j, val := range row {
-			val = data.Sp.ParseString(strings.TrimSpace(cast.ToString(val)), j)
+			if j >= len(columns) {
+				// Skip if column index is out of range
+				continue
+			}
+
+			valStr := ""
+			if val != nil {
+				valStr = cast.ToString(val)
+				// Handle maps by marshaling them to JSON
+				if reflect.TypeOf(val) != nil && reflect.TypeOf(val).Kind() == reflect.Map {
+					valStr = g.Marshal(val)
+				}
+			}
+
 			columns[j].Stats.TotalCnt++
 
-			valStr := cast.ToString(val)
-			l := len(valStr)
-			if val == nil || l == 0 || (data.Sp.Config.NullIf != "" && data.Sp.Config.NullIf == valStr) {
+			// Count empty strings as nulls to better handle CSV data
+			if val == nil || valStr == "" || (data.Sp.Config.NullIf != "" && data.Sp.Config.NullIf == valStr) {
 				columns[j].Stats.NullCnt++
 				continue
-			} else {
-				if l > columns[j].Stats.MaxLen {
-					columns[j].Stats.MaxLen = l
-				}
-				if l < columns[j].Stats.MinLen {
-					columns[j].Stats.MinLen = l
-				}
+			}
+
+			l := len(valStr)
+			if l > columns[j].Stats.MaxLen {
+				columns[j].Stats.MaxLen = l
+			}
+			if l < columns[j].Stats.MinLen {
+				columns[j].Stats.MinLen = l
+			}
+
+		reclassify:
+			// Make sure val is not nil before type switch
+			if val == nil {
+				columns[j].Stats.NullCnt++
+				continue
 			}
 
 			switch v := val.(type) {
@@ -465,8 +493,6 @@ func (data *Dataset) InferColumnTypes() {
 				} else {
 					columns[j].Stats.DateTimeZCnt++
 				}
-			case nil:
-				columns[j].Stats.NullCnt++
 			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 				columns[j].Stats.IntCnt++
 				val0 := cast.ToInt64(val)
@@ -486,8 +512,8 @@ func (data *Dataset) InferColumnTypes() {
 					columns[j].Stats.Min = val0
 				}
 
-				if strings.Contains(valStr, ".") {
-					decLen := len(strings.Split(cast.ToString(val), ".")[1])
+				if parts := strings.Split(cast.ToString(val), "."); len(parts) == 2 {
+					decLen := len(parts[1])
 					if decLen > columns[j].Stats.MaxDecLen {
 						columns[j].Stats.MaxDecLen = decLen
 					}
@@ -496,15 +522,38 @@ func (data *Dataset) InferColumnTypes() {
 			case bool:
 				columns[j].Stats.BoolCnt++
 			case string, []uint8:
-				if looksLikeJson(valStr) {
-					var v interface{}
-					if err := g.Unmarshal(valStr, &v); err == nil {
-						columns[j].Stats.JsonCnt++
+				// For strings, attempt to parse as other types first
+				valP := data.Sp.ParseString(strings.TrimSpace(valStr), j)
+				if valP != nil {
+					if _, ok := valP.(string); !ok {
+						val = valP
+						goto reclassify
+					}
+
+					if looksLikeJson(valStr) {
+						var v interface{}
+						if err := g.Unmarshal(valStr, &v); err == nil {
+							columns[j].Stats.JsonCnt++
+						} else {
+							columns[j].Stats.StringCnt++
+						}
 					} else {
 						columns[j].Stats.StringCnt++
 					}
 				} else {
 					columns[j].Stats.StringCnt++
+				}
+			default:
+				if reflect.TypeOf(val) != nil && (reflect.TypeOf(val).Kind() == reflect.Slice || reflect.TypeOf(val).Kind() == reflect.Map) {
+					columns[j].Stats.JsonCnt++
+				} else {
+					valP := data.Sp.ParseString(strings.TrimSpace(valStr), j)
+					if _, ok := valP.(string); !ok && valP != nil {
+						val = valP
+						goto reclassify
+					} else {
+						columns[j].Stats.StringCnt++
+					}
 				}
 			}
 		}
@@ -513,11 +562,13 @@ func (data *Dataset) InferColumnTypes() {
 	data.Columns = InferFromStats(columns, data.SafeInference, data.NoDebug)
 
 	// overwrite if found in config.columns
-	data.Columns = data.Columns.Coerce(data.Sp.Config.Columns, data.Sp.Config.Header)
+	data.Columns = data.Columns.Coerce(
+		data.Sp.Config.Columns, data.Sp.Config.Header,
+		data.Sp.Config.ColumnCasing, data.Sp.Config.TargetType)
 
 	data.Inferred = true
 }
 
 func looksLikeJson(s string) bool {
-	return s == "" || (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
+	return (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) || (strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) || (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`))
 }

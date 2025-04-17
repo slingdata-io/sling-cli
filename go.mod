@@ -29,6 +29,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/integrii/flaggy v1.5.2
+	github.com/itchyny/timefmt-go v0.1.6
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/jmespath/go-jmespath v0.4.0

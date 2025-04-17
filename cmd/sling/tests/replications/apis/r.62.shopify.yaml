@@ -1,0 +1,14 @@
+source: shopify
+target: postgres
+
+defaults:
+  mode: incremental
+  object: apis.{source_name}_{stream_name}
+
+streams:
+  # '*':
+  'order':
+
+env:
+  SLING_STATE: postgres/sling_state.shopify # one state table per replication
+  SLING_LOADED_AT_COLUMN: timestamp

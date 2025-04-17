@@ -639,7 +639,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 	// so that lists are treated as TEXT and not JSON
 	// lists / arrays do not conform to JSON spec and can error out
-	transforms := map[string][]string{"*": {"duckdb_list_to_text"}}
+	transforms := map[string][]string{"*": {TransformDuckdbListToText.Name}}
 
 	// add any specified transforms
 	fsProps := map[string]string{}
@@ -1102,7 +1102,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			readerCh <- batchR.Reader
 
 			// can use this as a from table
-			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N')`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
 
 			streamPartChn <- HttpStreamPart{
 				Index:    partIndex,
@@ -1134,7 +1134,7 @@ func (duck *DuckDb) GenerateCsvColumns(columns Columns) (colStr string) {
 
 	colsArr := make([]string, len(columns))
 	for i, col := range columns {
-		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb)
+		nativeType, err := col.GetNativeType(dbio.TypeDbDuckDb, ColumnTyping{})
 		if err != nil {
 			g.Warn(err.Error())
 		}

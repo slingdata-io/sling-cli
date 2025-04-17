@@ -8,6 +8,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -87,7 +88,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		if cfg.IncrementalValStr != "" {
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"value", cfg.IncrementalValStr,
 				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
 			)
@@ -124,7 +125,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.backfill_where"),
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"start_value", startValue,
 				"end_value", endValue,
 			)
@@ -145,7 +146,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"fields", selectFieldsStr,
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			)
 		} else {
 			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {
@@ -156,7 +157,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			sTable.SQL = g.R(
 				sTable.SQL,
 				"incremental_where_cond", incrementalWhereCond,
-				"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 				"incremental_value", cfg.IncrementalValStr,
 			)
 		}
@@ -165,7 +166,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		cfg.Source.Where = g.R(
 			cfg.Source.Where,
 			"incremental_where_cond", incrementalWhereCond,
-			"update_key", srcConn.Quote(cfg.Source.UpdateKey, false),
+			"update_key", srcConn.Quote(cfg.Source.UpdateKey),
 			"incremental_value", cfg.IncrementalValStr,
 		)
 	}
@@ -253,7 +254,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			Select:           cfg.Source.Select,
 			Limit:            cfg.Source.Limit(),
 			SQL:              cfg.Source.Query,
-			FileSelect:       cfg.Source.Options.FileSelect,
+			FileSelect:       cfg.Source.Files,
 			IncrementalKey:   cfg.Source.UpdateKey,
 			IncrementalValue: cfg.IncrementalValStr,
 		}
@@ -352,6 +353,31 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	return
 }
 
+// ReadFromApi reads from a source api
+func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df *iop.Dataflow, err error) {
+	setStage("3 - prepare-dataflow")
+
+	if cfg.Source.Options.Flatten == nil {
+		cfg.Source.Options.Flatten = 1 // flatten level 1 by default
+	}
+
+	sCfg := api.APIStreamConfig{
+		Flatten:     cfg.Source.Flatten(),
+		JmesPath:    g.PtrVal(cfg.Source.Options.JmesPath),
+		Select:      cfg.Source.Select,
+		Limit:       cfg.Source.Limit(),
+		Metadata:    t.setGetMetadata(),
+		DsConfigMap: t.getOptionsMap(),
+	}
+	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
+	if err != nil {
+		err = g.Error(err, "Could not ReadDataflow for %s", cfg.SrcConn.Type)
+		return t.df, err
+	}
+
+	return df, err
+}
+
 // setColumnKeys sets the column keys
 func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 	eG := g.ErrorGroup{}
@@ -370,7 +396,9 @@ func (t *TaskExecution) setColumnKeys(df *iop.Dataflow) (err error) {
 
 	if tkMap := t.Config.Target.Options.TableKeys; tkMap != nil {
 		for tableKey, keys := range tkMap {
-			eG.Capture(df.Columns.SetKeys(tableKey, keys...))
+			// ignore error if column is not found, it is set again later
+			// see https://github.com/slingdata-io/sling-cli/issues/532
+			_ = df.Columns.SetKeys(tableKey, keys...)
 		}
 	}
 

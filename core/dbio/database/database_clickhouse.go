@@ -157,7 +157,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				defer conn.Rollback()
 			}
 
-			insCols, err := conn.ValidateColumnNames(columns, batch.Columns.Names(), true)
+			insCols, err := conn.ValidateColumnNames(columns, batch.Columns.Names())
 			if err != nil {
 				return g.Error(err, "columns mismatch")
 			}
@@ -313,8 +313,8 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 
 	sqlTempl := `
 	alter table {tgt_table}
-	delete where ({pk_fields}) in (
-			select {pk_fields}
+	delete where ({tgt_pk_fields}) in (
+			select {src_pk_fields}
 			from {src_table} src
 	)
 	;
@@ -331,7 +331,8 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"insert_fields", upsertMap["insert_fields"],
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
+		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
+		"src_pk_fields", upsertMap["src_pk_fields"],
 	)
 
 	return

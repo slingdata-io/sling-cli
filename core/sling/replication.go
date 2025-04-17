@@ -11,6 +11,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/gobwas/glob"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -78,6 +79,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 	if rd.state == nil {
 		rd.state = &ReplicationState{
 			State:     map[string]map[string]any{},
+			Store:     map[string]any{},
 			Env:       rd.Env,
 			Runs:      map[string]*RunState{},
 			Execution: ExecutionState{},
@@ -99,6 +101,9 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 			if err != nil {
 				return rd.state, err
 			}
+
+			// populate env
+			rd.state.Env = g.ToMap(task.Env)
 
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type
@@ -222,11 +227,32 @@ type Wildcard struct {
 	StreamNames []string
 	NodeMap     map[string]filesys.FileNode
 	TableMap    map[string]database.Table
+	EndpointMap map[string]api.Endpoint
 }
 
 // ProcessWildcards process the streams using wildcards
 // such as `my_schema.*` or `my_schema.my_prefix_*` or `my_schema.*_my_suffix`
 func (rd *ReplicationConfig) ProcessWildcards() (err error) {
+	// get local connections
+	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
+		return strings.ToLower(c.Connection.Name)
+	})
+
+	conn, ok := connsMap[strings.ToLower(rd.Source)]
+	if !ok {
+		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
+			conn = connection.LocalFileConnEntry()
+		} else if strings.Contains(rd.Source, "://") {
+			conn.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
+			if err != nil {
+				return
+			}
+		} else {
+			g.Error("did not find connection for wildcards: %s", rd.Source)
+			return
+		}
+	}
+
 	hasWildcard := func(name string) bool {
 		return strings.Contains(name, "*") || strings.Contains(name, "?")
 	}
@@ -243,7 +269,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 			continue
 		}
 
-		if name == "*" {
+		if name == "*" && !conn.Connection.Type.IsAPI() {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) {
 			// use a clone stream to apply defaults
@@ -269,25 +295,6 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		return
 	}
 
-	// get local connections
-	connsMap := lo.KeyBy(connection.GetLocalConns(), func(c connection.ConnEntry) string {
-		return strings.ToLower(c.Connection.Name)
-	})
-	c, ok := connsMap[strings.ToLower(rd.Source)]
-	if !ok {
-		if strings.EqualFold(rd.Source, "local://") || strings.EqualFold(rd.Source, "file://") {
-			c = connection.LocalFileConnEntry()
-		} else if strings.Contains(rd.Source, "://") {
-			c.Connection, err = connection.NewConnectionFromURL("source", rd.Source)
-			if err != nil {
-				return
-			}
-		} else {
-			g.Error("did not find connection for wildcards: %s", rd.Source)
-			return
-		}
-	}
-
 	originalStreamNames := rd.streamsOrdered
 	originalNormalizedStreamNames := map[string]string{}
 	for _, name := range originalStreamNames {
@@ -295,12 +302,16 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	}
 
 	var wildcards Wildcards
-	if c.Connection.Type.IsDb() {
-		if wildcards, err = rd.ProcessWildcardsDatabase(c.Connection, patterns); err != nil {
+	if conn.Connection.Type.IsDb() {
+		if wildcards, err = rd.ProcessWildcardsDatabase(conn.Connection, patterns); err != nil {
 			return err
 		}
-	} else if c.Connection.Type.IsFile() {
-		if wildcards, err = rd.ProcessWildcardsFile(c.Connection, patterns); err != nil {
+	} else if conn.Connection.Type.IsFile() {
+		if wildcards, err = rd.ProcessWildcardsFile(conn.Connection, patterns); err != nil {
+			return err
+		}
+	} else if conn.Connection.Type.IsAPI() {
+		if wildcards, err = rd.ProcessWildcardsAPI(conn.Connection, patterns); err != nil {
 			return err
 		}
 	} else {
@@ -316,7 +327,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 			if wildcard.Pattern == origName {
 				matched = true
 				for _, wsn := range wildcard.StreamNames {
-					if c.Connection.Type.IsDb() {
+					if conn.Connection.Type.IsDb() {
 						table := wildcard.TableMap[wsn]
 
 						// check if table name exists
@@ -331,7 +342,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						newStreamNames = append(newStreamNames, table.FullName())
 					}
 
-					if c.Connection.Type.IsFile() {
+					if conn.Connection.Type.IsFile() {
 						node := wildcard.NodeMap[wsn]
 
 						// check if node path exists
@@ -351,6 +362,21 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						cfg := rd.Streams[wildcard.Pattern]
 						rd.AddStream(node.Path(), cfg)
 						newStreamNames = append(newStreamNames, node.Path())
+					}
+
+					if conn.Connection.Type.IsAPI() {
+						endpoint := wildcard.EndpointMap[wsn]
+
+						// check if endpoint exists
+						_, _, found := rd.GetStream(endpoint.Name)
+						if found {
+							// leave as is for order to be respected
+							continue
+						}
+
+						cfg := rd.Streams[wildcard.Pattern]
+						rd.AddStream(endpoint.Name, cfg)
+						newStreamNames = append(newStreamNames, endpoint.Name)
 					}
 				}
 
@@ -627,7 +653,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 
 		// get all tables in schema
 		g.Debug("getting tables for %s", pattern)
-		ok, _, schemata, err := c.Discover(&connection.DiscoverOptions{Pattern: pattern})
+		ok, _, schemata, _, err := c.Discover(&connection.DiscoverOptions{Pattern: pattern})
 		if err != nil {
 			return wildcards, g.Error(err, "could not get tables for schema: %s", schemaT.Schema)
 		} else if !ok {
@@ -645,6 +671,39 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 		wildcards = append(wildcards, &wildcard)
 
 	}
+	return
+}
+
+func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
+	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+
+	ac, err := c.AsAPI(true)
+	if err != nil {
+		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
+	} else if err = ac.Authenticate(); err != nil {
+		return wildcards, g.Error(err, "could not authenticate to api system for wildcard processing: %s", rd.Source)
+	}
+	defer c.Close() // close so we can re-initiate the queues on replication
+
+	for _, pattern := range patterns {
+		wildcard := Wildcard{Pattern: pattern, EndpointMap: map[string]api.Endpoint{}}
+
+		g.Debug("getting endpoints for %s", pattern)
+		ok, _, _, endpoints, err := c.Discover(&connection.DiscoverOptions{Pattern: pattern})
+
+		if err != nil {
+			return wildcards, g.Error(err, "could not get endpoints for pattern: %s", pattern)
+		} else if !ok {
+			return wildcards, g.Error("could not get endpoints for for pattern: %s", pattern)
+		}
+
+		for _, endpoint := range endpoints {
+			wildcard.StreamNames = append(wildcard.StreamNames, endpoint.Name)
+			wildcard.EndpointMap[endpoint.Name] = endpoint
+		}
+		wildcards = append(wildcards, &wildcard)
+	}
+
 	return
 }
 
@@ -669,7 +728,7 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 			}
 		}
 
-		ok, nodes, _, err := c.Discover(&connection.DiscoverOptions{Pattern: path})
+		ok, nodes, _, _, err := c.Discover(&connection.DiscoverOptions{Pattern: path})
 		if err != nil {
 			return wildcards, g.Error(err, "could not get files for schema: %s", pattern)
 		} else if !ok {
@@ -825,8 +884,8 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			}
 
 			// other incremental / backfill overrides
-			if newFileSelect := cfgOverwrite.Source.Options.FileSelect; newFileSelect != nil {
-				stream.SourceOptions.FileSelect = newFileSelect
+			if newFiles := cfgOverwrite.Source.Files; newFiles != nil {
+				stream.Files = newFiles
 			}
 			incrementalValStr = cfgOverwrite.IncrementalValStr
 
@@ -906,6 +965,7 @@ type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
+	Files         *[]string      `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
 	Where         string         `json:"where,omitempty" yaml:"where,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
@@ -956,6 +1016,7 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"mode":        func() { stream.Mode = replicationCfg.Defaults.Mode },
 		"object":      func() { stream.Object = replicationCfg.Defaults.Object },
 		"select":      func() { stream.Select = replicationCfg.Defaults.Select },
+		"files":       func() { stream.Files = replicationCfg.Defaults.Files },
 		"where":       func() { stream.Where = replicationCfg.Defaults.Where },
 		"primary_key": func() { stream.PrimaryKeyI = replicationCfg.Defaults.PrimaryKeyI },
 		"update_key":  func() { stream.UpdateKey = replicationCfg.Defaults.UpdateKey },

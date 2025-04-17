@@ -34,11 +34,11 @@ type Table struct {
 }
 
 var ChunkByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
-	return []Table{table}, nil
+	return []Table{table}, g.Error("please use the official sling-cli release for chunking columns")
 }
 
 var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max string) ([]string, error) {
-	return []string{}, nil
+	return []string{}, g.Error("please use the official sling-cli release for chunking")
 }
 
 func (t *Table) IsQuery() bool {
@@ -845,6 +845,16 @@ func getColumnsProp(conn Connection) (coerceCols iop.Columns, ok bool) {
 		}
 	}
 	return coerceCols, false
+}
+
+// getColumnsProp returns the colCasing from the column_casing property
+func getColumnCasingProp(conn Connection) (colCasing iop.ColumnCasing, ok bool) {
+	if colCasingV := conn.GetProp("column_casing"); colCasingV != "" {
+		if err := g.Unmarshal(colCasingV, &colCasing); err == nil {
+			return colCasing, true
+		}
+	}
+	return colCasing, false
 }
 
 func GetQualifierQuote(dialect dbio.Type) string {

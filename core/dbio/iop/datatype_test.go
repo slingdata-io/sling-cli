@@ -6,6 +6,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 )
@@ -371,4 +372,81 @@ func TestParseString(t *testing.T) {
 	val = sp.ParseString("2024-05-05 09:10:09.000000 -07")
 	g.P(val)
 	g.P(cast.ToTime(val).Location().String() == "UTC")
+}
+
+func TestValidateNames(t *testing.T) {
+	// Test 1: Column names shorter than max length - should remain unchanged
+	t.Run("ColumnNamesShorterThanMaxLength", func(t *testing.T) {
+		cols := NewColumnsFromFields("id", "name", "email")
+		// Postgres has max_column_length of 63
+		newCols := cols.ValidateNames(dbio.TypeDbPostgres)
+
+		assert.Equal(t, "id", newCols[0].Name)
+		assert.Equal(t, "name", newCols[1].Name)
+		assert.Equal(t, "email", newCols[2].Name)
+	})
+
+	// Test 2: Column names exceeding max length - should be truncated
+	t.Run("ColumnNamesExceedingMaxLength", func(t *testing.T) {
+		longName := "this_is_a_very_long_column_name_that_exceeds_postgres_column_name_length_limit_of_63_characters"
+		cols := NewColumnsFromFields("id", longName, "email")
+		// Postgres has max_column_length of 63
+		newCols := cols.ValidateNames(dbio.TypeDbPostgres)
+		maxLength := cast.ToInt(dbio.TypeDbPostgres.GetTemplateValue("variable.max_column_length"))
+
+		assert.Equal(t, "id", newCols[0].Name)
+		assert.Equal(t, longName[:maxLength], newCols[1].Name) // Should be truncated to 63 chars
+		assert.Equal(t, "email", newCols[2].Name)
+	})
+
+	// Test 3: Truncated names causing conflicts - should add suffix
+	t.Run("TruncatedNamesWithConflicts", func(t *testing.T) {
+		// Both columns will truncate to the same prefix
+		col1 := "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567890"
+		col2 := "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567890"
+		cols := NewColumnsFromFields(col1, col2)
+		// Postgres has max_column_length of 63
+		newCols := cols.ValidateNames(dbio.TypeDbPostgres)
+
+		// First column should be truncated without suffix
+		assert.Equal(t, col1[:63], newCols[0].Name)
+
+		// Second column should be truncated with a suffix
+		// The suffix pattern should be original name (truncated to fit) + "_1"
+		assert.Equal(t, "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567_1", newCols[1].Name)
+		assert.Equal(t, 63, len(newCols[1].Name)) // Should still be 63 chars
+	})
+
+	// Test 4: Database with no max length defined - should return unchanged
+	t.Run("DatabaseWithNoMaxLength", func(t *testing.T) {
+		// Create a mock Type that doesn't have max_column_length defined
+		mockType := dbio.Type("mock_type")
+
+		longName := "this_is_a_very_long_column_name_that_would_normally_be_truncated"
+		cols := NewColumnsFromFields("id", longName, "email")
+		newCols := cols.ValidateNames(mockType)
+
+		// Names should remain unchanged
+		assert.Equal(t, "id", newCols[0].Name)
+		assert.Equal(t, longName, newCols[1].Name)
+		assert.Equal(t, "email", newCols[2].Name)
+	})
+
+	// Test 5: Multiple conflicts requiring incrementing suffixes
+	t.Run("MultipleConflictsWithIncrementingSuffixes", func(t *testing.T) {
+		// Create three identical columns that will cause conflicts
+		prefix := "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567890"
+		cols := NewColumnsFromFields(prefix, prefix, prefix)
+		// Postgres has max_column_length of 63
+		newCols := cols.ValidateNames(dbio.TypeDbPostgres)
+
+		// First column should be truncated without suffix
+		assert.Equal(t, prefix[:63], newCols[0].Name)
+
+		// Second column should have _1 suffix
+		assert.Equal(t, "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567_1", newCols[1].Name)
+
+		// Third column should have _2 suffix
+		assert.Equal(t, "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567_2", newCols[2].Name)
+	})
 }

@@ -258,3 +258,6 @@ variable:
   quote_char: "`"
   timestamp_layout: "2006-01-02 15:04:05.000000 -07"
   timestamp_layout_str: to_time('{value}')
+  max_string_type: String
+  max_string_length: 1000000000
+  max_column_length: 256

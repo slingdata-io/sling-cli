@@ -24,6 +24,12 @@ const DbToFile JobType = "db-file"
 // FileToFile is from file to file
 const FileToFile JobType = "file-file"
 
+// ApiToDB is from api to db
+const ApiToDB JobType = "api-db"
+
+// ApiToFile is from api to file
+const ApiToFile JobType = "api-file"
+
 // DbSQL is for a db sql query
 const DbSQL JobType = "db-sql"
 
@@ -38,6 +44,8 @@ var AllJobType = []struct {
 	{FileToDB, "FileToDB"},
 	{DbToFile, "DbToFile"},
 	{FileToFile, "FileToFile"},
+	{ApiToDB, "ApiToDB"},
+	{ApiToFile, "ApiToFile"},
 	{DbSQL, "DbSQL"},
 }
 
@@ -49,6 +57,8 @@ const (
 	ExecStatusCreated ExecStatus = "created"
 	// ExecStatusQueued = queued
 	ExecStatusQueued ExecStatus = "queued"
+	// ExecStatusSubmitted = submitted
+	ExecStatusSubmitted ExecStatus = "submitted"
 	// ExecStatusStarted = started
 	ExecStatusStarted ExecStatus = "started"
 	// ExecStatusRunning = running

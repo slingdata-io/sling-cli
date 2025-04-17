@@ -277,7 +277,7 @@ func (conn *PostgresConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 	insert into {tgt_table}
 	({insert_fields})
 	select {src_fields} from {src_table} src
-	on conflict ({pk_fields})
+	on conflict ({tgt_pk_fields})
 	DO UPDATE 
 	SET {set_fields}
 	`
@@ -330,7 +330,7 @@ func (conn *PostgresConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
 		"src_fields", upsertMap["src_fields"],
-		"pk_fields", upsertMap["pk_fields"],
+		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
 		// "set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
