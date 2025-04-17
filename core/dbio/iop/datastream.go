@@ -458,7 +458,7 @@ func (ds *Datastream) Close() {
 // SetColumns sets the columns
 func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns) {
 	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
-	ds.Columns = mergedCols
+	ds.Columns = mergedCols.ValidateNames(ds.Sp.Config.TargetType)
 	added = colsAdded.AddedCols
 
 	ds.schemaChgChan <- colsAdded
