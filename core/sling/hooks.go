@@ -48,7 +48,9 @@ const (
 	HookStageEnd   HookStage = "end"
 )
 
-var ParseHook = func(any, ParseOptions) (Hook, error) { return nil, nil }
+var ParseHook = func(any, ParseOptions) (Hook, error) {
+	return nil, g.Error("please use the official sling-cli release for using hooks and pipelines")
+}
 
 func (hs Hooks) Execute() (err error) {
 	for _, hook := range hs {
