@@ -40,7 +40,11 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 	}
 
 	if !lo.Contains(schemas, schemaName) {
-		_, err = conn.Exec(g.F("create schema %s", conn.Quote(schemaName)))
+		sql := g.R(
+			conn.Template().Value("core.create_schema"),
+			"schema", conn.Quote(schemaName),
+		)
+		_, err = conn.Exec(sql)
 		if err != nil {
 			return false, g.Error(err, "Error creating schema %s", conn.Quote(schemaName))
 		}
