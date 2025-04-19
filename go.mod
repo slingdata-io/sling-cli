@@ -23,7 +23,7 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
 	github.com/fatih/color v1.17.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.139
+	github.com/flarco/g v0.1.140
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/gobwas/glob v0.2.3
