@@ -403,7 +403,7 @@ variable:
   error_ignore_drop_table: unknown
   max_string_type: varchar(65533)
   max_string_length: 65533
-  max_column_length: 64
+  max_column_length: 1024
 
 error_filter:
   table_not_exist: exist
