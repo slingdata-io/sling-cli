@@ -9,6 +9,7 @@ on:
     paths-ignore:
       - '.github/**'
       - 'core/dbio/api/specs/**'
+      - 'api/**'
       - 'core/dbio/api/llms.md'
       - 'README.md'
 
