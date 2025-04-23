@@ -20,6 +20,7 @@ core:
   limit_sql: select top {limit} * from ( {sql} ) as t
   incremental_select_limit: select top {limit} {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
   incremental_select_limit_offset: select top {limit} * from ( select {fields} from {table}  where ({incremental_where_cond}){where_and} order by {update_key} asc offset {offset} rows) as t
+  incremental_select: select top 100 percent {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc
   insert: insert into {table} ({cols}) values ({values})
   insert_temp: insert into {table} ({cols}) select {cols} from {temp_table}
   insert_ignore: insert into {table} ({fields}) values ({values}) on conflict ({pk_fields}) do nothing
