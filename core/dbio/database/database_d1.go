@@ -128,7 +128,17 @@ func (conn *D1Conn) Connect(timeOut ...int) (err error) {
 		return g.Error("no databases found")
 	}
 
-	conn.UUID = response.Result[0].UUID
+	available := []string{}
+	for _, result := range response.Result {
+		available = append(available, result.Name)
+		if strings.EqualFold(result.Name, conn.Database) {
+			conn.UUID = result.UUID
+		}
+	}
+
+	if conn.UUID == "" {
+		return g.Error(`did not find database "%s" in %s`, conn.Database, g.Marshal(available))
+	}
 
 	if !cast.ToBool(conn.GetProp("silent")) {
 		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
