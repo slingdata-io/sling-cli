@@ -396,6 +396,9 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 	sqlLines := []string{
 		extensionsSQL + ";",
 		secretSQL + ";",
+		// preserve_insertion_order=false reduces the memory load.
+		// See https://www.reddit.com/r/DuckDB/comments/1jnw1ed/got_outofmemory_while_etl_30gb_parquet_files_on_s3/
+		"set preserve_insertion_order = false;",
 		g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 		".changes on",
 		sql + ";",
