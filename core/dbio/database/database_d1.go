@@ -194,6 +194,9 @@ func (conn *D1Conn) ExecContext(ctx context.Context, q string, args ...interface
 	}
 
 	queryContext := g.NewContext(ctx)
+	if args == nil {
+		args = make([]any, 0)
+	}
 	payload := g.M("sql", q, "params", args)
 
 	conn.LogSQL(q, args...)

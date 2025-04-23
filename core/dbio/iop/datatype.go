@@ -873,6 +873,10 @@ func (col *Column) SetConstraint() {
 // ValidateNames truncates the column name it exceed the max column length
 func (cols Columns) ValidateNames(tgtType dbio.Type) (newCols Columns) {
 	newCols = cols
+	if string(tgtType) == "" {
+		return
+	}
+
 	maxLength := cast.ToInt(tgtType.GetTemplateValue("variable.max_column_length"))
 	if maxLength == 0 {
 		return
