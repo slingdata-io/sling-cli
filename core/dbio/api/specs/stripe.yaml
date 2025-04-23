@@ -128,13 +128,10 @@ endpoints:
     description: "Retrieve credit note line items"
     docs: https://docs.stripe.com/api/credit_notes/line_items
     disabled: true
-    
-    state:
-      credit_note_ids: []  # This should be populated with credit note IDs from a 
 
     iterate:
       over: queue.credit_note_ids
-      into: state.credit_note_idprevious run
+      into: state.credit_note_id
     
     request:
       url: ${state.base_url}/credit_notes/${state.credit_note_id}/lines
@@ -189,11 +186,7 @@ endpoints:
   customer_balance_transaction:
     description: "Retrieve customer balance transactions"
     docs: https://docs.stripe.com/api/customers/balance_transactions
-    
-    state:
-      customer_ids: []  # This should be populated with customer IDs from a previous run
 
-    # loop over each invoice id processed
     iterate:
       over: "queue.customer_ids"
       into: "state.customer_id"
