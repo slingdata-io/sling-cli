@@ -367,6 +367,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Select:      cfg.Source.Select,
 		Limit:       cfg.Source.Limit(),
 		Metadata:    t.setGetMetadata(),
+		Mode:        strings.ToLower(string(cfg.Mode)),
 		DsConfigMap: t.getOptionsMap(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
