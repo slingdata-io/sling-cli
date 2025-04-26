@@ -77,6 +77,18 @@ func TestFunctions(t *testing.T) {
 		{"non-string_second_arg", `split("a,b,c", 123)`, []string{"a,b,c"}, false},
 	}
 
+	testSuites["range"] = []test{
+		{"sample_int_range", `range(1, 5)`, []any{1, 2, 3, 4, 5}, false},
+		{"sample_date_range", `range(date_parse("2022-01-01 00:00:00", "auto"), date_parse("2022-01-01 00:04:00", "auto"), "1m")`,
+			[]any{
+				time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 1, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 2, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 3, 0, 0, time.UTC),
+				time.Date(2022, 1, 1, 0, 4, 0, 0, time.UTC),
+			}, false},
+	}
+
 	testSuites["int_range"] = []test{
 		{"no_args", `int_range()`, nil, true},
 		{"one_arg", `int_range(5)`, nil, true},

@@ -499,20 +499,50 @@ func (fns functions) Range(args ...any) (any, error) {
 		return nil, g.Error("range requires at least 2 arguments: start and end")
 	}
 
-	// Try to cast the first argument to a time value
-	_, err1 := fns.sp.CastToTime(args[0])
-	_, err2 := fns.sp.CastToTime(args[1])
-	if err1 == nil && err2 == nil {
-		// First argument can be parsed as a time, use dateRange
-		return fns.dateRange(args...)
-	}
-
 	// Try to cast the first argument to an integer
-	_, err1 = cast.ToIntE(args[0])
-	_, err2 = cast.ToIntE(args[1])
+	_, err1 := cast.ToIntE(args[0])
+	_, err2 := cast.ToIntE(args[1])
 	if err1 == nil && err2 == nil {
 		// First argument can be parsed as an integer, use intRange
-		return fns.intRange(args...)
+		resultInt, err := fns.intRange(args...)
+		if err != nil {
+			return nil, err
+		}
+
+		ri, ok := resultInt.([]int)
+		if !ok {
+			return nil, g.Error("could not cast to array of int")
+		}
+
+		result := make([]any, len(ri))
+		for i, val := range ri {
+			result[i] = val
+		}
+
+		return result, nil
+	}
+
+	// Try to cast the first argument to a time value
+	_, err1 = fns.sp.CastToTime(args[0])
+	_, err2 = fns.sp.CastToTime(args[1])
+	if err1 == nil && err2 == nil {
+		// First argument can be parsed as a time, use dateRange
+		resultDate, err := fns.dateRange(args...)
+		if err != nil {
+			return nil, err
+		}
+
+		rd, ok := resultDate.([]time.Time)
+		if !ok {
+			return nil, g.Error("could not cast to array of time")
+		}
+
+		result := make([]any, len(rd))
+		for i, val := range rd {
+			result[i] = val
+		}
+
+		return result, nil
 	}
 
 	// If we reach here, the argument type is neither a time nor an integer
