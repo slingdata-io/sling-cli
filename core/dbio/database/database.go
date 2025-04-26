@@ -3361,81 +3361,96 @@ func CopyFromAzure(conn Connection, tableFName, azPath string) (err error) {
 // ParseSQLMultiStatements splits a sql text into statements
 // typically by a ';'
 func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
-	inQuote := false
-	inCommentLine := false
-	inCommentMulti := false
-	char := ""
-	pChar := ""
-	nChar := ""
-	currState := ""
-
 	var dialect dbio.Type
 	if len(Dialect) > 0 {
 		dialect = Dialect[0]
 	}
 
-	inComment := func() bool {
-		return inCommentLine || inCommentMulti
-	}
-
-	// determine if is SQL code block
+	// Special cases that should be treated as single statements
 	sqlLower := strings.TrimRight(strings.TrimSpace(strings.ToLower(sql)), ";")
 	if strings.HasPrefix(sqlLower, "begin") && strings.HasSuffix(sqlLower, "end") {
 		return []string{sql}
 	} else if strings.Contains(sqlLower, "prepare ") && strings.Contains(sqlLower, "execute ") {
 		return []string{sql}
+	} else if strings.Contains(sqlLower, "create procedure") || strings.Contains(sqlLower, "create function") {
+		return []string{sql}
 	}
 
-	for i := range sql {
-		char = string(sql[i])
+	inQuote := false
+	inCommentLine := false
+	inCommentMulti := false
+	currStatement := strings.Builder{}
 
-		// previous
-		if i > 0 {
-			pChar = string(sql[i-1])
-		}
+	// Process character by character
+	for i := 0; i < len(sql); i++ {
+		char := sql[i]
 
-		// next
-		nChar = ""
-		if i+1 < len(sql) {
-			nChar = string(sql[i+1])
-		}
+		// Write current character to the statement buffer
+		currStatement.WriteByte(char)
 
-		switch {
-		case !inQuote && !inComment() && char == "'":
-			inQuote = true
-		case inQuote && char == "'" && nChar != "'":
-			inQuote = false
-		case !inQuote && !inComment() && pChar == "-" && char == "-":
-			inCommentLine = true
-		case inCommentLine && char == "\n":
-			inCommentLine = false
-		case !inQuote && !inComment() && pChar == "/" && char == "*":
-			inCommentMulti = true
-		case inCommentMulti && pChar == "*" && char == "/":
-			inCommentMulti = false
-		}
-
-		currState = currState + char
-
-		// detect end
-		if char == ";" && !inQuote && !inComment() {
-			if currState = strings.TrimSpace(currState); currState != "" {
-				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
-					currState = strings.TrimSuffix(currState, ";")
+		// Handle state changes (after writing the character)
+		if !inCommentLine && !inCommentMulti {
+			// Handle quotes
+			if char == '\'' && !inQuote {
+				inQuote = true
+			} else if char == '\'' && inQuote {
+				// Check for escaped quote (''), which means stay in quote
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					// Add the next quote now and skip it in the next iteration
+					currStatement.WriteByte(sql[i+1])
+					i++
+					continue
 				}
-				sqls = append(sqls, currState)
+				inQuote = false
 			}
-			currState = ""
+		}
+
+		// Handle comments (only if not in a quote)
+		if !inQuote {
+			// Line comment start
+			if i > 0 && char == '-' && sql[i-1] == '-' && !inCommentMulti {
+				inCommentLine = true
+			}
+
+			// Multi-line comment start
+			if i > 0 && char == '*' && sql[i-1] == '/' && !inCommentLine {
+				inCommentMulti = true
+			}
+
+			// Multi-line comment end
+			if i > 0 && char == '/' && sql[i-1] == '*' && inCommentMulti {
+				inCommentMulti = false
+			}
+		}
+
+		// End of line comment
+		if char == '\n' && inCommentLine {
+			inCommentLine = false
+		}
+
+		// Detect statement end with semicolon (only when not in comment or quote)
+		if char == ';' && !inQuote && !inCommentLine && !inCommentMulti {
+			statement := strings.TrimSpace(currStatement.String())
+			if statement != "" && statement != ";" {
+				// Remove trailing semicolon for certain databases
+				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+					statement = strings.TrimSuffix(statement, ";")
+				}
+				sqls = append(sqls, statement)
+				currStatement.Reset()
+			} else {
+				currStatement.Reset()
+			}
 		}
 	}
 
-	if len(currState) > 0 {
-		if currState = strings.TrimSpace(currState); currState != "" {
-			if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
-				currState = strings.TrimSuffix(currState, ";")
-			}
-			sqls = append(sqls, currState)
+	// Handle any remaining statement
+	if remaining := strings.TrimSpace(currStatement.String()); remaining != "" {
+		// Remove trailing semicolon for certain databases
+		if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+			remaining = strings.TrimSuffix(remaining, ";")
 		}
+		sqls = append(sqls, remaining)
 	}
 
 	return
