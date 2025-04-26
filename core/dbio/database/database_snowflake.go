@@ -479,7 +479,7 @@ func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 
 		stage := conn.getOrCreateStage(table.Schema)
 		if stage != "" {
-			return conn.CopyViaStage(tableFName, df)
+			return conn.CopyViaStage(table, df)
 		}
 
 		if err == nil && stage == "" {
@@ -738,7 +738,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unl
 
 // CopyViaStage uses the Snowflake COPY INTO Table command
 // https://docs.snowflake.com/en/sql-reference/sql/copy-into-table.html
-func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (count uint64, err error) {
+func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count uint64, err error) {
 
 	context := g.NewContext(conn.Context().Ctx)
 
@@ -747,15 +747,26 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 	}
 
 	if conn.GetProp("schema") == "" {
-		table, err := ParseTableName(tableFName, conn.Type)
-		if err != nil {
-			return 0, g.Error(err, "could not parse table name: "+tableFName)
-		}
 		if table.Schema == "" {
 			return 0, g.Error("Prop schema is required")
 		}
 		conn.SetProp("schema", table.Schema)
+	} else if table.Schema == "" {
+		table.Schema = conn.GetProp("schema")
 	}
+
+	// get target columns
+	columns, err := conn.GetSQLColumns(table)
+	if err != nil {
+		return 0, g.Error("could not get columns for %s", table.FullName())
+	}
+
+	columns, err = conn.ValidateColumnNames(columns, df.Columns.Names())
+	if err != nil {
+		return 0, g.Error("could not validate columns prior to COPY from STAGE for %s", table.FullName())
+	}
+
+	tableFName := table.FullName()
 
 	// Write the ds to a temp file
 	folderPath := path.Join(env.GetTempFolder(), "snowflake", "put", env.CleanTableName(tableFName), g.NowFileStr())
@@ -856,10 +867,9 @@ func (conn *SnowflakeConn) CopyViaStage(tableFName string, df *iop.Dataflow) (co
 			return
 		}
 
-		tgtColumns := make([]string, len(df.Columns))
-		for i, name := range df.Columns.Names() {
-			colName, _ := ParseColumnName(name, conn.GetType())
-			tgtColumns[i] = conn.Quote(colName)
+		tgtColumns := make([]string, len(columns))
+		for i, name := range columns.Names() {
+			tgtColumns[i] = conn.Quote(name)
 		}
 
 		srcColumns := make([]string, len(df.Columns))
