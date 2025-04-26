@@ -128,3 +128,96 @@ func TestDuckDb(t *testing.T) {
 		assert.Contains(t, data.Columns.Names(), "file")
 	})
 }
+
+func TestStripSQLComments(t *testing.T) {
+	type testCase struct {
+		name     string
+		input    string
+		expected string
+	}
+	cases := []testCase{
+		{
+			name:     "no comments",
+			input:    "SELECT * FROM users WHERE id = 1",
+			expected: "SELECT * FROM users WHERE id = 1",
+		},
+		{
+			name:     "single line comment at end",
+			input:    "SELECT * FROM users -- Get all users",
+			expected: "SELECT * FROM users ",
+		},
+		{
+			name:     "single line comment in middle",
+			input:    "SELECT * -- Get all users\nFROM users",
+			expected: "SELECT * \nFROM users",
+		},
+		{
+			name:     "single line comment at start",
+			input:    "-- Get all users\nSELECT * FROM users",
+			expected: "\nSELECT * FROM users",
+		},
+		{
+			name:     "multi-line comment at end",
+			input:    "SELECT * FROM users /* Get all users */",
+			expected: "SELECT * FROM users ",
+		},
+		{
+			name:     "multi-line comment in middle",
+			input:    "SELECT * /* Get all users */ FROM users",
+			expected: "SELECT *  FROM users",
+		},
+		{
+			name:     "multi-line comment at start",
+			input:    "/* Get all users */\nSELECT * FROM users",
+			expected: "\nSELECT * FROM users",
+		},
+		{
+			name:     "multi-line comment spanning lines",
+			input:    "SELECT * FROM users /* This is a\nmulti-line\ncomment */ WHERE id = 1",
+			expected: "SELECT * FROM users  WHERE id = 1",
+		},
+		{
+			name:     "quote with dash inside",
+			input:    "SELECT * FROM users WHERE name = 'user--name'",
+			expected: "SELECT * FROM users WHERE name = 'user--name'",
+		},
+		{
+			name:     "quote with comment markers inside",
+			input:    "SELECT * FROM users WHERE name = '/* comment in string */'",
+			expected: "SELECT * FROM users WHERE name = '/* comment in string */'",
+		},
+		{
+			name:     "multiple mixed comments",
+			input:    "/* Header comment */\nSELECT * -- Get all\nFROM users /* Filter */ WHERE id = 1",
+			expected: "\nSELECT * \nFROM users  WHERE id = 1",
+		},
+		{
+			name:     "comment with SQL keywords",
+			input:    "SELECT * FROM users -- SELECT * FROM secrets",
+			expected: "SELECT * FROM users ",
+		},
+		{
+			name:     "dash without comment",
+			input:    "SELECT * FROM users WHERE id = 1-5",
+			expected: "SELECT * FROM users WHERE id = 1-5",
+		},
+		{
+			name:     "slash without comment",
+			input:    "SELECT * FROM users WHERE id = 1/5",
+			expected: "SELECT * FROM users WHERE id = 1/5",
+		},
+		{
+			name:     "nested comment-like structures in string",
+			input:    "SELECT '-- not /*really*/ a -- comment'",
+			expected: "SELECT '-- not /*really*/ a -- comment'",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result, err := StripSQLComments(c.input)
+			assert.NoError(t, err)
+			assert.Equal(t, c.expected, result)
+		})
+	}
+}
