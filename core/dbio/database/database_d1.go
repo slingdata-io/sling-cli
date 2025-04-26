@@ -98,41 +98,24 @@ retry:
 
 // Connect connects to the database
 func (conn *D1Conn) Connect(timeOut ...int) (err error) {
-	type Response struct {
-		Result []struct {
-			UUID      string    `json:"uuid"`
-			Name      string    `json:"name"`
-			CreatedAt time.Time `json:"created_at"`
-			Version   string    `json:"version"`
-			NumTables int       `json:"num_tables"`
-			FileSize  int64     `json:"file_size"`
-		} `json:"result"`
+	if cast.ToBool(conn.GetProp("connected")) {
+		return nil
 	}
 
-	resp, err := conn.makeRequest(conn.context.Ctx, "GET", "", nil)
+	data, err := conn.GetDatabases()
 	if err != nil {
-		return g.Error(err, "could not make request")
-	}
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return g.Error(err, "could not read from request body")
-	}
-
-	var response Response
-	if err = g.Unmarshal(string(respBytes), &response); err != nil {
-		return g.Error(err, "could not unmarshal from request body")
-	}
-
-	if len(response.Result) == 0 {
+		return g.Error(err, "could not list databases")
+	} else if len(data.Rows) == 0 {
 		return g.Error("no databases found")
 	}
 
 	available := []string{}
-	for _, result := range response.Result {
-		available = append(available, result.Name)
-		if strings.EqualFold(result.Name, conn.Database) {
-			conn.UUID = result.UUID
+	for _, row := range data.Rows {
+		name := cast.ToString(row[0])
+		uuid := cast.ToString(row[1])
+		available = append(available, name)
+		if strings.EqualFold(name, conn.Database) {
+			conn.UUID = uuid
 		}
 	}
 
@@ -147,6 +130,46 @@ func (conn *D1Conn) Connect(timeOut ...int) (err error) {
 	conn.SetProp("connected", "true")
 
 	return nil
+}
+
+// GetDatabases returns databases for given connection
+func (conn *D1Conn) GetDatabases() (data iop.Dataset, err error) {
+	type Response struct {
+		Result []struct {
+			UUID      string    `json:"uuid"`
+			Name      string    `json:"name"`
+			CreatedAt time.Time `json:"created_at"`
+			Version   string    `json:"version"`
+			NumTables int       `json:"num_tables"`
+			FileSize  int64     `json:"file_size"`
+		} `json:"result"`
+	}
+
+	resp, err := conn.makeRequest(conn.context.Ctx, "GET", "", nil)
+	if err != nil {
+		return data, g.Error(err, "could not make request")
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return data, g.Error(err, "could not read from request body")
+	}
+
+	var response Response
+	if err = g.Unmarshal(string(respBytes), &response); err != nil {
+		return data, g.Error(err, "could not unmarshal from request body")
+	}
+
+	if len(response.Result) == 0 {
+		return data, g.Error("no databases found")
+	}
+
+	data = iop.NewDataset(iop.NewColumnsFromFields("name", "uuid"))
+	for _, result := range response.Result {
+		data.Rows = append(data.Rows, []any{result.Name, result.UUID})
+	}
+
+	return data, nil
 }
 
 type d1ExecResponse struct {

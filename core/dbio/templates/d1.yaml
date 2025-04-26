@@ -7,6 +7,19 @@ core:
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
   insert_option: ""
+  delete_where_not_exist: |
+    delete from {target_table}
+    where {where}
+      and {unique_id} NOT IN (
+          select {unique_id} from {temp_table}
+      )
+  update_where_not_exist: |
+    update {target_table}
+    set {set_fields}
+    where {where}
+      and {unique_id} NOT IN (
+          select {unique_id} from {temp_table}
+      )
 
 
 metadata:
