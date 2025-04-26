@@ -1,8 +1,8 @@
 module github.com/slingdata-io/sling-cli
 
-go 1.22
+go 1.22.0
 
-toolchain go1.22.5
+toolchain go1.23.4
 
 require (
 	cloud.google.com/go v0.115.0
@@ -12,7 +12,7 @@ require (
 	github.com/360EntSecGroup-Skylar/excelize v1.4.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.4.0
-	github.com/ClickHouse/clickhouse-go/v2 v2.24.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.34.0
 	github.com/PuerkitoBio/goquery v1.6.0
 	github.com/apache/arrow/go/v16 v16.1.0
 	github.com/aws/aws-sdk-go v1.51.11
@@ -36,7 +36,7 @@ require (
 	github.com/jmoiron/sqlx v1.2.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.17.11
 	github.com/kshedden/datareader v0.0.0-20210325133423-816b6ffdd011
 	github.com/labstack/echo/v4 v4.10.2
 	github.com/lib/pq v1.10.9
@@ -61,15 +61,15 @@ require (
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.10.0
 	github.com/spf13/cast v1.6.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.19
 	github.com/trinodb/trino-go-client v0.318.0
 	github.com/xo/dburl v0.3.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	go.mongodb.org/mongo-driver v1.14.0
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.33.0
 	golang.org/x/oauth2 v0.23.0
-	golang.org/x/text v0.21.0
+	golang.org/x/text v0.22.0
 	google.golang.org/api v0.187.0
 	gopkg.in/cheggaaa/pb.v2 v2.0.7
 	gopkg.in/yaml.v2 v2.4.0
@@ -94,10 +94,10 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.13.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.2.2 // indirect
-	github.com/ClickHouse/ch-go v0.61.5 // indirect
+	github.com/ClickHouse/ch-go v0.65.1 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/andybalholm/cascadia v1.1.0 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
 	github.com/apache/thrift v0.19.0 // indirect
@@ -128,8 +128,8 @@ require (
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/imaging v1.6.2 // indirect
-	github.com/distribution/reference v0.5.0 // indirect
-	github.com/docker/docker v27.3.1+incompatible // indirect
+	github.com/distribution/reference v0.6.0 // indirect
+	github.com/docker/docker v28.0.4+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/domodwyer/mailyak/v3 v3.6.2 // indirect
@@ -173,7 +173,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20231201235250-de7065d80cb9 // indirect
 	github.com/jackc/pgx/v5 v5.5.5 // indirect
-	github.com/jackc/puddle/v2 v2.2.1 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
 	github.com/jcmturner/gofork v1.7.6 // indirect
@@ -218,7 +218,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0 // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
-	github.com/pierrec/lz4/v4 v4.1.21 // indirect
+	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/term v1.2.0-beta.2 // indirect
@@ -249,21 +249,22 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
-	go.opentelemetry.io/otel v1.30.0 // indirect
-	go.opentelemetry.io/otel/metric v1.30.0 // indirect
-	go.opentelemetry.io/otel/trace v1.30.0 // indirect
+	go.opentelemetry.io/otel v1.35.0 // indirect
+	go.opentelemetry.io/otel/metric v1.35.0 // indirect
+	go.opentelemetry.io/otel/trace v1.35.0 // indirect
 	gocloud.dev v0.37.0 // indirect
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8 // indirect
 	golang.org/x/image v0.18.0 // indirect
-	golang.org/x/mod v0.18.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
+	golang.org/x/mod v0.23.0 // indirect
+	golang.org/x/net v0.35.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
-	golang.org/x/tools v0.22.0 // indirect
+	golang.org/x/tools v0.30.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/genproto v0.0.0-20240624140628-dc46fd24d27d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
