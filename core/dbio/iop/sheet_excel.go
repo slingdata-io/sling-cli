@@ -3,9 +3,11 @@ package iop
 import (
 	"context"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/360EntSecGroup-Skylar/excelize"
 	"github.com/flarco/g"
@@ -287,4 +289,32 @@ func (xls *Excel) WriteSheet(shtName string, ds *Datastream, mode string) (err e
 	xls.RefreshSheets()
 
 	return
+}
+
+// excelDateToTime convert Excel dates to time.Time
+func excelDateToTime(excelDate float64) time.Time {
+	// Excel dates are days since 1900-01-01, with a quirk for leap years
+	// There's a leap year bug in Excel - it thinks 1900 was a leap year
+	if excelDate > 60 {
+		excelDate-- // Adjust for Excel's leap year bug
+	}
+
+	// Split into days and fractional day
+	days := int(excelDate)
+	frac := excelDate - float64(days)
+
+	// Start date: 1900-01-01
+	date := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Add days
+	date = date.AddDate(0, 0, days)
+
+	// Add fractional day as hours, minutes, seconds
+	seconds := int(math.Round(frac * 86400)) // 86400 seconds in a day
+	hours := seconds / 3600
+	seconds -= hours * 3600
+	minutes := seconds / 60
+	seconds -= minutes * 60
+
+	return time.Date(date.Year(), date.Month(), date.Day(), hours, minutes, seconds, 0, time.UTC)
 }
