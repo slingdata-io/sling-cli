@@ -16,6 +16,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.6.0
 	github.com/apache/arrow/go/v16 v16.1.0
 	github.com/aws/aws-sdk-go v1.51.11
+	github.com/bits-and-blooms/bloom/v3 v3.7.0
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/clbanning/mxj/v2 v2.7.0
 	github.com/denisbrodbeck/machineid v1.0.1
@@ -122,6 +123,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.1 // indirect
 	github.com/aws/smithy-go v1.20.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.4.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20240423153145-555b57ec207b // indirect
