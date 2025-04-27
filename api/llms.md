@@ -6,20 +6,27 @@ This guide explains how to create API specifications for Sling. Follow this docu
 
 Sling API specs are YAML files that define how to interact with REST APIs. They specify authentication, endpoints, request formation, iteration, pagination, response processing, and state management.
 
+Principal Instructions for LLMs:
+- Use the documentation details below to construct a Sling API spec.
+- The Sling API specs are intended to extract data from API sources. It is not intended for pushing or updating data into an API endpoint (typically via methods `POST`/`PATCH`/`PUT`/`DELETE`). Ignore or omit endpoints which are intended for creating/updating/deleting data into an API resource.
+- When reading API documentation, if an endpoint is marked as `DEPRECATED`, you should ignore this endpoint unless explicitly instructed by the user.
+- Don't be verbose with extra comments indicating optional additional inputs/parameters, or whether a pagination is required or not, etc. Only put comments in a section of the API spec where it might be confusing for a human.
+- Make sure to use the browser MCP (if available) to understand how the subject API resource works. This includes: Authentication, Pagination and how the response is structured for each endpoint, so that Sling can parse the data correctly.
+- If something in the API documentation is unclear, pause and ask the human operator for instructions. It is better to get confirmation than to build an unstable API spec.
+
+
 ## Basic Structure
 
 ```yaml
 name: "API Name"
 description: "Description of the API"
 
-authentication:
-  type: "bearer|basic|oauth2"
-  # Authentication details...
-
 defaults:
+  state:
+    base_url: https://api.base.url/v1
+  
   # Default settings for all endpoints
   request:
-    url: "https://api.base.url/v1"
     headers:
       Accept: "application/json"
 
@@ -28,9 +35,9 @@ endpoints:
   endpoint_name:
     description: "Endpoint description"
     request:
-      # Path relative to defaults.request.url or full URL
-      url: "resource"
+      url: "${state.base_url}/resource"
       method: "GET"
+    
     response:
       records:
         jmespath: "data[]" # JMESPath to extract records
@@ -61,21 +68,11 @@ authentication:
   username: "${secrets.username}"
   password: "${secrets.password}"
 
-  # OAuth2 configuration (example, details vary)
-  authentication_url: "https://auth.example.com/oauth/token"
-  client_id: "${secrets.client_id}"
-  client_secret: "${secrets.client_secret}"
-  scopes: ["read", "write"]
-  redirect_uri: "https://app.example.com/callback"
-  refresh_token: "${secrets.refresh_token}"
-  refresh_on_expire: true
-  flow: "authorization_code"
 
 # Default settings applied to all endpoints
 defaults:
   # Default request configuration
   request:
-    url: "https://api.example.com/v1"
     method: "GET"
     headers:
       Accept: "application/json"
@@ -86,6 +83,7 @@ defaults:
   # Default state variables
   state:
     limit: 100
+    base_url: "https://api.example.com/v1"
 
   # Default pagination settings
   pagination:
@@ -103,8 +101,7 @@ defaults:
 
 # Map of API endpoints to interact with
 endpoints:
-  # Key 'list_users' must match the endpoint name
-  list_users:
+  users:
     # Description of what this endpoint does
     description: "Retrieve a list of users with incremental sync"
 
@@ -126,7 +123,7 @@ endpoints:
     # HTTP request configuration
     request:
       # Path relative to defaults.request.url
-      url: "users"
+      url: ${state.base_url}/users
       # Method overrides default if needed
       method: "GET"
       # Headers merged with defaults.request.headers
@@ -198,7 +195,7 @@ endpoints:
 
     request:
       # Use the iterated user ID in the URL
-      url: "users/${state.current_user_id}"
+      url: ${state.base_url}/users/${state.current_user_id}
       method: "GET"
 
     response:
@@ -218,7 +215,7 @@ queues:
   - order_ids
 
 endpoints:
-  list_products:
+  products:
     # ... request config ...
     response:
       processors:
@@ -226,15 +223,16 @@ endpoints:
         - expression: "record.id"
           output: "queue.product_ids"
 
-  get_product_inventory:
+  product_inventory:
     description: "Get inventory for each product ID from the queue"
     iterate:
       # Iterate over values from the 'product_ids' queue
       over: "queue.product_ids"
       into: "state.current_product_id"
       concurrency: 10 # Process 10 products concurrently
+    
     request:
-      url: "products/${state.current_product_id}/inventory"
+      url: ${state.base_url}/products/${state.current_product_id}/inventory
       # ... other request config ...
     response:
       # ... response config ...
@@ -259,15 +257,6 @@ authentication:
   # Bearer Token
   type: "bearer"
   token: "${secrets.api_token}" # Can use secrets, env, or state vars
-
-  # OAuth2 (Configuration details vary based on flow)
-  type: "oauth2"
-  flow: "authorization_code" # or client_credentials, etc.
-  authentication_url: "https://auth.example.com/oauth/token"
-  client_id: "${secrets.client_id}"
-  client_secret: "${secrets.client_secret}"
-  scopes: ["read:users", "write:orders"]
-  # ... other OAuth2 specific fields ...
 ```
 
 ## Variable Scopes and Expressions
@@ -294,8 +283,8 @@ Each key under the `endpoints` map defines an endpoint. The key itself **must** 
 
 ```yaml
 endpoints:
-  # The key 'list_users' is the effective name
-  list_users:
+  # The key 'users' is the effective name
+  users:
     description: "Retrieve users from the API"
     # ... other endpoint config ...
 
@@ -311,8 +300,8 @@ Endpoints define specific API operations. They inherit settings from `defaults` 
 
 ```yaml
 request:
-  # URL: Can be a full URL or a path relative to defaults.request.url
-  url: "users/${state.user_id}?active=true"
+  # Request full URL, can includ state variables
+  url: "${state.base_url}/users/${state.user_id}?active=true"
   # Method: GET, POST, PUT, PATCH, DELETE, etc.
   method: "POST"
   # Headers: Merged with defaults.request.headers
@@ -553,7 +542,6 @@ authentication:
 
 defaults:
   request:
-    url: "https://api.base.url/v1" # Base URL for API requests
     method: "GET"
     headers:
       Accept: "application/json"
@@ -562,11 +550,12 @@ defaults:
     rate: 10 # Adjust based on API limits
     concurrency: 5
   state:
+    base_url: "https://api.base.url/v1" # Base URL for API requests
     limit: 100 # Default page size or limit
 
 endpoints:
   # Key is the endpoint name
-  list_items:
+  items:
     description: "Fetch a list of items"
     state:
       # Example state for pagination or filtering
@@ -577,7 +566,7 @@ endpoints:
     sync: [last_item_id, last_sync_time]
 
     request:
-      url: "items" # Relative to defaults.request.url
+      url: "${state.base_url}/items" # Relative to defaults.request.url
       parameters:
         limit: ${state.limit}
         starting_after: ${state.starting_after}
@@ -625,7 +614,7 @@ endpoints:
   #     into: "state.current_item_id"
   #     concurrency: 10
   #   request:
-  #     url: "items/${state.current_item_id}"
+  #     url: "${state.base_url}/items/${state.current_item_id}"
   #   response:
   #     records:
   #       jmespath: "data" # Assuming single item response
