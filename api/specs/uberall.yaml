@@ -1,0 +1,39 @@
+name: "Uberall"
+description: "API for managing business location data, listings, reviews, and analytics on the Uberall platform."
+
+defaults:
+  request:
+    headers:
+      Accept: "application/json"
+      privateKey: ${secrets.private_key}
+
+    timeout: 60
+    rate: 5   # Adjust based on observed API limits
+    concurrency: 5
+
+endpoints:
+
+  locations:
+    description: "Get several locations with filtering and pagination."
+
+    state:
+      offset: 0
+      limit: 100
+      location_id: ${ coalesce(env.LOCATION_ID, secrets.location_id) }
+
+    request:
+      url: https://uberall.com/api/locations/${state.location_id}
+      method: "GET"
+      parameters:
+        max: ${state.limit}
+        offset: ${state.offset}
+    
+    pagination:
+      next_state:
+        offset: "${state.offset + state.limit}"
+      stop_condition: "length(response.records) == 0"
+    
+    response:
+      records:
+        jmespath: "response"
+        primary_key: ["id"]
