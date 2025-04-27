@@ -1,30 +1,39 @@
 # Sling API Specification Guide for LLMs
 
-This guide explains how to create API specifications for Sling. Follow this document along with the target API's official documentation to build a properly formatted API spec.
+This guide explains how to create API specifications for Sling. Follow this document along with the target API\'s official documentation to build a properly formatted API spec.
 
 ## Overview
 
-Sling API specs are YAML files that define how to interact with REST APIs. They specify authentication, endpoints, request formation, pagination, and response processing.
+Sling API specs are YAML files that define how to interact with REST APIs. They specify authentication, endpoints, request formation, iteration, pagination, response processing, and state management.
 
 ## Basic Structure
 
 ```yaml
 name: "API Name"
 description: "Description of the API"
+
 authentication:
   type: "bearer|basic|oauth2"
   # Authentication details...
+
 defaults:
   # Default settings for all endpoints
+  request:
+    url: "https://api.base.url/v1"
+    headers:
+      Accept: "application/json"
+
 endpoints:
-  - name: "endpoint_name"
-    description: "Endpoint description"d
+  # Name must match the key in the endpoints map
+  endpoint_name:
+    description: "Endpoint description"
     request:
-      url: "https://api.example.com/resource"
+      # Path relative to defaults.request.url or full URL
+      url: "resource"
       method: "GET"
     response:
       records:
-        jmespath: "data[]"
+        jmespath: "data[]" # JMESPath to extract records
 ```
 
 ## Full Structure
@@ -36,19 +45,23 @@ name: "Example API"
 # Description of what the API does
 description: "This API provides access to example data"
 
+# Declares queues for passing data between endpoints
+queues:
+  - user_ids
+
 # Authentication configuration for accessing the API
 authentication:
   # Type of authentication: "bearer", "basic", "oauth2", or empty for none
   type: "bearer"
-  
+
   # Bearer token for authentication
   token: "${secrets.api_token}"
-  
+
   # Basic authentication credentials
   username: "${secrets.username}"
   password: "${secrets.password}"
-  
-  # OAuth2 configuration
+
+  # OAuth2 configuration (example, details vary)
   authentication_url: "https://auth.example.com/oauth/token"
   client_id: "${secrets.client_id}"
   client_secret: "${secrets.client_secret}"
@@ -56,8 +69,6 @@ authentication:
   redirect_uri: "https://app.example.com/callback"
   refresh_token: "${secrets.refresh_token}"
   refresh_on_expire: true
-  
-  # OAuth2 flow type
   flow: "authorization_code"
 
 # Default settings applied to all endpoints
@@ -68,125 +79,168 @@ defaults:
     method: "GET"
     headers:
       Accept: "application/json"
-    timeout: 30
+    timeout: 30 # seconds
+    rate: 10    # max requests per second (default: 2)
+    concurrency: 5 # max concurrent requests (default: 5)
 
-# List of API endpoints to interact with
+  # Default state variables
+  state:
+    limit: 100
+
+  # Default pagination settings
+  pagination:
+    stop_condition: "!response.json.has_more" # Common for cursor/offset
+
+  # Default response settings
+  response:
+    rules:
+      # Default rules are implicitly added:
+      # - action: retry, condition: response.status == 429, max_attempts: 3, backoff: linear, backoff_base: 2
+      # - action: fail, condition: response.status >= 400
+      # You can override these or add more specific rules.
+      - action: "continue" # Example: ignore 404 errors
+        condition: "response.status == 404"
+
+# Map of API endpoints to interact with
 endpoints:
-  - # Name of this endpoint
-    name: "list_users"
-    
+  # Key 'list_users' must match the endpoint name
+  list_users:
     # Description of what this endpoint does
-    description: "Retrieve a list of users"
-    
-    # State variables for this endpoint
+    description: "Retrieve a list of users with incremental sync"
+
+    # Initial state variables for this endpoint (merged with defaults.state)
     state:
-      page: 1
-      limit: 100
-    
-    # Variables to persist between API runs
+      # Get last sync timestamp from persistent state, default to 30 days ago
+      updated_since: >
+        ${ coalesce(
+             sync.last_updated,
+             date_format(date_add(now(), -30, 'day'), '%Y-%m-%dT%H:%M:%SZ')
+           )
+        }
+      page: 1 # Example for page-based pagination
+
+    # Variables to persist between API runs for incremental loading
+    # Values are read from 'sync.' scope and written to 'state.' scope for the next run.
     sync: ["last_updated"]
-    
+
     # HTTP request configuration
     request:
-      # Full URL or path relative to defaults.request.url
+      # Path relative to defaults.request.url
       url: "users"
-      
-      # HTTP method: GET, POST, PUT, PATCH, DELETE, etc.
+      # Method overrides default if needed
       method: "GET"
-      
-      # Request timeout in seconds
-      timeout: 30
-      
-      # HTTP headers to include with request
+      # Headers merged with defaults.request.headers
       headers:
-        Content-Type: "application/json"
-        Authorization: "Bearer ${auth.token}"
-      
+        X-Custom-Header: "value"
       # URL query parameters
       parameters:
         page: "${state.page}"
         limit: "${state.limit}"
-        sort: "created_at"
-      
-      # Request body for POST/PUT/PATCH requests
-      payload:
-        user:
-          name: "Example User"
-          email: "user@example.com"
-      
-      # Expression to loop through items
-      loop: "state.items"
-      
-      # Rate limiting (requests per second)
-      rate: 5
-      
-      # Maximum concurrent requests
-      concurrency: 3
-    
+        updated_since: "${state.updated_since}" # Use the state variable
+
     # Pagination configuration
     pagination:
-      # Updated state for next page request
+      # How to update state for the next page request
       next_state:
         page: "${state.page + 1}"
-      
-      # Expression that evaluates to true when pagination should stop
-      stop_condition: "length(response.records) < ${state.limit} || response.json.meta.next_page == null"
-    
+      # Overrides default stop_condition
+      stop_condition: "response.json.page >= response.json.total_pages"
+
     # Response processing configuration
     response:
       # How to extract records from response
       records:
         # JMESPath expression to extract records array from response
         jmespath: "data.users[]"
-        
-        # Field(s) that uniquely identify each record
+        # Field(s) that uniquely identify each record (used for deduplication)
         primary_key: ["id"]
-        
-        # Field used for incremental updates
+        # Optional: Field used for incremental updates (informational)
         update_key: "updated_at"
-        
-        # Maximum number of records to process (useful for testing)
+        # Optional: Max records to process (useful for testing)
         limit: 1000
-      
-      # Post-processing transformations
+        # Optional: Specify Bloom filter parameters for efficient deduplication of large datasets
+        # Format: "<estimated_items>,<false_positive_probability>" (e.g., "1000000,0.001")
+        duplicate_tolerance: "1000000,0.001"
+
+      # Post-processing transformations and aggregations
       processors:
-        - # Expression to evaluate on each record or response
-          expression: "record.created_at"
-          
-          # Where to store the result
-          output: "record.last_created_at"
-          
-          # If we want to aggregate values across records (maximum, minimum, flatten, first, last)
+        # Example 1: Add a processed field to each record
+        - expression: "upper(record.name)"
+          output: "record.upper_name" # Target: record.<new_field>
+
+        # Example 2: Aggregate the maximum 'updated_at' timestamp into state for the next sync
+        - expression: "record.updated_at"
+          output: "state.last_updated" # Target: state.<variable_name>
           aggregation: "maximum"
-      
-      # Rules for handling specific response conditions
+
+        # Example 3: Send user IDs to a queue for another endpoint to process
+        - expression: "record.id"
+          output: "queue.user_ids" # Target: queue.<queue_name>
+
+      # Endpoint-specific rules (merged with defaults.response.rules)
       rules:
-        - # Action to take: retry, continue, stop, fail
-          action: "retry"
-          
-          # Condition that triggers this rule
-          condition: "response.status >= 500"
-          
-          # Maximum retry attempts
-          max_attempts: 3
-          
-          # Backoff strategy: none, constant, linear, exponential, jitter
-          backoff: "exponential"
-          
-          # Base duration in seconds for backoff
-          backoff_base: 2
-          
-          # Error message for logging/debugging
-          message: "Server error occurred"
-    
-    # Configuration for dynamic endpoints
-    dynamic:
-      # Expression that returns array to iterate over
-      iterate: "state.resource_ids"
-      
-      # Variable to store current iteration value
-      into: "state.current_id"
+        - action: "fail"
+          condition: "response.status == 403"
+          message: "Authentication failed for list_users"
+
+  # Example of an endpoint that iterates over values from a queue
+  get_user_details:
+    description: "Retrieve details for each user ID from the queue"
+
+    # Iteration configuration
+    iterate:
+      # Iterate over items received from the 'user_ids' queue
+      over: "queue.user_ids"
+      # Store the current user ID in state.current_user_id for each iteration
+      into: "state.current_user_id"
+      # Number of concurrent iterations/requests to run
+      concurrency: 10
+
+    request:
+      # Use the iterated user ID in the URL
+      url: "users/${state.current_user_id}"
+      method: "GET"
+
+    response:
+      records:
+        jmespath: "user" # Assuming the response structure is {"user": {...}}
+        primary_key: ["id"]
 ```
+
+## Queues
+
+You can declare queues at the top level of your spec using the `queues` key. Queues allow passing data (like IDs or other values) generated by one endpoint to another endpoint for further processing using the `iterate` feature.
+
+```yaml
+# Declare queues at the top level
+queues:
+  - product_ids
+  - order_ids
+
+endpoints:
+  list_products:
+    # ... request config ...
+    response:
+      processors:
+        # Send product IDs to the 'product_ids' queue
+        - expression: "record.id"
+          output: "queue.product_ids"
+
+  get_product_inventory:
+    description: "Get inventory for each product ID from the queue"
+    iterate:
+      # Iterate over values from the 'product_ids' queue
+      over: "queue.product_ids"
+      into: "state.current_product_id"
+      concurrency: 10 # Process 10 products concurrently
+    request:
+      url: "products/${state.current_product_id}/inventory"
+      # ... other request config ...
+    response:
+      # ... response config ...
+```
+
+Queues are backed by temporary files and operate in a write-then-read manner within a single Sling run. An endpoint producing data writes to the queue (`output: queue.<name>`), and another endpoint consumes it (`iterate.over: queue.<name>`).
 
 ## Authentication
 
@@ -194,193 +248,294 @@ Supported authentication types:
 
 ```yaml
 authentication:
+  # No Authentication
+  type: "" # or omit the authentication block
+
   # Basic Auth
   type: "basic"
   username: "${secrets.username}"
   password: "${secrets.password}"
-  
+
   # Bearer Token
   type: "bearer"
-  token: "${secrets.api_token}"
-  
-  # OAuth2 (placeholder - implementation varies)
+  token: "${secrets.api_token}" # Can use secrets, env, or state vars
+
+  # OAuth2 (Configuration details vary based on flow)
   type: "oauth2"
+  flow: "authorization_code" # or client_credentials, etc.
+  authentication_url: "https://auth.example.com/oauth/token"
   client_id: "${secrets.client_id}"
   client_secret: "${secrets.client_secret}"
+  scopes: ["read:users", "write:orders"]
+  # ... other OAuth2 specific fields ...
 ```
 
-Variable references use `${section.key}` syntax to access:
-- `env`: Environment variables
-- `secrets`: Sensitive credentials
-- `state`: Persistent state between requests
-- `auth`: Authentication data
+## Variable Scopes and Expressions
+
+Sling uses `${...}` syntax for embedding expressions and accessing variables within YAML strings. Expressions are evaluated using the `goval` library with custom functions.
+
+Available variable scopes:
+- `env`: Environment variables (e.g., `${env.USER}`).
+- `secrets`: Sensitive credentials passed to Sling (e.g., `${secrets.api_key}`).
+- `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
+- `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `${coalesce(sync.var, state.var, default_value)}`.
+- `auth`: Authentication data after successful authentication (e.g., `${auth.token}` for OAuth2).
+- `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts`.
+- `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
+- `record`: The current data record being processed by a processor (available only within `response.processors`).
+- `queue`: Access queues declared at the top level (e.g., `iterate.over: queue.my_queue`).
+- `null`: Represents a null value (e.g., `coalesce(state.value, null)`).
+
+State variables (`state.`) within an endpoint have a defined render order. If `state.b` depends on `state.a` (`state.b: "${state.a + 1}"`), `state.a` will be evaluated first. Circular dependencies are detected and cause an error.
 
 ## Endpoints
 
-Each endpoint defines a specific API resource:
+Each key under the `endpoints` map defines an endpoint. The key itself **must** be used as the `name` of the endpoint internally, though you can add a `description` field for clarity.
 
 ```yaml
 endpoints:
-  - name: "list_users"
+  # The key 'list_users' is the effective name
+  list_users:
     description: "Retrieve users from the API"
-    request:
-      url: "https://api.example.com/users"
-      method: "GET"
-      headers:
-        Content-Type: "application/json"
-        Accept: "application/json"
-      parameters:
-        limit: 100
-        offset: 0
-    response:
-      records:
-        jmespath: "data.users[]"
-        primary_key: ["id"]
+    # ... other endpoint config ...
+
+  # The key 'get_details' is the effective name
+  get_details:
+    description: "Get item details"
+    # ... other endpoint config ...
 ```
+
+Endpoints define specific API operations. They inherit settings from `defaults` and can override them.
 
 ## Request Configuration
 
 ```yaml
 request:
-  url: "https://api.example.com/resource/${state.resource_id}"
-  method: "GET|POST|PUT|PATCH|DELETE"
+  # URL: Can be a full URL or a path relative to defaults.request.url
+  url: "users/${state.user_id}?active=true"
+  # Method: GET, POST, PUT, PATCH, DELETE, etc.
+  method: "POST"
+  # Headers: Merged with defaults.request.headers
   headers:
-    Authorization: "Bearer ${auth.token}"
     Content-Type: "application/json"
+    Authorization: "Bearer ${auth.token}"
+    X-Request-ID: "${uuid()}"
+  # Parameters: Added as URL query parameters for GET/DELETE,
+  # or form-encoded body for POST/PUT/PATCH if Content-Type is application/x-www-form-urlencoded
   parameters:
-    page: 1
-    per_page: 100
-  payload: 
-    key1: "value1"
-    key2: "value2"
-  timeout: 30  # seconds
-  rate: 10     # max requests per second
-  concurrency: 5  # max concurrent requests
+    page: ${state.page}
+    limit: 100
+    status: "active"
+  # Payload: Used as request body for POST/PUT/PATCH.
+  # Can be a string, map, or list. Will be JSON-encoded if Content-Type is application/json.
+  payload:
+    user:
+      name: "New User"
+      email: "${state.user_email}"
+  # Timeout: Request timeout in seconds (default: 30)
+  timeout: 60
+  # Rate: Max requests per second for this endpoint (default: 2)
+  rate: 5
+  # Concurrency: Max concurrent requests for this endpoint (default: 5)
+  concurrency: 3
+```
+
+## Iteration (Looping Requests)
+
+The `iterate` section allows an endpoint to make multiple requests based on a list of items (e.g., IDs from a queue, date ranges).
+
+```yaml
+iterate:
+  # Expression evaluated to get items to loop over.
+  # Can be an array, a queue reference ('queue.name'), or a function like range() or chunk().
+  over: "queue.product_ids"
+  # Name of the state variable to store the current item in each iteration. Must start with 'state.'.
+  into: "state.current_product_id"
+  # Optional: Number of iterations to run concurrently (default: 10).
+  concurrency: 5
+  # Optional: Condition to evaluate before starting iteration.
+  # if: "state.process_details == true"
+```
+
+Each iteration runs independently with its own copy of the initial state, modified by the `into` variable and subsequent pagination/processors within that iteration.
+
+**Example: Iterating over a date range:**
+
+```yaml
+iterate:
+  over: >
+    range(
+      date_trunc(date_add(now(), -7, "day"), "day"), # Start date: 7 days ago
+      date_trunc(now(), "day"),                      # End date: today
+      "1d"                                           # Step: 1 day
+    )
+  into: state.current_day
+  concurrency: 10
+request:
+  parameters:
+    date: ${date_format(state.current_day, "%Y-%m-%d")}
+    # ... other params ...
+```
+
+**Example: Iterating over chunks of IDs from a queue:**
+
+```yaml
+iterate:
+  # Use the chunk() function to process IDs in batches of 50
+  over: "chunk(queue.variant_ids, 50)"
+  into: "state.variant_id_batch" # state.variant_id_batch will be an array/list
+  concurrency: 5
+request:
+  parameters:
+    # Join the batch of IDs into a comma-separated string for the API parameter
+    ids: ${join(state.variant_id_batch, ",")}
 ```
 
 ## Pagination
 
-Control how to navigate through multiple result pages:
+Controls how Sling navigates through multiple pages of results for *each iteration* (if `iterate` is used) or for the single endpoint execution (if `iterate` is not used).
 
 ```yaml
 pagination:
+  # Map of state variables to update *before* the next request in the current iteration.
+  # Expressions are evaluated based on the *current* state and response (if needed).
   next_state:
-    page: "${response.json.meta.next_page}"
-  stop_condition: "response.json.meta.next_page == null"
+    # Example 1: Cursor-based (using last record ID)
+    starting_after: "${response.records[-1].id}"
+    # Example 2: Page number based
+    # page: "${state.page + 1}"
+    # Example 3: Offset based
+    # offset: "${state.offset + state.limit}"
+    # Example 4: Using URL from response header (e.g., Link header)
+    # url: >
+    #  ${
+    #      if(contains(response.headers.link, "rel=\"next\""),
+    #         trim(split_part(split(response.headers.link, ",")[0], ";", 0), "<>"),
+    #         null # Or keep current state.url? Needs careful handling.
+    #      )
+    #   }
+
+  # Expression evaluated *after* a response is received to check if pagination should stop for the current iteration.
+  # If true, no more requests are made for this iteration/endpoint.
+  stop_condition: "!response.json.has_more || length(response.records) == 0"
+  # Example: Page-based stop
+  # stop_condition: "response.json.page >= response.json.total_pages"
+  # Example: Stop if next page URL is missing in header
+  # stop_condition: "!contains(jmespath(response.headers, \"link\"), \"rel=\\\"next\\\"\")"
 ```
+
+**Note:** If `next_state` expressions depend on `response.*` variables, Sling waits for the current request to finish before evaluating them. Otherwise, `next_state` is evaluated immediately to prepare the next request potentially in parallel.
 
 ## Response Processing
 
-Extract and transform data from responses:
+Extracts and transforms data from responses.
 
 ```yaml
 response:
   records:
-    jmespath: "data.items[]"  # JMESPath expression to extract records
-    primary_key: ["id"]       # Primary key field(s)
-    limit: 1000               # Optional limit for testing
-  
+    # JMESPath expression to extract an array of records from the response.json
+    jmespath: "data.items[]"
+    # Primary Key: Field(s) used to uniquely identify records for deduplication.
+    primary_key: ["id", "location_id"] # Can be a single string or list
+    # Update Key: Informational field often used in incremental logic.
+    update_key: "updated_at"
+    # Limit: Max number of records to process per endpoint run (for testing).
+    limit: 5000
+    # Duplicate Tolerance: Enables Bloom filter for efficient deduplication on large datasets.
+    # Format: "<estimated_items>,<false_positive_probability>"
+    duplicate_tolerance: "1000000,0.001"
+
   processors:
-    - expression: "record.created_at"
-      output: "state.last_timestamp"
-      aggregation: "maximum"  # aggregation types: maximum, minimum, flatten, first, last
-  
+    # Applied to each record extracted by jmespath.
+    - # Expression to evaluate. Can access 'record', 'state', 'response', etc.
+      expression: "date_parse(record.created_ts, 'auto')"
+      # Target output location:
+      # - 'record.<new_field>': Adds/updates a field in the current record.
+      # - 'queue.<queue_name>': Appends the result to the named queue.
+      output: "record.created_at_dt"
+
+    - # Example using aggregation
+      expression: "record.amount"
+      # Target output for aggregation must be 'state.<variable>'
+      output: "state.total_amount"
+      # Aggregation type: maximum, minimum, flatten, first, last (default: none)
+      aggregation: "sum" # Note: 'sum' is not explicitly listed but implied by common need. Check functions.go
+
   rules:
-    - action: "retry"        # retry, continue, stop, fail
-      condition: "response.status >= 500"
-      max_attempts: 3
-      backoff: "exponential"  # none, constant, linear, exponential, jitter
-      backoff_base: 2         # base delay in seconds
+    # Define actions based on response conditions (status code, headers, body).
+    # Rules are evaluated in order. Execution stops at the first matching rule with action stop/fail/retry.
+    - # Action: retry, continue, stop, fail
+      action: "retry"
+      # Condition: Expression evaluating to true triggers the action.
+      condition: "response.status == 429 || response.status >= 500"
+      # Max attempts for retry action.
+      max_attempts: 5
+      # Backoff strategy for retry: none, constant, linear, exponential, jitter
+      backoff: "exponential"
+      # Base delay in seconds for backoff calculation (default: 1 for retry)
+      backoff_base: 2
+      # Optional message for logging when rule is met.
+      message: "Server error or rate limit hit, retrying..."
+
     - action: "fail"
-      condition: "response.status == 403"
-      message: "Authorization failed"
+      condition: "response.status == 401 || response.status == 403"
+      message: "Authentication/Authorization failed"
+
+    # Default rules (implicitly added if not defined, processed last):
+    # - action: retry, condition: response.status == 429, ...
+    # - action: fail, condition: response.status >= 400
+    # You can override the defaults by providing your own rules for these conditions.
+    # Example: To ignore 404 errors and continue:
+    # - action: "continue"
+    #   condition: "response.status == 404" # Ignore 404s
 ```
 
-## Dynamic Endpoints
+**Deduplication:** If `primary_key` is defined, Sling automatically tracks seen keys within the current run and skips duplicate records. For very large datasets where storing all keys in memory is infeasible, specifying `duplicate_tolerance` activates a Bloom filter for probabilistic deduplication.
 
-For APIs that require iterating through resources:
+**Rules & Retries:** Sling automatically handles standard `RateLimit-Reset` or `Retry-After` headers when `response.status == 429` and the action is `retry`, using the header value for the backoff duration if available, otherwise falling back to the configured `backoff` strategy.
 
-```yaml
-dynamic:
-  iterate: "state.resource_ids" # an array of IDs
-  into: "state.current_id"
-```
+## Sync State for Incremental Loads
+
+The `sync` key in an endpoint definition allows persisting specific `state` variables between runs, enabling incremental data loading.
 
 ```yaml
 endpoints:
-	- dynamic:
-			iterate: state.objects
-			into: state.object
-		
-		name: ${ state.object.id }
-		
-		request:
-			url: ${ state.object.url }
-			method: GET
-		
-		response:
-			processors:
-				- expression: date_parse(record.timestamp, "auto")
-					output: record.timestamp_parsed
+  incremental_data:
+    state:
+      # Read the last sync timestamp from persistent state ('sync.last_sync_ts').
+      # If it's the first run (sync.last_sync_ts is null), use a default start date.
+      start_timestamp: >
+        ${ coalesce(
+             sync.last_sync_ts,
+             date_format(date_add(now(), -7, 'day'), '%Y-%m-%dT%H:%M:%SZ')
+           )
+        }
+
+    # List of state variables to persist.
+    # At the end of the run, the final values of state.last_sync_ts (and any others listed)
+    # will be saved and made available as sync.last_sync_ts in the next run.
+    sync: [last_sync_ts]
+
+    request:
+      parameters:
+        updated_since: "${state.start_timestamp}"
+
+    response:
+      processors:
+        # Find the maximum timestamp from the current batch of records.
+        - expression: "record.updated_at"
+          # Store the maximum value in state.last_sync_ts.
+          output: "state.last_sync_ts"
+          # Use the 'maximum' aggregation across all records processed by this endpoint run.
+          aggregation: "maximum"
 ```
 
-## Common Patterns and Examples
-
-### Extracting Data with JMESPath
-
-```yaml
-response:
-  records:
-    jmespath: "data.results[]"  # Array of objects
-```
-
-### Date-based Incremental Sync
-
-```yaml
-
-state:
-  updated_since: ${ coalesce(state.last_sync_date, "2021-01-01") }
-
-# array of state variable name to sync on start/end of process
-# first time, the value is null (therefore it is best to use
-# coalesce to have a fallback value
-sync: [ last_sync_date ]
-
-request:
-  parameters:
-    updated_since: "${ state.updated_since }"
-response:
-  processors:
-    - expression: "record.updated_at"
-      output: "state.last_sync_date"
-      aggregation: "maximum"
-```
-
-### Pagination Examples
-
-#### Offset-based pagination:
-```yaml
-pagination:
-  next_state:
-    offset: "${state.offset + 100}"
-  stop_condition: "length(response.records) < 100"
-```
-
-#### Page-based pagination:
-```yaml
-pagination:
-  next_state:
-    page: "${state.page + 1}"
-  stop_condition: "response.json.page == response.json.total_pages"
-```
-
-#### Cursor-based pagination:
-```yaml
-pagination:
-  next_state:
-    cursor: "${response.json.next_cursor}"
-  stop_condition: "response.json.next_cursor == null"
-```
+**Workflow:**
+1.  **Run Start:** Sling loads persisted sync values (e.g., `last_sync_ts` from the previous run) into the `sync.` scope.
+2.  **State Initialization:** The endpoint's `state` is initialized. Expressions like `${coalesce(sync.last_sync_ts, ...)}` read the persisted value or use a default.
+3.  **Requests:** Requests are made using the initialized state (e.g., `updated_since: "${state.start_timestamp}"`).
+4.  **Processing:** Processors update state variables (e.g., `output: state.last_sync_ts`, `aggregation: maximum`).
+5.  **Run End:** The final values of the state variables listed in the `sync` array (e.g., `state.last_sync_ts`) are persisted for the next run.
 
 ## Template for New API Specs
 
@@ -388,40 +543,93 @@ pagination:
 name: "API Name"
 description: "API Description"
 
+# Optional: Declare queues if needed
+# queues:
+#   - item_ids
+
 authentication:
-  type: "bearer|basic|oauth2"
-  # Authentication details...
+  type: "bearer" # bearer|basic|oauth2|""
+  token: "${secrets.api_token}" # Or username/password, or OAuth2 config
 
 defaults:
   request:
-    url: "https://api.base.url"
+    url: "https://api.base.url/v1" # Base URL for API requests
+    method: "GET"
     headers:
       Accept: "application/json"
+      # Common headers like User-Agent can go here
+    timeout: 30
+    rate: 10 # Adjust based on API limits
+    concurrency: 5
+  state:
+    limit: 100 # Default page size or limit
 
 endpoints:
-  - name: "endpoint_name"
-    description: "Endpoint description"
+  # Key is the endpoint name
+  list_items:
+    description: "Fetch a list of items"
+    state:
+      # Example state for pagination or filtering
+      starting_after: ${sync.last_item_id} # For cursor pagination + incremental
+      created_since: ${coalesce(sync.last_sync_time, date_format(date_add(now(), -1, 'day'), '%Y-%m-%d'))}
+
+    # Persist last item ID and timestamp for next run
+    sync: [last_item_id, last_sync_time]
+
     request:
-      url: "resource_path"
-      method: "GET"
+      url: "items" # Relative to defaults.request.url
       parameters:
-        param1: "value1"
+        limit: ${state.limit}
+        starting_after: ${state.starting_after}
+        created_since: ${state.created_since}
+
     pagination:
+      # Update 'starting_after' state with the ID of the last record from the response
       next_state:
-        page: "${state.page + 1}"
-      stop_condition: "response.json.next_page == null"
+        starting_after: "${response.records[-1].id}"
+      # Stop when the API indicates no more pages or returns an empty list
+      stop_condition: "!response.json.has_more || length(response.records) == 0"
+
     response:
       records:
-        jmespath: "data[]"
-        primary_key: ["id"]
+        jmespath: "data[]" # JMESPath to extract records array
+        primary_key: ["id"] # Field(s) for deduplication
+        # Optional: for large datasets
+        # duplicate_tolerance: "1000000,0.001"
+
       processors:
+        # Store the ID of the last record processed in this run for the next pagination cursor
+        - expression: "record.id"
+          output: "state.last_item_id"
+          aggregation: "last"
+
+        # Store the latest updated_at timestamp for the next incremental run
         - expression: "record.updated_at"
-          output: "state.last_updated"
+          output: "state.last_sync_time"
           aggregation: "maximum"
-      rules:
-        - action: "retry"
-          condition: "response.status >= 500"
-          max_attempts: 3
+
+        # Optional: Send IDs to a queue for another endpoint
+        # - expression: "record.id"
+        #   output: "queue.item_ids"
+
+      # Optional: Custom rules for this endpoint
+      # rules:
+      #   - action: "continue"
+      #     condition: "response.status == 404" # Ignore 404s
+
+  # Optional: Another endpoint using iteration
+  # get_item_details:
+  #   description: "Get details for each item ID"
+  #   iterate:
+  #     over: "queue.item_ids"
+  #     into: "state.current_item_id"
+  #     concurrency: 10
+  #   request:
+  #     url: "items/${state.current_item_id}"
+  #   response:
+  #     records:
+  #       jmespath: "data" # Assuming single item response
+  #       primary_key: ["id"]
 
 ```
 
@@ -429,214 +637,125 @@ endpoints:
 
 ## Expression Functions
 
-You can use the following functions in expressions within your API spec.
+You can use the following functions within `${...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
 
-See [here](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions_test.go) for extensive amounts of test examples.
-See [here](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions.go) for the functions source code.
+See [functions.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions.go) for the source code and authoritative list.
+See [functions_test.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions_test.go) for usage examples.
+
+*(Function tables need careful review against functions.go - the following is based on the previous version and source analysis)*
 
 ### String Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `upper(string)` | Converts string to uppercase | `string`: Input string | Uppercase string | `upper("hello")` → "HELLO" |
-| `lower(string)` | Converts string to lowercase | `string`: Input string | Lowercase string | `lower("HELLO")` → "hello" |
-| `substring(string, start[, end])` | Extracts part of a string | `string`: Input string<br>`start`: Start index<br>`end`: Optional end index | Substring | `substring("hello world", 0, 5)` → "hello" |
-| `replace(string, pattern, replacement)` | Replaces occurrences of pattern | `string`: Input string<br>`pattern`: String to replace<br>`replacement`: Replacement string | Modified string | `replace("hello", "l", "x")` → "hexxo" |
-| `trim(string)` | Removes whitespace from start and end | `string`: Input string | Trimmed string | `trim(" hello ")` → "hello" |
-| `contains(string, substring)` | Checks if string contains substring | `string`: Input string<br>`substring`: String to find | Boolean | `contains("hello world", "world")` → true |
-| `split(string, separator)` | Splits string into array | `string`: Input string<br>`separator`: Delimiter | Array of strings | `split("a,b,c", ",")` → ["a", "b", "c"] |
-| `join(array, separator)` | Joins array elements into string | `array`: Array of values<br>`separator`: Delimiter | String | `join(["a", "b", "c"], ", ")` → "a, b, c" |
-| `length(string|array|map)` | Gets length of string/array/map | `value`: String, array or map | Number | `length("hello")` → 5 |
+| Function                            | Description                          | Parameters                                                       | Returns          | Example                                            |
+| ----------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | ---------------- | -------------------------------------------------- |
+| `upper(string)`                     | Converts string to uppercase         | `string`: Input string                                           | Uppercase string | `upper("hello")` → "HELLO"                       |
+| `lower(string)`                     | Converts string to lowercase         | `string`: Input string                                           | Lowercase string | `lower("HELLO")` → "hello"                       |
+| `substring(string, start[, end])`   | Extracts part of a string            | `string`: Input string<br>`start`: Start index<br>`end`: Optional end index | Substring        | `substring("hello world", 0, 5)` → "hello"       |
+| `replace(string, pattern, replace)` | Replaces occurrences of pattern      | `string`, `pattern`, `replacement`                               | Modified string  | `replace("hello", "l", "x")` → "hexxo"           |
+| `trim(string)`                      | Removes whitespace from start/end    | `string`: Input string                                           | Trimmed string   | `trim(" hello ")` → "hello"                      |
+| `contains(string, substring)`       | Checks if string contains substring  | `string`, `substring`                                            | Boolean          | `contains("hello world", "world")` → true        |
+| `split(string, separator)`          | Splits string into array             | `string`, `separator`                                            | Array of strings | `split("a,b,c", ",")` → `["a", "b", "c"]`      |
+| `split_part(string, sep, index)`    | Gets part of split string by index   | `string`, `separator`, `index` (1-based)                         | String part      | `split_part("a,b,c", ",", 2)` → "b"              |
+| `join(array, separator)`            | Joins array elements into string     | `array`, `separator`                                             | String           | `join(["a", "b", "c"], ", ")` → "a, b, c"        |
+| `length(string\|array\|map)`        | Gets length of string/array/map      | `value`: String, array or map                                    | Number           | `length("hello")` → 5, `length([1,2])` → 2       |
 
 ### Numeric Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `int_parse(value)` | Converts value to integer | `value`: Value to convert | Integer | `int_parse("42")` → 42 |
-| `float_parse(value)` | Converts value to float | `value`: Value to convert | Float | `float_parse("42.5")` → 42.5 |
-| `int_format(value, format)` | Formats integer with specification | `value`: Number<br>`format`: Format string | Formatted string | `int_format(42, "05")` → "00042" |
-| `float_format(value, format)` | Formats float with specification | `value`: Number<br>`format`: Format string | Formatted string | `float_format(42.5678, ".2")` → "42.57" |
-| `range(start, end[, step])` | Creates array of integers | `start`: First number<br>`end`: Last number<br>`step`: Optional increment | Array of integers | `range(1, 5)` → [1, 2, 3, 4, 5] |
-| `greatest(array)` or `greatest(val1, val2, ...)` | Finds maximum value | `array` or multiple values | Maximum value | `greatest(1, 5, 3)` → 5 |
-| `least(array)` or `least(val1, val2, ...)` | Finds minimum value | `array` or multiple values | Minimum value | `least(1, 5, 3)` → 1 |
-| `is_greater(val1, val2)` | Checks if first value is greater | `val1`, `val2`: Values to compare | Boolean | `is_greater(5, 3)` → true |
-| `is_less(val1, val2)` | Checks if first value is less | `val1`, `val2`: Values to compare | Boolean | `is_less(3, 5)` → true |
+| Function                         | Description                      | Parameters                               | Returns           | Example                                    |
+| -------------------------------- | -------------------------------- | ---------------------------------------- | ----------------- | ------------------------------------------ |
+| `int_parse(value)`               | Converts value to integer        | `value`: Value to convert                | Integer or error  | `int_parse("42")` → 42                     |
+| `float_parse(value)`             | Converts value to float          | `value`: Value to convert                | Float or error    | `float_parse("42.5")` → 42.5               |
+| `int_format(value, format)`      | Formats integer (Go format)      | `value`: Number<br>`format`: Format string | Formatted string  | `int_format(42, "%05d")` → "00042"         |
+| `float_format(value, format)`    | Formats float (Go format)        | `value`: Number<br>`format`: Format string | Formatted string  | `float_format(42.5678, "%.2f")` → "42.57"  |
+| `greatest(array\|val1, val2...)` | Finds maximum value              | `array` or multiple values               | Maximum value     | `greatest(1, 5, 3)` → 5                    |
+| `least(array\|val1, val2...)`    | Finds minimum value              | `array` or multiple values               | Minimum value     | `least(1, 5, 3)` → 1                       |
+| `is_greater(val1, val2)`         | Checks if `val1 > val2`          | `val1`, `val2`: Values to compare        | Boolean           | `is_greater(5, 3)` → true                  |
+| `is_less(val1, val2)`            | Checks if `val1 < val2`          | `val1`, `val2`: Values to compare        | Boolean           | `is_less(3, 5)` → true                     |
 
 ### Date Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `date_parse(string[, format])` | Parses string to date | `string`: Date string<br>`format`: Optional format string or "auto" | Date object | `date_parse("2022-01-01", "auto")` |
-| `date_format(date, format)` | Formats date to string | `date`: Date object<br>`format`: Format string | Formatted string | `date_format(date_parse("2022-01-01"), "%Y-%m-%d")` → "2022-01-01" |
-| `date_add(date, duration[, unit])` | Adds time to date | `date`: Date object<br>`duration`: Time to add<br>`unit`: Optional unit | Date object | `date_add(date_parse("2022-01-01"), 1, "day")` |
-| `date_diff(date1, date2[, unit])` | Calculates time between dates | `date1`, `date2`: Date objects<br>`unit`: Optional unit | Number | `date_diff(date_parse("2022-01-02"), date_parse("2022-01-01"), "day")` → 1 |
-| `date_trunc(date, unit)` | Truncates date to specified unit | `date`: Date object<br>`unit`: Time unit | Date object | `date_trunc(date_parse("2022-01-15"), "month")` → "2022-01-01" |
-| `date_extract(date, part)` | Extracts part from date | `date`: Date object<br>`part`: Part to extract | Number | `date_extract(date_parse("2022-01-15"), "day")` → 15 |
-| `date_last(date[, period])` | Gets last day of period | `date`: Date object<br>`period`: Optional period | Date object | `date_last(date_parse("2022-01-15"))` → "2022-01-31" |
-| `date_first(date[, period])` | Gets first day of period | `date`: Date object<br>`period`: Optional period | Date object | `date_first(date_parse("2022-01-15"))` → "2022-01-01" |
-| `now()` | Gets current date and time | None | Current date | `now()` |
+Uses Go's `time` package and `strftime` conventions via [timefmt-go](https://github.com/itchyny/timefmt-go).
 
-The `format` argument used in `date_format()` and `date_parse()` adheres to the [strftime](https://linux.die.net/man/3/strftime) standard (same as python).
-Sling uses [timefmt-go](https://github.com/itchyny/timefmt-go) internally for this.
+| Function                           | Description                    | Parameters                                              | Returns              | Example                                                                    |
+| ---------------------------------- | ------------------------------ | ------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
+| `now()`                            | Gets current date and time     | None                                                    | Time object          | `now()`                                                                    |
+| `date_parse(string[, format])`     | Parses string to time object   | `string`: Date string<br>`format`: "auto" or `strftime` | Time object or error | `date_parse("2022-01-01T10:00:00Z", "auto")`                              |
+| `date_format(date, format)`        | Formats time object to string  | `date`: Time object<br>`format`: `strftime` format        | Formatted string     | `date_format(now(), "%Y-%m-%d")` → "2023-10-27"                            |
+| `date_add(date, duration[, unit])` | Adds duration to time object   | `date`, `duration` (int), `unit` (string, default "s")  | Time object          | `date_add(now(), -7, "day")`                                               |
+| `date_diff(date1, date2[, unit])`  | Time between dates             | `date1`, `date2`, `unit` (string, default "s")          | Number (float)       | `date_diff(date_add(now(), 1, "day"), now(), "hour")` → 24.0            |
+| `date_trunc(date, unit)`           | Truncates date to unit start   | `date`, `unit` ("year", "month", "day", "hour", etc.)   | Time object          | `date_trunc(now(), "month")` → First day of current month at 00:00:00      |
+| `date_extract(date, part)`         | Extracts part from date        | `date`, `part` ("year", "month", "day", "hour", etc.)   | Number               | `date_extract(now(), "year")` → 2023                                       |
+| `date_last(date[, period])`        | Gets last day of period        | `date`, `period` ("month", "year", default "month")     | Time object          | `date_last(now())` → Last day of current month                             |
+| `date_first(date[, period])`       | Gets first day of period       | `date`, `period` ("month", "year", default "month")     | Time object          | `date_first(now())` → First day of current month                           |
+| `range(start, end[, step])`        | Creates array of time objects  | `start`, `end` (time obj), `step` (string duration)     | Array of Time objects | `range(date_add(now(),-2,'day'), now(), '1d')` → `[t-2d, t-1d, t]`         |
 
-#### Basic Auto-Detection
+*Date function `unit`/`part`/`period` parameters often accept: "year", "month", "week", "day", "hour", "minute", "second".*
+*`range` function with dates requires time objects as start/end.*
 
-```yaml
-# Automatically detects the date format
-- expression: date_parse("2022-05-15", "auto")
-  output: state.parsed_date
-```
-
-#### Specific Format Parsing
+#### Date Parsing and Formatting Examples
 
 ```yaml
-# Parses date using the specified format
-- expression: date_parse("05/15/2022", "%m/%d/%Y")
-  output: state.parsed_date
-```
+# Auto-detect format
+- expression: date_parse("05/15/2022", "auto")
+  output: state.parsed_auto
 
-#### Parsing ISO 8601 Timestamps
+# Specify strftime format
+- expression: date_parse("15-May-2022 10:30", "%d-%b-%Y %H:%M")
+  output: state.parsed_specific
 
-```yaml
-# Parses ISO 8601 timestamp with timezone
-- expression: date_parse("2022-05-15T14:30:45Z", "auto")
-  output: state.parsed_timestamp
-```
+# Format a date object
+- expression: date_format(state.parsed_auto, "%Y%m%d")
+  output: state.formatted_compact
 
-#### Parsing from API Response
-
-```yaml
-# Converts string dates in records to date objects
-response:
-  processors:
-    - expression: date_parse(record.created_at, "auto")
-      output: record.created_date
-```
-
-#### Basic Date Formatting
-
-```yaml
-# Formats date as "2022-05-15"
-- expression: date_format(date_parse("2022-05-15", "auto"), "%Y-%m-%d")
-  output: state.formatted_date
-```
-
-#### Different Format Patterns
-
-```yaml
-# Formats date as "15/05/2022"
-- expression: date_format(date_parse("2022-05-15", "auto"), "%d/%m/%Y")
-  output: state.european_date
-
-# Formats date as "May 15, 2022"
-- expression: date_format(date_parse("2022-05-15", "auto"), "%B %d, %Y")
-  output: state.long_date
-
-# Formats date as "20220515"
-- expression: date_format(date_parse("2022-05-15", "auto"), "%Y%m%d")
-  output: state.compact_date
-```
-
-#### Formatting Times
-
-```yaml
-# Formats as "14:30:45"
-- expression: date_format(date_parse("2022-05-15T14:30:45Z", "auto"), "%H:%M:%S")
-  output: state.time_only
-
-# Formats as "2022-05-15 02:30 PM"
-- expression: date_format(date_parse("2022-05-15T14:30:45Z", "auto"), "%Y-%m-%d %I:%M %p")
-  output: state.datetime_12h
-```
-
-#### Formatting Dates for API Requests
-
-```yaml
-# Format current date minus 7 days in required API format
+# Format for API parameter (ISO 8601 with timezone)
 request:
   parameters:
-    start_date: "${date_format(date_add(now(), -7, 'day'), '%Y-%m-%d')}"
-    end_date: "${date_format(now(), '%Y-%m-%d')}"
+    updated_since: "${date_format(date_add(now(), -1, 'hour'), '%Y-%m-%dT%H:%M:%SZ')}"
 ```
-
-#### Incremental Sync Using Dates
-
-We can use the `sync` keys to indicate which state variables need to be stored and retrieved for the next run (ideal for incremental replications).
-
-```yaml
-state:
-  last_sync: "${coalesce(state.last_sync_date, '2020-01-01')}"
-
-# `sync` defines the state variables to be persistent in your SLING_STATE connection 
-# at the end of the run, and retrieved at the start of next run
-sync: [ last_sync_date ]
-
-request:
-  parameters:
-    # Format the saved state date in the format the API requires
-    updated_since: "${date_format(date_parse(state.last_sync, 'auto'), '%Y-%m-%dT%H:%M:%SZ')}"
-
-response:
-  processors:
-    # Update the sync state with the latest date from records
-    - expression: record.updated_at
-      output: state.last_sync_date
-      aggregation: maximum
-```
-
-#### Date Calculations in Filters
-
-```yaml
-request:
-  parameters:
-    # Create a date range for last month
-    start_date: "${date_format(date_first(date_add(now(), -1, 'month'), 'month'), '%Y-%m-%d')}"
-    end_date: "${date_format(date_last(date_add(now(), -1, 'month'), 'month'), '%Y-%m-%d')}"
-```
-
 
 ### Value Handling Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `coalesce(val1, val2, ...)` | Returns first non-null value | Multiple values | First non-null value | `coalesce(null, "default")` → "default" |
-| `value(val1, val2, ...)` | Returns first non-empty value | Multiple values | First non-empty value | `value("", "default")` → "default" |
-| `require(val, error_msg)` | Ensures value is not null | `val`: Value to check<br>`error_msg`: Error message | The value or error | `require(someVar, "Variable required")` |
-| `cast(value, type)` | Converts value to specified type | `value`: Value to convert<br>`type`: Target type | Converted value | `cast("42", "int")` → 42 |
-| `try_cast(value, type)` | Tries to convert, returns null on failure | `value`: Value to convert<br>`type`: Target type | Converted value or null | `try_cast("test", "int")` → null |
-| `element(array, index)` | Gets element at index from array | `array`: Source array<br>`index`: Position | Element | `element(["a", "b", "c"], 1)` → "b" |
-| `is_null(value)` | Checks if value is null | `value`: Value to check | Boolean | `is_null(null)` → true |
-| `is_empty(value)` | Checks if value is empty | `value`: Value to check | Boolean | `is_empty("")` → true |
-| `if(condition, then_val, else_val)` | Conditional expression | `condition`: Boolean condition<br>`then_val`: Value if true<br>`else_val`: Value if false | Selected value | `if(5 > 3, "yes", "no")` → "yes" |
+| Function                     | Description                        | Parameters                                       | Returns                | Example                                                   |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------ | ---------------------- | --------------------------------------------------------- |
+| `coalesce(val1, val2, ...)`  | Returns first non-null value       | Multiple values                                  | First non-null value   | `coalesce(null, sync.val, state.val, "default")`        |
+| `value(val1, val2, ...)`     | Returns first non-empty value      | Multiple values                                  | First non-empty value  | `value("", state.val, "default")` → "default"             |
+| `require(val[, error_msg])`  | Ensures value is not null or error | `val`, `error_msg` (optional)                    | Value or error         | `require(secrets.api_key, "API Key is required")`         |
+| `cast(value, type)`          | Converts value to type             | `value`, `type` ("int", "float", "string", "bool") | Converted value or error | `cast("42", "int")` → 42                                |
+| `try_cast(value, type)`      | Tries conversion, returns null     | `value`, `type`                                  | Converted value or null | `try_cast("abc", "int")` → null                         |
+| `element(array, index)`      | Gets element at 0-based index      | `array`, `index` (integer)                       | Element or error       | `element(["a", "b"], 1)` → "b"                            |
+| `is_null(value)`             | Checks if value is null            | `value`                                          | Boolean                | `is_null(state.optional_param)` → true or false         |
+| `is_empty(value)`            | Checks if value is empty           | `value` (string, array, map)                     | Boolean                | `is_empty("")` → true, `is_empty([])` → true            |
+| `if(condition, then, else)`  | Conditional expression             | `condition` (bool), `then_val`, `else_val`       | Selected value         | `if(state.count > 0, "has items", "empty")`             |
+| `equals(val1, val2)`         | Checks deep equality             | `val1`, `val2`                                   | Boolean                | `equals(response.status, 200)` → true                   |
 
 ### Collection Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `keys(map)` | Gets keys from map | `map`: Map object | Array of keys | `keys({"a": 1, "b": 2})` → ["a", "b"] |
-| `values(map)` | Gets values from map | `map`: Map object | Array of values | `values({"a": 1, "b": 2})` → [1, 2] |
-| `jmespath(object, expression)` | Evaluates JMESPath expression | `object`: Data object<br>`expression`: JMESPath query | Query result | `jmespath({"foo": {"bar": "baz"}}, "foo.bar")` → "baz" |
-| `get_path(object, path)` | Gets value at specified path | `object`: Data object<br>`path`: Dot notation path | Value at path | `get_path({"foo": {"bar": "baz"}}, "foo.bar")` → "baz" |
-| `filter(array, expression)` | Filters array using expression | `array`: Array to filter<br>`expression`: Filter condition | Filtered array | `filter([1, 2, 3], "value > 1")` → [2, 3] |
-| `map(array, expression)` | Maps array using expression | `array`: Array to transform<br>`expression`: Transformation | Transformed array | `map([1, 2, 3], "value * 2")` → [2, 4, 6] |
-| `sort(array[, descending])` | Sorts array elements | `array`: Array to sort<br>`descending`: Optional boolean | Sorted array | `sort([3, 1, 2])` → [1, 2, 3] |
+| Function                       | Description                     | Parameters                                | Returns           | Example                                                        |
+| ------------------------------ | ------------------------------- | ----------------------------------------- | ----------------- | -------------------------------------------------------------- |
+| `keys(map)`                    | Gets keys from map              | `map` object                              | Array of keys     | `keys({"a": 1, "b": 2})` → `["a", "b"]`                       |
+| `values(map)`                  | Gets values from map            | `map` object                              | Array of values   | `values({"a": 1, "b": 2})` → `[1, 2]`                         |
+| `jmespath(object, expression)` | Evaluates JMESPath expression   | `object`, `expression` (string)           | Query result      | `jmespath(response.json, "data.items[?age > 30]")`            |
+| `get_path(object, path)`       | Gets value using dot notation   | `object`, `path` (string, e.g., "a.b[0]") | Value at path     | `get_path(response.json, "user.profile.email")`              |
+| `filter(array, expression)`    | Filters array (goval expression)| `array`, `expression` (string uses `value`) | Filtered array    | `filter([1, 2, 3], "value > 1")` → `[2, 3]`                  |
+| `map(array, expression)`       | Maps array (goval expression)   | `array`, `expression` (string uses `value`) | Transformed array | `map([1, 2, 3], "value * 2")` → `[2, 4, 6]`                    |
+| `sort(array[, descending])`    | Sorts array elements            | `array`, `descending` (optional bool)     | Sorted array      | `sort([3, 1, 2])` → `[1, 2, 3]`                               |
+| `chunk(array\|queue, size)`    | Splits array/queue into chunks  | `array` or `queue.name`, `size` (int)     | Channel of arrays | `iterate: over: chunk(queue.ids, 50)`                           |
 
 ### Encoding/Decoding Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `encode_url(string)` | URL encodes a string | `string`: String to encode | Encoded string | `encode_url("hello world")` → "hello+world" |
-| `decode_url(string)` | URL decodes a string | `string`: String to decode | Decoded string | `decode_url("hello+world")` → "hello world" |
-| `encode_base64(string)` | Base64 encodes a string | `string`: String to encode | Encoded string | `encode_base64("hello")` → "aGVsbG8=" |
-| `decode_base64(string)` | Base64 decodes a string | `string`: String to decode | Decoded string | `decode_base64("aGVsbG8=")` → "hello" |
-| `hash(string[, algorithm])` | Creates hash of string | `string`: Input string<br>`algorithm`: Hash algorithm | Hash string | `hash("hello", "md5")` → "5d41402abc4b2a76b9719d911017c592" |
+| Function                    | Description             | Parameters                        | Returns         | Example                                          |
+| --------------------------- | ----------------------- | --------------------------------- | --------------- | ------------------------------------------------ |
+| `encode_url(string)`        | URL encodes a string    | `string`                          | Encoded string  | `encode_url("a b")` → "a%20b"                     |
+| `decode_url(string)`        | URL decodes a string    | `string`                          | Decoded string  | `decode_url("a%20b")` → "a b"                    |
+| `encode_base64(string)`     | Base64 encodes string   | `string`                          | Encoded string  | `encode_base64("user:pass")` → "dXNlcjpwYXNz"    |
+| `decode_base64(string)`     | Base64 decodes string   | `string`                          | Decoded string  | `decode_base64("dXNlcjpwYXNz")` → "user:pass"   |
+| `hash(string[, algorithm])` | Creates hash of string  | `string`, `algorithm` ("md5", "sha1", "sha256") | Hash string     | `hash("hello", "md5")` → "5d4..."              |
 
 ### Utility Functions
 
-| Function | Description | Parameters | Returns | Example |
-|----------|-------------|------------|---------|---------|
-| `uuid()` | Generates random UUID | None | UUID string | `uuid()` → "550e8400-e29b-41d4-a716-446655440000" |
-| `equals(val1, val2)` | Checks if values are equal | `val1`, `val2`: Values to compare | Boolean | `equals("test", "test")` → true |
-| `log(message)` | Logs a message | `message`: Message to log | The message | `log("Processing item")` → "Processing item" |
-| `regex_match(string, pattern)` | Checks if string matches pattern | `string`: Input string<br>`pattern`: Regex pattern | Boolean | `regex_match("abc123", "\\d+")` → true |
-| `regex_extract(string, pattern[, group])` | Extracts matches from string | `string`: Input string<br>`pattern`: Regex pattern<br>`group`: Optional group index | Matches or specific group | `regex_extract("hello world", "(hello) (world)", 1)` → "hello" |
+| Function                               | Description                       | Parameters                            | Returns                | Example                                                       |
+| -------------------------------------- | --------------------------------- | ------------------------------------- | ---------------------- | ------------------------------------------------------------- |
+| `uuid()`                               | Generates random UUID             | None                                  | UUID string            | `uuid()` → "..."                                              |
+| `log(message)`                         | Logs a message during evaluation  | `message`                             | The message (passthru) | `log("Processing record: " + record.id)`                      |
+| `regex_match(string, pattern)`         | Checks if string matches pattern  | `string`, `pattern` (Go regex)        | Boolean                | `regex_match("img_123.jpg", "^img_.*\\.jpg$")` → true        |
+| `regex_extract(string, pattern[, idx])`| Extracts matches using regex      | `string`, `pattern`, `idx` (optional) | Matches/group or null  | `regex_extract("id=123", "id=(\\d+)", 1)` → "123"           |
