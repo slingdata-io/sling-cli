@@ -1,0 +1,1015 @@
+name: "Shopify GraphQL API"
+description: "API for extracting data from Shopify e-commerce platform using GraphQL. See https://shopify.dev/docs/apps/build/graphql."
+
+# Queues for passing values between endpoints
+queues:
+  - customer_ids
+  - order_ids
+  - product_ids
+  - variant_ids
+  - collection_ids
+
+defaults:
+  state:
+    base_url: "https://${secrets.shop_name}.myshopify.com/admin/api/2025-04/graphql.json"
+    limit: 250
+  
+  request:
+    method: "POST"
+    headers:
+      Accept: "application/json"
+      X-Shopify-Access-Token: ${secrets.access_token}
+      Content-Type: "application/json"
+    rate: 20        # Default rate limit of 20 requests per second
+    concurrency: 5  # Default concurrency of 5
+    
+  pagination:
+    stop_condition: "is_null(response.json.data.edges) || length(response.json.data.edges) == 0 || is_null(response.json.data.pageInfo.hasNextPage) || response.json.data.pageInfo.hasNextPage == false"
+
+endpoints:
+  shop:
+      description: "Retrieve shop information"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Shop
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            {
+              shop {
+                id
+                name
+                email
+                myshopifyDomain
+                primaryDomain {
+                  url
+                  host
+                }
+                url
+                currencyCode
+                billingAddress {
+                  address1
+                  address2
+                  city
+                  zip
+                  provinceCode
+                  countryCodeV2
+                }
+                contactEmail
+                customerAccounts
+                description
+                enabledPresentmentCurrencies
+                features {
+                  storefront
+                  storefront2
+                  storefront_api
+                  storefront2_api
+                }
+                ianaTimezone
+                marketingEvents
+                metafields {
+                  namespace
+                  key
+                  value
+                  type
+                }
+                plan {
+                  displayName
+                  partnerDevelopment
+                  shopifyPlus
+                }
+                weight
+                weightUnit
+              }
+            }
+      
+      response:
+        records:
+          jmespath: "data.shop"
+          primary_key: ["id"]
+
+  product:
+      description: "Retrieve list of products"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Product
+      
+      state:
+        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        cursor: null
+      
+      sync: [ last_id ]
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!, $query: String) {
+              products(first: $first, after: $cursor, query: $query) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    title
+                    handle
+                    descriptionHtml
+                    productType
+                    vendor
+                    status
+                    createdAt
+                    updatedAt
+                    publishedAt
+                    tags
+                    options {
+                      id
+                      name
+                      position
+                      values
+                    }
+                    priceRangeV2 {
+                      maxVariantPrice {
+                        amount
+                        currencyCode
+                      }
+                      minVariantPrice {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    featuredImage {
+                      id
+                      url
+                      altText
+                      width
+                      height
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.products.edges) > 0, response.json.data.products.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.products.pageInfo.hasNextPage) || response.json.data.products.pageInfo.hasNextPage == false || is_null(response.json.data.products.edges) || length(response.json.data.products.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.products.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.id"
+            output: "state.last_id"
+            aggregation: "last"
+          
+          - expression: "record.id"
+            output: "queue.product_ids"
+
+  product_variant:
+      description: "Retrieve product variants"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant
+      
+      state:
+        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        cursor: null
+      
+      sync: [ last_id ]
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!, $query: String) {
+              productVariants(first: $first, after: $cursor, query: $query) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    title
+                    sku
+                    price
+                    compareAtPrice
+                    inventoryQuantity
+                    inventoryManagement
+                    inventoryPolicy
+                    createdAt
+                    updatedAt
+                    weight
+                    weightUnit
+                    requiresShipping
+                    taxable
+                    barcode
+                    selectedOptions {
+                      name
+                      value
+                    }
+                    product {
+                      id
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.productVariants.edges) > 0, response.json.data.productVariants.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.productVariants.pageInfo.hasNextPage) || response.json.data.productVariants.pageInfo.hasNextPage == false || is_null(response.json.data.productVariants.edges) || length(response.json.data.productVariants.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.productVariants.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.id"
+            output: "queue.variant_ids"
+
+  product_image:
+      description: "Retrieve product images"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Image
+
+      # Loop over each product id processed
+      iterate:
+        over: "queue.product_ids"
+        into: "state.product_id"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($productId: ID!, $first: Int!) {
+              product(id: $productId) {
+                images(first: $first) {
+                  edges {
+                    node {
+                      id
+                      url
+                      width
+                      height
+                      altText
+                      createdAt
+                      originalSrc
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            productId: ${state.product_id}
+            first: ${state.limit}
+      
+      response:
+        records:
+          jmespath: "data.product.images.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "state.product_id"
+            output: "record.product_id"
+
+  collection:
+      description: "Retrieve list of custom collections"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Collection
+      
+      state:
+        cursor: null
+      
+      sync: [ last_id ]
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!) {
+              collections(first: $first, after: $cursor) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    title
+                    handle
+                    descriptionHtml
+                    updatedAt
+                    seo {
+                      title
+                      description
+                    }
+                    image {
+                      id
+                      url
+                      width
+                      height
+                      altText
+                    }
+                    products(first: 1) {
+                      edges {
+                        node {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.collections.edges) > 0, response.json.data.collections.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.collections.pageInfo.hasNextPage) || response.json.data.collections.pageInfo.hasNextPage == false || is_null(response.json.data.collections.edges) || length(response.json.data.collections.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.collections.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.id"
+            output: "state.last_id"
+            aggregation: "last"
+          
+          - expression: "record.id"
+            output: "queue.collection_ids"
+
+  order:
+      description: "Retrieve list of orders"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Order
+      
+      state:
+        start_date: ${ coalesce(env.START_DATE, "2025-04-01") }
+        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        cursor: null
+        created_at_min: ${ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }
+        created_at_max: ${ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }
+      
+      sync: [ last_updated_at ]
+
+      iterate:
+        over: >
+          range(
+            date_trunc(date_add(now(), -30, "day"), "day"),
+            date_trunc(now(), "day"),
+            "1d"
+          )
+        into: state.day_start
+        concurrency: 20
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!, $query: String) {
+              orders(first: $first, after: $cursor, query: $query) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    name
+                    email
+                    createdAt
+                    updatedAt
+                    processedAt
+                    cancelledAt
+                    displayFinancialStatus
+                    displayFulfillmentStatus
+                    tags
+                    note
+                    phone
+                    subtotalPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalShippingPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalTaxSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    customer {
+                      id
+                      firstName
+                      lastName
+                      email
+                    }
+                    shippingAddress {
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      firstName
+                      lastName
+                      phone
+                      province
+                      zip
+                    }
+                    billingAddress {
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      firstName
+                      lastName
+                      phone
+                      province
+                      zip
+                    }
+                    taxLines {
+                      title
+                      priceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      rate
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+            query: ${ "created_at:>=" + state.created_at_min + " AND created_at:<" + state.created_at_max }
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.orders.edges) > 0, response.json.data.orders.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.orders.pageInfo.hasNextPage) || response.json.data.orders.pageInfo.hasNextPage == false || is_null(response.json.data.orders.edges) || length(response.json.data.orders.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.orders.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.updatedAt"
+            output: "state.last_updated_at"
+            aggregation: "last"
+          
+          - expression: "record.id"
+            output: "queue.order_ids"
+
+  order_transaction:
+      description: "Retrieve order transactions"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/OrderTransaction
+
+      # Loop over each order id processed
+      iterate:
+        over: "queue.order_ids"
+        into: "state.order_id"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($orderId: ID!, $first: Int!) {
+              order(id: $orderId) {
+                transactions(first: $first) {
+                  edges {
+                    node {
+                      id
+                      amountSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      createdAt
+                      error
+                      errorCode
+                      gateway
+                      kind
+                      status
+                      test
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            orderId: ${state.order_id}
+            first: ${state.limit}
+      
+      response:
+        records:
+          jmespath: "data.order.transactions.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "state.order_id"
+            output: "record.order_id"
+
+  refund:
+      description: "Retrieve order refunds"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Refund
+
+      # Loop over each order id processed
+      iterate:
+        over: "queue.order_ids"
+        into: "state.order_id"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($orderId: ID!, $first: Int!) {
+              order(id: $orderId) {
+                refunds(first: $first) {
+                  edges {
+                    node {
+                      id
+                      createdAt
+                      note
+                      totalRefundedSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      transactions(first: 10) {
+                        edges {
+                          node {
+                            id
+                            amountSet {
+                              shopMoney {
+                                amount
+                                currencyCode
+                              }
+                            }
+                            kind
+                            status
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            orderId: ${state.order_id}
+            first: ${state.limit}
+      
+      response:
+        records:
+          jmespath: "data.order.refunds.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "state.order_id"
+            output: "record.order_id"
+
+  customer:
+      description: "Retrieve list of customers"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Customer
+      
+      state:
+        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        cursor: null
+      
+      sync: [ last_id ]
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!, $query: String) {
+              customers(first: $first, after: $cursor, query: $query) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    firstName
+                    lastName
+                    email
+                    phone
+                    tags
+                    createdAt
+                    updatedAt
+                    acceptsMarketing
+                    defaultAddress {
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      countryCode
+                      phone
+                      province
+                      provinceCode
+                      zip
+                      name
+                    }
+                    note
+                    state
+                    verifiedEmail
+                    validEmailAddress
+                    taxExempt
+                    taxExemptions
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.customers.edges) > 0, response.json.data.customers.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.customers.pageInfo.hasNextPage) || response.json.data.customers.pageInfo.hasNextPage == false || is_null(response.json.data.customers.edges) || length(response.json.data.customers.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.customers.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.id"
+            output: "state.last_id"
+            aggregation: "last"
+          
+          - expression: "record.id"
+            output: "queue.customer_ids"
+
+  customer_address:
+      description: "Retrieve customer addresses"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/MailingAddress
+
+      # Loop over each customer id processed
+      iterate:
+        over: "queue.customer_ids"
+        into: "state.customer_id"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($customerId: ID!, $first: Int!) {
+              customer(id: $customerId) {
+                addresses(first: $first) {
+                  edges {
+                    node {
+                      id
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      countryCode
+                      countryCodeV2
+                      formattedArea
+                      latitude
+                      longitude
+                      name
+                      phone
+                      province
+                      provinceCode
+                      zip
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            customerId: ${state.customer_id}
+            first: ${state.limit}
+      
+      response:
+        records:
+          jmespath: "data.customer.addresses.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "state.customer_id"
+            output: "record.customer_id"
+
+  customer_order:
+      description: "Retrieve customer orders"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Order
+
+      # Loop over each customer id processed
+      iterate:
+        over: "queue.customer_ids"
+        into: "state.customer_id"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($customerId: ID!, $first: Int!) {
+              customer(id: $customerId) {
+                orders(first: $first) {
+                  edges {
+                    node {
+                      id
+                      name
+                      createdAt
+                      updatedAt
+                      processedAt
+                      cancelledAt
+                      displayFinancialStatus
+                      displayFulfillmentStatus
+                      tags
+                      note
+                      subtotalPriceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      totalPriceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      totalShippingPriceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      totalTaxSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            customerId: ${state.customer_id}
+            first: ${state.limit}
+      
+      response:
+        records:
+          jmespath: "data.customer.orders.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "state.customer_id"
+            output: "record.customer_id"
+
+  inventory_item:
+      description: "Retrieve inventory items"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/InventoryItem
+        
+      iterate:
+        # Process variants in batches of 50
+        over: "chunk(queue.variant_ids, 50)"
+        into: "state.variant_ids"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ... on ProductVariant {
+                  id
+                  inventoryItem {
+                    id
+                    countryCodeOfOrigin
+                    createdAt
+                    duplicateSkuCount
+                    harmonizedSystemCode
+                    inventoryHistoryUrl
+                    inventoryLevels(first: 10) {
+                      edges {
+                        node {
+                          id
+                          available
+                          location {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                    provinceCodeOfOrigin
+                    requiresShipping
+                    sku
+                    tracked
+                    updatedAt
+                  }
+                }
+              }
+            }
+          variables:
+            ids: ${state.variant_ids}
+      
+      response:
+        records:
+          jmespath: "data.nodes[].inventoryItem"
+          primary_key: ["id"]
+
+  inventory_level:
+      description: "Retrieve inventory levels"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/InventoryLevel
+        
+      iterate:
+        # Process variants in batches of 50
+        over: "chunk(queue.variant_ids, 50)"
+        into: "state.variant_ids"
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ... on ProductVariant {
+                  id
+                  inventoryItem {
+                    id
+                    inventoryLevels(first: 10) {
+                      edges {
+                        node {
+                          id
+                          available
+                          incoming
+                          item {
+                            id
+                          }
+                          location {
+                            id
+                            name
+                            address {
+                              address1
+                              city
+                              country
+                              zip
+                            }
+                          }
+                          updatedAt
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          variables:
+            ids: ${state.variant_ids}
+      
+      response:
+        records:
+          jmespath: "data.nodes[].inventoryItem.inventoryLevels.edges[].node"
+          primary_key: ["id"]
+
+  abandoned_checkout:
+      description: "Retrieve abandoned checkouts"
+      docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/AbandonedCheckout
+      
+      state:
+        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        cursor: null
+      
+      sync: [ last_id ]
+      
+      request:
+        url: ${state.base_url}
+        payload:
+          query: >
+            query ($cursor: String, $first: Int!, $query: String) {
+              abandonedCheckouts(first: $first, after: $cursor, query: $query) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    createdAt
+                    updatedAt
+                    completedAt
+                    email
+                    phone
+                    subtotalPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalPriceSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalTaxSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    discountCode
+                    note
+                    webUrl
+                    billingAddress {
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      firstName
+                      lastName
+                      phone
+                      province
+                      zip
+                    }
+                    shippingAddress {
+                      address1
+                      address2
+                      city
+                      company
+                      country
+                      firstName
+                      lastName
+                      phone
+                      province
+                      zip
+                    }
+                    customer {
+                      id
+                      firstName
+                      lastName
+                      email
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
+            }
+          variables:
+            first: ${state.limit}
+            cursor: ${state.cursor}
+            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+      
+      pagination:
+        next_state:
+          cursor: ${if(length(response.json.data.abandonedCheckouts.edges) > 0, response.json.data.abandonedCheckouts.edges[-1].cursor, null)}
+        stop_condition: "is_null(response.json.data.abandonedCheckouts.pageInfo.hasNextPage) || response.json.data.abandonedCheckouts.pageInfo.hasNextPage == false || is_null(response.json.data.abandonedCheckouts.edges) || length(response.json.data.abandonedCheckouts.edges) == 0"
+
+      response:
+        records:
+          jmespath: "data.abandonedCheckouts.edges[].node"
+          primary_key: ["id"]
+        
+        processors:
+          - expression: "record.id"
+            output: "state.last_id"
+            aggregation: "last"
