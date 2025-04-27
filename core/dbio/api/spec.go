@@ -3,11 +3,14 @@ package api
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/flarco/g"
 	"github.com/maja42/goval"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -131,11 +134,13 @@ type Endpoint struct {
 	conn         *APIConnection
 	client       http.Client
 	eval         *goval.Evaluator
+	backoffTimer *time.Timer
 	totalRecords int
 	totalReqs    int
 	syncMap      StateMap // values to sync
 	context      *g.Context
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
+	bloomFilter  *bloom.BloomFilter
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -150,20 +155,84 @@ func (eps Endpoints) Sort() {
 	})
 }
 
+func (sm StateMap) DetermineRenderOrder() (order []string, err error) {
+	remaining := lo.Keys(sm)
+	processing := map[string]bool{} // track variables being processed in current chain
+
+	addAndRemove := func(key string) {
+		if !g.In(key, order...) {
+			order = append(order, key)
+			remaining = lo.Filter(remaining, func(k string, i int) bool {
+				return k != key // remove from remaining
+			})
+		}
+	}
+
+	var processVar func(key string) error
+	processVar = func(key string) error {
+		// Check for circular dependency
+		if processing[key] {
+			return g.Error("circular dependency detected for state variable: %s", key)
+		}
+
+		// Skip if already processed
+		if g.In(key, order...) {
+			return nil
+		}
+
+		// Mark as being processed
+		processing[key] = true
+		defer func() { processing[key] = false }()
+
+		expr := cast.ToString(sm[key])
+		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
+		if len(matches) > 0 {
+			for _, match := range matches {
+				varsReferenced := extractVars(match[1])
+				for _, varReferenced := range varsReferenced {
+					if strings.HasPrefix(varReferenced, "state.") {
+						refKey := strings.TrimPrefix(varReferenced, "state.")
+						// Process dependency first
+						if err := processVar(refKey); err != nil {
+							return g.Error(err, "while processing dependency chain for %s", key)
+						}
+					}
+				}
+			}
+		}
+		addAndRemove(key)
+		return nil
+	}
+
+	// Process all remaining variables
+	for len(remaining) > 0 {
+		key := remaining[0] // take first remaining key
+		if err := processVar(key); err != nil {
+			return nil, g.Error(err, "error determining render order")
+		}
+	}
+
+	return
+}
+
 // Iterate is for configuring looping values for requests
 type Iterate struct {
-	Over       any    `yaml:"over" json:"iterate,omitempty"` // expression
-	Into       string `yaml:"into" json:"into,omitempty"`    // state variable
-	If         string `yaml:"id" json:"id,omitempty"`        // if we should iterate
-	iterations chan *Iteration
+	Over        any    `yaml:"over" json:"iterate,omitempty"` // expression
+	Into        string `yaml:"into" json:"into,omitempty"`    // state variable
+	If          string `yaml:"id" json:"id,omitempty"`        // if we should iterate
+	Concurrency int    `yaml:"concurrency" json:"concurrency,omitempty"`
+	iterations  chan *Iteration
 }
 
 type Iteration struct {
-	state   StateMap // each iteration has its own state
-	counter int
-	field   string // state field
-	value   any    // state value
-	stop    bool   // whether to stop the iteration
+	state    StateMap // each iteration has its own state
+	id       int      // iteration ID
+	sequence int      // paginated request number
+	field    string   // state field
+	value    any      // state value
+	stop     bool     // whether to stop the iteration
+	context  *g.Context
+	endpoint *Endpoint
 }
 
 // Calls are steps that are executed at different stages of the API request lifecycle
@@ -242,6 +311,8 @@ type Records struct {
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
 	UpdateKey  string   `yaml:"update_key" json:"update_key,omitempty"`
 	Limit      int      `yaml:"limit" json:"limit,omitempty"` // to limit the records, useful for testing
+
+	DuplicateTolerance string `yaml:"duplicate_tolerance" json:"duplicate_tolerance,omitempty"`
 }
 
 type AggregationType string
@@ -312,12 +383,19 @@ type SingleRequest struct {
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
 }
 
-func NewSingleRequest(ep *Endpoint, iter *Iteration) *SingleRequest {
-	ep.totalReqs++
+func NewSingleRequest(iter *Iteration) *SingleRequest {
+	iter.sequence++
+	iter.endpoint.totalReqs++
+
+	id := g.F("r.%04d.%s", iter.endpoint.totalReqs, g.RandString(g.AlphaRunesLower, 3))
+	if iter.field != "" {
+		id = g.F("i%02d.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
+	}
+
 	return &SingleRequest{
-		id:        g.F("r.%04d.%s", ep.totalReqs, g.RandString(g.AlphaRunesLower, 3)),
+		id:        id,
 		timestamp: time.Now().UnixMilli(),
-		endpoint:  ep,
+		endpoint:  iter.endpoint,
 		iter:      iter,
 	}
 }
@@ -332,6 +410,11 @@ func (lrs *SingleRequest) Records() []any {
 func (lrs *SingleRequest) Debug(text string, args ...any) {
 	text = env.DarkGrayString(lrs.id) + " " + text
 	g.Debug(text, args...)
+}
+
+func (lrs *SingleRequest) Trace(text string, args ...any) {
+	text = env.DarkGrayString(lrs.id) + " " + text
+	g.Trace(text, args...)
 }
 
 func (lrs *SingleRequest) Map() map[string]any {

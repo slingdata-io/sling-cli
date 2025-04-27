@@ -267,7 +267,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 	ds.SetEmpty()
 
-	g.Debug("COPY %d ROWS", count)
+	g.Trace("COPY %d ROWS", count)
 	return count, nil
 }
 

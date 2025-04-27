@@ -98,6 +98,42 @@ retry:
 
 // Connect connects to the database
 func (conn *D1Conn) Connect(timeOut ...int) (err error) {
+	if cast.ToBool(conn.GetProp("connected")) {
+		return nil
+	}
+
+	data, err := conn.GetDatabases()
+	if err != nil {
+		return g.Error(err, "could not list databases")
+	} else if len(data.Rows) == 0 {
+		return g.Error("no databases found")
+	}
+
+	available := []string{}
+	for _, row := range data.Rows {
+		name := cast.ToString(row[0])
+		uuid := cast.ToString(row[1])
+		available = append(available, name)
+		if strings.EqualFold(name, conn.Database) {
+			conn.UUID = uuid
+		}
+	}
+
+	if conn.UUID == "" {
+		return g.Error(`did not find database "%s" in %s`, conn.Database, g.Marshal(available))
+	}
+
+	if !cast.ToBool(conn.GetProp("silent")) {
+		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	}
+
+	conn.SetProp("connected", "true")
+
+	return nil
+}
+
+// GetDatabases returns databases for given connection
+func (conn *D1Conn) GetDatabases() (data iop.Dataset, err error) {
 	type Response struct {
 		Result []struct {
 			UUID      string    `json:"uuid"`
@@ -111,32 +147,29 @@ func (conn *D1Conn) Connect(timeOut ...int) (err error) {
 
 	resp, err := conn.makeRequest(conn.context.Ctx, "GET", "", nil)
 	if err != nil {
-		return g.Error(err, "could not make request")
+		return data, g.Error(err, "could not make request")
 	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return g.Error(err, "could not read from request body")
+		return data, g.Error(err, "could not read from request body")
 	}
 
 	var response Response
 	if err = g.Unmarshal(string(respBytes), &response); err != nil {
-		return g.Error(err, "could not unmarshal from request body")
+		return data, g.Error(err, "could not unmarshal from request body")
 	}
 
 	if len(response.Result) == 0 {
-		return g.Error("no databases found")
+		return data, g.Error("no databases found")
 	}
 
-	conn.UUID = response.Result[0].UUID
-
-	if !cast.ToBool(conn.GetProp("silent")) {
-		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	data = iop.NewDataset(iop.NewColumnsFromFields("name", "uuid"))
+	for _, result := range response.Result {
+		data.Rows = append(data.Rows, []any{result.Name, result.UUID})
 	}
 
-	conn.SetProp("connected", "true")
-
-	return nil
+	return data, nil
 }
 
 type d1ExecResponse struct {
@@ -184,6 +217,9 @@ func (conn *D1Conn) ExecContext(ctx context.Context, q string, args ...interface
 	}
 
 	queryContext := g.NewContext(ctx)
+	if args == nil {
+		args = make([]any, 0)
+	}
 	payload := g.M("sql", q, "params", args)
 
 	conn.LogSQL(q, args...)

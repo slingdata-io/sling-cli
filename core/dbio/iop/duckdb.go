@@ -396,6 +396,9 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 	sqlLines := []string{
 		extensionsSQL + ";",
 		secretSQL + ";",
+		// preserve_insertion_order=false reduces the memory load.
+		// See https://www.reddit.com/r/DuckDB/comments/1jnw1ed/got_outofmemory_while_etl_30gb_parquet_files_on_s3/
+		"set preserve_insertion_order = false;",
 		g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 		".changes on",
 		sql + ";",
@@ -985,8 +988,9 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 // Describe returns the columns of a query
 func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	// prevent infinite loop
-	queryL := strings.TrimSpace(strings.ToLower(query))
-	if strings.HasPrefix(queryL, "describe ") || strings.HasPrefix(queryL, "pragma ") {
+	queryStriped, _ := StripSQLComments(query)
+	queryL := strings.TrimSpace(strings.ToLower(queryStriped))
+	if !(strings.HasPrefix(queryL, "with") || strings.HasPrefix(queryL, "select")) {
 		return columns, nil
 	}
 
@@ -1225,4 +1229,62 @@ func (duck *DuckDb) MakeScanQuery(format dbio.FileType, uri string, fsc FileStre
 	}
 
 	return sql
+}
+
+// StripSQLComments removes all SQL comments (-- or /* */) from the provided SQL string
+func StripSQLComments(sql string) (string, error) {
+	inQuote := false
+	inCommentLine := false
+	inCommentMulti := false
+	result := strings.Builder{}
+
+	for i := 0; i < len(sql); i++ {
+		// Check for comment start/end sequences
+		if !inQuote {
+			// Check for start of line comment (--)
+			if i < len(sql)-1 && sql[i] == '-' && sql[i+1] == '-' && !inCommentMulti {
+				inCommentLine = true
+				i++ // Skip the second '-'
+				continue
+			}
+
+			// Check for start of multi-line comment (/*)
+			if i < len(sql)-1 && sql[i] == '/' && sql[i+1] == '*' && !inCommentLine {
+				inCommentMulti = true
+				i++ // Skip the '*'
+				continue
+			}
+
+			// Check for end of multi-line comment (*/)
+			if i < len(sql)-1 && sql[i] == '*' && sql[i+1] == '/' && inCommentMulti {
+				inCommentMulti = false
+				i++ // Skip the '/'
+				continue
+			}
+		}
+
+		// Handle quotes
+		if sql[i] == '\'' && !inCommentLine && !inCommentMulti {
+			// Check for escaped quote ('')
+			if i < len(sql)-1 && sql[i+1] == '\'' {
+				result.WriteByte(sql[i])
+				result.WriteByte(sql[i+1])
+				i++ // Skip the second quote
+				continue
+			}
+			inQuote = !inQuote
+		}
+
+		// End of line comment ends at newline
+		if sql[i] == '\n' && inCommentLine {
+			inCommentLine = false
+		}
+
+		// Only write character if not in a comment
+		if !inCommentLine && !inCommentMulti {
+			result.WriteByte(sql[i])
+		}
+	}
+
+	return result.String(), nil
 }

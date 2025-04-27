@@ -21,7 +21,7 @@ defaults:
       
 
 endpoints:
-  - name: people
+  people:
     
     state:
       object_id: ${secrets.people_object_id}

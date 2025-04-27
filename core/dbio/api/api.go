@@ -160,6 +160,7 @@ type APIStreamConfig struct {
 	Select      []string // select specific columns
 	Limit       int
 	Metadata    iop.Metadata
+	Mode        string
 	DsConfigMap map[string]any // stream processor options
 }
 

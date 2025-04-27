@@ -43,7 +43,10 @@ defaults:
       updated_at_min: null  # unset for next page parameter
       status: null          # unset for next page parameter
       limit: null           # unset for next page parameter
-    stop_condition: jmespath(response.headers, "link") == null
+      created_at_min: null           # unset for next page parameter
+      created_at_max: null           # unset for next page parameter
+    
+    stop_condition: '!contains(jmespath(response.headers, "link"), "rel=\"next\"")'
 
 
 endpoints:
@@ -74,7 +77,6 @@ endpoints:
         parameters:
           limit: ${state.limit}
           updated_at_min: ${state.updated_at_min}
-      
 
       
       response:
@@ -201,29 +203,34 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/order
       
       state:
-        start_date: ${ coalesce(env.START_DATE, "2021-01-01") }
+        start_date: ${ coalesce(env.START_DATE, "2025-04-01") }
         url: "${state.base_url}/orders.json"  # Initial URL or next URL from pagination
         updated_at_min: ${coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
         status: any
+        created_at_min: ${ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }
+        created_at_max: ${ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }
       
       sync: [ last_updated_at ]
 
-      # iterate:
-      #   over: >
-      #     range(
-      #       date_trunc(date_parse(state.start_date), "day"),
-      #       date_trunc(now(), "day"),
-      #       "1d"
-      #     )
-      #   into: state.month_start
+      iterate:
+        over: >
+          range(
+            date_trunc(date_add(now(), -30, "day"), "day"),
+            date_trunc(now(), "day"),
+            "1d"
+          )
+        into: state.day_start
+        concurrency: 20
       
       request:
         
         url: ${state.url}
         parameters:
           limit: ${state.limit}
-          updated_at_min: ${state.updated_at_min}
+          # updated_at_min: ${state.updated_at_min}
           status: ${state.status}
+          created_at_min: ${ state.created_at_min }
+          created_at_max: ${ state.created_at_max }
 
       response:
         records:

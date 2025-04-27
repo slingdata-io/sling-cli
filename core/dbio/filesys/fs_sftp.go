@@ -312,6 +312,8 @@ func (fs *SftpFileSysClient) Write(urlStr string, reader io.Reader) (bw int64, e
 		err = g.Error(err, "Unable to open "+path)
 		return
 	}
+	defer file.Close()
+
 	bw, err = io.Copy(io.Writer(file), reader)
 	if err != nil {
 		err = g.Error(err, "Error writing from reader")
