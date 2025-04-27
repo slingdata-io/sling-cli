@@ -215,7 +215,7 @@ func (t Type) IsUnknown() bool {
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
-		TypeApi:             "API - Generic",
+		TypeApi:             "API - Spec",
 		TypeFileLocal:       "FileSys - Local",
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
