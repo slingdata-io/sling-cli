@@ -42,6 +42,48 @@
           "description": "Optional condition to determine if the step should execute.",
           "type": "string"
         },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        }
+      },
+      "required": ["type"],
+      "oneOf": [
+        { "$ref": "#/definitions/stepQuery" },
+        { "$ref": "#/definitions/stepHttp" },
+        { "$ref": "#/definitions/stepCheck" },
+        { "$ref": "#/definitions/stepCopy" },
+        { "$ref": "#/definitions/stepList" },
+        { "$ref": "#/definitions/stepUpload" },
+        { "$ref": "#/definitions/stepDownload" },
+        { "$ref": "#/definitions/stepReplication" },
+        { "$ref": "#/definitions/stepCommand" },
+        { "$ref": "#/definitions/stepGroup" },
+        { "$ref": "#/definitions/stepDelete" },
+        { "$ref": "#/definitions/stepLog" },
+        { "$ref": "#/definitions/stepInspect" },
+        { "$ref": "#/definitions/stepStore" }
+      ]
+    },
+    "stepQuery": {
+      "properties": {
+        "type": { "const": "query" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "connection": { "type": "string", "description": "Name of the database connection." },
         "transient": { "type": "boolean", "description": "Whether the connection is transient.", "default": false },
         "query": { "type": "string", "description": "SQL query or path to SQL file (file://...)." }
