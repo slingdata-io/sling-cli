@@ -42,38 +42,6 @@
           "description": "Optional condition to determine if the step should execute.",
           "type": "string"
         },
-        "on_failure": {
-          "description": "What to do if the step fails.",
-          "type": "string",
-          "enum": ["abort", "warn", "quiet", "skip"],
-          "default": "abort"
-        }
-      },
-      "required": ["type"],
-      "oneOf": [
-        { "$ref": "#/definitions/stepQuery" },
-        { "$ref": "#/definitions/stepHttp" },
-        { "$ref": "#/definitions/stepCheck" },
-        { "$ref": "#/definitions/stepCopy" },
-        { "$ref": "#/definitions/stepList" },
-        { "$ref": "#/definitions/stepUpload" },
-        { "$ref": "#/definitions/stepDownload" },
-        { "$ref": "#/definitions/stepReplication" },
-        { "$ref": "#/definitions/stepCommand" },
-        { "$ref": "#/definitions/stepGroup" },
-        { "$ref": "#/definitions/stepDelete" },
-        { "$ref": "#/definitions/stepLog" },
-        { "$ref": "#/definitions/stepInspect" },
-        { "$ref": "#/definitions/stepStore" }
-      ]
-    },
-    "stepQuery": {
-      "properties": {
-        "type": { "const": "query" },
-        "id": {
-          "description": "A specific identifier to refer to the step output data.",
-          "type": "string"
-        },
         "connection": { "type": "string", "description": "Name of the database connection." },
         "transient": { "type": "boolean", "description": "Whether the connection is transient.", "default": false },
         "query": { "type": "string", "description": "SQL query or path to SQL file (file://...)." }
@@ -87,6 +55,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "url": { "type": "string", "description": "URL for the HTTP request." },
         "method": { "type": "string", "description": "HTTP method (GET, POST, etc.).", "default": "GET" },
@@ -103,6 +81,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "check": { "type": "string", "description": "The boolean expression to evaluate." },
         "vars": { "type": "object", "description": "Local variables for the check scope." }
       },
@@ -115,6 +103,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "from": { "type": "string", "description": "Source location (e.g., 's3_conn/path/to/file', 'local/path')." },
         "to": { "type": "string", "description": "Destination location." },
@@ -129,6 +127,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
         "connection": { "type": "string", "description": "Name of the storage connection." },
@@ -150,6 +158,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "connection": { "type": "string", "description": "Name of the destination storage connection." },
         "local_path": { "type": "string", "description": "Path to the local file or directory to upload." },
         "remote_path": { "type": "string", "description": "Path in the remote storage." }
@@ -164,6 +182,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "connection": { "type": "string", "description": "Name of the source storage connection." },
         "remote_path": { "type": "string", "description": "Path in the remote storage." },
         "local_path": { "type": "string", "description": "Optional path to save the downloaded file locally." }
@@ -177,6 +205,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "path": { "type": "string", "description": "Path to the replication YAML file." },
         "range": { "type": "string", "description": "Override source range option." },
@@ -194,6 +232,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "command": { "type": "array", "items": { "type": "string" }, "description": "Command and arguments to execute." },
         "print": { "type": "boolean", "description": "Print command output to stdout/stderr.", "default": false },
         "capture": { "type": "boolean", "description": "Capture command output in step state.", "default": false },
@@ -210,6 +258,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "steps": { "type": "array", "items": { "$ref": "#/definitions/step" }, "description": "Steps to execute within the group." },
         "loop": { "description": "JMESPath expression or array to loop over.", "anyOf": [ { "type": "string"}, { "type": "array"} ] },
         "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Environment variables specific to the group." }
@@ -223,6 +281,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
         "connection": { "type": "string", "description": "Name of the storage connection." },
@@ -243,6 +311,16 @@
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
         },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
         "level": { "type": "string", "enum": ["info", "warn", "debug"], "default": "info" },
         "message": { "type": "string", "description": "Message to log. Can contain variables." }
       },
@@ -255,6 +333,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
         "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
         "connection": { "type": "string", "description": "Name of the storage connection." },
@@ -274,6 +362,16 @@
         "id": {
           "description": "A specific identifier to refer to the step output data.",
           "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
         },
             "key": { "type": "string", "description": "The key to store the value under in the pipeline state store." },
             "value": { "description": "The value to store. Can be any valid JSON type. Variables are replaced in strings." },
