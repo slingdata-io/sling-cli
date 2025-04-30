@@ -28,6 +28,13 @@ type ConnEntry struct {
 
 type ConnEntries []ConnEntry
 
+func (ce ConnEntries) Names() (names []string) {
+	for _, conn := range ce {
+		names = append(names, conn.Name)
+	}
+	return names
+}
+
 func (ce ConnEntries) Get(name string) ConnEntry {
 	for _, conn := range ce {
 		if strings.EqualFold(conn.Name, name) {
