@@ -19,7 +19,7 @@ import (
 func LoadSpec(specBody string) (spec Spec, err error) {
 
 	// set maps
-	err = yaml.Unmarshal([]byte(specBody), &spec.OriginalMap)
+	err = yaml.Unmarshal([]byte(specBody), &spec.originalMap)
 	if err != nil {
 		err = g.Error(err, "Error parsing yaml content")
 		return
@@ -62,14 +62,14 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	}
 
 	// so that JMESPath works
-	g.Unmarshal(g.Marshal(spec.OriginalMap), &spec.OriginalMap)
+	g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap)
 
 	return
 }
 
 // Spec defines the complete API specification with endpoints and authentication
 type Spec struct {
-	Name             string         `yaml:"string" json:"string"`
+	Name             string         `yaml:"name" json:"name"`
 	Description      string         `yaml:"description" json:"description"`
 	Calls            Calls          `yaml:"calls" json:"calls"`
 	Queues           []string       `yaml:"queues" json:"queues"`
@@ -78,7 +78,7 @@ type Spec struct {
 	EndpointMap      EndpointMap    `yaml:"endpoints" json:"endpoints"`
 	DynamicEndpoints Endpoints      `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
-	OriginalMap      map[string]any
+	originalMap      map[string]any
 	endpointsOrdered []string
 }
 
