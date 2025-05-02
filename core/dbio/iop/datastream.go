@@ -1345,6 +1345,7 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					val = val0
 				}
 			} else {
+				it.addNewColumns(len(row))
 				val = val0
 			}
 			it.Row[i] = val
