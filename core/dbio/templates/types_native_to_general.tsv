@@ -53,6 +53,29 @@ azuresql	time	time	col_time time	TRUE	TRUE
 azuresql	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
 azuresql	varbinary	binary	col_varbinary varbinary(100)	TRUE	TRUE	
 azuresql	varchar	text	col_varchar varchar	TRUE	TRUE	
+athena	bigint	bigint	col_bigint bigint	TRUE	TRUE	8-byte signed integer
+athena	binary	binary	col_binary binary	TRUE	TRUE	Binary data
+athena	boolean	bool	col_boolean boolean	TRUE	TRUE	TRUE/FALSE value
+athena	char	string	col_char char(size)	TRUE	TRUE	Fixed-length character data
+athena	date	date	col_date date	TRUE	TRUE	Date type (YYYY-MM-DD)
+athena	decimal	decimal	col_decimal decimal(precision,scale)	TRUE	TRUE	Decimal type with configurable precision and scale
+athena	double	float	col_double double	TRUE	TRUE	Double precision floating-point number
+athena	float	float	col_float float	TRUE	TRUE	Single precision floating-point number
+athena	integer	integer	col_integer integer	TRUE	TRUE	4-byte signed integer
+athena	json	json	col_json json	TRUE	TRUE	JSON value
+athena	map	json	col_map map	FALSE	FALSE	Map of key-value pairs
+athena	array	json	col_array array	FALSE	FALSE	Array of values
+athena	row	json	col_row row	FALSE	FALSE	Structured value with named fields
+athena	smallint	smallint	col_smallint smallint	TRUE	TRUE	2-byte signed integer
+athena	string	text	col_string string	TRUE	TRUE	Variable-length character string
+athena	struct	json	col_struct struct	FALSE	FALSE	Structured data
+athena	text	text	col_text text	TRUE	TRUE	Variable-length character string
+athena	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	Timestamp (YYYY-MM-DD HH:MM:SS.fraction)
+athena	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	1-byte signed integer
+athena	varbinary	binary	col_varbinary varbinary	TRUE	TRUE	Variable-length binary data
+athena	varchar	text	col_varchar varchar(size)	TRUE	TRUE	Variable-length character string with specified maximum length
+athena	timestamp with time zone	timestampz	col_timestamp_with_time_zone timestamp with time zone	TRUE	TRUE	Timestamp with time zone
+athena	real	float	col_real real	TRUE	TRUE	Single precision floating-point number
 bigquery	array	json		FALSE	FALSE	
 bigquery	record	json		FALSE	FALSE	
 bigquery	geography	json		FALSE	FALSE	
