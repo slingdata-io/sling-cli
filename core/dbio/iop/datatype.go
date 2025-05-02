@@ -1275,6 +1275,10 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 			"(,)",
 			fmt.Sprintf("(%d,%d)", precision, scale),
 		)
+	} else if col.Type.IsJSON() {
+		if ct.JSON != nil {
+			ct.JSON.Apply(col)
+		}
 	}
 
 	return
@@ -1431,6 +1435,7 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 type ColumnTyping struct {
 	String  *StringColumnTyping  `json:"string,omitempty" yaml:"string,omitempty"`
 	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
+	JSON    *JsonColumnTyping    `json:"json,omitempty" yaml:"json,omitempty"`
 }
 
 // StringColumnTyping contains string type mapping configurations
@@ -1514,4 +1519,16 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 	}
 
 	return
+}
+
+// JsonColumnTyping contains json type mapping configurations
+type JsonColumnTyping struct {
+	AsText bool `json:"as_text,omitempty" yaml:"as_text,omitempty"`
+}
+
+func (jct *JsonColumnTyping) Apply(col *Column) {
+	if jct.AsText {
+		// set to text type
+		col.Type = TextType
+	}
 }
