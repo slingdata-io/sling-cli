@@ -168,6 +168,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, nil
 	}
 
+	// set primary key if supplied via API Spec
+	if cfg.SrcConn.Type.IsAPI() && len(cfg.Source.PrimaryKey()) == 0 {
+		pkCols := df.Columns.GetKeys(iop.PrimaryKey)
+		cfg.Source.PrimaryKeyI = pkCols.Names()
+	}
+
 	// write directly to the final table (no temp table)
 	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {

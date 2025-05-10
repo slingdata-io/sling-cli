@@ -773,6 +773,17 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
+	case dbio.TypeDbAthena:
+		setIfMissing("access_key_id", c.Data["user"])
+		setIfMissing("secret_access_key", nil)
+		setIfMissing("profile", nil)
+		setIfMissing("session_token", nil)
+		setIfMissing("region", c.Data["aws_region"])
+		setIfMissing("workgroup", "primary")
+		setIfMissing("output_location", "")
+		setIfMissing("catalog", "AwsDataCatalog") // standard default aws catalog
+		setIfMissing("database", "")
+		template = "athena://{access_key_id}:{secret_access_key}@{region}"
 	default:
 		if c.Type.IsUnknown() {
 			g.Trace("no type detected for %s", c.Name)

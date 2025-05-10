@@ -539,7 +539,8 @@ func (t *TaskExecution) runApiToDb() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			return g.Error("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
@@ -559,6 +560,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 			return err
 		}
 	}
+skipGetState:
 
 	t.df, err = t.ReadFromApi(t.Config, srcConn)
 	if err != nil {
@@ -617,7 +619,8 @@ func (t *TaskExecution) runApiToFile() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			return g.Error("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
@@ -638,6 +641,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 			return err
 		}
 	}
+skipGetState:
 
 	t.df, err = t.ReadFromApi(t.Config, srcConn)
 	if err != nil {

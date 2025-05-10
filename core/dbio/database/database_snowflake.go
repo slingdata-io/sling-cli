@@ -48,8 +48,11 @@ func (conn *SnowflakeConn) Init() error {
 		conn.SetProp("schema", s)
 	}
 
-	if strings.EqualFold(conn.GetProp("authenticator"), "snowflake_jwt") && conn.GetProp("private_key_path") == "" {
-		return g.Error("did not provide property `private_key_path` with authenticator=snowflake_jwt. See https://docs.slingdata.io/connections/database-connections/snowflake")
+	if strings.EqualFold(conn.GetProp("authenticator"), "snowflake_jwt") &&
+		(conn.GetProp("private_key_path") == "" && conn.GetProp("private_key") == "") {
+		return g.Error(
+			"did not provide property `private_key_path` or `private_key` with authenticator=snowflake_jwt. See https://docs.slingdata.io/connections/database-connections/snowflake",
+		)
 	}
 
 	if m := conn.GetProp("copy_method"); m != "" {
@@ -98,7 +101,6 @@ func (conn *SnowflakeConn) Init() error {
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
-
 }
 
 func (conn *SnowflakeConn) ConnString() string {

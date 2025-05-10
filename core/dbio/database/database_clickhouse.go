@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cast"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
 
 	"github.com/flarco/g"
 )
@@ -174,16 +175,15 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				return g.Error(err, "could not prepare statement")
 			}
 
-			decimalCols := []int{}
-			intCols := []int{}
-			int64Cols := []int{}
-			floatCols := []int{}
+			var decimalCols, intCols, jsonCols, int64Cols, floatCols []int
 			for i, col := range batch.Columns {
 				switch {
 				case col.Type == iop.DecimalType:
 					decimalCols = append(decimalCols, i)
 				case col.Type == iop.SmallIntType:
 					intCols = append(intCols, i)
+				case col.Type == iop.JsonType:
+					// jsonCols = append(jsonCols, i) // disable cause it gives issues (2025-05-01)
 				case col.Type.IsInteger():
 					int64Cols = append(int64Cols, i)
 				case col.Type == iop.FloatType:
@@ -202,6 +202,21 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 							row[colI] = val
 						}
 						eG.Capture(err)
+					}
+				}
+
+				// set JSON correctly
+				for _, colI := range jsonCols {
+					if row[colI] != nil {
+						sVal := cast.ToString(row[colI])
+						mVal, _ := g.UnmarshalMap(sVal)
+						val := chcol.NewJSON()
+						err := val.Scan(mVal)
+						if !g.LogError(err, "could not convert value `%s` for clickhouse JSON", sVal) {
+							row[colI] = val
+						} else {
+							row[colI] = nil
+						}
 					}
 				}
 
@@ -273,17 +288,20 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 // GenerateInsertStatement returns the proper INSERT statement
 func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
-	fields := cols.Names()
-	values := make([]string, len(fields))
-	qFields := make([]string, len(fields)) // quoted fields
+	values := make([]string, len(cols))
+	qFields := make([]string, len(cols)) // quoted fields
 
 	valuesStr := ""
 	c := 0
 	for n := 0; n < numRows; n++ {
-		for i, field := range fields {
+		for i, col := range cols {
 			c++
-			values[i] = conn.bindVar(i+1, field, n, c)
-			qFields[i] = conn.Self().Quote(field)
+			values[i] = conn.bindVar(i+1, col.Name, n, c)
+			// disabled due to issues (2025-05-01)
+			// if col.Type == iop.JsonType {
+			// 	values[i] = values[i] + "::JSON" // cast to JSOn
+			// }
+			qFields[i] = conn.Self().Quote(col.Name)
 		}
 		valuesStr += fmt.Sprintf("(%s),", strings.Join(values, ", "))
 	}
@@ -338,9 +356,13 @@ func (conn *ClickhouseConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	return
 }
 
+var count = 0
+
 func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
 	for i := range row {
-		if columns[i].Type == iop.DecimalType {
+		col := columns[i]
+		switch {
+		case col.Type == iop.DecimalType:
 			sVal := cast.ToString(row[i])
 			if sVal != "" {
 				val, err := decimal.NewFromString(sVal)
@@ -350,10 +372,20 @@ func processClickhouseInsertRow(columns iop.Columns, row []any) []any {
 			} else {
 				row[i] = nil
 			}
-		} else if columns[i].Type == iop.FloatType {
+		// case col.Type == iop.JsonType:
+		// 	sVal := cast.ToString(row[i])
+		// 	val := chcol.NewJSON()
+		// 	err := val.Scan(sVal)
+		// 	if !g.LogError(err, "could not convert value `%s` for clickhouse JSON", sVal) {
+		// 		row[i] = val
+		// 	} else {
+		// 		row[i] = nil
+		// 	}
+		case col.Type == iop.FloatType:
 			row[i] = cast.ToFloat64(row[i])
 		}
 	}
+	count++
 	return row
 }
 

@@ -16,11 +16,6 @@ type Pipeline struct {
 	state *PipelineState
 }
 
-type PipelineSteps []PipelineStep
-
-type PipelineStep struct {
-}
-
 func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) {
 	cfgFile, err := os.Open(cfgPath)
 	if err != nil {

@@ -1,0 +1,426 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Sling Pipeline Configuration",
+  "description": "Defines the structure for a Sling pipeline configuration file.",
+  "type": "object",
+  "properties": {
+    "env": {
+      "description": "Environment variables available to the pipeline steps.",
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          { "type": "string" },
+          { "type": "number" },
+          { "type": "boolean" },
+          { "type": "array" },
+          { "type": "object" }
+        ]
+      }
+    },
+    "steps": {
+      "description": "A list of steps to be executed in the pipeline.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/step"
+      }
+    }
+  },
+  "required": [
+    "steps"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "step": {
+      "description": "A single step in the pipeline.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        }
+      },
+      "required": ["type"],
+      "oneOf": [
+        { "$ref": "#/definitions/stepQuery" },
+        { "$ref": "#/definitions/stepHttp" },
+        { "$ref": "#/definitions/stepCheck" },
+        { "$ref": "#/definitions/stepCopy" },
+        { "$ref": "#/definitions/stepList" },
+        { "$ref": "#/definitions/stepUpload" },
+        { "$ref": "#/definitions/stepDownload" },
+        { "$ref": "#/definitions/stepReplication" },
+        { "$ref": "#/definitions/stepCommand" },
+        { "$ref": "#/definitions/stepGroup" },
+        { "$ref": "#/definitions/stepDelete" },
+        { "$ref": "#/definitions/stepLog" },
+        { "$ref": "#/definitions/stepInspect" },
+        { "$ref": "#/definitions/stepStore" }
+      ]
+    },
+    "stepQuery": {
+      "properties": {
+        "type": { "const": "query" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "connection": { "type": "string", "description": "Name of the database connection." },
+        "transient": { "type": "boolean", "description": "Whether the connection is transient.", "default": false },
+        "query": { "type": "string", "description": "SQL query or path to SQL file (file://...)." }
+      },
+      "required": ["type", "connection", "query"],
+      "additionalProperties": false
+    },
+    "stepHttp": {
+      "properties": {
+        "type": { "const": "http" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "url": { "type": "string", "description": "URL for the HTTP request." },
+        "method": { "type": "string", "description": "HTTP method (GET, POST, etc.).", "default": "GET" },
+        "payload": { "type": "string", "description": "Request body payload." },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "required": ["type", "url"],
+      "additionalProperties": false
+    },
+    "stepCheck": {
+      "properties": {
+        "type": { "const": "check" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "check": { "type": "string", "description": "The boolean expression to evaluate." },
+        "vars": { "type": "object", "description": "Local variables for the check scope." }
+      },
+      "required": ["type", "check"],
+      "additionalProperties": false
+    },
+    "stepCopy": {
+      "properties": {
+        "type": { "const": "copy" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "from": { "type": "string", "description": "Source location (e.g., 's3_conn/path/to/file', 'local/path')." },
+        "to": { "type": "string", "description": "Destination location." },
+        "recursive": { "type": "boolean", "default": false }
+      },
+      "required": ["type", "from", "to"],
+      "additionalProperties": false
+    },
+    "stepList": {
+      "properties": {
+        "type": { "const": "list" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
+        "connection": { "type": "string", "description": "Name of the storage connection." },
+        "path": { "type": "string", "description": "Path within the connection." },
+        "recursive": { "type": "boolean", "default": false },
+        "only": { "type": "string", "enum": ["files", "folders"], "description": "Filter results to only files or folders." }
+      },
+      "required": ["type"],
+      "anyOf": [
+        { "required": ["location"]},
+        { "required": ["connection", "path"]}
+      ],
+      "additionalProperties": false
+    },
+    "stepUpload": {
+      "properties": {
+        "type": { "const": "upload" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "connection": { "type": "string", "description": "Name of the destination storage connection." },
+        "local_path": { "type": "string", "description": "Path to the local file or directory to upload." },
+        "remote_path": { "type": "string", "description": "Path in the remote storage." }
+      },
+      "required": ["type", "connection", "local_path", "remote_path"],
+      "additionalProperties": false
+    },
+    "stepDownload": {
+      "properties": {
+        "type": { "const": "download" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "connection": { "type": "string", "description": "Name of the source storage connection." },
+        "remote_path": { "type": "string", "description": "Path in the remote storage." },
+        "local_path": { "type": "string", "description": "Optional path to save the downloaded file locally." }
+      },
+      "required": ["type", "connection", "remote_path"],
+      "additionalProperties": false
+    },
+    "stepReplication": {
+      "properties": {
+        "type": { "const": "replication" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "path": { "type": "string", "description": "Path to the replication YAML file." },
+        "range": { "type": "string", "description": "Override source range option." },
+        "mode": { "type": "string", "enum": ["full-refresh", "incremental", "snapshot"], "description": "Override replication mode." },
+        "streams": { "type": "array", "items": { "type": "string" }, "description": "Select specific streams to run." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Override environment variables for the replication." }
+      },
+      "required": ["type", "path"],
+      "additionalProperties": false
+    },
+    "stepCommand": {
+      "properties": {
+        "type": { "const": "command" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "command": { "type": "array", "items": { "type": "string" }, "description": "Command and arguments to execute." },
+        "print": { "type": "boolean", "description": "Print command output to stdout/stderr.", "default": false },
+        "capture": { "type": "boolean", "description": "Capture command output in step state.", "default": false },
+        "working_dir": { "type": "string", "description": "Working directory for the command." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Environment variables for the command." }
+      },
+      "required": ["type", "command"],
+      "additionalProperties": false
+    },
+    "stepGroup": {
+      "properties": {
+        "type": { "const": "group" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "steps": { "type": "array", "items": { "$ref": "#/definitions/step" }, "description": "Steps to execute within the group." },
+        "loop": { "description": "JMESPath expression or array to loop over.", "anyOf": [ { "type": "string"}, { "type": "array"} ] },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Environment variables specific to the group." }
+      },
+      "required": ["type", "steps"],
+      "additionalProperties": false
+    },
+    "stepDelete": {
+      "properties": {
+        "type": { "const": "delete" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
+        "connection": { "type": "string", "description": "Name of the storage connection." },
+        "path": { "type": "string", "description": "Path to delete within the connection." },
+        "recursive": { "type": "boolean", "default": false }
+      },
+      "required": ["type"],
+      "anyOf": [
+        { "required": ["location"]},
+        { "required": ["connection", "path"]}
+      ],
+      "additionalProperties": false
+    },
+    "stepLog": {
+      "properties": {
+        "type": { "const": "log" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "level": { "type": "string", "enum": ["info", "warn", "debug"], "default": "info" },
+        "message": { "type": "string", "description": "Message to log. Can contain variables." }
+      },
+      "required": ["type", "message"],
+      "additionalProperties": false
+    },
+    "stepInspect": {
+      "properties": {
+        "type": { "const": "inspect" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+        "location": { "type": "string", "description": "Storage location (e.g., 's3_conn/path/'). Deprecated, use connection/path." },
+        "connection": { "type": "string", "description": "Name of the storage connection." },
+        "path": { "type": "string", "description": "Path to inspect within the connection." },
+        "recursive": { "type": "boolean", "default": false }
+      },
+      "required": ["type"],
+      "anyOf": [
+        { "required": ["location"]},
+        { "required": ["connection", "path"]}
+      ],
+      "additionalProperties": false
+    },
+     "stepStore": {
+        "properties": {
+            "type": { "const": "store" },
+        "id": {
+          "description": "A specific identifier to refer to the step output data.",
+          "type": "string"
+        },
+        "if": {
+          "description": "Optional condition to determine if the step should execute.",
+          "type": "string"
+        },
+        "on_failure": {
+          "description": "What to do if the step fails.",
+          "type": "string",
+          "enum": ["abort", "warn", "quiet", "skip"],
+          "default": "abort"
+        },
+            "key": { "type": "string", "description": "The key to store the value under in the pipeline state store." },
+            "value": { "description": "The value to store. Can be any valid JSON type. Variables are replaced in strings." },
+            "delete": { "type": "boolean", "description": "If true, delete the key instead of setting a value.", "default": false }
+        },
+        "required": ["type", "key"],
+        "additionalProperties": false
+     }
+  }
+}

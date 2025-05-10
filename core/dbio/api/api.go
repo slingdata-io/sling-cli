@@ -155,7 +155,7 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 }
 
 type APIStreamConfig struct {
-	Flatten     int
+	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
 	Select      []string // select specific columns
 	Limit       int

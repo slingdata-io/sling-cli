@@ -1,0 +1,340 @@
+core:
+  create_table: CREATE EXTERNAL TABLE {table} ({col_types})
+  drop_table: DROP TABLE IF EXISTS {table}
+  drop_view: DROP VIEW IF EXISTS {view}
+  drop_index: "SELECT 'indexes do not apply for Athena'"
+  create_index: "SELECT 'indexes do not apply for Athena'"
+  replace: |
+    -- Athena doesn't support UPSERT natively, use DELETE + INSERT pattern
+    DELETE FROM {table}
+    WHERE {pk_fields} IN (SELECT {pk_fields} FROM (VALUES ({values})) AS t({fields}));
+    INSERT INTO {table} ({fields}) VALUES ({values})
+  replace_temp: |
+    -- Athena doesn't support UPSERT natively, use DELETE + INSERT pattern
+    DELETE FROM {table}
+    WHERE EXISTS (
+      SELECT 1
+      FROM {temp_table}
+      WHERE {pk_fields_equal}
+    );
+    INSERT INTO {table} ({names})
+    SELECT {names} FROM {temp_table}
+  insert_ignore: |
+    -- Athena doesn't have INSERT IGNORE, simulate with conditional insert
+    INSERT INTO {table} ({fields})
+    SELECT * FROM (
+      SELECT {values} AS t({fields})
+    ) s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM {table}
+      WHERE {pk_fields_equal}
+    )
+  insert_ignore_temp: |
+    -- Athena doesn't have INSERT IGNORE, simulate with conditional insert
+    INSERT INTO {table} ({names})
+    SELECT * FROM {temp_table} s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM {table} t
+      WHERE {pk_fields_equal}
+    )
+  update_temp: |
+    -- Athena doesn't support UPDATE directly, use DELETE + INSERT pattern
+    DELETE FROM {table}
+    WHERE EXISTS (
+      SELECT 1
+      FROM {temp_table}
+      WHERE {pk_fields_equal2}
+    );
+    INSERT INTO {table}
+    SELECT * FROM {temp_table}
+  sample: SELECT {fields} FROM {table} TABLESAMPLE BERNOULLI (5) LIMIT {n}
+  rename_table: ALTER TABLE {table} RENAME TO {new_table}
+  set_schema: |
+    -- Athena doesn't support changing schema with ALTER, need to recreate
+    CREATE TABLE {new_schema}.{table} AS
+    SELECT * FROM {table};
+    DROP TABLE {table}
+  
+  copy_from_s3: |
+    -- Athena doesn't support COPY, only reads from S3
+    -- For use with CREATE TABLE AS or INSERT INTO
+    SELECT * FROM s3_table(
+      '{s3_path}',
+      '*csv*',
+      ARRAY['csv'],
+      MAP['header', 'true', 'delimiter', ',']
+    )
+  copy_to_s3: |
+    -- Use UNLOAD statement to export data to S3
+    UNLOAD ({sql})
+    TO '{s3_path}'
+    WITH (
+      format = 'CSV',
+      field_delimiter = ',',
+      compression = 'GZIP',
+      header = true
+    )
+  alter_columns: |
+    -- Athena requires recreating the table to change column definitions
+    -- This is a placeholder, actual implementation requires multiple steps
+    -- ALTER TABLE {table} {col_ddl}
+    SELECT 'ALTER COLUMN not directly supported in Athena, must recreate table'
+ 
+metadata:
+  current_database:
+    SELECT current_database
+    
+  databases: |
+    SELECT 'catalog' as name
+    
+  schemas: |
+    SELECT schema_name
+    FROM information_schema.schemata
+    ORDER BY schema_name
+    
+  tables: |
+    SELECT 
+      table_schema as schema_name, 
+      table_name, 
+      CASE 
+        WHEN table_type = 'VIEW' THEN 'true'
+        ELSE 'false'
+      END as is_view
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE'
+      {{if .schema -}} AND table_schema = '{schema}' {{- end}}
+    ORDER BY table_schema, table_name
+    
+  views: |
+    SELECT 
+      table_schema as schema_name, 
+      table_name, 
+      'true' as is_view
+    FROM information_schema.tables
+    WHERE table_type = 'VIEW'
+      {{if .schema -}} AND table_schema = '{schema}' {{- end}}
+    ORDER BY table_schema, table_name
+
+  columns: |
+    SELECT column_name, data_type
+    FROM information_schema.columns
+    WHERE table_schema = '{schema}'
+      AND table_name = '{table}'
+    ORDER BY ordinal_position
+
+  primary_keys: |
+    -- Athena doesn't track primary keys in information_schema
+    -- This is a placeholder query that will return no results
+    SELECT 
+      '' as pk_name,
+      0 as position,
+      '' as column_name
+    WHERE false
+
+  indexes: |
+    -- Athena doesn't support indexes, return empty result
+    SELECT 
+      '' as index_name,
+      '' as column_name
+    WHERE false 
+  
+  columns_full: |
+    SELECT
+      table_schema as schema_name,
+        table_name,
+      column_name,
+      data_type,
+      ordinal_position as position
+    FROM information_schema.columns
+    WHERE table_schema = '{schema}' 
+      AND table_name = '{table}'
+    ORDER BY ordinal_position
+
+  schemata: |
+    SELECT
+      cols.table_schema as schema_name,
+      cols.table_name,
+      CASE 
+        WHEN tabs.table_type = 'VIEW' THEN true
+        ELSE false
+      END as is_view,
+      cols.column_name,
+      cols.data_type,
+      cols.ordinal_position as position
+    FROM information_schema.columns cols
+    JOIN information_schema.tables tabs
+      ON tabs.table_schema = cols.table_schema
+      AND tabs.table_name = cols.table_name
+    WHERE 1=1
+      {{if .schema -}} AND cols.table_schema = '{schema}' {{- end}}
+      {{if .tables -}} AND cols.table_name IN ({tables}) {{- end}}
+    ORDER BY cols.table_schema, cols.table_name, cols.ordinal_position
+  
+  ddl_table: |
+    -- Athena doesn't provide a direct way to get DDL
+    -- You can use SHOW CREATE TABLE instead
+      SELECT
+      'SHOW CREATE TABLE {schema}.{table}' as ddl
+    
+  ddl_view: |
+    -- Athena doesn't provide a direct way to get view definition
+    -- You can use SHOW CREATE VIEW instead
+    SELECT 
+      'SHOW CREATE VIEW {schema}.{table}' as ddl
+
+analysis:
+  field_chars: |
+    SELECT
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field, 
+      SUM(CASE WHEN REGEXP_LIKE(CAST({field} AS VARCHAR), '\n') THEN 1 ELSE 0 END) as cnt_nline, 
+      SUM(CASE WHEN REGEXP_LIKE(CAST({field} AS VARCHAR), '\t') THEN 1 ELSE 0 END) as cnt_tab, 
+      SUM(CASE WHEN REGEXP_LIKE(CAST({field} AS VARCHAR), ',') THEN 1 ELSE 0 END) as cnt_comma, 
+      SUM(CASE WHEN REGEXP_LIKE(CAST({field} AS VARCHAR), '"') THEN 1 ELSE 0 END) as cnt_dquote, 
+      MIN(LENGTH(CAST({field} AS VARCHAR))) as f_min_len, 
+      MAX(LENGTH(CAST({field} AS VARCHAR))) as f_max_len
+    FROM "{schema}"."{table}"
+
+  field_stat_len: |
+    -- field_stat_len {table}
+    SELECT
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      COUNT(*) as tot_cnt,
+      MIN(LENGTH(CAST({field} AS VARCHAR))) as f_min_len,
+      MAX(LENGTH(CAST({field} AS VARCHAR))) as f_max_len
+    FROM "{schema}"."{table}"
+  
+  field_stat_deep: |
+    SELECT
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      COUNT(*) as tot_cnt,
+      COUNT({field}) as f_cnt,
+      COUNT(*) - COUNT({field}) as f_null_cnt,
+      ROUND(100.0 * (COUNT(*) - COUNT({field})) / COUNT(*), 1) as f_null_prct,
+      COUNT(DISTINCT {field}) as f_dstct_cnt,
+      ROUND(100.0 * COUNT(DISTINCT {field}) / COUNT(*), 1) as f_dstct_prct,
+      COUNT(*) - COUNT(DISTINCT {field}) as f_dup_cnt,
+      CAST(MIN({field}) AS VARCHAR) as f_min,
+      CAST(MAX({field}) AS VARCHAR) as f_max,
+      MIN(LENGTH(CAST({field} AS VARCHAR))) as f_min_len,
+      MAX(LENGTH(CAST({field} AS VARCHAR))) as f_max_len
+    FROM "{schema}"."{table}"
+
+  distro_field: |
+    WITH t1 AS (
+      SELECT
+        '{field}' as field,
+        {field},
+        COUNT(*) cnt
+      FROM "{schema}"."{table}"
+      GROUP BY {field}
+      ORDER BY COUNT(*) DESC
+    ),
+    t2 AS (
+      SELECT
+        '{field}' as field,
+        COUNT(*) ttl_cnt
+      FROM "{schema}"."{table}"
+    )
+    SELECT
+      '{table}' as table_nm,
+      t1.field,
+      {field} as value,
+      cnt,
+      ROUND(100.0 * cnt / ttl_cnt, 2) as prct
+    FROM t1
+    JOIN t2
+      ON t1.field = t2.field
+    ORDER BY cnt DESC
+
+  distro_field_group: |
+    WITH t1 AS (
+      SELECT
+        '{field}' as field,
+        {group_expr} as group_exp,
+        {field},        
+        COUNT(*) cnt
+      FROM "{schema}"."{table}"
+      GROUP BY {field}, {group_expr}
+      ORDER BY COUNT(*) DESC
+    ),
+    t2 AS (
+      SELECT
+        '{field}' as field,
+        COUNT(*) ttl_cnt
+      FROM "{schema}"."{table}"
+    )
+    SELECT
+      '{table}' as table_nm,
+      t1.field,
+      t1.group_exp,
+      {field} as value,
+      cnt,
+      ROUND(100.0 * cnt / ttl_cnt, 2) as prct
+    FROM t1
+    JOIN t2
+      ON t1.field = t2.field
+    ORDER BY cnt DESC
+
+  distro_field_date: |
+    WITH t1 AS (
+      SELECT
+        '{field}' as field,
+        EXTRACT(year FROM {field}) as year,
+        EXTRACT(month FROM {field}) as month,
+        EXTRACT(day FROM {field}) as day,
+        COUNT(*) cnt
+      FROM "{schema}"."{table}"
+      GROUP BY 
+        EXTRACT(year FROM {field}), 
+        EXTRACT(month FROM {field}), 
+        EXTRACT(day FROM {field})
+      ORDER BY 
+        EXTRACT(year FROM {field}), 
+        EXTRACT(month FROM {field}), 
+        EXTRACT(day FROM {field})
+    ),
+    t2 AS (
+      SELECT 
+        '{field}' as field, 
+        COUNT(*) ttl_cnt
+      FROM "{schema}"."{table}"
+    )
+    SELECT 
+        '{schema}' as schema_nm,
+        '{table}' as table_nm,
+        t1.field,
+        t1.year,
+        t1.month,
+        t1.day,
+        cnt,
+      ROUND(100.0 * cnt / ttl_cnt, 2) as prct
+    FROM t1
+    JOIN t2
+      ON t1.field = t2.field
+    ORDER BY t1.year, t1.month, t1.day
+
+function:
+  truncate_f: CAST({field} AS INTEGER)
+  truncate_datef: DATE_TRUNC('day', {field})
+  string_type: VARCHAR
+  cast_to_string: CAST({field} AS VARCHAR)
+  cast_to_text: CAST({field} AS VARCHAR)
+  date_to_int: CAST(DATE_DIFF('day', DATE '1970-01-01', {field}) AS INTEGER)
+  number_to_int: CAST(ROUND({field}, 0) AS INTEGER)
+  checksum_date: DATE_DIFF('second', TIMESTAMP '1970-01-01 00:00:00', CAST({field} AS TIMESTAMP))
+  checksum_datetime: DATE_DIFF('second', TIMESTAMP '1970-01-01 00:00:00', CAST({field} AS TIMESTAMP))
+  checksum_string: LENGTH(CAST({field} AS VARCHAR))
+  checksum_boolean: LENGTH(CASE WHEN {field} = true THEN 'true' WHEN {field} = false THEN 'false' END)
+  checksum_json: LENGTH(REGEXP_REPLACE(CAST({field} AS VARCHAR), ' ', ''))
+  now: CURRENT_TIMESTAMP
+
+variable:
+  max_string_type: VARCHAR
+  max_string_length: 2147483647
+  max_column_length: 127

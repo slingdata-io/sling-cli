@@ -261,6 +261,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		}
 	} else if strings.HasPrefix(URL, "redshift") {
 		conn = &RedshiftConn{URL: URL}
+	} else if strings.HasPrefix(URL, "athena") {
+		conn = &AthenaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "trino") {
 		conn = &TrinoConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
@@ -1284,6 +1286,8 @@ func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
 	data, err := conn.Self().Query(sql)
 	if err != nil {
 		return 0, err
+	} else if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
+		return 0, nil
 	}
 	return cast.ToUint64(data.Rows[0][0]), nil
 }
