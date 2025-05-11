@@ -816,8 +816,12 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
-	if _, err := exec.LookPath("bcp"); err == nil {
+	_, err := exec.LookPath("bcp")
+	if err == nil {
 		testSuite(t, dbio.Type("sqlserver_bcp"))
+	} else {
+		g.Warn("BCP not found in PATH, failing")
+		t.Fail()
 	}
 }
 
