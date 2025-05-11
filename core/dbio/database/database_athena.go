@@ -1093,11 +1093,11 @@ func (conn *AthenaConn) GetSchemata(level SchemataLevel, schemaName string, tabl
 			)
 		}
 		if err != nil {
-			if strings.Contains(err.Error(), "TYPE_NOT_FOUND") || strings.Contains(err.Error(), "GENERIC_INTERNAL_ERROR") {
+			if strings.Contains(err.Error(), "TYPE_NOT_FOUND") || strings.Contains(err.Error(), "GENERIC_INTERNAL_ERROR") || strings.Contains(err.Error(), "AccessDenied") {
 				g.Warn(g.ErrMsg(err))
 				err = nil
 			} else {
-				return g.Error(err, "Could not get schemata at %s level", level)
+				return g.Error(err, "Could not get schemata at %s level for %s", level, g.Marshal(values))
 			}
 		}
 
