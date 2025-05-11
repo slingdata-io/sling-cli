@@ -1227,6 +1227,81 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	return
 }
 
+// TrimSQLComments removes all SQL comments (line and block comments) from the input SQL
+// Line comments start with -- and end with a newline
+// Block comments start with /* and end with */
+func TrimSQLComments(sql string) (string, error) {
+	inQuote := false
+	inCommentLine := false
+	inCommentMulti := false
+	result := strings.Builder{}
+
+	// Process character by character
+	for i := 0; i < len(sql); i++ {
+		char := sql[i]
+
+		// Handle state changes
+		if !inCommentLine && !inCommentMulti {
+			// Handle quotes
+			if char == '\'' && !inQuote {
+				inQuote = true
+				result.WriteByte(char)
+			} else if char == '\'' && inQuote {
+				// Check for escaped quote (''), which means stay in quote
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					// Add both quotes and skip the next one in the next iteration
+					result.WriteByte(char)
+					result.WriteByte(sql[i+1])
+					i++
+					continue
+				}
+				inQuote = false
+				result.WriteByte(char)
+			} else if inQuote {
+				// Inside quotes, keep all characters
+				result.WriteByte(char)
+			} else {
+				// Outside quotes, check for comment starts
+				if i+1 < len(sql) && char == '-' && sql[i+1] == '-' {
+					// Line comment start, don't add these characters
+					inCommentLine = true
+					i++ // Skip the next dash
+				} else if i+1 < len(sql) && char == '/' && sql[i+1] == '*' {
+					// Multi-line comment start, don't add these characters
+					inCommentMulti = true
+					i++ // Skip the star
+				} else {
+					// Not in a comment and not starting one, add character
+					result.WriteByte(char)
+				}
+			}
+		} else if inCommentLine {
+			// In line comment, look for end (newline)
+			if char == '\n' {
+				inCommentLine = false
+				result.WriteByte(char) // Keep the newline
+			}
+			// Else discard comment characters
+		} else if inCommentMulti {
+			// In multi-line comment, look for end (*/)
+			if i+1 < len(sql) && char == '*' && sql[i+1] == '/' {
+				inCommentMulti = false
+				i++ // Skip the slash
+			}
+			// Else discard comment characters
+		}
+	}
+
+	// Check if we have an unterminated comment or quote
+	if inQuote {
+		return "", g.Error("unterminated quote")
+	} else if inCommentMulti {
+		return "", g.Error("unterminated block comment")
+	}
+
+	return result.String(), nil
+}
+
 // GenerateAlterDDL generate a DDL based on a dataset
 func GenerateAlterDDL(conn Connection, table Table, newColumns iop.Columns) (bool, error) {
 

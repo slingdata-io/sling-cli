@@ -295,3 +295,99 @@ func TestParseSQLMultiStatements(t *testing.T) {
 		})
 	}
 }
+
+func TestTrimSQLComments(t *testing.T) {
+	type testCase struct {
+		name     string
+		input    string
+		expected string
+		hasError bool
+	}
+
+	cases := []testCase{
+		{
+			name:     "no comments",
+			input:    "SELECT * FROM users WHERE id = 1",
+			expected: "SELECT * FROM users WHERE id = 1",
+			hasError: false,
+		},
+		{
+			name:     "line comment at end",
+			input:    "SELECT * FROM users -- This is a comment",
+			expected: "SELECT * FROM users ",
+			hasError: false,
+		},
+		{
+			name:     "line comment in middle",
+			input:    "SELECT * -- Get all users\nFROM users",
+			expected: "SELECT * \nFROM users",
+			hasError: false,
+		},
+		{
+			name:     "block comment at end",
+			input:    "SELECT * FROM users /* This is a block comment */",
+			expected: "SELECT * FROM users ",
+			hasError: false,
+		},
+		{
+			name:     "block comment in middle",
+			input:    "SELECT * /* Get all users */ FROM users",
+			expected: "SELECT *  FROM users",
+			hasError: false,
+		},
+		{
+			name:     "mixed comments",
+			input:    "SELECT * /* Block comment */ FROM users -- Line comment\nWHERE id = 1",
+			expected: "SELECT *  FROM users \nWHERE id = 1",
+			hasError: false,
+		},
+		{
+			name:     "comment inside quoted string",
+			input:    "SELECT * FROM users WHERE comment = '-- Not a comment'",
+			expected: "SELECT * FROM users WHERE comment = '-- Not a comment'",
+			hasError: false,
+		},
+		{
+			name:     "escaped quotes",
+			input:    "SELECT * FROM users WHERE name = 'O''Connor' -- Comment",
+			expected: "SELECT * FROM users WHERE name = 'O''Connor' ",
+			hasError: false,
+		},
+		{
+			name:     "unterminated quote",
+			input:    "SELECT * FROM users WHERE name = 'O",
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "unterminated block comment",
+			input:    "SELECT * FROM users /* Comment without end",
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "nested-looking comments",
+			input:    "SELECT * /* outer /* inner */ comment */ FROM users",
+			expected: "SELECT *  comment */ FROM users",
+			hasError: false,
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			expected: "",
+			hasError: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result, err := TrimSQLComments(c.input)
+			if c.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, c.expected, result)
+			}
+		})
+	}
+}
