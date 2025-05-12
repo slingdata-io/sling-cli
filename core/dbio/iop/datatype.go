@@ -1488,6 +1488,9 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 
 	precision = col.DbPrecision
 	scale = col.DbScale
+	if col.Stats.MaxDecLen > scale {
+		scale = col.Stats.MaxDecLen
+	}
 
 	if precision == 0 {
 		minPrecision := col.Stats.MaxLen + scale

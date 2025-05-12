@@ -417,16 +417,24 @@ func (df *Dataflow) SyncColumns() {
 	for _, ds := range df.Streams {
 		colMap := df.Columns.FieldMap(true)
 		for i, col := range ds.Columns {
-			maxLen := ds.Columns[i].Stats.MaxLen // old max length
+			maxLen := col.Stats.MaxLen       // old max length
+			minLen := col.Stats.MinLen       // old min length
+			maxDecLen := col.Stats.MaxDecLen // old max dec length
 
 			// sync stats
 			if cs, ok := ds.Sp.colStats[i]; ok {
 				ds.Columns[i].Stats = *cs
 			}
 
-			// keep max len if greater (from manual column length spec)
+			// keep old values
 			if maxLen > ds.Columns[i].Stats.MaxLen {
 				ds.Columns[i].Stats.MaxLen = maxLen
+			}
+			if minLen > 0 && ds.Columns[i].Stats.MinLen == 0 {
+				ds.Columns[i].Stats.MinLen = minLen
+			}
+			if maxDecLen > ds.Columns[i].Stats.MaxDecLen {
+				ds.Columns[i].Stats.MaxDecLen = maxDecLen
 			}
 
 			colName := strings.ToLower(col.Name)
@@ -489,6 +497,21 @@ func (df *Dataflow) SyncStats() {
 			}
 			if colStats.MaxDecLen > dfCols[i].Stats.MaxDecLen {
 				dfCols[i].Stats.MaxDecLen = colStats.MaxDecLen
+			}
+
+			{ // preserve original stats
+				if col.Stats.Max > dfCols[i].Stats.Max {
+					dfCols[i].Stats.Max = col.Stats.Max
+				}
+				if col.Stats.MaxLen > dfCols[i].Stats.MaxLen {
+					dfCols[i].Stats.MaxLen = col.Stats.MaxLen
+				}
+				if col.Stats.MaxDecLen > dfCols[i].Stats.MaxDecLen {
+					dfCols[i].Stats.MaxDecLen = col.Stats.MaxDecLen
+				}
+				if col.Stats.MinLen > 0 && dfCols[i].Stats.MinLen == 0 {
+					dfCols[i].Stats.MinLen = col.Stats.MinLen
+				}
 			}
 
 			switch {
