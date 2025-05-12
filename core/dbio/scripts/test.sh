@@ -12,7 +12,7 @@ go test -timeout 5m -v -run 'TestParseDate|TestDetectDelimiter|TestFIX|TestConst
 cd -
 
 cd database
-go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName'
+go test -v -run 'TestParseTableName|TestRegexMatch|TestParseColumnName|TestParseSQLMultiStatements|TestTrimSQLComments'
 go test -run TestChunkByColumnRange
 cd -
 
