@@ -972,7 +972,7 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 		return err
 	}
 	if rowAffCnt > 0 {
-		g.DebugLow("%d rows affected", rowAffCnt)
+		g.Debug("%d rows affected", cast.ToInt64(rowAffCnt))
 	}
 	return nil
 }
