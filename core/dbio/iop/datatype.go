@@ -1225,7 +1225,11 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 				if ct.String != nil {
 					newLength := ct.String.Apply(length, maxStringLength)
 					if newLength != length {
-						g.Debug(`  applied length type mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
+						if ct.String.Note != "" {
+							g.Debug(`  applied string length mapping for column "%s" (%d => %d) [%s]`, col.Name, length, newLength, ct.String.Note)
+						} else {
+							g.Debug(`  applied string length mapping for column "%s" (%d => %d)`, col.Name, length, newLength)
+						}
 					}
 					length = newLength
 				}
@@ -1444,6 +1448,8 @@ type StringColumnTyping struct {
 	MinLength    int  `json:"min_length,omitempty" yaml:"min_length,omitempty"`
 	MaxLength    int  `json:"max_length,omitempty" yaml:"max_length,omitempty"`
 	UseMax       bool `json:"use_max,omitempty" yaml:"use_max,omitempty"`
+
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {

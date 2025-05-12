@@ -215,6 +215,11 @@ func (t Type) IsUnknown() bool {
 	return t.Kind() == KindUnknown
 }
 
+// IsSQLServer returns true is sql server flavor
+func (t Type) IsSQLServer() bool {
+	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH)
+}
+
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
