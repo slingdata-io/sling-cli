@@ -39,6 +39,11 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	if len(cfg.Source.Select) > 0 {
 		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
+			// lookup column name
+			col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(f))
+			if col != nil {
+				return col.Name
+			}
 			return f
 		})
 
@@ -51,10 +56,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				return t.df, g.Error("All specified select columns must be excluded with prefix '-'. Cannot do partial exclude.")
 			}
 
-			q := database.GetQualifierQuote(srcConn.GetType())
 			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
 				for _, exField := range excluded {
-					exField = strings.ReplaceAll(strings.TrimPrefix(exField, "-"), q, "")
+					exField = srcConn.GetType().Unquote(strings.TrimPrefix(exField, "-"))
 					if strings.EqualFold(c.Name, exField) {
 						return false
 					}
@@ -142,7 +146,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			sTable.SQL = g.R(
 				srcConn.GetTemplateValue(key),
-				"fields", strings.Join(selectFields, ", "),
+				"fields", strings.Join(srcConn.GetType().QuoteNames(selectFields...), ", "),
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
