@@ -28,11 +28,18 @@ import (
 
 //go:embed examples.sh
 var slingFolder embed.FS
-var examples = ``
-var ctx = g.NewContext(context.Background())
-var telemetry = true
-var interrupted = false
-var machineID = ""
+var (
+	examples    = ``
+	ctx         = g.NewContext(context.Background())
+	telemetry   = true
+	interrupted = false
+	machineID   = ""
+	telProps    = g.M(
+		"application", "sling-cli",
+		"version", core.Version,
+		"os", runtime.GOOS+"/"+runtime.GOARCH,
+	)
+)
 
 func init() {
 	env.InitLogger()
@@ -421,13 +428,14 @@ func Track(event string, props ...map[string]interface{}) {
 	}
 
 	properties := g.M(
-		"application", "sling-cli",
-		"version", core.Version,
 		"package", getSlingPackage(),
-		"os", runtime.GOOS+"/"+runtime.GOARCH,
 		"emit_time", time.Now().UnixMicro(),
 		"user_id", machineID,
 	)
+
+	for k, v := range telProps {
+		properties[k] = v
+	}
 
 	for k, v := range env.TelMap {
 		properties[k] = v
