@@ -17,7 +17,7 @@ import (
 )
 
 // Set in the store/store.go file for history keeping
-var StoreSet = func(t *TaskExecution) error { return nil }
+var StoreSet = func(val any) error { return nil }
 
 // TaskExecution is a sling ELT task run, synonymous to an execution
 type TaskExecution struct {

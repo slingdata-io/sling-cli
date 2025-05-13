@@ -20,6 +20,7 @@ type Hook interface {
 	SetExtra(map[string]any)
 	Stage() HookStage
 	Execute() error
+	PayloadMap() map[string]any
 	ExecuteOnDone(error) (OnFailType, error)
 }
 
@@ -37,6 +38,7 @@ type ParseOptions struct {
 	kind  HookKind
 	index int
 	state RuntimeState
+	md5   string
 }
 
 type HookStage string
