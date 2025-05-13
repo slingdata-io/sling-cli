@@ -148,6 +148,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 				"s3_path", s3PathPart,
 				"aws_access_key_id", AwsID,
 				"aws_secret_access_key", AwsAccessKey,
+				"aws_session_token_expr", AwsSessionTokenExpr,
 				"parallel", conn.GetProp("PARALLEL"),
 			)
 
