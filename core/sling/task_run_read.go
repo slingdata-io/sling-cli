@@ -144,9 +144,17 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"core.incremental_select",
 			)
 
+			sFields := lo.Map(selectFields, func(sf string, i int) string {
+				col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(sf))
+				if col != nil {
+					return srcConn.GetType().Quote(col.Name) // apply quotes if match
+				}
+				return sf
+			})
+
 			sTable.SQL = g.R(
 				srcConn.GetTemplateValue(key),
-				"fields", strings.Join(srcConn.GetType().QuoteNames(selectFields...), ", "),
+				"fields", strings.Join(sFields, ", "),
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
