@@ -619,6 +619,11 @@ func (sp *StreamProcessor) commitChecksum() {
 	}
 }
 
+// Clickhouse JSON data
+type chJSON interface {
+	MarshalJSON() ([]byte, error)
+}
+
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessVal'
@@ -651,6 +656,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		sVal = string(v)
 		val = sVal
 		isString = true
+	case chJSON: // Clickhouse JSON / Variant
+		sBytes, _ := v.MarshalJSON()
+		sVal = string(sBytes)
 	case string, *string:
 		switch v2 := v.(type) {
 		case string:

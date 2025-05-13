@@ -18,22 +18,18 @@ var Store = cmap.New[*Execution]()
 
 func init() {
 
-	sling.StoreSet = func(t *sling.TaskExecution) error {
-		StoreSet(t)
+	sling.StoreSet = func(val any) error {
+		switch v := val.(type) {
+		case *sling.TaskExecution:
+			StoreSetReplicationExec(v)
+		case *sling.Pipeline:
+			StoreSetPipelineExec(v)
+		}
 		return nil
 	}
 }
 
-var syncStatus = func(e *Execution) {
-	// drain channel for now
-	for {
-		select {
-		case <-e.TaskExec.OutputLines:
-		default:
-			return
-		}
-	}
-}
+var syncStatus = func(val any) {}
 
 // Execution is a task execute in the store. PK = exec_id + stream_id
 type Execution struct {
@@ -243,7 +239,7 @@ func ToConfigObject(t *sling.TaskExecution) (task *Task, replication *Replicatio
 }
 
 // Store saves the task into the local sqlite
-func StoreSet(t *sling.TaskExecution) {
+func StoreSetReplicationExec(t *sling.TaskExecution) {
 	e := ToExecutionObject(t)
 	key := g.F("%s-%s", e.ExecID, e.StreamID)
 	exec, ok := Store.Get(key)
@@ -266,4 +262,8 @@ func StoreSet(t *sling.TaskExecution) {
 
 	// sync status
 	syncStatus(exec)
+}
+
+func StoreSetPipelineExec(pl *sling.Pipeline) {
+	syncStatus(pl)
 }

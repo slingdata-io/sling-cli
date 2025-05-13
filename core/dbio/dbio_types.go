@@ -75,6 +75,7 @@ const (
 	TypeDbElasticsearch Type = "elasticsearch"
 	TypeDbPrometheus    Type = "prometheus"
 	TypeDbProton        Type = "proton"
+	TypeDbAthena        Type = "athena"
 )
 
 var AllType = []struct {
@@ -108,6 +109,7 @@ var AllType = []struct {
 	{TypeDbAzure, "TypeDbAzure"},
 	{TypeDbAzureDWH, "TypeDbAzureDWH"},
 	{TypeDbTrino, "TypeDbTrino"},
+	{TypeDbAthena, "TypeDbAthena"},
 	{TypeDbClickhouse, "TypeDbClickhouse"},
 	{TypeDbElasticsearch, "TypeDbElasticsearch"},
 	{TypeDbMongoDB, "TypeDbMongoDB"},
@@ -133,7 +135,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
 	}
 
@@ -157,6 +159,7 @@ func (t Type) DefPort() int {
 		TypeDbSQLServer:     1433,
 		TypeDbAzure:         1433,
 		TypeDbTrino:         8080,
+		TypeDbAthena:        443,
 		TypeDbClickhouse:    9000,
 		TypeDbMongoDB:       27017,
 		TypeDbElasticsearch: 9200,
@@ -177,7 +180,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -212,10 +215,15 @@ func (t Type) IsUnknown() bool {
 	return t.Kind() == KindUnknown
 }
 
+// IsSQLServer returns true is sql server flavor
+func (t Type) IsSQLServer() bool {
+	return g.In(t, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH)
+}
+
 // NameLong return the type long name
 func (t Type) NameLong() string {
 	mapping := map[Type]string{
-		TypeApi:             "API - Generic",
+		TypeApi:             "API - Spec",
 		TypeFileLocal:       "FileSys - Local",
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
@@ -241,6 +249,7 @@ func (t Type) NameLong() string {
 		TypeDbSQLServer:     "DB - SQLServer",
 		TypeDbAzure:         "DB - Azure",
 		TypeDbTrino:         "DB - Trino",
+		TypeDbAthena:        "DB - Athena",
 		TypeDbClickhouse:    "DB - Clickhouse",
 		TypeDbPrometheus:    "DB - Prometheus",
 		TypeDbElasticsearch: "DB - Elasticsearch",
@@ -279,6 +288,7 @@ func (t Type) Name() string {
 		TypeDbMotherDuck:    "MotherDuck",
 		TypeDbSQLServer:     "SQLServer",
 		TypeDbTrino:         "Trino",
+		TypeDbAthena:        "Athena",
 		TypeDbClickhouse:    "Clickhouse",
 		TypeDbPrometheus:    "Prometheus",
 		TypeDbElasticsearch: "Elasticsearch",

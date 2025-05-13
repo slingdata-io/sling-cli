@@ -20,7 +20,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	setStage("3 - prepare-dataflow")
 
-	selectFieldsStr := "*"
+	selectFields := []string{"*"}
 	sTable, err := t.GetSourceTable()
 	if err != nil {
 		err = g.Error(err, "Could not parse source stream text")
@@ -38,7 +38,12 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	}
 
 	if len(cfg.Source.Select) > 0 {
-		fields := lo.Map(cfg.Source.Select, func(f string, i int) string {
+		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
+			// lookup column name
+			col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(f))
+			if col != nil {
+				return col.Name
+			}
 			return f
 		})
 
@@ -51,10 +56,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				return t.df, g.Error("All specified select columns must be excluded with prefix '-'. Cannot do partial exclude.")
 			}
 
-			q := database.GetQualifierQuote(srcConn.GetType())
 			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
 				for _, exField := range excluded {
-					exField = strings.ReplaceAll(strings.TrimPrefix(exField, "-"), q, "")
+					exField = srcConn.GetType().Unquote(strings.TrimPrefix(exField, "-"))
 					if strings.EqualFold(c.Name, exField) {
 						return false
 					}
@@ -65,10 +69,8 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			if len(includedCols) == 0 {
 				return t.df, g.Error("All available columns were excluded")
 			}
-			fields = iop.Columns(includedCols).Names()
+			selectFields = iop.Columns(includedCols).Names()
 		}
-
-		selectFieldsStr = strings.Join(fields, ", ")
 	}
 
 	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode {
@@ -141,9 +143,18 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				),
 				"core.incremental_select",
 			)
+
+			sFields := lo.Map(selectFields, func(sf string, i int) string {
+				col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(sf))
+				if col != nil {
+					return srcConn.GetType().Quote(col.Name) // apply quotes if match
+				}
+				return sf
+			})
+
 			sTable.SQL = g.R(
 				srcConn.GetTemplateValue(key),
-				"fields", selectFieldsStr,
+				"fields", strings.Join(sFields, ", "),
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
@@ -179,9 +190,15 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	sTable.SQL = g.R(sTable.SQL, "incremental_value", "null")     // if running non-incremental mode
 
 	// construct select statement for selected fields or where condition
-	if selectFieldsStr != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
+	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
+		if sTable.SQL != "" {
+			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
+			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.
+			selectFields = []string{"*"}
+		}
+
 		sTable.SQL = sTable.Select(database.SelectOptions{
-			Fields: strings.Split(selectFieldsStr, ", "),
+			Fields: selectFields,
 			Where:  cfg.Source.Where,
 			Limit:  cfg.Source.Limit(),
 			Offset: cfg.Source.Offset(),

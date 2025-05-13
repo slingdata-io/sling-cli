@@ -640,6 +640,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 	} else if err = conn.Connect(); err != nil {
 		return wildcards, g.Error(err, "could not connect to database for wildcard processing: %s", rd.Source)
 	}
+	defer conn.Close() // causes issues for duckdb, let's close
 
 	for _, pattern := range patterns {
 		wildcard := Wildcard{Pattern: pattern, TableMap: map[string]database.Table{}}

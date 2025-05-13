@@ -278,6 +278,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 			taskOptions["tgt_adjust_column_type"] = task.Config.Target.Options.AdjustColumnType
 			taskOptions["tgt_column_casing"] = task.Config.Target.Options.ColumnCasing
 
+			taskMap["exec_id"] = task.ExecID
 			taskMap["md5"] = task.Config.MD5()
 			taskMap["type"] = task.Type
 			taskMap["mode"] = task.Config.Mode
@@ -388,6 +389,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 
 	// set log sink
 	env.LogSink = func(ll *g.LogLine) {
+		ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
 		task.AppendOutput(ll)
 	}
 

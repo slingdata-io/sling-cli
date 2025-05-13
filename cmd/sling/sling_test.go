@@ -271,7 +271,13 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		}
 		if conn.adjustCol != nil {
 			targetOptions["adjust_column_type"] = *conn.adjustCol
-			sourceOptions["columns"] = g.M("code", "decimal")
+			if cm, _ := sourceOptions["columns"].(map[string]any); cm != nil {
+				cm["code"] = "decimal"
+			} else if cm, _ := sourceOptions["columns"].(map[string]string); cm != nil {
+				cm["code"] = "decimal"
+			} else {
+				sourceOptions["columns"] = g.M("code", "decimal")
+			}
 		}
 
 		streamName := strings.TrimSpace(cast.ToString(rec["source_stream"]))
@@ -816,8 +822,12 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 func TestSuiteDatabaseSQLServer(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbSQLServer)
-	if _, err := exec.LookPath("bcp"); err == nil {
+	_, err := exec.LookPath("bcp")
+	if err == nil {
 		testSuite(t, dbio.Type("sqlserver_bcp"))
+	} else {
+		g.Warn("BCP not found in PATH, failing")
+		t.Fail()
 	}
 }
 

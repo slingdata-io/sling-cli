@@ -3,9 +3,11 @@ package sling
 import (
 	"io"
 	"os"
+	"strings"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"gopkg.in/yaml.v2"
 )
 
@@ -13,12 +15,14 @@ type Pipeline struct {
 	Steps Hooks          `json:"steps" yaml:"steps"`
 	Env   map[string]any `json:"env,omitempty" yaml:"env,omitempty"`
 
-	state *PipelineState
-}
+	Output      strings.Builder `json:"-"`
+	OutputLines chan *g.LogLine `json:"-"`
+	CurrentStep map[string]any  `json:"-"`
+	MD5         string          `json:"-"`
+	FileName    string          `json:"-"`
 
-type PipelineSteps []PipelineStep
-
-type PipelineStep struct {
+	state  *PipelineState
+	execID string
 }
 
 func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) {
@@ -34,12 +38,17 @@ func LoadPipelineConfigFromFile(cfgPath string) (pipeline *Pipeline, err error) 
 		return
 	}
 
-	return LoadPipelineConfig(string(cfgBytes))
+	pipeline, err = LoadPipelineConfig(string(cfgBytes))
+	pipeline.FileName = cfgPath
+
+	return
 }
 
 func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 	pipeline = &Pipeline{
-		Env: map[string]any{},
+		Env:         map[string]any{},
+		OutputLines: make(chan *g.LogLine, 5000),
+		MD5:         g.MD5(content),
 	}
 
 	m := g.M()
@@ -98,6 +107,7 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 			state: state,
 			stage: HookStage(g.F("step-%02d", i+1)),
 			kind:  HookKindStep,
+			md5:   g.MD5(g.Marshal(stepRaw)),
 		}
 		step, err := ParseHook(stepRaw, opts)
 		if err != nil {
@@ -107,19 +117,44 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		}
 	}
 
+	pipeline.execID = os.Getenv("SLING_EXEC_ID")
+	if pipeline.execID == "" {
+		pipeline.execID = NewExecID()
+	}
+
 	return
 }
 
 func (pl *Pipeline) Execute() (err error) {
 	for _, step := range pl.Steps {
+
 		if !g.In(step.Type(), "log") {
+			pl.CurrentStep = step.PayloadMap()
+			defer StoreSet(pl)
+			StoreSet(pl)
 			g.Debug(`executing step "%s" (type: %s)`, step.ID(), step.Type())
+		}
+
+		// set log sink for new root level step
+		env.LogSink = func(ll *g.LogLine) {
+			ll.Group = g.F("%s,%s", pl.execID, step.ID())
+
+			// push line if not full
+			select {
+			case pl.OutputLines <- ll:
+			default:
+			}
+
+			// add new-line char
+			pl.Output.WriteString(ll.Line() + "\n")
 		}
 
 		stepErr := step.Execute()
 		_, err = step.ExecuteOnDone(stepErr)
+		pl.CurrentStep = step.PayloadMap()
 
 		if err != nil {
+			pl.CurrentStep["error"] = err.Error()
 			return g.Error(err, "error executing step")
 		}
 	}

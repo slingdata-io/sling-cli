@@ -261,6 +261,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		}
 	} else if strings.HasPrefix(URL, "redshift") {
 		conn = &RedshiftConn{URL: URL}
+	} else if strings.HasPrefix(URL, "athena") {
+		conn = &AthenaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "trino") {
 		conn = &TrinoConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
@@ -1284,6 +1286,8 @@ func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
 	data, err := conn.Self().Query(sql)
 	if err != nil {
 		return 0, err
+	} else if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
+		return 0, nil
 	}
 	return cast.ToUint64(data.Rows[0][0]), nil
 }
@@ -2294,6 +2298,35 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 		}
 
 		columns = orderedColumns
+	}
+
+	// if temporary, and SQL Server, set factor for nvarchar
+	if temporary && conn.GetType().IsSQLServer() {
+		// modify column typing to increase factor for temp table
+		// see https://github.com/slingdata-io/sling-cli/issues/554
+		origColTyping := conn.GetProp("column_typing")
+		defer func() {
+			conn.SetProp("column_typing", origColTyping) // set back after DDL generation
+		}()
+
+		var ct iop.ColumnTyping
+		if origColTyping != "" {
+			g.Unmarshal(origColTyping, &ct)
+		}
+
+		cts := ct.String
+		if cts == nil {
+			cts = &iop.StringColumnTyping{}
+		}
+		if cts.LengthFactor < 2 {
+			cts.LengthFactor = 2 // set to allow buffer for replacement
+			cts.MinLength = 50   // set to allow buffer for replacement
+			cts.Note = "for temporary table buffer"
+		}
+		ct.String = cts
+
+		// marshal for DDL generation
+		conn.SetProp("column_typing", g.Marshal(ct))
 	}
 
 	for _, col := range columns {
