@@ -1260,7 +1260,6 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 	}
 
 	var colMap map[int]int
-	var csvInconsistencyWarned bool
 	nextFunc := func(it *Iterator) bool {
 
 	processNext:
@@ -1278,7 +1277,6 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					it.ds.Context.CaptureErr(g.Error(err, "Error getting next reader"))
 					return false
 				}
-				csvInconsistencyWarned = false
 
 				// analyze header for subsequent CSVs, since c.getReader() injects header line if missing
 				row0, _ = r.Read()
@@ -1337,10 +1335,9 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 					// This would indicate a schema synchronization issue where colMap's target index
 					// is out of bounds for the current datastream schema size (len(it.ds.Columns)).
 					// This case should ideally not be hit if schema updates are perfectly synchronized.
-					if !csvInconsistencyWarned {
-						g.Warn("CSV Schema inconsistency at row #%d (%s): colMap index %d is out of bounds for current schema length %d for column '%s'. Here are all the columns detected: %s", it.Counter+1, ds.Metadata.StreamURL.Value, correctI, len(correctRow), it.ds.Columns.Names()[correctI], g.Marshal(it.ds.Columns.Names()))
-						csvInconsistencyWarned = true
-					}
+					err = g.Error("CSV Schema inconsistency at row #%d (%s): colMap index %d is out of bounds for current schema length %d for column '%s'. Here are all the columns detected: %s", it.Counter+1, ds.Metadata.StreamURL.Value, correctI, len(correctRow), it.ds.Columns.Names()[correctI], g.Marshal(it.ds.Columns.Names()))
+					it.ds.Context.CaptureErr(err)
+					return false
 				}
 			}
 			row = correctRow
