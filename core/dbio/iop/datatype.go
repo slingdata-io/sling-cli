@@ -563,6 +563,10 @@ func (cols Columns) Coerce(castCols Columns, hasHeader bool, casing ColumnCasing
 	newCols = newCols.ValidateNames(tgtType)
 
 	for i, col := range newCols {
+		if strings.HasPrefix(col.Description, "Sling.Metadata.") {
+			continue // do not modify metadata type
+		}
+
 		if !hasHeader && len(castCols) == len(newCols) {
 			// assume same order since same number of columns and no header
 			col = castCols[i]
