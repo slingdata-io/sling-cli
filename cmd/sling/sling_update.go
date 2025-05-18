@@ -154,7 +154,9 @@ func upgradeBrew() (err error) {
 }
 
 func upgradeScoop() (err error) {
-	g.Info("Sling was installed with scoop. Running `scoop update sling`")
+	g.Warn("Sling was installed with scoop. Try running `scoop update sling`")
+	return nil
+	// errors with "sling" is still running. Need to install manually
 
 	proc, err := process.NewProc("scoop")
 	if err != nil {
