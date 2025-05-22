@@ -210,7 +210,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 runReplication:
 	defer connection.CloseAll()
 
-	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	if !cast.ToBool(os.Getenv("SLING_THREAD_CHILD")) {
+		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	}
 
 	if pipelineCfgPath != "" {
 		err = runPipeline(pipelineCfgPath)
