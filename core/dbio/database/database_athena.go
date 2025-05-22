@@ -154,6 +154,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 	}
 
 	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	if !cast.ToBool(conn.GetProp("silent")) {
 		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))

@@ -176,6 +176,7 @@ func (conn *BigTableConn) Connect(timeOut ...int) error {
 	}
 
 	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	return nil
 }
