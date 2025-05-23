@@ -31,6 +31,7 @@ cmd/sling/tests/replications/r.test.yaml
 cmd/sling/tests/pipelines/p.test.yaml
 
 *..go
+*..md
 *__test.go
 
 appicon.png

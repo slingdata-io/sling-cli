@@ -26,8 +26,8 @@ import (
 	"github.com/spf13/cast"
 )
 
-//go:embed examples.sh
-var slingFolder embed.FS
+//go:embed resource/*
+var slingResources embed.FS
 var (
 	examples    = ``
 	ctx         = g.NewContext(context.Background())
@@ -405,7 +405,7 @@ func init() {
 	}
 
 	// collect examples
-	examplesBytes, _ := slingFolder.ReadFile("examples.sh")
+	examplesBytes, _ := slingResources.ReadFile("resource/examples.sh")
 	examples = string(examplesBytes)
 
 	cliConns.Make().Add()
