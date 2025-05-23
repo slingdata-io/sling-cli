@@ -34,11 +34,6 @@ var (
 	telemetry   = true
 	interrupted = false
 	machineID   = ""
-	telProps    = g.M(
-		"application", "sling-cli",
-		"version", core.Version,
-		"os", runtime.GOOS+"/"+runtime.GOARCH,
-	)
 )
 
 func init() {
@@ -433,7 +428,7 @@ func Track(event string, props ...map[string]interface{}) {
 		"user_id", machineID,
 	)
 
-	for k, v := range telProps {
+	for k, v := range core.TelProps {
 		properties[k] = v
 	}
 
