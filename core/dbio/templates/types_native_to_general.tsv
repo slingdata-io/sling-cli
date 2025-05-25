@@ -470,7 +470,7 @@ sqlite	varchar	text	col_varchar varchar	TRUE	TRUE
 sqlite	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 sqlite	integer	bigint	col_integer integer	TRUE	TRUE	
 sqlite	null	text	col_null null	TRUE	TRUE	
-sqlite	real	float	col_real real	TRUE	TRUE	
+sqlite	real	decimal	col_real real	TRUE	TRUE	
 sqlite	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 sqlite	decimal	decimal	col_decimal decimal	TRUE	TRUE	
 sqlite	int	integer	col_int int	TRUE	TRUE	
@@ -487,7 +487,7 @@ d1	varchar	text	col_varchar varchar	TRUE	TRUE
 d1	bigint	bigint	col_bigint bigint	TRUE	TRUE	
 d1	integer	bigint	col_integer integer	TRUE	TRUE	
 d1	null	text	col_null null	TRUE	TRUE	
-d1	real	float	col_real real	TRUE	TRUE	
+d1	real	decimal	col_real real	TRUE	TRUE	
 d1	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 d1	decimal	decimal	col_decimal decimal	TRUE	TRUE	
 d1	int	integer	col_int int	TRUE	TRUE	
