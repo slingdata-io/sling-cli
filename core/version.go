@@ -2,6 +2,7 @@ package core
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -11,6 +12,12 @@ import (
 
 // Version is the version number
 var Version = "dev"
+
+var TelProps = g.M(
+	"application", "sling-cli",
+	"version", Version,
+	"os", runtime.GOOS+"/"+runtime.GOARCH,
+)
 
 func init() {
 	// dev build version is in format => 1.2.2.dev/2024-08-20

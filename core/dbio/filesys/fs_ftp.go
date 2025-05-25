@@ -228,7 +228,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes FileNodes, err error) {
 
 		// replace double slash issue
 		node.URI = fs.cleanUpNodeURI(node.URI)
-		nodes.Add(node)
+		nodes.AddWhere(pattern, 0, node)
 	}
 
 	return

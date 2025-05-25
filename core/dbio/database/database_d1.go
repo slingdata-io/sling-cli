@@ -128,6 +128,7 @@ func (conn *D1Conn) Connect(timeOut ...int) (err error) {
 	}
 
 	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	return nil
 }

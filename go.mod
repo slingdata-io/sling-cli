@@ -24,7 +24,7 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
 	github.com/fatih/color v1.17.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.142
+	github.com/flarco/g v0.1.146
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/gobwas/glob v0.2.3
@@ -43,6 +43,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/maja42/goval v1.4.0
+	github.com/mark3labs/mcp-go v0.29.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/microsoft/go-mssqldb v1.8.0
 	github.com/nqd/flat v0.1.1
@@ -61,7 +62,7 @@ require (
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.10.0
-	github.com/spf13/cast v1.6.0
+	github.com/spf13/cast v1.7.1
 	github.com/stretchr/testify v1.10.0
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.19
 	github.com/trinodb/trino-go-client v0.318.0
@@ -247,6 +248,7 @@ require (
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect

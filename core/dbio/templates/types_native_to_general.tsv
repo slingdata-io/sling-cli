@@ -17,7 +17,7 @@ azuredwh	nchar	text	col_nchar nchar	TRUE	TRUE
 azuredwh	ntext	text	col_ntext ntext	TRUE	TRUE	
 azuredwh	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 azuredwh	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
-azuredwh	real	decimal	col_real real	TRUE	TRUE	
+azuredwh	real	float	col_real real	TRUE	TRUE	
 azuredwh	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
 azuredwh	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
 azuredwh	smallint	smallint	col_smallint smallint	TRUE	TRUE	
@@ -45,7 +45,7 @@ azuresql	nchar	text	col_nchar nchar	TRUE	TRUE
 azuresql	ntext	text	col_ntext ntext	TRUE	TRUE	
 azuresql	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 azuresql	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
-azuresql	real	decimal	col_real real	TRUE	TRUE	
+azuresql	real	float	col_real real	TRUE	TRUE	
 azuresql	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
 azuresql	smallint	smallint	col_smallint smallint	TRUE	TRUE	
 azuresql	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
@@ -325,7 +325,7 @@ postgres	path	string	col_path path	FALSE	FALSE	geometric path on a plane
 postgres	pg_lsn	bigint	col_pg_lsn pg_lsn	FALSE	FALSE	PostgreSQL Log Sequence Number
 postgres	point	string	col_point point	FALSE	FALSE	geometric point on a plane
 postgres	polygon	string	col_polygon polygon	FALSE	FALSE	closed geometric path on a plane
-postgres	real	decimal	col_real real	TRUE	TRUE	single precision floating-point number (4 bytes)
+postgres	real	float	col_real real	TRUE	TRUE	single precision floating-point number (4 bytes)
 postgres	serial	integer	col_serial serial	TRUE	TRUE	autoincrementing four-byte integer
 postgres	serial2	smallint	col_serial2 serial2	TRUE	TRUE	autoincrementing two-byte integer
 postgres	serial4	integer	col_serial4 serial4	TRUE	TRUE	autoincrementing four-byte integer
@@ -517,7 +517,7 @@ sqlserver	nchar	text	col_nchar nchar(17)	TRUE	TRUE
 sqlserver	ntext	text	col_ntext ntext	TRUE	TRUE	
 sqlserver	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 sqlserver	nvarchar	text	col_nvarchar nvarchar(100)	TRUE	TRUE	
-sqlserver	real	decimal	col_real real	TRUE	TRUE	
+sqlserver	real	float	col_real real	TRUE	TRUE	
 sqlserver	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
 sqlserver	smallint	smallint	col_smallint smallint	TRUE	TRUE	
 sqlserver	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	

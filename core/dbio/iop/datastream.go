@@ -1325,7 +1325,20 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 			// remake row in proper order. row has new structure
 			correctRow := make([]string, len(it.ds.Columns))
 			for incorrectI, correctI := range colMap {
-				correctRow[correctI] = row[incorrectI]
+				// Ensure the target index correctI is valid for correctRow (current schema length)
+				if correctI < len(correctRow) {
+					// Ensure the source index incorrectI is valid for the current data row's length
+					if incorrectI < len(row) {
+						correctRow[correctI] = row[incorrectI]
+					}
+				} else {
+					// This would indicate a schema synchronization issue where colMap's target index
+					// is out of bounds for the current datastream schema size (len(it.ds.Columns)).
+					// This case should ideally not be hit if schema updates are perfectly synchronized.
+					err = g.Error("CSV Schema inconsistency at row #%d (%s): colMap index %d is out of bounds for current schema length %d for column '%s'. Here are all the columns detected: %s", it.Counter+1, ds.Metadata.StreamURL.Value, correctI, len(correctRow), it.ds.Columns.Names()[correctI], g.Marshal(it.ds.Columns.Names()))
+					it.ds.Context.CaptureErr(err)
+					return false
+				}
 			}
 			row = correctRow
 		}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -208,7 +210,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 runReplication:
 	defer connection.CloseAll()
 
-	g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	if !cast.ToBool(os.Getenv("SLING_THREAD_CHILD")) {
+		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	}
 
 	if pipelineCfgPath != "" {
 		err = runPipeline(pipelineCfgPath)
@@ -568,6 +572,8 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 }
 
 func runPipeline(pipelineCfgPath string) (err error) {
+	g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
+
 	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath)
 	if err != nil {
 		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)

@@ -125,6 +125,7 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 
 	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	if conn.GetType() == dbio.TypeDbMotherDuck {
 		_, err = conn.Exec("SET autoinstall_known_extensions=1; SET autoload_known_extensions=1;" + noDebugKey)

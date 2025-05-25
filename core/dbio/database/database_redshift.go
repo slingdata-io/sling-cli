@@ -295,6 +295,17 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	}
 	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
+	// Close and re-establish connection to Redshift to avoid timeout
+	connectTime := cast.ToTime(conn.GetProp("connect_time"))
+	if time.Since(connectTime) > 10*time.Minute {
+		g.Debug("re-establishing redshift connection before COPY command")
+		conn.Close()
+		err = conn.Connect()
+		if err != nil {
+			return df.Count(), g.Error(err, "error reconnecting to redshift before COPY command")
+		}
+	}
+
 	_, err = conn.CopyFromS3(tableFName, s3Path, df.Columns)
 	if err != nil {
 		return df.Count(), g.Error(err, "error copying into redshift from s3")
