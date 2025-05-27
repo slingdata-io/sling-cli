@@ -774,6 +774,13 @@ func (c *Connection) setURL() (err error) {
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbAthena:
+		// use dbt inputs
+		{
+			setIfMissing("region", c.Data["region_name"])
+			setIfMissing("profile", c.Data["aws_profile_name"])
+			setIfMissing("workgroup", c.Data["work_group"])
+		}
+
 		setIfMissing("access_key_id", c.Data["user"])
 		setIfMissing("secret_access_key", nil)
 		setIfMissing("profile", nil)
