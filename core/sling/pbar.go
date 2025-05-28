@@ -8,11 +8,12 @@ import (
 	"github.com/flarco/g"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	pb "gopkg.in/cheggaaa/pb.v2"
 )
 
-var ShowProgress = true
+var ShowProgress = env.IsInteractiveTerminal()
 
 type ProgressBar struct {
 	bar      *pb.ProgressBar

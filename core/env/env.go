@@ -12,6 +12,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
+	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -79,6 +80,11 @@ func init() {
 
 func HomeBinDir() string {
 	return path.Join(HomeDir, "bin")
+}
+
+// IsInteractiveTerminal checks if the current process is running in an interactive terminal
+func IsInteractiveTerminal() bool {
+	return isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())
 }
 
 func SetTelVal(key string, value any) {

@@ -475,7 +475,9 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 	signal.Notify(kill, syscall.SIGTERM)
 
-	sling.ShowProgress = os.Getenv("SLING_SHOW_PROGRESS") != "false"
+	if val := os.Getenv("SLING_SHOW_PROGRESS"); val != "" {
+		sling.ShowProgress = cast.ToBool(os.Getenv("SLING_SHOW_PROGRESS"))
+	}
 	database.UseBulkExportFlowCSV = cast.ToBool(os.Getenv("SLING_BULK_EXPORT_FLOW_CSV"))
 
 	exit := func() {
