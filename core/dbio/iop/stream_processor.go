@@ -925,7 +925,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sVal = cast.ToString(val)
 			sp.rowChecksum[i] = uint64(len(sVal))
 			nVal = sVal
-		} else if dVal.IsZero() || g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
+		} else if g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
 			nVal = nil
 			cs.NullCnt++
 			sp.rowBlankValCnt++
@@ -1013,15 +1013,15 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)
 	case typ.IsDate():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
+		tVal, err := sp.CastToTime(val)
+		if err != nil {
+			return cast.ToString(val)
 		}
 		return tVal.Format("2006-01-02")
 	case typ.IsDatetime():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
+		tVal, err := sp.CastToTime(val)
+		if err != nil {
+			return cast.ToString(val)
 		} else if sp.Config.DatetimeFormat != "" && strings.ToLower(sp.Config.DatetimeFormat) != "auto" {
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
@@ -1037,48 +1037,6 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return sp.bytesToHexEscape([]byte(strVal))
 		}
 		return strVal
-	}
-}
-
-// CastToStringSafe to string (safer)
-func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...ColumnType) string {
-	typ := ColumnType("")
-	switch v := val.(type) {
-	case time.Time:
-		typ = DatetimeType
-	default:
-		_ = v
-	}
-
-	if len(valType) > 0 {
-		typ = valType[0]
-	}
-
-	switch {
-	case val == nil:
-		return ""
-	case sp.Config.BoolAsInt && typ.IsBool():
-		switch cast.ToString(val) {
-		case "true", "1", "TRUE":
-			return "1"
-		}
-		return "0"
-	case typ.IsDecimal() || typ.IsFloat():
-		return cast.ToString(val)
-	case typ.IsDate():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
-		}
-		return tVal.UTC().Format("2006-01-02")
-	case typ.IsDatetime():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
-		}
-		return tVal.UTC().Format("2006-01-02 15:04:05.999999") + " +00"
-	default:
-		return cast.ToString(val)
 	}
 }
 
@@ -1155,8 +1113,6 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
 			nVal = val // keep string
-		} else if dVal.IsZero() {
-			nVal = nil
 		} else {
 			nVal = dVal
 		}
