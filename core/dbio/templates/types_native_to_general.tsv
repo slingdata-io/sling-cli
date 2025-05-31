@@ -155,7 +155,7 @@ duckdb	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE
 duckdb	interval	string	col_interval interval	TRUE	TRUE	
 mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 mariadb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
-mariadb	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
+mariadb	bit	binary	col_bit bit	FALSE	FALSE	A bit field
 mariadb	blob	text	col_blob blob	TRUE	TRUE	A small BLOB
 mariadb	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
 mariadb	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
@@ -227,7 +227,7 @@ motherduck	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE
 motherduck	interval	string	col_interval interval	TRUE	TRUE	
 mysql	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 mysql	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
-mysql	bit	smallint	col_bit bit	FALSE	FALSE	A bit field
+mysql	bit	binary	col_bit bit	FALSE	FALSE	A bit field
 mysql	blob	text	col_blob blob	TRUE	TRUE	A small BLOB
 mysql	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
 mysql	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format

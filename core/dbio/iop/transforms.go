@@ -44,6 +44,8 @@ func init() {
 		TransformHashSha256,
 		TransformHashSha512,
 		TransformParseBit,
+		TransformBinaryToDecimal,
+		TransformBinaryToHex,
 		TransformParseFix,
 		TransformParseUuid,
 		TransformParseMsUuid,
@@ -247,6 +249,20 @@ var (
 		Name: "parse_bit",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ParseBit(sp, val)
+		},
+	}
+
+	TransformBinaryToDecimal = Transform{
+		Name: "binary_to_decimal",
+		FuncString: func(sp *StreamProcessor, val string) (string, error) {
+			return Transforms.BinaryToDecimal(sp, val)
+		},
+	}
+
+	TransformBinaryToHex = Transform{
+		Name: "binary_to_hex",
+		FuncString: func(sp *StreamProcessor, val string) (string, error) {
+			return Transforms.BinaryToHex(val), nil
 		},
 	}
 
@@ -492,6 +508,51 @@ func (t transformsNS) ParseBit(sp *StreamProcessor, val string) (string, error) 
 		return fmt.Sprintf("%b", []uint8(val)[0]), nil
 	}
 	return val, nil
+}
+
+func (t transformsNS) BinaryToDecimal(sp *StreamProcessor, val string) (string, error) {
+	// Handle MySQL BIT type which can be 1 to 64 bits (1 to 8 bytes)
+	// Convert binary data to decimal representation for better compatibility
+	if len(val) > 0 && len(val) <= 8 {
+		// Check if it's binary data (all bytes are either printable or control chars)
+		isBinary := true
+		for _, b := range []byte(val) {
+			// If we have high bit values or control characters, treat as binary
+			if b > 127 || (b < 32 && b != 9 && b != 10 && b != 13) {
+				isBinary = true
+				break
+			}
+			// If we have regular ASCII text, don't treat as binary
+			if b >= 32 && b <= 126 {
+				isBinary = false
+			}
+		}
+
+		if isBinary {
+			// Convert binary data to uint64 (big-endian)
+			var result uint64
+			for i, b := range []byte(val) {
+				result |= uint64(b) << (8 * (len(val) - 1 - i))
+			}
+			return fmt.Sprintf("%d", result), nil
+		}
+	}
+	return val, nil
+}
+
+func (t transformsNS) BinaryToHex(val string) string {
+	// Convert binary data to hexadecimal representation for Snowflake COPY
+	if len(val) == 0 {
+		return ""
+	}
+
+	// Convert each byte to hex and concatenate
+	hexStr := ""
+	for _, b := range []byte(val) {
+		hexStr += fmt.Sprintf("%02X", b)
+	}
+
+	return hexStr
 }
 
 func (t transformsNS) Replace0x00(sp *StreamProcessor, val string) (string, error) {

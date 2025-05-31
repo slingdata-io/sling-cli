@@ -136,17 +136,8 @@ func (cfg *Config) SetDefault() {
 		}
 	}
 
-	// set default transforms
-	switch cfg.SrcConn.Type {
-	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
-		// parse_bit for MySQL
-		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
-	}
-
 	// set default metadata
 	switch {
-	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}

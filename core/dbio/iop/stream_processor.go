@@ -1028,6 +1028,8 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"
 		}
 		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
+	case typ.IsBinary() && g.In(sp.Config.TargetType, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery):
+		return Transforms.BinaryToHex(cast.ToString(val))
 	default:
 		strVal := cast.ToString(val)
 		if !utf8.ValidString(strVal) {
