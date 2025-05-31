@@ -467,6 +467,12 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 	}
 
+	// load SLING_TIMEOUT if specified in replication env
+	timeoutR := replication.Env["SLING_TIMEOUT"]
+	timeoutE := os.Getenv("SLING_TIMEOUT")
+
+	setTimeout(cast.ToString(timeoutR), timeoutE)
+
 	err = replication.Compile(cfgOverwrite, selectStreams...)
 	if err != nil {
 		return g.Error(err, "Error compiling replication config")
@@ -578,6 +584,12 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	if err != nil {
 		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)
 	}
+
+	// load SLING_TIMEOUT if specified in pipeline env
+	timeoutR := pipeline.Env["SLING_TIMEOUT"]
+	timeoutE := os.Getenv("SLING_TIMEOUT")
+
+	setTimeout(cast.ToString(timeoutR), timeoutE)
 
 	// set function here due to scoping
 	sling.HookRunReplication = runReplication
@@ -697,6 +709,7 @@ func setTimeout(values ...string) {
 		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
 
 		// set deadline for status setting later
+		g.Debug("setting timeout for %s minutes", timeout)
 		deadline := time.Now().Add(duration)
 		ctx.Map.Set("timeout-deadline", deadline.Unix())
 		break
