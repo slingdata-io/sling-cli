@@ -969,18 +969,21 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	// add new
 	for _, col := range columns {
 		key := strings.ToLower(col.Name)
-		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH) {
+		vals := colTransforms[key]
+		switch conn.Type {
+		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH:
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
-
-				if vals, ok := colTransforms[key]; ok {
-					// only add transform parse_ms_uuid if parse_uuid is not specified
-					if !lo.Contains(vals, "parse_uuid") {
-						g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
-						colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
-					}
-				} else {
-					g.Debug(`setting transform "parse_ms_uuid" for column %s`, col.Name)
-					colTransforms[key] = []string{"parse_ms_uuid"}
+				if !lo.Contains(vals, "parse_uuid") {
+					g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
+					colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
+				}
+			}
+		case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
+			if strings.ToLower(col.DbType) == "bit" {
+				// only add transform parse_bit if binary_to_hex or binary_to_decimal is not specified
+				if !lo.Contains(vals, "binary_to_hex") && !lo.Contains(vals, "binary_to_decimal") {
+					g.Debug(`setting transform "parse_bit" for column "%s"`, col.Name)
+					colTransforms[key] = append([]string{"parse_bit"}, vals...)
 				}
 			}
 		}
