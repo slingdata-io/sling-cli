@@ -234,9 +234,9 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
 		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
-			sql += fmt.Sprintf("; LOAD %s;", extension)
+			sql += fmt.Sprintf("LOAD %s;", extension)
 		} else {
-			sql += fmt.Sprintf(";INSTALL %s; LOAD %s;", extension, extension)
+			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, extension)
 		}
 	}
 	return
@@ -394,8 +394,8 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	// submit sql to stdin
 	sqlLines := []string{
-		extensionsSQL + ";",
-		secretSQL + ";",
+		strings.Trim(extensionsSQL, ";") + ";",
+		strings.Trim(secretSQL, ";") + ";",
 		// preserve_insertion_order=false reduces the memory load.
 		// See https://www.reddit.com/r/DuckDB/comments/1jnw1ed/got_outofmemory_while_etl_30gb_parquet_files_on_s3/
 		"set preserve_insertion_order = false;",

@@ -59,7 +59,9 @@ func testDeltaReader(t *testing.T, d *DeltaReader) {
 
 	// Test Columns method
 	columns, err := d.Columns()
-	assert.NoError(t, err)
+	if !assert.NoError(t, err) {
+		return
+	}
 	assert.NotEmpty(t, columns)
 
 	// Check if columns are correctly parsed
