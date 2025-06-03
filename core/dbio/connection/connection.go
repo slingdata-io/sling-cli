@@ -773,6 +773,10 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
+	case dbio.TypeDbIceberg:
+		setIfMissing("rest_uri", c.Data["rest_uri"])
+		setIfMissing("catalog_type", c.Data["catalog_type"])
+		setIfMissing("token", c.Data["token"])
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{
