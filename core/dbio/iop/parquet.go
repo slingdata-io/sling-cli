@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	arrowParquet "github.com/apache/arrow/go/v16/parquet"
+	arrowParquet "github.com/apache/arrow-go/v18/parquet"
 	"github.com/flarco/g"
 	"github.com/google/uuid"
 	"github.com/samber/lo"

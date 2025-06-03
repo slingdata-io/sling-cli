@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
+	arrowCompress "github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/json"

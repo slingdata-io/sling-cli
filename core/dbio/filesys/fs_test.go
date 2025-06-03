@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	arrowParquet "github.com/apache/arrow/go/v16/parquet"
-	"github.com/apache/arrow/go/v16/parquet/compress"
+	arrowParquet "github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/clbanning/mxj/v2"
 	"github.com/flarco/g/net"
 	"github.com/linkedin/goavro/v2"
