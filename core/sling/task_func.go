@@ -57,7 +57,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table, temp bool) (created bool, err error) {
 
 	// check table existence
-	exists, err := database.TableExists(conn, table.FullName())
+	exists, err := conn.TableExists(*table)
 	if err != nil {
 		return false, g.Error(err, "Error checking table "+table.FullName())
 	} else if exists {

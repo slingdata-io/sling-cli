@@ -153,8 +153,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	} else if df.Columns[0].Name == "_sling_api_stream_no_data_" {
 		df.Collect()
 
+		table, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+		if err != nil {
+			return 0, g.Error(err, "Could not parse table name: "+cfg.Target.Object)
+		}
+
 		// check table existence
-		exists, _ := database.TableExists(tgtConn, cfg.Target.Object)
+		exists, _ := tgtConn.TableExists(table)
 		if exists {
 			if cfg.Mode == IncrementalMode {
 				g.Info("no new data or records found in source api stream.")

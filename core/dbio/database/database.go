@@ -133,6 +133,7 @@ type Connection interface {
 	StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error)
 	SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
 	SwapTable(srcTable string, tgtTable string) (err error)
+	TableExists(table Table) (exists bool, err error)
 	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
@@ -1506,19 +1507,14 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 }
 
 // TableExists returns true if the table exists
-func TableExists(conn Connection, tableFName string) (exists bool, err error) {
-
-	table, err := ParseTableName(tableFName, conn.GetType())
-	if err != nil {
-		return false, g.Error(err, "could not parse table name: "+tableFName)
-	}
+func (conn *BaseConn) TableExists(table Table) (exists bool, err error) {
 
 	colData, err := conn.SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return false, g.Error(err, "could not check table existence: "+tableFName)
+		return false, g.Error(err, "could not check table existence: "+table.FullName())
 	}
 
 	if len(colData.Rows) > 0 {
@@ -1732,17 +1728,17 @@ func (conn *BaseConn) CreateTemporaryTable(tableName string, cols iop.Columns) (
 // `tableName` should have 'schema.table' format
 func (conn *BaseConn) CreateTable(tableName string, cols iop.Columns, tableDDL string) (err error) {
 
+	table, err := ParseTableName(tableName, conn.Type)
+	if err != nil {
+		return g.Error(err, "Could not parse table name: "+tableName)
+	}
+
 	// check table existence
-	exists, err := TableExists(conn, tableName)
+	exists, err := conn.TableExists(table)
 	if err != nil {
 		return g.Error(err, "Error checking table "+tableName)
 	} else if exists {
 		return nil
-	}
-
-	table, err := ParseTableName(tableName, conn.Type)
-	if err != nil {
-		return g.Error(err, "Could not parse table name: "+tableName)
 	}
 
 	// generate ddl
