@@ -298,6 +298,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &SQLiteConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
 		conn = &DuckDbConn{URL: URL}
+	} else if strings.HasPrefix(URL, "iceberg:") {
+		conn = &IcebergConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}

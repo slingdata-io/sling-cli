@@ -776,7 +776,9 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeDbIceberg:
 		setIfMissing("rest_uri", c.Data["rest_uri"])
 		setIfMissing("catalog_type", c.Data["catalog_type"])
+		setIfMissing("credential", c.Data["credential"])
 		setIfMissing("token", c.Data["token"])
+		setIfMissing("warehouse", c.Data["warehouse"])
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{
