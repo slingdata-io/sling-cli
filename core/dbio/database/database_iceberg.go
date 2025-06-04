@@ -3,7 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"database/sql/driver"
 	"strings"
 	"time"
 
@@ -27,8 +27,9 @@ import (
 // IcebergConn is an Iceberg connection
 type IcebergConn struct {
 	BaseConn
-	URL     string
-	Catalog catalog.Catalog
+	URL       string
+	Warehouse string
+	Catalog   catalog.Catalog
 }
 
 // Init initiates the object
@@ -103,8 +104,9 @@ func (conn *IcebergConn) connectREST() error {
 	}
 
 	// Add warehouse location if provided
-	if warehouse := conn.GetProp("warehouse"); warehouse != "" {
-		opts = append(opts, rest.WithWarehouseLocation(warehouse))
+	conn.Warehouse = conn.GetProp("warehouse")
+	if conn.Warehouse != "" {
+		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
 	}
 
 	// Add credential if provided
@@ -119,6 +121,9 @@ func (conn *IcebergConn) connectREST() error {
 		opts...,
 	)
 	if err != nil {
+		if strings.TrimSpace(err.Error()) == ":" {
+			return g.Error("Failed to create REST catalog, check URI and credentials")
+		}
 		return g.Error(err, "Failed to create REST catalog")
 	}
 
@@ -265,7 +270,7 @@ func (conn *IcebergConn) getTablesOrViews(schema string, includeViews bool) (dat
 		return data, g.Error(err, "Could not reconnect")
 	}
 
-	data = iop.NewDataset(iop.NewColumnsFromFields("table_name", "is_view"))
+	data = iop.NewDataset(iop.NewColumnsFromFields("schema_name", "table_name", "is_view"))
 
 	// Parse namespace from schema string
 	var namespace table.Identifier
@@ -282,8 +287,9 @@ func (conn *IcebergConn) getTablesOrViews(schema string, includeViews bool) (dat
 			return data, g.Error(err, "Failed to list tables")
 		}
 		// Get table name (last part of identifier)
+		schemaName := tblID[len(tblID)-2]
 		tableName := tblID[len(tblID)-1]
-		data.Rows = append(data.Rows, []any{tableName, false})
+		data.Rows = append(data.Rows, []any{schemaName, tableName, false})
 	}
 
 	return data, nil
@@ -315,7 +321,7 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 		col := iop.Column{
 			Name:     field.Name,
 			Position: i + 1,
-			Type:     icebergTypeToIopType(field.Type),
+			Type:     iop.NativeTypeToGeneral(field.Name, field.Type.String(), dbio.TypeDbIceberg),
 			DbType:   field.Type.String(),
 			Sourced:  true,
 		}
@@ -384,7 +390,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 			col := iop.Column{
 				Name:     field.Name,
 				Position: i + 1,
-				Type:     icebergTypeToIopType(field.Type),
+				Type:     iop.NativeTypeToGeneral(field.Name, field.Type.String(), dbio.TypeDbIceberg),
 				DbType:   field.Type.String(),
 				Sourced:  true,
 				Table:    tableName,
@@ -459,7 +465,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 			it.Row = make([]interface{}, currentRecord.NumCols())
 			for colIdx := 0; colIdx < int(currentRecord.NumCols()); colIdx++ {
 				col := currentRecord.Column(colIdx)
-				it.Row[colIdx] = getArrowValue(col, currentRowIdx)
+				it.Row[colIdx] = iop.GetValueFromArrowArray(col, currentRowIdx)
 			}
 
 			currentRowIdx++
@@ -485,18 +491,108 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	return ds, nil
 }
 
+type icebergResult struct {
+	TotalRows uint64
+	res       driver.Result
+}
+
+func (r icebergResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r icebergResult) RowsAffected() (int64, error) {
+	return cast.ToInt64(r.TotalRows), nil
+}
+
 // ExecContext executes a write operation
 func (conn *IcebergConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+	switch {
+	case strings.HasPrefix(sql, "create schema "):
+		schema := strings.TrimPrefix(sql, "create schema ")
+		return icebergResult{}, conn.CreateNamespaceIfNotExists(schema)
+	case strings.HasPrefix(sql, "drop table "):
+		table := strings.TrimPrefix(sql, "drop table ")
+		return icebergResult{}, conn.DropTable(table)
+	case strings.Contains(sql, `"ddl_columns":`) && strings.Contains(sql, `"table":`):
+		m, _ := g.UnmarshalMap(sql)
+		var table Table
+		var columns iop.Columns
+		if err = g.JSONConvert(m["ddl_columns"], &columns); err != nil {
+			return nil, g.Error(err, "could not convert ddl_columns")
+		}
+		if err = g.JSONConvert(m["table"], &table); err != nil {
+			return nil, g.Error(err, "could not convert table for ")
+		}
+
+		if err = conn.CreateTable(table.FullName(), columns, ""); err != nil {
+			return nil, g.Error(err, "could not create table")
+		}
+
+		return icebergResult{}, nil
+	}
+
 	// Iceberg doesn't support SQL execution directly
 	// This would need to be implemented with table operations
 	return nil, g.Error("Iceberg does not support direct SQL execution. Use bulk import/export operations instead")
+}
+
+func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDDL string) (err error) {
+
+	t, err := ParseTableName(tableName, conn.Type)
+	if err != nil {
+		return g.Error(err, "could create parse %s", tableName)
+	}
+	tableID := table.Identifier{t.Schema, t.Name}
+
+	// First check if namespace exists (if schema is specified)
+	if t.Schema != "" {
+		if err := conn.CreateNamespaceIfNotExists(t.Schema); err != nil {
+			return g.Error(err, "could create namespace %s", t.Schema)
+		}
+	}
+
+	// Create Iceberg schema from datastream columns
+	icebergSchema, err := conn.generateIcebergSchema(cols)
+	if err != nil {
+		return g.Error(err, "Failed to create Iceberg schema")
+	}
+
+	// Create table options
+	createOpts := []catalog.CreateTableOpt{}
+
+	// Add table properties including format-version: 2
+	props := iceberg.Properties{
+		"format-version":       "2",
+		"write.format.default": "parquet",
+		"created-by":           "sling-cli",
+	}
+
+	// Add any additional properties from connection
+	if conn.Warehouse != "" {
+		props["location"] = conn.Warehouse + "/" + strings.Join(tableID, "/")
+	}
+
+	createOpts = append(createOpts, catalog.WithProperties(props))
+
+	// Create the table
+	_, err = conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
+	if err != nil {
+		return g.Error(err, "Failed to create table %s", tableName)
+	}
+
+	return nil
+}
+
+// GetCount returns -1 to skip validation
+func (conn *IcebergConn) GetCount(string) (int64, error) {
+	return -1, nil
 }
 
 // GenerateDDL generates a DDL based on a dataset
 func (conn *IcebergConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (sql string, err error) {
 	// Iceberg doesn't use traditional SQL DDL
 	// Table creation is done through the catalog API
-	return "", g.Error("DDL generation not supported for Iceberg. Tables are created through catalog operations")
+	return g.Marshal(g.M("table", table, "ddl_columns", data.Columns)), nil
 }
 
 // CastColumnForSelect casts to the correct target column type
@@ -515,6 +611,64 @@ func (conn *IcebergConn) InsertStream(tableFName string, ds *iop.Datastream) (co
 	return conn.BulkImportStream(tableFName, ds)
 }
 
+func (conn *IcebergConn) TableExists(t Table) (exists bool, err error) {
+
+	identifier := table.Identifier{t.Schema, t.Name}
+	exists, err = conn.Catalog.CheckTableExists(conn.context.Ctx, identifier)
+	if err != nil {
+		return false, g.Error(err, "cannot check table existence: %s", t.FullName())
+	}
+
+	return
+}
+
+// DropTable drops given table.
+func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
+
+	for _, tableName := range tableNames {
+		t, err := ParseTableName(tableName, conn.Type)
+		if err != nil {
+			return g.Error(err, "cannot parse table name: %s", tableName)
+		}
+
+		exists, err := conn.TableExists(t)
+		if err != nil {
+			return g.Error(err, "cannot check table existence: %s", tableName)
+		}
+
+		identifier := table.Identifier{t.Schema, t.Name}
+		if exists {
+			err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
+			if err != nil {
+				return g.Error(err, "cannot drop table")
+			}
+			g.Debug("table %s dropped", tableName)
+		}
+	}
+
+	return nil
+}
+
+func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
+
+	namespace := table.Identifier{schema}
+	exists, nsErr := conn.Catalog.CheckNamespaceExists(conn.Context().Ctx, namespace)
+	if nsErr != nil {
+		// Some catalogs might not implement namespace checking, log and continue
+		g.Debug("could not check if namespace exists: %v", nsErr)
+	} else if !exists {
+		// Try to create the namespace
+		nsProps := iceberg.Properties{
+			"created-by": "sling-cli",
+		}
+		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nsProps); err != nil {
+			return g.Error(err, "could not create namespace %s", schema)
+		}
+	}
+
+	return nil
+}
+
 // BulkImportStream inserts a stream into a table using Arrow format.
 // This method converts the incoming datastream to Apache Arrow format and uses
 // the iceberg-go table.AppendTable API to write the data.
@@ -531,77 +685,13 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 
 	// Parse table identifier
 	tableID := table.Identifier{t.Schema, t.Name}
-
-	// Try to load the table
 	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
 	if err != nil {
-		// Table doesn't exist, try to create it
-		g.Debug("table %s does not exist, attempting to create it", tableFName)
-
-		// First check if namespace exists (if schema is specified)
-		if t.Schema != "" {
-			namespace := table.Identifier{t.Schema}
-			exists, nsErr := conn.Catalog.CheckNamespaceExists(conn.Context().Ctx, namespace)
-			if nsErr != nil {
-				// Some catalogs might not implement namespace checking, log and continue
-				g.Debug("could not check if namespace exists: %v", nsErr)
-			} else if !exists {
-				// Try to create the namespace
-				nsProps := iceberg.Properties{
-					"created-by": "sling-cli",
-				}
-				if err := conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nsProps); err != nil {
-					g.Warn("could not create namespace %s: %v", t.Schema, err)
-					// Continue anyway, as some catalogs might handle this automatically
-				} else {
-					g.Debug("created namespace: %s", t.Schema)
-				}
-			}
-		}
-
-		// Create Iceberg schema from datastream columns
-		icebergSchema, err := conn.createIcebergSchema(ds.Columns)
-		if err != nil {
-			return 0, g.Error(err, "Failed to create Iceberg schema")
-		}
-
-		// Create table options
-		createOpts := []catalog.CreateTableOpt{}
-
-		// Add table properties including format-version: 2
-		props := iceberg.Properties{
-			"format-version":       "2",
-			"write.format.default": "parquet",
-			"created-by":           "sling-cli",
-		}
-
-		// Add any additional properties from connection
-		if warehouse := conn.GetProp("warehouse"); warehouse != "" {
-			props["location"] = warehouse + "/" + strings.Join(tableID, "/")
-		}
-
-		createOpts = append(createOpts, catalog.WithProperties(props))
-
-		// Create the table
-		tbl, err = conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
-		if err != nil {
-			return 0, g.Error(err, "Failed to create table %s", tableFName)
-		}
-
-		g.Debug("successfully created Iceberg table %s", tableFName)
+		return 0, g.Error(err, "could not load existing table: %s", tableFName)
 	}
 
 	// Create Arrow schema from datastream columns
-	arrowFields := make([]arrow.Field, len(ds.Columns))
-	for i, col := range ds.Columns {
-		dataType := iopTypeToArrowType(col.Type)
-		arrowFields[i] = arrow.Field{
-			Name:     col.Name,
-			Type:     dataType,
-			Nullable: true,
-		}
-	}
-	arrowSchema := arrow.NewSchema(arrowFields, nil)
+	arrowSchema := iop.ColumnsToArrowSchema(ds.Columns)
 
 	// Create memory allocator
 	alloc := memory.NewGoAllocator()
@@ -626,7 +716,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			if i >= len(recordBuilder.Fields()) {
 				break
 			}
-			appendValueToBuilder(recordBuilder.Field(i), val)
+			iop.AppendToBuilder(recordBuilder.Field(i), &ds.Columns[i], val)
 		}
 
 		batchCount++
@@ -713,7 +803,7 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 	ctx := g.NewContext(conn.context.Ctx, 10)
 
 	// Use catalog name as database name
-	currDatabase := conn.GetProp("catalog_name")
+	currDatabase := conn.Warehouse
 	if currDatabase == "" {
 		currDatabase = "iceberg"
 	}
@@ -740,13 +830,9 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 			// Then get columns for each table
 			data.Columns = iop.NewColumnsFromFields("schema_name", "table_name", "column_name", "data_type", "position", "is_view")
 			for _, row := range tablesData.Rows {
-				tableName := cast.ToString(row[0])
-				fullTableName := schemaName
-				if fullTableName != "" {
-					fullTableName += "."
-				}
-				fullTableName += tableName
-
+				schemaName := cast.ToString(row[0])
+				tableName := cast.ToString(row[1])
+				fullTableName := schemaName + "." + tableName
 				columns, err := conn.GetColumns(fullTableName)
 				if err != nil {
 					g.Warn("Could not get columns for table %s: %v", fullTableName, err)
@@ -872,8 +958,8 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 	return schemata, nil
 }
 
-// createIcebergSchema creates an Iceberg schema from iop columns
-func (conn *IcebergConn) createIcebergSchema(columns iop.Columns) (*iceberg.Schema, error) {
+// generateIcebergSchema creates an Iceberg schema from iop columns
+func (conn *IcebergConn) generateIcebergSchema(columns iop.Columns) (*iceberg.Schema, error) {
 	fields := make([]iceberg.NestedField, len(columns))
 
 	for i, col := range columns {
@@ -918,7 +1004,8 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(iopType iop.ColumnType) i
 	case iop.DatetimeType, iop.TimestampType:
 		return iceberg.PrimitiveTypes.Timestamp
 	case iop.TimestampzType:
-		return iceberg.PrimitiveTypes.TimestampTz
+		// Iceberg TimestampTz doesn't work with Arrow, use regular Timestamp instead
+		return iceberg.PrimitiveTypes.Timestamp
 	case iop.TimeType:
 		return iceberg.PrimitiveTypes.Time
 	case iop.TimezType:
@@ -970,244 +1057,4 @@ func parseSimpleSelectSQL(sql string) (tableName string, err error) {
 	}
 
 	return parts[0], nil
-}
-
-func icebergTypeToIopType(icebergType iceberg.Type) iop.ColumnType {
-	switch icebergType.Type() {
-	case "boolean":
-		return iop.BoolType
-	case "int32", "int":
-		return iop.IntegerType
-	case "int64", "long":
-		return iop.BigIntType
-	case "float32", "float":
-		return iop.FloatType
-	case "float64", "double":
-		return iop.FloatType
-	case "decimal":
-		return iop.DecimalType
-	case "date":
-		return iop.DateType
-	case "timestamp", "timestamptz", "timestamp_ns", "timestamptz_ns":
-		return iop.TimestampType
-	case "time":
-		return iop.TimeType
-	case "string":
-		return iop.StringType
-	case "uuid":
-		return iop.UUIDType
-	case "binary", "fixed":
-		return iop.BinaryType
-	case "struct", "list", "map":
-		return iop.JsonType
-	default:
-		return iop.StringType
-	}
-}
-
-func getArrowValue(col arrow.Array, rowIdx int) interface{} {
-	if col.IsNull(rowIdx) {
-		return nil
-	}
-
-	switch arr := col.(type) {
-	case *array.Boolean:
-		return arr.Value(rowIdx)
-	case *array.Int8:
-		return int64(arr.Value(rowIdx))
-	case *array.Int16:
-		return int64(arr.Value(rowIdx))
-	case *array.Int32:
-		return int64(arr.Value(rowIdx))
-	case *array.Int64:
-		return arr.Value(rowIdx)
-	case *array.Uint8:
-		return int64(arr.Value(rowIdx))
-	case *array.Uint16:
-		return int64(arr.Value(rowIdx))
-	case *array.Uint32:
-		return int64(arr.Value(rowIdx))
-	case *array.Uint64:
-		return int64(arr.Value(rowIdx))
-	case *array.Float32:
-		return float64(arr.Value(rowIdx))
-	case *array.Float64:
-		return arr.Value(rowIdx)
-	case *array.String:
-		return arr.Value(rowIdx)
-	case *array.Binary:
-		return arr.Value(rowIdx)
-	case *array.FixedSizeBinary:
-		return arr.Value(rowIdx)
-	case *array.Date32:
-		// Convert days since epoch to time.Time
-		days := arr.Value(rowIdx)
-		return time.Unix(int64(days)*86400, 0).UTC()
-	case *array.Date64:
-		// Convert milliseconds since epoch to time.Time
-		ms := arr.Value(rowIdx)
-		return time.Unix(int64(ms)/1000, (int64(ms)%1000)*1000000).UTC()
-	case *array.Timestamp:
-		// Get the timestamp value and convert based on unit
-		val := arr.Value(rowIdx)
-		dt := arr.DataType().(*arrow.TimestampType)
-		switch dt.Unit {
-		case arrow.Second:
-			return time.Unix(int64(val), 0).UTC()
-		case arrow.Millisecond:
-			return time.Unix(int64(val)/1000, (int64(val)%1000)*1000000).UTC()
-		case arrow.Microsecond:
-			return time.Unix(int64(val)/1000000, (int64(val)%1000000)*1000).UTC()
-		case arrow.Nanosecond:
-			return time.Unix(int64(val)/1000000000, int64(val)%1000000000).UTC()
-		}
-	default:
-		// For complex types, convert to string representation
-		return fmt.Sprintf("%v", col.ValueStr(rowIdx))
-	}
-
-	return nil
-}
-
-// iopTypeToArrowType converts iop column type to Arrow data type
-func iopTypeToArrowType(iopType iop.ColumnType) arrow.DataType {
-	switch iopType {
-	case iop.BoolType:
-		return arrow.FixedWidthTypes.Boolean
-	case iop.IntegerType, iop.SmallIntType:
-		return arrow.PrimitiveTypes.Int64
-	case iop.BigIntType:
-		return arrow.PrimitiveTypes.Int64
-	case iop.FloatType:
-		return arrow.PrimitiveTypes.Float64
-	case iop.DecimalType:
-		return arrow.PrimitiveTypes.Float64 // Simplified - could use decimal128
-	case iop.DateType:
-		return arrow.FixedWidthTypes.Date32
-	case iop.DatetimeType, iop.TimestampType, iop.TimestampzType:
-		return &arrow.TimestampType{Unit: arrow.Microsecond}
-	case iop.TimeType, iop.TimezType:
-		return &arrow.Time64Type{Unit: arrow.Microsecond}
-	case iop.StringType, iop.TextType:
-		return arrow.BinaryTypes.String
-	case iop.UUIDType:
-		return arrow.BinaryTypes.String
-	case iop.BinaryType:
-		return arrow.BinaryTypes.Binary
-	case iop.JsonType:
-		return arrow.BinaryTypes.String
-	default:
-		return arrow.BinaryTypes.String
-	}
-}
-
-// appendValueToBuilder appends a value to the appropriate Arrow array builder
-func appendValueToBuilder(builder array.Builder, val interface{}) {
-	if val == nil {
-		builder.AppendNull()
-		return
-	}
-
-	switch b := builder.(type) {
-	case *array.BooleanBuilder:
-		switch v := val.(type) {
-		case bool:
-			b.Append(v)
-		default:
-			b.Append(cast.ToBool(val))
-		}
-	case *array.Int64Builder:
-		switch v := val.(type) {
-		case int64:
-			b.Append(v)
-		case int:
-			b.Append(int64(v))
-		case int32:
-			b.Append(int64(v))
-		default:
-			b.Append(cast.ToInt64(val))
-		}
-	case *array.Float64Builder:
-		switch v := val.(type) {
-		case float64:
-			b.Append(v)
-		case float32:
-			b.Append(float64(v))
-		default:
-			b.Append(cast.ToFloat64(val))
-		}
-	case *array.StringBuilder:
-		switch v := val.(type) {
-		case string:
-			b.Append(v)
-		case []byte:
-			b.Append(string(v))
-		default:
-			b.Append(cast.ToString(val))
-		}
-	case *array.BinaryBuilder:
-		switch v := val.(type) {
-		case []byte:
-			b.Append(v)
-		case string:
-			b.Append([]byte(v))
-		default:
-			b.Append([]byte(cast.ToString(val)))
-		}
-	case *array.Date32Builder:
-		switch v := val.(type) {
-		case time.Time:
-			// Convert to days since epoch
-			days := int32(v.Unix() / 86400)
-			b.Append(arrow.Date32(days))
-		default:
-			// Try to parse as time
-			if t, err := cast.ToTimeE(val); err == nil {
-				days := int32(t.Unix() / 86400)
-				b.Append(arrow.Date32(days))
-			} else {
-				b.AppendNull()
-			}
-		}
-	case *array.TimestampBuilder:
-		switch v := val.(type) {
-		case time.Time:
-			// Convert to microseconds since epoch
-			micros := v.UnixNano() / 1000
-			b.Append(arrow.Timestamp(micros))
-		default:
-			// Try to parse as time
-			if t, err := cast.ToTimeE(val); err == nil {
-				micros := t.UnixNano() / 1000
-				b.Append(arrow.Timestamp(micros))
-			} else {
-				b.AppendNull()
-			}
-		}
-	case *array.Time64Builder:
-		switch v := val.(type) {
-		case time.Time:
-			// Convert to microseconds since midnight
-			micros := int64(v.Hour()*3600+v.Minute()*60+v.Second()) * 1000000
-			micros += int64(v.Nanosecond()) / 1000
-			b.Append(arrow.Time64(micros))
-		default:
-			// Try to parse as time
-			if t, err := cast.ToTimeE(val); err == nil {
-				secs := t.Hour()*3600 + t.Minute()*60 + t.Second()
-				micros := int64(secs) * 1000000
-				micros += int64(t.Nanosecond()) / 1000
-				b.Append(arrow.Time64(micros))
-			} else {
-				b.AppendNull()
-			}
-		}
-	default:
-		// For any other type, try to append as string
-		if sb, ok := builder.(*array.StringBuilder); ok {
-			sb.Append(cast.ToString(val))
-		} else {
-			builder.AppendNull()
-		}
-	}
 }

@@ -432,8 +432,8 @@ func (data *Dataset) InferColumnTypes() {
 	for i, column := range data.Columns {
 		column.Type = lo.Ternary(column.Type == "", StringType, column.Type)
 		column.Stats = ColumnStats{
-			Min:    math.MaxInt64,
-			Max:    math.MinInt64,
+			Min:    math.MaxInt64 - 1000,
+			Max:    math.MinInt64 + 1000,
 			MinLen: math.MaxInt32,
 		}
 		column.Position = i + 1

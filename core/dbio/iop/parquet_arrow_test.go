@@ -275,7 +275,7 @@ func TestNewParquetWriter(t *testing.T) {
 					if columnData.Len() > rowIdx {
 						// Extract value from column
 						chunk := columnData.Data().Chunk(0)
-						readRow[colIdx] = reader.getValueFromArray(chunk, rowIdx, reader.columns[colIdx])
+						readRow[colIdx] = GetValueFromArrowArray(chunk, rowIdx)
 					}
 				}
 

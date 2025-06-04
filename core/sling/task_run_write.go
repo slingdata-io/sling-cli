@@ -180,8 +180,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// write directly to the final table (no temp table)
-	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert {
+	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert || tgtConn.GetType() == dbio.TypeDbIceberg {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
+			if tgtConn.GetType() == dbio.TypeDbIceberg {
+				return 0, g.Error("mode '%s' not supported for iceberg target.", cfg.Mode)
+			}
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else {
 			return t.writeToDbDirectly(cfg, df, tgtConn)
@@ -302,8 +305,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		err = g.Error(err, "could not get count for temp table "+tableTmp.FullName())
 		return 0, err
-	} else {
-		if cnt != tCnt {
+	} else if tCnt >= 0 {
+		if cnt != cast.ToUint64(tCnt) {
 			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 			return 0, err
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
@@ -480,7 +483,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 			err = g.Error(err, "could not get count from final table %s", targetTable.FullName())
 			return 0, err
 		}
-		if cnt != tCnt {
+		if tCnt >= 0 && cnt != cast.ToUint64(tCnt) {
 			err = g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 			return 0, err
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {

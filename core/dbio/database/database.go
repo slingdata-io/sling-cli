@@ -88,7 +88,7 @@ type Connection interface {
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
 	GetColumnsFull(string) (iop.Dataset, error)
 	GetColumnStats(tableName string, fields ...string) (columns iop.Columns, err error)
-	GetCount(string) (uint64, error)
+	GetCount(string) (int64, error)
 	GetDatabases() (iop.Dataset, error)
 	GetDDL(string) (string, error)
 	GetGormConn(config *gorm.Config) (*gorm.DB, error)
@@ -1288,7 +1288,7 @@ func (conn *BaseConn) SubmitTemplate(level string, templateMap map[string]string
 }
 
 // GetCount returns count of records
-func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
+func (conn *BaseConn) GetCount(tableFName string) (int64, error) {
 	sql := fmt.Sprintf(`select count(*) cnt from %s`, tableFName)
 	data, err := conn.Self().Query(sql)
 	if err != nil {
@@ -1296,7 +1296,7 @@ func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
 	} else if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
 		return 0, nil
 	}
-	return cast.ToUint64(data.Rows[0][0]), nil
+	return cast.ToInt64(data.Rows[0][0]), nil
 }
 
 // GetSchemas returns schemas

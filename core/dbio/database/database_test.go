@@ -784,9 +784,9 @@ func tInsertStreamLarge(t *testing.T, conn Connection, data iop.Dataset, tableNa
 	g.Debug("inserted %d rows [%s r/s]", cnt, getRate(cnt))
 }
 
-func tSelectStreamLarge(t *testing.T, conn Connection, tableName string, dfMult int) (count uint64) {
+func tSelectStreamLarge(t *testing.T, conn Connection, tableName string, dfMult int) (count int64) {
 	start := time.Now()
-	getRate := func(cnt uint64) string {
+	getRate := func(cnt int64) string {
 		return humanize.Commaf(math.Round(cast.ToFloat64(cnt) / time.Since(start).Seconds()))
 	}
 	table, _ := ParseTableName(tableName, conn.GetType())
@@ -802,7 +802,7 @@ func tSelectStreamLarge(t *testing.T, conn Connection, tableName string, dfMult 
 		ds.SetEmpty()
 		g.AssertNoError(t, ds.Err())
 	}
-	count = df.Count()
+	count = cast.ToInt64(df.Count())
 	assert.True(t, df.IsEmpty())
 	df.Close()
 	g.Debug("selected %d rows [%s r/s]", count, getRate(count))

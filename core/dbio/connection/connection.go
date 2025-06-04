@@ -779,6 +779,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("credential", c.Data["credential"])
 		setIfMissing("token", c.Data["token"])
 		setIfMissing("warehouse", c.Data["warehouse"])
+		template = "iceberg://{warehouse}"
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{
