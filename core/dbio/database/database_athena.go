@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/dustin/go-humanize"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -25,7 +26,7 @@ import (
 // AthenaConn is an Athena connection
 type AthenaConn struct {
 	BaseConn
-	Client *athena.Athena
+	Client *athena.Client
 	URL    string
 }
 
@@ -47,7 +48,7 @@ func (conn *AthenaConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
-func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Athena, err error) {
+func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Client, err error) {
 	// Get AWS credentials from connection properties
 	awsAccessKeyID := conn.GetProp("access_key_id")
 	awsSecretAccessKey := conn.GetProp("secret_access_key")
@@ -59,65 +60,62 @@ func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Athena, err
 		return nil, g.Error("AWS region not specified")
 	}
 
-	// Create AWS config
-	config := &aws.Config{
-		Region: aws.String(awsRegion),
-	}
+	ctx := context.Background()
+	var cfg aws.Config
+
+	// Configure options based on authentication method
+	var configOptions []func(*awsconfig.LoadOptions) error
+
+	// Add region to config options
+	configOptions = append(configOptions, awsconfig.WithRegion(awsRegion))
 
 	// Set timeout if provided
 	if len(timeOut) > 0 && timeOut[0] > 0 {
-		config.HTTPClient = &http.Client{
+		httpClient := &http.Client{
 			Timeout: time.Duration(timeOut[0]) * time.Second,
 		}
+		configOptions = append(configOptions, awsconfig.WithHTTPClient(httpClient))
 	}
-
-	var sess *session.Session
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
 		g.Debug("Athena: Using static credentials (Key ID: %s)", awsAccessKeyID)
-		config.Credentials = credentials.NewStaticCredentials(
+		credProvider := credentials.NewStaticCredentialsProvider(
 			awsAccessKeyID,
 			awsSecretAccessKey,
 			awsSessionToken,
 		)
+		configOptions = append(configOptions, awsconfig.WithCredentialsProvider(credProvider))
 
-		// Create a new AWS session with static credentials
-		sess, err = session.NewSession(config)
+		// Load config with static credentials
+		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
 		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS session with static credentials")
+			return nil, g.Error(err, "Failed to create AWS config with static credentials")
 		}
 	} else if awsProfile != "" {
 		g.Debug("Athena: Using AWS profile=%s region=%s", awsProfile, awsRegion)
 
 		// Use specified profile from AWS credentials file
-		options := session.Options{
-			Config:            *config,
-			Profile:           awsProfile,
-			SharedConfigState: session.SharedConfigEnable,
-		}
+		configOptions = append(configOptions, awsconfig.WithSharedConfigProfile(awsProfile))
 
-		// Create a new AWS session with profile
-		sess, err = session.NewSessionWithOptions(options)
+		// Load config with profile
+		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
 		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS session with profile %s", awsProfile)
+			return nil, g.Error(err, "Failed to create AWS config with profile %s", awsProfile)
 		}
 	} else {
 		g.Debug("Athena: Using default AWS credential chain")
 		// Use default credential chain (env vars, IAM role, credential file, etc.)
-		options := session.Options{
-			Config:            *config,
-			SharedConfigState: session.SharedConfigEnable,
-		}
 
-		// Create a new AWS session with default credential chain
-		sess, err = session.NewSessionWithOptions(options)
+		// Load config with default credential chain
+		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
 		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS session with default credentials")
+			return nil, g.Error(err, "Failed to create AWS config with default credentials")
 		}
 	}
+
 	// Create and return a new Athena client
-	return athena.New(sess), nil
+	return athena.NewFromConfig(cfg), nil
 }
 
 // Connect connects to the database
@@ -132,7 +130,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// List available catalogs
-	// output, err := conn.Client.ListDataCatalogs(&athena.ListDataCatalogsInput{})
+	// output, err := conn.Client.ListDataCatalogs(context.Background(), &athena.ListDataCatalogsInput{})
 	// if err != nil {
 	// 	g.Warn("Could not list data catalogs: %v", err)
 	// } else {
@@ -142,7 +140,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 	// }
 
 	// Get workgroup info
-	wgOutput, err := conn.Client.GetWorkGroup(&athena.GetWorkGroupInput{WorkGroup: aws.String(conn.GetProp("workgroup"))})
+	wgOutput, err := conn.Client.GetWorkGroup(context.Background(), &athena.GetWorkGroupInput{WorkGroup: aws.String(conn.GetProp("workgroup"))})
 	if err != nil {
 		if strings.Contains(err.Error(), "Invalid refresh token provided") {
 			return g.Error("could not connect. Please renew your session.\n%s", err.Error())
@@ -150,7 +148,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 			g.Warn("Could not get workgroup details: %v", err)
 		}
 	} else if wgOutput.WorkGroup != nil {
-		g.Trace("connected to Athena. workgroup=%s catalog=%s endpoint=%s apiVersion=%s", conn.GetProp("workgroup"), conn.GetProp("catalog"), conn.Client.ClientInfo.Endpoint, conn.Client.ClientInfo.APIVersion)
+		g.Trace("connected to Athena. workgroup=%s catalog=%s", conn.GetProp("workgroup"), conn.GetProp("catalog"))
 	}
 
 	conn.SetProp("connected", "true")
@@ -367,7 +365,7 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 	// Start the query
 	startQueryInput := &athena.StartQueryExecutionInput{
 		QueryString: aws.String(sql),
-		QueryExecutionContext: &athena.QueryExecutionContext{
+		QueryExecutionContext: &types.QueryExecutionContext{
 			Database: aws.String(conn.GetProp("database")),
 			Catalog:  aws.String(conn.GetProp("catalog")),
 		},
@@ -376,13 +374,13 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 
 	// Set output location if provided
 	if outputLocation := conn.GetProp("output_location"); outputLocation != "" {
-		startQueryInput.ResultConfiguration = &athena.ResultConfiguration{
+		startQueryInput.ResultConfiguration = &types.ResultConfiguration{
 			OutputLocation: aws.String(outputLocation),
 		}
 	}
 
 	// Execute the query
-	resp, err := conn.Client.StartQueryExecutionWithContext(ctx, startQueryInput)
+	resp, err := conn.Client.StartQueryExecution(ctx, startQueryInput)
 	if err != nil {
 		if strings.Contains(sql, noDebugKey) {
 			err = g.Error(err, "Error executing query")
@@ -397,22 +395,22 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 	// Poll for query completion
 	var queryExecution *athena.GetQueryExecutionOutput
 	for {
-		queryExecution, err = conn.Client.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
+		queryExecution, err = conn.Client.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
 			QueryExecutionId: aws.String(queryID),
 		})
 		if err != nil {
 			return nil, g.Error(err, "Failed to get query execution status")
 		}
 
-		state := *queryExecution.QueryExecution.Status.State
-		if state == athena.QueryExecutionStateSucceeded {
+		state := queryExecution.QueryExecution.Status.State
+		if state == types.QueryExecutionStateSucceeded {
 			// Query succeeded - for non-select statements, we're done
 			if queryExecution.QueryExecution.Statistics != nil {
 				// athenaResult.RowsAffected = *queryExecution.QueryExecution.Statistics.DataManipulation.AffectedRows
 			}
 			break
-		} else if state == athena.QueryExecutionStateFailed ||
-			state == athena.QueryExecutionStateCancelled {
+		} else if state == types.QueryExecutionStateFailed ||
+			state == types.QueryExecutionStateCancelled {
 			errorMessage := ""
 			if queryExecution.QueryExecution.Status.StateChangeReason != nil {
 				errorMessage = *queryExecution.QueryExecution.Status.StateChangeReason
@@ -424,7 +422,7 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 		select {
 		case <-ctx.Done():
 			// Context cancelled
-			conn.Client.StopQueryExecutionWithContext(ctx, &athena.StopQueryExecutionInput{
+			conn.Client.StopQueryExecution(ctx, &athena.StopQueryExecutionInput{
 				QueryExecutionId: aws.String(queryID),
 			})
 			return nil, g.Error("Query execution cancelled by context")
@@ -466,7 +464,7 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 	// Start the query
 	startQueryInput := &athena.StartQueryExecutionInput{
 		QueryString: aws.String(sql),
-		QueryExecutionContext: &athena.QueryExecutionContext{
+		QueryExecutionContext: &types.QueryExecutionContext{
 			Database: aws.String(conn.GetProp("database")),
 			Catalog:  aws.String(conn.GetProp("catalog")),
 		},
@@ -475,13 +473,13 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	// Set output location if provided
 	if outputLocation := conn.GetProp("output_location"); outputLocation != "" {
-		startQueryInput.ResultConfiguration = &athena.ResultConfiguration{
+		startQueryInput.ResultConfiguration = &types.ResultConfiguration{
 			OutputLocation: aws.String(outputLocation),
 		}
 	}
 
 	// Execute the query
-	resp, err := conn.Client.StartQueryExecutionWithContext(ctx, startQueryInput)
+	resp, err := conn.Client.StartQueryExecution(ctx, startQueryInput)
 	if err != nil {
 		if strings.Contains(sql, noDebugKey) {
 			err = g.Error(err, "Error executing query")
@@ -497,19 +495,19 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 	g.Trace("athena query id: %s", queryID)
 	var queryExecution *athena.GetQueryExecutionOutput
 	for {
-		queryExecution, err = conn.Client.GetQueryExecutionWithContext(ctx, &athena.GetQueryExecutionInput{
+		queryExecution, err = conn.Client.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
 			QueryExecutionId: aws.String(queryID),
 		})
 		if err != nil {
 			return nil, g.Error(err, "Failed to get query execution status")
 		}
 
-		state := *queryExecution.QueryExecution.Status.State
-		if state == athena.QueryExecutionStateSucceeded {
+		state := queryExecution.QueryExecution.Status.State
+		if state == types.QueryExecutionStateSucceeded {
 			// Query succeeded
 			break
-		} else if state == athena.QueryExecutionStateFailed ||
-			state == athena.QueryExecutionStateCancelled {
+		} else if state == types.QueryExecutionStateFailed ||
+			state == types.QueryExecutionStateCancelled {
 			errorMessage := ""
 			if queryExecution.QueryExecution.Status.StateChangeReason != nil {
 				errorMessage = *queryExecution.QueryExecution.Status.StateChangeReason
@@ -521,7 +519,7 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 		select {
 		case <-ctx.Done():
 			// Context cancelled
-			conn.Client.StopQueryExecutionWithContext(ctx, &athena.StopQueryExecutionInput{
+			conn.Client.StopQueryExecution(ctx, &athena.StopQueryExecutionInput{
 				QueryExecutionId: aws.String(queryID),
 			})
 			return nil, g.Error("Query execution cancelled by context")
@@ -532,7 +530,7 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 	// Get query results
 	var queryResults *athena.GetQueryResultsOutput
-	queryResults, err = conn.Client.GetQueryResultsWithContext(ctx, &athena.GetQueryResultsInput{
+	queryResults, err = conn.Client.GetQueryResults(ctx, &athena.GetQueryResultsInput{
 		QueryExecutionId: aws.String(queryID),
 	})
 	if err != nil {
@@ -576,8 +574,8 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 				Type:        colType,
 				Position:    i + 1,
 				DbType:      dbType,
-				DbPrecision: cast.ToInt(g.PtrVal(colInfo.Precision)),
-				DbScale:     cast.ToInt(g.PtrVal(colInfo.Scale)),
+				DbPrecision: int(colInfo.Precision),
+				DbScale:     int(colInfo.Scale),
 				Sourced:     true,
 			}
 		}
@@ -621,7 +619,7 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 
 					var err error
 					g.Trace("getting next page with token: %s (queryID: %s)", g.PtrVal(tokenForNextPage), queryID)
-					queryResults, err = conn.Client.GetQueryResultsWithContext(queryContext.Ctx, input)
+					queryResults, err = conn.Client.GetQueryResults(queryContext.Ctx, input)
 					if err != nil {
 						queryContext.CaptureErr(g.Error(err, "Error getting next page of results"))
 						return false
