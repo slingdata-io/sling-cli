@@ -121,7 +121,12 @@ func (fs *S3FileSysClient) Connect() (err error) {
 			return g.Error(err, "could not connect to ssh tunnel server")
 		}
 
-		fs.SetProp("endpoint", "127.0.0.1:"+cast.ToString(localPort))
+		// Preserve the protocol scheme when setting the tunnel endpoint
+		scheme := "http"
+		if strings.HasPrefix(endpoint, "https") {
+			scheme = "https"
+		}
+		fs.SetProp("endpoint", scheme+"://127.0.0.1:"+cast.ToString(localPort))
 	}
 
 	region := fs.GetProp("REGION", "DEFAULT_REGION")
@@ -136,10 +141,19 @@ func (fs *S3FileSysClient) Connect() (err error) {
 
 	// Add endpoint if specified
 	if endpoint != "" {
+		// Get the updated endpoint value in case it was modified (e.g., by SSH tunnel)
+		finalEndpoint := fs.GetProp("endpoint")
+
+		// Ensure final endpoint has proper protocol scheme
+		if !strings.HasPrefix(finalEndpoint, "http://") && !strings.HasPrefix(finalEndpoint, "https://") {
+			// Default to https for security
+			finalEndpoint = "https://" + finalEndpoint
+		}
+
 		configOptions = append(configOptions, config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 				return aws.Endpoint{
-					URL:               endpoint,
+					URL:               finalEndpoint,
 					HostnameImmutable: true,
 				}, nil
 			})))
