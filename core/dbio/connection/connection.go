@@ -545,6 +545,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("database", c.Data["dbname"])
 		template = "postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+		if _, ok := c.Data["role"]; ok {
+			template = template + "&role={role}"
+		}
 	case dbio.TypeDbRedshift:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")

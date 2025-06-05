@@ -41,6 +41,24 @@ func (conn *PostgresConn) Init() error {
 	return conn.BaseConn.Init()
 }
 
+// Connect connects to the database
+func (conn *PostgresConn) Connect(timeOut ...int) error {
+	err := conn.BaseConn.Connect(timeOut...)
+	if err != nil {
+		return err
+	}
+
+	// Set role if provided
+	if val := conn.GetProp("role"); val != "" {
+		_, err = conn.Exec("SET ROLE " + val)
+		if err != nil {
+			return g.Error(err, "could not set role")
+		}
+	}
+
+	return nil
+}
+
 // CopyToStdout Copy TO STDOUT
 func (conn *PostgresConn) CopyToStdout(ctx *g.Context, sql string) (stdOutReader io.Reader, err error) {
 	var stderr bytes.Buffer
