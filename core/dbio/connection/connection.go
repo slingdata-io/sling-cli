@@ -451,6 +451,7 @@ func (c *Connection) setURL() (err error) {
 
 			if g.In(c.Type, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				setIfMissing("sslmode", U.PopParam("sslmode"))
+				setIfMissing("role", U.PopParam("role"))
 			}
 
 			if c.Type == dbio.TypeDbSnowflake {
