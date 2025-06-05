@@ -308,6 +308,9 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 	// Load table
 	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
 	if err != nil {
+		if strings.Contains(err.Error(), "Table action can_get_metadata forbidden") {
+			return columns, g.Error("%s, check table name", err.Error())
+		}
 		return columns, g.Error(err, "Failed to load table %s", tableFName)
 	}
 
@@ -337,6 +340,14 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 	}
 
 	return columns, nil
+}
+
+func (conn *IcebergConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
+	if table.IsQuery() {
+		return nil, g.Error("cannot get columns of a custom query in iceberg")
+	}
+
+	return conn.GetColumns(table.FullName(), fields...)
 }
 
 // StreamRowsContext streams the rows of a table or query
@@ -750,6 +761,36 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		rec.Release()
 	}
 
+	// io, ok := tbl.FS().(iceio.WriteFileIO)
+	// if !ok {
+	// 	return 0, g.Error("could not convert to iceio.WriteFileIO")
+	// }
+
+	// filePath := g.F("%s/%s.parquet", tbl.Location(), g.NewTsID("file"))
+
+	// writer, err := io.Create(filePath)
+	// if err != nil {
+	// 	return 0, g.Error(err, "could not create file(s) for %s", tableFName)
+	// }
+
+	// err = pqarrow.WriteTable(arrowTable, writer, arrowTable.NumRows(), nil, pqarrow.DefaultWriterProps())
+	// if err != nil {
+	// 	return 0, g.Error(err, "could not write records to %s", filePath)
+	// }
+
+	// tx := tbl.NewTransaction()
+	// err = tx.AddFiles(conn.Context().Ctx, []string{filePath}, nil, false)
+	// if err != nil {
+	// 	io.Remove(filePath) // clean up
+	// 	return 0, g.Error(err, "could not add files")
+	// }
+
+	// newTable, err := tx.Commit(conn.Context().Ctx)
+	// if err != nil {
+	// 	io.Remove(filePath) // clean up
+	// 	return 0, g.Error(err, "could not get table from transaction")
+	// }
+
 	// Use the table's AppendTable method to write the data
 	// This handles all the low-level details of writing Parquet files,
 	// creating manifests, and updating table metadata
@@ -758,16 +799,33 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		"source":    "sling-cli",
 	}
 
+	tx := tbl.NewTransaction()
+
 	// Append the Arrow table to the Iceberg table
-	newTable, err := tbl.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(batchSize), snapshotProps)
+	err = tx.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(batchSize), snapshotProps)
 	if err != nil {
 		return count, g.Error(err, "Failed to append data to Iceberg table %s", tableFName)
 	}
 
-	// The newTable is the updated table with the new snapshot
-	// The catalog has already been updated by the AppendTable operation
-	g.Info("Successfully wrote %d rows to Iceberg table %s", count, tableFName)
-	g.Debug("New snapshot ID: %v", newTable.CurrentSnapshot().SnapshotID)
+	// Debug: Check staged table before commit
+	// stagedTable, err := tx.StagedTable()
+	// if err != nil {
+	// 	g.Warn("Could not get staged table for debugging: %v", err)
+	// } else {
+	// 	g.Info("Staged table location: %s", stagedTable.Location())
+	// 	if currentSnapshot := stagedTable.CurrentSnapshot(); currentSnapshot != nil {
+	// 		g.Info("Staged snapshot ID: %d", currentSnapshot.SnapshotID)
+	// 		g.Info("Staged snapshot summary: %s", g.Marshal(currentSnapshot.Summary))
+	// 	}
+	// }
+
+	newTable, err := tx.Commit(conn.Context().Ctx)
+	if err != nil {
+		return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
+	}
+
+	details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "rows", count)
+	g.Debug("created iceberg snapshot", details)
 
 	return count, nil
 }
@@ -1030,6 +1088,7 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(iopType iop.ColumnType) i
 
 func parseTableIdentifier(tableName string) table.Identifier {
 	// Split by dots to create namespace and table parts
+	tableName = strings.ReplaceAll(tableName, `"`, "")
 	parts := strings.Split(tableName, ".")
 	return parts
 }
