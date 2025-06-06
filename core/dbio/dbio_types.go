@@ -48,10 +48,11 @@ const (
 	TypeFileHDFS   Type = "hdfs"
 	TypeFileS3     Type = "s3"
 	TypeFileAzure  Type = "azure"
-	TypeFileGoogle Type = "gs"
-	TypeFileFtp    Type = "ftp"
-	TypeFileSftp   Type = "sftp"
-	TypeFileHTTP   Type = "http"
+	TypeFileGoogle      Type = "gs"
+	TypeFileGoogleDrive Type = "gdrive"
+	TypeFileFtp         Type = "ftp"
+	TypeFileSftp        Type = "sftp"
+	TypeFileHTTP        Type = "http"
 
 	TypeDbPostgres      Type = "postgres"
 	TypeDbRedshift      Type = "redshift"
@@ -90,6 +91,7 @@ var AllType = []struct {
 	{TypeFileS3, "TypeFileS3"},
 	{TypeFileAzure, "TypeFileAzure"},
 	{TypeFileGoogle, "TypeFileGoogle"},
+	{TypeFileGoogleDrive, "TypeFileGoogleDrive"},
 	{TypeFileFtp, "TypeFileFtp"},
 	{TypeFileSftp, "TypeFileSftp"},
 	{TypeFileHTTP, "TypeFileHTTP"},
@@ -136,7 +138,7 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeApi,
-		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
+		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
 		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
 	}
@@ -185,7 +187,7 @@ func (t Type) Kind() Kind {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
 		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
-	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
+	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
 	case TypeApi:
 		return KindAPI
@@ -231,7 +233,8 @@ func (t Type) NameLong() string {
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
 		TypeFileAzure:       "FileSys - Azure",
-		TypeFileGoogle:      "FileSys - Google",
+		TypeFileGoogle:      "FileSys - Google Cloud Storage",
+		TypeFileGoogleDrive: "FileSys - Google Drive",
 		TypeFileSftp:        "FileSys - Sftp",
 		TypeFileFtp:         "FileSys - Ftp",
 		TypeFileHTTP:        "FileSys - HTTP",
@@ -272,7 +275,8 @@ func (t Type) Name() string {
 		TypeFileHDFS:        "HDFS",
 		TypeFileS3:          "S3",
 		TypeFileAzure:       "Azure",
-		TypeFileGoogle:      "Google",
+		TypeFileGoogle:      "Google Cloud Storage",
+		TypeFileGoogleDrive: "Google Drive",
 		TypeFileSftp:        "Sftp",
 		TypeFileFtp:         "Ftp",
 		TypeFileHTTP:        "HTTP",

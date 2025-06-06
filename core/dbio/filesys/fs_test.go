@@ -1310,6 +1310,116 @@ func TestFileSysFtp(t *testing.T) {
 	// assert.EqualValues(t, 1036, df2.Count())
 }
 
+func TestFileSysGoogleDrive(t *testing.T) {
+	// Skip if no Google Drive credentials are provided
+	if os.Getenv("GDRIVE_KEY_FILE") == "" && os.Getenv("GDRIVE_CLIENT_ID") == "" {
+		t.Skip("Skipping Google Drive tests - no credentials provided")
+		return
+	}
+
+	t.Parallel()
+
+	// Create Google Drive filesystem client
+	fs, err := NewFileSysClient(dbio.TypeFileGoogleDrive, "folder_id=1J0XayKhZ1Nw4q-awg2y32S18Yy-jLwuR", "GDRIVE_KEY_FILE="+os.Getenv("GDRIVE_KEY_FILE"))
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	// Test 1: Basic Write and Read
+	testPath := "gdrive:///test/fs_test.txt"
+	testString := "Hello Google Drive!"
+
+	// Delete if exists
+	_ = Delete(fs, testPath)
+
+	// Write file
+	reader := strings.NewReader(testString)
+	bw, err := fs.Write(testPath, reader)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(testString), bw)
+
+	// Read file back
+	reader2, err := fs.GetReader(testPath)
+	if assert.NoError(t, err) {
+		data := make([]byte, len(testString))
+		_, err = reader2.Read(data)
+		assert.NoError(t, err)
+		assert.Equal(t, testString, string(data))
+	}
+
+	// Test 2: List files
+	paths, err := fs.List("gdrive:///test/")
+	assert.NoError(t, err)
+	found := false
+	for _, node := range paths {
+		if strings.Contains(node.URI, "fs_test.txt") {
+			found = true
+			assert.False(t, node.IsDir)
+			assert.Greater(t, node.Size, uint64(0))
+			break
+		}
+	}
+	assert.True(t, found, "Should find the test file in listing")
+
+	// Test 3: List recursive
+	paths, err = fs.ListRecursive("gdrive://")
+	assert.NoError(t, err)
+	found = false
+	for _, node := range paths {
+		if strings.Contains(node.URI, "fs_test.txt") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should find the test file in recursive listing")
+
+	// Test 4: Create nested directories
+	nestedPath := "gdrive:///test/nested/deep/file.txt"
+	nestedContent := "Nested file content"
+	reader = strings.NewReader(nestedContent)
+	bw, err = fs.Write(nestedPath, reader)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(nestedContent), bw)
+
+	// Verify nested file exists
+	reader2, err = fs.GetReader(nestedPath)
+	if assert.NoError(t, err) {
+		data := make([]byte, len(nestedContent))
+		_, err = reader2.Read(data)
+		assert.NoError(t, err)
+		assert.Equal(t, nestedContent, string(data))
+	}
+
+	// Test 5: Overwrite existing file
+	updatedContent := "Updated content"
+	reader = strings.NewReader(updatedContent)
+	bw, err = fs.Write(testPath, reader)
+	assert.NoError(t, err)
+	assert.EqualValues(t, len(updatedContent), bw)
+
+	// Verify updated content
+	reader2, err = fs.GetReader(testPath)
+	if assert.NoError(t, err) {
+		data := make([]byte, len(updatedContent))
+		_, err = reader2.Read(data)
+		assert.NoError(t, err)
+		assert.Equal(t, updatedContent, string(data))
+	}
+
+	// Test 6: Delete files
+	err = Delete(fs, testPath)
+	assert.NoError(t, err)
+
+	// Verify file is deleted
+	time.Sleep(2 * time.Second) // Google Drive might have eventual consistency
+	_, err = fs.GetReader(testPath)
+	assert.Error(t, err, "Should get error when reading deleted file")
+
+	// Clean up nested file
+	err = Delete(fs, nestedPath)
+	assert.NoError(t, err)
+}
+
 func TestFileSysHTTP(t *testing.T) {
 	fs, err := NewFileSysClient(
 		dbio.TypeFileHTTP, //"HTTP_USER=user", "HTTP_PASSWORD=password",

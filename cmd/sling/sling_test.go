@@ -76,12 +76,13 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 
-	dbio.TypeFileLocal:  {name: "local"},
-	dbio.TypeFileSftp:   {name: "sftp"},
-	dbio.TypeFileAzure:  {name: "azure_storage"},
-	dbio.TypeFileS3:     {name: "aws_s3"},
-	dbio.TypeFileGoogle: {name: "google_storage"},
-	dbio.TypeFileFtp:    {name: "ftp_test_url"},
+	dbio.TypeFileLocal:       {name: "local"},
+	dbio.TypeFileSftp:        {name: "sftp"},
+	dbio.TypeFileAzure:       {name: "azure_storage"},
+	dbio.TypeFileS3:          {name: "aws_s3"},
+	dbio.TypeFileGoogle:      {name: "google_storage"},
+	dbio.TypeFileGoogleDrive: {name: "google_drive"},
+	dbio.TypeFileFtp:         {name: "ftp_test_url"},
 }
 
 func init() {
@@ -1425,6 +1426,11 @@ func TestSuiteFileS3(t *testing.T) {
 func TestSuiteFileGoogle(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileGoogle)
+}
+
+func TestSuiteFileGoogleDrive(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileGoogleDrive)
 }
 
 func TestSuiteFileAzure(t *testing.T) {

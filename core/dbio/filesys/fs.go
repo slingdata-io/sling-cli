@@ -96,6 +96,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &AzureFileSysClient{}
 	case dbio.TypeFileGoogle:
 		fsClient = &GoogleFileSysClient{}
+	case dbio.TypeFileGoogleDrive:
+		fsClient = &GoogleDriveFileSysClient{}
 	case dbio.TypeFileHTTP:
 		fsClient = &HTTPFileSysClient{}
 	default:
@@ -158,6 +160,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "gs://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileGoogle, props...)
+	case strings.HasPrefix(url, "gdrive://"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileGoogleDrive, props...)
 	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
@@ -239,6 +244,8 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
+	// case dbio.TypeFileGoogleDrive:
+	// 	return fs.Prefix() + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}

@@ -236,6 +236,8 @@ func (c *Connection) URL() string {
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
 		case dbio.TypeFileGoogle:
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
+		case dbio.TypeFileGoogleDrive:
+			url = "gdrive://"
 		case dbio.TypeFileAzure:
 			url = g.F("https://%s.blob.core.windows.net/%s", c.Data["account"], c.Data["container"])
 		}
@@ -494,6 +496,9 @@ func (c *Connection) setURL() (err error) {
 		}
 		if c.Type == dbio.TypeFileS3 || c.Type == dbio.TypeFileGoogle {
 			setIfMissing("bucket", U.U.Host)
+		}
+		if c.Type == dbio.TypeFileGoogleDrive {
+			// Google Drive doesn't use buckets, paths are absolute
 		}
 		if c.Type == dbio.TypeFileAzure {
 			account := strings.ReplaceAll(U.U.Host, ".blob.core.windows.net", "")
@@ -774,7 +779,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = c.Type.String() + "://{user}:{password}@{host}:{port}/"
-	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
+	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
