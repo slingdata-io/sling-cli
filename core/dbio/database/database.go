@@ -299,6 +299,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &SQLiteConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
 		conn = &DuckDbConn{URL: URL}
+	} else if strings.HasPrefix(URL, "ducklake:") {
+		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "iceberg:") {
 		conn = &IcebergConn{URL: URL}
 	} else {
@@ -352,7 +354,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "snowflake"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
 		driverName = "sqlserver"
@@ -2094,7 +2096,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 		// don't normalize name, leave as is
 		selectExpr := conn.Self().Quote(srcCol.Name)
 
-		if srcCol.DbType != tgtCol.DbType {
+		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
 			g.Debug(
 				"inserting %s [%s] into %s [%s]",
 				srcCol.Name, srcCol.DbType, tgtCol.Name, tgtCol.DbType,

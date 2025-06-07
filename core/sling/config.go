@@ -752,6 +752,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
 				tgtOpts.TableTmp = tableTmp.FullName()
+			} else if g.In(cfg.TgtConn.Type, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
+				// for duckdb and ducklake, we'll use a temp table, which uses the 'main' schema
+				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
+				tableTmp.Schema = "main"
+				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}
 	}

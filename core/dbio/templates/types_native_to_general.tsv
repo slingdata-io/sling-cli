@@ -153,6 +153,51 @@ duckdb	utinyint	integer	col_utinyint utinyint	TRUE	TRUE
 duckdb	uuid	uuid	col_uuid uuid	TRUE	TRUE		
 duckdb	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE		
 duckdb	interval	string	col_interval interval	TRUE	TRUE		
+ducklake	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer	
+ducklake	int64	bigint	col_bigint bigint	TRUE	TRUE	A large integer	
+ducklake	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string	
+ducklake	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB	
+ducklake	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string	
+ducklake	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format	
+ducklake	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value inCCYY-MM-DD hh:mm:ssformat	
+ducklake	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number	
+ducklake	double	float	col_double double	TRUE	TRUE	A double-precision floating point number	
+ducklake	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration; each column value may be assigned one enumeration member	
+ducklake	float	float	col_float float	TRUE	TRUE	A single-precision floating point number	
+ducklake	float32	float	col_float float	TRUE	TRUE	A single-precision floating point number	
+ducklake	float64	float	col_float float	TRUE	TRUE	A single-precision floating point number	
+ducklake	integer	integer	col_int int	TRUE	TRUE	A standard integer	
+ducklake	int16	integer	col_int int	TRUE	TRUE	A standard integer	
+ducklake	int32	integer	col_int int	TRUE	TRUE	A standard integer	
+ducklake	json	json	col_json json	TRUE	TRUE	JSON Data Type	
+ducklake	int8	smallint	col_int int	TRUE	TRUE	A standard integer	
+ducklake	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer	
+ducklake	text	text	col_text text	TRUE	TRUE	A small non-binary string	
+ducklake	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format	
+ducklake	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	timestamp_s	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	timestamp_ms	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	timestamp_ns	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	timestamp with time zone	timestampz	col_timestampz timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	timestamptz	timestampz	col_timestampz timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format	
+ducklake	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB (binary large object)	
+ducklake	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer	
+ducklake	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string	
+ducklake	boolean	bool	col_boolean boolean	TRUE	TRUE		
+ducklake	list	text	col_list list	TRUE	TRUE		
+ducklake	struct	json	col_struct struct	TRUE	TRUE		
+ducklake	map	json	col_map map	TRUE	TRUE		
+ducklake	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE		
+ducklake	uint8	integer	col_uinteger uinteger	TRUE	TRUE		
+ducklake	uint16	integer	col_uinteger uinteger	TRUE	TRUE		
+ducklake	uint32	bigint	col_uinteger uinteger	TRUE	TRUE		
+ducklake	uint64	bigint	col_uinteger uinteger	TRUE	TRUE		
+ducklake	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE		
+ducklake	usmallint	integer	col_usmallint usmallint	TRUE	TRUE		
+ducklake	utinyint	integer	col_utinyint utinyint	TRUE	TRUE		
+ducklake	uuid	uuid	col_uuid uuid	TRUE	TRUE		
+ducklake	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE		
+ducklake	interval	string	col_interval interval	TRUE	TRUE		
 mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer	
 mariadb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string	
 mariadb	bit	binary	col_bit bit	FALSE	FALSE	A bit field	

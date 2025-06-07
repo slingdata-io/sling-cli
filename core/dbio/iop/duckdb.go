@@ -44,6 +44,7 @@ type DuckDb struct {
 }
 
 type duckDbQuery struct {
+	SQL     string
 	Context *g.Context
 	reader  *io.PipeReader
 	writer  *io.PipeWriter
@@ -137,6 +138,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"REGION":            "REGION",
 			"SESSION_TOKEN":     "SESSION_TOKEN",
 			"ENDPOINT":          "ENDPOINT",
+			"PROFILE":           "PROFILE",
 			"USE_SSL":           "USE_SSL",
 			"URL_STYLE":         "URL_STYLE",
 		}
@@ -178,6 +180,9 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		secretKeyMap = map[string]string{
 			"CONN_STR":                "CONNECTION_STRING",
 			"ACCOUNT":                 "ACCOUNT_NAME",
+			"ACCOUNT_KEY":             "ACCOUNT_KEY",
+			"SAS_TOKEN":               "SAS_TOKEN",
+			"CLIENT_SECRET":           "CLIENT_SECRET",
 			"HTTP_PROXY":              "HTTP_PROXY",
 			"PROXY_USER_NAME":         "PROXY_USER_NAME",
 			"PROXY_PASSWORD":          "PROXY_PASSWORD",
@@ -463,7 +468,7 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 	duck.Context.Lock()
 	defer duck.Context.Unlock()
 
-	dq := duck.newQuery(ctx)
+	dq := duck.newQuery(ctx, sql)
 
 	result = duckDbResult{}
 
@@ -503,9 +508,10 @@ func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interfa
 	return result, nil
 }
 
-func (duck *DuckDb) newQuery(ctx context.Context) (query *duckDbQuery) {
+func (duck *DuckDb) newQuery(ctx context.Context, sql string) (query *duckDbQuery) {
 	stdOutReader, stdOutWriter := io.Pipe() // new pipe
 	duck.query = &duckDbQuery{
+		SQL:     sql,
 		Context: g.NewContext(ctx),
 		reader:  stdOutReader,
 		writer:  stdOutWriter,
@@ -619,10 +625,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		opts = options[0]
 	}
 
-	columns, err := duck.Describe(sql)
-	if err != nil {
-		return nil, g.Error(err, "could not get columns")
-	}
+	columns, describeErr := duck.Describe(sql)
 
 	// one query at a time
 	duck.Context.Lock()
@@ -631,7 +634,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	ds = NewDatastreamContext(queryCtx.Ctx, columns)
 
 	// Create a pipe for stdout, stderr handling
-	dq := duck.newQuery(queryCtx.Ctx)
+	dq := duck.newQuery(queryCtx.Ctx, sql)
 
 	// start and submit sql
 	err = duck.SubmitSQL(sql, false)
@@ -688,6 +691,10 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 
 	if dq.err != nil {
 		return ds, dq.err
+	} else if describeErr != nil {
+		// should never occur, since if Describe fails, SubmitSQL should fail
+		// to get better error. but just in case it does, log error
+		g.LogError(describeErr)
 	}
 
 	return
@@ -737,7 +744,8 @@ func (duck *DuckDb) initScanner() {
 
 			errString.WriteString(line)
 			errTimer = time.AfterFunc(25*time.Millisecond, func() {
-				duck.query.err = g.Error(errString.String())
+				suffix := g.F("For query => " + duck.query.SQL)
+				duck.query.err = g.Error(errString.String() + "\n" + suffix)
 				errString.Reset()
 				resetWriter() // in case writer is active
 			})
@@ -1004,9 +1012,21 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 
 		col.Name = cast.ToString(rec["column_name"])
 		col.DbType = cast.ToString(rec["column_type"])
-		col.Type = NativeTypeToGeneral(col.Name, cast.ToString(rec["column_type"]), dbio.TypeDbDuckDb)
+		col.Type = NativeTypeToGeneral(col.Name, col.DbType, dbio.TypeDbDuckDb)
 		col.Position = k + 1
 		col.Sourced = true
+
+		// fill in precision/scale if decimal
+		if dbType := strings.ToLower(col.DbType); strings.HasPrefix(dbType, "decimal(") {
+			dbType = strings.ReplaceAll(dbType, " ", "")
+			precScale := strings.ReplaceAll(dbType, "decimal", "")
+			precScale = strings.Trim(precScale, "()")
+			precScaleParts := strings.Split(precScale, ",")
+			col.DbPrecision = cast.ToInt(precScaleParts[0])
+			if len(precScaleParts) > 1 {
+				col.DbScale = cast.ToInt(precScaleParts[1])
+			}
+		}
 
 		columns = append(columns, col)
 	}
@@ -1106,7 +1126,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			readerCh <- batchR.Reader
 
 			// can use this as a from table
-			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=134217728, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
 
 			streamPartChn <- HttpStreamPart{
 				Index:    partIndex,

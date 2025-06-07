@@ -444,7 +444,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("username", U.Username())
 				setIfMissing("password", U.Password())
@@ -683,6 +683,50 @@ func (c *Connection) setURL() (err error) {
 		}
 		setIfMissing("schema", "main")
 		template = "duckdb://{instance}?schema={schema}"
+	case dbio.TypeDbDuckLake:
+		if val, ok := c.Data["instance"]; ok {
+			dbURL, err := net.NewURL(cast.ToString(val))
+			if err == nil && g.In(dbURL.U.Scheme, "s3", "http", "https") {
+				setIfMissing("http_url", dbURL.String())
+				c.Data["instance"] = dbURL.Path()
+			} else {
+				c.Data["instance"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+			}
+		}
+
+		setIfMissing("schema", "main")
+
+		// Storage credentials for various backends
+		// S3
+		setIfMissing("s3_access_key_id", c.Data["s3_access_key_id"])
+		setIfMissing("s3_secret_access_key", c.Data["s3_secret_access_key"])
+		setIfMissing("s3_session_token", c.Data["s3_session_token"])
+		setIfMissing("s3_region", c.Data["s3_region"])
+		setIfMissing("s3_endpoint", c.Data["s3_endpoint"])
+
+		// Azure
+		setIfMissing("azure_account_name", c.Data["azure_account_name"])
+		setIfMissing("azure_account_key", c.Data["azure_account_key"])
+		setIfMissing("azure_sas_token", c.Data["azure_sas_token"])
+		setIfMissing("azure_tenant_id", c.Data["azure_tenant_id"])
+		setIfMissing("azure_client_id", c.Data["azure_client_id"])
+		setIfMissing("azure_client_secret", c.Data["azure_client_secret"])
+		setIfMissing("azure_connection_string", c.Data["azure_connection_string"])
+
+		// GCS
+		setIfMissing("gcs_key_file", c.Data["gcs_key_file"])
+		setIfMissing("gcs_project_id", c.Data["gcs_project_id"])
+		setIfMissing("gcs_access_key_id", c.Data["gcs_access_key_id"])
+		setIfMissing("gcs_secret_access_key", c.Data["gcs_secret_access_key"])
+
+		// Catalog configuration
+		setIfMissing("catalog_type", c.Data["catalog_type"])
+		setIfMissing("catalog_conn_string", c.Data["catalog_conn_string"])
+		setIfMissing("data_path", c.Data["data_path"])
+
+		// Build the ducklake URL based on catalog configuration
+		// Default to simple ducklake:// if no specific catalog URL is provided
+		template = "ducklake://"
 	case dbio.TypeDbMotherDuck:
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)

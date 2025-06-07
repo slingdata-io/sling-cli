@@ -5,6 +5,7 @@ core:
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
   create_table: create table if not exists {table} ({col_types})
+  create_temporary_table: create temp table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
   insert_option: ""
@@ -188,8 +189,8 @@ function:
   iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
   delta_scanner: delta_scan('{uri}')
   parquet_scanner: read_parquet([{uris}]{filename_expr})
-  # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
-  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=134217728, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
+  # csv_scanner: read_csv('{uri}', delim='{delimiter}', header={header}, columns={columns}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}')
+  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
 
 variable:
   bool_as: integer
