@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/flarco/g"
@@ -39,10 +40,6 @@ func (conn *DuckLakeConn) Init() error {
 	// Set default catalog type if not specified
 	if conn.CatalogType == "" {
 		conn.CatalogType = "duckdb"
-	}
-
-	if conn.Database == "" {
-		conn.Database = "ducklake"
 	}
 
 	if conn.CatalogConnStr == "" {
@@ -95,6 +92,9 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 			conn.duck.AddExtension("azure")
 		} else if strings.HasPrefix(conn.DataPath, "gs://") || strings.HasPrefix(conn.DataPath, "gcs://") {
 			conn.duck.AddExtension("httpfs")
+		} else {
+			// ensure dir is created
+			os.MkdirAll(conn.DataPath, 0775)
 		}
 	}
 
