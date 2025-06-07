@@ -847,10 +847,11 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("session_token", nil)
 		setIfMissing("region", c.Data["aws_region"])
 		setIfMissing("workgroup", "primary")
-		setIfMissing("output_location", "")
+		setIfMissing("data_location", "")
+		setIfMissing("staging_location", "")
 		setIfMissing("catalog", "AwsDataCatalog") // standard default aws catalog
 		setIfMissing("database", "")
-		template = "athena://{access_key_id}:{secret_access_key}@{region}"
+		template = "athena://{region}"
 	default:
 		if c.Type.IsUnknown() {
 			g.Trace("no type detected for %s", c.Name)

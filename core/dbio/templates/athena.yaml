@@ -1,84 +1,51 @@
 core:
-  create_table: CREATE EXTERNAL TABLE {table} ({col_types})
-  drop_table: DROP TABLE IF EXISTS {table}
-  drop_view: DROP VIEW IF EXISTS {view}
+  create_table: |
+    create table {table} (
+      {col_types}
+    ) 
+    location '{location}'
+    tblproperties (
+      'table_type'='iceberg',
+      'compression_level'='3',
+      'format'='PARQUET',
+      'write_compression'='ZSTD'
+    )
+    {partition_by}
+    {bucket_by}
+  create_table_external: |
+    create external table {table} (
+      {col_types}
+    )
+    stored as parquet
+    location '{location}'
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
   drop_index: "SELECT 'indexes do not apply for Athena'"
   create_index: "SELECT 'indexes do not apply for Athena'"
-  replace: |
-    -- Athena doesn't support UPSERT natively, use DELETE + INSERT pattern
-    DELETE FROM {table}
-    WHERE {pk_fields} IN (SELECT {pk_fields} FROM (VALUES ({values})) AS t({fields}));
-    INSERT INTO {table} ({fields}) VALUES ({values})
-  replace_temp: |
-    -- Athena doesn't support UPSERT natively, use DELETE + INSERT pattern
-    DELETE FROM {table}
-    WHERE EXISTS (
-      SELECT 1
-      FROM {temp_table}
-      WHERE {pk_fields_equal}
-    );
-    INSERT INTO {table} ({names})
-    SELECT {names} FROM {temp_table}
-  insert_ignore: |
-    -- Athena doesn't have INSERT IGNORE, simulate with conditional insert
-    INSERT INTO {table} ({fields})
-    SELECT * FROM (
-      SELECT {values} AS t({fields})
-    ) s
-    WHERE NOT EXISTS (
-      SELECT 1 FROM {table}
-      WHERE {pk_fields_equal}
-    )
-  insert_ignore_temp: |
-    -- Athena doesn't have INSERT IGNORE, simulate with conditional insert
-    INSERT INTO {table} ({names})
-    SELECT * FROM {temp_table} s
-    WHERE NOT EXISTS (
-      SELECT 1 FROM {table} t
-      WHERE {pk_fields_equal}
-    )
-  update_temp: |
-    -- Athena doesn't support UPDATE directly, use DELETE + INSERT pattern
-    DELETE FROM {table}
-    WHERE EXISTS (
-      SELECT 1
-      FROM {temp_table}
-      WHERE {pk_fields_equal2}
-    );
-    INSERT INTO {table}
-    SELECT * FROM {temp_table}
-  sample: SELECT {fields} FROM {table} TABLESAMPLE BERNOULLI (5) LIMIT {n}
-  rename_table: ALTER TABLE {table} RENAME TO {new_table}
+  sample: select {fields} from {table} tablesample bernoulli (5) limit {n}
+  rename_table: alter table {table} rename to {new_table}
   set_schema: |
     -- Athena doesn't support changing schema with ALTER, need to recreate
-    CREATE TABLE {new_schema}.{table} AS
-    SELECT * FROM {table};
-    DROP TABLE {table}
+    create table {new_schema}.{table} as
+    select * from {table};
+    drop table {table}
   
-  copy_from_s3: |
-    -- Athena doesn't support COPY, only reads from S3
-    -- For use with CREATE TABLE AS or INSERT INTO
-    SELECT * FROM s3_table(
-      '{s3_path}',
-      '*csv*',
-      ARRAY['csv'],
-      MAP['header', 'true', 'delimiter', ',']
-    )
+
   copy_to_s3: |
     -- Use UNLOAD statement to export data to S3
-    UNLOAD ({sql})
-    TO '{s3_path}'
-    WITH (
-      format = 'CSV',
+    unload ({sql})
+    to '{s3_path}'
+    with (
+      format = 'csv',
       field_delimiter = ',',
-      compression = 'GZIP',
+      compression = 'gzip',
       header = true
     )
   alter_columns: |
     -- Athena requires recreating the table to change column definitions
     -- This is a placeholder, actual implementation requires multiple steps
     -- ALTER TABLE {table} {col_ddl}
-    SELECT 'ALTER COLUMN not directly supported in Athena, must recreate table'
+    select 'alter column not directly supported in Athena, must recreate table'
  
 metadata:
   current_database:
@@ -335,6 +302,7 @@ function:
   now: CURRENT_TIMESTAMP
 
 variable:
+  quote_char: '`'
   max_string_type: VARCHAR
   max_string_length: 2147483647
   max_column_length: 127

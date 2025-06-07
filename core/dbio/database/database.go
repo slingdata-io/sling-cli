@@ -2360,7 +2360,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	ddl := g.R(
 		createTemplate,
 		"table", table.FullName(),
-		"col_types", strings.Join(columnsDDL, ",\n"),
+		"col_types", strings.Join(columnsDDL, ",\n  "),
 	)
 
 	return ddl, nil

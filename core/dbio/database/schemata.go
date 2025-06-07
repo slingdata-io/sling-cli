@@ -860,7 +860,7 @@ func getColumnCasingProp(conn Connection) (colCasing iop.ColumnCasing, ok bool) 
 func GetQualifierQuote(dialect dbio.Type) string {
 	quote := `"`
 	switch dialect {
-	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse, dbio.TypeDbProton:
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbAthena:
 		quote = "`"
 	case dbio.TypeDbBigTable, dbio.TypeDbMongoDB, dbio.TypeDbPrometheus:
 		quote = ""

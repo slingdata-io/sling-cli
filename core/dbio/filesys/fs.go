@@ -822,8 +822,8 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	// adjust fileBytesLimit due to compression
-	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) {
-		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply
+	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) && fileFormat != dbio.FileTypeParquet {
+		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply, parquet would be compressed already
 	}
 
 	processStream := func(ds *iop.Datastream, partURL string) {
@@ -904,7 +904,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				}
 			}
 		case dbio.FileTypeParquet:
-			for reader := range ds.NewParquetReaderChnl(sc) {
+			for reader := range ds.NewParquetArrowReaderChnl(sc) {
 				err := processReader(reader)
 				if err != nil {
 					break

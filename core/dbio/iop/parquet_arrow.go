@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -576,6 +577,8 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		case FloatType:
 			arrowType = arrow.PrimitiveTypes.Float64
 		case DecimalType:
+			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, int(env.DdlMinDecLength), col.DbPrecision)
+			col.DbScale = lo.Ternary(col.DbScale == 0, env.DdlMinDecScale, col.DbScale)
 			arrowType = &arrow.Decimal128Type{Precision: int32(col.DbPrecision), Scale: int32(col.DbScale)}
 		case DateType:
 			arrowType = arrow.FixedWidthTypes.Date32

@@ -26,8 +26,10 @@ import (
 // AthenaConn is an Athena connection
 type AthenaConn struct {
 	BaseConn
-	Client *athena.Client
-	URL    string
+	Client          *athena.Client
+	URL             string
+	DataLocation    string
+	StagingLocation string
 }
 
 // Init initiates the object
@@ -38,6 +40,17 @@ func (conn *AthenaConn) Init() error {
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
+
+	conn.DataLocation = strings.TrimSuffix(conn.GetProp("data_location"), "/")
+	conn.StagingLocation = strings.TrimSuffix(conn.GetProp("staging_location"), "/")
+
+	if conn.DataLocation == "" {
+		return g.Error("did not provide data_location")
+	}
+
+	if conn.StagingLocation == "" {
+		return g.Error("did not provide staging_location")
+	}
 
 	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
 		if conn.GetProp(key) == "" {
@@ -79,7 +92,6 @@ func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Client, err
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
-		g.Debug("Athena: Using static credentials (Key ID: %s)", awsAccessKeyID)
 		credProvider := credentials.NewStaticCredentialsProvider(
 			awsAccessKeyID,
 			awsSecretAccessKey,
@@ -184,23 +196,9 @@ func (conn *AthenaConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 
 	// Add Athena-specific DDL modifications
 	makeNativeType := func(col *iop.Column) (nativeType string) {
-		switch col.Type {
-		case iop.StringType, iop.TextType, iop.UUIDType:
-			nativeType = "string"
-		case iop.IntegerType, iop.SmallIntType, iop.BigIntType:
-			nativeType = "int"
-		case iop.FloatType:
-			nativeType = "float"
-		case iop.DecimalType:
-			nativeType = "decimal(38,9)"
-		case iop.DateType:
-			nativeType = "date"
-		case iop.TimestampType, iop.DatetimeType, iop.TimestampzType:
-			nativeType = "timestamp"
-		case iop.BoolType:
-			nativeType = "boolean"
-		default:
-			nativeType = "string"
+		nativeType, _ = conn.Self().GetNativeType(*col)
+		if nativeType == "" {
+			return "string"
 		}
 		return
 	}
@@ -238,68 +236,23 @@ func (conn *AthenaConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		if bucketCount := cast.ToInt(conn.GetProp("bucket_count")); bucketCount > 0 {
 			numBuckets = bucketCount
 		}
-		bucketBy = fmt.Sprintf("CLUSTERED BY (%s) INTO %d BUCKETS",
-			strings.Join(colNames, ", "), numBuckets)
+		bucketBy = fmt.Sprintf("clustered by (%s) into %d buckets", strings.Join(colNames, ", "), numBuckets)
 	}
 
 	// Process location if specified
 	location := ""
-	if loc := conn.GetProp("table_location"); loc != "" {
-		location = fmt.Sprintf("LOCATION '%s'", loc)
-	} else if loc := conn.GetProp("AWS_S3_LOCATION"); loc != "" {
-		tablePath := strings.ToLower(strings.ReplaceAll(table.Name, ".", "/"))
-		location = fmt.Sprintf("LOCATION '%s/%s'", loc, tablePath)
+	if temporary {
+		location = g.F("%s/%s/%s", conn.StagingLocation, table.Schema, table.Name)
+	} else {
+		location = g.F("%s/%s/%s", conn.DataLocation, table.Schema, table.Name)
 	}
 
-	// Handle format and other properties
-	tableProperties := []string{}
-
-	// Default file format
-	format := "PARQUET"
-	if fmt := conn.GetProp("file_format"); fmt != "" {
-		format = strings.ToUpper(fmt)
-	}
-
-	// Add all modifications to the SQL
-	ddlParts := []string{}
-	if partitionBy != "" {
-		ddlParts = append(ddlParts, partitionBy)
-	}
-	if bucketBy != "" {
-		ddlParts = append(ddlParts, bucketBy)
-	}
-
-	// Add row format if needed
-	if format != "" {
-		ddlParts = append(ddlParts, fmt.Sprintf("STORED AS %s", format))
-	}
-
-	if location != "" {
-		ddlParts = append(ddlParts, location)
-	}
-
-	// Add table properties if specified
-	if len(tableProperties) > 0 {
-		propString := fmt.Sprintf("TBLPROPERTIES (%s)", strings.Join(tableProperties, ", "))
-		ddlParts = append(ddlParts, propString)
-	}
-
-	// Append the modifications to the SQL
-	if len(ddlParts) > 0 {
-		// Make sure we have a closing parenthesis before adding clauses
-		if !strings.Contains(sql, ")") {
-			sql += ")"
-		}
-
-		// Find the last closing parenthesis and add our clauses after it
-		lastParenPos := strings.LastIndex(sql, ")")
-		if lastParenPos > 0 {
-			sql = sql[:lastParenPos+1] + " " + strings.Join(ddlParts, " ") + sql[lastParenPos+1:]
-		} else {
-			// Just append if we can't find the closing parenthesis
-			sql += " " + strings.Join(ddlParts, " ")
-		}
-	}
+	sql = g.R(
+		sql,
+		"location", location,
+		"partition_by", partitionBy,
+		"bucket_by", bucketBy,
+	)
 
 	return strings.TrimSpace(sql), nil
 }
@@ -316,6 +269,15 @@ func (r athenaResult) LastInsertId() (int64, error) {
 
 func (r athenaResult) RowsAffected() (int64, error) {
 	return r.rowsAffected, nil
+}
+
+func (conn *AthenaConn) ensureQuotes(sql string) string {
+	// use double quotes only for DMLs, backticks for DDL. stupid...
+	trimmedSQL, _ := TrimSQLComments(strings.ToLower(sql))
+	if strings.Contains(trimmedSQL, "select") && strings.Contains(trimmedSQL, "from") && strings.Contains(trimmedSQL, "`") {
+		return strings.ReplaceAll(sql, "`", `"`)
+	}
+	return sql
 }
 
 // ExecContext executes the sql query
@@ -357,6 +319,8 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 		}
 	}
 
+	sql = conn.ensureQuotes(sql)
+
 	conn.LogSQL(sql)
 
 	// Create a struct to return rows affected
@@ -373,7 +337,8 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 	}
 
 	// Set output location if provided
-	if outputLocation := conn.GetProp("output_location"); outputLocation != "" {
+	if conn.StagingLocation != "" {
+		outputLocation := g.F("%s/%s/%s", conn.StagingLocation, tempCloudStorageFolder, g.NewTsID("query"))
 		startQueryInput.ResultConfiguration = &types.ResultConfiguration{
 			OutputLocation: aws.String(outputLocation),
 		}
@@ -459,6 +424,9 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 	}
 
 	queryContext := g.NewContext(ctx)
+
+	sql = conn.ensureQuotes(sql)
+
 	conn.LogSQL(sql)
 
 	// Start the query
@@ -472,7 +440,8 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 	}
 
 	// Set output location if provided
-	if outputLocation := conn.GetProp("output_location"); outputLocation != "" {
+	if conn.StagingLocation != "" {
+		outputLocation := g.F("%s/%s/%s", conn.StagingLocation, tempCloudStorageFolder, g.NewTsID("query"))
 		startQueryInput.ResultConfiguration = &types.ResultConfiguration{
 			OutputLocation: aws.String(outputLocation),
 		}
@@ -544,30 +513,8 @@ func (conn *AthenaConn) StreamRowsContext(ctx context.Context, sql string, optio
 		fetchedColumns = make(iop.Columns, len(columnInfo))
 
 		for i, colInfo := range columnInfo {
-			colType := iop.StringType // Default type
 			dbType := *colInfo.Type
-
-			// Map Athena types to corresponding iop types
-			switch strings.ToLower(dbType) {
-			case "integer", "int", "smallint", "tinyint":
-				colType = iop.IntegerType
-			case "bigint":
-				colType = iop.BigIntType
-			case "boolean":
-				colType = iop.BoolType
-			case "double", "float":
-				colType = iop.FloatType
-			case "decimal":
-				colType = iop.DecimalType
-			case "date":
-				colType = iop.DateType
-			case "timestamp":
-				colType = iop.TimestampType
-			case "binary", "varbinary":
-				colType = iop.BinaryType
-			case "array", "map", "struct", "json":
-				colType = iop.JsonType
-			}
+			colType := NativeTypeToGeneral(*colInfo.Name, *colInfo.Type, conn)
 
 			fetchedColumns[i] = iop.Column{
 				Name:        *colInfo.Name,
@@ -738,25 +685,16 @@ func (conn *AthenaConn) Close() error {
 
 // Unload exports the sql query into an S3 bucket
 func (conn *AthenaConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, err error) {
-	awsBucket := conn.GetProp("AWS_BUCKET")
-	if awsBucket == "" {
-		return "", g.Error("AWS_BUCKET must be set to unload data")
-	}
-
-	outputLocation := conn.GetProp("output_location")
-	if outputLocation == "" {
-		outputLocation = fmt.Sprintf("s3://%s/%s/", awsBucket, tempCloudStorageFolder)
-		conn.SetProp("output_location", outputLocation)
-	}
 
 	if len(tables) == 0 {
 		return "", g.Error("No tables provided for Unload")
 	}
 
 	table := tables[0]
-	s3Path = fmt.Sprintf("%s%s_%s/",
-		outputLocation,
-		strings.ReplaceAll(table.Name, ".", "_"),
+	s3Path = fmt.Sprintf("%s/%s/%s/%s",
+		conn.StagingLocation,
+		tempCloudStorageFolder,
+		table.Schema+"."+table.Name,
 		time.Now().Format("20060102_150405"))
 
 	// Build the SQL query for UNLOAD
@@ -764,10 +702,8 @@ func (conn *AthenaConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, 
 	UNLOAD (%s)
 	TO '%s' 
 	WITH (
-		format = 'CSV',
-		field_delimiter = ',',
-		compression = 'GZIP',
-		header = true
+   format = 'PARQUET',
+   compression = 'SNAPPY'
 	)
 	`, table.Select(), s3Path)
 
@@ -793,8 +729,8 @@ func (conn *AthenaConn) BulkExportStream(table Table) (ds *iop.Datastream, err e
 
 // BulkExportFlow reads in bulk
 func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
-	if conn.GetProp("AWS_BUCKET") == "" {
-		g.Warn("using cursor to export. Please set AWS creds for Sling to use the Athena UNLOAD function (for bigger datasets).")
+	if conn.StagingLocation == "" {
+		g.Warn("using cursor to export. Please set staging_location for Sling to use the Athena UNLOAD function (for bigger datasets).")
 		return conn.BaseConn.BulkExportFlow(table)
 	}
 
@@ -811,7 +747,8 @@ func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error
 		return
 	}
 
-	fs, err := filesys.NewFileSysClientContext(unloadCtx.Ctx, dbio.TypeFileS3, conn.PropArr()...)
+	props := append(conn.PropArr(), "bucket="+conn.StagingBucket())
+	fs, err := filesys.NewFileSysClientContext(unloadCtx.Ctx, dbio.TypeFileS3, props...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -824,10 +761,8 @@ func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error
 		columns.Coerce(coerceCols, true, cc, tgtType)
 	}
 
-	fs.SetProp("format", "csv")
-	fs.SetProp("delimiter", ",")
-	fs.SetProp("header", "true")
-	fs.SetProp("null_if", `\N`)
+	fs.SetProp("format", "parquet")
+	fs.SetProp("compression", "snappy")
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 
@@ -846,25 +781,26 @@ func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error
 
 	return
 }
+func (conn *AthenaConn) StagingBucket() string {
+	return strings.Split(strings.TrimPrefix(conn.StagingLocation, "s3://"), "/")[0]
+}
 
 // BulkImportFlow inserts a flow of streams into a table.
-// For redshift we need to create CSVs in S3 and then use the COPY command.
+// For athena we need to create CSVs in S3 and then use the COPY command.
 func (conn *AthenaConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
 	settingMppBulkImportFlow(conn, iop.GzipCompressorType)
-	if conn.GetProp("AWS_BUCKET") == "" {
-		return count, g.Error("Need to set 'AWS_BUCKET' to copy to redshift")
-	}
 
 	s3Path := fmt.Sprintf(
-		"s3://%s/%s/%s",
-		conn.GetProp("AWS_BUCKET"),
+		"%s/%s/%s",
+		strings.TrimPrefix(conn.StagingLocation, "s3://"+conn.StagingBucket()+"/"),
 		tempCloudStorageFolder,
-		tableFName,
+		strings.ReplaceAll(tableFName, "`", ""),
 	)
 
-	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	props := append(conn.PropArr(), "bucket="+conn.StagingBucket())
+	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, props...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -881,24 +817,36 @@ func (conn *AthenaConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		}
 	}) // cleanup
 
-	g.Info("writing to s3 for redshift import")
-	s3Fs.SetProp("null_as", `\N`)
+	// set defaults
+	s3Fs.SetProp("format", "parquet")
+	s3Fs.SetProp("compression", "snappy")
+
+	s3Fs.SetProp("file_max_rows", conn.GetProp("file_max_rows"))
+	s3Fs.SetProp("file_max_bytes", conn.GetProp("file_max_bytes"))
+
+	if g.In(s3Fs.GetProp("file_max_rows"), "", "0") {
+		s3Fs.SetProp("file_max_rows", "1000000")
+	}
+	if g.In(s3Fs.GetProp("file_max_bytes"), "", "0") {
+		s3Fs.SetProp("file_max_bytes", "128000000")
+	}
+
 	bw, err := filesys.WriteDataflow(s3Fs, df, s3Path)
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
 	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
-	_, err = conn.CopyFromS3(tableFName, s3Path, df.Columns)
+	_, err = conn.LoadFromS3(tableFName, s3Path, df.Columns)
 	if err != nil {
-		return df.Count(), g.Error(err, "error copying into redshift from s3")
+		return df.Count(), g.Error(err, "error copying into athena from s3")
 	}
 
 	return df.Count(), nil
 }
 
 // BulkImportStream inserts a stream into a table.
-// For redshift we need to create CSVs in S3 and then use the COPY command.
+// For athena we need to create CSVs in S3 and then use the COPY command.
 func (conn *AthenaConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	df, err := iop.MakeDataFlow(ds)
 	if err != nil {
@@ -951,48 +899,69 @@ func (conn *AthenaConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	return
 }
 
-// CopyFromS3 uses the COPY INTO Table command from AWS S3
-func (conn *AthenaConn) CopyFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
-	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
-	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
-	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
-	if (AwsID == "" || AwsAccessKey == "") && (AwsSessionToken == "") {
-		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' or 'AWS_SESSION_TOKEN' to copy to redshift from S3")
-		return
-	}
-
-	AwsSessionTokenExpr := ""
-	if AwsSessionToken != "" {
-		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
-	}
-
-	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
-
-	g.Debug("copying into redshift from s3")
-	g.Debug("url: " + s3Path)
-	sql := g.R(
-		conn.template.Core["copy_from_s3"],
-		"tgt_table", tableFName,
-		"tgt_columns", strings.Join(tgtColumns, ", "),
-		"s3_path", s3Path,
-		"aws_access_key_id", AwsID,
-		"aws_secret_access_key", AwsAccessKey,
-		"aws_session_token_expr", AwsSessionTokenExpr,
-	)
-	sql = conn.setEmptyAsNull(sql)
-
-	_, err = conn.Exec(sql)
+// LoadFromS3 creates a temporary external table pointing to S3, then inserts into the target table
+func (conn *AthenaConn) LoadFromS3(tableFName, s3Path string, columns iop.Columns) (count uint64, err error) {
+	// Generate a unique temporary table name
+	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
-		return 0, g.Error(err)
+		return 0, g.Error(err, "could not parse table name for loading")
+	}
+	tempTable := table.Clone()
+	tempTable.Name = g.F("%s_%d", tempTable.Name, time.Now().Unix())
+
+	// Build column definitions using GetNativeType (same as GenerateDDL)
+	colDefs := make([]string, len(columns))
+	for i, col := range columns {
+		// convert from general type to native type
+		nativeType, err := conn.Self().GetNativeType(col)
+		if err != nil {
+			return 0, g.Error(err, "no native mapping for column %s", col.Name)
+		}
+
+		colDefs[i] = fmt.Sprintf("%s %s",
+			conn.Self().Quote(col.Name),
+			nativeType)
+	}
+
+	// Create external table SQL using template
+	createExtTableSQL := g.R(
+		conn.template.Core["create_table_external"],
+		"table", tempTable.FullName(),
+		"col_types", strings.Join(colDefs, ",\n  "),
+		"location", g.F("s3://%s/%s", conn.StagingBucket(), s3Path),
+	)
+
+	// Execute create external table
+	_, err = conn.Exec(createExtTableSQL)
+	if err != nil {
+		return 0, g.Error(err, "failed to create external table")
+	}
+
+	// Ensure we clean up the external table even if insertion fails
+	defer func() {
+		dropSQL := fmt.Sprintf("drop table if exists %s", tempTable.FullName())
+		if _, dropErr := conn.Exec(dropSQL); dropErr != nil {
+			g.Warn("failed to drop temporary external table %s: %v", tempTable.FullName(), dropErr)
+		} else {
+			g.Debug("dropped temporary external table: %s", tempTable.FullName())
+		}
+	}()
+
+	// Insert from external table to target table
+	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
+	insertSQL := fmt.Sprintf(`insert into %s (%s) select %s from %s`,
+		tableFName,
+		strings.Join(tgtColumns, ", "),
+		strings.Join(tgtColumns, ", "),
+		tempTable.FullName())
+
+	g.Debug("inserting from external table to target table")
+	_, err = conn.Exec(insertSQL)
+	if err != nil {
+		return 0, g.Error(err, "failed to insert from external table")
 	}
 
 	return 0, nil
-}
-func (conn *AthenaConn) setEmptyAsNull(sql string) string {
-	if !cast.ToBool(conn.GetProp("empty_as_null")) {
-		sql = strings.ReplaceAll(sql, " EMPTYASNULL BLANKSASNULL", "")
-	}
-	return sql
 }
 
 // CastColumnForSelect casts to the correct target column type
