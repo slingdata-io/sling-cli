@@ -274,9 +274,18 @@ func (r athenaResult) RowsAffected() (int64, error) {
 func (conn *AthenaConn) ensureQuotes(sql string) string {
 	// use double quotes only for DMLs, backticks for DDL. stupid...
 	trimmedSQL, _ := TrimSQLComments(strings.ToLower(sql))
-	if strings.Contains(trimmedSQL, "select") && strings.Contains(trimmedSQL, "from") && strings.Contains(trimmedSQL, "`") {
+	if !strings.Contains(trimmedSQL, "`") {
+		return sql
+	}
+
+	if (strings.Contains(trimmedSQL, "select") && strings.Contains(trimmedSQL, "from")) ||
+		// (strings.Contains(trimmedSQL, "drop") && strings.Contains(trimmedSQL, "table")) ||
+		(strings.Contains(trimmedSQL, "drop") && strings.Contains(trimmedSQL, "view")) ||
+		// (strings.Contains(trimmedSQL, "alter") && strings.Contains(trimmedSQL, "table")) ||
+		(strings.Contains(trimmedSQL, "update") && strings.Contains(trimmedSQL, "set")) {
 		return strings.ReplaceAll(sql, "`", `"`)
 	}
+
 	return sql
 }
 
