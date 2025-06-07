@@ -389,7 +389,7 @@ func (conn *AthenaConn) ExecContext(ctx context.Context, sql string, args ...int
 			if queryExecution.QueryExecution.Status.StateChangeReason != nil {
 				errorMessage = *queryExecution.QueryExecution.Status.StateChangeReason
 			}
-			return nil, g.Error("Query execution failed: %s", errorMessage)
+			return nil, g.Error("Query execution failed: %s\nQuery => %s", errorMessage, sql)
 		}
 
 		// Wait before polling again
@@ -706,21 +706,44 @@ func (conn *AthenaConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, 
 		table.Schema+"."+table.Name,
 		time.Now().Format("20060102_150405"))
 
+	// Build custom SELECT statement to handle timestamp precision
+	var selectFields []string
+	for _, col := range table.Columns {
+		quotedName := conn.Self().Quote(col.Name)
+
+		// Check if column is a timestamp with high precision and cast to VARCHAR to keep fidelity
+		// sling will parse it back
+		if strings.Contains(strings.ToLower(col.DbType), "timestamp") {
+			selectFields = append(selectFields, fmt.Sprintf("cast(%s as varchar) as %s", quotedName, quotedName))
+		} else {
+			selectFields = append(selectFields, quotedName)
+		}
+	}
+
+	sql := fmt.Sprintf("select %s from %s", strings.Join(selectFields, ", "), table.FullName())
+
 	// Build the SQL query for UNLOAD
-	unloadSQL := fmt.Sprintf(`
-	UNLOAD (%s)
-	TO '%s' 
-	WITH (
-   format = 'PARQUET',
-   compression = 'SNAPPY'
+	tempTable := table.Clone()
+	tempTable.Name = g.F("%s_%d", tempTable.Name, time.Now().Unix())
+	unloadSQL := g.R(
+		// conn.GetTemplateValue("core.unload_to_s3_ctas"),
+		conn.GetTemplateValue("core.unload_to_s3"),
+		"table", tempTable.FullName(),
+		"s3_path", s3Path,
+		"sql", sql,
 	)
-	`, table.Select(), s3Path)
 
 	// Execute the UNLOAD query
 	_, err = conn.ExecContext(ctx.Ctx, unloadSQL)
 	if err != nil {
 		return "", g.Error(err, "Failed to execute UNLOAD statement")
 	}
+
+	// drop the temp table, since the files remain
+	// err = conn.DropTable(tempTable.FullName())
+	// if err != nil {
+	// 	return "", g.Error(err, "Failed to drop temp table")
+	// }
 
 	return s3Path, nil
 }
@@ -749,6 +772,7 @@ func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error
 		return
 	}
 
+	table.Columns = columns
 	unloadCtx := g.NewContext(conn.Context().Ctx)
 	s3Path, err := conn.Unload(unloadCtx, table)
 	if err != nil {

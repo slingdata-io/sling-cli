@@ -30,17 +30,26 @@ core:
     select * from {table};
     drop table {table}
   
-
-  copy_to_s3: |
-    -- Use UNLOAD statement to export data to S3
+  # does not allow timestamp(6), only timestamp(3)
+  unload_to_s3: |
     unload ({sql})
     to '{s3_path}'
     with (
-      format = 'csv',
-      field_delimiter = ',',
-      compression = 'gzip',
-      header = true
+      format = 'PARQUET',
+      compression = 'SNAPPY'
     )
+
+  # using CREATE TABLE AS SELECT (CTAS) instead of UNLOAD, allows timestamp(6)
+  unload_to_s3_ctas: |
+    CREATE TABLE {table} 
+    WITH (
+        format = 'PARQUET',
+        write_compression = 'SNAPPY',
+        external_location = '{s3_path}'
+    )
+    AS
+    {sql}
+
   alter_columns: |
     -- Athena requires recreating the table to change column definitions
     -- This is a placeholder, actual implementation requires multiple steps
@@ -297,6 +306,8 @@ function:
   checksum_date: DATE_DIFF('second', TIMESTAMP '1970-01-01 00:00:00', CAST({field} AS TIMESTAMP))
   checksum_datetime: DATE_DIFF('second', TIMESTAMP '1970-01-01 00:00:00', CAST({field} AS TIMESTAMP))
   checksum_string: LENGTH(CAST({field} AS VARCHAR))
+  checksum_integer: ABS({field})
+  checksum_decimal: CAST(ROUND(ABS({field}) * 1000000, 0) AS BIGINT)
   checksum_boolean: LENGTH(case when {field} = true THEN 'true' when {field} = false THEN 'false' end)
   checksum_json: LENGTH(REGEXP_REPLACE(CAST({field} AS VARCHAR), ' ', ''))
   now: CURRENT_TIMESTAMP

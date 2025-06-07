@@ -60,6 +60,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbDuckLake:          {name: "ducklake"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
+	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
@@ -744,6 +745,20 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // ducklake uses text for json
 				}
+			case tgtType == dbio.TypeDbAthena:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // athena iceberg uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // athena uses text for json
+				}
+			case srcType == dbio.TypeDbAthena && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // athena iceberg uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // athena uses text for json
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -832,6 +847,11 @@ func TestSuiteDatabaseDuckLake(t *testing.T) {
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck)
+}
+
+func TestSuiteDatabaseAthena(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbAthena, "1-8,20,23+")
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
