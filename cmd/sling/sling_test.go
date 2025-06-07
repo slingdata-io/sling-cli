@@ -57,6 +57,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbDuckDb:            {name: "duckdb"},
+	dbio.TypeDbDuckLake:          {name: "ducklake"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
@@ -735,6 +736,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.TimestampzType {
 					correctType = iop.TimestampType // clickhouse uses datetime
 				}
+			case tgtType == dbio.TypeDbDuckLake:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // ducklake uses text for json
+				}
+			case srcType == dbio.TypeDbDuckLake && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // ducklake uses text for json
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -813,6 +822,11 @@ func TestSuiteDatabaseD1(t *testing.T) {
 func TestSuiteDatabaseDuckDb(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbDuckDb)
+}
+
+func TestSuiteDatabaseDuckLake(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbDuckLake, "1-17,19+") // soft-delete is not supported
 }
 
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
