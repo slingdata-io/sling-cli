@@ -744,7 +744,7 @@ func (duck *DuckDb) initScanner() {
 
 			errString.WriteString(line)
 			errTimer = time.AfterFunc(25*time.Millisecond, func() {
-				suffix := g.F("For query => " + duck.query.SQL)
+				suffix := g.F("For query => %s", duck.query.SQL)
 				duck.query.err = g.Error(errString.String() + "\n" + suffix)
 				errString.Reset()
 				resetWriter() // in case writer is active
