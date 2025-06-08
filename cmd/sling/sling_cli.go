@@ -39,6 +39,10 @@ var (
 func init() {
 	env.InitLogger()
 	store.InitDB()
+
+	if os.Getenv("SLING_EXEC_ID") == "" {
+		os.Setenv("SLING_EXEC_ID", sling.NewExecID()) // set exec id if none provided
+	}
 }
 
 var cliRunFlags = []g.Flag{
