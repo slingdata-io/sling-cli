@@ -520,6 +520,8 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 			err = ds.ConsumeXmlReader(reader)
 		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReader(reader)
+		case dbio.FileTypeArrow:
+			err = ds.ConsumeArrowReader(reader)
 		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReader(reader)
 		case dbio.FileTypeSAS:
@@ -1636,7 +1638,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
-	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
+	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeArrow, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
 		ext := fileType.Ext()
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType

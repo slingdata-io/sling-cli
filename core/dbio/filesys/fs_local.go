@@ -173,6 +173,8 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 			err = ds.ConsumeXmlReader(bufio.NewReader(file))
 		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReaderSeeker(file)
+		case dbio.FileTypeArrow:
+			err = ds.ConsumeArrowReaderSeeker(file)
 		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReaderSeeker(file)
 		case dbio.FileTypeSAS:

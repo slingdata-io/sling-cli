@@ -595,6 +595,7 @@ const (
 	FileTypeExcel     FileType = "xlsx"
 	FileTypeJson      FileType = "json"
 	FileTypeParquet   FileType = "parquet"
+	FileTypeArrow     FileType = "arrow"
 	FileTypeAvro      FileType = "avro"
 	FileTypeSAS       FileType = "sas7bdat"
 	FileTypeJsonLines FileType = "jsonlines"
@@ -614,6 +615,7 @@ var AllFileType = []struct {
 	{FileTypeJson, "FileTypeJson"},
 	{FileTypeParquet, "FileTypeParquet"},
 	{FileTypeAvro, "FileTypeAvro"},
+	{FileTypeArrow, "FileTypeArrow"},
 	{FileTypeSAS, "FileTypeSAS"},
 	{FileTypeJsonLines, "FileTypeJsonLines"},
 	{FileTypeIceberg, "FileTypeIceberg"},
