@@ -102,8 +102,20 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 
 			stream.SetConfig(options)
 			sc := df.StreamConfig()
+
+			// output as arrow
+			var readerChn chan *iop.BatchReader
 			sc.FileMaxRows = cast.ToInt64(limit)
-			for batchR := range stream.NewCsvReaderChnl(sc) {
+			switch cfg.Target.Options.Format {
+			case dbio.FileTypeArrow:
+				readerChn = stream.NewArrowReaderChnl(sc)
+			case dbio.FileTypeParquet:
+				readerChn = stream.NewParquetArrowReaderChnl(sc)
+			default:
+				readerChn = stream.NewCsvReaderChnl(sc)
+			}
+
+			for batchR := range readerChn {
 				if limit > 0 && cnt >= limit {
 					return
 				}
@@ -112,6 +124,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 					err = g.Error("number columns have changed, not compatible with stdout.")
 					return
 				}
+
 				bufStdout := bufio.NewWriter(os.Stdout)
 				bw, err = filesys.Write(batchR.Reader, bufStdout)
 				bufStdout.Flush()

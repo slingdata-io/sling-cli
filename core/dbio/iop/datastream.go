@@ -2381,6 +2381,94 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 	return readerChn
 }
 
+// NewArrowReaderChnl provides a channel of readers as the limit is reached
+// each channel flows as fast as the consumer consumes
+func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+
+	pipeR, pipeW := io.Pipe()
+
+	tbw := int64(0)
+
+	go func() {
+		var aw *ArrowWriter
+		var br *BatchReader
+		var err error
+
+		defer close(readerChn)
+
+		nextPipe := func(batch *Batch) error {
+			if aw != nil {
+				err := aw.Close()
+				if err != nil {
+					return g.Error(err, "could not close arrow writer")
+				}
+			}
+
+			if pipeW != nil {
+				pipeW.Close() // close the prior writer after arrow writer is closed
+			}
+			tbw = 0 // reset
+
+			// new reader
+			pipeR, pipeW = io.Pipe()
+
+			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			readerChn <- br
+
+			aw, err = NewArrowWriter(pipeW, batch.Columns)
+			if err != nil {
+				return g.Error(err, "could not create arrow writer")
+			}
+
+			return nil
+		}
+
+		for batch := range ds.BatchChan {
+			if batch.ColumnsChanged() || batch.IsFirst() {
+				err := nextPipe(batch)
+				if err != nil {
+					ds.Context.CaptureErr(err)
+					return
+				}
+			}
+
+			for row := range batch.Rows {
+				err := aw.WriteRow(row)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing row"))
+					ds.Context.Cancel()
+					pipeW.Close()
+					return
+				}
+
+				br.Counter++
+
+				if (sc.FileMaxRows > 0 && br.Counter >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
+					err = nextPipe(batch)
+					if err != nil {
+						ds.Context.CaptureErr(err)
+						return
+					}
+				}
+			}
+		}
+
+		if aw != nil {
+			err := aw.Close()
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "could not close final arrow writer"))
+			}
+		}
+		if pipeW != nil {
+			pipeW.Close()
+		}
+
+	}()
+
+	return readerChn
+}
+
 // NewParquetArrowReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
 // WARN: Not using this one since it doesn't write Decimals properly.

@@ -912,6 +912,13 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 					break
 				}
 			}
+		case dbio.FileTypeArrow:
+			for reader := range ds.NewArrowReaderChnl(sc) {
+				err := processReader(reader)
+				if err != nil {
+					break
+				}
+			}
 		case dbio.FileTypeExcel:
 			for reader := range ds.NewExcelReaderChnl(sc) {
 				err := processReader(reader)
