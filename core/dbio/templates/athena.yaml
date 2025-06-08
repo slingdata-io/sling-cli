@@ -18,7 +18,7 @@ core:
     )
     stored as parquet
     location '{location}'
-  drop_table: drop table if exists {table}
+  drop_table: drop table if exists {table} purge
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for Athena'"
   create_index: "select 'indexes do not apply for Athena'"
