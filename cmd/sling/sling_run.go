@@ -587,6 +587,27 @@ func runPipeline(pipelineCfgPath string) (err error) {
 
 	setTimeout(cast.ToString(timeoutR), timeoutE)
 
+	pipelineMap := g.M()
+
+	// track usage
+	defer func() {
+		steps := []map[string]any{}
+		for _, s := range pipeline.Steps {
+			steps = append(steps, s.PayloadMap())
+		}
+
+		pipelineMap["md5"] = pipeline.MD5
+		pipelineMap["steps"] = steps
+
+		if err != nil {
+			env.SetTelVal("error", getErrString(err))
+		}
+		env.SetTelVal("pipeline", g.Marshal(pipelineMap))
+
+		// telemetry
+		Track("run")
+	}()
+
 	// set function here due to scoping
 	sling.HookRunReplication = runReplication
 
