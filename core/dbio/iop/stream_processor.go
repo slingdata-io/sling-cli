@@ -54,6 +54,7 @@ type StreamConfig struct {
 	NullAs            string                   `json:"null_as"`
 	DatetimeFormat    string                   `json:"datetime_format"`
 	SkipBlankLines    bool                     `json:"skip_blank_lines"`
+	Format            dbio.FileType            `json:"format"`
 	Delimiter         string                   `json:"delimiter"`
 	Escape            string                   `json:"escape"`
 	Quote             string                   `json:"quote"`
@@ -393,6 +394,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["null_if"]; ok {
 		sp.Config.NullIf = val
+	}
+
+	if val, ok := configMap["format"]; ok {
+		sp.Config.Format = dbio.FileType(val)
 	}
 
 	if val, ok := configMap["null_as"]; ok {

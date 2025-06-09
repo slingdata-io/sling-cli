@@ -3,8 +3,6 @@ package database
 import (
 	"context"
 	"database/sql"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/net"
-	"github.com/labstack/echo/v4"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -134,6 +131,11 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 		}
 	}
 
+	// add extensions
+	if conn.GetProp("copy_method") == "arrow_http" {
+		conn.duck.AddExtension("arrow from community")
+	}
+
 	return nil
 }
 
@@ -245,7 +247,7 @@ func (conn *DuckDbConn) importViaTempCSVs(tableFName string, df *iop.Dataflow) (
 	return df.Count(), nil
 }
 
-func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (count uint64, err error) {
+func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, format dbio.FileType) (count uint64, err error) {
 
 	table, err := ParseTableName(tableFName, conn.GetType())
 	if err != nil {
@@ -253,69 +255,24 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 		return
 	}
 
-	// start local http server
-	port, err := g.GetPort("localhost:0")
-	if err != nil {
-		err = g.Error(err, "could not acquire local port for duckdb http import")
-		return 0, err
-	}
-	// create reader channel to pass between handler and main flow
-	readerCh := make(chan io.Reader, 1)
-
-	// create http server to serve data
-	importContext := g.NewContext(conn.context.Ctx)
-	httpURL := g.F("http://localhost:%d/data", port)
-	server := echo.New()
-	{
-		server.HidePort = true
-		server.HideBanner = true
-		// server.Use(middleware.Logger())
-		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
-			select {
-			case reader := <-readerCh:
-				if reader != nil {
-					return c.Stream(200, "text/csv", reader)
-				}
-			default:
-			}
-			return c.NoContent(http.StatusOK)
-		})
-
-		server.Add(http.MethodHead, "/data", func(c echo.Context) error {
-			c.Response().Header().Set("Content-Type", "text/csv")
-			return c.NoContent(http.StatusOK)
-		})
-
-		// start server in background, wait for it to start
-		importContext.Wg.Read.Add()
-		go func() {
-			g.Debug("started %s for duckdb direct import", httpURL)
-			importContext.Wg.Read.Done()
-			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
-				g.Error(err, "duckdb import http server error")
-			}
-		}()
-	}
-
-	// wait for local server startup
-	importContext.Wg.Read.Wait()
-	time.Sleep(100 * time.Millisecond)
-	defer server.Shutdown(conn.Context().Ctx)
-
+	// Use the new DataflowToHttpStream function
 	sc := conn.defaultCsvConfig()
-	df.SetBatchLimit(sc.BatchLimit)
-	ds := iop.MergeDataflow(df)
+	sc.Format = format
 
-	for batchR := range ds.NewCsvReaderChnl(sc) {
-		g.Trace("processing duckdb batch %s", batchR.Batch.ID())
-		readerCh <- batchR.Reader
+	streamPartChn, err := conn.duck.DataflowToHttpStream(df, sc)
+	if err != nil {
+		return 0, g.Error(err, "could not setup http stream")
+	}
 
-		columnNames := lo.Map(batchR.Columns.Names(), func(col string, i int) string {
+	// Process each stream part
+	for streamPart := range streamPartChn {
+		columnNames := lo.Map(streamPart.Columns.Names(), func(col string, i int) string {
 			return `"` + col + `"`
 		})
 
+		// Generate insert SQL using the fromExpr from streamPart
 		sqlLines := []string{
-			g.F(`insert into %s (%s) select * from read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false);`, table.FDQN(), strings.Join(columnNames, ", "), httpURL, conn.generateCsvColumns(batchR.Columns)),
+			g.F(`insert into %s (%s) select * from %s;`, table.FDQN(), strings.Join(columnNames, ", "), streamPart.FromExpr),
 		}
 
 		sql := strings.Join(sqlLines, ";\n")
@@ -325,13 +282,9 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow) (coun
 			return df.Count(), g.Error(err, "could not insert into %s", tableFName)
 		}
 
-		if err = importContext.Err(); err != nil {
-			return df.Count(), g.Error(err, "error importing insert into %s", tableFName)
-		}
-
 		if result != nil {
 			inserted, _ := result.RowsAffected()
-			g.Trace("inserted %d rows into temp duckdb", inserted)
+			g.Trace("inserted %d rows into %s", inserted, tableFName)
 		}
 	}
 

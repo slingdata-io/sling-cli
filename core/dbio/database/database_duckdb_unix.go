@@ -12,6 +12,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 )
@@ -22,10 +23,12 @@ func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		return conn.importViaNamedPipe(tableFName, df)
 	case "csv_files":
 		return conn.importViaTempCSVs(tableFName, df)
-	case "http_server":
-		return conn.importViaHTTP(tableFName, df)
+	case "csv_http":
+		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
+	case "arrow_http":
+		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
 	default:
-		return conn.importViaTempCSVs(tableFName, df)
+		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
 	}
 }
 

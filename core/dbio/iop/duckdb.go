@@ -2,6 +2,7 @@ package iop
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -241,7 +242,7 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
 			sql += fmt.Sprintf("LOAD %s;", extension)
 		} else {
-			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, extension)
+			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
 		}
 	}
 	return
@@ -1073,7 +1074,16 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		return streamPartChn, err
 	}
 	// create reader channel to pass between handler and main flow
-	readerCh := make(chan io.Reader, 1)
+	readerCh := make(chan io.Reader)
+	doneCh := make(chan bool)
+
+	// determine content type and format based on sc.Format
+	contentType := "text/csv"
+	format := dbio.FileTypeCsv // default to CSV
+	if sc.Format == dbio.FileTypeArrow {
+		contentType = "application/vnd.apache.arrow.stream"
+		format = dbio.FileTypeArrow
+	}
 
 	// create http server to serve data
 	importContext := g.NewContext(duck.Context.Ctx)
@@ -1084,18 +1094,16 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		server.HideBanner = true
 		// server.Use(middleware.Logger())
 		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
-			select {
-			case reader := <-readerCh:
-				if reader != nil {
-					return c.Stream(200, "text/csv", reader)
-				}
-			default:
+			reader := <-readerCh
+			if reader != nil {
+				defer func() { doneCh <- true }()
+				return c.Stream(200, contentType, reader)
 			}
 			return c.NoContent(http.StatusOK)
 		})
 
 		server.Add(http.MethodHead, "/data", func(c echo.Context) error {
-			c.Response().Header().Set("Content-Type", "text/csv")
+			c.Response().Header().Set("Content-Type", contentType)
 			return c.NoContent(http.StatusOK)
 		})
 
@@ -1115,26 +1123,66 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	time.Sleep(100 * time.Millisecond)
 	df.Defer(func() { server.Shutdown(importContext.Ctx) })
 
+	sc.BatchLimit = 50000               // since it's ready all in memory
+	sc.FileMaxBytes = 100 * 1024 * 1024 // since it's ready all in memory
+
 	df.SetBatchLimit(sc.BatchLimit)
 	ds := MergeDataflow(df)
 
 	go func() {
 		defer close(streamPartChn)
 		var partIndex int
-		for batchR := range ds.NewCsvReaderChnl(sc) {
-			g.Trace("processing duckdb batch %s", batchR.Batch.ID())
-			readerCh <- batchR.Reader
 
-			// can use this as a from table
-			fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+		if format == dbio.FileTypeArrow {
+			// Use Arrow format
+			for batchR := range ds.NewArrowReaderChnl(sc) {
+				g.Trace("processing duckdb arrow batch %s", batchR.Batch.ID())
 
-			streamPartChn <- HttpStreamPart{
-				Index:    partIndex,
-				FromExpr: fromExpr,
-				Columns:  batchR.Columns,
+				// buffer all the data first to avoid deadlock
+				data, err := io.ReadAll(batchR.Reader)
+				if err != nil {
+					g.Error(err, "failed to read arrow batch")
+					return
+				}
+
+				// Use read_arrow_ipc for Arrow format
+				fromExpr := g.F(`read_arrow('%s')`, httpURL)
+
+				streamPartChn <- HttpStreamPart{
+					Index:    partIndex,
+					FromExpr: fromExpr,
+					Columns:  batchR.Columns,
+				}
+				readerCh <- bytes.NewReader(data)
+				<-doneCh
+
+				partIndex++
 			}
+		} else {
+			// Default to CSV format
+			for batchR := range ds.NewCsvReaderChnl(sc) {
+				g.Trace("processing duckdb batch %s", batchR.Batch.ID())
 
-			partIndex++
+				// buffer all the data first to avoid deadlock
+				data, err := io.ReadAll(batchR.Reader)
+				if err != nil {
+					g.Error(err, "failed to read csv batch")
+					return
+				}
+
+				// can use this as a from table
+				fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
+
+				streamPartChn <- HttpStreamPart{
+					Index:    partIndex,
+					FromExpr: fromExpr,
+					Columns:  batchR.Columns,
+				}
+				readerCh <- bytes.NewReader(data)
+				<-doneCh
+
+				partIndex++
+			}
 		}
 	}()
 

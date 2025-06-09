@@ -498,7 +498,7 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("bucket", U.U.Host)
 		}
 		if c.Type == dbio.TypeFileGoogleDrive {
-			// Google Drive doesn't use buckets, paths are absolute
+			setIfMissing("folder_id", U.U.Host)
 		}
 		if c.Type == dbio.TypeFileAzure {
 			account := strings.ReplaceAll(U.U.Host, ".blob.core.windows.net", "")
