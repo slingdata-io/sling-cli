@@ -839,6 +839,8 @@ func (c *Connection) setURL() (err error) {
 			setIfMissing("region", c.Data["region_name"])
 			setIfMissing("profile", c.Data["aws_profile_name"])
 			setIfMissing("workgroup", c.Data["work_group"])
+			setIfMissing("data_location", c.Data["s3_data_dir"])
+			setIfMissing("staging_location", c.Data["s3_staging_dir"])
 		}
 
 		setIfMissing("access_key_id", c.Data["user"])
@@ -847,8 +849,6 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("session_token", nil)
 		setIfMissing("region", c.Data["aws_region"])
 		setIfMissing("workgroup", "primary")
-		setIfMissing("data_location", "")
-		setIfMissing("staging_location", "")
 		setIfMissing("catalog", "AwsDataCatalog") // standard default aws catalog
 		setIfMissing("database", "")
 		template = "athena://{region}"
