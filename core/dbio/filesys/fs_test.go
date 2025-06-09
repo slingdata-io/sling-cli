@@ -295,7 +295,7 @@ func TestFileSysLocalParquet(t *testing.T) {
 	}
 
 	expectedTypes := map[string]iop.ColumnType{
-		"id":         iop.BigIntType,
+		"id":         iop.IntegerType,
 		"first_name": iop.StringType,
 		"last_name":  iop.StringType,
 		"email":      iop.StringType,
