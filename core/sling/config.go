@@ -596,6 +596,18 @@ func (cfg *Config) Prepare() (err error) {
 	switch cfg.Target.Type {
 	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable:
 		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
+	case dbio.TypeDbIceberg:
+		switch cfg.Mode {
+		case TruncateMode, BackfillMode:
+			return g.Error("mode '%s' not yet supported for iceberg target.", cfg.Mode)
+		case IncrementalMode:
+			if !cfg.Source.HasUpdateKey() {
+				return g.Error("for mode '%s' with iceberg target, must provided update-key", cfg.Mode)
+			} else if cfg.Source.HasPrimaryKey() {
+				g.Warn("for mode '%s' with iceberg target, primary-key is ineffective, incremental merge is not yet supported (only appends)", cfg.Mode)
+				cfg.Source.PrimaryKeyI = nil // delete PK
+			}
+		}
 	}
 
 	// validate table keys

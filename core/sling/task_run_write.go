@@ -192,12 +192,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Source.PrimaryKeyI = pkCols.Names()
 	}
 
+	// write directly for iceberg full-refresh
+	isIce := tgtConn.GetType() == dbio.TypeDbIceberg
+
 	// write directly to the final table (no temp table)
-	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert || tgtConn.GetType() == dbio.TypeDbIceberg {
+	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert || isIce {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
-			if tgtConn.GetType() == dbio.TypeDbIceberg {
-				return 0, g.Error("mode '%s' not supported for iceberg target.", cfg.Mode)
-			}
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else {
 			return t.writeToDbDirectly(cfg, df, tgtConn)
@@ -825,8 +825,8 @@ func prepareFinal(
 }
 
 func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
-	if cfg.Mode == "drop (need to optimize temp table in place)" {
-		// Use swap
+	if cfg.Mode == FullRefreshMode && g.In(tgtConn.GetType(), dbio.TypeDbIceberg) {
+		// Use swap, we cannot yet insert from one table to another
 		return transferBySwappingTables(tgtConn, tableTmp, targetTable)
 	}
 

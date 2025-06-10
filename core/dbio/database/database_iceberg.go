@@ -526,6 +526,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	}
 
 	if incrementalKey != "" && incrementalValue != "" {
+		incrementalValue = strings.ReplaceAll(incrementalValue, "'", "") // clean
 		// Find the field in the table schema to get proper field reference
 		field, found := tbl.Schema().FindFieldByNameCaseInsensitive(incrementalKey)
 		if !found {
@@ -540,6 +541,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 
 		// Try to parse as different types based on field type
 		var greaterThanExpr iceberg.UnboundPredicate
+		sp := iop.NewStreamProcessor()
 		switch field.Type {
 		case iceberg.PrimitiveTypes.String:
 			literal = iceberg.NewLiteral(incrementalValue)
@@ -573,14 +575,14 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 				return nil, g.Error("cannot parse incremental value '%s' as double: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.Date:
-			if val, parseErr := time.Parse("2006-01-02", incrementalValue); parseErr == nil {
+			if val, parseErr := sp.ParseTime(incrementalValue); parseErr == nil {
 				literal = iceberg.NewLiteral(iceberg.Date(val.Unix() / 86400)) // Convert to days since epoch
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Date(val.Unix()/86400))
 			} else {
 				return nil, g.Error("cannot parse incremental value '%s' as date: %v", incrementalValue, parseErr)
 			}
 		case iceberg.PrimitiveTypes.TimestampTz:
-			if val, parseErr := time.Parse(time.RFC3339, incrementalValue); parseErr == nil {
+			if val, parseErr := sp.ParseTime(incrementalValue); parseErr == nil {
 				literal = iceberg.NewLiteral(iceberg.Timestamp(val.UnixMicro()))
 				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Timestamp(val.UnixMicro()))
 			} else {
@@ -873,6 +875,72 @@ func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
 		}
 	}
 
+	return nil
+}
+
+// SwapTable swaps two tables by renaming them
+// 2025-06-09 => doesn't work, blank error
+func (conn *IcebergConn) SwapTable(srcTable string, tgtTable string) (err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		return g.Error(err, "Could not reconnect")
+	}
+
+	// Parse table names
+	srcT, err := ParseTableName(srcTable, conn.Type)
+	if err != nil {
+		return g.Error(err, "could not parse source table name: %s", srcTable)
+	}
+
+	tgtT, err := ParseTableName(tgtTable, conn.Type)
+	if err != nil {
+		return g.Error(err, "could not parse target table name: %s", tgtTable)
+	}
+
+	// Create identifiers
+	srcID := table.Identifier{srcT.Schema, srcT.Name}
+	tgtID := table.Identifier{tgtT.Schema, tgtT.Name}
+
+	// Create temporary table name
+	tempName := tgtT.Name + "_tmp" + g.RandString(g.AlphaRunesLower, 2)
+	tempID := table.Identifier{tgtT.Schema, tempName}
+
+	// Drop temp table if exists
+	tempT := Table{Schema: tgtT.Schema, Name: tempName}
+	exists, err := conn.TableExists(tempT)
+	if err != nil {
+		return g.Error(err, "could not check temp table existence")
+	}
+	if exists {
+		if err = conn.DropTable(tempT.FullName()); err != nil {
+			return g.Error(err, "could not drop temp table %s", tempT.FullName())
+		}
+	}
+
+	// Rename target table to temp
+	_, err = conn.Catalog.RenameTable(conn.Context().Ctx, tgtID, tempID)
+	if err != nil {
+		return g.Error(err, "could not rename table %s to %s", tgtTable, tempT.FullName())
+	}
+
+	// Rename source table to target
+	_, err = conn.Catalog.RenameTable(conn.Context().Ctx, srcID, tgtID)
+	if err != nil {
+		// Try to rollback
+		conn.Catalog.RenameTable(conn.Context().Ctx, tempID, tgtID)
+		return g.Error(err, "could not rename table %s to %s", srcTable, tgtTable)
+	}
+
+	// Rename temp table to source
+	_, err = conn.Catalog.RenameTable(conn.Context().Ctx, tempID, srcID)
+	if err != nil {
+		// Try to rollback
+		conn.Catalog.RenameTable(conn.Context().Ctx, tgtID, srcID)
+		conn.Catalog.RenameTable(conn.Context().Ctx, tempID, tgtID)
+		return g.Error(err, "could not rename table %s to %s", tempT.FullName(), srcTable)
+	}
+
+	g.Debug("successfully swapped tables %s and %s", srcTable, tgtTable)
 	return nil
 }
 
