@@ -469,6 +469,8 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		fetchedColumns = val
 	}
 
+	tableSchema := cast.ToString(opts["table_schema"])
+	tableName := cast.ToString(opts["table_name"])
 	incrementalKey := cast.ToString(opts["incremental_key"])
 	incrementalValue := cast.ToString(opts["incremental_value"])
 	limit := cast.ToUint64(opts["limit"])
@@ -481,20 +483,13 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	queryContext := g.NewContext(ctx)
 	conn.LogSQL(sql)
 
-	// For Iceberg, we only support simple table scans (SELECT * FROM table)
-	// Parse the SQL to extract table name
-	tableName, err := parseSimpleSelectSQL(sql)
-	if err != nil {
-		return nil, g.Error(err, "Iceberg only supports simple SELECT * FROM table queries")
-	}
-
 	// Parse table identifier
-	tableID := parseTableIdentifier(tableName)
+	tableID := table.Identifier{tableSchema, tableName}
 
 	// Load table
 	tbl, err := conn.Catalog.LoadTable(queryContext.Ctx, tableID, nil)
 	if err != nil {
-		return nil, g.Error(err, "Failed to load table %s", tableName)
+		return nil, g.Error(err, "Failed to load table %s.%s", tableSchema, tableName)
 	}
 
 	// Get table schema and convert to columns if not provided
