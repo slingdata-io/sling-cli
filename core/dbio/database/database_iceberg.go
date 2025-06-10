@@ -613,21 +613,21 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 
 		var currentRecord arrow.Record
 		var currentRowIdx int
-		var records []arrow.Record
-		var recordIdx int
+		var recordChan = make(chan arrow.Record, 1)
+		var done = make(chan bool)
 
-		// Collect all records from the iterator
-		for record, err := range recordIterator {
-			if err != nil {
-				queryContext.CaptureErr(g.Error(err, "Error reading arrow records"))
-				break
+		// Stream records in a goroutine
+		go func() {
+			defer close(recordChan)
+			defer close(done)
+			for record, err := range recordIterator {
+				if err != nil {
+					queryContext.CaptureErr(g.Error(err, "Error reading arrow records"))
+					return
+				}
+				recordChan <- record
 			}
-			records = append(records, record)
-		}
-
-		if len(records) > 0 {
-			currentRecord = records[0]
-		}
+		}()
 
 		return func(it *iop.Iterator) bool {
 			if limit > 0 && it.Counter >= limit {
@@ -636,11 +636,14 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 
 			// Check if we need to fetch next record batch
 			if currentRecord == nil || currentRowIdx >= int(currentRecord.NumRows()) {
-				recordIdx++
-				if recordIdx < len(records) {
-					currentRecord = records[recordIdx]
+				select {
+				case record, ok := <-recordChan:
+					if !ok {
+						return false
+					}
+					currentRecord = record
 					currentRowIdx = 0
-				} else {
+				case <-done:
 					return false
 				}
 			}
@@ -960,131 +963,95 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		return 0, g.Error(err, "could not load existing table: %s", tableFName)
 	}
 
-	// Create Arrow schema from datastream columns
-	arrowSchema := iop.ColumnsToArrowSchema(ds.Columns)
-
-	// Create memory allocator
-	alloc := memory.NewGoAllocator()
-
-	// Create record builder
-	recordBuilder := array.NewRecordBuilder(alloc, arrowSchema)
-	defer recordBuilder.Release()
-
 	// Batch size for writing
-	batchSize := 10000
-	if bSize := cast.ToInt(conn.GetProp("batch_size")); bSize > 0 {
-		batchSize = bSize
+	fileMaxRows := 500000
+	if bSize := cast.ToInt(conn.GetProp("file_max_rows")); bSize > 0 {
+		fileMaxRows = bSize
 	}
 
-	// Collect records in batches
-	records := []arrow.Record{}
-	batchCount := 0
-
-	for row := range ds.Rows() {
-		// Add row to record builder
-		for i, val := range row {
-			if i >= len(recordBuilder.Fields()) {
-				break
-			}
-			iop.AppendToBuilder(recordBuilder.Field(i), &ds.Columns[i], val)
-		}
-
-		batchCount++
-		count++
-
-		// Write batch when size is reached
-		if batchCount >= batchSize {
-			record := recordBuilder.NewRecord()
-			records = append(records, record)
-			batchCount = 0
-		}
-	}
-
-	// Write final batch if any rows remain
-	if batchCount > 0 {
-		record := recordBuilder.NewRecord()
-		records = append(records, record)
-	}
-
-	// Check if we have any records to write
-	if len(records) == 0 {
-		return 0, nil
-	}
-
-	// Create an Arrow table from records
-	arrowTable := array.NewTableFromRecords(arrowSchema, records)
-	defer arrowTable.Release()
-
-	// Release individual records
-	for _, rec := range records {
-		rec.Release()
-	}
-
-	// io, ok := tbl.FS().(iceio.WriteFileIO)
-	// if !ok {
-	// 	return 0, g.Error("could not convert to iceio.WriteFileIO")
-	// }
-
-	// filePath := g.F("%s/%s.parquet", tbl.Location(), g.NewTsID("file"))
-
-	// writer, err := io.Create(filePath)
-	// if err != nil {
-	// 	return 0, g.Error(err, "could not create file(s) for %s", tableFName)
-	// }
-
-	// err = pqarrow.WriteTable(arrowTable, writer, arrowTable.NumRows(), nil, pqarrow.DefaultWriterProps())
-	// if err != nil {
-	// 	return 0, g.Error(err, "could not write records to %s", filePath)
-	// }
-
-	// tx := tbl.NewTransaction()
-	// err = tx.AddFiles(conn.Context().Ctx, []string{filePath}, nil, false)
-	// if err != nil {
-	// 	io.Remove(filePath) // clean up
-	// 	return 0, g.Error(err, "could not add files")
-	// }
-
-	// newTable, err := tx.Commit(conn.Context().Ctx)
-	// if err != nil {
-	// 	io.Remove(filePath) // clean up
-	// 	return 0, g.Error(err, "could not get table from transaction")
-	// }
-
-	// Use the table's AppendTable method to write the data
-	// This handles all the low-level details of writing Parquet files,
-	// creating manifests, and updating table metadata
+	// Use snapshot properties
 	snapshotProps := map[string]string{
 		"operation": "append",
 		"source":    "sling-cli",
 	}
 
-	tx := tbl.NewTransaction()
+	// Process batches from the datastream
+	for batch := range ds.BatchChan {
+		// Create Arrow schema from batch columns (in case they changed)
+		arrowSchema := iop.ColumnsToArrowSchema(batch.Columns)
 
-	// Append the Arrow table to the Iceberg table
-	err = tx.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(batchSize), snapshotProps)
-	if err != nil {
-		return count, g.Error(err, "Failed to append data to Iceberg table %s", tableFName)
+		// Create memory allocator
+		alloc := memory.NewGoAllocator()
+
+		// Create record builder for this batch
+		recordBuilder := array.NewRecordBuilder(alloc, arrowSchema)
+		defer recordBuilder.Release()
+
+		// Collect records for this batch
+		records := []arrow.Record{}
+		rowCount := 0
+
+		for row := range batch.Rows {
+			// Add row to record builder
+			for i, val := range row {
+				if i >= len(recordBuilder.Fields()) {
+					break
+				}
+				iop.AppendToBuilder(recordBuilder.Field(i), &batch.Columns[i], val)
+			}
+
+			rowCount++
+			count++
+
+			// Create new record when batch size is reached
+			if rowCount >= fileMaxRows {
+				record := recordBuilder.NewRecord()
+				records = append(records, record)
+				rowCount = 0
+				// Reset builder for next batch
+				recordBuilder = array.NewRecordBuilder(alloc, arrowSchema)
+				batch.Close() // close batch to write parquet file
+			}
+		}
+
+		// Write final record if any rows remain
+		if rowCount > 0 {
+			record := recordBuilder.NewRecord()
+			records = append(records, record)
+		}
+
+		// Skip if no records in this batch
+		if len(records) == 0 {
+			continue
+		}
+
+		// Create an Arrow table from records
+		arrowTable := array.NewTableFromRecords(arrowSchema, records)
+		defer arrowTable.Release()
+
+		// Release individual records
+		for _, rec := range records {
+			rec.Release()
+		}
+
+		// Create a new transaction for this batch
+		tx := tbl.NewTransaction()
+
+		// Append the Arrow table to the Iceberg table
+		err = tx.AppendTable(conn.Context().Ctx, arrowTable, cast.ToInt64(fileMaxRows), snapshotProps)
+		if err != nil {
+			return count, g.Error(err, "Failed to append data to Iceberg table %s", tableFName)
+		}
+
+		// Commit the transaction
+		newTable, err := tx.Commit(conn.Context().Ctx)
+		if err != nil {
+			return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
+		}
+
+		details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "batch_rows", len(batch.Rows))
+		g.Debug("committed iceberg batch", details)
 	}
-
-	// Debug: Check staged table before commit
-	// stagedTable, err := tx.StagedTable()
-	// if err != nil {
-	// 	g.Warn("Could not get staged table for debugging: %v", err)
-	// } else {
-	// 	g.Info("Staged table location: %s", stagedTable.Location())
-	// 	if currentSnapshot := stagedTable.CurrentSnapshot(); currentSnapshot != nil {
-	// 		g.Info("Staged snapshot ID: %d", currentSnapshot.SnapshotID)
-	// 		g.Info("Staged snapshot summary: %s", g.Marshal(currentSnapshot.Summary))
-	// 	}
-	// }
-
-	newTable, err := tx.Commit(conn.Context().Ctx)
-	if err != nil {
-		return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
-	}
-
-	details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "rows", count)
-	g.Debug("created iceberg snapshot", details)
 
 	return count, nil
 }
@@ -1110,7 +1077,7 @@ func (conn *IcebergConn) BulkExportStream(table Table) (ds *iop.Datastream, err 
 	}
 
 	// For bulk export, we can use the regular stream rows functionality
-	return conn.Self().StreamRows(table.Select(), options)
+	return conn.Self().StreamRows(sql, options)
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table
