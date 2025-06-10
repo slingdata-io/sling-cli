@@ -158,6 +158,10 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 				"table", sTable.FDQN(),
 				"incremental_where_cond", incrementalWhereCond,
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
+				"incremental_value", cfg.IncrementalValStr,
+				"table_name", sTable.Name,
+				"table_schema", sTable.Schema,
+				"fields_array", g.Marshal(sFields),
 			)
 		} else {
 			if g.In(t.Config.Mode, IncrementalMode, BackfillMode) && !(strings.Contains(sTable.SQL, "{incremental_where_cond}") || strings.Contains(sTable.SQL, "{incremental_value}")) {

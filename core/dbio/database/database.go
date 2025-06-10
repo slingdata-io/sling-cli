@@ -90,6 +90,7 @@ type Connection interface {
 	GetColumnStats(tableName string, fields ...string) (columns iop.Columns, err error)
 	GetCount(string) (int64, error)
 	GetDatabases() (iop.Dataset, error)
+	GetMaxValue(t Table, colName string) (value any, col iop.Column, err error)
 	GetDDL(string) (string, error)
 	GetGormConn(config *gorm.Config) (*gorm.DB, error)
 	GetIndexes(string) (iop.Dataset, error)
@@ -1664,6 +1665,42 @@ func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
 	)
 }
 
+// GetMaxValue get the max value of a column
+func (conn *BaseConn) GetMaxValue(table Table, colName string) (value any, maxCol iop.Column, err error) {
+	sql := g.F(
+		"select max(%s) as max_val from %s",
+		conn.Quote(colName),
+		table.FDQN(),
+	)
+
+	data, err := conn.Query(sql)
+	if err != nil {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "exist") ||
+			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "unknown") ||
+			strings.Contains(errMsg, "no such table") ||
+			strings.Contains(errMsg, "invalid object") {
+			// table does not exists, will be create later
+			// set val to blank for full load
+			return nil, maxCol, nil
+		}
+		err = g.Error(err, "could not get max value for "+colName)
+		return
+	}
+
+	if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
+		// table is empty
+		// set val to blank for full load
+		return nil, maxCol, nil
+	}
+
+	maxCol = data.Columns[0]
+	value = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
+
+	return value, maxCol, nil
+}
+
 // GetDDL returns DDL for given table.
 func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
@@ -2941,6 +2978,11 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
+
+	if g.In(conn.Type, dbio.TypeDbIceberg) {
+		g.Warn("cannot compare checksums for %s", conn.Type)
+		return nil
+	}
 
 	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {

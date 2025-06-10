@@ -637,6 +637,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	if !ok {
 		sp.colStats[i] = &ColumnStats{}
 		cs = sp.colStats[i]
+		if len(sp.rowChecksum) <= i {
+			sp.rowChecksum = append(sp.rowChecksum, 0)
+		}
 	}
 
 	var nVal interface{}

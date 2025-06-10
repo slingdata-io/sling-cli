@@ -61,6 +61,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
+	dbio.TypeDbIceberg:           {name: "iceberg", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
@@ -759,6 +760,20 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // athena uses text for json
 				}
+			case tgtType == dbio.TypeDbIceberg:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // iceberg uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // iceberg uses text for json
+				}
+			case srcType == dbio.TypeDbIceberg && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // iceberg uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // iceberg uses text for json
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -852,6 +867,12 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 func TestSuiteDatabaseAthena(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbAthena, "1-8,20,23+")
+}
+
+func TestSuiteDatabaseIceberg(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8")
+	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {

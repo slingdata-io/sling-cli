@@ -19,8 +19,10 @@ import (
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -350,6 +352,110 @@ func (conn *IcebergConn) GetTableColumns(table *Table, fields ...string) (column
 	return conn.GetColumns(table.FullName(), fields...)
 }
 
+func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, err error) {
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		return nil, g.Error(err, "Could not reconnect")
+	}
+
+	// Parse table identifier
+	tableID := table.Identifier{t.Schema, t.Name}
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	if err != nil {
+		return nil, g.Error(err, "could not load existing table: %s", t.FullName())
+	}
+
+	// Check each data file's statistics
+	manifests, _ := tbl.CurrentSnapshot().Manifests(tbl.FS())
+	for _, manifest := range manifests {
+		// Only process data manifests (not delete manifests)
+		if manifest.ManifestContent() != iceberg.ManifestContentData {
+			continue
+		}
+
+		// Fetch manifest entries
+		entries, err := manifest.FetchEntries(tbl.FS(), true)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, entry := range entries {
+			dataFile := entry.DataFile()
+			dataFiles = append(dataFiles, dataFile)
+		}
+	}
+
+	return dataFiles, nil
+}
+
+// GetMaxValue gets the maximum value of the given column
+func (conn *IcebergConn) GetMaxValue(t Table, colName string) (value any, maxCol iop.Column, err error) {
+
+	err = reconnectIfClosed(conn)
+	if err != nil {
+		return nil, maxCol, g.Error(err, "Could not reconnect")
+	}
+
+	// Parse table identifier
+	tableID := table.Identifier{t.Schema, t.Name}
+	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
+	if err != nil {
+		return 0, maxCol, g.Error(err, "could not load existing table: %s", t.FullName())
+	}
+
+	field, ok := tbl.Schema().FindFieldByNameCaseInsensitive(colName)
+	if !ok {
+		return nil, maxCol, g.Error("could not find column %s in table %s", colName, t.FullName())
+	}
+
+	dataFiles, err := conn.GetDataFiles(t)
+	if err != nil {
+		return nil, maxCol, g.Error(err, "could not get data files")
+	}
+
+	// Check each data file's statistics
+	var globalMax iceberg.Literal
+
+	for _, dataFile := range dataFiles {
+
+		// Get upper bound values (max values) for each column
+		upperBounds := dataFile.UpperBoundValues()
+
+		// Check if we have statistics for our column
+		for colId, maxBytes := range upperBounds {
+			if colId != field.ID {
+				continue
+			}
+
+			// Convert bytes to literal based on the field type
+			maxLiteral, err := iceberg.LiteralFromBytes(field.Type, maxBytes)
+			if err != nil {
+				return nil, maxCol, err
+			}
+
+			// Update global max
+			if globalMax == nil {
+				globalMax = maxLiteral
+			} else if maxLiteral.String() > globalMax.String() {
+				globalMax = maxLiteral
+			}
+		}
+	}
+
+	// convert globalMax.String() to value according to field.Type
+	maxCol = iop.Column{
+		Name:    field.Name,
+		Type:    iop.NativeTypeToGeneral(field.Name, field.Type.String(), dbio.TypeDbIceberg),
+		DbType:  field.Type.String(),
+		Sourced: true,
+	}
+
+	// cast value
+	value = iop.NewStreamProcessor().CastVal(0, globalMax.String(), &maxCol)
+
+	return
+}
+
 // StreamRowsContext streams the rows of a table or query
 func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error) {
 	err = reconnectIfClosed(conn)
@@ -363,10 +469,9 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		fetchedColumns = val
 	}
 
-	limit := uint64(0) // infinite
-	if val := cast.ToUint64(opts["limit"]); val > 0 {
-		limit = val
-	}
+	incrementalKey := cast.ToString(opts["incremental_key"])
+	incrementalValue := cast.ToString(opts["incremental_value"])
+	limit := cast.ToUint64(opts["limit"])
 
 	start := time.Now()
 	if strings.TrimSpace(sql) == "" {
@@ -420,9 +525,80 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		scanOpts = append(scanOpts, table.WithLimit(int64(limit)))
 	}
 
+	if incrementalKey != "" && incrementalValue != "" {
+		// Find the field in the table schema to get proper field reference
+		field, found := tbl.Schema().FindFieldByNameCaseInsensitive(incrementalKey)
+		if !found {
+			return nil, g.Error("incremental key field '%s' not found in table schema", incrementalKey)
+		}
+
+		// Create the greater than expression using field reference
+		fieldRef := iceberg.Reference(field.Name)
+
+		// Parse the incremental value to the appropriate type based on field type
+		var literal iceberg.Literal
+
+		// Try to parse as different types based on field type
+		var greaterThanExpr iceberg.UnboundPredicate
+		switch field.Type {
+		case iceberg.PrimitiveTypes.String:
+			literal = iceberg.NewLiteral(incrementalValue)
+			greaterThanExpr = iceberg.GreaterThan(fieldRef, incrementalValue)
+		case iceberg.PrimitiveTypes.Int32:
+			if val, parseErr := cast.ToInt32E(incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(val)
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as integer: %v", incrementalValue, parseErr)
+			}
+		case iceberg.PrimitiveTypes.Int64:
+			if val, parseErr := cast.ToInt64E(incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(val)
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as long: %v", incrementalValue, parseErr)
+			}
+		case iceberg.PrimitiveTypes.Float32:
+			if val, parseErr := cast.ToFloat32E(incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(val)
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as float: %v", incrementalValue, parseErr)
+			}
+		case iceberg.PrimitiveTypes.Float64:
+			if val, parseErr := cast.ToFloat64E(incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(val)
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, val)
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as double: %v", incrementalValue, parseErr)
+			}
+		case iceberg.PrimitiveTypes.Date:
+			if val, parseErr := time.Parse("2006-01-02", incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(iceberg.Date(val.Unix() / 86400)) // Convert to days since epoch
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Date(val.Unix()/86400))
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as date: %v", incrementalValue, parseErr)
+			}
+		case iceberg.PrimitiveTypes.TimestampTz:
+			if val, parseErr := time.Parse(time.RFC3339, incrementalValue); parseErr == nil {
+				literal = iceberg.NewLiteral(iceberg.Timestamp(val.UnixMicro()))
+				greaterThanExpr = iceberg.GreaterThan(fieldRef, iceberg.Timestamp(val.UnixMicro()))
+			} else {
+				return nil, g.Error("cannot parse incremental value '%s' as timestamp: %v", incrementalValue, parseErr)
+			}
+		default:
+			// Default to string
+			literal = iceberg.NewLiteral(incrementalValue)
+			greaterThanExpr = iceberg.GreaterThan(fieldRef, incrementalValue)
+		}
+		_ = literal
+
+		scanOpts = append(scanOpts, table.WithRowFilter(greaterThanExpr))
+	}
+
 	// Add selected fields if specified
-	if fieldNames := opts["selected_fields"]; fieldNames != nil {
-		if fields, ok := fieldNames.([]string); ok {
+	if fieldNames := opts["fields_array"]; fieldNames != nil {
+		if fields, err := cast.ToStringSliceE(fieldNames); err == nil {
 			scanOpts = append(scanOpts, table.WithSelectedFields(fields...))
 		}
 	}
@@ -524,6 +700,9 @@ func (conn *IcebergConn) ExecContext(ctx context.Context, sql string, args ...in
 	case strings.HasPrefix(sql, "drop table "):
 		table := strings.TrimPrefix(sql, "drop table ")
 		return icebergResult{}, conn.DropTable(table)
+	case strings.HasPrefix(sql, "drop view "):
+		table := strings.TrimPrefix(sql, "drop view ")
+		return icebergResult{}, conn.DropTable(table)
 	case strings.Contains(sql, `"ddl_columns":`) && strings.Contains(sql, `"table":`):
 		m, _ := g.UnmarshalMap(sql)
 		var table Table
@@ -544,7 +723,7 @@ func (conn *IcebergConn) ExecContext(ctx context.Context, sql string, args ...in
 
 	// Iceberg doesn't support SQL execution directly
 	// This would need to be implemented with table operations
-	return nil, g.Error("Iceberg does not support direct SQL execution. Use bulk import/export operations instead")
+	return nil, g.Error("Iceberg does not support direct SQL execution. Use bulk import/export operations instead:\n%s", sql)
 }
 
 func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDDL string) (err error) {
@@ -586,6 +765,8 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 	createOpts = append(createOpts, catalog.WithProperties(props))
 
 	// Create the table
+	conn.LogSQL(g.F("create table %s (%s)", tableName, g.Marshal(icebergSchema)))
+
 	_, err = conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
 	if err != nil {
 		return g.Error(err, "Failed to create table %s", tableName)
@@ -595,8 +776,23 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 }
 
 // GetCount returns -1 to skip validation
-func (conn *IcebergConn) GetCount(string) (int64, error) {
-	return -1, nil
+func (conn *IcebergConn) GetCount(tableFName string) (count int64, err error) {
+
+	t, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return 0, g.Error(err, "could not parse table name: %s", tableFName)
+	}
+
+	dataFiles, err := conn.GetDataFiles(t)
+	if err != nil {
+		return 0, g.Error(err, "could not get data files")
+	}
+
+	for _, dataFile := range dataFiles {
+		count = count + dataFile.Count()
+	}
+
+	return count, nil
 }
 
 // GenerateDDL generates a DDL based on a dataset
@@ -832,8 +1028,26 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 
 // BulkExportStream reads table data in bulk
 func (conn *IcebergConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// determine where clause to apply to scanOptions
+
+	sql := table.Select()
+
+	options := g.M("columns", table.Columns)
+
+	parts := strings.Split(sql, "--iceberg-json=")
+	if len(parts) == 2 {
+		m, err := g.UnmarshalMap(parts[1])
+		if err != nil {
+			return nil, g.Error(err, "malformed iceberg-json payload")
+		}
+
+		for k, v := range m {
+			options[k] = v
+		}
+	}
+
 	// For bulk export, we can use the regular stream rows functionality
-	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
+	return conn.Self().StreamRows(table.Select(), options)
 }
 
 // GetSchemata obtain full schemata info for a schema and/or table
@@ -866,11 +1080,10 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 		currDatabase = "iceberg"
 	}
 
-	getOneSchemata := func(values map[string]interface{}) error {
+	getOneSchemata := func(schemaName string, tables []string) error {
 		defer ctx.Wg.Read.Done()
 
 		var data iop.Dataset
-		schemaName := cast.ToString(values["schema"])
 
 		switch level {
 		case SchemataLevelSchema:
@@ -890,6 +1103,20 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 			for _, row := range tablesData.Rows {
 				schemaName := cast.ToString(row[0])
 				tableName := cast.ToString(row[1])
+
+				if len(tables) > 0 {
+					matched := false
+					for _, table := range tables {
+						if strings.EqualFold(table, tableName) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				}
+
 				fullTableName := schemaName + "." + tableName
 				columns, err := conn.GetColumns(fullTableName)
 				if err != nil {
@@ -911,7 +1138,7 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 		}
 
 		if err != nil {
-			return g.Error(err, "Could not get schemata at %s level for %s", level, g.Marshal(values))
+			return g.Error(err, "Could not get schemata at %s level for schema=%s", level, schemaName)
 		}
 
 		defer ctx.Unlock()
@@ -984,27 +1211,13 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 	}
 
 	for _, schemaName := range schemaNames {
-		g.Debug("getting schemata for %s", schemaName)
-		values := g.M("schema", schemaName)
-
-		if len(tableNames) > 0 && !(tableNames[0] == "" && len(tableNames) == 1) {
-			tablesQ := []string{}
-			for _, tableName := range tableNames {
-				if strings.TrimSpace(tableName) == "" {
-					continue
-				}
-				tablesQ = append(tablesQ, `'`+tableName+`'`)
-			}
-			if len(tablesQ) > 0 {
-				values["tables"] = strings.Join(tablesQ, ", ")
-			}
-		}
+		g.Debug("getting schemata for %s %s", schemaName, g.Marshal(tableNames))
 
 		ctx.Wg.Read.Add()
-		go func(values map[string]interface{}) {
-			err := getOneSchemata(values)
+		go func() {
+			err := getOneSchemata(schemaName, tableNames)
 			ctx.CaptureErr(err)
-		}(values)
+		}()
 	}
 
 	ctx.Wg.Read.Wait()
@@ -1022,7 +1235,7 @@ func (conn *IcebergConn) generateIcebergSchema(columns iop.Columns) (*iceberg.Sc
 
 	for i, col := range columns {
 		// Convert iop column type to Iceberg type
-		icebergType := conn.iopTypeToIcebergPrimitiveType(col.Type)
+		icebergType := conn.iopTypeToIcebergPrimitiveType(col)
 
 		// Create nested field with auto-assigned ID (starting from 1)
 		fields[i] = iceberg.NestedField{
@@ -1044,8 +1257,8 @@ func (conn *IcebergConn) generateIcebergSchema(columns iop.Columns) (*iceberg.Sc
 }
 
 // iopTypeToIcebergPrimitiveType converts iop column type to Iceberg primitive type
-func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(iopType iop.ColumnType) iceberg.Type {
-	switch iopType {
+func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(col iop.Column) iceberg.Type {
+	switch col.Type {
 	case iop.BoolType:
 		return iceberg.PrimitiveTypes.Bool
 	case iop.IntegerType, iop.SmallIntType:
@@ -1055,15 +1268,15 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(iopType iop.ColumnType) i
 	case iop.FloatType:
 		return iceberg.PrimitiveTypes.Float64
 	case iop.DecimalType:
-		// For now, use Float64 for decimals. Could use DecimalType with precision/scale
-		return iceberg.PrimitiveTypes.Float64
+		precision := lo.Ternary(col.DbPrecision > 0, col.DbPrecision, env.DdlMinDecLength)
+		scale := lo.Ternary(col.DbScale > 0, col.DbScale, env.DdlMinDecScale)
+		return iceberg.DecimalTypeOf(precision, scale)
 	case iop.DateType:
 		return iceberg.PrimitiveTypes.Date
 	case iop.DatetimeType, iop.TimestampType:
-		return iceberg.PrimitiveTypes.Timestamp
+		return iceberg.PrimitiveTypes.TimestampTz // arrow Timestamp converts to iceberg timestampz
 	case iop.TimestampzType:
-		// Iceberg TimestampTz doesn't work with Arrow, use regular Timestamp instead
-		return iceberg.PrimitiveTypes.Timestamp
+		return iceberg.PrimitiveTypes.TimestampTz
 	case iop.TimeType:
 		return iceberg.PrimitiveTypes.Time
 	case iop.TimezType:
