@@ -472,15 +472,19 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 		// Clean value (remove currency symbols, commas)
 		cleanValue := strings.ReplaceAll(strings.ReplaceAll(valStr, ",", ""), "$", "")
 
-		// Convert to decimal128
+		// Convert to decimal128 using big.Rat for exact arithmetic
 		rat := new(big.Rat)
 		if _, ok := rat.SetString(cleanValue); ok {
 			// Get numerator and denominator
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places
-			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(col.DbScale)), nil)
+			// Scale for decimal places - use default if not set
+			scaleToUse := col.DbScale
+			if scaleToUse == 0 {
+				scaleToUse = env.DdlMinDecScale
+			}
+			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
 			// Calculate scaled value: num * scale / denom
 			scaledNum := new(big.Int).Mul(num, scale)
@@ -497,15 +501,19 @@ func AppendToBuilder(builder array.Builder, col *Column, val interface{}) {
 		// Clean value (remove currency symbols, commas)
 		cleanValue := strings.ReplaceAll(strings.ReplaceAll(valStr, ",", ""), "$", "")
 
-		// Convert to decimal256
+		// Convert to decimal256 using big.Rat for exact arithmetic
 		rat := new(big.Rat)
 		if _, ok := rat.SetString(cleanValue); ok {
 			// Get numerator and denominator
 			num := rat.Num()
 			denom := rat.Denom()
 
-			// Scale for decimal places
-			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(col.DbScale)), nil)
+			// Scale for decimal places - use default if not set
+			scaleToUse := col.DbScale
+			if scaleToUse == 0 {
+				scaleToUse = env.DdlMinDecScale
+			}
+			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(scaleToUse)), nil)
 
 			// Calculate scaled value: num * scale / denom
 			scaledNum := new(big.Int).Mul(num, scale)
