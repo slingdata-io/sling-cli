@@ -66,7 +66,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
-	dbio.TypeDbRedshift:          {name: "redshift"},
+	dbio.TypeDbRedshift:          {name: "redshift", adjustCol: g.Bool(false)},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbD1:                {name: "d1", schema: "main"},
@@ -797,7 +797,6 @@ func TestSuiteDatabasePostgres(t *testing.T) {
 
 func TestSuiteDatabaseRedshift(t *testing.T) {
 	t.Skip()
-	os.Setenv("SAMPLE_SIZE", "1200") // adjust_column_type does not work in Redshift
 	testSuite(t, dbio.TypeDbRedshift)
 }
 
