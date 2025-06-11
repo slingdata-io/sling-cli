@@ -1,0 +1,209 @@
+tools:
+  conns_list: |
+    List the connections detected and available for use.
+    
+    **Parameters**: None.
+    
+    **Output (for User)**: A CSV string listing connections with columns: `name`, `description`, `type`. The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string representing a list of connections, each with `name`, `description`, `source`, and `type`.
+
+  conns_discover: |
+    Discover available streams/tables/files in a connection.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the connection to discover.
+    - `pattern` (string, required): Filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet).
+    - `recursive` (boolean, required): List all files recursively.
+    - `columns` (boolean, required): Show column level metadata.
+    
+    **Output (for User)**: A CSV string with varying columns depending on discovery type:
+    - For database columns: `database`, `schema`, `table`, `name`, `type`, `position`
+    - For database tables: `database`, `schema`, `name`, `type`
+    - For database schemas: `database`, `name`
+    - For file columns: `file`, `name`, `type`, `position`
+    - For files: `name`, `type`, `size`, `updated`, `is_dir`
+    - For API endpoints: `name`
+    The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string detailing the discovered items. The structure varies based on connection type and discovery level.
+
+  conns_database_get_schemata: |
+    Obtains schemata (databases, schemas, tables, columns) from a database connection.
+    
+    **Parameters**:
+    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas.
+    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels.
+    
+    **Output**: A JSON string representing the database schemata (databases, schemas, tables, columns) according to the specified `level`, `schema_name`, and `table_names`.
+
+  conns_database_get_schemas: |
+    Retrieves a list of schema names from a database connection.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the connection to get schemata from.
+    
+    **Output**: A JSON string representing an `iop.Dataset` where each row contains a schema name from the specified database connection.
+
+  conns_database_query: |
+    Execute a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+
+    *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
+    *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
+    *   Always use the LIMIT clause to minimize the number of rows returned.
+    
+    **Parameters**:
+    - `limit` (number, optional): The limit of rows to return (defaults to 100).
+    - `transient` (boolean, optional): Whether to use a transient connection (default: false).
+    
+    **Output (for User)**: A CSV formatted string of the query results. The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string containing the `query` executed, `connection` name, an array of `columns` names, an array of `rows` (each row being an array of values), and the `row_count`.
+
+  conns_test: |
+    Test a database or file system connection to verify it works correctly.
+    
+    **Parameters**:
+    - `debug` (boolean, optional): Enable debug logging during the test (default: false).
+    - `trace` (boolean, optional): Enable trace logging during the test (default: false).
+    
+    **Output (for User)**: A simple text message: "Connection test for '[connection_name]': SUCCESS" or "Connection test for '[connection_name]': FAILED - [error_message]".
+    
+    **Output (for Assistant)**: A JSON string with `type: "connection_test"`, `connection` name, `success` (boolean), `error` (string, null if success), and captured `logs` from the test.
+
+  conns_set: |
+    Create or update a connection by setting its properties.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the connection to set (will be converted to uppercase).
+    - `properties` (object, required): Object containing the connection properties as key-value pairs (e.g. `{"type": "postgres", "host": "localhost", "user": "myuser"}`).
+    
+    **Output (for User)**: A text message: "Connection '[NAME]' has been set in [env_file_path]. Please test with `sling conns test [NAME]`".
+    
+    **Output (for Assistant)**: A JSON string with `type: "connection_set"`, `connection` name, the `properties` that were set (keys normalized to lowercase), `env_file_path`, and `success: true`.
+
+  conns_file_list: |
+    List files and directories in a file system connection path.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the file system connection to list from.
+    - `path` (string, required): The path to list files from.
+    - `recursive` (boolean, optional): Whether to list files recursively (default: false).
+    - `only` (string, optional): Filter results to only 'files' or 'folders'.
+    
+    **Output (for User)**: A CSV string listing items with columns: `path`, `type` (directory/file), `size` (human-readable), `last_updated` (formatted timestamp and time ago). The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string with `type: "file_list"`, `connection` name, `path` queried, `recursive` flag, `only` filter, `count` of items, and a `files` array with detailed metadata for each item.
+
+  conns_file_copy: |
+    Copy files from one file system connection to another.
+    
+    **Parameters**:
+    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local/path/to/file').
+    - `recursive` (boolean, optional): Whether to copy files recursively (default: false).
+    
+    **Output**: A JSON string with `type: "file_copy"`, details of `source_location`, `source_connection`, `source_path`, `source_uri`, `target_location`, `target_connection`, `target_path`, `target_uri`, `bytes_written`, and `recursive` flag.
+
+  conns_file_inspect: |
+    Inspect a file or directory in a file system connection to get metadata.
+    
+    **Parameters**:
+    - `path` (string, required): The path to inspect.
+    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false).
+    
+    **Output**: A JSON string with `type: "file_inspect"`, `connection` name, `path` inspected, `recursive` flag, and a `metadata` object containing detailed file/directory information.
+
+  api_spec_save: |
+    Validate and save an API specification YAML content to the specs folder in sling home directory.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension).
+    - `spec_content` (string, required): The YAML content of the API specification to validate and save.
+    
+    **Output (for User)**: A text message: "API specification '[name]' validated and saved to [file_path]".
+    
+    **Output (for Assistant)**: A JSON string with `type: "api_spec_save"`, `name` of the spec, `file_path` where it was saved, `specs_dir` (sling home specs folder), and `success: true`.
+
+  api_spec_list: |
+    List all YAML API specification files in the sling home specs folder.
+    
+    **Parameters**: None.
+    
+    **Output (for User)**: A CSV string listing `spec_file_name` for each API specification found. The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string with `type: "api_spec_list"`, `specs_dir`, `count` of specs found, and a `specs` array with detailed metadata for each specification.
+
+  api_spec_get: |
+    Get the content of an API specification by name from the sling home specs folder.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the API specification to get (without .yaml extension).
+    
+    **Output (for User)**: If parsing is successful, a CSV string listing endpoints with columns: `endpoint_name`, `endpoint_description`, `endpoint_method`. If parsing fails, a text message: "Error parsing API spec: [error_message]".
+    
+    **Output (for Assistant)**: A JSON string with `type: "api_spec_get"`, `name` of the spec, `file_path`, and raw `content` (string). If parsing was successful, includes additional parsed metadata.
+
+  replication_save: |
+    Save a replication configuration to a specified file path.
+    
+    **Parameters**:
+    - `file_path` (string, required): The file path where to save the replication configuration (can be absolute or relative to current working directory).
+    - `config_content` (string, required): The YAML content of the replication configuration to validate and save.
+    - `working_dir` (string, optional): Working directory to change to before saving replication configuration.
+    
+    **Output (for User)**: A text message: "Replication configuration validated and saved to [absFilePath]".
+    
+    **Output (for Assistant)**: A JSON string with `type: "replication_save"`, `file_path` (absolute), `directory` (absolute path to dir of file), `working_dir` (if provided), and `success: true`.
+
+  replication_list: |
+    List all YAML replication configuration files in a directory.
+    
+    **Parameters**:
+    - `directory` (string, optional): Directory to list replication files from (defaults to current working directory).
+    - `working_dir` (string, optional): Working directory to change to before listing replication files.
+    
+    **Output (for User)**: A CSV string listing `config_file_name` for each replication configuration found. The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string with `type: "replication_list"`, `directory` (absolute path searched), `working_dir` (if provided), `count` of files found, and a `files` array with detailed metadata.
+
+  replication_get: |
+    Get the content of a replication configuration file.
+    
+    **Parameters**:
+    - `file_path` (string, required): The file path of the replication configuration to get (can be absolute or relative to current working directory).
+    - `working_dir` (string, optional): Working directory to change to before getting replication configuration.
+    
+    **Output (for User)**: If parsing is successful, a CSV string listing streams with columns: `stream_name`, `object`, `mode`. If parsing fails, a text message: "Error parsing replication config: [error_message]". The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string with `type: "replication_get"`, `file_path` (absolute), `working_dir` (if provided), and raw `content` (string). If parsing was successful, includes additional parsed metadata.
+
+  replication_compile: |
+    Compile a replication configuration to validate and prepare it for execution.
+    
+    **Parameters**:
+    - `select_streams` (array, optional): Optional list of specific streams to compile (default: all streams).
+    - `working_dir` (string, optional): Working directory to change to before compiling replication configuration.
+    
+    **Output (for User)**: A text message: "Replication configuration '[absFilePath]' compiled successfully with [task_count] tasks".
+    
+    **Output (for Assistant)**: A JSON string with `type: "replication_compile"`, `file_path` (absolute), `working_dir` (if provided), `success: true`, `task_count`, `compiled` (boolean status), `streams_selected` (array), and a `tasks` array with detailed task metadata.
+
+  replication_run: |
+    Run a replication configuration.
+    
+    **Parameters**:
+    - `range` (string, optional): Backfill range for source options.
+    - `mode` (string, optional): Mode override for replication (e.g. full-refresh, incremental).
+    - `env` (object, optional): Environment variables to set for the replication run.
+    
+    **Output (for User)**: A simple text message: "Replication '[absFilePath]': SUCCESS" or "Replication '[absFilePath]': FAILED - [error_message]".
+    
+    **Output (for Assistant)**: A JSON string with `type: "replication_run"`, `file_path` (absolute), `success` (boolean), `streams_selected` (array), `working_dir` (if provided), `range` (if provided), `mode` (if provided), `env` variables (if provided), and captured `logs`. If an error occurred, includes error details.
+
+resources:
+  "docs://API_SPEC": |
+    README to understand Sling API Specs.
+    
+    **Name**: API_SPEC
+    **MIME Type**: `text/markdown`
+    **Description**: README to understand Sling API Specs.
