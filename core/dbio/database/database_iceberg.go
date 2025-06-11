@@ -1050,7 +1050,7 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 		}
 
 		details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "batch_rows", len(batch.Rows))
-		g.Debug("committed iceberg batch", details)
+		g.Debug("committed iceberg snapshot", details)
 	}
 
 	return count, nil
