@@ -24,17 +24,6 @@ defaults:
       limit: ${state.limit}
     rate: 20        # Default rate limit of 20 requests per second to avoid hitting rate limits
     concurrency: 5  # Default concurrency of 5
-  
-  response:
-    # rules:
-    #   - action: "retry"
-    #     condition: "response.status >= 500"
-    #     max_attempts: 3
-    #     backoff: "exponential"
-    #     backoff_base: 2
-    #   - action: "fail"
-    #     condition: "response.status == 429"
-    #     message: "Rate limit exceeded"
 
 endpoints:
 
