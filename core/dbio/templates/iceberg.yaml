@@ -1,0 +1,13 @@
+core:
+  incremental_select: |
+    select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc 
+    --iceberg-json={"table_name": "{table_name}", "table_schema": "{table_schema}", "incremental_key": {update_key}, "incremental_value": "{incremental_value}", "fields_array": {fields_array}}
+
+  incremental_select_limit: |
+    select {fields} from {table} where ({incremental_where_cond}){where_and} order by {update_key} asc limit {limit}
+    --iceberg-json={"table_name": "{table_name}", "table_schema": "{table_schema}", "incremental_key": {update_key}, "incremental_value": "{incremental_value}", "fields_array": {fields_array}, "limit": {limit}}
+
+  backfill_where: '{update_key} >= {start_value} and {update_key} <= {end_value}'
+
+variable:
+  quote_char: '"'

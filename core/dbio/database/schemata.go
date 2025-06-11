@@ -208,6 +208,12 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 	switch t.Dialect {
 	case dbio.TypeDbPrometheus:
 		return t.SQL
+	case dbio.TypeDbIceberg:
+		if !strings.Contains(t.SQL, "--iceberg-json=") {
+			m := g.M("table_name", t.Name, "table_schema", t.Schema, "fields_array", fields, "limit", opts.Limit)
+			t.SQL = g.F("%s\n--iceberg-json=%s", t.SQL, g.Marshal(m))
+		}
+		return t.SQL
 	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {
@@ -860,7 +866,7 @@ func getColumnCasingProp(conn Connection) (colCasing iop.ColumnCasing, ok bool) 
 func GetQualifierQuote(dialect dbio.Type) string {
 	quote := `"`
 	switch dialect {
-	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse, dbio.TypeDbProton:
+	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks, dbio.TypeDbBigQuery, dbio.TypeDbClickhouse, dbio.TypeDbProton, dbio.TypeDbAthena:
 		quote = "`"
 	case dbio.TypeDbBigTable, dbio.TypeDbMongoDB, dbio.TypeDbPrometheus:
 		quote = ""

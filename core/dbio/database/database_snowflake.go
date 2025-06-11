@@ -785,6 +785,7 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		}
 
 		config := iop.LoaderStreamConfig(true)
+		config.TargetType = conn.GetType()
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 
 		if err != nil {

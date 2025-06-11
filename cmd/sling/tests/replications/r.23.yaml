@@ -1,0 +1,16 @@
+source: postgres
+target: iceberg
+
+streams:
+  test1k_mariadb_pg_full:
+    mode: full-refresh
+    sql: select * from public.test1k_mariadb_pg where update_dt < '2018-12-01'
+    object: public.test1k_mariadb_pg
+
+  test1k_mariadb_pg_incremental:
+    mode: incremental
+    sql: select * from public.test1k_mariadb_pg where {incremental_where_cond}
+    object: public.test1k_mariadb_pg
+    update_key: update_dt
+  
+  

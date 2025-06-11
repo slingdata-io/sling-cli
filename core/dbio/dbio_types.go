@@ -44,14 +44,15 @@ const (
 
 	TypeApi Type = "api"
 
-	TypeFileLocal  Type = "file"
-	TypeFileHDFS   Type = "hdfs"
-	TypeFileS3     Type = "s3"
-	TypeFileAzure  Type = "azure"
-	TypeFileGoogle Type = "gs"
-	TypeFileFtp    Type = "ftp"
-	TypeFileSftp   Type = "sftp"
-	TypeFileHTTP   Type = "http"
+	TypeFileLocal       Type = "file"
+	TypeFileHDFS        Type = "hdfs"
+	TypeFileS3          Type = "s3"
+	TypeFileAzure       Type = "azure"
+	TypeFileGoogle      Type = "gs"
+	TypeFileGoogleDrive Type = "gdrive"
+	TypeFileFtp         Type = "ftp"
+	TypeFileSftp        Type = "sftp"
+	TypeFileHTTP        Type = "http"
 
 	TypeDbPostgres      Type = "postgres"
 	TypeDbRedshift      Type = "redshift"
@@ -65,6 +66,7 @@ const (
 	TypeDbSQLite        Type = "sqlite"
 	TypeDbD1            Type = "d1"
 	TypeDbDuckDb        Type = "duckdb"
+	TypeDbDuckLake      Type = "ducklake"
 	TypeDbMotherDuck    Type = "motherduck"
 	TypeDbSQLServer     Type = "sqlserver"
 	TypeDbAzure         Type = "azuresql"
@@ -76,6 +78,7 @@ const (
 	TypeDbPrometheus    Type = "prometheus"
 	TypeDbProton        Type = "proton"
 	TypeDbAthena        Type = "athena"
+	TypeDbIceberg       Type = "iceberg"
 )
 
 var AllType = []struct {
@@ -89,6 +92,7 @@ var AllType = []struct {
 	{TypeFileS3, "TypeFileS3"},
 	{TypeFileAzure, "TypeFileAzure"},
 	{TypeFileGoogle, "TypeFileGoogle"},
+	{TypeFileGoogleDrive, "TypeFileGoogleDrive"},
 	{TypeFileFtp, "TypeFileFtp"},
 	{TypeFileSftp, "TypeFileSftp"},
 	{TypeFileHTTP, "TypeFileHTTP"},
@@ -104,12 +108,14 @@ var AllType = []struct {
 	{TypeDbSQLite, "TypeDbSQLite"},
 	{TypeDbD1, "TypeDbD1"},
 	{TypeDbDuckDb, "TypeDbDuckDb"},
+	{TypeDbDuckLake, "TypeDbDuckLake"},
 	{TypeDbMotherDuck, "TypeDbMotherDuck"},
 	{TypeDbSQLServer, "TypeDbSQLServer"},
 	{TypeDbAzure, "TypeDbAzure"},
 	{TypeDbAzureDWH, "TypeDbAzureDWH"},
 	{TypeDbTrino, "TypeDbTrino"},
 	{TypeDbAthena, "TypeDbAthena"},
+	{TypeDbIceberg, "TypeDbIceberg"},
 	{TypeDbClickhouse, "TypeDbClickhouse"},
 	{TypeDbElasticsearch, "TypeDbElasticsearch"},
 	{TypeDbMongoDB, "TypeDbMongoDB"},
@@ -134,8 +140,8 @@ func ValidateType(tStr string) (Type, bool) {
 	switch t {
 	case
 		TypeApi,
-		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
+		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
 	}
 
@@ -160,6 +166,7 @@ func (t Type) DefPort() int {
 		TypeDbAzure:         1433,
 		TypeDbTrino:         8080,
 		TypeDbAthena:        443,
+		TypeDbIceberg:       443,
 		TypeDbClickhouse:    9000,
 		TypeDbMongoDB:       27017,
 		TypeDbElasticsearch: 9200,
@@ -180,9 +187,9 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbDuckDb, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
-	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
+	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
 	case TypeApi:
 		return KindAPI
@@ -228,7 +235,8 @@ func (t Type) NameLong() string {
 		TypeFileHDFS:        "FileSys - HDFS",
 		TypeFileS3:          "FileSys - S3",
 		TypeFileAzure:       "FileSys - Azure",
-		TypeFileGoogle:      "FileSys - Google",
+		TypeFileGoogle:      "FileSys - Google Cloud Storage",
+		TypeFileGoogleDrive: "FileSys - Google Drive",
 		TypeFileSftp:        "FileSys - Sftp",
 		TypeFileFtp:         "FileSys - Ftp",
 		TypeFileHTTP:        "FileSys - HTTP",
@@ -245,11 +253,13 @@ func (t Type) NameLong() string {
 		TypeDbD1:            "DB - D1",
 		TypeDbSQLite:        "DB - SQLite",
 		TypeDbDuckDb:        "DB - DuckDB",
+		TypeDbDuckLake:      "DB - DuckLake",
 		TypeDbMotherDuck:    "DB - MotherDuck",
 		TypeDbSQLServer:     "DB - SQLServer",
 		TypeDbAzure:         "DB - Azure",
 		TypeDbTrino:         "DB - Trino",
 		TypeDbAthena:        "DB - Athena",
+		TypeDbIceberg:       "DB - Iceberg",
 		TypeDbClickhouse:    "DB - Clickhouse",
 		TypeDbPrometheus:    "DB - Prometheus",
 		TypeDbElasticsearch: "DB - Elasticsearch",
@@ -268,7 +278,8 @@ func (t Type) Name() string {
 		TypeFileHDFS:        "HDFS",
 		TypeFileS3:          "S3",
 		TypeFileAzure:       "Azure",
-		TypeFileGoogle:      "Google",
+		TypeFileGoogle:      "Google Cloud Storage",
+		TypeFileGoogleDrive: "Google Drive",
 		TypeFileSftp:        "Sftp",
 		TypeFileFtp:         "Ftp",
 		TypeFileHTTP:        "HTTP",
@@ -285,10 +296,12 @@ func (t Type) Name() string {
 		TypeDbD1:            "D1",
 		TypeDbSQLite:        "SQLite",
 		TypeDbDuckDb:        "DuckDB",
+		TypeDbDuckLake:      "DuckLake",
 		TypeDbMotherDuck:    "MotherDuck",
 		TypeDbSQLServer:     "SQLServer",
 		TypeDbTrino:         "Trino",
 		TypeDbAthena:        "Athena",
+		TypeDbIceberg:       "Iceberg",
 		TypeDbClickhouse:    "Clickhouse",
 		TypeDbPrometheus:    "Prometheus",
 		TypeDbElasticsearch: "Elasticsearch",
@@ -582,6 +595,7 @@ const (
 	FileTypeExcel     FileType = "xlsx"
 	FileTypeJson      FileType = "json"
 	FileTypeParquet   FileType = "parquet"
+	FileTypeArrow     FileType = "arrow"
 	FileTypeAvro      FileType = "avro"
 	FileTypeSAS       FileType = "sas7bdat"
 	FileTypeJsonLines FileType = "jsonlines"
@@ -601,6 +615,7 @@ var AllFileType = []struct {
 	{FileTypeJson, "FileTypeJson"},
 	{FileTypeParquet, "FileTypeParquet"},
 	{FileTypeAvro, "FileTypeAvro"},
+	{FileTypeArrow, "FileTypeArrow"},
 	{FileTypeSAS, "FileTypeSAS"},
 	{FileTypeJsonLines, "FileTypeJsonLines"},
 	{FileTypeIceberg, "FileTypeIceberg"},

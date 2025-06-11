@@ -57,13 +57,16 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbDuckDb:            {name: "duckdb"},
+	dbio.TypeDbDuckLake:          {name: "ducklake"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
+	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
+	dbio.TypeDbIceberg:           {name: "iceberg", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
-	dbio.TypeDbRedshift:          {name: "redshift"},
+	dbio.TypeDbRedshift:          {name: "redshift", adjustCol: g.Bool(false)},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbD1:                {name: "d1", schema: "main"},
@@ -76,12 +79,13 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
 
-	dbio.TypeFileLocal:  {name: "local"},
-	dbio.TypeFileSftp:   {name: "sftp"},
-	dbio.TypeFileAzure:  {name: "azure_storage"},
-	dbio.TypeFileS3:     {name: "aws_s3"},
-	dbio.TypeFileGoogle: {name: "google_storage"},
-	dbio.TypeFileFtp:    {name: "ftp_test_url"},
+	dbio.TypeFileLocal:       {name: "local"},
+	dbio.TypeFileSftp:        {name: "sftp"},
+	dbio.TypeFileAzure:       {name: "azure_storage"},
+	dbio.TypeFileS3:          {name: "aws_s3"},
+	dbio.TypeFileGoogle:      {name: "google_storage"},
+	dbio.TypeFileGoogleDrive: {name: "google_drive"},
+	dbio.TypeFileFtp:         {name: "ftp_test_url"},
 }
 
 func init() {
@@ -734,6 +738,42 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.TimestampzType {
 					correctType = iop.TimestampType // clickhouse uses datetime
 				}
+			case tgtType == dbio.TypeDbDuckLake:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // ducklake uses text for json
+				}
+			case srcType == dbio.TypeDbDuckLake && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // ducklake uses text for json
+				}
+			case tgtType == dbio.TypeDbAthena:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // athena iceberg uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // athena uses text for json
+				}
+			case srcType == dbio.TypeDbAthena && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // athena iceberg uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // athena uses text for json
+				}
+			case tgtType == dbio.TypeDbIceberg:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // iceberg uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // iceberg uses text for json
+				}
+			case srcType == dbio.TypeDbIceberg && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // iceberg uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // iceberg uses text for json
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -757,7 +797,6 @@ func TestSuiteDatabasePostgres(t *testing.T) {
 
 func TestSuiteDatabaseRedshift(t *testing.T) {
 	t.Skip()
-	os.Setenv("SAMPLE_SIZE", "1200") // adjust_column_type does not work in Redshift
 	testSuite(t, dbio.TypeDbRedshift)
 }
 
@@ -814,9 +853,25 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 	testSuite(t, dbio.TypeDbDuckDb)
 }
 
+func TestSuiteDatabaseDuckLake(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbDuckLake, "1-17,19+") // soft-delete is not supported
+}
+
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck)
+}
+
+func TestSuiteDatabaseAthena(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbAthena, "1-8,20,23+")
+}
+
+func TestSuiteDatabaseIceberg(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbIceberg, "1-4,6-8")
+	// testSuite(t, dbio.TypeDbIceberg, "1-4,6-12")
 }
 
 func TestSuiteDatabaseSQLServer(t *testing.T) {
@@ -1425,6 +1480,11 @@ func TestSuiteFileS3(t *testing.T) {
 func TestSuiteFileGoogle(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileGoogle)
+}
+
+func TestSuiteFileGoogleDrive(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeFileGoogleDrive)
 }
 
 func TestSuiteFileAzure(t *testing.T) {

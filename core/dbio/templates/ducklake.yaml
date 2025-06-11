@@ -1,0 +1,312 @@
+# DuckLake template inherits most functionality from DuckDB
+# with additional support for DuckLake-specific features
+
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
+  create_table: create table if not exists {table} ({col_types})
+  create_temporary_table: create temp table if not exists {table} ({col_types})
+  replace: replace into {table} ({names}) values({values})
+  truncate_table: delete from {table}
+  insert_option: ""
+  modify_column: 'alter {column} type {type}'
+  select_stream_scanner: select {fields} from {stream_scanner} {where}
+  
+  # Not implemented Error: Complex update plans are not yet supported for updates in DuckLake
+  # update_where_not_exist: |
+  #   update {target_table} t
+  #   set {set_fields}
+  #   where {where}
+  #     and ({unique_id}) not in (
+  #         select {unique_id}
+  #         from {temp_table}
+  #         where {unique_id} is not null
+  #     )
+  
+  # DuckLake supports exporting to various formats
+  export_to_local: |
+    COPY (
+      select *
+      from {table}
+    ) TO '{local_path}' 
+    (
+      format '{format}', overwrite true, {file_size_bytes_expr} {file_extension_expr}
+      compression '{compression}'
+    )
+  export_to_local_partitions: |
+    COPY (
+      select
+        *,
+        {partition_expressions}
+      from {table}
+    ) TO '{local_path}' 
+    ( 
+      format '{format}', {file_size_bytes_expr} {file_extension_expr}
+      compression '{compression}',
+      overwrite true,
+      write_partition_columns {write_partition_columns},
+      partition_by ( {partition_columns} )
+    )
+  
+  # Cloud storage secrets (inherited from DuckDB)
+  default_s3_secret: |
+    create or replace secret s3_default (
+        type s3,
+        provider credential_chain,
+        chain 'env;config'
+    )
+  default_azure_secret: |
+    create or replace secret azure_default (
+        type azure,
+        provider credential_chain,
+        chain 'default;env;managed_identity;cli',
+        account_name '{account}'
+    )
+
+metadata:
+  # Get current snapshot ID for DuckLake metadata queries
+  current_snapshot: |
+    SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+    WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+
+  databases: |
+    SELECT database_name 
+    FROM duckdb_databases() 
+    WHERE database_name != 'system' 
+    ORDER BY database_name
+  
+  current_database: SELECT current_database()
+
+  schemas: |
+    WITH current_snap AS (
+      SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+      WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+    )
+    SELECT schema_name
+    FROM __ducklake_metadata_ducklake.ducklake_schema, current_snap
+    WHERE
+      current_snap.snapshot_id >= begin_snapshot AND
+      (current_snap.snapshot_id < end_snapshot OR end_snapshot IS NULL)
+    ORDER BY schema_name
+
+  tables: |
+    WITH current_snap AS (
+      SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+      WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+    )
+    SELECT 
+      s.schema_name,
+      t.table_name,
+      'false' as is_view
+    FROM __ducklake_metadata_ducklake.ducklake_table t
+    JOIN __ducklake_metadata_ducklake.ducklake_schema s ON t.schema_id = s.schema_id
+    CROSS JOIN current_snap
+    WHERE
+      current_snap.snapshot_id >= t.begin_snapshot AND
+      (current_snap.snapshot_id < t.end_snapshot OR t.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= s.begin_snapshot AND
+      (current_snap.snapshot_id < s.end_snapshot OR s.end_snapshot IS NULL)
+      {{if .schema -}} AND s.schema_name = '{schema}' {{- end}}
+    ORDER BY s.schema_name, t.table_name
+
+  views: |
+    WITH current_snap AS (
+      SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+      WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+    )
+    SELECT 
+      s.schema_name,
+      v.view_name as table_name,
+      'true' as is_view
+    FROM __ducklake_metadata_ducklake.ducklake_view v
+    JOIN __ducklake_metadata_ducklake.ducklake_schema s ON v.schema_id = s.schema_id
+    CROSS JOIN current_snap
+    WHERE
+      current_snap.snapshot_id >= v.begin_snapshot AND
+      (current_snap.snapshot_id < v.end_snapshot OR v.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= s.begin_snapshot AND
+      (current_snap.snapshot_id < s.end_snapshot OR s.end_snapshot IS NULL)
+      {{if .schema -}} AND s.schema_name = '{schema}' {{- end}}
+    ORDER BY s.schema_name, v.view_name
+
+  columns: |
+    WITH current_snap AS (
+      SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+      WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+    )
+    SELECT 
+      c.column_name,
+      c.column_type as data_type,
+      (regexp_extract(c.column_type, 'decimal\((\d+)\s*,\s*(\d+)\)', 1)) AS precision,
+      (regexp_extract(c.column_type, 'decimal\((\d+)\s*,\s*(\d+)\)', 2)) AS scale
+    FROM __ducklake_metadata_ducklake.ducklake_column c
+    JOIN __ducklake_metadata_ducklake.ducklake_table t ON c.table_id = t.table_id
+    JOIN __ducklake_metadata_ducklake.ducklake_schema s ON t.schema_id = s.schema_id
+    CROSS JOIN current_snap
+    WHERE
+      s.schema_name = '{schema}' AND
+      t.table_name = '{table}' AND
+      c.parent_column IS NULL AND
+      current_snap.snapshot_id >= c.begin_snapshot AND
+      (current_snap.snapshot_id < c.end_snapshot OR c.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= t.begin_snapshot AND
+      (current_snap.snapshot_id < t.end_snapshot OR t.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= s.begin_snapshot AND
+      (current_snap.snapshot_id < s.end_snapshot OR s.end_snapshot IS NULL)
+    ORDER BY c.column_order
+  
+  columns_temp:
+    select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
+    from information_schema.columns
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+    order by ordinal_position
+
+  primary_keys: |
+    select '{table}.key' as pk_name,
+           constraint_index as position,
+           replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
+    from duckdb_constraints()
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+      and constraint_type = 'PRIMARY KEY'
+  
+  indexes: |
+    select index_name as index_name,
+           sql as column_name
+    from duckdb_indexes()
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+
+  columns_full: |
+    with tables_cte as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then true
+          when 'FOREIGN' then true
+          else false
+        end as is_view
+      from information_schema.tables
+      where table_catalog = current_database()
+        and table_schema = '{schema}'
+        and table_name = '{table}'
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables_cte
+      on tables_cte.table_schema = cols.table_schema
+      and tables_cte.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+  
+  schemata: |
+    WITH current_snap AS (
+      SELECT snapshot_id FROM __ducklake_metadata_ducklake.ducklake_snapshot
+      WHERE snapshot_id = (SELECT max(snapshot_id) FROM __ducklake_metadata_ducklake.ducklake_snapshot)
+    )
+    SELECT
+      s.schema_name,
+      t.table_name,
+      false as is_view,
+      c.column_name,
+      c.column_type as data_type,
+      c.column_order as position
+    FROM __ducklake_metadata_ducklake.ducklake_column c
+    JOIN __ducklake_metadata_ducklake.ducklake_table t ON c.table_id = t.table_id
+    JOIN __ducklake_metadata_ducklake.ducklake_schema s ON t.schema_id = s.schema_id
+    CROSS JOIN current_snap
+    WHERE
+      c.parent_column IS NULL AND
+      current_snap.snapshot_id >= c.begin_snapshot AND
+      (current_snap.snapshot_id < c.end_snapshot OR c.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= t.begin_snapshot AND
+      (current_snap.snapshot_id < t.end_snapshot OR t.end_snapshot IS NULL) AND
+      current_snap.snapshot_id >= s.begin_snapshot AND
+      (current_snap.snapshot_id < s.end_snapshot OR s.end_snapshot IS NULL)
+      {{if .schema -}} AND s.schema_name = '{schema}' {{- end}}
+      {{if .tables -}} AND t.table_name in ({tables}) {{- end}}
+    
+    ORDER BY schema_name, table_name, position
+  
+  ddl_table: |
+    PRAGMA table_info('{schema}.{table}')
+  
+  ddl_view: |
+    PRAGMA table_info('{schema}.{table}')
+
+# DuckLake-specific functions
+ducklake:
+  # Snapshot management functions
+  list_snapshots: |
+    SELECT * FROM __ducklake_metadata_ducklake.ducklake_snapshots('{table}')
+  
+  table_info: |
+    SELECT * FROM __ducklake_metadata_ducklake.ducklake_table_info('{table}')
+  
+  table_insertions: |
+    SELECT * FROM __ducklake_metadata_ducklake.ducklake_table_insertions('{table}', {snapshot_id})
+  
+  table_deletions: |
+    SELECT * FROM __ducklake_metadata_ducklake.ducklake_table_deletions('{table}', {snapshot_id})
+  
+  table_changes: |
+    SELECT * FROM __ducklake_metadata_ducklake.ducklake_table_changes('{table}', {from_snapshot}, {to_snapshot})
+  
+  # Maintenance functions
+  cleanup_old_files: |
+    SELECT ducklake_cleanup_old_files('{table}')
+  
+  expire_snapshots: |
+    SELECT ducklake_expire_snapshots('{table}', {snapshot_ids})
+  
+  merge_adjacent_files: |
+    SELECT ducklake_merge_adjacent_files('{table}')
+
+analysis:
+  # Inherited from DuckDB
+  chars: |
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field, sum(case when {field}::text ~ '\n' then 1 else 0 end) as cnt_nline, 
+      sum(case when {field}::text ~ '\t' then 1 else 0 end) as cnt_tab, 
+      sum(case when {field}::text ~ ',' then 1 else 0 end) as cnt_comma, 
+      sum(case when {field}::text ~ '"' then 1 else 0 end) as cnt_dquote, 
+      min(length({field}::text)) as f_min_len, 
+      max(length({field}::text)) as f_max_len
+    from "{schema}"."{table}"
+
+function:
+  # Inherited from DuckDB
+  sleep: select sqlite3_sleep({seconds}*1000)
+  checksum_datetime: CAST((epoch({field}) || substr(strftime({field}, '%f'),4) ) as bigint)
+  checksum_decimal: 'abs(cast({field} as bigint))'
+  checksum_boolean: 'length({field}::string)'
+  cast_to_text: 'cast({field} as text)'
+
+  # Scanner functions (inherited from DuckDB)
+  iceberg_scanner: iceberg_scan('{uri}', allow_moved_paths = true)
+  delta_scanner: delta_scan('{uri}')
+  parquet_scanner: read_parquet([{uris}]{filename_expr})
+  csv_scanner: read_csv([{uris}], delim='{delimiter}', header={header}, max_line_size=2000000, parallel=true, quote='{quote}', escape='{escape}', nullstr='{null_if}'{filename_expr})
+
+variable:
+  # Inherited from DuckDB
+  bool_as: integer
+  bind_string: ${c}
+  batch_rows: 50
+  batch_values: 1000
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000-07:00'
+  max_string_type: text
+  max_string_length: 2147483647

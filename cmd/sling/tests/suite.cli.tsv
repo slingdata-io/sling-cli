@@ -71,3 +71,5 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 70	Run sling chunking			10		"""update_dt"" >= '2018-11-21|""id"" >= 601 and ""id"" <= 800|TEST1K_SQLSERVER_PG_003|TEST1K_SNOWFLAKE_PG_004"	sling run -r cmd/sling/tests/replications/r.20.yaml -d
 71	Run sling pipeline 02					sftp//tmp/test1k_mysql_pg.csv|aws_s3/sling_test/files/test1k_s3.csv	sling run -p cmd/sling/tests/pipelines/p.02.yaml
 72	Run sling to test column casing			1		test1k_clickhouse_pg_first_name	sling run -d -r cmd/sling/tests/replications/r.21.yaml
+73	Run sling mysql bit			1		execution succeeded	sling run -d -r cmd/sling/tests/replications/r.22.yaml
+74	Run sling iceberg insert			2		committed iceberg snapshot	sling run -d -r cmd/sling/tests/replications/r.23.yaml

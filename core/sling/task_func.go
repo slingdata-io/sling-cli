@@ -57,7 +57,7 @@ func createSchemaIfNotExists(conn database.Connection, schemaName string) (creat
 func createTableIfNotExists(conn database.Connection, data iop.Dataset, table *database.Table, temp bool) (created bool, err error) {
 
 	// check table existence
-	exists, err := database.TableExists(conn, table.FullName())
+	exists, err := conn.TableExists(*table)
 	if err != nil {
 		return false, g.Error(err, "Error checking table "+table.FullName())
 	} else if exists {
@@ -212,42 +212,20 @@ func getIncrementalValueViaDB(cfg *Config, tgtConn database.Connection, srcConnT
 		return // target columns does not exist
 	}
 
-	sql := g.F(
-		"select max(%s) as max_val from %s",
-		tgtConn.Quote(tgtUpdateKey),
-		table.FDQN(),
-	)
-
-	data, err := tgtConn.Query(sql)
+	// get target columns to match update-key
+	// in case column casing needs adjustment
+	var maxCol iop.Column
+	cfg.IncrementalVal, maxCol, err = tgtConn.GetMaxValue(table, tgtUpdateKey)
 	if err != nil {
-		errMsg := strings.ToLower(err.Error())
-		if strings.Contains(errMsg, "exist") ||
-			strings.Contains(errMsg, "not found") ||
-			strings.Contains(errMsg, "unknown") ||
-			strings.Contains(errMsg, "no such table") ||
-			strings.Contains(errMsg, "invalid object") {
-			// table does not exists, will be create later
-			// set val to blank for full load
-			return nil
-		}
-		err = g.Error(err, "could not get max value for "+tgtUpdateKey)
-		return
+		return g.Error(err, "could not get incremental value")
 	}
-	if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
-		// table is empty
-		// set val to blank for full load
-		return nil
-	}
-
-	// set null for empty value (e.g. if target table exists but is empty)
-	cfg.IncrementalVal = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
 
 	// oracle's DATE type is mapped to datetime, but needs to use the TO_DATE function
-	if data.Columns[0].DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
-		data.Columns[0].Type = iop.DateType // force date type
+	if maxCol.DbType == "DATE" && tgtConn.GetType() == dbio.TypeDbOracle {
+		maxCol.Type = iop.DateType // force date type
 	}
 
-	cfg.IncrementalValStr = iop.FormatValue(cfg.IncrementalVal, data.Columns[0].Type, srcConnType)
+	cfg.IncrementalValStr = iop.FormatValue(cfg.IncrementalVal, maxCol.Type, srcConnType)
 
 	return
 }

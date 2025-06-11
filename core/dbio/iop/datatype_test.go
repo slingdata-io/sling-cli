@@ -301,6 +301,16 @@ func TestParseDate(t *testing.T) {
 	g.P(sp.ParseString(val))
 	val = `1/17/20`
 	g.P(sp.ParseString(val))
+	val = `0001-01-01 00:00:00.000`
+	valT, err := sp.CastToTime(val)
+	if assert.NoError(t, err) {
+		g.P(valT)
+		g.P(valT.IsZero())
+		g.P(valT.Format(time.DateTime))
+	}
+	val = `0000-00-00 00:00:00.000`
+	_, err = sp.CastToTime(val)
+	assert.Error(t, err)
 }
 
 func TestParseDecimal(t *testing.T) {

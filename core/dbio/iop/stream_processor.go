@@ -54,6 +54,7 @@ type StreamConfig struct {
 	NullAs            string                   `json:"null_as"`
 	DatetimeFormat    string                   `json:"datetime_format"`
 	SkipBlankLines    bool                     `json:"skip_blank_lines"`
+	Format            dbio.FileType            `json:"format"`
 	Delimiter         string                   `json:"delimiter"`
 	Escape            string                   `json:"escape"`
 	Quote             string                   `json:"quote"`
@@ -395,6 +396,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		sp.Config.NullIf = val
 	}
 
+	if val, ok := configMap["format"]; ok {
+		sp.Config.Format = dbio.FileType(val)
+	}
+
 	if val, ok := configMap["null_as"]; ok {
 		sp.Config.NullAs = val
 	}
@@ -632,6 +637,9 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 	if !ok {
 		sp.colStats[i] = &ColumnStats{}
 		cs = sp.colStats[i]
+		if len(sp.rowChecksum) <= i {
+			sp.rowChecksum = append(sp.rowChecksum, 0)
+		}
 	}
 
 	var nVal interface{}
@@ -925,7 +933,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			sVal = cast.ToString(val)
 			sp.rowChecksum[i] = uint64(len(sVal))
 			nVal = sVal
-		} else if dVal.IsZero() || g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
+		} else if g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
 			nVal = nil
 			cs.NullCnt++
 			sp.rowBlankValCnt++
@@ -1013,21 +1021,23 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 		return cast.ToString(val)
 		// return fmt.Sprintf("%v", val)
 	case typ.IsDate():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
+		tVal, err := sp.CastToTime(val)
+		if err != nil {
+			return cast.ToString(val)
 		}
 		return tVal.Format("2006-01-02")
 	case typ.IsDatetime():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
+		tVal, err := sp.CastToTime(val)
+		if err != nil {
+			return cast.ToString(val)
 		} else if sp.Config.DatetimeFormat != "" && strings.ToLower(sp.Config.DatetimeFormat) != "auto" {
 			return tVal.Format(sp.Config.DatetimeFormat)
 		} else if tVal.Location() == nil {
 			return tVal.Format("2006-01-02 15:04:05.999999999") + " +00"
 		}
 		return tVal.Format("2006-01-02 15:04:05.999999999 -07")
+	case typ.IsBinary() && g.In(sp.Config.TargetType, dbio.TypeDbSnowflake, dbio.TypeDbBigQuery):
+		return Transforms.BinaryToHex(cast.ToString(val))
 	default:
 		strVal := cast.ToString(val)
 		if !utf8.ValidString(strVal) {
@@ -1037,48 +1047,6 @@ func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...Colum
 			return sp.bytesToHexEscape([]byte(strVal))
 		}
 		return strVal
-	}
-}
-
-// CastToStringSafe to string (safer)
-func (sp *StreamProcessor) CastToStringSafe(i int, val interface{}, valType ...ColumnType) string {
-	typ := ColumnType("")
-	switch v := val.(type) {
-	case time.Time:
-		typ = DatetimeType
-	default:
-		_ = v
-	}
-
-	if len(valType) > 0 {
-		typ = valType[0]
-	}
-
-	switch {
-	case val == nil:
-		return ""
-	case sp.Config.BoolAsInt && typ.IsBool():
-		switch cast.ToString(val) {
-		case "true", "1", "TRUE":
-			return "1"
-		}
-		return "0"
-	case typ.IsDecimal() || typ.IsFloat():
-		return cast.ToString(val)
-	case typ.IsDate():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
-		}
-		return tVal.UTC().Format("2006-01-02")
-	case typ.IsDatetime():
-		tVal, _ := sp.CastToTime(val)
-		if tVal.IsZero() {
-			return ""
-		}
-		return tVal.UTC().Format("2006-01-02 15:04:05.999999") + " +00"
-	default:
-		return cast.ToString(val)
 	}
 }
 
@@ -1155,8 +1123,6 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
 			nVal = val // keep string
-		} else if dVal.IsZero() {
-			nVal = nil
 		} else {
 			nVal = dVal
 		}

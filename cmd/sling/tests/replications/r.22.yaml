@@ -1,0 +1,36 @@
+source: mysql
+target: snowflake
+
+# Hooks to set up test data
+hooks:
+  start:
+    - description: "Create test table with BIT columns in MySQL"
+      type: query
+      connection: mysql
+      query: |
+        USE mysql;
+        
+        DROP TABLE IF EXISTS bit_table;
+        
+        CREATE TABLE bit_table (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          bit1_col BIT(1) DEFAULT b'0',
+          bit8_col BIT(8) DEFAULT b'11110000',
+          bit16_col BIT(16) DEFAULT b'1010101010101010',
+          bit32_col BIT(32) DEFAULT b'11111111000000001111111100000000',
+          bit64_col BIT(64) DEFAULT b'1010101010101010101010101010101010101010101010101010101010101010',
+          name VARCHAR(50),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        INSERT INTO bit_table (bit1_col, bit8_col, bit16_col, bit32_col, bit64_col, name) VALUES
+        (b'0', b'00000000', b'0000000000000000', b'00000000000000000000000000000000', b'0000000000000000000000000000000000000000000000000000000000000000', 'all_zeros'),
+        (b'1', b'11111111', b'1111111111111111', b'11111111111111111111111111111111', b'1111111111111111111111111111111111111111111111111111111111111111', 'all_ones'),
+        (b'1', b'10101010', b'1010101010101010', b'10101010101010101010101010101010', b'1010101010101010101010101010101010101010101010101010101010101010', 'alternating'),
+        (b'0', b'01010101', b'0101010101010101', b'01010101010101010101010101010101', b'0101010101010101010101010101010101010101010101010101010101010101', 'inverse_alternating'),
+        (b'1', b'11110000', b'1111000011110000', b'11110000111100001111000011110000', b'1111000011110000111100001111000011110000111100001111000011110000', 'pattern_test');
+
+streams:
+  mysql.bit_table:
+    object: public.bit_table
+    mode: full-refresh

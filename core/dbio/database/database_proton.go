@@ -367,7 +367,7 @@ func processProtonInsertRow(columns iop.Columns, row []any) []any {
 }
 
 // GetCount returns count of records
-func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
+func (conn *ProtonConn) GetCount(tableFName string) (int64, error) {
 	// wait for a while before getting count, otherwise newly added row can be 0
 	time.Sleep(3300 * time.Millisecond)
 	sql := fmt.Sprintf(`select count(*) as cnt from table(%s)`, tableFName)
@@ -376,7 +376,7 @@ func (conn *ProtonConn) GetCount(tableFName string) (uint64, error) {
 		g.LogError(err, "could not get row number")
 		return 0, err
 	}
-	return cast.ToUint64(data.Rows[0][0]), nil
+	return cast.ToInt64(data.Rows[0][0]), nil
 }
 
 func (conn *ProtonConn) GetNativeType(col iop.Column) (nativeType string, err error) {

@@ -198,10 +198,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
-	if os.Getenv("SLING_EXEC_ID") == "" {
-		// set exec id if none provided
-		os.Setenv("SLING_EXEC_ID", sling.NewExecID())
-	}
 
 	// check for update, and print note
 	go checkUpdate(false)
@@ -467,6 +463,12 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		}
 	}
 
+	// load SLING_TIMEOUT if specified in replication env
+	timeoutR := replication.Env["SLING_TIMEOUT"]
+	timeoutE := os.Getenv("SLING_TIMEOUT")
+
+	setTimeout(cast.ToString(timeoutR), timeoutE)
+
 	err = replication.Compile(cfgOverwrite, selectStreams...)
 	if err != nil {
 		return g.Error(err, "Error compiling replication config")
@@ -578,6 +580,33 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	if err != nil {
 		return g.Error(err, "could not load pipeline: %s", pipelineCfgPath)
 	}
+
+	// load SLING_TIMEOUT if specified in pipeline env
+	timeoutR := pipeline.Env["SLING_TIMEOUT"]
+	timeoutE := os.Getenv("SLING_TIMEOUT")
+
+	setTimeout(cast.ToString(timeoutR), timeoutE)
+
+	pipelineMap := g.M()
+
+	// track usage
+	defer func() {
+		steps := []map[string]any{}
+		for _, s := range pipeline.Steps {
+			steps = append(steps, s.PayloadMap())
+		}
+
+		pipelineMap["md5"] = pipeline.MD5
+		pipelineMap["steps"] = steps
+
+		if err != nil {
+			env.SetTelVal("error", getErrString(err))
+		}
+		env.SetTelVal("pipeline", g.Marshal(pipelineMap))
+
+		// telemetry
+		Track("run")
+	}()
 
 	// set function here due to scoping
 	sling.HookRunReplication = runReplication
@@ -697,6 +726,7 @@ func setTimeout(values ...string) {
 		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
 
 		// set deadline for status setting later
+		g.Debug("setting timeout for %s minutes", timeout)
 		deadline := time.Now().Add(duration)
 		ctx.Map.Set("timeout-deadline", deadline.Unix())
 		break

@@ -87,6 +87,33 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 	return strings.TrimSpace(sql), nil
 }
 
+// getS3Props gets the properties for the S3 Filesystem,
+// adding fallbacks for credentials for wider compatibility.
+// See: https://github.com/slingdata-io/sling-cli/issues/571
+func (conn *RedshiftConn) getS3Props() []string {
+	s3Props := conn.PropArr()
+
+	awsID := conn.GetProp("AWS_ACCESS_KEY_ID")
+	awsKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	awsToken := conn.GetProp("AWS_SESSION_TOKEN")
+
+	if awsID != "" {
+		s3Props = append(s3Props, "ACCESS_KEY_ID="+awsID)
+	}
+	if awsKey != "" {
+		s3Props = append(s3Props, "SECRET_ACCESS_KEY="+awsKey)
+	}
+	if awsToken != "" {
+		s3Props = append(s3Props, "SESSION_TOKEN="+awsToken)
+	}
+
+	// If no AWS credentials are provided, instruct S3 client to use environment credentials
+	if awsID == "" && awsKey == "" {
+		s3Props = append(s3Props, "USE_ENVIRONMENT=true")
+	}
+	return s3Props
+}
+
 // Unload unloads a query to S3
 func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, err error) {
 
@@ -163,7 +190,9 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 
 	}
 
-	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	// Prepare properties for S3 client
+	s3Props := conn.getS3Props()
+	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, s3Props...)
 	if err != nil {
 		err = g.Error(err, "Unable to create S3 Client")
 		return
@@ -219,7 +248,9 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
-	fs, err := filesys.NewFileSysClientContext(unloadCtx.Ctx, dbio.TypeFileS3, conn.PropArr()...)
+	// Prepare properties for S3 client
+	s3Props := conn.getS3Props()
+	fs, err := filesys.NewFileSysClientContext(unloadCtx.Ctx, dbio.TypeFileS3, s3Props...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return
@@ -270,7 +301,9 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		tableFName,
 	)
 
-	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, conn.PropArr()...)
+	// Prepare properties for S3 client
+	s3Props := conn.getS3Props()
+	s3Fs, err := filesys.NewFileSysClient(dbio.TypeFileS3, s3Props...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for S3")
 		return

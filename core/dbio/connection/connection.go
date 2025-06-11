@@ -236,6 +236,8 @@ func (c *Connection) URL() string {
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
 		case dbio.TypeFileGoogle:
 			url = g.F("%s://%s", c.Type.String(), c.Data["bucket"])
+		case dbio.TypeFileGoogleDrive:
+			url = "gdrive://"
 		case dbio.TypeFileAzure:
 			url = g.F("https://%s.blob.core.windows.net/%s", c.Data["account"], c.Data["container"])
 		}
@@ -442,7 +444,7 @@ func (c *Connection) setURL() (err error) {
 			pathValue := strings.ReplaceAll(U.Path(), "/", "")
 			setIfMissing("schema", U.PopParam("schema"))
 
-			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
+			if !g.In(c.Type, dbio.TypeDbMotherDuck, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake, dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbBigQuery) {
 				setIfMissing("host", U.Hostname())
 				setIfMissing("username", U.Username())
 				setIfMissing("password", U.Password())
@@ -451,6 +453,7 @@ func (c *Connection) setURL() (err error) {
 
 			if g.In(c.Type, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				setIfMissing("sslmode", U.PopParam("sslmode"))
+				setIfMissing("role", U.PopParam("role"))
 			}
 
 			if c.Type == dbio.TypeDbSnowflake {
@@ -493,6 +496,9 @@ func (c *Connection) setURL() (err error) {
 		}
 		if c.Type == dbio.TypeFileS3 || c.Type == dbio.TypeFileGoogle {
 			setIfMissing("bucket", U.U.Host)
+		}
+		if c.Type == dbio.TypeFileGoogleDrive {
+			setIfMissing("folder_id", U.U.Host)
 		}
 		if c.Type == dbio.TypeFileAzure {
 			account := strings.ReplaceAll(U.U.Host, ".blob.core.windows.net", "")
@@ -545,6 +551,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("database", c.Data["dbname"])
 		template = "postgresql://{username}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+		if _, ok := c.Data["role"]; ok {
+			template = template + "&role={role}"
+		}
 	case dbio.TypeDbRedshift:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
@@ -674,6 +683,50 @@ func (c *Connection) setURL() (err error) {
 		}
 		setIfMissing("schema", "main")
 		template = "duckdb://{instance}?schema={schema}"
+	case dbio.TypeDbDuckLake:
+		if val, ok := c.Data["instance"]; ok {
+			dbURL, err := net.NewURL(cast.ToString(val))
+			if err == nil && g.In(dbURL.U.Scheme, "s3", "http", "https") {
+				setIfMissing("http_url", dbURL.String())
+				c.Data["instance"] = dbURL.Path()
+			} else {
+				c.Data["instance"] = strings.ReplaceAll(cast.ToString(val), `\`, `/`) // windows path fix
+			}
+		}
+
+		setIfMissing("schema", "main")
+
+		// Storage credentials for various backends
+		// S3
+		setIfMissing("s3_access_key_id", c.Data["s3_access_key_id"])
+		setIfMissing("s3_secret_access_key", c.Data["s3_secret_access_key"])
+		setIfMissing("s3_session_token", c.Data["s3_session_token"])
+		setIfMissing("s3_region", c.Data["s3_region"])
+		setIfMissing("s3_endpoint", c.Data["s3_endpoint"])
+
+		// Azure
+		setIfMissing("azure_account_name", c.Data["azure_account_name"])
+		setIfMissing("azure_account_key", c.Data["azure_account_key"])
+		setIfMissing("azure_sas_token", c.Data["azure_sas_token"])
+		setIfMissing("azure_tenant_id", c.Data["azure_tenant_id"])
+		setIfMissing("azure_client_id", c.Data["azure_client_id"])
+		setIfMissing("azure_client_secret", c.Data["azure_client_secret"])
+		setIfMissing("azure_connection_string", c.Data["azure_connection_string"])
+
+		// GCS
+		setIfMissing("gcs_key_file", c.Data["gcs_key_file"])
+		setIfMissing("gcs_project_id", c.Data["gcs_project_id"])
+		setIfMissing("gcs_access_key_id", c.Data["gcs_access_key_id"])
+		setIfMissing("gcs_secret_access_key", c.Data["gcs_secret_access_key"])
+
+		// Catalog configuration
+		setIfMissing("catalog_type", c.Data["catalog_type"])
+		setIfMissing("catalog_conn_string", c.Data["catalog_conn_string"])
+		setIfMissing("data_path", c.Data["data_path"])
+
+		// Build the ducklake URL based on catalog configuration
+		// Default to simple ducklake:// if no specific catalog URL is provided
+		template = "ducklake://"
 	case dbio.TypeDbMotherDuck:
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)
@@ -770,20 +823,35 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = c.Type.String() + "://{user}:{password}@{host}:{port}/"
-	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileAzure,
+	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
+	case dbio.TypeDbIceberg:
+		setIfMissing("rest_uri", c.Data["rest_uri"])
+		setIfMissing("catalog_type", c.Data["catalog_type"])
+		setIfMissing("credential", c.Data["credential"])
+		setIfMissing("token", c.Data["token"])
+		setIfMissing("warehouse", c.Data["warehouse"])
+		template = "iceberg://{warehouse}"
 	case dbio.TypeDbAthena:
+		// use dbt inputs
+		{
+			setIfMissing("region", c.Data["region_name"])
+			setIfMissing("profile", c.Data["aws_profile_name"])
+			setIfMissing("workgroup", c.Data["work_group"])
+			setIfMissing("data_location", c.Data["s3_data_dir"])
+			setIfMissing("staging_location", c.Data["s3_staging_dir"])
+		}
+
 		setIfMissing("access_key_id", c.Data["user"])
 		setIfMissing("secret_access_key", nil)
 		setIfMissing("profile", nil)
 		setIfMissing("session_token", nil)
 		setIfMissing("region", c.Data["aws_region"])
 		setIfMissing("workgroup", "primary")
-		setIfMissing("output_location", "")
 		setIfMissing("catalog", "AwsDataCatalog") // standard default aws catalog
 		setIfMissing("database", "")
-		template = "athena://{access_key_id}:{secret_access_key}@{region}"
+		template = "athena://{region}"
 	default:
 		if c.Type.IsUnknown() {
 			g.Trace("no type detected for %s", c.Name)

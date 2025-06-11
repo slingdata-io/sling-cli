@@ -88,8 +88,9 @@ type Connection interface {
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
 	GetColumnsFull(string) (iop.Dataset, error)
 	GetColumnStats(tableName string, fields ...string) (columns iop.Columns, err error)
-	GetCount(string) (uint64, error)
+	GetCount(string) (int64, error)
 	GetDatabases() (iop.Dataset, error)
+	GetMaxValue(t Table, colName string) (value any, col iop.Column, err error)
 	GetDDL(string) (string, error)
 	GetGormConn(config *gorm.Config) (*gorm.DB, error)
 	GetIndexes(string) (iop.Dataset, error)
@@ -133,6 +134,7 @@ type Connection interface {
 	StreamRowsContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *iop.Datastream, err error)
 	SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error)
 	SwapTable(srcTable string, tgtTable string) (err error)
+	TableExists(table Table) (exists bool, err error)
 	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
@@ -298,6 +300,10 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &SQLiteConn{URL: URL}
 	} else if strings.HasPrefix(URL, "duckdb:") || strings.HasPrefix(URL, "motherduck:") {
 		conn = &DuckDbConn{URL: URL}
+	} else if strings.HasPrefix(URL, "ducklake:") {
+		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
+	} else if strings.HasPrefix(URL, "iceberg:") {
+		conn = &IcebergConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -349,7 +355,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "snowflake"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"
-	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck:
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
 		driverName = "duckdb"
 	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
 		driverName = "sqlserver"
@@ -969,18 +975,21 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	// add new
 	for _, col := range columns {
 		key := strings.ToLower(col.Name)
-		if g.In(conn.Type, dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH) {
+		vals := colTransforms[key]
+		switch conn.Type {
+		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH:
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
-
-				if vals, ok := colTransforms[key]; ok {
-					// only add transform parse_ms_uuid if parse_uuid is not specified
-					if !lo.Contains(vals, "parse_uuid") {
-						g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
-						colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
-					}
-				} else {
-					g.Debug(`setting transform "parse_ms_uuid" for column %s`, col.Name)
-					colTransforms[key] = []string{"parse_ms_uuid"}
+				if !lo.Contains(vals, "parse_uuid") {
+					g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
+					colTransforms[key] = append([]string{"parse_ms_uuid"}, vals...)
+				}
+			}
+		case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
+			if strings.ToLower(col.DbType) == "bit" {
+				// only add transform parse_bit if binary_to_hex or binary_to_decimal is not specified
+				if !lo.Contains(vals, "binary_to_hex") && !lo.Contains(vals, "binary_to_decimal") {
+					g.Debug(`setting transform "parse_bit" for column "%s"`, col.Name)
+					colTransforms[key] = append([]string{"parse_bit"}, vals...)
 				}
 			}
 		}
@@ -1282,7 +1291,7 @@ func (conn *BaseConn) SubmitTemplate(level string, templateMap map[string]string
 }
 
 // GetCount returns count of records
-func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
+func (conn *BaseConn) GetCount(tableFName string) (int64, error) {
 	sql := fmt.Sprintf(`select count(*) cnt from %s`, tableFName)
 	data, err := conn.Self().Query(sql)
 	if err != nil {
@@ -1290,7 +1299,7 @@ func (conn *BaseConn) GetCount(tableFName string) (uint64, error) {
 	} else if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
 		return 0, nil
 	}
-	return cast.ToUint64(data.Rows[0][0]), nil
+	return cast.ToInt64(data.Rows[0][0]), nil
 }
 
 // GetSchemas returns schemas
@@ -1501,19 +1510,14 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 }
 
 // TableExists returns true if the table exists
-func TableExists(conn Connection, tableFName string) (exists bool, err error) {
-
-	table, err := ParseTableName(tableFName, conn.GetType())
-	if err != nil {
-		return false, g.Error(err, "could not parse table name: "+tableFName)
-	}
+func (conn *BaseConn) TableExists(table Table) (exists bool, err error) {
 
 	colData, err := conn.SubmitTemplate(
 		"single", conn.Template().Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
-		return false, g.Error(err, "could not check table existence: "+tableFName)
+		return false, g.Error(err, "could not check table existence: "+table.FullName())
 	}
 
 	if len(colData.Rows) > 0 {
@@ -1661,6 +1665,42 @@ func (conn *BaseConn) GetIndexes(tableFName string) (iop.Dataset, error) {
 	)
 }
 
+// GetMaxValue get the max value of a column
+func (conn *BaseConn) GetMaxValue(table Table, colName string) (value any, maxCol iop.Column, err error) {
+	sql := g.F(
+		"select max(%s) as max_val from %s",
+		conn.Quote(colName),
+		table.FDQN(),
+	)
+
+	data, err := conn.Query(sql)
+	if err != nil {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "exist") ||
+			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "unknown") ||
+			strings.Contains(errMsg, "no such table") ||
+			strings.Contains(errMsg, "invalid object") {
+			// table does not exists, will be create later
+			// set val to blank for full load
+			return nil, maxCol, nil
+		}
+		err = g.Error(err, "could not get max value for "+colName)
+		return
+	}
+
+	if len(data.Rows) == 0 || len(data.Rows[0]) == 0 {
+		// table is empty
+		// set val to blank for full load
+		return nil, maxCol, nil
+	}
+
+	maxCol = data.Columns[0]
+	value = lo.Ternary(cast.ToString(data.Rows[0][0]) == "", nil, data.Rows[0][0])
+
+	return value, maxCol, nil
+}
+
 // GetDDL returns DDL for given table.
 func (conn *BaseConn) GetDDL(tableFName string) (string, error) {
 
@@ -1727,17 +1767,17 @@ func (conn *BaseConn) CreateTemporaryTable(tableName string, cols iop.Columns) (
 // `tableName` should have 'schema.table' format
 func (conn *BaseConn) CreateTable(tableName string, cols iop.Columns, tableDDL string) (err error) {
 
+	table, err := ParseTableName(tableName, conn.Type)
+	if err != nil {
+		return g.Error(err, "Could not parse table name: "+tableName)
+	}
+
 	// check table existence
-	exists, err := TableExists(conn, tableName)
+	exists, err := conn.TableExists(table)
 	if err != nil {
 		return g.Error(err, "Error checking table "+tableName)
 	} else if exists {
 		return nil
-	}
-
-	table, err := ParseTableName(tableName, conn.Type)
-	if err != nil {
-		return g.Error(err, "Could not parse table name: "+tableName)
 	}
 
 	// generate ddl
@@ -2093,7 +2133,7 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 		// don't normalize name, leave as is
 		selectExpr := conn.Self().Quote(srcCol.Name)
 
-		if srcCol.DbType != tgtCol.DbType {
+		if !strings.EqualFold(srcCol.DbType, tgtCol.DbType) {
 			g.Debug(
 				"inserting %s [%s] into %s [%s]",
 				srcCol.Name, srcCol.DbType, tgtCol.Name, tgtCol.DbType,
@@ -2357,7 +2397,7 @@ func (conn *BaseConn) GenerateDDL(table Table, data iop.Dataset, temporary bool)
 	ddl := g.R(
 		createTemplate,
 		"table", table.FullName(),
-		"col_types", strings.Join(columnsDDL, ",\n"),
+		"col_types", strings.Join(columnsDDL, ",\n  "),
 	)
 
 	return ddl, nil
@@ -2938,6 +2978,11 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 			err = g.Error(g.F("panic occurred! %#v\n%s", r, string(debug.Stack())))
 		}
 	}()
+
+	if g.In(conn.Type, dbio.TypeDbIceberg) {
+		g.Warn("cannot compare checksums for %s", conn.Type)
+		return nil
+	}
 
 	table, err := ParseTableName(tableName, conn.GetType())
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	arrowCompress "github.com/apache/arrow/go/v16/parquet/compress"
+	arrowCompress "github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/json"
@@ -317,15 +317,6 @@ func (ds *Datastream) CastRowToString(row []any) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
 		rowStr[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
-	}
-	return rowStr
-}
-
-// CastRowToStringSafe returns the row as string casted (safer)
-func (ds *Datastream) CastRowToStringSafe(row []any) []string {
-	rowStr := make([]string, len(row))
-	for i, val := range row {
-		rowStr[i] = ds.Sp.CastToStringSafe(i, val, ds.Columns[i].Type)
 	}
 	return rowStr
 }
@@ -1488,6 +1479,28 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 	return
 }
 
+// ConsumeArrowReaderSeeker uses the provided reader to stream rows
+func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
+	selected := ds.Columns.Names()
+
+	a, err := NewArrowReader(reader, selected)
+	if err != nil {
+		return g.Error(err, "could create arrow stream")
+	}
+
+	ds.Columns = a.Columns()
+	ds.Inferred = ds.Columns.Sourced()
+	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
 // ConsumeParquetReader uses the provided reader to stream rows
 func (ds *Datastream) ConsumeParquetReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
@@ -1532,6 +1545,32 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	_, err = file.Seek(0, 0) // reset to beginning
 	if err != nil {
 		return g.Error(err, "Unable to seek to beginning of temp file: "+parquetPath)
+	}
+
+	return ds.ConsumeParquetReaderSeeker(file)
+}
+
+// ConsumeArrowReader uses the provided reader to stream rows
+func (ds *Datastream) ConsumeArrowReader(reader io.Reader) (err error) {
+	// need to write to temp file prior
+	arrowPath := path.Join(env.GetTempFolder(), g.NewTsID("arrow.temp")+".arrows")
+	ds.Defer(func() { env.RemoveLocalTempFile(arrowPath) })
+
+	file, err := os.Create(arrowPath)
+	if err != nil {
+		return g.Error(err, "Unable to create temp file: "+arrowPath)
+	}
+
+	g.Debug("downloading to temp file on disk: %s", arrowPath)
+	bw, err := io.Copy(file, reader)
+	if err != nil {
+		return g.Error(err, "Unable to write to temp file: "+arrowPath)
+	}
+	g.Debug("wrote %d bytes to %s", bw, arrowPath)
+
+	_, err = file.Seek(0, 0) // reset to beginning
+	if err != nil {
+		return g.Error(err, "Unable to seek to beginning of temp file: "+arrowPath)
 	}
 
 	return ds.ConsumeParquetReaderSeeker(file)
@@ -2337,6 +2376,94 @@ func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *i
 			}
 		}
 		pipe.Writer.Close()
+	}()
+
+	return readerChn
+}
+
+// NewArrowReaderChnl provides a channel of readers as the limit is reached
+// each channel flows as fast as the consumer consumes
+func (ds *Datastream) NewArrowReaderChnl(sc StreamConfig) (readerChn chan *BatchReader) {
+	readerChn = make(chan *BatchReader, 100)
+
+	pipeR, pipeW := io.Pipe()
+
+	tbw := int64(0)
+
+	go func() {
+		var aw *ArrowWriter
+		var br *BatchReader
+		var err error
+
+		defer close(readerChn)
+
+		nextPipe := func(batch *Batch) error {
+			if aw != nil {
+				err := aw.Close()
+				if err != nil {
+					return g.Error(err, "could not close arrow writer")
+				}
+			}
+
+			if pipeW != nil {
+				pipeW.Close() // close the prior writer after arrow writer is closed
+			}
+			tbw = 0 // reset
+
+			// new reader
+			pipeR, pipeW = io.Pipe()
+
+			br = &BatchReader{batch, batch.Columns, pipeR, 0}
+			readerChn <- br
+
+			aw, err = NewArrowWriter(pipeW, batch.Columns)
+			if err != nil {
+				return g.Error(err, "could not create arrow writer")
+			}
+
+			return nil
+		}
+
+		for batch := range ds.BatchChan {
+			if batch.ColumnsChanged() || batch.IsFirst() {
+				err := nextPipe(batch)
+				if err != nil {
+					ds.Context.CaptureErr(err)
+					return
+				}
+			}
+
+			for row := range batch.Rows {
+				err := aw.WriteRow(row)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing row"))
+					ds.Context.Cancel()
+					pipeW.Close()
+					return
+				}
+
+				br.Counter++
+
+				if (sc.FileMaxRows > 0 && br.Counter >= sc.FileMaxRows) || (sc.FileMaxBytes > 0 && tbw >= sc.FileMaxBytes) {
+					err = nextPipe(batch)
+					if err != nil {
+						ds.Context.CaptureErr(err)
+						return
+					}
+				}
+			}
+		}
+
+		if aw != nil {
+			err := aw.Close()
+			if err != nil {
+				ds.Context.CaptureErr(g.Error(err, "could not close final arrow writer"))
+			}
+		}
+		if pipeW != nil {
+			pipeW.Close()
+		}
+
 	}()
 
 	return readerChn

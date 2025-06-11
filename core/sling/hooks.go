@@ -19,6 +19,7 @@ type Hook interface {
 	Data() map[string]any
 	SetExtra(map[string]any)
 	Stage() HookStage
+	Status() ExecStatus
 	Execute() error
 	PayloadMap() map[string]any
 	ExecuteOnDone(error) (OnFailType, error)

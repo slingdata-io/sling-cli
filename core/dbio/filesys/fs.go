@@ -96,6 +96,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 		fsClient = &AzureFileSysClient{}
 	case dbio.TypeFileGoogle:
 		fsClient = &GoogleFileSysClient{}
+	case dbio.TypeFileGoogleDrive:
+		fsClient = &GoogleDriveFileSysClient{}
 	case dbio.TypeFileHTTP:
 		fsClient = &HTTPFileSysClient{}
 	default:
@@ -158,6 +160,9 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "gs://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileGoogle, props...)
+	case strings.HasPrefix(url, "gdrive://"):
+		props = append(props, "URL="+url)
+		return NewFileSysClientContext(ctx, dbio.TypeFileGoogleDrive, props...)
 	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
@@ -239,6 +244,8 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
+	// case dbio.TypeFileGoogleDrive:
+	// 	return fs.Prefix() + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}
@@ -513,6 +520,8 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 			err = ds.ConsumeXmlReader(reader)
 		case dbio.FileTypeParquet:
 			err = ds.ConsumeParquetReader(reader)
+		case dbio.FileTypeArrow:
+			err = ds.ConsumeArrowReader(reader)
 		case dbio.FileTypeAvro:
 			err = ds.ConsumeAvroReader(reader)
 		case dbio.FileTypeSAS:
@@ -815,8 +824,8 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	// adjust fileBytesLimit due to compression
-	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) {
-		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply
+	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) && fileFormat != dbio.FileTypeParquet {
+		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply, parquet would be compressed already
 	}
 
 	processStream := func(ds *iop.Datastream, partURL string) {
@@ -897,7 +906,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				}
 			}
 		case dbio.FileTypeParquet:
-			for reader := range ds.NewParquetReaderChnl(sc) {
+			for reader := range ds.NewParquetArrowReaderChnl(sc) {
+				err := processReader(reader)
+				if err != nil {
+					break
+				}
+			}
+		case dbio.FileTypeArrow:
+			for reader := range ds.NewArrowReaderChnl(sc) {
 				err := processReader(reader)
 				if err != nil {
 					break
@@ -1629,7 +1645,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
-	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
+	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeArrow, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
 		ext := fileType.Ext()
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType

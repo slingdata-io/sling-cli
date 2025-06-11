@@ -136,17 +136,8 @@ func (cfg *Config) SetDefault() {
 		}
 	}
 
-	// set default transforms
-	switch cfg.SrcConn.Type {
-	case dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbStarRocks:
-		// parse_bit for MySQL
-		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
-	}
-
 	// set default metadata
 	switch {
-	case g.In(cfg.TgtConn.Type, dbio.TypeDbStarRocks):
-		cfg.extraTransforms = append(cfg.extraTransforms, "parse_bit")
 	case g.In(cfg.TgtConn.Type, dbio.TypeDbBigQuery):
 		cfg.Target.Options.DatetimeFormat = "2006-01-02 15:04:05.000000-07"
 	}
@@ -605,6 +596,18 @@ func (cfg *Config) Prepare() (err error) {
 	switch cfg.Target.Type {
 	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable:
 		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
+	case dbio.TypeDbIceberg:
+		switch cfg.Mode {
+		case TruncateMode, BackfillMode:
+			return g.Error("mode '%s' not yet supported for iceberg target.", cfg.Mode)
+		case IncrementalMode:
+			if !cfg.Source.HasUpdateKey() {
+				return g.Error("for mode '%s' with iceberg target, must provided update-key", cfg.Mode)
+			} else if cfg.Source.HasPrimaryKey() {
+				g.Warn("for mode '%s' with iceberg target, primary-key is ineffective, incremental merge is not yet supported (only appends)", cfg.Mode)
+				cfg.Source.PrimaryKeyI = nil // delete PK
+			}
+		}
 	}
 
 	// validate table keys
@@ -760,6 +763,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 				if cfg.TgtConn.Type.DBNameUpperCase() {
 					tableTmp.Name = strings.ToUpper(tableTmp.Name)
 				}
+				tgtOpts.TableTmp = tableTmp.FullName()
+			} else if g.In(cfg.TgtConn.Type, dbio.TypeDbDuckDb, dbio.TypeDbDuckLake) {
+				// for duckdb and ducklake, we'll use a temp table, which uses the 'main' schema
+				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
+				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}

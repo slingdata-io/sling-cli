@@ -102,8 +102,20 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 
 			stream.SetConfig(options)
 			sc := df.StreamConfig()
+
+			// output as arrow
+			var readerChn chan *iop.BatchReader
 			sc.FileMaxRows = cast.ToInt64(limit)
-			for batchR := range stream.NewCsvReaderChnl(sc) {
+			switch cfg.Target.Options.Format {
+			case dbio.FileTypeArrow:
+				readerChn = stream.NewArrowReaderChnl(sc)
+			case dbio.FileTypeParquet:
+				readerChn = stream.NewParquetArrowReaderChnl(sc)
+			default:
+				readerChn = stream.NewCsvReaderChnl(sc)
+			}
+
+			for batchR := range readerChn {
 				if limit > 0 && cnt >= limit {
 					return
 				}
@@ -112,6 +124,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 					err = g.Error("number columns have changed, not compatible with stdout.")
 					return
 				}
+
 				bufStdout := bufio.NewWriter(os.Stdout)
 				bw, err = filesys.Write(batchR.Reader, bufStdout)
 				bufStdout.Flush()
@@ -153,8 +166,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	} else if df.Columns[0].Name == "_sling_api_stream_no_data_" {
 		df.Collect()
 
+		table, err := database.ParseTableName(cfg.Target.Object, tgtConn.GetType())
+		if err != nil {
+			return 0, g.Error(err, "Could not parse table name: "+cfg.Target.Object)
+		}
+
 		// check table existence
-		exists, _ := database.TableExists(tgtConn, cfg.Target.Object)
+		exists, _ := tgtConn.TableExists(table)
 		if exists {
 			if cfg.Mode == IncrementalMode {
 				g.Info("no new data or records found in source api stream.")
@@ -174,8 +192,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		cfg.Source.PrimaryKeyI = pkCols.Names()
 	}
 
+	// write directly for iceberg full-refresh
+	isIce := tgtConn.GetType() == dbio.TypeDbIceberg
+
 	// write directly to the final table (no temp table)
-	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert {
+	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert || isIce {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else {
@@ -297,8 +318,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	if err != nil {
 		err = g.Error(err, "could not get count for temp table "+tableTmp.FullName())
 		return 0, err
-	} else {
-		if cnt != tCnt {
+	} else if tCnt >= 0 {
+		if cnt != cast.ToUint64(tCnt) {
 			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 			return 0, err
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
@@ -475,7 +496,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 			err = g.Error(err, "could not get count from final table %s", targetTable.FullName())
 			return 0, err
 		}
-		if cnt != tCnt {
+		if tCnt >= 0 && cnt != cast.ToUint64(tCnt) {
 			err = g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 			return 0, err
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
@@ -804,8 +825,8 @@ func prepareFinal(
 }
 
 func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
-	if cfg.Mode == "drop (need to optimize temp table in place)" {
-		// Use swap
+	if cfg.Mode == FullRefreshMode && g.In(tgtConn.GetType(), dbio.TypeDbIceberg) {
+		// Use swap, we cannot yet insert from one table to another
 		return transferBySwappingTables(tgtConn, tableTmp, targetTable)
 	}
 
