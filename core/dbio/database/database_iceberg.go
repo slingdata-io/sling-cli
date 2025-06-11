@@ -365,8 +365,13 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 		return nil, g.Error(err, "could not load existing table: %s", t.FullName())
 	}
 
+	fs, err := tbl.FS(conn.Context().Ctx)
+	if err != nil {
+		return nil, g.Error(err, "could not load table FS => %s", t.FullName())
+	}
+
 	// Check each data file's statistics
-	manifests, _ := tbl.CurrentSnapshot().Manifests(tbl.FS())
+	manifests, _ := tbl.CurrentSnapshot().Manifests(fs)
 	for _, manifest := range manifests {
 		// Only process data manifests (not delete manifests)
 		if manifest.ManifestContent() != iceberg.ManifestContentData {
@@ -374,7 +379,7 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 		}
 
 		// Fetch manifest entries
-		entries, err := manifest.FetchEntries(tbl.FS(), true)
+		entries, err := manifest.FetchEntries(fs, true)
 		if err != nil {
 			return nil, err
 		}
