@@ -47,6 +47,7 @@ const (
 	TypeFileLocal       Type = "file"
 	TypeFileHDFS        Type = "hdfs"
 	TypeFileS3          Type = "s3"
+	TypeFileR2          Type = "r2"
 	TypeFileAzure       Type = "azure"
 	TypeFileGoogle      Type = "gs"
 	TypeFileGoogleDrive Type = "gdrive"

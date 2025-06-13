@@ -131,7 +131,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 	case dbio.TypeFileLocal:
 		return strings.ReplaceAll(uri, "file://", "")
 
-	case dbio.TypeFileS3:
+	case dbio.TypeFileS3, dbio.TypeFileR2:
 		secretKeyMap = map[string]string{
 			"ACCESS_KEY_ID":     "KEY_ID",
 			"SECRET_ACCESS_KEY": "SECRET",
