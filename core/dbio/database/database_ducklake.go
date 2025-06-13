@@ -23,6 +23,7 @@ type DuckLakeConn struct {
 
 	// Catalog database configuration
 	CatalogType    string // duckdb, sqlite, postgres, mysql
+	CatalogSchema  string // schema to use in postgres or mysql
 	CatalogConnStr string // connection string for catalog database
 	DataPath       string // path to data files (local or cloud storage)
 	Database       string // the database name to attached
@@ -33,6 +34,7 @@ func (conn *DuckLakeConn) Init() error {
 
 	// Extract data path from properties
 	conn.CatalogType = conn.GetProp("catalog_type")
+	conn.CatalogSchema = conn.GetProp("catalog_schema")
 	conn.CatalogConnStr = conn.GetProp("catalog_conn_string")
 	conn.DataPath = conn.GetProp("data_path")
 	conn.Database = "ducklake" // for hard-coded  '__ducklake_metadata_ducklake'
@@ -196,8 +198,15 @@ func (conn *DuckLakeConn) buildAttachSQL() string {
 	}
 
 	// Add data path if specified
+	metaParts := []string{}
 	if conn.DataPath != "" {
-		attachSQL += fmt.Sprintf(" (DATA_PATH '%s')", conn.DataPath)
+		metaParts = append(metaParts, g.F("DATA_PATH '%s'", conn.DataPath))
+	}
+	if conn.CatalogSchema != "" {
+		metaParts = append(metaParts, g.F("META_SCHEMA '%s'", conn.CatalogSchema))
+	}
+	if len(metaParts) > 0 {
+		attachSQL += fmt.Sprintf(" (%s)", strings.Join(metaParts, ", "))
 	}
 
 	return attachSQL
