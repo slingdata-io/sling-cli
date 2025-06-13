@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
@@ -71,6 +72,11 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	if err = conn.DuckDbConn.Connect(timeOut...); err != nil {
 		return g.Error(err, "could not connect to DuckDB for DuckLake")
 	}
+
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
+	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	// Add required extensions using the DuckDb instance
 	// DuckLake is the table format extension that provides versioned, ACID transactions on DuckDB
@@ -177,8 +183,6 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	if err != nil {
 		return g.Error(err, "could not use ducklake database")
 	}
-
-	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 
 	return nil
 }
@@ -309,38 +313,6 @@ func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]st
 	}
 
 	return
-}
-
-// GetDatabases returns the available databases
-func (conn *DuckLakeConn) GetDatabases() (iop.Dataset, error) {
-	// For DuckLake, we need to query the attached databases
-	sql := "SELECT database_name FROM duckdb_databases() WHERE database_name != 'system' ORDER BY database_name" + noDebugKey
-	return conn.Query(sql)
-}
-
-// GetSchemas returns schemas for DuckLake
-func (conn *DuckLakeConn) GetSchemas() (iop.Dataset, error) {
-	// Use the current database to get schemas
-	sql := `
-		SELECT DISTINCT schema_name
-		FROM information_schema.schemata
-		WHERE catalog_name = current_database()
-		ORDER BY schema_name
-	` + noDebugKey
-	return conn.Query(sql)
-}
-
-// CurrentDatabase returns the current database name
-func (conn *DuckLakeConn) CurrentDatabase() (string, error) {
-	data, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
-	if err != nil {
-		err = g.Error(err, "could not get current database")
-	} else {
-		dbName := cast.ToString(data.FirstVal())
-		return dbName, nil
-	}
-
-	return "", err
 }
 
 // Close closes the DuckLake connection
