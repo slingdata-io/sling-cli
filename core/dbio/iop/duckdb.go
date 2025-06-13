@@ -146,7 +146,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 
 		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
 			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
-			secretProps = append(secretProps, "ACCOUNT_ID "+accountID)
+			secretProps = append(secretProps, g.F("ACCOUNT_ID '%s'", accountID))
 			secretProps = append(secretProps, "TYPE R2")
 			scopeScheme = "r2"
 			uri = strings.ReplaceAll(uri, "s3://", "r2://")
@@ -252,7 +252,7 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 	for _, secret := range duck.secrets {
 		env.LogSQL(nil, secret+env.NoDebugKey)
-		sql += fmt.Sprintf(";%s;", secret)
+		sql += fmt.Sprintf("%s;", secret)
 	}
 	return
 }
