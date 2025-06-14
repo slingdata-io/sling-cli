@@ -1,11 +1,11 @@
 source: postgres
-target: iceberg
+target: '{target}'
 
 hooks:
   end:
     # verify that we can query with custom SQL via duckDB
     - type: query
-      connection: iceberg
+      connection: '{target}'
       query: select count(*) from iceberg_catalog.public.test1k_mariadb_pg
       into: count_result
     
@@ -24,4 +24,6 @@ streams:
     object: public.test1k_mariadb_pg
     update_key: create_dt
   
+env:
+  target: iceberg
   

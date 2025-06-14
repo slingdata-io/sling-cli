@@ -30,9 +30,9 @@ import (
 type IcebergConn struct {
 	BaseConn
 	URL         string
-	Warehouse   string
-	Catalog     catalog.Catalog
 	CatalogType dbio.IcebergCatalogType
+	Catalog     catalog.Catalog
+	Warehouse   string
 	duck        *iop.DuckDb
 }
 
@@ -68,7 +68,6 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 	case dbio.IcebergCatalogTypeGlue:
 		err = conn.connectGlue()
 	case dbio.IcebergCatalogTypeS3Tables:
-		err = conn.connectGlue()
 	default:
 		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", conn.CatalogType)
 	}
@@ -100,15 +99,25 @@ func (conn *IcebergConn) connectREST() error {
 
 	opts := []rest.Option{}
 
+	// Add warehouse location if provided
+	conn.Warehouse = conn.GetProp("warehouse")
+	if conn.Warehouse != "" {
+		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
+
+		// check fo s3table
+		if strings.HasPrefix(conn.Warehouse, "arn:aws:s3tables") {
+			// configure for s3tables via REST
+			region := conn.GetProp("s3_region")
+			if region == "" {
+				return g.Error("must provide 's3_region' to connect to s3tables REST catalog")
+			}
+			opts = append(opts, rest.WithSigV4RegionSvc(region, "s3tables"))
+		}
+	}
+
 	// Add authentication if provided
 	if token := conn.GetProp("rest_token"); token != "" {
 		opts = append(opts, rest.WithOAuthToken(token))
-	}
-
-	// Add warehouse location if provided
-	conn.Warehouse = conn.GetProp("rest_warehouse")
-	if conn.Warehouse != "" {
-		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
 	}
 
 	// Add rest_credential if provided
@@ -133,13 +142,17 @@ func (conn *IcebergConn) connectREST() error {
 	return nil
 }
 
+func (conn *IcebergConn) isS3TablesViaREST() bool {
+	return strings.HasPrefix(conn.Warehouse, "arn:aws:s3tables")
+}
+
 func (conn *IcebergConn) connectGlue() error {
 	// Get AWS credentials from connection properties
-	awsAccessKeyID := conn.GetProp("access_key_id")
-	awsSecretAccessKey := conn.GetProp("secret_access_key")
-	awsSessionToken := conn.GetProp("session_token")
-	awsRegion := conn.GetProp("region")
-	awsProfile := conn.GetProp("profile")
+	awsAccessKeyID := conn.GetProp("s3_access_key_id")
+	awsSecretAccessKey := conn.GetProp("s3_secret_access_key")
+	awsSessionToken := conn.GetProp("s3_session_token")
+	awsRegion := conn.GetProp("s3_region")
+	awsProfile := conn.GetProp("s3_profile")
 
 	if awsRegion == "" {
 		return g.Error("AWS region not specified")
@@ -378,8 +391,13 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 		return nil, g.Error(err, "could not load table FS => %s", t.FullName())
 	}
 
+	currSnapshot := tbl.CurrentSnapshot()
+	if currSnapshot == nil {
+		return nil, g.Error("no current snapshot found")
+	}
+
 	// Check each data file's statistics
-	manifests, _ := tbl.CurrentSnapshot().Manifests(fs)
+	manifests, _ := currSnapshot.Manifests(fs)
 	for _, manifest := range manifests {
 		// Only process data manifests (not delete manifests)
 		if manifest.ManifestContent() != iceberg.ManifestContentData {
@@ -464,7 +482,9 @@ func (conn *IcebergConn) GetMaxValue(t Table, colName string) (value any, maxCol
 	}
 
 	// cast value
-	value = iop.NewStreamProcessor().CastVal(0, globalMax.String(), &maxCol)
+	if globalMax != nil {
+		value = iop.NewStreamProcessor().CastVal(0, globalMax.String(), &maxCol)
+	}
 
 	return
 }
@@ -880,13 +900,13 @@ func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
 	exists, nsErr := conn.Catalog.CheckNamespaceExists(conn.Context().Ctx, namespace)
 	if nsErr != nil {
 		// Some catalogs might not implement namespace checking, log and continue
-		g.Debug("could not check if namespace exists: %v", nsErr)
+		g.Debug("could not check if namespace exists: %w", nsErr)
 	} else if !exists {
 		// Try to create the namespace
-		nsProps := iceberg.Properties{
-			"created-by": "sling-cli",
-		}
-		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nsProps); err != nil {
+		// nsProps := iceberg.Properties{
+		// 	"created-by": "sling-cli",
+		// }
+		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nil); err != nil {
 			return g.Error(err, "could not create namespace %s", schema)
 		}
 	}
@@ -1067,7 +1087,10 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
 		}
 
-		details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "batch_rows", len(batch.Rows))
+		details := g.M("location", tbl.Location(), "batch_rows", len(batch.Rows))
+		if currSnapshot := newTable.CurrentSnapshot(); currSnapshot != nil {
+			details["snapshot_id"] = currSnapshot.SnapshotID
+		}
 		g.Debug("committed iceberg snapshot", details)
 	}
 
@@ -1372,7 +1395,13 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 	}
 
 	attachSQL := ""
-	switch conn.CatalogType {
+	catalogType := lo.Ternary(
+		conn.isS3TablesViaREST(),
+		dbio.IcebergCatalogTypeS3Tables,
+		conn.CatalogType,
+	)
+
+	switch catalogType {
 	case dbio.IcebergCatalogTypeREST:
 		// make secret
 		secretProps := MakeDuckDbSecretProps(conn, iop.DuckDbSecretTypeIceberg)
@@ -1417,17 +1446,17 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 
 			warehouse := g.F("%s:s3tablescatalog/%s", accountID, namespace)
 
-			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_secret)", warehouse)
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
 		}
 
 		if conn.CatalogType == dbio.IcebergCatalogTypeS3Tables {
 			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
-			arn := conn.GetProp("s3tables_arn")
-			if arn == "" {
-				return nil, g.Error("s3tables_arn property are required for S3 Tables catalog")
+			arn := conn.GetProp("warehouse")
+			if !strings.HasPrefix(arn, "arn:aws:s3tables") {
+				return nil, g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
 			}
 
-			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_secret)", arn)
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_storage_secret)", arn)
 		}
 
 	default:
