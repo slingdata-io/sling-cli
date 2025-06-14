@@ -377,3 +377,79 @@ func (conn *DuckDbConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column
 
 	return selectStr
 }
+
+// MakeDuckDbSecretProps convert conn props to duckdb secret props
+func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (secretProps map[string]string) {
+	secretProps = map[string]string{}
+
+	fillSecretProps := func(secretKeyMap map[string]string) {
+		for connPropKey, duckDbSecretKey := range secretKeyMap {
+			connPropKey = strings.ToLower(connPropKey)
+			duckDbSecretKey = strings.ToUpper(duckDbSecretKey)
+			if value := conn.GetProp(connPropKey); value != "" {
+				if connPropKey == "s3_bucket" {
+					// add prefix (don't modify original value)
+					if secretType == iop.DuckDbSecretTypeR2 {
+						value = "r2://" + value
+					} else {
+						value = "s3://" + value
+					}
+				}
+				secretProps[duckDbSecretKey] = value
+			}
+		}
+	}
+
+	switch secretType {
+	case iop.DuckDbSecretTypeS3, iop.DuckDbSecretTypeR2:
+		fillSecretProps(map[string]string{
+			"s3_access_key_id":     "KEY_ID",
+			"s3_secret_access_key": "SECRET",
+			"s3_region":            "REGION",
+			"s3_bucket":            "SCOPE",
+			"s3_session_token":     "SESSION_TOKEN",
+			"s3_endpoint":          "ENDPOINT",
+			"s3_profile":           "PROFILE",
+			"use_ssl":              "USE_SSL",
+			"url_style":            "URL_STYLE",
+			"assume_role_arn":      "ASSUME_ROLE_ARN",
+			"chain":                "CHAIN",
+		})
+	case iop.DuckDbSecretTypeAzure:
+		fillSecretProps(map[string]string{
+			"azure_connection_string": "CONNECTION_STRING",
+			"azure_account_name":      "ACCOUNT_NAME",
+			"azure_account_key":       "ACCOUNT_KEY",
+			"azure_sas_token":         "SAS_TOKEN",
+			"azure_client_secret":     "CLIENT_SECRET",
+			"http_proxy":              "HTTP_PROXY",
+			"proxy_user_name":         "PROXY_USER_NAME",
+			"proxy_password":          "PROXY_PASSWORD",
+			"client_certificate_path": "CLIENT_CERTIFICATE_PATH",
+			"azure_tenant_id":         "TENANT_ID",
+			"azure_client_id":         "CLIENT_ID",
+			"provider":                "PROVIDER",
+		})
+	case iop.DuckDbSecretTypeGCS:
+		// via HMAC keys (S3 interoperability)
+		// https://console.cloud.google.com/storage/settings;tab=interoperability
+		fillSecretProps(map[string]string{
+			"gcs_access_key_id":     "KEY_ID",
+			"gcs_secret_access_key": "SECRET",
+		})
+	case iop.DuckDbSecretTypeIceberg:
+		fillSecretProps(map[string]string{
+			"rest_token":             "TOKEN",
+			"rest_endpoint":          "ENDPOINT",
+			"rest_uri":               "ENDPOINT",
+			"rest_client_id":         "CLIENT_ID",
+			"rest_client_secret":     "CLIENT_SECRET",
+			"rest_oauth2_scope":      "OAUTH2_SCOPE",
+			"rest_oauth2_server_uri": "OAUTH2_SERVER_URI",
+		})
+	default:
+		g.Warn("could not make secret props for `%s`", secretType)
+	}
+
+	return secretProps
+}

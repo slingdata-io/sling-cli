@@ -827,12 +827,8 @@ func (c *Connection) setURL() (err error) {
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
-		setIfMissing("rest_uri", c.Data["rest_uri"])
-		setIfMissing("catalog_type", c.Data["catalog_type"])
-		setIfMissing("credential", c.Data["credential"])
-		setIfMissing("token", c.Data["token"])
-		setIfMissing("warehouse", c.Data["warehouse"])
-		template = "iceberg://{warehouse}"
+		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables
+		template = "iceberg://{catalog_type}"
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{

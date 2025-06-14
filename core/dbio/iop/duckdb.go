@@ -37,11 +37,12 @@ var (
 
 // DuckDb is a Duck DB compute layer
 type DuckDb struct {
-	Context    *g.Context
-	Proc       *process.Proc
-	extensions []string
-	secrets    []string
-	query      *duckDbQuery // only one active query at a time
+	Context     *g.Context
+	Proc        *process.Proc
+	extensions  []string
+	secrets     []DuckDbSecret
+	initialized bool
+	query       *duckDbQuery // only one active query at a time
 }
 
 type duckDbQuery struct {
@@ -91,7 +92,60 @@ func (duck *DuckDb) Props() map[string]string {
 func (duck *DuckDb) AddExtension(extension string) {
 	if !lo.Contains(duck.extensions, extension) {
 		duck.extensions = append(duck.extensions, extension)
+		duck.initialized = false // to re-initialize
 	}
+}
+
+type DuckDbSecret struct {
+	Type  DuckDbSecretType  `json:"type"`
+	Name  string            `json:"name"`
+	Props map[string]string `json:"props"`
+}
+
+type DuckDbSecretType string
+
+const (
+	DuckDbSecretTypeUnknown DuckDbSecretType = ""
+	DuckDbSecretTypeS3      DuckDbSecretType = "s3"
+	DuckDbSecretTypeR2      DuckDbSecretType = "r2"
+	DuckDbSecretTypeGCS     DuckDbSecretType = "gcs"
+	DuckDbSecretTypeAzure   DuckDbSecretType = "azure"
+	DuckDbSecretTypeIceberg DuckDbSecretType = "iceberg"
+)
+
+func NewDuckDbSecret(name string, secretType DuckDbSecretType, props map[string]string) DuckDbSecret {
+
+	secret := DuckDbSecret{
+		Type:  secretType,
+		Name:  name,
+		Props: map[string]string{},
+	}
+
+	// lowercase keys
+	for k, v := range props {
+		secret.Props[strings.ToLower(k)] = cast.ToString(v)
+	}
+
+	return secret
+}
+
+func (dds *DuckDbSecret) AddProp(key, value string) {
+	dds.Props[key] = value
+}
+
+func (dds *DuckDbSecret) Render() string {
+
+	props := []string{}
+	for k, v := range dds.Props {
+		if g.In(k, "provider") {
+			props = append(props, g.F("%s %s", strings.ToUpper(k), v))
+		} else {
+			props = append(props, g.F("%s '%s'", strings.ToUpper(k), v)) // add quotes
+		}
+	}
+
+	return g.F("CREATE SECRET %s (TYPE %s, %s)",
+		dds.Name, dds.Type, strings.Join(props, ", "))
 }
 
 // PrepareFsSecretAndURI prepares the secret configuration from the fs_props and modifies the URI if necessary
@@ -124,6 +178,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 	}
 
 	var secretKeyMap map[string]string
+	var secretType DuckDbSecretType
 	secretProps := []string{}
 	scopeScheme := scheme.String()
 
@@ -147,11 +202,11 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
 			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
 			secretProps = append(secretProps, g.F("ACCOUNT_ID '%s'", accountID))
-			secretProps = append(secretProps, "TYPE R2")
 			scopeScheme = "r2"
 			uri = strings.ReplaceAll(uri, "s3://", "r2://")
+			secretType = DuckDbSecretTypeR2
 		} else {
-			secretProps = append(secretProps, "TYPE S3")
+			secretType = DuckDbSecretTypeS3
 		}
 
 		// set endpoint
@@ -165,15 +220,18 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		}
 
 		// add default provider chain (https://duckdb.org/docs/extensions/httpfs/s3api.html#credential_chain-provider)
-		secretSQL := dbio.TypeDbDuckDb.GetTemplateValue("core.default_s3_secret")
-		duck.secrets = append(duck.secrets, secretSQL)
+		s3DefaultSecret := NewDuckDbSecret(
+			"s3_default", DuckDbSecretTypeS3,
+			map[string]string{"provider": "credential_chain", "chain": "env;config"},
+		)
+		duck.AddSecret(s3DefaultSecret)
 
 	case dbio.TypeFileGoogle:
 		secretKeyMap = map[string]string{
 			"ACCESS_KEY_ID":     "KEY_ID",
 			"SECRET_ACCESS_KEY": "SECRET",
 		}
-		secretProps = append(secretProps, "TYPE GCS")
+		secretType = DuckDbSecretTypeGCS
 		scopeScheme = "gcs"
 		uri = strings.ReplaceAll(uri, "gs://", "gcs://")
 
@@ -192,7 +250,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 			"CLIENT_ID":               "CLIENT_ID",
 			"PROVIDER":                "PROVIDER",
 		}
-		secretProps = append(secretProps, "TYPE AZURE")
+		secretType = DuckDbSecretTypeAzure
 
 		if strings.Contains(uri, ".blob.core.windows.net/") {
 			uri = strings.ReplaceAll(uri, "https://", "az://")
@@ -207,33 +265,53 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		}
 
 		// add default provider chain (https://duckdb.org/docs/extensions/azure.html#credential_chain-provider)
-		secretSQL := dbio.TypeDbDuckDb.GetTemplateValue("core.default_azure_secret")
-		secretSQL = g.R(secretSQL, "account", fsProps["ACCOUNT"])
-		duck.secrets = append(duck.secrets, secretSQL)
+		azureDefaultSecret := NewDuckDbSecret(
+			"azure_default", DuckDbSecretTypeAzure,
+			map[string]string{
+				"provider":     "credential_chain",
+				"chain":        "default;env;managed_identity;cli",
+				"account_name": fsProps["ACCOUNT"],
+			},
+		)
+		duck.AddSecret(azureDefaultSecret)
 	}
 
 	// populate secret props and make secret sql
 	if len(secretProps) > 0 {
+		props := map[string]string{}
 		for slingKey, duckdbKey := range secretKeyMap {
 			if val := fsProps[slingKey]; val != "" {
 				if duckdbKey == "SCOPE" {
 					val = scopeScheme + "://" + val
 				}
-				duckdbVal := "'" + val + "'" // add quotes
-				secretProps = append(secretProps, g.F("%s %s", duckdbKey, duckdbVal))
+				props[duckdbKey] = val
 			}
 		}
-
-		secretSQL := g.R(
-			"create or replace secret {name} ({key_vals})",
-			"name", scopeScheme,
-			"key_vals", strings.Join(secretProps, ",\n  "),
-		)
-
-		duck.secrets = append(duck.secrets, secretSQL)
+		secret := NewDuckDbSecret(g.F("%s_secret", secretType), secretType, props)
+		duck.AddSecret(secret)
 	}
 
 	return uri
+}
+
+// AddSecret registers a new secret in session (also adds needed extension)
+func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
+	duck.secrets = append(duck.secrets, secret)
+	duck.initialized = false // to re-initialize
+
+	// add extension
+	switch secret.Type {
+	case DuckDbSecretTypeS3:
+		duck.AddExtension("aws")
+		duck.AddExtension("httpfs")
+	case DuckDbSecretTypeR2:
+		duck.AddExtension("aws")
+		duck.AddExtension("httpfs")
+	case DuckDbSecretTypeAzure:
+		duck.AddExtension("azure")
+	case DuckDbSecretTypeGCS:
+		duck.AddExtension("httpfs")
+	}
 }
 
 // getLoadExtensionSQL generates SQL statements to load extensions
@@ -250,7 +328,8 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 
 // getCreateSecretSQL generates SQL statements to create secrets
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
-	for _, secret := range duck.secrets {
+	for _, s := range duck.secrets {
+		secret := s.Render()
 		env.LogSQL(nil, secret+env.NoDebugKey)
 		sql += fmt.Sprintf("%s;", secret)
 	}
@@ -393,15 +472,20 @@ func (r duckDbResult) RowsAffected() (int64, error) {
 // SubmitSQL submits a sql query to duckdb via stdin
 func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
-	extensionsSQL := duck.getLoadExtensionSQL()
-	secretSQL := duck.getCreateSecretSQL()
+	extensionSecretSQL := ""
+	if !duck.initialized {
+		extensionsSQL := duck.getLoadExtensionSQL()
+		secretSQL := duck.getCreateSecretSQL()
+		extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
+		extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
+		duck.initialized = true // commented out for now
+	}
 
 	queryID := g.RandSuffix("", 3) // for debugging
 
 	// submit sql to stdin
 	sqlLines := []string{
-		strings.Trim(extensionsSQL, ";") + ";",
-		strings.Trim(secretSQL, ";") + ";",
+		extensionSecretSQL,
 		// preserve_insertion_order=false reduces the memory load.
 		// See https://www.reddit.com/r/DuckDB/comments/1jnw1ed/got_outofmemory_while_etl_30gb_parquet_files_on_s3/
 		"set preserve_insertion_order = false;",
@@ -414,8 +498,7 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	if !showChanges {
 		sqlLines = []string{
-			extensionsSQL + ";",
-			secretSQL + ";",
+			extensionSecretSQL,
 			g.R("select '{v}' AS marker_{id};", "v", duckDbSOFMarker, "id", queryID),
 			sql + ";",
 			g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
@@ -1035,7 +1118,7 @@ func (duck *DuckDb) Describe(query string) (columns Columns, err error) {
 	if len(columns) == 0 {
 		return nil, g.Error("no columns found for: %s", query)
 	} else {
-		g.Trace("duckdb describe got %d columns", len(columns))
+		g.Trace("duckdb describe got %d column(s)", len(columns))
 	}
 
 	return

@@ -640,3 +640,11 @@ func (ft FileType) IsJson() bool {
 	}
 	return false
 }
+
+type IcebergCatalogType string
+
+const (
+	IcebergCatalogTypeREST     IcebergCatalogType = "rest"
+	IcebergCatalogTypeGlue     IcebergCatalogType = "glue"
+	IcebergCatalogTypeS3Tables IcebergCatalogType = "s3tables"
+)

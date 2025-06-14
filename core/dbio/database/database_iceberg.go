@@ -29,9 +29,11 @@ import (
 // IcebergConn is an Iceberg connection
 type IcebergConn struct {
 	BaseConn
-	URL       string
-	Warehouse string
-	Catalog   catalog.Catalog
+	URL         string
+	Warehouse   string
+	Catalog     catalog.Catalog
+	CatalogType dbio.IcebergCatalogType
+	duck        *iop.DuckDb
 }
 
 // Init initiates the object
@@ -42,6 +44,8 @@ func (conn *IcebergConn) Init() error {
 
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
+
+	conn.CatalogType = dbio.IcebergCatalogType(conn.GetProp("catalog_type"))
 
 	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
 		if conn.GetProp(key) == "" {
@@ -58,19 +62,15 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 		return nil
 	}
 
-	// Determine catalog type from URL or properties
-	catalogType := conn.GetProp("catalog_type")
-	if catalogType == "" {
-		catalogType = "rest" // default to REST catalog
-	}
-
-	switch strings.ToLower(catalogType) {
-	case "rest":
+	switch conn.CatalogType {
+	case dbio.IcebergCatalogTypeREST:
 		err = conn.connectREST()
-	case "glue":
+	case dbio.IcebergCatalogTypeGlue:
+		err = conn.connectGlue()
+	case dbio.IcebergCatalogTypeS3Tables:
 		err = conn.connectGlue()
 	default:
-		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", catalogType)
+		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", conn.CatalogType)
 	}
 
 	if err != nil {
@@ -88,9 +88,9 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 }
 
 func (conn *IcebergConn) connectREST() error {
-	restURI := conn.GetProp("rest_uri")
+	restURI := conn.GetProp("rest_endpoint", "rest_uri")
 	if restURI == "" {
-		return g.Error("rest_uri property is required for REST catalog")
+		return g.Error("rest_endpoint property is required for REST catalog")
 	}
 
 	catalogName := conn.GetProp("catalog_name")
@@ -101,18 +101,18 @@ func (conn *IcebergConn) connectREST() error {
 	opts := []rest.Option{}
 
 	// Add authentication if provided
-	if token := conn.GetProp("token"); token != "" {
+	if token := conn.GetProp("rest_token"); token != "" {
 		opts = append(opts, rest.WithOAuthToken(token))
 	}
 
 	// Add warehouse location if provided
-	conn.Warehouse = conn.GetProp("warehouse")
+	conn.Warehouse = conn.GetProp("rest_warehouse")
 	if conn.Warehouse != "" {
 		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
 	}
 
-	// Add credential if provided
-	if cred := conn.GetProp("credential"); cred != "" {
+	// Add rest_credential if provided
+	if cred := conn.GetProp("rest_credential"); cred != "" {
 		opts = append(opts, rest.WithCredential(cred))
 	}
 
@@ -197,6 +197,10 @@ func (conn *IcebergConn) connectGlue() error {
 
 // Close closes the connection
 func (conn *IcebergConn) Close() error {
+	if conn.duck != nil {
+		conn.duck.Close()
+	}
+
 	if conn.Catalog == nil {
 		return nil
 	}
@@ -305,7 +309,11 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 	}
 
 	// Parse table identifier
-	tableID := parseTableIdentifier(tableFName)
+	t, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return nil, g.Error(err, "could parse %s", tableFName)
+	}
+	tableID := table.Identifier{t.Schema, t.Name}
 
 	// Load table
 	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
@@ -483,6 +491,11 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	start := time.Now()
 	if strings.TrimSpace(sql) == "" {
 		return ds, g.Error("Empty Query")
+	}
+
+	if tableName == "" || conn.CatalogType != dbio.IcebergCatalogTypeREST {
+		// if custom SQL, or glue or s3 tables, use DuckDB
+		return conn.queryViaDuckDB(ctx, sql, opts)
 	}
 
 	queryContext := g.NewContext(ctx)
@@ -1332,36 +1345,108 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(col iop.Column) iceberg.T
 	}
 }
 
-// Helper functions
-
-func parseTableIdentifier(tableName string) table.Identifier {
-	// Split by dots to create namespace and table parts
-	tableName = strings.ReplaceAll(tableName, `"`, "")
-	parts := strings.Split(tableName, ".")
-	return parts
-}
-
-func parseSimpleSelectSQL(sql string) (tableName string, err error) {
-	// Very simple SQL parser for "SELECT * FROM table" queries
-	sql = strings.TrimSpace(sql)
-	sql = strings.ToUpper(sql)
-
-	if !strings.HasPrefix(sql, "SELECT") {
-		return "", g.Error("Only SELECT queries are supported")
+// queryViaDuckDB executes a custom SQL query using DuckDB with Iceberg REST or Glue catalog
+// https://duckdb.org/docs/stable/core_extensions/iceberg/iceberg_rest_catalogs
+// https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
+// https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
+func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts map[string]any) (ds *iop.Datastream, err error) {
+	if !strings.Contains(sql, "iceberg_catalog.") {
+		g.Warn("for querying iceberg with custom SQL via duckDB, the table names need to be qualified with \"iceberg_catalog\". For example: select count(*) cnt from iceberg_catalog.my_namespace.my_table")
+		return nil, g.Error("missing qualifier \"iceberg_catalog\"")
 	}
 
-	// Find FROM clause
-	fromIdx := strings.Index(sql, "FROM")
-	if fromIdx == -1 {
-		return "", g.Error("No FROM clause found")
+	if conn.duck != nil {
+		return conn.duck.StreamContext(ctx, sql, opts)
 	}
 
-	// Extract table name after FROM
-	afterFrom := strings.TrimSpace(sql[fromIdx+4:])
-	parts := strings.Fields(afterFrom)
-	if len(parts) == 0 {
-		return "", g.Error("No table name found after FROM")
+	// Create a DuckDB instance
+	conn.duck = iop.NewDuckDb(ctx, "sling_conn_id", conn.GetProp("sling_conn_id"))
+
+	// Add iceberg extensions
+	conn.duck.AddExtension("iceberg")
+
+	// Open DuckDB connection
+	err = conn.duck.Open()
+	if err != nil {
+		return nil, g.Error(err, "could not open DuckDB connection for Iceberg query")
 	}
 
-	return parts[0], nil
+	attachSQL := ""
+	switch conn.CatalogType {
+	case dbio.IcebergCatalogTypeREST:
+		// make secret
+		secretProps := MakeDuckDbSecretProps(conn, iop.DuckDbSecretTypeIceberg)
+		secret := iop.NewDuckDbSecret("iceberg_secret", iop.DuckDbSecretTypeIceberg, secretProps)
+		conn.duck.AddSecret(secret)
+
+		// make attach SQL
+		restEndpoint := conn.GetProp("rest_endpoint", "rest_uri")
+		if restEndpoint == "" {
+			return nil, g.Error("rest_endpoint property is required for REST catalog")
+		}
+		attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
+
+	case dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeS3Tables:
+		// Map secret credentials
+		var storageSecretType iop.DuckDbSecretType
+		for key := range conn.properties {
+			if storageSecretType != iop.DuckDbSecretTypeUnknown {
+				break
+			} else if strings.HasPrefix(key, "s3_") {
+				storageSecretType = iop.DuckDbSecretTypeS3
+			}
+		}
+
+		if storageSecretType == iop.DuckDbSecretTypeUnknown {
+			return nil, g.Error("could not make AWS duckdb Iceberg secret for Iceberg query")
+		}
+
+		// make secret
+		secretProps := MakeDuckDbSecretProps(conn, storageSecretType)
+		secret := iop.NewDuckDbSecret("iceberg_storage_secret", storageSecretType, secretProps)
+		conn.duck.AddSecret(secret)
+
+		// make attach SQL
+		if conn.CatalogType == dbio.IcebergCatalogTypeGlue {
+			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
+			accountID := conn.GetProp("glue_account_id")
+			namespace := conn.GetProp("glue_namespace")
+			if accountID == "" || namespace == "" {
+				return nil, g.Error("glue_account_id and glue_namespace properties are required for GLUE catalog")
+			}
+
+			warehouse := g.F("%s:s3tablescatalog/%s", accountID, namespace)
+
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_secret)", warehouse)
+		}
+
+		if conn.CatalogType == dbio.IcebergCatalogTypeS3Tables {
+			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
+			arn := conn.GetProp("s3tables_arn")
+			if arn == "" {
+				return nil, g.Error("s3tables_arn property are required for S3 Tables catalog")
+			}
+
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_secret)", arn)
+		}
+
+	default:
+		return nil, g.Error("Unsupported catalog type for DuckDB query: %s", conn.CatalogType)
+	}
+
+	// Attach
+	_, err = conn.duck.Exec(attachSQL + env.NoDebugKey)
+	if err != nil {
+		return nil, g.Error(err, "could not attach Iceberg catalog")
+	}
+
+	// Use the catalog
+	// getting => Catalog Error: SET schema: No catalog + schema named "iceberg_catalog" found.
+	// _, err = conn.duck.Exec("USE iceberg_catalog;" + env.NoDebugKey)
+	// if err != nil {
+	// 	return nil, g.Error(err, "could not use Iceberg catalog")
+	// }
+
+	// Execute the actual query
+	return conn.duck.StreamContext(ctx, sql, opts)
 }

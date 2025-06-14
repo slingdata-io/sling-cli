@@ -93,14 +93,32 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// Add storage-specific extensions based on data path
+	var secret iop.DuckDbSecret
+
 	if conn.DataPath != "" {
-		if strings.HasPrefix(conn.DataPath, "s3://") || strings.HasPrefix(conn.DataPath, "r2://") {
-			conn.duck.AddExtension("httpfs")
-		} else if strings.HasPrefix(conn.DataPath, "az://") || strings.HasPrefix(conn.DataPath, "abfss://") {
-			conn.duck.AddExtension("azure")
-		} else if strings.HasPrefix(conn.DataPath, "gs://") || strings.HasPrefix(conn.DataPath, "gcs://") {
-			conn.duck.AddExtension("httpfs")
-		} else {
+		switch {
+		case strings.HasPrefix(conn.DataPath, "s3://"), strings.HasPrefix(conn.DataPath, "r2://"):
+			secretType := iop.DuckDbSecretTypeS3
+			if strings.HasPrefix(conn.DataPath, "r2://") {
+				secretType = iop.DuckDbSecretTypeR2
+			}
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("s3_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		case strings.HasPrefix(conn.DataPath, "az://"), strings.HasPrefix(conn.DataPath, "abfss://"):
+			secretType := iop.DuckDbSecretTypeAzure
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("azure_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		case strings.HasPrefix(conn.DataPath, "gs://"), strings.HasPrefix(conn.DataPath, "gcs://"):
+			secretType := iop.DuckDbSecretTypeGCS
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("gcs_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		default:
 			// ensure dir is created
 			os.MkdirAll(conn.DataPath, 0775)
 		}
@@ -111,71 +129,6 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	_, err = conn.Exec(attachSQL + noDebugKey)
 	if err != nil {
 		return g.Error(err, "could not attach ducklake database")
-	}
-
-	// Configure storage credentials using DuckDB's PrepareFsSecretAndURI method
-	if conn.DataPath != "" {
-		// Prepare fs_props from connection properties for storage credential configuration
-		fsProps := map[string]string{}
-
-		// Map DuckLake connection properties to fs_props format
-		if conn.GetProp("s3_access_key_id") != "" {
-			fsProps["ACCESS_KEY_ID"] = conn.GetProp("s3_access_key_id")
-		}
-		if conn.GetProp("s3_secret_access_key") != "" {
-			fsProps["SECRET_ACCESS_KEY"] = conn.GetProp("s3_secret_access_key")
-		}
-		if conn.GetProp("s3_session_token") != "" {
-			fsProps["SESSION_TOKEN"] = conn.GetProp("s3_session_token")
-		}
-		if conn.GetProp("s3_region") != "" {
-			fsProps["REGION"] = conn.GetProp("s3_region")
-		}
-		if conn.GetProp("s3_endpoint") != "" {
-			fsProps["ENDPOINT"] = conn.GetProp("s3_endpoint")
-		}
-		if conn.GetProp("s3_profile") != "" {
-			fsProps["PROFILE"] = conn.GetProp("s3_profile")
-		}
-
-		// Azure credentials
-		if conn.GetProp("azure_account_name") != "" {
-			fsProps["ACCOUNT"] = conn.GetProp("azure_account_name")
-		}
-		if conn.GetProp("azure_account_key") != "" {
-			fsProps["ACCOUNT_KEY"] = conn.GetProp("azure_account_key")
-		}
-		if conn.GetProp("azure_sas_token") != "" {
-			fsProps["SAS_TOKEN"] = conn.GetProp("azure_sas_token")
-		}
-		if conn.GetProp("azure_tenant_id") != "" {
-			fsProps["TENANT_ID"] = conn.GetProp("azure_tenant_id")
-		}
-		if conn.GetProp("azure_client_id") != "" {
-			fsProps["CLIENT_ID"] = conn.GetProp("azure_client_id")
-		}
-		if conn.GetProp("azure_client_secret") != "" {
-			fsProps["CLIENT_SECRET"] = conn.GetProp("azure_client_secret")
-		}
-		if conn.GetProp("azure_connection_string") != "" {
-			fsProps["CONN_STR"] = conn.GetProp("azure_connection_string")
-		}
-
-		// GCS credentials - HMAC keys for interoperability with S3 API
-		if conn.GetProp("gcs_access_key_id") != "" {
-			fsProps["ACCESS_KEY_ID"] = conn.GetProp("gcs_access_key_id")
-		}
-		if conn.GetProp("gcs_secret_access_key") != "" {
-			fsProps["SECRET_ACCESS_KEY"] = conn.GetProp("gcs_secret_access_key")
-		}
-		// Note: For service account key file, DuckDB expects it to be set via environment
-		// variables or credential chain provider, not as a direct secret parameter
-
-		// Set fs_props on the duck instance
-		conn.duck.SetProp("fs_props", g.Marshal(fsProps))
-
-		// Use DuckDB's PrepareFsSecretAndURI to configure storage secrets
-		_ = conn.duck.PrepareFsSecretAndURI(conn.DataPath)
 	}
 
 	// Use the attached database by default
