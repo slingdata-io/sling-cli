@@ -932,7 +932,12 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 
 		identifier := table.Identifier{t.Schema, t.Name}
 		if exists {
-			err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
+			// purge table
+			catalog, ok := conn.Catalog.(*rest.Catalog)
+			if !ok {
+				return g.Error("could not cast to rest.Catalog")
+			}
+			err = catalog.PurgeTable(conn.context.Ctx, identifier)
 			if err != nil {
 				return g.Error(err, "cannot drop table")
 			}
