@@ -25,5 +25,5 @@ streams:
     update_key: create_dt
   
 env:
-  target: iceberg
+  target: ${TARGET}
   
