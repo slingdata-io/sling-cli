@@ -1,6 +1,6 @@
 module github.com/slingdata-io/sling-cli
 
-go 1.24
+go 1.24.0
 
 toolchain go1.24.3
 
@@ -323,4 +323,4 @@ replace github.com/flarco/g => ../g
 
 replace github.com/slingdata-io/sling => ../sling
 
-replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250611103821-67dfc1bc6720
+replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250615124011-afc413814524
