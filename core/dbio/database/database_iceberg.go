@@ -87,10 +87,6 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 }
 
 func (conn *IcebergConn) connectREST() error {
-	restURI := conn.GetProp("rest_uri")
-	if restURI == "" {
-		return g.Error("rest_endpoint property is required for REST catalog")
-	}
 
 	catalogName := conn.GetProp("catalog_name")
 	if catalogName == "" {
@@ -105,14 +101,28 @@ func (conn *IcebergConn) connectREST() error {
 		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
 
 		// check fo s3table
-		if strings.HasPrefix(conn.Warehouse, "arn:aws:s3tables") {
+		if conn.isS3TablesViaREST() {
+			// extract region
+			parts := strings.Split(conn.Warehouse, ":")
+			if len(parts) != 6 {
+				return g.Error("invalid s3tables ARN: %s", conn.Warehouse)
+			}
+
 			// configure for s3tables via REST
-			region := conn.GetProp("s3_region")
-			if region == "" {
-				return g.Error("must provide 's3_region' to connect to s3tables REST catalog")
+			region := parts[3]
+			if r := conn.GetProp("s3_region"); r != "" && r != region {
+				return g.Error("ARN region does not match `s3_region` property: %s != %s", r, region)
 			}
 			opts = append(opts, rest.WithSigV4RegionSvc(region, "s3tables"))
+
+			conn.SetProp("s3_region", region)
+			conn.SetProp("rest_uri", g.F("https://s3tables.%s.amazonaws.com/iceberg", region))
 		}
+	}
+
+	restURI := conn.GetProp("rest_uri")
+	if restURI == "" {
+		return g.Error("rest_uri property is required for REST catalog")
 	}
 
 	if cast.ToBool(conn.GetProp("rest_sigv4_enable")) {
@@ -205,6 +215,7 @@ func (conn *IcebergConn) connectGlue() error {
 
 	var awsCfg awsv2.Config
 	var err error
+	opts := []glue.Option{}
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
@@ -246,8 +257,18 @@ func (conn *IcebergConn) connectGlue() error {
 		}
 	}
 
+	opts = append(opts, glue.WithAwsConfig(awsCfg))
+
+	if extra := conn.GetProp("glue_extra_props"); extra != "" {
+		props := map[string]string{}
+		if err := g.Unmarshal(extra, &props); err != nil {
+			return g.Error(err, "could not unmarshal glue_extra_props")
+		}
+		opts = append(opts, glue.WithAwsProperties(props))
+	}
+
 	// Create Glue catalog with AWS config
-	cat := glue.NewCatalog(glue.WithAwsConfig(awsCfg))
+	cat := glue.NewCatalog(opts...)
 	conn.Catalog = cat
 
 	return nil
@@ -1465,7 +1486,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 		// make attach SQL
 		restEndpoint := conn.GetProp("rest_uri")
 		if restEndpoint == "" {
-			return nil, g.Error("rest_endpoint property is required for REST catalog")
+			return nil, g.Error("rest_uri property is required for REST catalog")
 		}
 		attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
 
