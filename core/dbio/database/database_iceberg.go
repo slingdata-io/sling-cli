@@ -19,6 +19,7 @@ import (
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -67,7 +68,6 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 		err = conn.connectREST()
 	case dbio.IcebergCatalogTypeGlue:
 		err = conn.connectGlue()
-	case dbio.IcebergCatalogTypeS3Tables:
 	default:
 		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", conn.CatalogType)
 	}
@@ -87,7 +87,7 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 }
 
 func (conn *IcebergConn) connectREST() error {
-	restURI := conn.GetProp("rest_endpoint", "rest_uri")
+	restURI := conn.GetProp("rest_uri")
 	if restURI == "" {
 		return g.Error("rest_endpoint property is required for REST catalog")
 	}
@@ -100,7 +100,7 @@ func (conn *IcebergConn) connectREST() error {
 	opts := []rest.Option{}
 
 	// Add warehouse location if provided
-	conn.Warehouse = conn.GetProp("warehouse")
+	conn.Warehouse = conn.GetProp("rest_warehouse")
 	if conn.Warehouse != "" {
 		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
 
@@ -115,14 +115,59 @@ func (conn *IcebergConn) connectREST() error {
 		}
 	}
 
+	if cast.ToBool(conn.GetProp("rest_sigv4_enable")) {
+		opts = append(opts, rest.WithSigV4())
+		region := conn.GetProp("rest_sigv4_region")
+		service := conn.GetProp("rest_sigv4_service")
+		if region != "" {
+			opts = append(opts, rest.WithSigV4RegionSvc(region, service))
+		}
+	}
+
+	if tlsConfig, err := conn.makeTlsConfig(); tlsConfig != nil && err == nil {
+		opts = append(opts, rest.WithTLSConfig(tlsConfig))
+	} else if err != nil {
+		return g.Error(err, "invalid TLS config")
+	}
+
+	if metaLoc := conn.GetProp("rest_metadata_location"); metaLoc != "" {
+		opts = append(opts, rest.WithMetadataLocation(metaLoc))
+	}
+
+	if prefix := conn.GetProp("rest_prefix"); prefix != "" {
+		opts = append(opts, rest.WithPrefix(prefix))
+	}
+
+	if extra := conn.GetProp("rest_extra_props"); extra != "" {
+		props := map[string]string{}
+		if err := g.Unmarshal(extra, &props); err != nil {
+			return g.Error(err, "could not unmarshal rest_extra_props")
+		}
+		opts = append(opts, rest.WithAdditionalProps(props))
+	}
+
 	// Add authentication if provided
 	if token := conn.GetProp("rest_token"); token != "" {
 		opts = append(opts, rest.WithOAuthToken(token))
 	}
 
+	if authURI := conn.GetProp("rest_oauth_server_uri"); authURI != "" {
+		au, err := net.NewURL(authURI)
+		if err != nil {
+			return g.Error(err, "invalid rest_auth_uri")
+		}
+		opts = append(opts, rest.WithAuthURI(au.U))
+	}
+
+	if scope := conn.GetProp("rest_oauth_scope"); scope != "" {
+		opts = append(opts, rest.WithScope(scope))
+	}
+
 	// Add rest_credential if provided
-	if cred := conn.GetProp("rest_credential"); cred != "" {
-		opts = append(opts, rest.WithCredential(cred))
+	if clientID := conn.GetProp("rest_oauth_client_id"); clientID != "" {
+		clientSecret := conn.GetProp("rest_oauth_client_secret")
+		creds := clientID + ":" + clientSecret
+		opts = append(opts, rest.WithCredential(creds))
 	}
 
 	cat, err := rest.NewCatalog(
@@ -1413,7 +1458,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 		conn.duck.AddSecret(secret)
 
 		// make attach SQL
-		restEndpoint := conn.GetProp("rest_endpoint", "rest_uri")
+		restEndpoint := conn.GetProp("rest_uri")
 		if restEndpoint == "" {
 			return nil, g.Error("rest_endpoint property is required for REST catalog")
 		}
@@ -1455,7 +1500,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 
 		if catalogType == dbio.IcebergCatalogTypeS3Tables {
 			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
-			arn := conn.GetProp("warehouse")
+			arn := conn.GetProp("s3tables_arn", "rest_warehouse")
 			if !strings.HasPrefix(arn, "arn:aws:s3tables") {
 				return nil, g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
 			}

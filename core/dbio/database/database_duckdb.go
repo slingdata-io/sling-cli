@@ -439,13 +439,13 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 		})
 	case iop.DuckDbSecretTypeIceberg:
 		fillSecretProps(map[string]string{
-			"rest_token":             "TOKEN",
-			"rest_endpoint":          "ENDPOINT",
-			"rest_uri":               "ENDPOINT",
-			"rest_client_id":         "CLIENT_ID",
-			"rest_client_secret":     "CLIENT_SECRET",
-			"rest_oauth2_scope":      "OAUTH2_SCOPE",
-			"rest_oauth2_server_uri": "OAUTH2_SERVER_URI",
+			"rest_token":               "TOKEN",
+			"rest_uri":                 "ENDPOINT",
+			"rest_oauth_client_id":     "CLIENT_ID",
+			"rest_oauth_client_secret": "CLIENT_SECRET",
+			"rest_oauth_scope":         "OAUTH2_SCOPE",
+			"rest_oauth_grant_type":    "OAUTH2_GRANT_TYPE",
+			"rest_oauth_server_uri":    "OAUTH2_SERVER_URI",
 		})
 	default:
 		g.Warn("could not make secret props for `%s`", secretType)

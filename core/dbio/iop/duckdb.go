@@ -472,6 +472,13 @@ func (r duckDbResult) RowsAffected() (int64, error) {
 // SubmitSQL submits a sql query to duckdb via stdin
 func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
+	// combine props with fs_props for proper masking in logging
+	propsCombined := map[string]string{}
+	g.Unmarshal(duck.GetProp("fs_props"), &propsCombined)
+	for k, v := range duck.Props() {
+		propsCombined[k] = v
+	}
+
 	extensionSecretSQL := ""
 	if !duck.initialized {
 		extensionsSQL := duck.getLoadExtensionSQL()
@@ -479,6 +486,7 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 		extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
 		extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
 		duck.initialized = true // commented out for now
+		env.LogSQL(propsCombined, extensionSecretSQL+env.NoDebugKey)
 	}
 
 	queryID := g.RandSuffix("", 3) // for debugging
@@ -503,13 +511,6 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 			sql + ";",
 			g.R("select '{v}' AS {v};\n", "v", duckDbEOFMarker),
 		}
-	}
-
-	// combine props with fs_props for proper masking
-	propsCombined := map[string]string{}
-	g.Unmarshal(duck.GetProp("fs_props"), &propsCombined)
-	for k, v := range duck.Props() {
-		propsCombined[k] = v
 	}
 	env.LogSQL(propsCombined, sql)
 
