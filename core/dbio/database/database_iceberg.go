@@ -397,7 +397,11 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 	}
 
 	// Check each data file's statistics
-	manifests, _ := currSnapshot.Manifests(fs)
+	manifests, err := currSnapshot.Manifests(fs)
+	if err != nil {
+		return nil, g.Error(err, "failed to get manifests from snapshot %d", currSnapshot.SnapshotID)
+	}
+
 	for _, manifest := range manifests {
 		// Only process data manifests (not delete manifests)
 		if manifest.ManifestContent() != iceberg.ManifestContentData {
@@ -1436,7 +1440,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 		conn.duck.AddSecret(secret)
 
 		// make attach SQL
-		if conn.CatalogType == dbio.IcebergCatalogTypeGlue {
+		if catalogType == dbio.IcebergCatalogTypeGlue {
 			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
 			accountID := conn.GetProp("glue_account_id")
 			namespace := conn.GetProp("glue_namespace")
@@ -1449,7 +1453,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
 		}
 
-		if conn.CatalogType == dbio.IcebergCatalogTypeS3Tables {
+		if catalogType == dbio.IcebergCatalogTypeS3Tables {
 			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
 			arn := conn.GetProp("warehouse")
 			if !strings.HasPrefix(arn, "arn:aws:s3tables") {
@@ -1460,7 +1464,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 		}
 
 	default:
-		return nil, g.Error("Unsupported catalog type for DuckDB query: %s", conn.CatalogType)
+		return nil, g.Error("Unsupported catalog type for DuckDB query: %s", catalogType)
 	}
 
 	// Attach
