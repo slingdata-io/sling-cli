@@ -64,6 +64,7 @@ const (
 	TypeDbBigTable      Type = "bigtable"
 	TypeDbBigQuery      Type = "bigquery"
 	TypeDbSnowflake     Type = "snowflake"
+	TypeDbDatabricks    Type = "databricks"
 	TypeDbSQLite        Type = "sqlite"
 	TypeDbD1            Type = "d1"
 	TypeDbDuckDb        Type = "duckdb"
@@ -106,6 +107,7 @@ var AllType = []struct {
 	{TypeDbBigTable, "TypeDbBigTable"},
 	{TypeDbBigQuery, "TypeDbBigQuery"},
 	{TypeDbSnowflake, "TypeDbSnowflake"},
+	{TypeDbDatabricks, "TypeDbDatabricks"},
 	{TypeDbSQLite, "TypeDbSQLite"},
 	{TypeDbD1, "TypeDbD1"},
 	{TypeDbDuckDb, "TypeDbDuckDb"},
@@ -142,7 +144,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
 		return t, true
 	}
 
@@ -173,6 +175,7 @@ func (t Type) DefPort() int {
 		TypeDbElasticsearch: 9200,
 		TypeDbPrometheus:    9090,
 		TypeDbProton:        8463,
+		TypeDbDatabricks:    443,
 		TypeFileFtp:         21,
 		TypeFileSftp:        22,
 	}
@@ -188,7 +191,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -251,6 +254,7 @@ func (t Type) NameLong() string {
 		TypeDbBigQuery:      "DB - BigQuery",
 		TypeDbBigTable:      "DB - BigTable",
 		TypeDbSnowflake:     "DB - Snowflake",
+		TypeDbDatabricks:    "DB - Databricks",
 		TypeDbD1:            "DB - D1",
 		TypeDbSQLite:        "DB - SQLite",
 		TypeDbDuckDb:        "DB - DuckDB",
@@ -294,6 +298,7 @@ func (t Type) Name() string {
 		TypeDbBigQuery:      "BigQuery",
 		TypeDbBigTable:      "BigTable",
 		TypeDbSnowflake:     "Snowflake",
+		TypeDbDatabricks:    "Databricks",
 		TypeDbD1:            "D1",
 		TypeDbSQLite:        "SQLite",
 		TypeDbDuckDb:        "DuckDB",

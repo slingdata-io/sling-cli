@@ -56,6 +56,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbBigTable:          {name: "bigtable"},
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckDb:            {name: "duckdb"},
 	dbio.TypeDbDuckLake:          {name: "ducklake"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
@@ -774,6 +775,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // iceberg uses text for json
 				}
+			case tgtType == dbio.TypeDbDatabricks:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // databricks uses timestampz
+				}
+			case srcType == dbio.TypeDbIceberg && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // databricks uses timestampz
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -861,6 +870,11 @@ func TestSuiteDatabaseDuckLake(t *testing.T) {
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck)
+}
+
+func TestSuiteDatabaseDatabricks(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbDatabricks)
 }
 
 func TestSuiteDatabaseAthena(t *testing.T) {

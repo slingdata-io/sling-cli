@@ -656,6 +656,20 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["passcode"]; ok {
 			template = template + "&passcode={passcode}"
 		}
+	case dbio.TypeDbDatabricks:
+		setIfMissing("token", c.Data["password"])
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("warehouse_id", c.Data["warehouse_id"]) // Default as per documentation
+		setIfMissing("max_rows", 10000)                      // Default as per documentation
+
+		// databricks uses a custom connection string format
+		// "token:<my_token>@hostname:port/http_path?catalog=hive_metastore&schema=default&timeout=60&maxRows=100&timezone=America/Sao_Paulo&ansi_mode=true"
+		if httpPath := cast.ToString(c.Data["http_path"]); httpPath != "" {
+			setIfMissing("http_path", httpPath)
+			template = "databricks://token:{token}@{host}:{port}{http_path}"
+		} else {
+			template = "databricks://token:{token}@{host}:{port}/sql/1.0/warehouses/{warehouse_id}"
+		}
 	case dbio.TypeDbD1:
 		setIfMissing("account_id", c.Data["host"])
 		setIfMissing("api_token", c.Data["password"])
@@ -832,22 +846,24 @@ func (c *Connection) setURL() (err error) {
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{
-			setIfMissing("region", c.Data["region_name"])
-			setIfMissing("profile", c.Data["aws_profile_name"])
+			setIfMissing("aws_region", c.Data["region_name"])
+			setIfMissing("aws_profile", c.Data["aws_profile_name"])
 			setIfMissing("workgroup", c.Data["work_group"])
 			setIfMissing("data_location", c.Data["s3_data_dir"])
 			setIfMissing("staging_location", c.Data["s3_staging_dir"])
 		}
 
-		setIfMissing("access_key_id", c.Data["user"])
-		setIfMissing("secret_access_key", nil)
-		setIfMissing("profile", nil)
-		setIfMissing("session_token", nil)
-		setIfMissing("region", c.Data["aws_region"])
+		setIfMissing("aws_access_key_id", c.Data["user"])
+		setIfMissing("aws_access_key_id", c.Data["access_key_id"])
+		setIfMissing("aws_secret_access_key", nil)
+		setIfMissing("aws_secret_access_key", c.Data["secret_access_key"])
+		setIfMissing("aws_region", c.Data["region"])
+		setIfMissing("aws_profile", nil)
+		setIfMissing("aws_session_token", nil)
 		setIfMissing("workgroup", "primary")
 		setIfMissing("catalog", "AwsDataCatalog") // standard default aws catalog
 		setIfMissing("database", "")
-		template = "athena://{region}"
+		template = "athena://{aws_region}"
 	default:
 		if c.Type.IsUnknown() {
 			g.Trace("no type detected for %s", c.Name)
