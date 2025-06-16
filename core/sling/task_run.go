@@ -309,7 +309,10 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connection, err error) {
 
 	options := g.M()
-	g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
+	err = g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
+	if err != nil {
+		g.Warn("could not unmarshal target options: %w", err)
+	}
 
 	// merge options
 	for k, v := range options {
