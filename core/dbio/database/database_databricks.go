@@ -883,7 +883,7 @@ func (conn *DatabricksConn) VolumeList(volumePath string) (data iop.Dataset, err
 }
 
 // CopyFromVolume uses the Databricks COPY INTO command from volumes
-func (conn *DatabricksConn) CopyFromVolume(tableFName, volumePath, fileFormat string, columns iop.Columns) error {
+func (conn *DatabricksConn) CopyFromVolume(tableFName, volumePath string, fileFormat dbio.FileType, columns iop.Columns) error {
 	tgtColumns := make([]string, len(columns))
 	for i, name := range columns.Names() {
 		colName, _ := ParseColumnName(name, conn.GetType())
@@ -891,11 +891,10 @@ func (conn *DatabricksConn) CopyFromVolume(tableFName, volumePath, fileFormat st
 	}
 
 	sql := g.R(
-		conn.template.Core["copy_from_volume"],
+		conn.template.Core["copy_from_volume_"+fileFormat.String()],
 		"tgt_columns", strings.Join(tgtColumns, ", "),
 		"table", tableFName,
 		"volume_path", volumePath,
-		"file_format", strings.ToUpper(fileFormat),
 	)
 
 	data, err := conn.Query(sql)
@@ -944,6 +943,8 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
+	// fileFormat := dbio.FileTypeCsv
+	fileFormat := dbio.FileTypeParquet
 	go func() {
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
 		if err != nil {
@@ -953,11 +954,17 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 
 		config := iop.LoaderStreamConfig(true)
 		config.TargetType = conn.GetType()
-		// Set format as CSV for volume uploads
-		fs.SetProp("format", "csv")
-		fs.SetProp("delimiter", ",")
-		fs.SetProp("header", "true")
-		fs.SetProp("null_as", "")
+
+		switch fileFormat {
+		case dbio.FileTypeCsv:
+			fs.SetProp("format", "csv")
+			fs.SetProp("delimiter", ",")
+			fs.SetProp("header", "true")
+			fs.SetProp("null_as", "")
+		case dbio.FileTypeParquet:
+			fs.SetProp("format", "parquet")
+			fs.SetProp("file_max_rows", "500000")
+		}
 
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 		if err != nil {
@@ -1020,7 +1027,7 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 
 	// Copy from volume to table
 	if df.Err() == nil && context.Err() == nil {
-		err = conn.CopyFromVolume(tableFName, volumeFolderPath, "CSV", columns)
+		err = conn.CopyFromVolume(tableFName, volumeFolderPath, fileFormat, columns)
 		if err != nil {
 			return 0, g.Error(err, "Error with COPY INTO from volume")
 		}

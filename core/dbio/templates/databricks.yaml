@@ -13,10 +13,18 @@ core:
   disable_trigger: ""
   optimize_table: optimize {table}
   create_volume: create volume if not exists {volume_name}
-  copy_from_volume: |
+  copy_from_volume_parquet: |
+    COPY INTO {table}
+    FROM '{volume_path}'
+    FILEFORMAT = PARQUET
+    FORMAT_OPTIONS (
+      'datetimeRebaseMode' = 'CORRECTED',
+      'int96RebaseMode' = 'CORRECTED'
+    )
+  copy_from_volume_csv: |
     COPY INTO {table} ({tgt_columns})
     FROM '{volume_path}'
-    FILEFORMAT = {file_format}
+    FILEFORMAT = CSV
     FORMAT_OPTIONS (
       -- 'header' = 'true',
       'skipRows' = '1',
