@@ -26,7 +26,6 @@ core:
     FROM '{volume_path}'
     FILEFORMAT = CSV
     FORMAT_OPTIONS (
-      -- 'header' = 'true',
       'skipRows' = '1',
       'nullValue' = '\\N',
       'enforceSchema' = 'false',
