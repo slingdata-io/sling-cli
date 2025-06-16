@@ -943,8 +943,8 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 	df.Defer(func() { env.RemoveAllLocalTempFile(folderPath) })
 
 	fileReadyChn := make(chan filesys.FileReady, 10000)
-	// fileFormat := dbio.FileTypeCsv
-	fileFormat := dbio.FileTypeParquet
+	fileFormat := dbio.FileTypeCsv
+	// fileFormat := dbio.FileTypeParquet // error-prone, type mismatch
 	go func() {
 		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
 		if err != nil {
@@ -954,16 +954,14 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 
 		config := iop.LoaderStreamConfig(true)
 		config.TargetType = conn.GetType()
+		config.FileMaxRows = 500000
+		config.Format = fileFormat
 
 		switch fileFormat {
 		case dbio.FileTypeCsv:
-			fs.SetProp("format", "csv")
-			fs.SetProp("delimiter", ",")
-			fs.SetProp("header", "true")
-			fs.SetProp("null_as", "")
+			config.Header = true
+			config.Delimiter = ","
 		case dbio.FileTypeParquet:
-			fs.SetProp("format", "parquet")
-			fs.SetProp("file_max_rows", "500000")
 		}
 
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
