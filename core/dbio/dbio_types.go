@@ -629,6 +629,10 @@ var AllFileType = []struct {
 	{FileTypeRaw, "FileTypeRaw"},
 }
 
+func (ft FileType) String() string {
+	return string(ft)
+}
+
 func (ft FileType) Ext() string {
 	switch ft {
 	case FileTypeJsonLines:
