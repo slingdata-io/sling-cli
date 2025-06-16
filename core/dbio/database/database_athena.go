@@ -52,22 +52,16 @@ func (conn *AthenaConn) Init() error {
 		return g.Error("did not provide staging_location")
 	}
 
-	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
-		if conn.GetProp(key) == "" {
-			conn.SetProp(key, conn.GetProp("AWS_"+key))
-		}
-	}
-
 	return conn.BaseConn.Init()
 }
 
 func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Client, err error) {
 	// Get AWS credentials from connection properties
-	awsAccessKeyID := conn.GetProp("access_key_id")
-	awsSecretAccessKey := conn.GetProp("secret_access_key")
-	awsSessionToken := conn.GetProp("session_token")
-	awsRegion := conn.GetProp("region")
-	awsProfile := conn.GetProp("profile")
+	awsAccessKeyID := conn.GetProp("aws_access_key_id", "access_key_id")
+	awsSecretAccessKey := conn.GetProp("aws_secret_access_key", "secret_access_key")
+	awsSessionToken := conn.GetProp("aws_session_token", "session_token")
+	awsRegion := conn.GetProp("aws_region", "region")
+	awsProfile := conn.GetProp("aws_profile", "profile")
 
 	if awsRegion == "" {
 		return nil, g.Error("AWS region not specified")

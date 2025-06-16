@@ -48,12 +48,6 @@ func (conn *IcebergConn) Init() error {
 
 	conn.CatalogType = dbio.IcebergCatalogType(conn.GetProp("catalog_type"))
 
-	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
-		if conn.GetProp(key) == "" {
-			conn.SetProp(key, conn.GetProp("AWS_"+key))
-		}
-	}
-
 	return conn.BaseConn.Init()
 }
 

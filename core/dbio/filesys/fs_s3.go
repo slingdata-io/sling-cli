@@ -47,8 +47,13 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 	fs.BaseFileSysClient.context = g.NewContext(ctx)
 
 	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
-		if fs.GetProp(key) == "" {
-			fs.SetProp(key, fs.GetProp("AWS_"+key))
+		valWithoutPrefix := fs.GetProp(key)
+		valWithPrefix := fs.GetProp("AWS_" + key)
+
+		if valWithoutPrefix == "" && valWithPrefix != "" {
+			fs.SetProp(key, valWithPrefix)
+		} else if valWithoutPrefix != "" && valWithPrefix != "" && valWithoutPrefix != valWithPrefix {
+			g.Warn("discrepancy for S3 Keys: AWS_%s=%s  vs  %s=%s", key, valWithPrefix, key, valWithoutPrefix)
 		}
 	}
 
