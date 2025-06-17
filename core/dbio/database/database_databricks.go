@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync/atomic"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -127,7 +126,7 @@ func (conn *DatabricksConn) Connect(timeOut ...int) error {
 	// get current catalog
 	data, err := conn.Query("select current_catalog()" + env.NoDebugKey)
 	if err != nil {
-		g.Warn("could not get catalog: %w", err)
+		g.Warn("could not get catalog: %s", err.Error())
 	} else {
 		conn.Catalog = cast.ToString(data.Rows[0][0])
 	}
@@ -547,13 +546,13 @@ func (conn *DatabricksConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 		if err != nil {
 			return nil, g.Error(err, "could not create volume")
 		} else if volume != "" {
-			var unloaded int64
-			filePath, unloaded, err = conn.UnloadViaVolume(table)
+			var unloadedFiles int
+			filePath, unloadedFiles, err = conn.UnloadViaVolume(table)
 			if err != nil {
 				err = g.Error(err, "Could not unload to volume.")
 				return df, err
-			} else if unloaded == 0 {
-				// since no rows, return empty dataflow
+			} else if unloadedFiles == 0 {
+				// since no files, return empty dataflow
 				data := iop.NewDataset(columns)
 				return iop.MakeDataFlow(data.Stream())
 			}
@@ -592,10 +591,10 @@ func (conn *DatabricksConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 			return df, err
 		}
 
-		fs.SetProp("format", "csv")
+		// format is auto-detected, below if CSV
 		fs.SetProp("delimiter", ",")
 		fs.SetProp("header", "true")
-		fs.SetProp("null_if", "")
+		fs.SetProp("null_if", "\\N")
 	}
 
 	// set column coercion if specified
@@ -882,6 +881,32 @@ func (conn *DatabricksConn) VolumeList(volumePath string) (data iop.Dataset, err
 	return data, nil
 }
 
+// VolumeDelete delete files in a Databricks volume path
+func (conn *DatabricksConn) VolumeDelete(volumePaths ...string) (err error) {
+
+	deleteContext := g.NewContext(conn.context.Ctx)
+
+	for _, volumePath := range volumePaths {
+		deleteContext.Wg.Write.Add()
+
+		go func(volumePath string) {
+			defer deleteContext.Wg.Write.Done()
+
+			url := g.F("https://%s/api/2.0/fs/files%s", conn.GetProp("host"), volumePath)
+			headers := map[string]string{"Authorization": "Bearer " + conn.GetProp("token")}
+			_, respBytes, err := net.ClientDo("DELETE", url, nil, headers)
+			if err != nil {
+				deleteContext.CaptureErr(g.Error(err, "could not delete volume via API with for `%s` %s\nResponse: %s", volumePath, string(respBytes)))
+			}
+
+		}(volumePath)
+	}
+
+	deleteContext.Wg.Write.Wait()
+
+	return deleteContext.Err()
+}
+
 // CopyFromVolume uses the Databricks COPY INTO command from volumes
 func (conn *DatabricksConn) CopyFromVolume(tableFName, volumePath string, fileFormat dbio.FileType, columns iop.Columns) error {
 	tgtColumns := make([]string, len(columns))
@@ -984,17 +1009,14 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 		volumePrefix, env.CleanTableName(tableFName), g.NowFileStr())
 
 	// Clean up volume files when done
+	volumeFilePaths := []string{}
 	df.Defer(func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
-			sql := g.R(
-				conn.template.Core["remove_volume_files"],
-				"volume_path", volumeFolderPath,
-			)
-			ctx := driverctx.NewContextWithStagingInfo(
-				conn.context.Ctx,
-				[]string{""},
-			)
-			conn.ExecContext(ctx, sql) // Remove volume files
+			g.Debug("deleting temporary volume: %s", volumeFolderPath)
+			err := conn.VolumeDelete(volumeFilePaths...)
+			if err != nil {
+				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, err.Error())
+			}
 		}
 	})
 
@@ -1015,7 +1037,8 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 
 	doPutDone := func(file filesys.FileReady) {
 		defer context.Wg.Write.Done()
-		doPut(file)
+		volumeFilePath := doPut(file)
+		volumeFilePaths = append(volumeFilePaths, volumeFilePath) // for deletion
 	}
 
 	// Process files and upload to volume
@@ -1050,7 +1073,7 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 }
 
 // UnloadViaVolume exports data to a Databricks volume, similar to Snowflake's UnloadViaStage
-func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, unloaded int64, err error) {
+func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, unloadedFiles int, err error) {
 	if conn.GetProp("internal_volume") == "" {
 		return "", 0, g.Error("internal_volume is required for volume unload")
 	}
@@ -1060,116 +1083,95 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 	volumeFolderPath := fmt.Sprintf("%s/%s/%s",
 		volumePrefix, tempCloudStorageFolder, g.NowFileStr())
 
-	context := g.NewContext(conn.Context().Ctx)
+	unloadContext := g.NewContext(conn.Context().Ctx)
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		// fileFormat = dbio.FileTypeCsv
+		fileFormat = dbio.FileTypeParquet
+	}
 
 	// Write each table to temp file, then read to df
-	folderPath := path.Join(env.GetTempFolder(), "databricks", "get", g.NowFileStr())
-	if err = os.MkdirAll(folderPath, 0777); err != nil {
-		return "", 0, g.Error(err, "could not create temp directory: %s", folderPath)
+	localFolderPath := path.Join(env.GetTempFolder(), "databricks", "get", g.NowFileStr())
+	if err = os.MkdirAll(localFolderPath, 0777); err != nil {
+		return "", 0, g.Error(err, "could not create temp directory: %s", localFolderPath)
 	}
 
 	// Clean up volume files when done (similar to Snowflake's REMOVE)
+	volumeFilePaths := []string{}
 	defer func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
-			sql := g.R(
-				conn.template.Core["remove_volume_files"],
-				"volume_path", volumeFolderPath,
-			)
-			conn.Exec(sql) // Remove volume files
+			g.Debug("deleting temporary volume: %s", volumeFolderPath)
+			err = conn.VolumeDelete(volumeFilePaths...)
+			if err != nil {
+				g.Warn("could not delete temporary volume files (%s): %s", volumeFolderPath, err.Error())
+			}
 		}
 	}()
 
-	unloadedRows := atomic.Int64{}
 	unload := func(table Table, volumePartPath string) {
-		defer context.Wg.Write.Done()
+		defer unloadContext.Wg.Write.Done()
 
-		// Export table data to a temporary external table first, then copy files to volume
-		tempTableName := fmt.Sprintf("sling_export_%s_%d",
-			strings.ReplaceAll(strings.ReplaceAll(table.Name, ".", "_"), "`", ""),
-			g.Now())
-
-		// Create temporary external table to export to volume
-		sql := fmt.Sprintf(`
-			CREATE TABLE %s 
-			USING CSV
-			OPTIONS (
-				'path' = '%s',
-				'header' = 'true'
-			)
-			AS %s
-		`, tempTableName, volumePartPath, table.Select())
+		sql := g.R(
+			conn.template.Core["export_to_volume_"+fileFormat.String()],
+			"volume_path", volumePartPath,
+			"sql", table.Select(),
+		)
 
 		_, err := conn.Exec(sql)
 		if err != nil {
 			err = g.Error(err, "SQL Error for %s", volumePartPath)
-			context.CaptureErr(err)
+			unloadContext.CaptureErr(err)
 			return
-		}
-
-		// Clean up the temporary table
-		defer func() {
-			dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTableName)
-			_, dropErr := conn.Exec(dropSQL)
-			if dropErr != nil {
-				g.Warn("Could not drop temporary table %s: %v", tempTableName, dropErr)
-			}
-		}()
-
-		// Get row count from the created table
-		countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s", tempTableName)
-		countData, err := conn.Query(countSQL)
-		if err == nil && len(countData.Rows) > 0 && len(countData.Rows[0]) > 0 {
-			count := cast.ToInt64(countData.Rows[0][0])
-			unloadedRows.Add(count)
-		} else {
-			unloadedRows.Add(1) // Fallback
 		}
 	}
 
 	// Export each table to volume
+	volumePathParts := []string{}
 	for i, table := range tables {
 		volumePathPart := fmt.Sprintf("%s/export_%02d", volumeFolderPath, i+1)
-		context.Wg.Write.Add()
+		unloadContext.Wg.Write.Add()
 		go unload(table, volumePathPart)
+		volumePathParts = append(volumePathParts, volumePathPart)
 	}
 
-	context.Wg.Write.Wait()
-	err = context.Err()
+	unloadContext.Wg.Write.Wait()
+	err = unloadContext.Err()
 	if err != nil {
 		err = g.Error(err, "Could not unload to volume files")
 		return
 	}
 
-	g.Debug("Unloaded %d rows to %s", unloadedRows.Load(), volumeFolderPath)
-
-	if unloadedRows.Load() == 0 {
-		return "", 0, nil
-	}
-
-	// Copy volume files to local directory for reading using VolumeGET
-	// List files in volume
-	data, err := conn.VolumeList(volumeFolderPath)
-	if err != nil {
-		err = g.Error(err, "Could not LIST volume path %s", volumeFolderPath)
-		context.CaptureErr(err)
-		return
-	}
-
-	// Copy files from volume to local temp directory using GET command
-	for _, row := range data.Rows {
-		if len(row) > 0 {
-			fileName := cast.ToString(row[0])
-			volumeFilePath := fmt.Sprintf("%s/%s", volumeFolderPath, fileName)
-			localFilePath := path.Join(folderPath, fileName)
-
-			// Use VolumeGET to download from volume to local
-			err = conn.VolumeGET(volumeFilePath, folderPath, localFilePath)
-			if err != nil {
-				g.Warn("Could not GET volume file %s to %s: %v", volumeFilePath, localFilePath, err)
-				continue
-			}
+	// Copy volume filePaths to local directory for reading using VolumeGET
+	// List filePaths in volume
+	for _, volumePathPart := range volumePathParts {
+		data, err := conn.VolumeList(volumePathPart)
+		if err != nil {
+			err = g.Error(err, "Could not LIST volume path %s", volumeFolderPath)
+			unloadContext.CaptureErr(err)
+			return "", 0, err
+		}
+		for _, row := range data.Rows {
+			volumeFilePaths = append(volumeFilePaths, cast.ToString(row[0]))
 		}
 	}
 
-	return folderPath, unloadedRows.Load(), context.Err()
+	// Copy files from volume to local temp directory using GET command
+	for _, volumeFilePath := range volumeFilePaths {
+		if !strings.HasSuffix(volumeFilePath, fileFormat.Ext()) {
+			continue
+		}
+		volumeFilePathParts := strings.Split(volumeFilePath, "/")
+		fileName := volumeFilePathParts[len(volumeFilePathParts)-1]
+		localFilePath := path.Join(localFolderPath, fileName)
+
+		// Use VolumeGET to download from volume to local
+		err = conn.VolumeGET(volumeFilePath, localFolderPath, localFilePath)
+		if err != nil {
+			unloadContext.CaptureErr(g.Error(err, "Could not GET volume file %s to %s", volumeFilePath, localFilePath))
+		} else {
+			unloadedFiles++
+		}
+	}
+
+	return localFolderPath, unloadedFiles, unloadContext.Err()
 }

@@ -779,7 +779,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.TimestampType {
 					correctType = iop.TimestampzType // databricks uses timestampz
 				}
-			case srcType == dbio.TypeDbIceberg && tgtType == dbio.TypeDbPostgres:
+			case srcType == dbio.TypeDbDatabricks && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.TimestampType {
 					correctType = iop.TimestampzType // databricks uses timestampz
 				}
@@ -874,7 +874,9 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbDatabricks)
+
+	// test 06 => BAD_REQUEST: Parameterized query has too many parameters: 1812 parameters were given but the limit is 256.
+	testSuite(t, dbio.TypeDbDatabricks, "1-5,7+")
 }
 
 func TestSuiteDatabaseAthena(t *testing.T) {

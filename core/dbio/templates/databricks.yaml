@@ -35,14 +35,10 @@ core:
       'escape' = '"',
       'delimiter' = ','
     )
-  put_into_volume: |
-    PUT '{local_file}' INTO '{volume_path}' OVERWRITE
-  get_from_volume: |
-    GET '{volume_path}' TO '{local_file}'
-  remove_volume_files: |
-    REMOVE '{volume_path}'
-  list_volume: |
-    LIST '{volume_path}'
+  put_into_volume: PUT '{local_file}' INTO '{volume_path}' OVERWRITE
+  get_from_volume: GET '{volume_path}' TO '{local_file}'
+  remove_volume_files: REMOVE '{volume_path}'
+  list_volume: LIST '{volume_path}'
   copy_from_s3: |
     COPY INTO {table}
     FROM '{s3_path}'
@@ -88,6 +84,17 @@ core:
     COPY_OPTIONS (
       'mergeSchema' = 'false'
     )
+  export_to_volume_csv: |
+    insert overwrite directory '{volume_path}' 
+    using csv
+    options (header = true, escape = '"', delimiter = ',')
+    {sql}
+
+  export_to_volume_parquet: |
+    insert overwrite directory '{volume_path}' 
+    using parquet
+    {sql}
+  
   export_to_s3: |
     CREATE TABLE {temp_table}
     USING {file_format}
