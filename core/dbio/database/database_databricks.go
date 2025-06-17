@@ -131,8 +131,16 @@ func (conn *DatabricksConn) Connect(timeOut ...int) error {
 		conn.Catalog = cast.ToString(data.Rows[0][0])
 	}
 
-	if val := conn.GetProp("schema"); val != "" {
-		_, err = conn.Exec("USE " + val)
+	// get current schema
+	if conn.Schema == "" {
+		data, err = conn.Query("select current_schema()" + env.NoDebugKey)
+		if err != nil {
+			g.Warn("could not get schema: %s", err.Error())
+		} else {
+			conn.Schema = cast.ToString(data.Rows[0][0])
+		}
+	} else {
+		_, err = conn.Exec("USE " + conn.Schema)
 		if err != nil {
 			g.Warn("could not set schema: %v", err)
 		}
@@ -524,6 +532,7 @@ func (conn *DatabricksConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 		err = g.Error(err, "Could not get columns.")
 		return
 	}
+	table.Columns = columns
 
 	filePath := ""
 
@@ -621,8 +630,6 @@ func (conn *DatabricksConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 	})
 
 	return df, nil
-
-	return
 }
 
 // GenerateDDL generates a DDL based on a dataset
@@ -668,48 +675,6 @@ func (conn *DatabricksConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	}
 
 	return strings.TrimSpace(sql) + ";", nil
-}
-
-// GetTables returns tables for given schema
-func (conn *DatabricksConn) GetTables(schema string) (data iop.Dataset, err error) {
-	// fields: [schema_name, table_name]
-	data1, err := conn.BaseConn.GetTables(schema)
-	if err != nil {
-		return data1, err
-	}
-	data = data1.Pick("database", "tableName")
-	data.Columns[0].Name = "SCHEMA_NAME"
-	data.Columns[1].Name = "TABLE_NAME"
-
-	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
-
-	for i := range data.Rows {
-		data.Rows[i] = append(data.Rows[i], false)
-	}
-
-	return data, nil
-}
-
-// GetViews returns views for given schema
-func (conn *DatabricksConn) GetViews(schema string) (data iop.Dataset, err error) {
-
-	// fields: [schema_name, table_name]
-	data1, err := conn.BaseConn.GetViews(schema)
-	if err != nil {
-		return data1, err
-	}
-
-	data = data1.Pick("namespace", "viewName")
-	data.Columns[0].Name = "SCHEMA_NAME"
-	data.Columns[1].Name = "TABLE_NAME"
-
-	data.Columns = append(data.Columns, iop.Column{Name: "IS_VIEW", Type: iop.BoolType, Position: 3})
-
-	for i := range data.Rows {
-		data.Rows[i] = append(data.Rows[i], true)
-	}
-
-	return data, nil
 }
 
 // GetColumnsFull returns full column information for a table
@@ -771,6 +736,9 @@ func (conn *DatabricksConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 		return
 	}
 
+	// For Databricks MERGE VALUES clause, convert placeholder_fields (ph.) to source references (src.)
+	srcValuesFields := strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src.")
+
 	// Databricks supports MERGE INTO
 	sqlTempl := `
 	MERGE INTO {tgt_table} AS tgt
@@ -779,7 +747,7 @@ func (conn *DatabricksConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 	WHEN MATCHED THEN
 		UPDATE SET {set_fields}
 	WHEN NOT MATCHED THEN
-		INSERT ({insert_fields}) VALUES ({src_fields})
+		INSERT ({insert_fields}) VALUES ({src_values_fields})
 	`
 
 	sql = g.R(
@@ -789,7 +757,7 @@ func (conn *DatabricksConn) GenerateUpsertSQL(srcTable string, tgtTable string, 
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
+		"src_values_fields", srcValuesFields,
 	)
 
 	return sql, nil
@@ -801,7 +769,10 @@ func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume str
 
 	if internalVolume == "" {
 		if schema == "" {
-			schema = conn.GetProp("schema")
+			schema = conn.Schema
+		}
+		if schema == "" {
+			return "", g.Error("schema is required to create temporary volume")
 		}
 
 		// Create volume name similar to how Snowflake creates stages
@@ -812,7 +783,7 @@ func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume str
 			conn.template.Core["create_volume"],
 			"volume_name", volumeFullName,
 		)
-		_, err := conn.Exec(sql)
+		_, err := conn.Exec(sql + env.NoDebugKey)
 		if err != nil {
 			return "", g.Error(err, "could not create volume: %s", volumeFullName)
 		}
@@ -1111,11 +1082,22 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 	unload := func(table Table, volumePartPath string) {
 		defer unloadContext.Wg.Write.Done()
 
+		selectOpts := SelectOptions{Fields: table.Columns.Names()}
 		sql := g.R(
 			conn.template.Core["export_to_volume_"+fileFormat.String()],
 			"volume_path", volumePartPath,
-			"sql", table.Select(),
+			"sql", table.Select(selectOpts),
 		)
+
+		// convert variant to string
+		if !table.IsQuery() {
+			for _, col := range table.Columns {
+				if g.In(strings.ToLower(col.DbType), "variant", "complex") {
+					// replace only the first occurrence for straight select
+					sql = strings.Replace(sql, conn.Quote(col.Name), conn.Quote(col.Name)+"::string", 1)
+				}
+			}
+		}
 
 		_, err := conn.Exec(sql)
 		if err != nil {

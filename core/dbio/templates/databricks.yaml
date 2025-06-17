@@ -2,8 +2,13 @@ core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for databricks'"
-  create_table: create table {table} ({col_types}) using delta
-  create_temporary_table: create table {table} ({col_types}) using delta
+  create_table: |
+    create table {table} ({col_types})
+    using delta
+  # create_temporary_table: |
+  #   create table {table} ({col_types})
+  #   using delta
+  #   tblproperties ('delta.feature.variantType-preview' = 'supported')
   create_index: "select 'indexes do not apply for databricks'"
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
@@ -154,18 +159,20 @@ metadata:
     show schemas
 
   tables: |
-    {{if .schema -}} 
-    show tables in {schema}
-    {{else}} 
-    show tables
-    {{end}}
+    select table_schema as schema_name, table_name, 'false' as is_view
+    from information_schema.tables
+    where table_type not in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
 
   views: |
-    {{if .schema -}} 
-    show views in {schema}
-    {{else}} 
-    show views
-    {{end}}
+    select table_schema as schema_name, table_name, 'true' as is_view
+    from information_schema.tables
+    where table_type in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
 
   columns: |
     select
@@ -540,6 +547,7 @@ function:
 
 variable:
   bind_string: "?"
+  batch_values: 256
   tmp_folder: /tmp
   column_upper: false
   max_string_type: string
