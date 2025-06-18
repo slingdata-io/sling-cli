@@ -949,10 +949,11 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 		if exists {
 			// purge table
 			catalog, ok := conn.Catalog.(*rest.Catalog)
-			if !ok {
-				return g.Error("could not cast to rest.Catalog")
+			if ok {
+				err = catalog.PurgeTable(conn.context.Ctx, identifier)
+			} else {
+				err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
 			}
-			err = catalog.PurgeTable(conn.context.Ctx, identifier)
 			if err != nil {
 				return g.Error(err, "cannot drop table")
 			}
