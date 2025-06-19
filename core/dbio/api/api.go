@@ -2,16 +2,22 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 )
 
 type APIConnection struct {
@@ -112,6 +118,62 @@ func (ac *APIConnection) Authenticate() (err error) {
 
 	case AuthTypeOAuth2:
 		// TODO: implement various OAuth2 flows
+
+	case AuthTypeAWSSigV4:
+
+		props := map[string]string{
+			"aws_service":           ac.Spec.Authentication.AwsService,
+			"aws_access_key_id":     ac.Spec.Authentication.AwsAccessKeyID,
+			"aws_secret_access_key": ac.Spec.Authentication.AwsSecretAccessKey,
+			"aws_session_token":     ac.Spec.Authentication.AwsSessionToken,
+			"aws_region":            ac.Spec.Authentication.AwsRegion,
+			"aws_profile":           ac.Spec.Authentication.AwsProfile,
+		}
+
+		// render prop values
+		for key, val := range props {
+			props[key], err = ac.renderString(val)
+			if err != nil {
+				return g.Error(err, "could not render %s", key)
+			}
+		}
+
+		// get aws service and region
+		awsService := cast.ToString(props["aws_service"])
+		awsRegion := cast.ToString(props["aws_region"])
+
+		if awsRegion == "" {
+			return g.Error(err, "did not provide aws_region")
+		}
+		if awsService == "" {
+			return g.Error(err, "did not provide aws_service")
+		}
+
+		// load AWS creds
+		cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
+		if err != nil {
+			return g.Error(err, "could not make AWS config for authentication")
+		}
+
+		ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+			// Calculate the SHA256 hash of the request body.
+			hasher := sha256.New()
+			hasher.Write(bodyBytes)
+			payloadHash := hex.EncodeToString(hasher.Sum(nil))
+
+			// Create a new signer.
+			signer := v4.NewSigner()
+
+			creds, err := cfg.Credentials.Retrieve(ctx)
+			if err != nil {
+				return g.Error(err, "could not retrieve AWS creds signing request")
+			}
+
+			// Sign the request, which adds the 'Authorization' and other necessary headers.
+			return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
+		}
+
+		setAuthenticated()
 
 	default:
 		setAuthenticated()
@@ -229,6 +291,8 @@ type APIStateAuth struct {
 	Authenticated bool              `json:"authenticated,omitempty"`
 	Token         string            `json:"token,omitempty"` // refresh token?
 	Headers       map[string]string `json:"-"`               // to inject
+
+	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
 }
 
 var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
