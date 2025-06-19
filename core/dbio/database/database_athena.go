@@ -4,14 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/dustin/go-humanize"
@@ -56,68 +53,14 @@ func (conn *AthenaConn) Init() error {
 }
 
 func (conn *AthenaConn) getNewClient(timeOut ...int) (client *athena.Client, err error) {
-	// Get AWS credentials from connection properties
-	awsAccessKeyID := conn.GetProp("aws_access_key_id", "access_key_id")
-	awsSecretAccessKey := conn.GetProp("aws_secret_access_key", "secret_access_key")
-	awsSessionToken := conn.GetProp("aws_session_token", "session_token")
-	awsRegion := conn.GetProp("aws_region", "region")
-	awsProfile := conn.GetProp("aws_profile", "profile")
-
-	if awsRegion == "" {
-		return nil, g.Error("AWS region not specified")
-	}
-
-	ctx := context.Background()
-	var cfg aws.Config
-
-	// Configure options based on authentication method
-	var configOptions []func(*awsconfig.LoadOptions) error
-
-	// Add region to config options
-	configOptions = append(configOptions, awsconfig.WithRegion(awsRegion))
-
-	// Set timeout if provided
+	props := conn.properties
 	if len(timeOut) > 0 && timeOut[0] > 0 {
-		httpClient := &http.Client{
-			Timeout: time.Duration(timeOut[0]) * time.Second,
-		}
-		configOptions = append(configOptions, awsconfig.WithHTTPClient(httpClient))
+		props["timeout"] = cast.ToString(timeOut[0])
 	}
 
-	// Set credentials if provided
-	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
-		credProvider := credentials.NewStaticCredentialsProvider(
-			awsAccessKeyID,
-			awsSecretAccessKey,
-			awsSessionToken,
-		)
-		configOptions = append(configOptions, awsconfig.WithCredentialsProvider(credProvider))
-
-		// Load config with static credentials
-		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
-		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS config with static credentials")
-		}
-	} else if awsProfile != "" {
-		g.Debug("Athena: Using AWS profile=%s region=%s", awsProfile, awsRegion)
-
-		// Use specified profile from AWS credentials file
-		configOptions = append(configOptions, awsconfig.WithSharedConfigProfile(awsProfile))
-
-		// Load config with profile
-		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
-		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS config with profile %s", awsProfile)
-		}
-	} else {
-		g.Debug("Athena: Using default AWS credential chain")
-		// Use default credential chain (env vars, IAM role, credential file, etc.)
-
-		// Load config with default credential chain
-		cfg, err = awsconfig.LoadDefaultConfig(ctx, configOptions...)
-		if err != nil {
-			return nil, g.Error(err, "Failed to create AWS config with default credentials")
-		}
+	cfg, err := iop.MakeAwsConfig(conn.context.Ctx, props)
+	if err != nil {
+		return nil, g.Error(err, "failed to create AWS config for athena")
 	}
 
 	// Create and return a new Athena client
