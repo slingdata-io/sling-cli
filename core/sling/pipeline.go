@@ -8,6 +8,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/env"
+	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
 
@@ -126,7 +127,14 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 }
 
 func (pl *Pipeline) Execute() (err error) {
-	for _, step := range pl.Steps {
+
+	idStepMap := map[string]int{}
+	for i, step := range pl.Steps {
+		idStepMap[step.ID()] = i
+	}
+
+	for i := 0; i < len(pl.Steps); i++ {
+		step := pl.Steps[i]
 
 		if !g.In(step.Type(), "log") {
 			pl.CurrentStep = step.PayloadMap()
@@ -156,6 +164,13 @@ func (pl *Pipeline) Execute() (err error) {
 		if err != nil {
 			pl.CurrentStep["error"] = err.Error()
 			return g.Error(err, "error executing step")
+		}
+
+		// check for goto
+		if gotoID := pl.CurrentStep["goto"]; gotoID != nil {
+			if gotoIndex, ok := idStepMap[cast.ToString(gotoID)]; ok {
+				i = gotoIndex - 1 // -1 because i++ will increment it
+			}
 		}
 	}
 
