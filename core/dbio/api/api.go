@@ -35,7 +35,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		State: &APIState{
 			Env:    g.KVArrToMap(os.Environ()...),
 			State:  g.M(),
-			Queues: make(map[string]*Queue),
+			Queues: make(map[string]*iop.Queue),
 		},
 		Spec: spec,
 		eval: goval.NewEvaluator(),
@@ -280,11 +280,11 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 }
 
 type APIState struct {
-	Env     map[string]string `json:"env,omitempty"`
-	State   map[string]any    `json:"state,omitempty"`
-	Secrets map[string]any    `json:"secrets,omitempty"`
-	Queues  map[string]*Queue `json:"queues,omitempty"` // appends to file
-	Auth    APIStateAuth      `json:"auth,omitempty"`
+	Env     map[string]string     `json:"env,omitempty"`
+	State   map[string]any        `json:"state,omitempty"`
+	Secrets map[string]any        `json:"secrets,omitempty"`
+	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
+	Auth    APIStateAuth          `json:"auth,omitempty"`
 }
 
 type APIStateAuth struct {
@@ -419,7 +419,7 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 		}
 
 		if callsFunc || err != nil {
-			value, err = ac.eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			value, err = ac.eval.Evaluate(expr, stateMap, iop.GlobalFunctionMap)
 			if err != nil {
 				return "", g.Error(err, "could not render expression")
 			}
@@ -588,7 +588,7 @@ var (
 
 // RegisterQueue creates a new queue with the given name
 // If a queue with the same name already exists, it is returned
-func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
+func (ac *APIConnection) RegisterQueue(name string) (*iop.Queue, error) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 
@@ -598,7 +598,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 	}
 
 	// Create new queue
-	q, err := NewQueue(name)
+	q, err := iop.NewQueue(name)
 	if err != nil {
 		return nil, err
 	}
@@ -609,7 +609,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 }
 
 // GetQueue retrieves a queue by name
-func (ac *APIConnection) GetQueue(name string) (*Queue, bool) {
+func (ac *APIConnection) GetQueue(name string) (*iop.Queue, bool) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 

@@ -1,4 +1,4 @@
-package api
+package iop
 
 import (
 	"fmt"
@@ -26,15 +26,14 @@ import (
 	"github.com/itchyny/timefmt-go"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
 type functions struct {
-	sp *iop.StreamProcessor
+	sp *StreamProcessor
 }
 
-var Functions = functions{sp: iop.NewStreamProcessor()}
+var Functions = functions{sp: NewStreamProcessor()}
 
 var GlobalFunctionMap = Functions.Generate()
 
@@ -82,8 +81,8 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	fMap["chunk"] = fns.chunk
 
 	// comparison operations
-	fMap["is_greater"] = fns.isGreater
-	fMap["is_less"] = fns.isLess
+	fMap["is_greater"] = fns.IsGreater
+	fMap["is_less"] = fns.IsLess
 	fMap["equals"] = fns.equals
 	fMap["is_null"] = fns.isNull
 	fMap["is_empty"] = fns.isEmpty
@@ -613,7 +612,7 @@ func (fns functions) greatest(args ...any) (any, error) {
 			// Compare with remaining elements
 			for i := 1; i < length; i++ {
 				val := v.Index(i).Interface()
-				greater, err := fns.isGreater(val, max)
+				greater, err := fns.IsGreater(val, max)
 				if err != nil {
 					return nil, err
 				}
@@ -628,7 +627,7 @@ func (fns functions) greatest(args ...any) (any, error) {
 	// If not a slice, compare all arguments directly
 	max := args[0]
 	for _, val := range args[1:] {
-		greater, err := fns.isGreater(val, max)
+		greater, err := fns.IsGreater(val, max)
 		if err != nil {
 			return nil, err
 		}
@@ -662,7 +661,7 @@ func (fns functions) least(args ...any) (any, error) {
 			// Compare with remaining elements
 			for i := 1; i < length; i++ {
 				val := v.Index(i).Interface()
-				less, err := fns.isLess(val, min)
+				less, err := fns.IsLess(val, min)
 				if err != nil {
 					return nil, err
 				}
@@ -677,7 +676,7 @@ func (fns functions) least(args ...any) (any, error) {
 	// If not a slice, compare all arguments directly
 	min := args[0]
 	for _, val := range args[1:] {
-		less, err := fns.isLess(val, min)
+		less, err := fns.IsLess(val, min)
 		if err != nil {
 			return nil, err
 		}
@@ -690,7 +689,7 @@ func (fns functions) least(args ...any) (any, error) {
 
 // Helper function to compare if val1 > val2
 // Works for numeric, string, and time.Time types
-func (fns functions) isGreater(args ...any) (any, error) {
+func (fns functions) IsGreater(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, g.Error("isGreater requires exactly 2 arguments")
 	}
@@ -733,7 +732,7 @@ func (fns functions) isGreater(args ...any) (any, error) {
 
 // Helper function to compare if val1 < val2
 // Works for numeric, string, and time.Time types
-func (fns functions) isLess(args ...any) (any, error) {
+func (fns functions) IsLess(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, g.Error("isLess requires exactly 2 arguments")
 	}
@@ -2313,7 +2312,7 @@ func (fns functions) dateDiff(args ...any) (any, error) {
 	}
 }
 
-type chunkResult struct {
+type ChunkResult struct {
 	Chan chan []any
 }
 
