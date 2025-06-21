@@ -74,16 +74,12 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
 
-	// set isDone when the function exists (meaning hooks are done as well)
-	isDone := false
-	defer func() { isDone = true }()
-
 	if StoreSet != nil {
 		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker5s.Stop()
 			for range ticker5s.C {
-				if t.Status != ExecStatusRunning && isDone {
+				if t.Status != ExecStatusRunning {
 					return // is done
 				}
 				select {
@@ -95,6 +91,10 @@ func (t *TaskExecution) Execute() error {
 			}
 		}()
 	}
+
+	// using newStatus to not signal that the run is done
+	// especially when we have post-hooks. Set t.Status at the end.
+	var newStatus ExecStatus
 
 	go func() {
 		defer close(done)
@@ -127,7 +127,7 @@ func (t *TaskExecution) Execute() error {
 			return
 		} else if t.skipStream {
 			t.SetProgress("skipping stream")
-			t.Status = ExecStatusSkipped
+			newStatus = ExecStatusSkipped
 			return
 		}
 
@@ -156,7 +156,7 @@ func (t *TaskExecution) Execute() error {
 			for _, col := range df.Columns {
 				if c := col.Constraint; c != nil && c.FailCnt > 0 {
 					g.Warn("column '%s' had %d constraint failures (%s) ", col.Name, c.FailCnt, c.Expression)
-					t.Status = ExecStatusWarning // set as warning status
+					newStatus = ExecStatusWarning // set as warning status
 				}
 			}
 		}
@@ -178,11 +178,11 @@ func (t *TaskExecution) Execute() error {
 	}
 
 	if t.Err == nil {
-		if t.Status == ExecStatusWarning {
+		if newStatus == ExecStatusWarning {
 			t.SetProgress("execution succeeded (with warnings)")
 		} else {
 			t.SetProgress("execution succeeded")
-			t.Status = ExecStatusSuccess
+			newStatus = ExecStatusSuccess
 		}
 	} else {
 
@@ -190,10 +190,10 @@ func (t *TaskExecution) Execute() error {
 		deadline, ok := t.Context.Map.Get("timeout-deadline")
 		if ok && cast.ToInt64(deadline) <= (time.Now().Unix()+1) {
 			t.SetProgress("execution failed (timed-out)")
-			t.Status = ExecStatusTimedOut
+			newStatus = ExecStatusTimedOut
 		} else {
 			t.SetProgress("execution failed")
-			t.Status = ExecStatusError
+			newStatus = ExecStatusError
 		}
 		if t.df != nil {
 			if err := t.df.Context.Err(); err != nil && err.Error() != t.Err.Error() {
@@ -212,6 +212,10 @@ func (t *TaskExecution) Execute() error {
 	now2 := time.Now()
 	t.EndTime = &now2
 
+	// since t.Status is still "running", let's use the context.Map for real status
+	t.Context.Map.Set("new_status", newStatus)
+	defer t.Context.Map.Remove("new_status") // clean up
+
 	// update into store
 	StateSet(t)
 
@@ -219,9 +223,11 @@ func (t *TaskExecution) Execute() error {
 	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
 		if t.Err == nil {
 			t.Err = hookErr
-			t.Status = ExecStatusError
+			newStatus = ExecStatusError
 		}
 	}
+
+	t.Status = newStatus
 
 	return t.Err
 }

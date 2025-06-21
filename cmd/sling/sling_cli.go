@@ -28,6 +28,7 @@ import (
 
 //go:embed resource/*
 var slingResources embed.FS
+
 var (
 	examples    = ``
 	ctx         = g.NewContext(context.Background())

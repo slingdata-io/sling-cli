@@ -277,6 +277,11 @@ func StateSet(t *TaskExecution) {
 			state.Execution.Error = g.Ptr(err.Error())
 		}
 
+		// look for new_status override
+		if val, ok := t.Context.Map.Get("new_status"); ok {
+			run.Status = val.(ExecStatus)
+		}
+
 		// set as active run
 		state.Run = run
 	}
