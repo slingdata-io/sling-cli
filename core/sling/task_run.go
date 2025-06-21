@@ -74,12 +74,16 @@ func (t *TaskExecution) Execute() error {
 	g.Trace("using Config:\n%s", g.Pretty(t.Config))
 	env.SetTelVal("stage", "2 - task-execution")
 
+	// set isDone when the function exists (meaning hooks are done as well)
+	isDone := false
+	defer func() { isDone = true }()
+
 	if StoreSet != nil {
 		ticker5s := time.NewTicker(5 * time.Second)
 		go func() {
 			defer ticker5s.Stop()
 			for range ticker5s.C {
-				if t.Status != ExecStatusRunning {
+				if t.Status != ExecStatusRunning && isDone {
 					return // is done
 				}
 				select {
@@ -215,6 +219,7 @@ func (t *TaskExecution) Execute() error {
 	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {
 		if t.Err == nil {
 			t.Err = hookErr
+			t.Status = ExecStatusError
 		}
 	}
 
