@@ -68,6 +68,14 @@ authentication:
   username: "${secrets.username}"
   password: "${secrets.password}"
 
+  # OAuth2 Client Credentials Flow (most common for API integrations)
+  type: "oauth2"
+  flow: "client_credentials"
+  client_id: "${secrets.oauth_client_id}"
+  client_secret: "${secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  scopes: ["read:data", "write:data"]
+
 
 # Default settings applied to all endpoints
 defaults:
@@ -257,7 +265,67 @@ authentication:
   # Bearer Token
   type: "bearer"
   token: "${secrets.api_token}" # Can use secrets, env, or state vars
+
+  # OAuth2 - Client Credentials Flow (recommended for server-to-server)
+  type: "oauth2"
+  flow: "client_credentials"
+  client_id: "${secrets.oauth_client_id}"
+  client_secret: "${secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  scopes:
+    - "read:data"
+    - "write:data"
+
+  # OAuth2 - Authorization Code Flow (interactive mode for CLI)
+  type: "oauth2"
+  flow: "authorization_code"
+  client_id: "${secrets.oauth_client_id}"
+  client_secret: "${secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  # redirect_uri: "" # Leave empty for automatic localhost server
+  scopes:
+    - "read:data"
+
+  # OAuth2 - Authorization Code Flow (manual mode for web apps)
+  type: "oauth2"
+  flow: "authorization_code"
+  client_id: "${secrets.oauth_client_id}"
+  client_secret: "${secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  redirect_uri: "https://myapp.example.com/callback"
+  token: "${secrets.authorization_code}" # Pre-obtained authorization code
+
+  # OAuth2 - Resource Owner Password Credentials (deprecated, avoid if possible)
+  type: "oauth2"
+  flow: "password"
+  client_id: "${secrets.oauth_client_id}"
+  client_secret: "${secrets.oauth_client_secret}"
+  username: "${secrets.username}"
+  password: "${secrets.password}"
+  authentication_url: "https://api.example.com/oauth/token"
+  scopes:
+    - "read:user"
+
+  # OAuth2 - Refresh Token Flow
+  type: "oauth2"
+  flow: "refresh_token"
+  client_id: "${secrets.oauth_client_id}" # Optional for some providers
+  client_secret: "${secrets.oauth_client_secret}" # Optional for some providers
+  refresh_token: "${secrets.refresh_token}"
+  authentication_url: "https://api.example.com/oauth/token"
 ```
+
+### OAuth2 Flow Details
+
+**Client Credentials Flow**: Best for server-to-server authentication where the application authenticates itself.
+
+**Authorization Code Flow**: 
+- **Interactive Mode**: When `redirect_uri` is empty or points to localhost, Sling automatically starts a local server and opens your browser for authorization.
+- **Manual Mode**: When you have a specific redirect URI, provide the authorization code in the `token` field.
+
+**Password Flow**: For trusted applications with user credentials (deprecated by OAuth2 spec).
+
+**Refresh Token Flow**: For refreshing expired access tokens using a previously obtained refresh token.
 
 ## Variable Scopes and Expressions
 
@@ -268,7 +336,7 @@ Available variable scopes:
 - `secrets`: Sensitive credentials passed to Sling (e.g., `${secrets.api_key}`).
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
 - `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `${coalesce(sync.var, state.var, default_value)}`.
-- `auth`: Authentication data after successful authentication (e.g., `${auth.token}` for OAuth2).
+- `auth`: Authentication data after successful authentication (e.g., `${auth.token}` for OAuth2 access tokens, refresh tokens stored here).
 - `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts`.
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
 - `record`: The current data record being processed by a processor (available only within `response.processors`).
@@ -539,6 +607,14 @@ description: "API Description"
 authentication:
   type: "bearer" # bearer|basic|oauth2|""
   token: "${secrets.api_token}" # Or username/password, or OAuth2 config
+  
+  # OAuth2 Client Credentials example (most common for APIs):
+  # type: "oauth2"
+  # flow: "client_credentials"
+  # client_id: "${secrets.oauth_client_id}"
+  # client_secret: "${secrets.oauth_client_secret}"
+  # authentication_url: "https://api.example.com/oauth/token"
+  # scopes: ["read:data"]
 
 defaults:
   request:
