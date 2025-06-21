@@ -164,8 +164,8 @@ func (conn *DuckLakeConn) buildAttachSQL() string {
 	if conn.CatalogSchema != "" {
 		metaParts = append(metaParts, g.F("META_SCHEMA '%s'", conn.CatalogSchema))
 	}
-  if conn.Encrypted {
-			metaParts = append(metaParts, "ENCRYPTED")
+	if conn.Encrypted {
+		metaParts = append(metaParts, "ENCRYPTED")
 	}
 	if len(metaParts) > 0 {
 		attachSQL += fmt.Sprintf(" (%s)", strings.Join(metaParts, ", "))
