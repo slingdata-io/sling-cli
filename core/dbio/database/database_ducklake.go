@@ -26,6 +26,7 @@ type DuckLakeConn struct {
 	CatalogConnStr string // connection string for catalog database
 	DataPath       string // path to data files (local or cloud storage)
 	Database       string // the database name to attached
+	Encrypted      bool   // whether data is written using Parquet encryption
 }
 
 // Init initiates the object
@@ -36,6 +37,7 @@ func (conn *DuckLakeConn) Init() error {
 	conn.CatalogConnStr = conn.GetProp("catalog_conn_string")
 	conn.DataPath = conn.GetProp("data_path")
 	conn.Database = "ducklake" // for hard-coded  '__ducklake_metadata_ducklake'
+	conn.Encrypted = cast.ToBool(conn.GetProp("encrypted"))
 
 	// Set default catalog type if not specified
 	if conn.CatalogType == "" {
@@ -197,7 +199,11 @@ func (conn *DuckLakeConn) buildAttachSQL() string {
 
 	// Add data path if specified
 	if conn.DataPath != "" {
-		attachSQL += fmt.Sprintf(" (DATA_PATH '%s')", conn.DataPath)
+		if conn.Encrypted {
+			attachSQL += fmt.Sprintf(" (DATA_PATH '%s', ENCRYPTED)", conn.DataPath)
+		} else {
+			attachSQL += fmt.Sprintf(" (DATA_PATH '%s')", conn.DataPath)
+		}
 	}
 
 	return attachSQL
