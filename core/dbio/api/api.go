@@ -2,16 +2,22 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
+
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 )
 
 type APIConnection struct {
@@ -29,7 +35,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		State: &APIState{
 			Env:    g.KVArrToMap(os.Environ()...),
 			State:  g.M(),
-			Queues: make(map[string]*Queue),
+			Queues: make(map[string]*iop.Queue),
 		},
 		Spec: spec,
 		eval: goval.NewEvaluator(),
@@ -112,6 +118,62 @@ func (ac *APIConnection) Authenticate() (err error) {
 
 	case AuthTypeOAuth2:
 		// TODO: implement various OAuth2 flows
+
+	case AuthTypeAWSSigV4:
+
+		props := map[string]string{
+			"aws_service":           ac.Spec.Authentication.AwsService,
+			"aws_access_key_id":     ac.Spec.Authentication.AwsAccessKeyID,
+			"aws_secret_access_key": ac.Spec.Authentication.AwsSecretAccessKey,
+			"aws_session_token":     ac.Spec.Authentication.AwsSessionToken,
+			"aws_region":            ac.Spec.Authentication.AwsRegion,
+			"aws_profile":           ac.Spec.Authentication.AwsProfile,
+		}
+
+		// render prop values
+		for key, val := range props {
+			props[key], err = ac.renderString(val)
+			if err != nil {
+				return g.Error(err, "could not render %s", key)
+			}
+		}
+
+		// get aws service and region
+		awsService := cast.ToString(props["aws_service"])
+		awsRegion := cast.ToString(props["aws_region"])
+
+		if awsRegion == "" {
+			return g.Error(err, "did not provide aws_region")
+		}
+		if awsService == "" {
+			return g.Error(err, "did not provide aws_service")
+		}
+
+		// load AWS creds
+		cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
+		if err != nil {
+			return g.Error(err, "could not make AWS config for authentication")
+		}
+
+		ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+			// Calculate the SHA256 hash of the request body.
+			hasher := sha256.New()
+			hasher.Write(bodyBytes)
+			payloadHash := hex.EncodeToString(hasher.Sum(nil))
+
+			// Create a new signer.
+			signer := v4.NewSigner()
+
+			creds, err := cfg.Credentials.Retrieve(ctx)
+			if err != nil {
+				return g.Error(err, "could not retrieve AWS creds signing request")
+			}
+
+			// Sign the request, which adds the 'Authorization' and other necessary headers.
+			return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
+		}
+
+		setAuthenticated()
 
 	default:
 		setAuthenticated()
@@ -218,17 +280,19 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 }
 
 type APIState struct {
-	Env     map[string]string `json:"env,omitempty"`
-	State   map[string]any    `json:"state,omitempty"`
-	Secrets map[string]any    `json:"secrets,omitempty"`
-	Queues  map[string]*Queue `json:"queues,omitempty"` // appends to file
-	Auth    APIStateAuth      `json:"auth,omitempty"`
+	Env     map[string]string     `json:"env,omitempty"`
+	State   map[string]any        `json:"state,omitempty"`
+	Secrets map[string]any        `json:"secrets,omitempty"`
+	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
+	Auth    APIStateAuth          `json:"auth,omitempty"`
 }
 
 type APIStateAuth struct {
 	Authenticated bool              `json:"authenticated,omitempty"`
 	Token         string            `json:"token,omitempty"` // refresh token?
 	Headers       map[string]string `json:"-"`               // to inject
+
+	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
 }
 
 var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
@@ -355,7 +419,7 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 		}
 
 		if callsFunc || err != nil {
-			value, err = ac.eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			value, err = ac.eval.Evaluate(expr, stateMap, iop.GlobalFunctionMap)
 			if err != nil {
 				return "", g.Error(err, "could not render expression")
 			}
@@ -524,7 +588,7 @@ var (
 
 // RegisterQueue creates a new queue with the given name
 // If a queue with the same name already exists, it is returned
-func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
+func (ac *APIConnection) RegisterQueue(name string) (*iop.Queue, error) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 
@@ -534,7 +598,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 	}
 
 	// Create new queue
-	q, err := NewQueue(name)
+	q, err := iop.NewQueue(name)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +609,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 }
 
 // GetQueue retrieves a queue by name
-func (ac *APIConnection) GetQueue(name string) (*Queue, bool) {
+func (ac *APIConnection) GetQueue(name string) (*iop.Queue, bool) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 

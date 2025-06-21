@@ -1,0 +1,558 @@
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_index: "select 'indexes do not apply for databricks'"
+  create_table: |
+    create table {table} ({col_types})
+    using delta
+  # create_temporary_table: |
+  #   create table {table} ({col_types})
+  #   using delta
+  #   tblproperties ('delta.feature.variantType-preview' = 'supported')
+  create_index: "select 'indexes do not apply for databricks'"
+  insert: insert into {table} ({fields}) values ({values})
+  update: update {table} set {set_fields} where {pk_fields_equal}
+  alter_columns: alter table {table} alter {col_ddl}
+  modify_column: '{column} type {type}'
+  enable_trigger: ""
+  disable_trigger: ""
+  optimize_table: optimize {table}
+  create_volume: create volume if not exists {volume_name}
+  copy_from_volume_parquet: |
+    COPY INTO {table}
+    FROM '{volume_path}'
+    FILEFORMAT = PARQUET
+    FORMAT_OPTIONS (
+      'datetimeRebaseMode' = 'CORRECTED',
+      'int96RebaseMode' = 'CORRECTED'
+    )
+  copy_from_volume_csv: |
+    COPY INTO {table} ({tgt_columns})
+    FROM '{volume_path}'
+    FILEFORMAT = CSV
+    FORMAT_OPTIONS (
+      'skipRows' = '1',
+      'nullValue' = '\\N',
+      'enforceSchema' = 'false',
+      'inferSchema' = 'false',
+      'mergeSchema' = 'false',
+      'multiLine' = 'true',
+      'escape' = '"',
+      'delimiter' = ','
+    )
+  put_into_volume: PUT '{local_file}' INTO '{volume_path}' OVERWRITE
+  get_from_volume: GET '{volume_path}' TO '{local_file}'
+  remove_volume_files: REMOVE '{volume_path}'
+  list_volume: LIST '{volume_path}'
+  copy_from_s3: |
+    COPY INTO {table}
+    FROM '{s3_path}'
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'inferSchema' = 'true',
+    )
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
+    )
+  copy_from_s3_with_creds: |
+    COPY INTO {table}
+    FROM '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}'
+      )
+    )
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'header' = 'true',
+      'inferSchema' = 'true'
+    )
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
+    )
+  copy_from_s3_with_creds_and_token: |
+    COPY INTO {table}
+    FROM '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}',
+        AWS_SESSION_TOKEN = '{aws_session_token}'
+      )
+    )
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'header' = 'true',
+      'inferSchema' = 'true'
+    )
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
+    )
+  export_to_volume_csv: |
+    insert overwrite directory '{volume_path}' 
+    using csv
+    options (header = true, escape = '"', delimiter = ',')
+    {sql}
+
+  export_to_volume_parquet: |
+    insert overwrite directory '{volume_path}' 
+    using parquet
+    {sql}
+  
+  export_to_s3: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    OPTIONS (
+      'path' = '{s3_path}',
+      'compression' = 'snappy',
+      'header' = 'true'
+    )
+    AS {sql}
+  export_to_s3_with_creds: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    LOCATION '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}'
+      )
+    )
+    OPTIONS (
+      'compression' = 'snappy',
+      'header' = 'true'
+    )
+    AS {sql}
+  export_to_s3_with_creds_and_token: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    LOCATION '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}',
+        AWS_SESSION_TOKEN = '{aws_session_token}'
+      )
+    )
+    OPTIONS (
+      'compression' = 'snappy',
+      'header' = 'true'
+    )
+    AS {sql}
+
+metadata:
+
+  current_database:
+    select current_database()
+
+  current_catalog:
+    select current_catalog()
+
+  catalogs: |
+    show catalogs
+
+  databases: |
+    show databases
+
+  schemas: |
+    show schemas
+
+  tables: |
+    select table_schema as schema_name, table_name, 'false' as is_view
+    from information_schema.tables
+    where table_type not in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
+
+  views: |
+    select table_schema as schema_name, table_name, 'true' as is_view
+    from information_schema.tables
+    where table_type in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
+
+  columns: |
+    select
+      column_name,
+      data_type,
+      character_maximum_length as maximum_length,
+      numeric_precision as precision, 
+      numeric_scale as scale
+    from information_schema.columns
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+    order by ordinal_position
+
+  primary_keys: |
+    select constraint_name as pk_name,
+           ordinal_position as position,
+           column_name
+    from information_schema.constraint_column_usage
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+      and constraint_type = 'PRIMARY KEY'
+    order by ordinal_position
+
+  columns_full: describe table extended {schema}.{table}
+
+  schemata: |
+    with tables as (
+      select
+        table_catalog,
+        table_schema,
+        table_name,
+        case table_type
+          when 'VIEW' then true
+          else false
+        end as is_view
+      from information_schema.tables
+      where 1=1
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .tables -}} and table_name in ({tables}) {{- end}}
+    )
+    select
+      cols.table_schema as schema_name,
+      cols.table_name as table_name,
+      tables.is_view as is_view,
+      cols.column_name as column_name,
+      cols.data_type as data_type,
+      cols.ordinal_position as position
+    from information_schema.columns cols
+    join tables
+      on tables.table_catalog = cols.table_catalog
+      and tables.table_schema = cols.table_schema
+      and tables.table_name = cols.table_name
+    order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
+
+  ddl_table: show create table {schema}.{table}
+
+  ddl_view: |
+    show create table {schema}.{table}
+
+analysis:
+  # table level
+  table_count: |
+    -- table_count {table}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      count(*) cnt
+    from {schema}.{table}
+
+  table_join_match: |
+    -- table_join_match "{t1}" vs "{t2}"
+    with T1 as (
+      select
+        {t1_field},
+        count(*) cnt
+      from {t1}
+      where {t1_filter}
+      group by {t1_field}
+    )
+    , T2 as (
+      select
+        {t2_field},
+        count(*) cnt
+      from {t2}
+      where {t2_filter}
+      group by {t2_field}
+    )
+    select
+      '{t1}' as table_1,
+      '{t2}' as table_2,
+      count(t1.{t1_field}) t1_cnt,
+      count(t2.{t2_field}) t2_cnt,
+      round(100.0 * count(t2.{t2_field}) / count(t1.{t1_field}), 1) match_rate,
+      sum(t1.cnt) t1_sum_cnt,
+      sum(t2.cnt) t2_sum_cnt,
+      round(100.0 * sum(t2.cnt) / sum(t1.cnt), 1) sum_match_rate,
+      sum(case when t1.{t1_field} is null then 0 else t1.cnt end) - count(t1.{t1_field}) t1_dup_cnt,
+      sum(case when t2.{t2_field} is null then 0 else t2.cnt end) - count(t2.{t2_field}) t2_dup_cnt,
+      sum(case when t1.{t1_field} is null then t1.cnt else 0 end) t1_null_cnt,
+      sum(case when t2.{t2_field} is null then t2.cnt else 0 end) t2_null_cnt
+    from t1
+    left join t2 on {conds}
+
+    union all
+
+    select
+      '{t2}' as table_1,
+      '{t1}' as table_2,
+      count(t2.{t2_field}) t1_cnt,
+      count(t1.{t1_field}) t2_cnt,
+      round(100.0 * count(t1.{t1_field}) / count(t2.{t2_field}), 1) match_rate,
+      sum(t1.cnt) t1_sum_cnt,
+      sum(t2.cnt) t2_sum_cnt,
+      round(100.0 * sum(t2.cnt) / sum(t1.cnt), 1) sum_match_rate,
+      sum(case when t2.{t2_field} is null then 0 else t1.cnt end) - count(t2.{t2_field}) t1_dup_cnt,
+      sum(case when t1.{t1_field} is null then 0 else t2.cnt end) - count(t1.{t1_field}) t2_dup_cnt,
+      sum(case when t2.{t2_field} is null then t1.cnt else 0 end) t1_null_cnt,
+      sum(case when t1.{t1_field} is null then t2.cnt else 0 end) t2_null_cnt
+    from t2
+    left join t1 on {conds}
+
+  field_chars: |
+    -- field_chars {field}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      sum(case when {field} rlike '\n' then 1 else 0 end) as cnt_nline,
+      sum(case when {field} rlike '\t' then 1 else 0 end) as cnt_tab,
+      sum(case when {field} rlike ',' then 1 else 0 end) as cnt_comma,
+      sum(case when {field} rlike '"' then 1 else 0 end) as cnt_dquote
+    from {schema}.{table}
+
+  field_pk_test: |
+    -- field_pk_test {table}
+    select
+      '{schema}.{table}' as table_nm,
+      case when count(*) = count(distinct {field}) then 'PASS' else 'FAIL' end as result,
+      count(*) as tot_cnt,
+      count(distinct {field}) as dstct_cnt
+    from {schema}.{table}
+
+  field_stat: |
+    -- field_stat {field}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*), 1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt
+    from {schema}.{table}
+
+  field_stat_group: |
+    -- field_stat_group {field} grouped by `{group_expr}`
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      {group_expr} as group_exp,
+      '{field}' as field,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*), 1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt
+    from {schema}.{table}
+    group by {group_expr}
+
+  field_stat_deep: |
+    -- field_stat_deep {field}
+    select
+      '{schema}' as schema_nm,
+      '{table}' as table_nm,
+      '{field}' as field,
+      '{type}' as type,
+      count(*) as tot_cnt,
+      count({field}) as f_cnt,
+      count(*) - count({field}) as f_null_cnt,
+      round(100.0 * (count(*) - count({field})) / count(*), 1) as f_null_prct,
+      count(distinct {field}) as f_dstct_cnt,
+      round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
+      count(*) - count(distinct {field}) as f_dup_cnt,
+      cast(min({field}) as string) as f_min,
+      cast(max({field}) as string) as f_max,
+      min(length(cast({field} as string))) as f_min_len,
+      max(length(cast({field} as string))) as f_max_len
+    from {schema}.{table}
+
+  fill_cnt_group_field: |
+    -- fill_cnt_group_field {field}
+    select
+      {field},
+      {columns_sql}
+    from {schema}.{table}
+    group by {field}
+    order by {field}
+
+  fill_rate_group_field: |
+    -- fill_rate_group_field {field}
+    select
+      {field},
+      {fill_rate_fields_sql}
+    from {schema}.{table}
+    group by {field}
+    order by {field}
+
+  distro_field: |
+    -- distro_field {field}
+    with t1 as (
+      select
+        '{field}' as field,
+        {field},
+        count(*) cnt
+      from {schema}.{table}
+      group by {field}
+      order by count(*) desc
+    )
+    , t2 as (
+      select
+        '{field}' as field,
+        count(*) ttl_cnt
+      from {schema}.{table}
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2
+      on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_group: |
+    -- distro_field_group {field}
+    with t1 as (
+      select
+        '{field}' as field,
+        {group_expr} as group_exp,
+        {field},        
+        count(*) cnt
+      from {schema}.{table}
+      group by {field}, {group_expr}
+      order by count(*) desc
+    )
+    , t2 as (
+      select
+        '{field}' as field,
+        count(*) ttl_cnt
+      from {schema}.{table}
+    )
+    select
+      '{table}' as table_nm,
+      t1.field,
+      t1.group_exp,
+      {field} as value,
+      cnt,
+      round(100.0 * cnt / ttl_cnt, 2) as prct
+    from t1
+    join t2
+      on t1.field = t2.field
+    order by cnt desc
+
+  distro_field_date: |
+    -- distro_field_date {field}
+    with t1 as (
+        select
+          '{field}' as field,
+          date_trunc('day', {field}) as date,
+          count(*) cnt
+        from {schema}.{table}
+        group by 2
+        order by 2
+      )
+      , t2 as (
+        select '{field}' as field, count(*) ttl_cnt
+        from {schema}.{table}
+      )
+      select 
+        '{schema}' as schema_nm,
+        '{table}' as table_nm,
+        t1.field,
+        t1.date,
+        cnt,
+        round(100.0 * cnt / ttl_cnt, 2) as prct
+      from t1
+      join t2
+        on t1.field = t2.field
+      order by t1.date
+
+  distro_field_date_wide: |
+    -- distro_field_date {table}
+    select
+      date_trunc('day', {date_field}) as {date_field}_day,
+      {columns_sql}
+    from {schema}.{table}
+    {where_clause}
+    group by 1
+    order by 1
+
+  test_pk: |
+    select
+      '{schema}.{table}' as table_nm,
+      '{fields_exp}' as expression,
+      case when count(*) = count(distinct {fields_exp}) then 'PASS' else 'FAIL' end as pk_result,
+      count(*) as tot_cnt,
+      count(distinct {fields_exp}) as expression_cnt,
+      count(*) - count(distinct {fields_exp}) as delta_cnt,
+      sum(case when {fields_exp} is null then 1 else 0 end) as null_cnt
+    from {schema}.{table}
+    {where_clause}
+
+routine:
+  number_min_max: |
+    select
+      count(*) as tot_cnt,
+      count({field}) as field_cnt,
+      min({field}) as min_val,
+      max({field}) as max_val
+    from {table}
+
+  number_trunc_min_max: |
+    select
+      {fields}
+    from {table}
+    where {where}
+      (({partition_col_trunc} >= '{min_val}'
+      and {partition_col_trunc} <= '{max_val}')
+      {or_null})
+
+  date_trunc_uniques: |
+    select
+      {partition_col_trunc} as day_field,
+      count(*) cnt
+    from {table}
+    {where}
+    group by {partition_col_trunc}
+    order by {partition_col_trunc}
+
+  number_trunc_uniques: |
+    select
+      {partition_col_trunc} as trunc_field,
+      count(*) cnt
+    from {table}
+    {where}
+    group by {partition_col_trunc}
+    order by {partition_col_trunc}
+
+function:
+  replace: replace({string_expr}, {to_replace}, {replacement})
+  str_utf8: "{field}"
+  string_type: string
+  cast_to_string: 'cast({field} as string)'
+  cast_to_text: 'cast({field} as string)'
+  fill_cnt_field: count({field}) as cnt_{field}
+  fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
+  sleep: 'SELECT 1' # Databricks doesn't have a built-in sleep function
+  checksum_date: unix_timestamp(cast({field} as timestamp)) * 1000000
+  checksum_datetime: unix_timestamp({field}) * 1000000
+  checksum_string: length({field})
+  checksum_boolean: length(cast({field} as string))
+  checksum_json: length(replace(cast({field} as string), ' ', ''))
+  checksum_integer: 'abs({field})'
+  checksum_decimal: 'abs(cast({field} as bigint))'
+
+variable:
+  bind_string: "?"
+  batch_values: 256
+  tmp_folder: /tmp
+  column_upper: false
+  max_string_type: string
+  max_string_length: 32700000
+  quote_char: "`"
+
+error_filter:
+  table_not_exist: exist

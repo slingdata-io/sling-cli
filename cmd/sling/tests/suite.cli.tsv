@@ -72,4 +72,6 @@ n	test_name	rows	bytes	streams	fails	output_contains	command
 71	Run sling pipeline 02					sftp//tmp/test1k_mysql_pg.csv|aws_s3/sling_test/files/test1k_s3.csv	sling run -p cmd/sling/tests/pipelines/p.02.yaml
 72	Run sling to test column casing			1		test1k_clickhouse_pg_first_name	sling run -d -r cmd/sling/tests/replications/r.21.yaml
 73	Run sling mysql bit			1		execution succeeded	sling run -d -r cmd/sling/tests/replications/r.22.yaml
-74	Run sling iceberg insert			2		committed iceberg snapshot	sling run -d -r cmd/sling/tests/replications/r.23.yaml
+74	Run sling iceberg_r2 insert			2		committed iceberg snapshot,count_result =>	TARGET=iceberg_r2 sling run -d -r cmd/sling/tests/replications/r.23.yaml
+75	Run sling iceberg_s3 insert			2		committed iceberg snapshot,count_result =>	TARGET=iceberg_s3 sling run -d -r cmd/sling/tests/replications/r.23.yaml
+76	Run sling iceberg_lakekeeper insert			2		committed iceberg snapshot,count_result =>	TARGET=iceberg_lakekeeper sling run -d -r cmd/sling/tests/replications/r.23.yaml

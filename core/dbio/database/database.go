@@ -24,6 +24,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -294,6 +295,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
+	} else if strings.HasPrefix(URL, "databricks") {
+		conn = &DatabricksConn{URL: URL}
 	} else if strings.HasPrefix(URL, "d1") {
 		conn = &D1Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlite:") {
@@ -353,6 +356,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:
 		driverName = "snowflake"
+	case dbio.TypeDbDatabricks:
+		driverName = "databricks"
 	case dbio.TypeDbSQLite:
 		driverName = "sqlite3"
 	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
@@ -642,12 +647,14 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		connPool.Mux.Lock()
 		db, poolOk := connPool.Dbs[connURL]
 		connPool.Mux.Unlock()
-		g.Trace("connURL -> %s", connURL)
+
+		driver := getDriverName(conn)
+		g.Trace("driver=%s conn_url=%s", driver, connURL)
 
 		if !usePool || !poolOk {
-			db, err = sqlx.Open(getDriverName(conn), connURL)
+			db, err = sqlx.Open(driver, connURL)
 			if err != nil {
-				return g.Error(err, "Could not connect to DB: "+getDriverName(conn))
+				return g.Error(err, "Could not connect to DB: %s", driver)
 			}
 		} else {
 			conn.SetProp("POOL_USED", cast.ToString(poolOk))
@@ -1516,7 +1523,8 @@ func (conn *BaseConn) TableExists(table Table) (exists bool, err error) {
 		"single", conn.Template().Metadata, "columns",
 		g.M("schema", table.Schema, "table", table.Name),
 	)
-	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+
+	if err != nil && !strings.Contains(err.Error(), "does not exist") && !strings.Contains(err.Error(), "cannot be found") {
 		return false, g.Error(err, "could not check table existence: "+table.FullName())
 	}
 

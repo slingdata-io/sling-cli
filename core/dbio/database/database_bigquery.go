@@ -1052,6 +1052,20 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 		return
 	}
 
+	// st, _ := ParseTableName(srcTable, conn.Type)
+	// tt, _ := ParseTableName(tgtTable, conn.Type)
+
+	// // fully qualify src. and tgt. in DELETE where expressions
+	// // see https://github.com/slingdata-io/sling-cli/issues/575
+	// upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(
+	// 	upsertMap["src_tgt_pk_equal"],
+	// 	"src.", conn.Quote(st.Name)+".",
+	// )
+	// upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(
+	// 	upsertMap["src_tgt_pk_equal"],
+	// 	"tgt.", conn.Quote(tt.Name)+".",
+	// )
+
 	sqlTempl := `
 	delete from {tgt_table} tgt
 	where exists (

@@ -100,15 +100,23 @@ type Authentication struct {
 	RedirectURI       string             `yaml:"redirect_uri" json:"redirect_uri"`
 	RefreshToken      string             `yaml:"refresh_token" json:"refresh_token"`
 	RefreshOnExpire   bool               `yaml:"refresh_on_expire" json:"refresh_on_expire"`
+
+	AwsService         string `yaml:"aws_service" json:"aws_service"`
+	AwsAccessKeyID     string `yaml:"aws_access_key_id" json:"aws_access_key_id"`
+	AwsSecretAccessKey string `yaml:"aws_secret_access_key" json:"aws_secret_access_key"`
+	AwsSessionToken    string `yaml:"aws_session_token" json:"aws_session_token"`
+	AwsRegion          string `yaml:"aws_region" json:"aws_region"`
+	AwsProfile         string `yaml:"aws_profile" json:"aws_profile"`
 }
 
 type AuthType string
 
 const (
-	AuthTypeNone   AuthType = ""
-	AuthTypeBearer AuthType = "bearer"
-	AuthTypeBasic  AuthType = "basic"
-	AuthTypeOAuth2 AuthType = "oauth2"
+	AuthTypeNone     AuthType = ""
+	AuthTypeBearer   AuthType = "bearer"
+	AuthTypeBasic    AuthType = "basic"
+	AuthTypeOAuth2   AuthType = "oauth2"
+	AuthTypeAWSSigV4 AuthType = "aws-sigv4"
 )
 
 type AuthenticationFlow string
@@ -292,7 +300,6 @@ type Request struct {
 }
 
 // Pagination configures how to navigate through multiple pages of API results
-
 type Pagination struct {
 	NextState     map[string]any `yaml:"next_state" json:"next_state,omitempty"`
 	StopCondition string         `yaml:"stop_condition" json:"stop_condition,omitempty"`

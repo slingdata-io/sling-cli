@@ -321,7 +321,10 @@ func LogSQL(props map[string]string, query string, args ...any) {
 	query = strings.TrimSuffix(query, ";")
 
 	// wrap args
-	contextArgs := g.M("conn", props["sling_conn_id"])
+	contextArgs := g.M()
+	if connID := props["sling_conn_id"]; connID != "" {
+		contextArgs["conn"] = connID
+	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
 	}

@@ -474,7 +474,10 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 		t.Config.Source.Options.Flatten = t.Config.Source.Flatten()
 	}
 
-	g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
+	err := g.Unmarshal(g.Marshal(t.Config.Source.Options), &options)
+	if err != nil {
+		g.Warn("could not unmarshal source options: %w", err)
+	}
 
 	if columns := t.Config.ColumnsPrepared(); len(columns) > 0 {
 		// set as string so that StreamProcessor parses it
