@@ -29,7 +29,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: false
         
       - name: Load Secrets
@@ -78,7 +78,7 @@ jobs:
       - name: Set up GoLang
         uses: actions/setup-go@v3
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: false
         
       - name: Load Secrets
