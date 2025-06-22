@@ -777,10 +777,15 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 	useBufferedStream := cast.ToBool(fs.GetProp("USE_BUFFERED_STREAM"))
 	concurrency := cast.ToInt(fs.GetProp("CONCURRENCY"))
-	fileFormat := dbio.FileType(strings.ToLower(cast.ToString(fs.GetProp("FORMAT"))))
 	fileExt := cast.ToString(fs.GetProp("FILE_EXTENSION"))
 
 	// use provided config or get from dataflow
+	if val := fs.GetProp("FORMAT"); val != "" && sc.Format == dbio.FileTypeNone {
+		sc.Format = dbio.FileType(strings.ToLower(val))
+		if sc.Format == dbio.FileTypeNone {
+			sc.Format = InferFileFormat(url)
+		}
+	}
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))
 	}
@@ -802,10 +807,6 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		concurrency = runtime.NumCPU()
 	}
 
-	if fileFormat == dbio.FileTypeNone {
-		fileFormat = InferFileFormat(url)
-	}
-
 	url = strings.TrimSuffix(NormalizeURI(fs, url), "/")
 
 	singleFile := sc.FileMaxRows == 0 && sc.FileMaxBytes == 0
@@ -824,7 +825,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	}
 
 	// adjust fileBytesLimit due to compression
-	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) && fileFormat != dbio.FileTypeParquet {
+	if g.In(iop.CompressorType(sc.Compression), iop.GzipCompressorType, iop.ZStandardCompressorType, iop.SnappyCompressorType) && sc.Format != dbio.FileTypeParquet {
 		sc.FileMaxBytes = sc.FileMaxBytes * 6 // compressed, multiply, parquet would be compressed already
 	}
 
@@ -857,7 +858,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 
 		processReader := func(batchR *iop.BatchReader) error {
 			fileCount++
-			fileSuffix := lo.Ternary(fileExt == "", fileFormat.Ext(), fileExt)
+			fileSuffix := lo.Ternary(fileExt == "", sc.Format.Ext(), fileExt)
 			subPartURL := fmt.Sprintf("%s.%04d%s", partURL, fileCount, fileSuffix)
 			if singleFile {
 				subPartURL = partURL
@@ -876,7 +877,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			}
 
 			compressor := iop.NewCompressor(sc.Compression)
-			if fileFormat == dbio.FileTypeParquet {
+			if sc.Format == dbio.FileTypeParquet {
 				compressor = iop.NewCompressor("none") // compression is done internally
 			} else {
 				subPartURL = subPartURL + compressor.Suffix()
@@ -890,7 +891,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			return df.Err()
 		}
 
-		switch fileFormat {
+		switch sc.Format {
 		case dbio.FileTypeJson:
 			for reader := range ds.NewJsonReaderChnl(sc) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
@@ -945,7 +946,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 				}
 			}
 		default:
-			g.Warn("WriteDataflowReady | File Format not recognized: %s", fileFormat)
+			g.Warn("WriteDataflowReady | File Format not recognized: %s", sc.Format)
 		}
 
 		ds.Buffer = nil // clear buffer
@@ -999,7 +1000,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			partURL = url
 		}
 
-		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, useBufferedStream, fileFormat, singleFile)
+		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, useBufferedStream, sc.Format, singleFile)
 
 		df.Context.Wg.Read.Add()
 		ds.SetConfig(fs.Props()) // pass options

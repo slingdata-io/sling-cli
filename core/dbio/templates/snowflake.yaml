@@ -11,7 +11,7 @@ core:
   modify_column: '{column} set data type {type}'
   enable_trigger: ""
   disable_trigger: ""
-  copy_from_stage: |
+  copy_from_stage_csv: |
     COPY INTO {table} ({tgt_columns})
     from ( 
       select {src_columns}
@@ -28,6 +28,16 @@ core:
       REPLACE_INVALID_CHARACTERS = TRUE
     )
     ON_ERROR = ABORT_STATEMENT
+  copy_from_stage_parquet: |
+    COPY INTO {table}
+    from {stage_path}
+    FILE_FORMAT = (
+      TYPE = PARQUET
+      COMPRESSION = AUTO
+      REPLACE_INVALID_CHARACTERS = TRUE
+    )
+    ON_ERROR = ABORT_STATEMENT
+    MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
   copy_from_s3: |
     COPY INTO {table} 
     from '{s3_path}'
@@ -63,7 +73,7 @@ core:
       REPLACE_INVALID_CHARACTERS = TRUE
     )
     ON_ERROR = ABORT_STATEMENT
-  copy_to_stage: |
+  copy_to_stage_csv: |
     COPY INTO '{stage_path}'
     from ({sql})
     FILE_FORMAT = (
@@ -75,6 +85,12 @@ core:
       FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
     )
     HEADER = TRUE
+  copy_to_stage_parquet: |
+    COPY INTO '{stage_path}'
+    from ({sql})
+    FILE_FORMAT = (
+      TYPE = PARQUET
+    )
   copy_to_s3: |
     COPY INTO '{s3_path}'
     from ({sql})
