@@ -11,6 +11,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/maja42/goval"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -120,6 +121,13 @@ const (
 )
 
 type AuthenticationFlow string
+
+const (
+	AuthFlowClientCredentials AuthenticationFlow = "client_credentials"
+	AuthFlowAuthorizationCode AuthenticationFlow = "authorization_code"
+	AuthFlowPassword          AuthenticationFlow = "password"
+	AuthFlowRefreshToken      AuthenticationFlow = "refresh_token"
+)
 
 // Endpoints is a collection of API endpoints
 type EndpointMap map[string]Endpoint
@@ -307,9 +315,10 @@ type Pagination struct {
 
 // Response defines how to process the API response and extract records
 type Response struct {
-	Records    Records     `yaml:"records" json:"records"`
-	Processors []Processor `yaml:"processors" json:"processors,omitempty"`
-	Rules      []Rule      `yaml:"rules" json:"rules,omitempty"`
+	Format     dbio.FileType `yaml:"format" json:"format,omitempty"` // force response format
+	Records    Records       `yaml:"records" json:"records"`
+	Processors []Processor   `yaml:"processors" json:"processors,omitempty"`
+	Rules      []Rule        `yaml:"rules" json:"rules,omitempty"`
 }
 
 // Records configures how to extract and process data records from a response
@@ -454,4 +463,8 @@ type ResponseState struct {
 type AggregateState struct {
 	value any
 	array []any
+}
+
+func escapeErrVal(val string) string {
+	return strings.ReplaceAll(val, `%`, `%`+`%`)
 }

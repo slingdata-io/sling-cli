@@ -704,6 +704,8 @@ endpoints:
 
 You can use the following functions within `${...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
 
+**IMPORTANT:** Always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). This is required by the [goval](https://github.com/maja42/goval) expression library that Sling uses.
+
 See [functions.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions.go) for the source code and authoritative list.
 See [functions_test.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions_test.go) for usage examples.
 

@@ -274,3 +274,157 @@ func TestAPIConnectionRender(t *testing.T) {
 		})
 	}
 }
+
+func TestOAuth2Authentication(t *testing.T) {
+	tests := []struct {
+		name        string
+		auth        Authentication
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "client_credentials_missing_client_id",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "client_credentials",
+				ClientSecret:      "secret123",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "client_id is required",
+		},
+		{
+			name: "client_credentials_missing_client_secret",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "client_credentials",
+				ClientID:          "client123",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "client_secret is required",
+		},
+		{
+			name: "client_credentials_missing_auth_url",
+			auth: Authentication{
+				Type:         AuthTypeOAuth2,
+				Flow:         "client_credentials",
+				ClientID:     "client123",
+				ClientSecret: "secret123",
+			},
+			expectError: true,
+			errorMsg:    "authentication_url is required",
+		},
+		{
+			name: "refresh_token_missing_token",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "refresh_token",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "refresh_token is required",
+		},
+		{
+			name: "password_missing_username",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "password",
+				Password:          "pass123",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "username is required",
+		},
+		{
+			name: "password_missing_password",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "password",
+				Username:          "user123",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "password is required",
+		},
+		{
+			name: "authorization_code_missing_code",
+			auth: Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              "authorization_code",
+				ClientID:          "client123",
+				ClientSecret:      "secret123",
+				RedirectURI:       "https://app.example.com/callback",
+				AuthenticationURL: "https://api.example.com/oauth/token",
+			},
+			expectError: true,
+			errorMsg:    "authorization code is required",
+		},
+		{
+			name: "unsupported_flow",
+			auth: Authentication{
+				Type: AuthTypeOAuth2,
+				Flow: "unsupported_flow",
+			},
+			expectError: true,
+			errorMsg:    "unsupported OAuth2 flow",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ac := &APIConnection{
+				Context: g.NewContext(context.Background()),
+				State: &APIState{
+					Env:     make(map[string]string),
+					State:   make(map[string]any),
+					Secrets: make(map[string]any),
+					Auth:    APIStateAuth{},
+				},
+				Spec: Spec{Authentication: tt.auth},
+				eval: goval.NewEvaluator(),
+			}
+
+			_, err := ac.performOAuth2Flow(tt.auth)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOAuth2FlowValidation(t *testing.T) {
+	ac := &APIConnection{
+		Context: g.NewContext(context.Background()),
+		State: &APIState{
+			Env:     make(map[string]string),
+			State:   make(map[string]any),
+			Secrets: make(map[string]any),
+			Auth:    APIStateAuth{},
+		},
+		eval: goval.NewEvaluator(),
+	}
+
+	// Test template rendering in OAuth2 fields
+	ac.State.Secrets["CLIENT_ID"] = "secret_client_123"
+	ac.State.Secrets["CLIENT_SECRET"] = "secret_value_456"
+
+	auth := Authentication{
+		Type:              AuthTypeOAuth2,
+		Flow:              "client_credentials",
+		ClientID:          "${secrets.CLIENT_ID}",
+		ClientSecret:      "${secrets.CLIENT_SECRET}",
+		AuthenticationURL: "https://api.example.com/oauth/token",
+	}
+
+	// This should not error during validation (only during actual HTTP request)
+	_, err := ac.performOAuth2Flow(auth)
+
+	// We expect this to fail at HTTP request stage, not validation
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+}

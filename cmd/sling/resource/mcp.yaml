@@ -12,7 +12,7 @@ tools:
     Discover available streams/tables/files in a connection.
     
     **Parameters**:
-    - `name` (string, required): The name of the connection to discover.
+    - `connection` (string, required): The name of the connection to discover.
     - `pattern` (string, required): Filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet).
     - `recursive` (boolean, required): List all files recursively.
     - `columns` (boolean, required): Show column level metadata.
@@ -32,6 +32,8 @@ tools:
     Obtains schemata (databases, schemas, tables, columns) from a database connection.
     
     **Parameters**:
+    - `connection` (string, required): The name of the connection to get schemata from.
+    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'.
     - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas.
     - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels.
     
@@ -41,7 +43,7 @@ tools:
     Retrieves a list of schema names from a database connection.
     
     **Parameters**:
-    - `name` (string, required): The name of the connection to get schemata from.
+    - `connection` (string, required): The name of the connection to get schemata from.
     
     **Output**: A JSON string representing an `iop.Dataset` where each row contains a schema name from the specified database connection.
 
@@ -53,6 +55,8 @@ tools:
     *   Always use the LIMIT clause to minimize the number of rows returned.
     
     **Parameters**:
+    - `connection` (string, required): The name of the database connection to execute the query on.
+    - `query` (string, required): The SQL query to execute.
     - `limit` (number, optional): The limit of rows to return (defaults to 100).
     - `transient` (boolean, optional): Whether to use a transient connection (default: false).
     
@@ -60,23 +64,35 @@ tools:
     
     **Output (for Assistant)**: A JSON string containing the `query` executed, `connection` name, an array of `columns` names, an array of `rows` (each row being an array of values), and the `row_count`.
 
+  conns_database_get_columns: |
+    Get column metadata for a specific table in a database connection.
+    
+    **Parameters**:
+    - `connection` (string, required): The name of the database connection.
+    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table').
+    
+    **Output (for User)**: A CSV string listing columns with: `name`, `type`, `position`. The assistant should display this as a pretty table if possible.
+    
+    **Output (for Assistant)**: A JSON string with `type: "columns"`, `connection` name, `table_name`, `full_table_name`, `column_count`, and an array of `columns` with detailed metadata.
+
   conns_test: |
-    Test a database or file system connection to verify it works correctly.
+    Test a database, API or file system connection to verify it works correctly.
     
     **Parameters**:
     - `debug` (boolean, optional): Enable debug logging during the test (default: false).
     - `trace` (boolean, optional): Enable trace logging during the test (default: false).
+    - `endpoints` (array, optional): Specify the endpoints to test (only for API connections)
     
     **Output (for User)**: A simple text message: "Connection test for '[connection_name]': SUCCESS" or "Connection test for '[connection_name]': FAILED - [error_message]".
     
     **Output (for Assistant)**: A JSON string with `type: "connection_test"`, `connection` name, `success` (boolean), `error` (string, null if success), and captured `logs` from the test.
 
   conns_set: |
-    Create or update a connection by setting its properties.
+    Create or update a connection by setting its properties. For API Specs, if secrets are required, put in a nested object under the `secrets` key.
     
     **Parameters**:
     - `name` (string, required): The name of the connection to set (will be converted to uppercase).
-    - `properties` (object, required): Object containing the connection properties as key-value pairs (e.g. `{"type": "postgres", "host": "localhost", "user": "myuser"}`).
+    - `properties` (object, required): Object containing the connection properties as key-value pairs (e.g. `{"type": "postgres", "host": "localhost", "user": "myuser"}` or for APIs `{"type": "api", "spec": "file:///path/to/spec.yaml", "secrets": {"token", "mytoken"}}`).
     
     **Output (for User)**: A text message: "Connection '[NAME]' has been set in [env_file_path]. Please test with `sling conns test [NAME]`".
     
@@ -86,7 +102,7 @@ tools:
     List files and directories in a file system connection path.
     
     **Parameters**:
-    - `name` (string, required): The name of the file system connection to list from.
+    - `connection` (string, required): The name of the file system connection to list from.
     - `path` (string, required): The path to list files from.
     - `recursive` (boolean, optional): Whether to list files recursively (default: false).
     - `only` (string, optional): Filter results to only 'files' or 'folders'.
@@ -117,7 +133,7 @@ tools:
     Validate and save an API specification YAML content to the specs folder in sling home directory.
     
     **Parameters**:
-    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension).
+    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension).  Can also be the full file path.
     - `spec_content` (string, required): The YAML content of the API specification to validate and save.
     
     **Output (for User)**: A text message: "API specification '[name]' validated and saved to [file_path]".
@@ -142,6 +158,36 @@ tools:
     **Output (for User)**: If parsing is successful, a CSV string listing endpoints with columns: `endpoint_name`, `endpoint_description`, `endpoint_method`. If parsing fails, a text message: "Error parsing API spec: [error_message]".
     
     **Output (for Assistant)**: A JSON string with `type: "api_spec_get"`, `name` of the spec, `file_path`, and raw `content` (string). If parsing was successful, includes additional parsed metadata.
+
+  api_spec_load: |
+    Load the YAML content of an API specification by name or file path.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path.
+    
+    **Output (for User)**: The raw YAML content of the API specification.
+    
+    **Output (for Assistant)**: A JSON string with `type: "api_spec_load"`, `name` parameter, `file_path` of the loaded file, and the raw `content` (string) of the YAML specification.
+
+  api_spec_edit: |
+    Edit an API specification file by performing a search and replace operation.
+    
+    **Parameters**:
+    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path.
+    - `old_string` (string, required): The exact text to find and replace.
+    - `new_string` (string, required): The replacement text.
+    - `expected_replacements` (number, optional): Expected number of replacements (default: 1).
+    
+    **Output (for User)**: A text message: "API specification '[name]' edited successfully - made [count] replacements".
+    
+    **Output (for Assistant)**: A JSON string with `type: "api_spec_edit"`, `name` parameter, `file_path` of the edited file, `old_string`, `new_string`, `expected_replacements`, `actual_replacements`, and `success: true`.
+
+  api_spec_docs: |
+    Fetch the Sling API specification documentation from the official repository.
+    
+    **Parameters**: None.
+    
+    **Output**: The raw markdown content of the API specification documentation from https://raw.githubusercontent.com/slingdata-io/sling-cli/refs/heads/main/api/llms.md. Both user and assistant audiences receive the same raw content.
 
   replication_save: |
     Save a replication configuration to a specified file path.
@@ -207,3 +253,164 @@ resources:
     **Name**: API_SPEC
     **MIME Type**: `text/markdown`
     **Description**: README to understand Sling API Specs.
+
+prompts:
+  api_spec_create_spec:
+    description: "Create a complete Sling API specification from scratch by analyzing API documentation and building endpoints with authentication, pagination, and data extraction configuration"
+    inputs:
+      spec_name: "Name for the API specification (will be used as filename)"
+      spec_file_path: "Optional full file path for the spec file" # optional
+      connection_name: "Name for the API connection to create and test"
+      api_docs_url: "URL to the API documentation website"
+      endpoint_names: "Comma-separated list of endpoint names to include in the spec"
+      additional_info: "Additional instructions or requirements for the API spec" # optional
+    message: |
+      You are an expert at creating Sling API specifications. Your task is to create a complete, working API spec by following this workflow:
+
+      ## Workflow Steps:
+      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
+      2. **Analyze API Documentation**: Navigate to the provided API docs URL using the browser to understand:
+         - Authentication methods and requirements
+         - Endpoint structures and parameters
+         - Response formats and data structures
+         - Pagination patterns
+         - Rate limiting constraints
+      3. **Create Specification**: Use `api_spec_save` to save the complete YAML spec in the specs directory
+      4. **Create Connection**: Use `conns_set` to create a connection using the spec. When using the `conns_set` tools, the `properties` parameters must contain `type` (which is always "api") and `spec` (which is the local path of the spec file with prefix `file://`) keys. 
+      
+      If the API connection requires authentication credentials (such as token or client ID/Secret), they should be put under the `secrets` key as a nested object.
+      
+      Furthermore, if the API connection requires authentication credentials, STOP and ask the user to open their env.yaml file (in folder ~/.sling/env.yaml), and to manually set the sensitive values. Assistant should have already ran `conns_set` with placeholder values (under the `secrets` key). When the user is done setting the creds, to mention so that the assistant can continue with testing. If Authentication fails, and the assistant believes there may be a error with the sensitive values, to STOP and mention so the user can correct the inputs.
+
+      5. **Test and Iterate**: Use `conn_test` with debug enabled to test the connection
+         - If test fails, analyze errors and modify the spec
+         - Repeat testing until all endpoints return data without errors
+         - Success means no errors and records are returned
+         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
+
+      ## Key Requirements:
+      - Follow the Sling API specification format exactly
+      - Include proper authentication configuration
+      - Configure pagination where needed
+      - Set up response record extraction with JMESPath
+      - Handle rate limiting appropriately
+      - Include proper error handling rules
+      - Add primary keys for deduplication when applicable
+      - Use appropriate state management for incremental loading
+      - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`).
+
+      ## Inputs Provided:
+      - **API Spec Name**: {spec_name}
+      - **Connection Name**: {connection_name}
+      - **API Documentation URL**: {api_docs_url}
+      - **Endpoints to Include**: {endpoint_names}
+      - **Additional Requirements**: {additional_info}
+
+      Start by getting the documentation, then thoroughly analyze the target API before creating the specification.
+    
+  api_spec_add_endpoint:
+    description: "Add a new endpoint to an existing Sling API specification by analyzing endpoint documentation and implementing proper configuration"
+    inputs:
+      spec_name: "Name of the existing API specification"
+      spec_file_path: "Full file path to the existing spec file (must exist)" # optional
+      endpoint_name: "Name of the new endpoint to add"
+      endpoint_docs_url: "URL to the specific endpoint documentation" # optional
+      additional_info: "Additional instructions for the endpoint implementation" # optional
+    message: |
+      You are an expert at extending Sling API specifications. Your task is to add a new endpoint to an existing API spec by following this workflow:
+
+      ## Workflow Steps:
+      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
+      2. **Load Existing Spec**: Use `api_spec_load` to load the current specification content
+      3. **Read Raw Spec**: Examine the existing spec structure and patterns
+      4. **Analyze Endpoint Documentation**: Navigate to the endpoint docs URL (if provided) or the main API docs to understand:
+         - Endpoint URL structure and parameters
+         - HTTP method and headers required
+         - Request/response format
+         - Pagination requirements
+         - Authentication needs
+         - Rate limiting considerations
+         - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). 
+      5. **Implement Endpoint**: Add the new endpoint configuration following existing patterns
+      6. **Test Endpoint**: Use `conn_test` with debug enabled, specifying the endpoint name
+         - If test fails, analyze errors and modify the endpoint configuration
+         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
+         - Repeat testing until the endpoint returns data without errors
+         - Success means no errors and records are returned
+
+      ## Key Requirements:
+      - Maintain consistency with the existing spec structure
+      - Follow the same authentication and state patterns
+      - Configure appropriate pagination if needed
+      - Set up proper response record extraction
+      - Include error handling rules
+      - Add primary keys if applicable
+      - Use consistent naming conventions
+
+      ## Inputs Provided:
+      - **Spec Name**: {spec_name}
+      - **Spec File Path**: {spec_file_path}
+      - **New Endpoint Name**: {endpoint_name}
+      - **Endpoint Documentation URL**: {endpoint_docs_url}
+      - **Additional Requirements**: {additional_info}
+
+      Start by getting the documentation and loading the existing spec before implementing the new endpoint.
+    
+  api_spec_debug_endpoint:
+    description: "Debug and fix issues with an existing endpoint in a Sling API specification by analyzing errors and adjusting configuration"
+    inputs:
+      spec_name: "Name of the API specification containing the endpoint"
+      spec_file_path: "Full file path to the spec file (must exist)" # optional
+      endpoint_name: "Name of the endpoint to debug and fix"
+      additional_info: "Additional context about the issues or specific areas to focus on" # optional
+    message: |
+      You are an expert at debugging Sling API specifications. Your task is to identify and fix issues with an existing endpoint by following this workflow:
+
+      ## Workflow Steps:
+      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
+      2. **Load Current Spec**: Use `api_spec_load` to examine the current specification
+      3. **Read Raw Spec**: Analyze the endpoint configuration in detail
+      4. **Analyze API Documentation**: Navigate to the API docs to verify:
+         - Correct endpoint URL and parameters
+         - Required headers and authentication
+         - Expected request/response format
+         - Pagination implementation
+         - Rate limiting compliance
+      5. **Test and Diagnose**: Use `conn_test` with debug enabled, specifying the endpoint name
+         - Examine error messages and response details
+         - Identify configuration mismatches
+         - Check authentication issues
+         - Verify data extraction paths
+      6. **Fix and Iterate**: Modify the endpoint specification based on findings
+         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
+          - Update URLs, parameters, or headers
+         - Fix JMESPath expressions for data extraction
+         - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`).
+         - Adjust pagination logic
+         - Correct authentication setup
+         - Repeat testing until successful
+
+      ## Common Issues to Check:
+      - **Authentication**: Token format, header names, authentication type
+      - **URL Construction**: Base URLs, parameter encoding, path variables
+      - **Headers**: Required headers, content types, user agents
+      - **Data Extraction**: JMESPath expressions, response structure changes
+      - **Pagination**: Next page logic, stop conditions, parameter names
+      - **Rate Limiting**: Request rates, backoff strategies
+      - **State Management**: Variable rendering, dependency chains
+
+      ## Success Criteria:
+      - Endpoint test passes without errors
+      - Records are successfully extracted and returned
+      - Pagination works correctly (if applicable)
+      - No authentication failures
+      - Proper error handling
+
+      ## Inputs Provided:
+      - **Spec Name**: {spec_name}
+      - **Spec File Path**: {spec_file_path}
+      - **Endpoint Name**: {endpoint_name}
+      - **Issue Context**: {additional_info}
+
+      Start by getting the documentation and loading the current spec to understand the existing configuration before testing and debugging.
+    

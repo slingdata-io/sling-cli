@@ -2,22 +2,16 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
-
-	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 )
 
 type APIConnection struct {
@@ -71,116 +65,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	}
 
 	return ac, nil
-}
-
-// Authenticate performs the auth workflow if needed. Like a Connect step.
-// Header based auths (such as Basic, or Bearer) don't need this step
-// save payload in APIState.Auth
-func (ac *APIConnection) Authenticate() (err error) {
-	auth := ac.Spec.Authentication
-
-	// set auth data
-	setAuthenticated := func() {
-		ac.State.Auth.Authenticated = true
-		for key, endpoint := range ac.Spec.EndpointMap {
-			for k, v := range ac.State.Auth.Headers {
-				endpoint.Request.Headers[k] = v
-			}
-			ac.Spec.EndpointMap[key] = endpoint
-		}
-	}
-
-	switch auth.Type {
-	case AuthTypeNone:
-		ac.State.Auth.Authenticated = true
-		return nil
-
-	case AuthTypeBearer:
-		token, err := ac.renderString(auth.Token)
-		if err != nil {
-			return g.Error(err, "could not render token")
-		} else if token == "" {
-			return g.Error(err, "no token was provided for bearer authentication")
-		}
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
-		setAuthenticated()
-		return nil
-
-	case AuthTypeBasic:
-		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
-		if err != nil {
-			return g.Error(err, "could not render user-password")
-		}
-		credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
-		setAuthenticated()
-		return nil
-
-	case AuthTypeOAuth2:
-		// TODO: implement various OAuth2 flows
-
-	case AuthTypeAWSSigV4:
-
-		props := map[string]string{
-			"aws_service":           ac.Spec.Authentication.AwsService,
-			"aws_access_key_id":     ac.Spec.Authentication.AwsAccessKeyID,
-			"aws_secret_access_key": ac.Spec.Authentication.AwsSecretAccessKey,
-			"aws_session_token":     ac.Spec.Authentication.AwsSessionToken,
-			"aws_region":            ac.Spec.Authentication.AwsRegion,
-			"aws_profile":           ac.Spec.Authentication.AwsProfile,
-		}
-
-		// render prop values
-		for key, val := range props {
-			props[key], err = ac.renderString(val)
-			if err != nil {
-				return g.Error(err, "could not render %s", key)
-			}
-		}
-
-		// get aws service and region
-		awsService := cast.ToString(props["aws_service"])
-		awsRegion := cast.ToString(props["aws_region"])
-
-		if awsRegion == "" {
-			return g.Error(err, "did not provide aws_region")
-		}
-		if awsService == "" {
-			return g.Error(err, "did not provide aws_service")
-		}
-
-		// load AWS creds
-		cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
-		if err != nil {
-			return g.Error(err, "could not make AWS config for authentication")
-		}
-
-		ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
-			// Calculate the SHA256 hash of the request body.
-			hasher := sha256.New()
-			hasher.Write(bodyBytes)
-			payloadHash := hex.EncodeToString(hasher.Sum(nil))
-
-			// Create a new signer.
-			signer := v4.NewSigner()
-
-			creds, err := cfg.Credentials.Retrieve(ctx)
-			if err != nil {
-				return g.Error(err, "could not retrieve AWS creds signing request")
-			}
-
-			// Sign the request, which adds the 'Authorization' and other necessary headers.
-			return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
-		}
-
-		setAuthenticated()
-
-	default:
-		setAuthenticated()
-		return nil
-	}
-
-	return
 }
 
 // Close performs cleanup of all resources
