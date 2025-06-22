@@ -275,6 +275,7 @@ prompts:
          - Response formats and data structures
          - Pagination patterns
          - Rate limiting constraints
+         - Determine what capabilities are available for incremental updates (Typically for a date/ID anchor/watermark, or range) in the filters
       3. **Create Specification**: Use `api_spec_save` to save the complete YAML spec in the specs directory
       4. **Create Connection**: Use `conns_set` to create a connection using the spec. When using the `conns_set` tools, the `properties` parameters must contain `type` (which is always "api") and `spec` (which is the local path of the spec file with prefix `file://`) keys. 
       
