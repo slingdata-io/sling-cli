@@ -1457,6 +1457,7 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 
 	// Add iceberg extensions
 	conn.duck.AddExtension("iceberg")
+	conn.duck.AddExtension("https")
 
 	// Open DuckDB connection
 	err = conn.duck.Open()
