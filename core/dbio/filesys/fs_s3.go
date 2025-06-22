@@ -53,7 +53,11 @@ func (fs *S3FileSysClient) Init(ctx context.Context) (err error) {
 		if valWithoutPrefix == "" && valWithPrefix != "" {
 			fs.SetProp(key, valWithPrefix)
 		} else if valWithoutPrefix != "" && valWithPrefix != "" && valWithoutPrefix != valWithPrefix {
-			g.Warn("discrepancy for S3 Keys: AWS_%s=%s  vs  %s=%s", key, valWithPrefix, key, valWithoutPrefix)
+			if g.In(key, "SECRET_ACCESS_KEY", "SESSION_TOKEN") {
+				g.Warn("discrepancy for S3 Keys: AWS_%s  vs  %s  (using %s)", key, key, key)
+			} else {
+				g.Warn("discrepancy for S3 Keys: AWS_%s=%s  vs  %s=%s  (using %s)", key, valWithPrefix, key, valWithoutPrefix, key)
+			}
 		}
 	}
 
