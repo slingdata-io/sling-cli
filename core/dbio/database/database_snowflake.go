@@ -765,8 +765,8 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 
 	fileFormat := dbio.FileType(conn.GetProp("format"))
 	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
-		// fileFormat = dbio.FileTypeCsv
-		fileFormat = dbio.FileTypeParquet
+		fileFormat = dbio.FileTypeCsv
+		// fileFormat = dbio.FileTypeParquet
 	}
 
 	// get target columns
