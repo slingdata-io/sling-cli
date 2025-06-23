@@ -164,12 +164,16 @@ func (pl *Pipeline) Execute() (err error) {
 		if err != nil {
 			pl.CurrentStep["error"] = err.Error()
 			return g.Error(err, "error executing step")
+		} else if br, _ := step.Context().Map.Get("break"); br == true {
+			break
 		}
 
 		// check for goto
 		if gotoID := pl.CurrentStep["goto"]; gotoID != nil {
 			if gotoIndex, ok := idStepMap[cast.ToString(gotoID)]; ok {
 				i = gotoIndex - 1 // -1 because i++ will increment it
+			} else {
+				g.Warn("did not find step ID (%s) for goto", gotoID)
 			}
 		}
 	}
