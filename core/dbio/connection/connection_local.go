@@ -74,12 +74,27 @@ func (ce ConnEntries) Test(name string) (ok bool, err error) {
 }
 
 var (
-	localConns   ConnEntries
-	localConnsTs time.Time
+	localConns        ConnEntries
+	localConnsTs      time.Time
+	localConnsExclude string
 )
 
-func GetLocalConns(force ...bool) ConnEntries {
-	if len(force) > 0 && force[0] {
+type LocalConnsExclude string
+
+func GetLocalConns(options ...any) ConnEntries {
+	defer func() { localConnsExclude = "" }() // clear if set
+	force := false
+
+	for _, option := range options {
+		switch opt := option.(type) {
+		case bool:
+			force = opt
+		case LocalConnsExclude:
+			localConnsExclude = string(opt)
+		}
+	}
+
+	if force {
 		// force refresh
 	} else if time.Since(localConnsTs).Seconds() < 10 {
 		return localConns // caching to not re-read from disk. once every 10s
@@ -226,8 +241,11 @@ func GetLocalConns(force ...bool) ConnEntries {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
 	})
 
-	localConnsTs = time.Now()
-	localConns = connArr
+	// only cache if no exclusion
+	if localConnsExclude == "" {
+		localConnsTs = time.Now()
+		localConns = connArr
+	}
 
 	return connArr
 }

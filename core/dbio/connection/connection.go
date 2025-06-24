@@ -61,6 +61,11 @@ type Connection struct {
 
 // NewConnection creates a new connection
 func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn Connection, err error) {
+	// prevent infinite recursion
+	if localConnsExclude != "" && strings.EqualFold(Name, localConnsExclude) {
+		return
+	}
+
 	conn = Connection{
 		Name:    strings.TrimLeft(Name, "$"),
 		Type:    t,
