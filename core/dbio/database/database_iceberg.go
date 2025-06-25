@@ -1079,6 +1079,10 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 				err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
 			}
 			if err != nil {
+				if g.IsDebug() && strings.Contains(err.Error(), "RuntimeIOException") {
+					g.Warn(err.Error())
+					return nil
+				}
 				return g.Error(err, "cannot drop table")
 			}
 			g.Debug("table %s dropped", tableName)
