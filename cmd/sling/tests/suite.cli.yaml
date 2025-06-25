@@ -1,0 +1,491 @@
+- id: 1
+  name: Simple sling command
+  run: sling
+  output_contains:
+    - Slings data from a data source to a data target.
+
+- id: 2
+  name: Run sling command
+  run: sling run
+  output_contains:
+    - Execute a run
+
+- id: 3
+  name: Run sling with Excel source
+  run: sling run --src-stream file://core/dbio/filesys/test/test.excel2.xlsx --tgt-object file://test.xlsx
+  rows: 1317
+  output_contains:
+    - wrote 1317 rows
+
+- id: 4
+  name: Run sling with CSV source and POSTGRES target
+  run: 'cat cmd/sling/tests/files/test1.1.csv | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh'
+  rows: 18
+
+- id: 5
+  name: Run sling with CSV source and POSTGRES target
+  run: 'sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh'
+  rows: 18
+
+- id: 6
+  name: Run sling with CSV source and MSSQL target
+  run: 'sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn MSSQL --tgt-object dbo.my_table --mode full-refresh --tgt-options ''use_bulk: false'''
+  rows: 18
+
+- id: 7
+  name: Run sling with CSV source and custom options
+  run: 'sling run --src-stream file://cmd/sling/tests/files/test4.csv --src-options ''{ delimiter: "|", escape: "\\" }'' --stdout > /dev/null'
+  rows: 4
+
+- id: 8
+  name: Run sling with gzipped CSV source and POSTGRES target
+  run: 'cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table1 --mode full-refresh'
+  rows: 18
+
+- id: 9
+  name: Run sling with gzipped CSV source and MYSQL target
+  run: 'sling run --src-stream ''file://cmd/sling/tests/files/test1.1.csv.gz'' --tgt-conn MYSQL --tgt-object mysql.my_table --mode full-refresh --tgt-options ''use_bulk: false'''
+  rows: 18
+
+- id: 10
+  name: Run sling with JSON source and POSTGRES target
+  run: 'cat cmd/sling/tests/files/test3.json | sling run --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table2 --tgt-options ''use_bulk: false'' --mode full-refresh'
+  rows: 1
+
+- id: 11
+  name: Run sling with JSON source and POSTGRES target
+  run: 'sling run --src-stream ''file://cmd/sling/tests/files/test3.json''  --src-options "flatten: true" --tgt-conn POSTGRES --tgt-object public.my_table3 --tgt-options ''use_bulk: false'' --mode full-refresh'
+  rows: 1
+
+- id: 12
+  name: Run sling with CSV source and no header
+  run: 'sling run --src-stream ''file://cmd/sling/tests/files/test6.csv'' --stdout -d --src-options ''{ header: false }'' > /dev/null'
+  rows: 2
+
+- id: 13
+  name: Run sling with echo input and empty allowed
+  run: 'echo ''a,b,c'' | SLING_ALLOW_EMPTY=true sling  run --tgt-object file:///tmp/test.csv'
+  rows: 0
+  bytes: 6
+  output_contains:
+    - execution succeeded
+
+- id: 14
+  name: Run sling with POSTGRES source and CSV output
+  run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv'
+  rows: 18
+
+- id: 15
+  name: Run sling with POSTGRES source and CSV target
+  run: 'sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv'
+  rows: 18
+
+- id: 16
+  name: Run sling with POSTGRES source and select columns
+  run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select ''id,email'' -l 2'
+  rows: 2
+  output_contains:
+    - 'id,email'
+
+- id: 17
+  name: Run sling with POSTGRES source and exclude columns
+  run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select ''-id'' -l 2'
+  rows: 2
+  output_contains:
+    - 'first_name,last_name,email,target,create_dt'
+
+- id: 18
+  name: Run sling with gzipped CSV source and POSTGRES target with ignore existing
+  run: 'cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options ''ignore_existing: true'''
+  rows: 0
+  output_contains:
+    - execution succeeded
+
+- id: 19
+  name: Run sling with POSTGRES source and CSV target with ignore existing
+  run: 'sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options ''ignore_existing: true'''
+  rows: 0
+  output_contains:
+    - execution succeeded
+
+- id: 20
+  name: Run sling with binary CSV source and POSTGRES target
+  run: 'sling run --src-stream file://cmd/sling/tests/files/binary/test.bytes.csv --tgt-conn postgres --tgt-object public.my_table_bytes'
+  rows: 1
+
+- id: 21
+  name: Execute SQL command on POSTGRES
+  run: 'sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like ''%89504e470d0a1a0a0000000d%''"'
+  rows: 1
+  output_contains:
+    - 1
+
+- id: 22
+  name: Run sling with JSON source and custom columns
+  run: 'SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh'
+  rows: 2019
+
+- id: 23
+  name: Execute SQL command to select distinct stream URL
+  run: 'sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"'
+  rows: 4
+  output_contains:
+    - _SLING_STREAM_URL
+
+- id: 24
+  name: Execute SQL command to select stream URL by row number
+  run: 'sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names'
+  rows: 3
+  output_contains:
+    - _SLING_STREAM_URL
+
+- id: 25
+  name: Execute SQL command to check column names
+  run: 'sling conns exec postgres "select column_name from information_schema.columns where table_schema = ''public'' and table_name = ''many_jsons'' and column_name like ''_sling%''" # should not have _sling_loaded_at'
+  rows: 2
+  output_contains:
+    - _sling_row_num
+    - _sling_stream_url
+
+- id: 26
+  name: Run sling with JSON source and timestamp column
+  run: 'SLING_LOADED_AT_COLUMN=''timestamp'' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh'
+  rows: 2019
+
+- id: 27
+  name: Execute SQL command to check data type of timestamp column
+  run: 'sling conns exec postgres "select data_type from information_schema.columns where table_schema = ''public'' and table_name = ''many_jsons'' and column_name = ''_sling_loaded_at'' and data_type like ''timestamp%''" # _sling_loaded_at should be a timestamp'
+  rows: 1
+  output_contains:
+    - timestamp with
+
+- id: 28
+  name: Test POSTGRES connection
+  run: sling conns test POSTGRES
+  output_contains:
+    - 'success!'
+
+- id: 29
+  name: Execute SQL command to count rows in POSTGRES table
+  run: 'sling conns exec POSTGRES ''select count(1) from public.my_table'''
+  rows: 1
+  output_contains:
+    - 'success!'
+    - 18
+
+- id: 30
+  name: Discover POSTGRES connections
+  run: sling conns discover POSTGRES
+  output_contains:
+    - information_schema
+
+- id: 31
+  name: Discover POSTGRES connections with schema filter
+  run: 'sling conns discover POSTGRES -s ''public.*'''
+  output_contains:
+    - information_schema
+
+- id: 32
+  name: Discover local connections
+  run: 'sling conns discover local -p ''.'''
+  output_contains:
+    - directory
+
+- id: 33
+  name: Discover Prometheus connections with columns
+  run: 'sling conns discover prometheus --columns'
+  fails: gauge
+
+- id: 34
+  name: Run sling with Prometheus source and custom query
+  run: 'sling run --src-conn prometheus --src-stream ''sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}'' --stdout  -d'
+  output_contains:
+    - quantile
+
+- id: 35
+  name: Run sling with replication configuration 05
+  run: 'sling run -r cmd/sling/tests/replications/r.05.yaml'
+  streams: 12
+
+- id: 36
+  name: Run sling with replication configuration 05 and streams
+  run: 'sling run -r cmd/sling/tests/replications/r.05.yaml --streams ''s3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'''
+  streams: 2
+
+- id: 37
+  name: Run sling with replication configuration 06
+  run: 'sling run -r cmd/sling/tests/replications/r.06.yaml'
+  streams: 3
+
+- id: 38
+  name: Run sling with replication configuration 07
+  run: 'sling run -r cmd/sling/tests/replications/r.07.yaml'
+  streams: 15
+
+- id: 39
+  name: Run sling with replication configuration 08
+  run: 'sling run -r cmd/sling/tests/replications/r.08.yaml'
+  streams: 4
+
+- id: 40
+  name: Run sling with replication configuration 09 and constraints
+  run: '# sling run -r cmd/sling/tests/replications/r.09.yaml'
+  streams: '>1'
+  fails: 2
+
+- id: 41
+  name: Run sling with replication configuration 09
+  run: 'sling run -d -r cmd/sling/tests/replications/r.09.yaml'
+  streams: '>1'
+  output_contains:
+    - '/ 7] running stream "public"."my_table_bytes"'
+    - RUNNING
+
+- id: 42
+  name: Run sling with replication configuration 09 and tags
+  run: 'sling run -r cmd/sling/tests/replications/r.09.yaml --streams tag:my_table'
+  streams: 3
+
+- id: 43
+  name: Run sling with replication configuration 10
+  run: 'sling run -d -r cmd/sling/tests/replications/r.10.yaml'
+  rows: 1018
+  streams: 1
+  output_contains:
+    - 'singleFile=true'
+
+- id: 44
+  name: Run sling with replication configuration 11 and year parameter
+  run: 'YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml'
+  streams: 2
+  output_contains:
+    - test1k/2005
+
+- id: 45
+  name: Run sling with replication configuration 12
+  run: 'sling run -r cmd/sling/tests/replications/r.12.yaml'
+  streams: 1
+
+- id: 46
+  name: Run sling with replication configuration 15
+  run: 'sling run -r cmd/sling/tests/replications/r.15.yaml # iceberg & delta'
+  streams: 5
+  output_contains:
+    - 100 rows
+    - '[1 / 3] running stream sling_test/lineitem_iceberg'
+
+- id: 47
+  name: Run sling with replication configuration 15 incremental
+  run: 'ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/'
+  rows: '>0'
+  streams: 1
+  output_contains:
+    - incremental
+
+- id: 48
+  name: Run sling with replication configuration 14
+  run: 'sling run -d -r cmd/sling/tests/replications/r.14.yaml'
+  streams: 5
+
+- id: 49
+  name: Run sling with replication configuration 14
+  run: 'sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows'
+  rows: 0
+
+- id: 50
+  name: Run sling with replication configuration 16
+  run: 'sling run -r cmd/sling/tests/replications/r.16.yaml'
+  rows: 90
+  streams: 1
+
+- id: 51
+  name: Run sling with task configuration
+  run: 'sling run -c cmd/sling/tests/task.yaml'
+  rows: 24
+
+- id: 52
+  name: Run sling with Parquet source
+  run: 'sling run --src-stream ''file://cmd/sling/tests/files/parquet'' --stdout > /dev/null'
+  rows: 1018
+
+- id: 53
+  name: Run sling with empty input
+  run: 'echo '''' | sling run --stdout'
+  rows: 0
+  output_contains:
+    - execution succeeded
+
+- id: 54
+  name: Run sling with CSV source and single quote
+  run: 'sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test7.csv --src-options ''{ delimiter: "|", quote: "''\''''", escape: "\\" }'' --stdout > /dev/null'
+  rows: 3
+
+- id: 55
+  name: Run sling with CSV source and $symbol quote
+  run: 'sling run --src-conn LOCAL --src-stream file://cmd/sling/tests/files/test8.csv --src-options ''{ delimiter: "|", quote: "$", escape: "\\" }'' --stdout > /dev/null'
+  rows: 3
+
+- id: 56
+  name: 'Run sling with direct insert full-refresh'
+  run: 'SLING_DIRECT_INSERT=true sling run --src-conn postgres --src-stream public.test1k_postgres_pg --tgt-conn mysql --tgt-object ''mysql.public_test1k_postgres_pg'' --mode full-refresh'
+  rows: '>10'
+  streams: '>1'
+  output_contains:
+    - streaming data (direct insert)
+
+- id: 57
+  name: Run sling with incremental (delete missing soft)
+  run: 'sling run -d --src-conn postgres --src-stream ''select * from public.test1k_postgres_pg where {incremental_where_cond} limit 900'' --tgt-conn mysql --tgt-object ''mysql.public_test1k_postgres_pg'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: soft }'''
+  rows: 0
+  output_contains:
+    - and not exists (
+
+- id: 58
+  name: Run sling with incremental (delete missing hard)
+  run: 'sling run -d --src-conn postgres --src-stream ''select * from public.test1k_postgres_pg where {incremental_where_cond} limit 900'' --tgt-conn mysql --tgt-object ''mysql.public_test1k_postgres_pg'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: hard }'''
+  rows: 0
+  output_contains:
+    - and not exists (
+
+- id: 59
+  name: Run sling writing to partitioned parquet (local)
+  run: 'rm -rf /tmp/sling/output8 ; sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object ''file:///tmp/sling/output8/{part_year}/{part_month}'' -d --tgt-options ''{ format: parquet }'' --update-key create_dt ; ls -l /tmp/sling/output8'
+  rows: 1000
+  output_contains:
+    - partition_by (
+    - 'create_dt_year=2018'
+
+- id: 60
+  name: Run sling writing to partitioned parquet (aws)
+  run: 'FORMAT=parquet sling run -d -r cmd/sling/tests/replications/r.17.yaml --mode full-refresh'
+  rows: 1002
+  output_contains:
+    - partition_by (
+
+- id: 61
+  name: Run sling with incremental writing to partitioned parquet (aws)
+  run: 'FORMAT=parquet sling run -d -r cmd/sling/tests/replications/r.17.yaml'
+  rows: 40
+  output_contains:
+    - partition_by (
+
+- id: 62
+  name: Run sling writing to partitioned csv (aws)
+  run: 'FORMAT=csv sling run -d -r cmd/sling/tests/replications/r.17.yaml --mode full-refresh'
+  rows: 1002
+  output_contains:
+    - partition_by (
+
+- id: 63
+  name: Run sling project init
+  run: sling project init
+  output_contains:
+    - .sling.json
+
+- id: 64
+  name: Run sling project status
+  run: sling project status
+  output_contains:
+    - PROJECT NAME
+
+- id: 65
+  name: Run sling project jobs
+  run: sling project jobs
+  output_contains:
+    - manage project jobs
+
+- id: 66
+  name: Run sling project jobs list
+  run: sling project jobs list
+  output_contains:
+    - FILE NAME
+
+- id: 67
+  name: 'Run sling hooks & source partitioned (backfill)'
+  run: 'RESET=true sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01'
+  rows: 551
+  output_contains:
+    - 'executed hook "start-02" (type: delete)'
+    - 'writing incremental state (value => 2019-06-01'
+
+- id: 68
+  name: 'Run sling hooks & source partitioned (incremental)'
+  run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --streams ''test1k_postgres_pg_parquet'''
+  rows: '>78'
+  output_contains:
+    - 'skipped hook "start-02"'
+    - 'hook (inspect_file_check) failed => check failure'
+    - 'writing incremental state (value => 2019-07-01'
+
+- id: 69
+  name: Run sling pipeline 01
+  run: 'sling run -p cmd/sling/tests/pipelines/p.01.yaml -d'
+  output_contains:
+    - 'executed step "step-02" (type: replication)'
+
+- id: 70
+  name: Run sling chunking
+  run: 'sling run -r cmd/sling/tests/replications/r.20.yaml -d'
+  streams: 10
+  output_contains:
+    - '"update_dt" >= ''2018-11-21'
+    - '"id" >= 601 and "id" <= 800'
+    - TEST1K_SQLSERVER_PG_003
+    - TEST1K_SNOWFLAKE_PG_004
+
+- id: 71
+  name: Run sling pipeline 02
+  run: 'sling run -p cmd/sling/tests/pipelines/p.02.yaml'
+  output_contains:
+    - sftp//tmp/test1k_mysql_pg.csv
+    - aws_s3/sling_test/files/test1k_s3.csv
+
+- id: 72
+  name: Run sling to test column casing
+  run: 'sling run -d -r cmd/sling/tests/replications/r.21.yaml'
+  streams: 1
+  output_contains:
+    - test1k_clickhouse_pg_first_name
+
+- id: 73
+  name: Run sling mysql bit
+  run: 'sling run -d -r cmd/sling/tests/replications/r.22.yaml'
+  streams: 1
+  output_contains:
+    - execution succeeded
+
+- id: 74
+  name: Run sling iceberg_r2 insert
+  run: 'TARGET=iceberg_r2 sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  streams: 2
+  output_contains:
+    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+
+- id: 75
+  name: Run sling iceberg_s3 insert
+  run: 'TARGET=iceberg_s3 sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  streams: 2
+  output_contains:
+    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+
+- id: 76
+  name: Run sling iceberg_lakekeeper insert
+  run: 'TARGET=iceberg_lakekeeper sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  streams: 2
+  output_contains:
+    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+
+- id: 77
+  name: Run sling iceberg_sql insert
+  run: 'TARGET=iceberg_sql sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  streams: 2
+  output_contains:
+    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+
+- id: 78
+  name: Run sling iceberg_gcp insert
+  run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.yaml
+  streams: 2
+  output_contains:
+    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+

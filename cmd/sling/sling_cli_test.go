@@ -14,7 +14,21 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
+
+type testCase struct {
+	ID             int               `yaml:"id"`
+	Name           string            `yaml:"name"`
+	Run            string            `yaml:"run"`
+	Env            map[string]string `yaml:"env"`
+	Err            bool              `yaml:"err"`
+	Rows           any               `yaml:"rows"`    // number of rows
+	Bytes          any               `yaml:"bytes"`   // number of bytes
+	Streams        any               `yaml:"streams"` // number of streams
+	Fails          any               `yaml:"fails"`   // number of fails
+	OutputContains []string          `yaml:"output_contains"`
+}
 
 func TestCLI(t *testing.T) {
 	bin := os.Getenv("SLING_BIN")
@@ -36,28 +50,17 @@ func TestCLI(t *testing.T) {
 
 	defaultEnv := g.KVArrToMap(os.Environ()...)
 
-	// Load tests from suite.cli.tsv
-	filePath := "tests/suite.cli.tsv"
-	dataT, err := iop.ReadCsv(filePath)
+	// Load tests from suite.cli.yaml
+	filePath := "tests/suite.cli.yaml"
+	content, err := os.ReadFile(filePath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	// rewrite correctly for displaying in Github
-	c := iop.CSV{Path: filePath, Delimiter: '\t'}
-	c.WriteStream(dataT.Stream())
-
-	type testCase struct {
-		Number         int
-		Name           string
-		Command        string
-		Env            map[string]string
-		Err            bool
-		Rows           string // number of rows
-		Bytes          string // number of bytes
-		Streams        string // number of streams
-		Fails          string // number of fails
-		OutputContains []string
+	cases := []testCase{}
+	err = yaml.Unmarshal(content, &cases)
+	if !g.AssertNoError(t, err) {
+		return
 	}
 
 	// get test numbers from env
@@ -68,12 +71,11 @@ func TestCLI(t *testing.T) {
 			if strings.HasSuffix(tn, "+") {
 				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
 
-				for _, rec := range dataT.RecordsString() {
-					n := cast.ToInt(rec["n"])
-					if n < start {
+				for _, tc := range cases {
+					if tc.ID < start {
 						continue
 					}
-					testNumbers = append(testNumbers, n)
+					testNumbers = append(testNumbers, tc.ID)
 				}
 			} else if parts := strings.Split(tn, "-"); len(parts) == 2 {
 				start := cast.ToInt(parts[0])
@@ -88,45 +90,37 @@ func TestCLI(t *testing.T) {
 	}
 
 	tests := []testCase{}
-	for _, record := range dataT.RecordsString() {
-		tc := testCase{
-			Number:         cast.ToInt(record["n"]),
-			Name:           record["test_name"],
-			Command:        record["command"],
-			Env:            map[string]string{},
-			Err:            false,
-			Rows:           record["rows"],
-			Bytes:          record["bytes"],
-			Streams:        record["streams"],
-			Fails:          record["fails"],
-			OutputContains: strings.Split(record["output_contains"], "|"),
-		}
-		if len(testNumbers) > 0 && !g.In(tc.Number, testNumbers...) {
+	for _, tc := range cases {
+		if len(testNumbers) > 0 && !g.In(tc.ID, testNumbers...) {
 			continue
 		}
 
-		if tc.Rows != "" {
-			tc.Env["SLING_ROW_CNT"] = tc.Rows
+		tc.Env = map[string]string{
+			"DEBUG": os.Getenv("DEBUG"),
 		}
-		if tc.Bytes != "" {
-			tc.Env["SLING_TOTAL_BYTES"] = tc.Bytes
+
+		if tc.Rows != nil {
+			tc.Env["SLING_ROW_CNT"] = cast.ToString(tc.Rows)
 		}
-		if tc.Streams != "" {
-			tc.Env["SLING_STREAM_CNT"] = tc.Streams
+		if tc.Bytes != nil {
+			tc.Env["SLING_TOTAL_BYTES"] = cast.ToString(tc.Bytes)
 		}
-		if tc.Fails != "" {
-			tc.Env["SLING_CONSTRAINT_FAILS"] = tc.Fails
+		if tc.Streams != nil {
+			tc.Env["SLING_STREAM_CNT"] = cast.ToString(tc.Streams)
+		}
+		if tc.Fails != nil {
+			tc.Env["SLING_CONSTRAINT_FAILS"] = cast.ToString(tc.Fails)
 		}
 
 		tests = append(tests, tc)
 	}
 
 	for _, tt := range tests {
-		if !assert.NotEmpty(t, tt.Command, "Command is empty") {
+		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
-		t.Run(g.F("%d/%s", tt.Number, tt.Name), func(t *testing.T) {
-			g.Info(env.GreenString(tt.Command))
+		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
+			g.Info(env.GreenString(tt.Run))
 
 			// set env
 			p.Env = map[string]string{}
@@ -154,7 +148,7 @@ func TestCLI(t *testing.T) {
 				"set -e",
 				"shopt -s expand_aliases",
 				g.F("alias sling=%s", bin),
-				tt.Command,
+				tt.Run,
 			}
 			content := strings.Join(lines, "\n")
 			_, err = tmpFile.WriteString(content)
