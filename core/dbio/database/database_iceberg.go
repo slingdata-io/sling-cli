@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"maps"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/glue"
 	"github.com/apache/iceberg-go/catalog/rest"
+	sqlcat "github.com/apache/iceberg-go/catalog/sql"
 	"github.com/apache/iceberg-go/table"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
@@ -30,11 +32,12 @@ import (
 // IcebergConn is an Iceberg connection
 type IcebergConn struct {
 	BaseConn
-	URL         string
-	CatalogType dbio.IcebergCatalogType
-	Catalog     catalog.Catalog
-	Warehouse   string
-	duck        *iop.DuckDb
+	URL            string
+	CatalogType    dbio.IcebergCatalogType
+	CatalogSQLConn Connection
+	Catalog        catalog.Catalog
+	Warehouse      string
+	duck           *iop.DuckDb
 }
 
 // Init initiates the object
@@ -62,8 +65,10 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 		err = conn.connectREST()
 	case dbio.IcebergCatalogTypeGlue:
 		err = conn.connectGlue()
+	case dbio.IcebergCatalogTypeSQL:
+		err = conn.connectSQL()
 	default:
-		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", conn.CatalogType)
+		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue, sql", conn.CatalogType)
 	}
 
 	if err != nil {
@@ -268,10 +273,129 @@ func (conn *IcebergConn) connectGlue() error {
 	return nil
 }
 
+func (conn *IcebergConn) connectSQL() error {
+	// Get SQL catalog configuration
+	catalogName := conn.GetProp("sql_catalog_name")
+	if catalogName == "" {
+		catalogName = "sql"
+	}
+
+	connName := conn.GetProp("sql_catalog_conn")
+	connPayload := conn.GetProp("sql_conn_payload")
+	if connName == "" {
+		return g.Error("must provide sql_catalog_conn")
+	} else if connPayload == "" {
+		return g.Error("did not find provided sql_catalog_conn: %s", connName)
+	}
+
+	connMap, err := g.UnmarshalMap(connPayload)
+	if err != nil {
+		return g.Error(err, "could not unmarshal payload for Iceberg SQL Connection")
+	}
+
+	connData := map[string]string{}
+	if err = g.JSONConvert(connMap["data"], &connData); err != nil {
+		return g.Error(err, "could not convert payload for Iceberg SQL Connection")
+	}
+
+	conn.CatalogSQLConn, err = NewConnContext(
+		conn.Context().Ctx, cast.ToString(connMap["url"]),
+		g.MapToKVArr(connData)...)
+	if err != nil {
+		return g.Error(err, "could not make object for Iceberg SQL Connection")
+	}
+
+	if err = conn.CatalogSQLConn.Connect(); err != nil {
+		return g.Error(err, "could not connect to Iceberg SQL Connection")
+	}
+
+	// Validate dialect
+	var dialect sqlcat.SupportedDialect
+	switch conn.CatalogSQLConn.GetType() {
+	case dbio.TypeDbPostgres:
+		dialect = sqlcat.Postgres
+	case dbio.TypeDbMySQL:
+		dialect = sqlcat.MySQL
+	case dbio.TypeDbSQLite:
+		dialect = sqlcat.SQLite
+	case dbio.TypeDbSQLServer:
+		dialect = sqlcat.MSSQL
+	case dbio.TypeDbOracle:
+		dialect = sqlcat.Oracle
+	default:
+		return g.Error("unsupported sql connection type '%s'", dialect)
+	}
+
+	// Prepare properties for SQL catalog
+	props := iceberg.Properties{
+		sqlcat.DialectKey: string(dialect),
+		sqlcat.DriverKey:  getDriverName(conn.CatalogSQLConn),
+		"uri":             conn.CatalogSQLConn.GetURL(),
+	}
+
+	// Add optional properties
+	if cast.ToBool(conn.GetProp("sql_catalog_init")) {
+		props["init_catalog_tables"] = "true"
+	}
+
+	// Add warehouse location if provided
+	if warehouse := conn.GetProp("sql_warehouse"); warehouse != "" {
+		props["warehouse"] = warehouse
+		conn.Warehouse = warehouse
+	}
+
+	// Pass through S3 properties for filesystem access
+	for key, value := range conn.properties {
+		if strings.HasPrefix(key, "s3") {
+			// Map common S3 properties to what iceberg-go expects
+			switch key {
+			case "s3_access_key_id":
+				props["s3.access-key-id"] = value
+			case "s3_secret_access_key":
+				props["s3.secret-access-key"] = value
+			case "s3_session_token":
+				props["s3.session-token"] = value
+			case "s3_region":
+				props["s3.region"] = value
+			case "s3_endpoint":
+				props["s3.endpoint"] = value
+			case "s3_profile":
+				props["s3.profile"] = value
+			default:
+				// Pass through any other s3_ properties as-is
+				props[key] = value
+			}
+		}
+	}
+
+	// Add any extra properties specified by the user
+	if extra := conn.GetProp("sql_extra_props"); extra != "" {
+		extraProps := map[string]string{}
+		if err := g.Unmarshal(extra, &extraProps); err != nil {
+			return g.Error(err, "could not unmarshal sql_extra_props")
+		}
+		maps.Copy(props, extraProps)
+	}
+
+	// Create SQL catalog
+	cat, err := sqlcat.NewCatalog(catalogName, conn.CatalogSQLConn.Db().DB, dialect, props)
+	if err != nil {
+		conn.CatalogSQLConn.Close()
+		return g.Error(err, "Failed to create SQL catalog")
+	}
+
+	conn.Catalog = cat
+
+	return nil
+}
+
 // Close closes the connection
 func (conn *IcebergConn) Close() error {
 	if conn.duck != nil {
 		conn.duck.Close()
+	}
+	if conn.CatalogSQLConn != nil {
+		conn.CatalogSQLConn.Close()
 	}
 
 	if conn.Catalog == nil {
@@ -1443,8 +1567,13 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(col iop.Column) iceberg.T
 // https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
 // https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
 func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts map[string]any) (ds *iop.Datastream, err error) {
+	if conn.CatalogType == dbio.IcebergCatalogTypeSQL {
+		g.Warn("for querying iceberg with custom SQL via DuckDB, cannot do so with SQL-Catalog. DuckDB only supports REST and Glue catalog types.")
+		return nil, g.Error("unsupported catalog for DuckDB Iceberg extension.")
+	}
+
 	if !strings.Contains(sql, "iceberg_catalog.") {
-		g.Warn("for querying iceberg with custom SQL via duckDB, the table names need to be qualified with \"iceberg_catalog\". For example: select count(*) cnt from iceberg_catalog.my_namespace.my_table")
+		g.Warn("for querying iceberg with custom SQL via DuckDB, the table names need to be qualified with \"iceberg_catalog\". For example: select count(*) cnt from iceberg_catalog.my_namespace.my_table")
 		return nil, g.Error("missing qualifier \"iceberg_catalog\"")
 	}
 

@@ -656,4 +656,5 @@ const (
 	IcebergCatalogTypeREST     IcebergCatalogType = "rest"
 	IcebergCatalogTypeGlue     IcebergCatalogType = "glue"
 	IcebergCatalogTypeS3Tables IcebergCatalogType = "s3tables"
+	IcebergCatalogTypeSQL      IcebergCatalogType = "sql"
 )

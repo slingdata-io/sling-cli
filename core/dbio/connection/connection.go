@@ -846,7 +846,26 @@ func (c *Connection) setURL() (err error) {
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
-		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables
+		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables, sql
+
+		// SQL catalog specific properties
+		if c.Data["catalog_type"] == "sql" {
+			setIfMissing("sql_catalog_name", c.Data["sql_catalog_name"])
+			setIfMissing("sql_catalog_init", "true")
+		}
+
+		if connName := c.Data["sql_catalog_conn"]; connName != nil {
+			// create database object and pass for connection
+			exclude := LocalConnsExclude(c.Name)
+			entry := GetLocalConns(exclude).Get(cast.ToString(connName))
+			if entry.Name != "" {
+				c.Data["sql_conn_payload"] = g.M(
+					"url", entry.Connection.URL(),
+					"data", entry.Connection.DataS(),
+				)
+			}
+		}
+
 		template = "iceberg://{catalog_type}"
 	case dbio.TypeDbAthena:
 		// use dbt inputs

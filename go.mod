@@ -64,7 +64,7 @@ require (
 	github.com/prometheus/common v0.55.0
 	github.com/psanford/sqlite3vfs v0.0.0-20220823065410-bd28ac7ee3c2
 	github.com/psanford/sqlite3vfshttp v0.0.0-20220827153928-a19f096e6eb4
-	github.com/rs/zerolog v1.28.0
+	github.com/rs/zerolog v1.34.0
 	github.com/samber/lo v1.39.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil/v3 v3.24.4
@@ -261,6 +261,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/pterm/pterm v0.12.81 // indirect
+	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
@@ -277,10 +278,20 @@ require (
 	github.com/substrait-io/substrait-go/v3 v3.9.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
+	github.com/uptrace/bun v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/mssqldialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/oracledialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/pgdialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/sqlitedialect v1.2.12 // indirect
+	github.com/uptrace/bun/extra/bundebug v1.2.12 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/viant/xunsafe v0.8.0 // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
@@ -333,6 +344,8 @@ replace github.com/flarco/g => ../g
 
 replace github.com/slingdata-io/sling => ../sling
 
-replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250615124011-afc413814524
+replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250625114951-763f8d92b49e
+
+// replace github.com/apache/iceberg-go => ../iceberg-go
 
 replace github.com/databricks/databricks-sql-go => github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad
