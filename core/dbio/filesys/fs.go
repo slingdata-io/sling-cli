@@ -780,8 +780,10 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 	fileExt := cast.ToString(fs.GetProp("FILE_EXTENSION"))
 
 	// use provided config or get from dataflow
-	if val := fs.GetProp("FORMAT"); val != "" && sc.Format == dbio.FileTypeNone {
-		sc.Format = dbio.FileType(strings.ToLower(val))
+	if sc.Format == dbio.FileTypeNone {
+		if val := fs.GetProp("FORMAT"); val != "" {
+			sc.Format = dbio.FileType(strings.ToLower(val))
+		}
 		if sc.Format == dbio.FileTypeNone {
 			sc.Format = InferFileFormat(url)
 		}
