@@ -120,7 +120,7 @@ func TestCLI(t *testing.T) {
 			break
 		}
 		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
-			g.Info(env.GreenString(tt.Run))
+			g.Info(env.GreenString(g.F("(%d) %s", tt.ID, tt.Run)))
 
 			// set env
 			p.Env = map[string]string{}
@@ -166,20 +166,24 @@ func TestCLI(t *testing.T) {
 			}
 
 			// check output
-			found := false
 			stderr := p.Stderr.String()
 			stdout := p.Stdout.String()
 			for _, contains := range tt.OutputContains {
-				if strings.Contains(stderr, contains) {
+				if contains == "" {
+					continue
+				}
+
+				found := false
+				if !strings.Contains(stderr, contains) {
 					found = true
 					break
 				}
-				if strings.Contains(stdout, contains) {
+				if !strings.Contains(stdout, contains) {
 					found = true
 					break
 				}
+				assert.True(t, found, "Output does not contain %#v", contains)
 			}
-			assert.True(t, found, "Output does not contain %v", tt.OutputContains)
 		})
 		if t.Failed() {
 			break
