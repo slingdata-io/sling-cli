@@ -120,7 +120,7 @@ func TestCLI(t *testing.T) {
 			break
 		}
 		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
-			g.Info(env.GreenString(g.F("(%d) %s", tt.ID, tt.Run)))
+			g.Info(env.GreenString(g.F("%02d | %s", tt.ID, tt.Run)))
 
 			// set env
 			p.Env = map[string]string{}
