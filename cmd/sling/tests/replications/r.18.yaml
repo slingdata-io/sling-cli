@@ -1,24 +1,25 @@
 source: postgres
 target: sqlite
 
+hooks:
+  start:
+    - type: log
+      message: starting replication!!!!
+      id: start_msg
+
+  end:
+    - type: log
+      level: warn
+      message: |
+        ending replication 👍
+        first row => { state.table_cnt.result[0] }
+        all rows => { state.table_cnt.result }
+        runtime_state => {runtime_state}
+
 defaults:
   mode: full-refresh
 
   hooks:
-    start:
-      - type: log
-        message: starting replication!!!!
-        id: start_msg
-
-    end:
-      - type: log
-        level: warn
-        message: |
-          ending replication 👍
-          start_msg: {state.start_msg.message}
-          first row => { state.table_cnt.result[0] }
-          all rows => { state.table_cnt.result }
-          runtime_state => {runtime_state}
 
     post:
       - type: log
