@@ -1,0 +1,69 @@
+source: mssql
+target: starrocks
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      # if: 'false'
+      query: |
+        DROP TABLE IF EXISTS dbo.test_null_values;
+        
+        CREATE TABLE dbo.test_null_values (
+            id INT PRIMARY KEY,
+            string_col VARCHAR(50),
+            empty_string_col VARCHAR(50),
+            int_col INT,
+            decimal_col DECIMAL(10,2),
+            date_col DATE
+        );
+
+        INSERT INTO dbo.test_null_values (id, string_col, empty_string_col, int_col, decimal_col, date_col) VALUES
+        (1, 'normal value', '', 100, 123.45, '2024-01-01'),
+        (2, NULL, '', NULL, NULL, NULL),
+        (3, '', '', 300, 456.78, '2024-01-03'),
+        (4, NULL, NULL, 400, 789.12, '2024-01-04'),
+        (5, 'another value', NULL, NULL, NULL, NULL);
+
+  end:
+    - type: check
+      check: run.status == "success"
+      on_failure: break
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS dbo.test_null_values
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, 
+               string_col,
+               CASE WHEN string_col IS NULL THEN 'NULL' ELSE CONCAT('VALUE:', string_col) END as string_col_check,
+               empty_string_col,
+               CASE WHEN empty_string_col IS NULL THEN 'NULL' ELSE CONCAT('VALUE:', empty_string_col) END as empty_string_check,
+               int_col,
+               decimal_col,
+               date_col
+        FROM public.test_null_values
+        ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        store.result =>
+        {pretty_table(store.result)}
+        Row 2 (should have NULL string_col): {store.result[1]}
+        Row 4 (should have NULL string_col): {store.result[3]}
+
+    - type: check
+      check: store.result[2].string_col_check == "NULL"
+      name: Row 3 string_col should be NULL
+
+streams:
+  dbo.test_null_values:
+    object: public.test_null_values
+    mode: full-refresh
+    source_options:
+      empty_as_null: true
+

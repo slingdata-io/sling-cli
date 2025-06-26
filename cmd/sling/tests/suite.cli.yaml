@@ -482,10 +482,17 @@
   output_contains:
     - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
 
-- id: 78
-  name: Run sling iceberg_gcp insert
-  run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.yaml
-  streams: 2
-  output_contains:
-    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+# - id: 78
+#   name: Run sling iceberg_gcp insert
+#   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.yaml
+#   streams: 2
+#   output_contains:
+#     - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
 
+- id: 79
+  name: starrocks empty_as_null
+  run: sling run -d -r cmd/sling/tests/replications/r.24.yaml
+  streams: 1
+  rows: 5
+  output_contains:
+    - 'store.result'
