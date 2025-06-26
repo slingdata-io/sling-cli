@@ -202,6 +202,9 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		if strings.Contains(fsProps["ENDPOINT"], "r2.cloudflarestorage.com") {
 			accountID := strings.Split(fsProps["ENDPOINT"], ".")[0]
 			secretProps = append(secretProps, g.F("ACCOUNT_ID '%s'", accountID))
+			// Add ACCOUNT_ID to fsProps so it gets picked up later
+			fsProps["ACCOUNT_ID"] = accountID
+			secretKeyMap["ACCOUNT_ID"] = "ACCOUNT_ID"
 			scopeScheme = "r2"
 			uri = strings.ReplaceAll(uri, "s3://", "r2://")
 			secretType = DuckDbSecretTypeR2

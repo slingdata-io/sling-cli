@@ -519,3 +519,13 @@
     - 'copying single file from'
     - 'Copy result:'
     - 'Output files:'
+
+- id: 83
+  name: Delta R2 secret creation test (https://github.com/slingdata-io/sling-cli/issues/564)
+  run: sling run -d -r cmd/sling/tests/replications/r.27.delta_r2.yaml
+  err: true  # We expect this to fail because the delta file doesn't exist
+  output_contains:
+    - "delta_scan('r2://"  # Verifies the URL was transformed from s3:// to r2://
+    - 'No files in log segment'
+  # This test validates that the R2 secret is created with ACCOUNT_ID
+  # It will fail at data reading stage, but that proves the secret was created correctly
