@@ -537,7 +537,7 @@
     - 'execution succeeded'
 
 - id: 85
-  name: Oracle v11 NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
-  run: SCHEMA=SYSTEM SOURCE=ORACLE TARGET=POSTGRES sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
+  name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
+  run: SCHEMA=ORACLE SOURCE=ORACLE TARGET=POSTGRES sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
   output_contains:
     - 'execution succeeded'
