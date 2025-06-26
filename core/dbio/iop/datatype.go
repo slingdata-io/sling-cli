@@ -851,7 +851,7 @@ type Record struct {
 
 // MakeRowsChan returns a buffered channel with default size
 func MakeRowsChan() chan []any {
-	return make(chan []any, 1000)
+	return make(chan []any)
 }
 
 const regexExtractPrecisionScale = `[a-zA-Z]+ *\( *(\d+) *(, *\d+)* *\)`
