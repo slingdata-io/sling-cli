@@ -2524,7 +2524,7 @@ func (fns functions) prettyTable(args ...any) (any, error) {
 
 	// Handle different input types
 	var maps []map[string]any
-	
+
 	// Check if it's already []map[string]any
 	if m, ok := data.([]map[string]any); ok {
 		maps = m
@@ -2548,10 +2548,10 @@ func (fns functions) prettyTable(args ...any) (any, error) {
 		if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
 			length := v.Len()
 			maps = make([]map[string]any, 0, length)
-			
+
 			for i := 0; i < length; i++ {
 				item := v.Index(i).Interface()
-				
+
 				// Try to convert each item to a map
 				if m, ok := item.(map[string]any); ok {
 					maps = append(maps, m)
@@ -2597,7 +2597,7 @@ func (fns functions) prettyTable(args ...any) (any, error) {
 	// Collect all unique keys in order they appear
 	keyOrder := []string{}
 	keySet := make(map[string]bool)
-	
+
 	for _, m := range maps {
 		for k := range m {
 			if !keySet[k] {
@@ -2612,7 +2612,7 @@ func (fns functions) prettyTable(args ...any) (any, error) {
 
 	// Create table
 	t := table.NewWriter()
-	
+
 	// Set header
 	header := table.Row{}
 	for _, key := range keyOrder {
@@ -2636,5 +2636,5 @@ func (fns functions) prettyTable(args ...any) (any, error) {
 	}
 
 	// Return rendered table
-	return t.Render(), nil
+	return "\n" + t.Render(), nil
 }
