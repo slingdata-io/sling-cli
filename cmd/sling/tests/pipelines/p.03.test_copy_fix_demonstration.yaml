@@ -1,0 +1,75 @@
+# This test demonstrates the fix for the issue where 
+# filename was duplicated when copying files listed from FTP/SFTP
+steps:
+  # Setup: Create test files
+  - type: write
+    to: local/tmp/demo_file_1.csv
+    content: |
+      id,product
+      1,Product_A
+      2,Product_B
+
+  - type: write
+    to: local/tmp/demo_file_2.csv
+    content: |
+      id,product
+      3,Product_C
+      4,Product_D
+
+  # Copy files to simulate remote location (using local as proxy)
+  - type: copy
+    from: local/tmp/demo_file_1.csv
+    to: local/tmp/remote/demo_file_1.csv
+    
+  - type: copy
+    from: local/tmp/demo_file_2.csv
+    to: local/tmp/remote/demo_file_2.csv
+
+  # List files (simulating customer's list operation)
+  - type: list
+    id: list_files
+    location: local/tmp/remote/demo_*.csv
+    only: files
+
+  - type: log
+    message: "Listed files: {state.list_files.result}"
+
+  # Copy using location from list result (customer's use case)
+  - type: group
+    loop: state.list_files.result
+    steps:
+      - type: log
+        message: "Processing file: {loop.value.name} from location: {loop.value.location}"
+      
+      # This copy operation should NOT duplicate the filename
+      - type: copy
+        from: "{loop.value.location}"
+        to: local/tmp/output/{loop.value.name}
+        id: copy_file
+
+      - type: log
+        message: "Copy result: {state.copy_file}"
+
+  # Verify files were copied correctly
+  - type: list
+    id: verify_output
+    location: local/tmp/output/
+    only: files
+
+  - type: log
+    message: "Output files: {state.verify_output.result}"
+
+  # Cleanup
+  - type: delete
+    location: local/tmp/demo_file_1.csv
+    
+  - type: delete
+    location: local/tmp/demo_file_2.csv
+    
+  - type: delete
+    location: local/tmp/remote/
+    recursive: true
+    
+  - type: delete
+    location: local/tmp/output/
+    recursive: true

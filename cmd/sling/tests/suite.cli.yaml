@@ -511,3 +511,11 @@
   streams: 1
   output_contains:
     - 'using chunked streaming'
+
+- id: 82
+  name: Pipeline copy single file from list result (fix for duplicate filename issue)
+  run: sling run -d -p cmd/sling/tests/pipelines/p.03.test_copy_fix_demonstration.yaml
+  output_contains:
+    - 'copying single file from'
+    - 'Copy result:'
+    - 'Output files:'
