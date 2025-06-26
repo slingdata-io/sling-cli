@@ -250,7 +250,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	if !g.AssertNoError(t, err) {
 		return
 	}
-	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
+	c := iop.CSV{Path: templateFilePath, Delimiter: "\t"}
 	c.WriteStream(dataT.Stream())
 	testMux.Unlock()
 

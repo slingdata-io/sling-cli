@@ -388,7 +388,7 @@ func (t transformsNS) ParseFIXMap(message string) (fixMap map[string]any, err er
 		g.LogFatal(err)
 
 		fileMappingTSV := CSV{Reader: bufio.NewReader(fixMappingBytes)}
-		fileMappingTSV.Delimiter = '\t'
+		fileMappingTSV.Delimiter = "\t"
 		fileMappingTSV.NoDebug = true
 
 		data, err := fileMappingTSV.Read()

@@ -1182,12 +1182,12 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
 		Quote:           ds.config.Quote,
-		Delimiter:       rune(0),
+		Delimiter:       ",",
 		NoDebug:         ds.NoDebug,
 	}
 
 	if ds.config.Delimiter != "" {
-		c.Delimiter = rune(ds.config.Delimiter[0])
+		c.Delimiter = ds.config.Delimiter
 	}
 
 	nextCSV := func(reader *ReaderReady) (r csv.CsvReaderLike, err error) {
@@ -1384,12 +1384,12 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		FieldsPerRecord: ds.config.FieldsPerRec,
 		Escape:          ds.config.Escape,
 		Quote:           ds.config.Quote,
-		Delimiter:       rune(0),
+		Delimiter:       ",",
 		NoDebug:         ds.NoDebug,
 	}
 
 	if ds.config.Delimiter != "" {
-		c.Delimiter = rune(ds.config.Delimiter[0])
+		c.Delimiter = ds.config.Delimiter
 	}
 
 	// decompress if needed
@@ -2153,9 +2153,9 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 			// new reader
 			pipeR, pipeW = io.Pipe()
 			w = csv.NewWriterSize(pipeW, 40960*10)
-			w.Comma = ','
+			w.Comma = ","
 			if sp.Config.Delimiter != "" {
-				w.Comma = []rune(sp.Config.Delimiter)[0]
+				w.Comma = sp.Config.Delimiter
 			}
 
 			if sp.Config.Header {
@@ -2719,9 +2719,9 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 
 		c := int64(0) // local counter
 		w := csv.NewWriterSize(pipeW, 40960*10)
-		w.Comma = ','
+		w.Comma = ","
 		if sp.Config.Delimiter != "" {
-			w.Comma = []rune(sp.Config.Delimiter)[0]
+			w.Comma = sp.Config.Delimiter
 		}
 
 		if sp.Config.Header {
