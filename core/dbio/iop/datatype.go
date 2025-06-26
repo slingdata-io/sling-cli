@@ -1506,7 +1506,9 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 		minPrecision := col.Stats.MaxLen + scale
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
 		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
-	} else if !col.Sourced {
+	}
+
+	if precision == 0 || !col.Sourced {
 		dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
 		dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
 		dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)

@@ -1423,6 +1423,12 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.Sourced = fc.Sourced
 			}
 			col.Constraint = fc.Constraint
+
+			// fetch decimal info
+			if col.IsDecimal() && col.DbPrecision == 0 && fc.DbPrecision > 0 {
+				col.DbPrecision = fc.DbPrecision
+				col.DbScale = fc.DbScale
+			}
 		}
 
 		if colType.Length > 0 {
