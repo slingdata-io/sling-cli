@@ -797,7 +797,7 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.DbScale == 0 {
+		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			// Check if the values are too large for a regular int
 			if colStats.Min < -2147483648 || colStats.Max > 2147483647 {
 				col.Type = BigIntType
