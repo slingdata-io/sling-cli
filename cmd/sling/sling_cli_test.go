@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
@@ -19,6 +20,7 @@ import (
 
 type testCase struct {
 	ID             int               `yaml:"id"`
+	Needs          []int             `yaml:"needs"`
 	Name           string            `yaml:"name"`
 	Run            string            `yaml:"run"`
 	Env            map[string]string `yaml:"env"`
@@ -31,6 +33,21 @@ type testCase struct {
 }
 
 func TestCLI(t *testing.T) {
+	args := os.Args
+	for _, arg := range args {
+		if arg == "-d" || arg == "--debug" {
+			os.Setenv("DEBUG", "true")
+			env.InitLogger()
+		}
+		if arg == "-t" || arg == "--trace" {
+			os.Setenv("DEBUG", "TRACE")
+			env.InitLogger()
+		}
+		if arg != "" && unicode.IsDigit(rune(arg[0])) {
+			os.Setenv("TESTS", arg)
+		}
+	}
+
 	bin := os.Getenv("SLING_BIN")
 	if bin == "" {
 		bin = "./sling"
@@ -120,7 +137,7 @@ func TestCLI(t *testing.T) {
 			break
 		}
 		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
-			g.Info(env.GreenString(g.F("%02d | %s", tt.ID, tt.Run)))
+			env.Println(env.GreenString(g.F("%02d |", tt.ID) + tt.Run))
 
 			// set env
 			p.Env = map[string]string{}
@@ -174,13 +191,11 @@ func TestCLI(t *testing.T) {
 				}
 
 				found := false
-				if !strings.Contains(stderr, contains) {
+				if strings.Contains(stderr, contains) {
 					found = true
-					break
 				}
-				if !strings.Contains(stdout, contains) {
+				if strings.Contains(stdout, contains) {
 					found = true
-					break
 				}
 				assert.True(t, found, "Output does not contain %#v", contains)
 			}

@@ -528,7 +528,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
 		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
-		conn, _ := taskCfg.TgtConn.AsDatabase()
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if !g.AssertNoError(t, err) {
+			return
+		}
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
 		conn.Close()
