@@ -16,7 +16,7 @@ steps:
         message: 'Hello from group 2: {runtime_state}'
 
       - type: log
-        message: 'value: {state.group2.loop_value} ({state.group2.loop_index})'
+        message: 'value: {loop.value} ({loop.index})'
       
 
   - type: list
@@ -30,12 +30,12 @@ steps:
     loop: state.s3_list.result
     steps:
       - type: log
-        message: 'file: ({loop_index}) {loop_value.location}'
+        message: 'file: ({loop.index}) {loop.value.location}'
       
       - type: copy
         id: my_copy
-        from: '{loop_value.location}'
-        to: azure_storage/sftp-test/{loop_value.name}
+        from: '{loop.value.location}'
+        to: azure_storage/sftp-test/{loop.value.name}
 
       - type: log
         message: 'bytes_written: {state.my_copy.bytes_written}'
@@ -53,15 +53,15 @@ steps:
     loop: state.sftp_list.result
     steps:
       - type: log
-        message: 'file: ({loop_index}) {loop_value.location}'
+        message: 'file: ({loop.index}) {loop.value.location}'
 
       - type: log
         message: 'group3.my_copy.bytes_written: {state.my_copy.bytes_written}'
         level: warn
       
       - type: copy
-        from: '{loop_value.location}'
-        to: azure_storage/sftp-test/{loop_value.name}
+        from: '{loop.value.location}'
+        to: azure_storage/sftp-test/{loop.value.name}
 
   - type: log
     message: 'group3.my_copy.bytes_written: {state.my_copy.bytes_written}'
