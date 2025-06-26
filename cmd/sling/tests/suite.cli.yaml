@@ -496,3 +496,18 @@
   rows: 5
   output_contains:
     - 'store.result'
+
+- id: 80
+  name: Prometheus buffer fix test
+  run: sling run -d -r cmd/sling/tests/replications/r.25.prometheus_buffer.yaml
+  streams: 1
+  min_rows: 1
+  output_contains:
+    - 'using range'
+
+- id: 81
+  name: Prometheus issue 551 (https://github.com/slingdata-io/sling-cli/issues/551)
+  run: sling run -d -r cmd/sling/tests/replications/r.26.prometheus_issue551.yaml
+  streams: 1
+  output_contains:
+    - 'using chunked streaming'

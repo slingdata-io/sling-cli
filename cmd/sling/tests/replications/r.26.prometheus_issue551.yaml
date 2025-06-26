@@ -1,0 +1,41 @@
+source: prometheus
+target: snowflake
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  end:
+    - type: query
+      connection: snowflake
+      query: |
+        select count(*) as row_count from public.prom_data
+      into: result
+    
+    - type: log
+      message: |
+        Loaded {store.result[0].row_count} rows into public.prom_data
+    
+    - type: check
+      check: int_parse(store.result[0].row_count) > 0
+      message: "Expected rows to be loaded, but got {store.result[0].row_count}"
+    
+    - type: query
+      connection: snowflake
+      query: |
+        select 
+          count(distinct "__name__") as metric_count,
+          count(distinct "instance") as instance_count,
+          min("timestamp") as min_timestamp,
+          max("timestamp") as max_timestamp
+        from public.prom_data
+      into: stats
+    
+    - type: log
+      message: '{pretty_table(store.stats)}'
+
+streams:
+  prometheus_metrics:
+    sql: |
+      up#{"start": "now-70m", "end": "now", "step": "5m"}
+    object: 'public.prom_data'
