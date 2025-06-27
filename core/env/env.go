@@ -111,8 +111,8 @@ func SetLogger() {
 		}
 	}
 
-	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05"}
-	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
+	outputOut := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
+	outputErr := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
 	outputOut.FormatErrFieldValue = func(i interface{}) string {
 		return fmt.Sprintf("%s", i)
 	}
@@ -133,9 +133,9 @@ func SetLogger() {
 		g.ZLogOut = zerolog.New(os.Stdout).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	} else {
-		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM"}
+		outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "3:04PM", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
 		if g.IsDebugLow() {
-			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05"}
+			outputErr = zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "2006-01-02 15:04:05", FormatLevel: g.ZLogFormatLevel, FormatMessage: g.ZLogFormatMessage}
 		}
 		g.ZLogOut = zerolog.New(outputErr).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
@@ -321,7 +321,10 @@ func LogSQL(props map[string]string, query string, args ...any) {
 	query = strings.TrimSuffix(query, ";")
 
 	// wrap args
-	contextArgs := g.M("conn", props["sling_conn_id"])
+	contextArgs := g.M()
+	if connID := props["sling_conn_id"]; connID != "" {
+		contextArgs["conn"] = connID
+	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
 	}

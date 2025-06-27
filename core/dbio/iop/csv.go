@@ -23,7 +23,7 @@ import (
 type CSV struct {
 	Path            string
 	NoHeader        bool
-	Delimiter       rune
+	Delimiter       string
 	Escape          string
 	Quote           string
 	FieldsPerRecord int
@@ -227,19 +227,19 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 	}
 
 	numCols := c.FieldsPerRecord
-	if c.Delimiter == 0 || numCols <= 0 {
+	if c.Delimiter == "" || numCols <= 0 {
 		var deli rune
 		deli, numCols, err = detectDelimiter(string(c.Delimiter), testBytes)
 
-		if c.Delimiter == 0 {
+		if c.Delimiter == "" {
 			if err != nil {
 				g.Debug(`could not detect delimiter. Using ","`)
-				c.Delimiter = ','
+				c.Delimiter = ","
 			} else {
 				if !c.NoDebug {
 					g.Debug("delimiter auto-detected: %#v", string(deli))
 				}
-				c.Delimiter = deli
+				c.Delimiter = string(deli)
 			}
 		}
 		if c.FieldsPerRecord <= 0 && !c.NoDebug {
@@ -261,7 +261,7 @@ func (c *CSV) getReader() (r csv.CsvReaderLike, err error) {
 
 	if c.Escape != "" {
 		options := csv.CsvOptions{}
-		options.Delimiter = byte(c.Delimiter)
+		options.Delimiter = c.Delimiter
 		options.Escape = []byte(c.Escape)[0]
 
 		if c.Quote != "" {
@@ -396,7 +396,7 @@ func (c *CSV) WriteStream(ds *Datastream) (cnt uint64, err error) {
 	defer c.File.Close()
 
 	w := csv.NewWriter(c.File)
-	if c.Delimiter != 0 {
+	if c.Delimiter != "" {
 		w.Comma = c.Delimiter
 	}
 
@@ -553,7 +553,7 @@ func detectDelimiter(delimiter string, testBytes []byte) (bestDeli rune, numCols
 		var row []string
 		csvR := csv.NewReader(strings.NewReader(testString))
 		csvR.LazyQuotes = true
-		csvR.Comma = d
+		csvR.Comma = string(d)
 		for {
 			row, csvErr = csvR.Read()
 			if csvErr == io.EOF {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"maps"
 	"strings"
 	"time"
 
@@ -14,11 +15,13 @@ import (
 	"github.com/apache/iceberg-go/catalog"
 	"github.com/apache/iceberg-go/catalog/glue"
 	"github.com/apache/iceberg-go/catalog/rest"
+	sqlcat "github.com/apache/iceberg-go/catalog/sql"
 	"github.com/apache/iceberg-go/table"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -29,9 +32,12 @@ import (
 // IcebergConn is an Iceberg connection
 type IcebergConn struct {
 	BaseConn
-	URL       string
-	Warehouse string
-	Catalog   catalog.Catalog
+	URL            string
+	CatalogType    dbio.IcebergCatalogType
+	CatalogSQLConn Connection
+	Catalog        catalog.Catalog
+	Warehouse      string
+	duck           *iop.DuckDb
 }
 
 // Init initiates the object
@@ -43,11 +49,7 @@ func (conn *IcebergConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
-	for _, key := range g.ArrStr("BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "REGION", "DEFAULT_REGION", "SESSION_TOKEN", "ENDPOINT", "ROLE_ARN", "ROLE_SESSION_NAME", "PROFILE") {
-		if conn.GetProp(key) == "" {
-			conn.SetProp(key, conn.GetProp("AWS_"+key))
-		}
-	}
+	conn.CatalogType = dbio.IcebergCatalogType(conn.GetProp("catalog_type"))
 
 	return conn.BaseConn.Init()
 }
@@ -58,19 +60,15 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 		return nil
 	}
 
-	// Determine catalog type from URL or properties
-	catalogType := conn.GetProp("catalog_type")
-	if catalogType == "" {
-		catalogType = "rest" // default to REST catalog
-	}
-
-	switch strings.ToLower(catalogType) {
-	case "rest":
+	switch conn.CatalogType {
+	case dbio.IcebergCatalogTypeREST:
 		err = conn.connectREST()
-	case "glue":
+	case dbio.IcebergCatalogTypeGlue:
 		err = conn.connectGlue()
+	case dbio.IcebergCatalogTypeSQL:
+		err = conn.connectSQL()
 	default:
-		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue", catalogType)
+		return g.Error("Unsupported catalog type: %s. Supported types are: rest, glue, sql", conn.CatalogType)
 	}
 
 	if err != nil {
@@ -88,10 +86,6 @@ func (conn *IcebergConn) Connect(timeOut ...int) (err error) {
 }
 
 func (conn *IcebergConn) connectREST() error {
-	restURI := conn.GetProp("rest_uri")
-	if restURI == "" {
-		return g.Error("rest_uri property is required for REST catalog")
-	}
 
 	catalogName := conn.GetProp("catalog_name")
 	if catalogName == "" {
@@ -100,20 +94,89 @@ func (conn *IcebergConn) connectREST() error {
 
 	opts := []rest.Option{}
 
+	// Add warehouse location if provided
+	conn.Warehouse = conn.GetProp("rest_warehouse")
+	if conn.Warehouse != "" {
+		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
+
+		// check fo s3table
+		if conn.isS3TablesViaREST() {
+			// extract region
+			parts := strings.Split(conn.Warehouse, ":")
+			if len(parts) != 6 {
+				return g.Error("invalid s3tables ARN: %s", conn.Warehouse)
+			}
+
+			// configure for s3tables via REST
+			region := parts[3]
+			if r := conn.GetProp("s3_region"); r != "" && r != region {
+				return g.Error("ARN region does not match `s3_region` property: %s != %s", r, region)
+			}
+			opts = append(opts, rest.WithSigV4RegionSvc(region, "s3tables"))
+
+			conn.SetProp("s3_region", region)
+			conn.SetProp("rest_uri", g.F("https://s3tables.%s.amazonaws.com/iceberg", region))
+		}
+	}
+
+	restURI := conn.GetProp("rest_uri")
+	if restURI == "" {
+		return g.Error("rest_uri property is required for REST catalog")
+	}
+
+	if cast.ToBool(conn.GetProp("rest_sigv4_enable")) {
+		opts = append(opts, rest.WithSigV4())
+		region := conn.GetProp("rest_sigv4_region")
+		service := conn.GetProp("rest_sigv4_service")
+		if region != "" {
+			opts = append(opts, rest.WithSigV4RegionSvc(region, service))
+		}
+	}
+
+	if tlsConfig, err := conn.makeTlsConfig(); tlsConfig != nil && err == nil {
+		opts = append(opts, rest.WithTLSConfig(tlsConfig))
+	} else if err != nil {
+		return g.Error(err, "invalid TLS config")
+	}
+
+	if metaLoc := conn.GetProp("rest_metadata_location"); metaLoc != "" {
+		opts = append(opts, rest.WithMetadataLocation(metaLoc))
+	}
+
+	if prefix := conn.GetProp("rest_prefix"); prefix != "" {
+		opts = append(opts, rest.WithPrefix(prefix))
+	}
+
+	if extra := conn.GetProp("rest_extra_props"); extra != "" {
+		props := map[string]string{}
+		if err := g.Unmarshal(extra, &props); err != nil {
+			return g.Error(err, "could not unmarshal rest_extra_props")
+		}
+		opts = append(opts, rest.WithAdditionalProps(props))
+	}
+
 	// Add authentication if provided
-	if token := conn.GetProp("token"); token != "" {
+	if token := conn.GetProp("rest_token"); token != "" {
 		opts = append(opts, rest.WithOAuthToken(token))
 	}
 
-	// Add warehouse location if provided
-	conn.Warehouse = conn.GetProp("warehouse")
-	if conn.Warehouse != "" {
-		opts = append(opts, rest.WithWarehouseLocation(conn.Warehouse))
+	if authURI := conn.GetProp("rest_oauth_server_uri"); authURI != "" {
+		au, err := net.NewURL(authURI)
+		if err != nil {
+			return g.Error(err, "invalid rest_auth_uri")
+		}
+		opts = append(opts, rest.WithAuthURI(au.U))
 	}
 
-	// Add credential if provided
-	if cred := conn.GetProp("credential"); cred != "" {
-		opts = append(opts, rest.WithCredential(cred))
+	if scope := conn.GetProp("rest_oauth_scope"); scope != "" {
+		opts = append(opts, rest.WithScope(scope))
+	}
+
+	// Add rest_credential if provided
+	if clientID := conn.GetProp("rest_oauth_client_id"); clientID != "" {
+		clientSecret := conn.GetProp("rest_oauth_client_secret")
+		creds := clientID + ":" + clientSecret
+		opts = append(opts, rest.WithCredential(creds))
 	}
 
 	cat, err := rest.NewCatalog(
@@ -133,13 +196,17 @@ func (conn *IcebergConn) connectREST() error {
 	return nil
 }
 
+func (conn *IcebergConn) isS3TablesViaREST() bool {
+	return strings.HasPrefix(conn.Warehouse, "arn:aws:s3tables")
+}
+
 func (conn *IcebergConn) connectGlue() error {
 	// Get AWS credentials from connection properties
-	awsAccessKeyID := conn.GetProp("access_key_id")
-	awsSecretAccessKey := conn.GetProp("secret_access_key")
-	awsSessionToken := conn.GetProp("session_token")
-	awsRegion := conn.GetProp("region")
-	awsProfile := conn.GetProp("profile")
+	awsAccessKeyID := conn.GetProp("s3_access_key_id")
+	awsSecretAccessKey := conn.GetProp("s3_secret_access_key")
+	awsSessionToken := conn.GetProp("s3_session_token")
+	awsRegion := conn.GetProp("s3_region")
+	awsProfile := conn.GetProp("s3_profile")
 
 	if awsRegion == "" {
 		return g.Error("AWS region not specified")
@@ -147,6 +214,7 @@ func (conn *IcebergConn) connectGlue() error {
 
 	var awsCfg awsv2.Config
 	var err error
+	opts := []glue.Option{}
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
@@ -188,8 +256,134 @@ func (conn *IcebergConn) connectGlue() error {
 		}
 	}
 
+	opts = append(opts, glue.WithAwsConfig(awsCfg))
+
+	if extra := conn.GetProp("glue_extra_props"); extra != "" {
+		props := map[string]string{}
+		if err := g.Unmarshal(extra, &props); err != nil {
+			return g.Error(err, "could not unmarshal glue_extra_props")
+		}
+		opts = append(opts, glue.WithAwsProperties(props))
+	}
+
 	// Create Glue catalog with AWS config
-	cat := glue.NewCatalog(glue.WithAwsConfig(awsCfg))
+	cat := glue.NewCatalog(opts...)
+	conn.Catalog = cat
+
+	return nil
+}
+
+func (conn *IcebergConn) connectSQL() error {
+	// Get SQL catalog configuration
+	catalogName := conn.GetProp("sql_catalog_name")
+	if catalogName == "" {
+		catalogName = "sql"
+	}
+
+	connName := conn.GetProp("sql_catalog_conn")
+	connPayload := conn.GetProp("sql_conn_payload")
+	if connName == "" {
+		return g.Error("must provide sql_catalog_conn")
+	} else if connPayload == "" {
+		return g.Error("did not find provided sql_catalog_conn: %s", connName)
+	}
+
+	connMap, err := g.UnmarshalMap(connPayload)
+	if err != nil {
+		return g.Error(err, "could not unmarshal payload for Iceberg SQL Connection")
+	}
+
+	connData := map[string]string{}
+	if err = g.JSONConvert(connMap["data"], &connData); err != nil {
+		return g.Error(err, "could not convert payload for Iceberg SQL Connection")
+	}
+
+	conn.CatalogSQLConn, err = NewConnContext(
+		conn.Context().Ctx, cast.ToString(connMap["url"]),
+		g.MapToKVArr(connData)...)
+	if err != nil {
+		return g.Error(err, "could not make object for Iceberg SQL Connection")
+	}
+
+	if err = conn.CatalogSQLConn.Connect(); err != nil {
+		return g.Error(err, "could not connect to Iceberg SQL Connection")
+	}
+
+	// Validate dialect
+	var dialect sqlcat.SupportedDialect
+	switch conn.CatalogSQLConn.GetType() {
+	case dbio.TypeDbPostgres:
+		dialect = sqlcat.Postgres
+	case dbio.TypeDbMySQL:
+		dialect = sqlcat.MySQL
+	case dbio.TypeDbSQLite:
+		dialect = sqlcat.SQLite
+	case dbio.TypeDbSQLServer:
+		dialect = sqlcat.MSSQL
+	case dbio.TypeDbOracle:
+		dialect = sqlcat.Oracle
+	default:
+		return g.Error("unsupported sql connection type '%s'", dialect)
+	}
+
+	// Prepare properties for SQL catalog
+	props := iceberg.Properties{
+		sqlcat.DialectKey: string(dialect),
+		sqlcat.DriverKey:  getDriverName(conn.CatalogSQLConn),
+		"uri":             conn.CatalogSQLConn.GetURL(),
+	}
+
+	// Add optional properties
+	if cast.ToBool(conn.GetProp("sql_catalog_init")) {
+		props["init_catalog_tables"] = "true"
+	}
+
+	// Add warehouse location if provided
+	if warehouse := conn.GetProp("sql_warehouse"); warehouse != "" {
+		props["warehouse"] = warehouse
+		conn.Warehouse = warehouse
+	}
+
+	// Pass through S3 properties for filesystem access
+	for key, value := range conn.properties {
+		if strings.HasPrefix(key, "s3") {
+			// Map common S3 properties to what iceberg-go expects
+			switch key {
+			case "s3_access_key_id":
+				props["s3.access-key-id"] = value
+			case "s3_secret_access_key":
+				props["s3.secret-access-key"] = value
+			case "s3_session_token":
+				props["s3.session-token"] = value
+			case "s3_region":
+				props["s3.region"] = value
+			case "s3_endpoint":
+				props["s3.endpoint"] = value
+			case "s3_profile":
+				props["s3.profile"] = value
+			default:
+				// Pass through any other s3_ properties as-is
+				props[key] = value
+			}
+		}
+	}
+
+	// Add any extra properties specified by the user
+	if extra := conn.GetProp("sql_extra_props"); extra != "" {
+		extraProps := map[string]string{}
+		if err := g.Unmarshal(extra, &extraProps); err != nil {
+			return g.Error(err, "could not unmarshal sql_extra_props")
+		}
+		maps.Copy(props, extraProps)
+	}
+
+	// Create SQL catalog
+	cat, err := sqlcat.NewCatalog(catalogName, conn.CatalogSQLConn.Db().DB, dialect, props)
+	if err != nil {
+		conn.CatalogSQLConn.Close()
+		return g.Error(err, "Failed to create SQL catalog")
+	}
+
 	conn.Catalog = cat
 
 	return nil
@@ -197,6 +391,13 @@ func (conn *IcebergConn) connectGlue() error {
 
 // Close closes the connection
 func (conn *IcebergConn) Close() error {
+	if conn.duck != nil {
+		conn.duck.Close()
+	}
+	if conn.CatalogSQLConn != nil {
+		conn.CatalogSQLConn.Close()
+	}
+
 	if conn.Catalog == nil {
 		return nil
 	}
@@ -305,7 +506,11 @@ func (conn *IcebergConn) GetColumns(tableFName string, fields ...string) (column
 	}
 
 	// Parse table identifier
-	tableID := parseTableIdentifier(tableFName)
+	t, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		return nil, g.Error(err, "could parse %s", tableFName)
+	}
+	tableID := table.Identifier{t.Schema, t.Name}
 
 	// Load table
 	tbl, err := conn.Catalog.LoadTable(conn.Context().Ctx, tableID, nil)
@@ -370,8 +575,17 @@ func (conn *IcebergConn) GetDataFiles(t Table) (dataFiles []iceberg.DataFile, er
 		return nil, g.Error(err, "could not load table FS => %s", t.FullName())
 	}
 
+	currSnapshot := tbl.CurrentSnapshot()
+	if currSnapshot == nil {
+		return nil, g.Error("no current snapshot found")
+	}
+
 	// Check each data file's statistics
-	manifests, _ := tbl.CurrentSnapshot().Manifests(fs)
+	manifests, err := currSnapshot.Manifests(fs)
+	if err != nil {
+		return nil, g.Error(err, "failed to get manifests from snapshot %d", currSnapshot.SnapshotID)
+	}
+
 	for _, manifest := range manifests {
 		// Only process data manifests (not delete manifests)
 		if manifest.ManifestContent() != iceberg.ManifestContentData {
@@ -456,7 +670,9 @@ func (conn *IcebergConn) GetMaxValue(t Table, colName string) (value any, maxCol
 	}
 
 	// cast value
-	value = iop.NewStreamProcessor().CastVal(0, globalMax.String(), &maxCol)
+	if globalMax != nil {
+		value = iop.NewStreamProcessor().CastVal(0, globalMax.String(), &maxCol)
+	}
 
 	return
 }
@@ -483,6 +699,11 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 	start := time.Now()
 	if strings.TrimSpace(sql) == "" {
 		return ds, g.Error("Empty Query")
+	}
+
+	if tableName == "" || conn.CatalogType != dbio.IcebergCatalogTypeREST {
+		// if custom SQL, or glue or s3 tables, use DuckDB
+		return conn.queryViaDuckDB(ctx, sql, opts)
 	}
 
 	queryContext := g.NewContext(ctx)
@@ -850,8 +1071,18 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 
 		identifier := table.Identifier{t.Schema, t.Name}
 		if exists {
-			err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
+			// purge table
+			catalog, ok := conn.Catalog.(*rest.Catalog)
+			if ok {
+				err = catalog.PurgeTable(conn.context.Ctx, identifier)
+			} else {
+				err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
+			}
 			if err != nil {
+				if g.IsDebug() && strings.Contains(err.Error(), "RuntimeIOException") {
+					g.Warn(err.Error())
+					return nil
+				}
 				return g.Error(err, "cannot drop table")
 			}
 			g.Debug("table %s dropped", tableName)
@@ -867,13 +1098,13 @@ func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
 	exists, nsErr := conn.Catalog.CheckNamespaceExists(conn.Context().Ctx, namespace)
 	if nsErr != nil {
 		// Some catalogs might not implement namespace checking, log and continue
-		g.Debug("could not check if namespace exists: %v", nsErr)
+		g.Debug("could not check if namespace exists: %w", nsErr)
 	} else if !exists {
 		// Try to create the namespace
-		nsProps := iceberg.Properties{
-			"created-by": "sling-cli",
-		}
-		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nsProps); err != nil {
+		// nsProps := iceberg.Properties{
+		// 	"created-by": "sling-cli",
+		// }
+		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nil); err != nil {
 			return g.Error(err, "could not create namespace %s", schema)
 		}
 	}
@@ -1054,7 +1285,10 @@ func (conn *IcebergConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 			return count, g.Error(err, "Failed to commit data to Iceberg table %s", tableFName)
 		}
 
-		details := g.M("location", tbl.Location(), "snapshot_id", newTable.CurrentSnapshot().SnapshotID, "batch_rows", len(batch.Rows))
+		details := g.M("location", tbl.Location(), "batch_rows", len(batch.Rows))
+		if currSnapshot := newTable.CurrentSnapshot(); currSnapshot != nil {
+			details["snapshot_id"] = currSnapshot.SnapshotID
+		}
 		g.Debug("committed iceberg snapshot", details)
 	}
 
@@ -1332,36 +1566,120 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(col iop.Column) iceberg.T
 	}
 }
 
-// Helper functions
-
-func parseTableIdentifier(tableName string) table.Identifier {
-	// Split by dots to create namespace and table parts
-	tableName = strings.ReplaceAll(tableName, `"`, "")
-	parts := strings.Split(tableName, ".")
-	return parts
-}
-
-func parseSimpleSelectSQL(sql string) (tableName string, err error) {
-	// Very simple SQL parser for "SELECT * FROM table" queries
-	sql = strings.TrimSpace(sql)
-	sql = strings.ToUpper(sql)
-
-	if !strings.HasPrefix(sql, "SELECT") {
-		return "", g.Error("Only SELECT queries are supported")
+// queryViaDuckDB executes a custom SQL query using DuckDB with Iceberg REST or Glue catalog
+// https://duckdb.org/docs/stable/core_extensions/iceberg/iceberg_rest_catalogs
+// https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
+// https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
+func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts map[string]any) (ds *iop.Datastream, err error) {
+	if conn.CatalogType == dbio.IcebergCatalogTypeSQL {
+		g.Warn("for querying iceberg with custom SQL via DuckDB, cannot do so with SQL-Catalog. DuckDB only supports REST and Glue catalog types.")
+		return nil, g.Error("unsupported catalog for DuckDB Iceberg extension.")
 	}
 
-	// Find FROM clause
-	fromIdx := strings.Index(sql, "FROM")
-	if fromIdx == -1 {
-		return "", g.Error("No FROM clause found")
+	if !strings.Contains(sql, "iceberg_catalog.") {
+		g.Warn("for querying iceberg with custom SQL via DuckDB, the table names need to be qualified with \"iceberg_catalog\". For example: select count(*) cnt from iceberg_catalog.my_namespace.my_table")
+		return nil, g.Error("missing qualifier \"iceberg_catalog\"")
 	}
 
-	// Extract table name after FROM
-	afterFrom := strings.TrimSpace(sql[fromIdx+4:])
-	parts := strings.Fields(afterFrom)
-	if len(parts) == 0 {
-		return "", g.Error("No table name found after FROM")
+	if conn.duck != nil {
+		return conn.duck.StreamContext(ctx, sql, opts)
 	}
 
-	return parts[0], nil
+	// Create a DuckDB instance
+	conn.duck = iop.NewDuckDb(ctx, "sling_conn_id", conn.GetProp("sling_conn_id"))
+
+	// Add iceberg extensions
+	conn.duck.AddExtension("iceberg")
+	conn.duck.AddExtension("https")
+
+	// Open DuckDB connection
+	err = conn.duck.Open()
+	if err != nil {
+		return nil, g.Error(err, "could not open DuckDB connection for Iceberg query")
+	}
+
+	attachSQL := ""
+	catalogType := lo.Ternary(
+		conn.isS3TablesViaREST(),
+		dbio.IcebergCatalogTypeS3Tables,
+		conn.CatalogType,
+	)
+
+	switch catalogType {
+	case dbio.IcebergCatalogTypeREST:
+		// make secret
+		secretProps := MakeDuckDbSecretProps(conn, iop.DuckDbSecretTypeIceberg)
+		secret := iop.NewDuckDbSecret("iceberg_secret", iop.DuckDbSecretTypeIceberg, secretProps)
+		conn.duck.AddSecret(secret)
+
+		// make attach SQL
+		restEndpoint := conn.GetProp("rest_uri")
+		if restEndpoint == "" {
+			return nil, g.Error("rest_uri property is required for REST catalog")
+		}
+		attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, SECRET iceberg_secret, ENDPOINT '%s')", conn.Warehouse, restEndpoint)
+
+	case dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeS3Tables:
+		// Map secret credentials
+		var storageSecretType iop.DuckDbSecretType
+		for key := range conn.properties {
+			if storageSecretType != iop.DuckDbSecretTypeUnknown {
+				break
+			} else if strings.HasPrefix(key, "s3_") {
+				storageSecretType = iop.DuckDbSecretTypeS3
+			}
+		}
+
+		if storageSecretType == iop.DuckDbSecretTypeUnknown {
+			return nil, g.Error("could not make AWS duckdb Iceberg secret for Iceberg query")
+		}
+
+		// make secret
+		secretProps := MakeDuckDbSecretProps(conn, storageSecretType)
+		secret := iop.NewDuckDbSecret("iceberg_storage_secret", storageSecretType, secretProps)
+		conn.duck.AddSecret(secret)
+
+		// make attach SQL
+		if catalogType == dbio.IcebergCatalogTypeGlue {
+			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse
+			accountID := conn.GetProp("glue_account_id")
+			namespace := conn.GetProp("glue_namespace")
+			if accountID == "" || namespace == "" {
+				return nil, g.Error("glue_account_id and glue_namespace properties are required for GLUE catalog")
+			}
+
+			warehouse := g.F("%s:s3tablescatalog/%s", accountID, namespace)
+
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE glue, SECRET iceberg_storage_secret)", warehouse)
+		}
+
+		if catalogType == dbio.IcebergCatalogTypeS3Tables {
+			// see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_s3_tables
+			arn := conn.GetProp("s3tables_arn", "rest_warehouse")
+			if !strings.HasPrefix(arn, "arn:aws:s3tables") {
+				return nil, g.Error("warehouse property is required for S3 Tables catalog via DuckDB")
+			}
+
+			attachSQL = g.F("ATTACH '%s' AS iceberg_catalog (TYPE ICEBERG, ENDPOINT_TYPE s3_tables, SECRET iceberg_storage_secret)", arn)
+		}
+
+	default:
+		return nil, g.Error("Unsupported catalog type for DuckDB query: %s", catalogType)
+	}
+
+	// Attach
+	_, err = conn.duck.Exec(attachSQL + env.NoDebugKey)
+	if err != nil {
+		return nil, g.Error(err, "could not attach Iceberg catalog")
+	}
+
+	// Use the catalog
+	// getting => Catalog Error: SET schema: No catalog + schema named "iceberg_catalog" found.
+	// _, err = conn.duck.Exec("USE iceberg_catalog;" + env.NoDebugKey)
+	// if err != nil {
+	// 	return nil, g.Error(err, "could not use Iceberg catalog")
+	// }
+
+	// Execute the actual query
+	return conn.duck.StreamContext(ctx, sql, opts)
 }

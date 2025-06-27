@@ -1,0 +1,14 @@
+source: prometheus
+target: local
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: csv
+    file_max_rows: 10000
+
+streams:
+  prometheus_metrics:
+    sql: |
+      up#{"start": "now-30m", "end": "now", "step": "5m"}
+    object: '/tmp/prometheus_test_{run_timestamp}.csv'

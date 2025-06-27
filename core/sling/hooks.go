@@ -1,6 +1,9 @@
 package sling
 
-import "github.com/flarco/g"
+import (
+	"github.com/flarco/g"
+	"github.com/spf13/cast"
+)
 
 type HookType string
 type HookKind string
@@ -16,7 +19,7 @@ var HookRunReplication func(string, *Config, ...string) error
 type Hook interface {
 	Type() HookType
 	ID() string
-	Data() map[string]any
+	Context() *g.Context
 	SetExtra(map[string]any)
 	Stage() HookStage
 	Status() ExecStatus
@@ -56,7 +59,14 @@ var ParseHook = func(any, ParseOptions) (Hook, error) {
 }
 
 func (hs Hooks) Execute() (err error) {
-	for _, hook := range hs {
+	idHookMap := map[string]int{}
+	for i, step := range hs {
+		idHookMap[step.ID()] = i
+	}
+
+	for i := 0; i < len(hs); i++ {
+		hook := hs[i]
+
 		if !g.In(hook.Type(), "log") {
 			g.Debug(`executing hook "%s" (type: %s)`, hook.ID(), hook.Type())
 		}
@@ -66,6 +76,17 @@ func (hs Hooks) Execute() (err error) {
 
 		if err != nil {
 			return g.Error(err, "error executing hook")
+		} else if br, _ := hook.Context().Map.Get("break"); br == true {
+			break
+		}
+
+		// check for goto
+		if gotoID := hook.PayloadMap()["goto"]; gotoID != nil {
+			if gotoIndex, ok := idHookMap[cast.ToString(gotoID)]; ok {
+				i = gotoIndex - 1 // -1 because i++ will increment it
+			} else {
+				g.Warn("did not find hook ID (%s) for goto", gotoID)
+			}
 		}
 	}
 	return nil

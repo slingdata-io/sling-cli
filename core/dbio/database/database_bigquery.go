@@ -1052,11 +1052,18 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 		return
 	}
 
+	// fully qualify src. in DELETE where expressions
+	// see https://github.com/slingdata-io/sling-cli/issues/575
+	projectPrefix := ""
+	if conn.ProjectID != "" {
+		projectPrefix = g.F("`%s`.", conn.ProjectID)
+	}
+
 	sqlTempl := `
 	delete from {tgt_table} tgt
 	where exists (
 			select 1
-			from {src_table} src
+			from {project_prefix}{src_table} src
 			where {src_tgt_pk_equal}
 	)
 	;
@@ -1082,6 +1089,7 @@ func (conn *BigQueryConn) GenerateUpsertSQL(srcTable string, tgtTable string, pk
 		sqlTempl,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
+		"project_prefix", projectPrefix,
 		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
 		"set_fields", upsertMap["set_fields"],
 		"insert_fields", upsertMap["insert_fields"],

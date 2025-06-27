@@ -241,6 +241,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 	}
 
 	filePath := ""
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+		// fileFormat = dbio.FileTypeParquet // Error encountered when unloading to PARQUET: TIMESTAMP_TZ and LTZ types are not supported for unloading to Parquet.
+	}
 
 	if conn.GetProp("use_bulk") != "false" {
 		switch conn.CopyMethod {
@@ -259,7 +264,7 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		default:
 			if stage := conn.getOrCreateStage(table.Schema); stage != "" {
 				var unloaded int64
-				filePath, unloaded, err = conn.UnloadViaStage(table)
+				filePath, unloaded, err = conn.UnloadViaStage(fileFormat, table)
 				if err != nil {
 					err = g.Error(err, "Could not unload to stage.")
 					return
@@ -290,10 +295,11 @@ func (conn *SnowflakeConn) BulkExportFlow(table Table) (df *iop.Dataflow, err er
 		columns.Coerce(coerceCols, true, cc, tgtType)
 	}
 
-	fs.SetProp("format", "csv")
+	// format is auto-detected, below if CSV
 	fs.SetProp("delimiter", ",")
 	fs.SetProp("header", "true")
-	fs.SetProp("null_if", `\N`)
+	fs.SetProp("null_if", "\\N")
+
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 	df, err = fs.ReadDataflow(filePath)
@@ -656,7 +662,7 @@ func (conn *SnowflakeConn) CopyFromAzure(tableFName, azPath string) (err error) 
 	return nil
 }
 
-func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unloaded int64, err error) {
+func (conn *SnowflakeConn) UnloadViaStage(format dbio.FileType, tables ...Table) (filePath string, unloaded int64, err error) {
 
 	stageFolderPath := fmt.Sprintf(
 		"@%s/%s/%s",
@@ -679,7 +685,7 @@ func (conn *SnowflakeConn) UnloadViaStage(tables ...Table) (filePath string, unl
 		defer context.Wg.Write.Done()
 
 		unloadSQL := g.R(
-			conn.template.Core["copy_to_stage"],
+			conn.template.Core[g.F("copy_to_stage_%s", format.String())],
 			"sql", sql,
 			"stage_path", stagePartPath,
 		)
@@ -757,6 +763,12 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		table.Schema = conn.GetProp("schema")
 	}
 
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+		// fileFormat = dbio.FileTypeParquet
+	}
+
 	// get target columns
 	columns, err := conn.GetSQLColumns(table)
 	if err != nil {
@@ -786,6 +798,19 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 
 		config := iop.LoaderStreamConfig(true)
 		config.TargetType = conn.GetType()
+		config.Format = fileFormat
+		config.FileMaxRows = cast.ToInt64(conn.GetProp("file_max_rows"))
+		if config.FileMaxRows == 0 {
+			config.FileMaxRows = 500000
+		}
+
+		switch fileFormat {
+		case dbio.FileTypeCsv:
+			config.Header = true
+			config.Delimiter = ","
+		case dbio.FileTypeParquet:
+		}
+
 		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 
 		if err != nil {
@@ -881,7 +906,7 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		}
 
 		sql := g.R(
-			conn.template.Core["copy_from_stage"],
+			conn.template.Core[g.F("copy_from_stage_%s", fileFormat.String())],
 			"table", tableFName,
 			"tgt_columns", strings.Join(tgtColumns, ", "),
 			"src_columns", strings.Join(srcColumns, ", "),

@@ -1,14 +1,14 @@
 module github.com/slingdata-io/sling-cli
 
-go 1.24
+go 1.24.0
 
 toolchain go1.24.3
 
 require (
-	cloud.google.com/go v0.120.0
-	cloud.google.com/go/bigquery v1.67.0
+	cloud.google.com/go v0.121.0
+	cloud.google.com/go/bigquery v1.69.0
 	cloud.google.com/go/bigtable v1.37.0
-	cloud.google.com/go/storage v1.51.0
+	cloud.google.com/go/storage v1.53.0
 	github.com/360EntSecGroup-Skylar/excelize v1.4.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.9.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
@@ -16,23 +16,24 @@ require (
 	github.com/PuerkitoBio/goquery v1.6.0
 	github.com/apache/arrow-go/v18 v18.3.0
 	github.com/apache/iceberg-go v0.3.0
-	github.com/aws/aws-sdk-go-v2 v1.36.3
+	github.com/aws/aws-sdk-go-v2 v1.36.5
 	github.com/aws/aws-sdk-go-v2/config v1.29.15
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.68
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.69
 	github.com/aws/aws-sdk-go-v2/service/athena v1.51.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.80.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.20
-	github.com/aws/smithy-go v1.22.3
+	github.com/aws/smithy-go v1.22.4
 	github.com/bits-and-blooms/bloom/v3 v3.7.0
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/clbanning/mxj/v2 v2.7.0
+	github.com/databricks/databricks-sql-go v0.0.0-00010101000000-000000000000
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.146
+	github.com/flarco/g v0.1.152
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.1
 	github.com/gobwas/glob v0.2.3
@@ -63,7 +64,7 @@ require (
 	github.com/prometheus/common v0.55.0
 	github.com/psanford/sqlite3vfs v0.0.0-20220823065410-bd28ac7ee3c2
 	github.com/psanford/sqlite3vfshttp v0.0.0-20220827153928-a19f096e6eb4
-	github.com/rs/zerolog v1.20.0
+	github.com/rs/zerolog v1.34.0
 	github.com/samber/lo v1.39.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/shirou/gopsutil/v3 v3.24.4
@@ -121,15 +122,16 @@ require (
 	github.com/andybalholm/cascadia v1.1.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
+	github.com/apache/arrow/go/v18 v18.0.0-20241007013041-ab95a4d25142 // indirect
 	github.com/apache/thrift v0.21.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.30 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.34 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.36 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.36 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.34 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.36 // indirect
 	github.com/aws/aws-sdk-go-v2/service/glue v1.113.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.7.2 // indirect
@@ -143,12 +145,14 @@ require (
 	github.com/cncf/xds/go v0.0.0-20250326154945-ae57f3c0d45f // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/containerd/console v1.0.5 // indirect
+	github.com/coreos/go-oidc/v3 v3.5.0 // indirect
 	github.com/creack/pty v1.1.18 // indirect
 	github.com/creasty/defaults v1.8.0 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/disintegration/imaging v1.6.2 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
+	github.com/dnephin/pflag v1.0.7 // indirect
 	github.com/docker/docker v28.0.4+incompatible // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -160,10 +164,12 @@ require (
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
+	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.7 // indirect
 	github.com/ganigeorgiev/fexpr v0.4.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -183,6 +189,7 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/wire v0.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
@@ -190,7 +197,9 @@ require (
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hamba/avro/v2 v2.28.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -252,6 +261,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/pterm/pterm v0.12.81 // indirect
+	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
@@ -268,10 +278,20 @@ require (
 	github.com/substrait-io/substrait-go/v3 v3.9.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
+	github.com/uptrace/bun v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/mssqldialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/oracledialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/pgdialect v1.2.12 // indirect
+	github.com/uptrace/bun/dialect/sqlitedialect v1.2.12 // indirect
+	github.com/uptrace/bun/extra/bundebug v1.2.12 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/viant/xunsafe v0.8.0 // indirect
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
@@ -313,6 +333,7 @@ require (
 	gopkg.in/mattn/go-colorable.v0 v0.1.0 // indirect
 	gopkg.in/mattn/go-isatty.v0 v0.0.4 // indirect
 	gopkg.in/mattn/go-runewidth.v0 v0.0.4 // indirect
+	gotest.tools/gotestsum v1.8.2 // indirect
 	modernc.org/libc v1.65.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
@@ -323,4 +344,8 @@ replace github.com/flarco/g => ../g
 
 replace github.com/slingdata-io/sling => ../sling
 
-replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250611103821-67dfc1bc6720
+replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250625114951-763f8d92b49e
+
+// replace github.com/apache/iceberg-go => ../iceberg-go
+
+replace github.com/databricks/databricks-sql-go => github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad

@@ -1,132 +1,156 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
-  drop_index: "select 'indexes do not apply for snowflake'"
-  create_table: create table {table} ({col_types}) {cluster_by}
-  create_temporary_table: create transient table {table} ({col_types}) {cluster_by}
-  create_index: "select 'indexes do not apply for snowflake'"
+  drop_index: "select 'indexes do not apply for databricks'"
+  create_table: |
+    create table {table} ({col_types})
+    using delta
+  # create_temporary_table: |
+  #   create table {table} ({col_types})
+  #   using delta
+  #   tblproperties ('delta.feature.variantType-preview' = 'supported')
+  create_index: "select 'indexes do not apply for databricks'"
   insert: insert into {table} ({fields}) values ({values})
   update: update {table} set {set_fields} where {pk_fields_equal}
   alter_columns: alter table {table} alter {col_ddl}
-  modify_column: '{column} set data type {type}'
+  modify_column: '{column} type {type}'
   enable_trigger: ""
   disable_trigger: ""
-  copy_from_stage_csv: |
-    COPY INTO {table} ({tgt_columns})
-    from ( 
-      select {src_columns}
-      from {stage_path} as T
-    )
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
-      EMPTY_FIELD_AS_NULL = FALSE
-      NULL_IF = '\\N'
-      SKIP_HEADER = 1
-      REPLACE_INVALID_CHARACTERS = TRUE
-    )
-    ON_ERROR = ABORT_STATEMENT
-  copy_from_stage_parquet: |
+  optimize_table: optimize {table}
+  create_volume: create volume if not exists {volume_name}
+  copy_from_volume_parquet: |
     COPY INTO {table}
-    from {stage_path}
-    FILE_FORMAT = (
-      TYPE = PARQUET
-      COMPRESSION = AUTO
-      REPLACE_INVALID_CHARACTERS = TRUE
+    FROM '{volume_path}'
+    FILEFORMAT = PARQUET
+    FORMAT_OPTIONS (
+      'datetimeRebaseMode' = 'CORRECTED',
+      'int96RebaseMode' = 'CORRECTED'
     )
-    ON_ERROR = ABORT_STATEMENT
-    MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+  copy_from_volume_csv: |
+    COPY INTO {table} ({tgt_columns})
+    FROM '{volume_path}'
+    FILEFORMAT = CSV
+    FORMAT_OPTIONS (
+      'skipRows' = '1',
+      'nullValue' = '\\N',
+      'enforceSchema' = 'false',
+      'inferSchema' = 'false',
+      'mergeSchema' = 'false',
+      'multiLine' = 'true',
+      'escape' = '"',
+      'delimiter' = ','
+    )
+  put_into_volume: PUT '{local_file}' INTO '{volume_path}' OVERWRITE
+  get_from_volume: GET '{volume_path}' TO '{local_file}'
+  remove_volume_files: REMOVE '{volume_path}'
+  list_volume: LIST '{volume_path}'
   copy_from_s3: |
-    COPY INTO {table} 
-    from '{s3_path}'
-    CREDENTIALS = (
-      AWS_KEY_ID = '{aws_access_key_id}'
-      AWS_SECRET_KEY = '{aws_secret_access_key}'
+    COPY INTO {table}
+    FROM '{s3_path}'
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'inferSchema' = 'true',
     )
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
-      EMPTY_FIELD_AS_NULL = FALSE
-      NULL_IF = '\\N'
-      SKIP_HEADER = 1
-      REPLACE_INVALID_CHARACTERS = TRUE
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
     )
-    ON_ERROR = ABORT_STATEMENT
-  copy_from_azure: |
-    COPY INTO {table} 
-    from '{azure_path}'
-    CREDENTIALS = (
-      AZURE_SAS_TOKEN = '{azure_sas_token}'
+  copy_from_s3_with_creds: |
+    COPY INTO {table}
+    FROM '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}'
+      )
     )
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
-      EMPTY_FIELD_AS_NULL = FALSE
-      NULL_IF = '\\N'
-      SKIP_HEADER = 1
-      REPLACE_INVALID_CHARACTERS = TRUE
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'header' = 'true',
+      'inferSchema' = 'true'
     )
-    ON_ERROR = ABORT_STATEMENT
-  copy_to_stage_csv: |
-    COPY INTO '{stage_path}'
-    from ({sql})
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      NULL_IF = '\\N'
-      COMPRESSION = GZIP
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY = '0x22'
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
     )
-    HEADER = TRUE
-  copy_to_stage_parquet: |
-    COPY INTO '{stage_path}'
-    from ({sql})
-    FILE_FORMAT = (
-      TYPE = PARQUET
+  copy_from_s3_with_creds_and_token: |
+    COPY INTO {table}
+    FROM '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}',
+        AWS_SESSION_TOKEN = '{aws_session_token}'
+      )
     )
-  copy_to_s3: |
-    COPY INTO '{s3_path}'
-    from ({sql})
-    CREDENTIALS = (
-      AWS_KEY_ID = '{aws_access_key_id}'
-      AWS_SECRET_KEY = '{aws_secret_access_key}'
+    FILEFORMAT = {file_format}
+    FORMAT_OPTIONS (
+      'header' = 'true',
+      'inferSchema' = 'true'
     )
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      NULL_IF = '\\N'
-      COMPRESSION = GZIP
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+    COPY_OPTIONS (
+      'mergeSchema' = 'false'
     )
-    HEADER = TRUE
-  copy_to_azure: |
-    COPY INTO '{azure_path}/'
-    from ({sql})
-    CREDENTIALS = (
-      AZURE_SAS_TOKEN = '{azure_sas_token}'
+  export_to_volume_csv: |
+    insert overwrite directory '{volume_path}' 
+    using csv
+    options (header = true, escape = '"', delimiter = ',')
+    {sql}
+
+  export_to_volume_parquet: |
+    insert overwrite directory '{volume_path}' 
+    using parquet
+    {sql}
+  
+  export_to_s3: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    OPTIONS (
+      'path' = '{s3_path}',
+      'compression' = 'snappy',
+      'header' = 'true'
     )
-    FILE_FORMAT = (
-      TYPE = CSV
-      RECORD_DELIMITER = '\n'
-      NULL_IF = '\\N'
-      COMPRESSION = GZIP
-      ESCAPE_UNENCLOSED_FIELD = NONE
-      FIELD_OPTIONALLY_ENCLOSED_BY='0x22'
+    AS {sql}
+  export_to_s3_with_creds: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    LOCATION '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}'
+      )
     )
-    HEADER = TRUE
+    OPTIONS (
+      'compression' = 'snappy',
+      'header' = 'true'
+    )
+    AS {sql}
+  export_to_s3_with_creds_and_token: |
+    CREATE TABLE {temp_table}
+    USING {file_format}
+    LOCATION '{s3_path}'
+    WITH (
+      CREDENTIAL (
+        AWS_ACCESS_KEY = '{aws_access_key_id}',
+        AWS_SECRET_KEY = '{aws_secret_access_key}',
+        AWS_SESSION_TOKEN = '{aws_session_token}'
+      )
+    )
+    OPTIONS (
+      'compression' = 'snappy',
+      'header' = 'true'
+    )
+    AS {sql}
 
 metadata:
 
   current_database:
     select current_database()
+
+  current_catalog:
+    select current_catalog()
+
+  catalogs: |
+    show catalogs
 
   databases: |
     show databases
@@ -135,30 +159,44 @@ metadata:
     show schemas
 
   tables: |
-    show tables in {{if .schema -}} schema "{schema}" {{else}} account {{end}}
+    select table_schema as schema_name, table_name, 'false' as is_view
+    from information_schema.tables
+    where table_type not in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
 
   views: |
-    show views in {{if .schema -}} schema "{schema}" {{else}} account {{end}}
+    select table_schema as schema_name, table_name, 'true' as is_view
+    from information_schema.tables
+    where table_type in ('VIEW', 'MATERIALIZED_VIEW')
+      and table_catalog = ( select current_catalog() )
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+    order by table_name
 
   columns: |
-    show columns in table "{schema}"."{table}"
+    select
+      column_name,
+      data_type,
+      character_maximum_length as maximum_length,
+      numeric_precision as precision, 
+      numeric_scale as scale
+    from information_schema.columns
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+    order by ordinal_position
 
   primary_keys: |
-    select tco.constraint_name as pk_name,
-           1 as position,
-           kcu.column_name as column_name
-    from information_schema.table_constraints tco
-    join information_schema.key_column_usage kcu 
-         on kcu.constraint_name = tco.constraint_name
-         and kcu.constraint_schema = tco.constraint_schema
-         and kcu.constraint_name = tco.constraint_name
-    where kcu.table_schema = '{schema}'
-      and kcu.table_name = '{table}'
-    order by kcu.table_schema,
-             kcu.table_name,
-             position
+    select constraint_name as pk_name,
+           ordinal_position as position,
+           column_name
+    from information_schema.constraint_column_usage
+    where table_schema = '{schema}'
+      and table_name = '{table}'
+      and constraint_type = 'PRIMARY KEY'
+    order by ordinal_position
 
-  columns_full: show columns in table "{schema}"."{table}"
+  columns_full: describe table extended {schema}.{table}
 
   schemata: |
     with tables as (
@@ -189,10 +227,10 @@ metadata:
       and tables.table_name = cols.table_name
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
 
-  ddl_table: select get_ddl('table', '{schema}.{table}')
+  ddl_table: show create table {schema}.{table}
 
   ddl_view: |
-    select get_ddl('view', '{schema}.{table}')
+    show create table {schema}.{table}
 
 analysis:
   # table level
@@ -202,7 +240,7 @@ analysis:
       '{schema}' as schema_nm,
       '{table}' as table_nm,
       count(*) cnt
-    from "{schema}"."{table}"
+    from {schema}.{table}
 
   table_join_match: |
     -- table_join_match "{t1}" vs "{t2}"
@@ -262,11 +300,11 @@ analysis:
       '{schema}' as schema_nm,
       '{table}' as table_nm,
       '{field}' as field,
-      sum(case when regexp_like({field}, '\\n') then 1 else 0 end) as cnt_nline,
-      sum(case when regexp_like({field}, '\\t') then 1 else 0 end) as cnt_tab,
-      sum(case when regexp_like({field}, ',') then 1 else 0 end) as cnt_comma,
-      sum(case when regexp_like({field}, '"') then 1 else 0 end) as cnt_dquote
-    from "{schema}"."{table}"
+      sum(case when {field} rlike '\n' then 1 else 0 end) as cnt_nline,
+      sum(case when {field} rlike '\t' then 1 else 0 end) as cnt_tab,
+      sum(case when {field} rlike ',' then 1 else 0 end) as cnt_comma,
+      sum(case when {field} rlike '"' then 1 else 0 end) as cnt_dquote
+    from {schema}.{table}
 
   field_pk_test: |
     -- field_pk_test {table}
@@ -275,7 +313,7 @@ analysis:
       case when count(*) = count(distinct {field}) then 'PASS' else 'FAIL' end as result,
       count(*) as tot_cnt,
       count(distinct {field}) as dstct_cnt
-    from "{schema}"."{table}"
+    from {schema}.{table}
 
   field_stat: |
     -- field_stat {field}
@@ -290,7 +328,7 @@ analysis:
       count(distinct {field}) as f_dstct_cnt,
       round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
       count(*) - count(distinct {field}) as f_dup_cnt
-    from "{schema}"."{table}"
+    from {schema}.{table}
 
   field_stat_group: |
     -- field_stat_group {field} grouped by `{group_expr}`
@@ -306,7 +344,7 @@ analysis:
       count(distinct {field}) as f_dstct_cnt,
       round(100.0 * count(distinct {field}) / count(*), 1) as f_dstct_prct,
       count(*) - count(distinct {field}) as f_dup_cnt
-    from "{schema}"."{table}"
+    from {schema}.{table}
     group by {group_expr}
 
   field_stat_deep: |
@@ -325,16 +363,16 @@ analysis:
       count(*) - count(distinct {field}) as f_dup_cnt,
       cast(min({field}) as string) as f_min,
       cast(max({field}) as string) as f_max,
-      min(length({field})) as f_min_len,
-      max(length({field})) as f_max_len
-    from "{schema}"."{table}"
+      min(length(cast({field} as string))) as f_min_len,
+      max(length(cast({field} as string))) as f_max_len
+    from {schema}.{table}
 
   fill_cnt_group_field: |
     -- fill_cnt_group_field {field}
     select
       {field},
       {columns_sql}
-    from "{schema}"."{table}"
+    from {schema}.{table}
     group by {field}
     order by {field}
 
@@ -343,7 +381,7 @@ analysis:
     select
       {field},
       {fill_rate_fields_sql}
-    from "{schema}"."{table}"
+    from {schema}.{table}
     group by {field}
     order by {field}
 
@@ -354,7 +392,7 @@ analysis:
         '{field}' as field,
         {field},
         count(*) cnt
-      from "{schema}"."{table}"
+      from {schema}.{table}
       group by {field}
       order by count(*) desc
     )
@@ -362,7 +400,7 @@ analysis:
       select
         '{field}' as field,
         count(*) ttl_cnt
-      from "{schema}"."{table}"
+      from {schema}.{table}
     )
     select
       '{table}' as table_nm,
@@ -383,7 +421,7 @@ analysis:
         {group_expr} as group_exp,
         {field},        
         count(*) cnt
-      from "{schema}"."{table}"
+      from {schema}.{table}
       group by {field}, {group_expr}
       order by count(*) desc
     )
@@ -391,7 +429,7 @@ analysis:
       select
         '{field}' as field,
         count(*) ttl_cnt
-      from "{schema}"."{table}"
+      from {schema}.{table}
     )
     select
       '{table}' as table_nm,
@@ -410,15 +448,15 @@ analysis:
     with t1 as (
         select
           '{field}' as field,
-          date_trunc(day, {field}) as date,
+          date_trunc('day', {field}) as date,
           count(*) cnt
-        from "{schema}"."{table}"
+        from {schema}.{table}
         group by 2
         order by 2
       )
       , t2 as (
         select '{field}' as field, count(*) ttl_cnt
-        from "{schema}"."{table}"
+        from {schema}.{table}
       )
       select 
         '{schema}' as schema_nm,
@@ -435,9 +473,9 @@ analysis:
   distro_field_date_wide: |
     -- distro_field_date {table}
     select
-      date_trunc(day, {date_field}) as {date_field}_day,
+      date_trunc('day', {date_field}) as {date_field}_day,
       {columns_sql}
-    from "{schema}"."{table}"
+    from {schema}.{table}
     {where_clause}
     group by 1
     order by 1
@@ -451,7 +489,7 @@ analysis:
       count(distinct {fields_exp}) as expression_cnt,
       count(*) - count(distinct {fields_exp}) as delta_cnt,
       sum(case when {fields_exp} is null then 1 else 0 end) as null_cnt
-    from "{schema}"."{table}"
+    from {schema}.{table}
     {where_clause}
 
 routine:
@@ -492,25 +530,29 @@ routine:
 
 function:
   replace: replace({string_expr}, {to_replace}, {replacement})
-  str_utf8: "{ field }"
+  str_utf8: "{field}"
   string_type: string
-  cast_to_string: '{field}::string'
-  cast_to_text: '{field}::string'
+  cast_to_string: 'cast({field} as string)'
+  cast_to_text: 'cast({field} as string)'
   fill_cnt_field: count({field}) as cnt_{field}
   fill_rate_field: round(100.0 * count({field}) / count(*), 2) as prct_{field}
-  sleep: call SYSTEM$WAIT({seconds})
-  checksum_date: DATE_PART('epoch_second', {field}) * 1000000
-  checksum_datetime: DATE_PART('epoch_microsecond', {field})
-  checksum_string: length({field}::string)
-  checksum_boolean: length({field}::string)
-  checksum_json: length(replace({field}::string, ' ', ''))
+  sleep: 'SELECT 1' # Databricks doesn't have a built-in sleep function
+  checksum_date: unix_timestamp(cast({field} as timestamp)) * 1000000
+  checksum_datetime: unix_timestamp({field}) * 1000000
+  checksum_string: length({field})
+  checksum_boolean: length(cast({field} as string))
+  checksum_json: length(replace(cast({field} as string), ' ', ''))
+  checksum_integer: 'abs({field})'
+  checksum_decimal: 'abs(cast({field} as bigint))'
 
 variable:
   bind_string: "?"
+  batch_values: 256
   tmp_folder: /tmp
-  column_upper: true
-  max_string_type: varchar
-  max_string_length: 16777216
+  column_upper: false
+  max_string_type: string
+  max_string_length: 32700000
+  quote_char: "`"
 
 error_filter:
   table_not_exist: exist

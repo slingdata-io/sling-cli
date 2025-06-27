@@ -56,12 +56,13 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbBigTable:          {name: "bigtable"},
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
+	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
 	dbio.TypeDbDuckDb:            {name: "duckdb"},
 	dbio.TypeDbDuckLake:          {name: "ducklake"},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck"},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
-	dbio.TypeDbIceberg:           {name: "iceberg", adjustCol: g.Bool(false)},
+	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
@@ -249,7 +250,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	if !g.AssertNoError(t, err) {
 		return
 	}
-	c := iop.CSV{Path: templateFilePath, Delimiter: '\t'}
+	c := iop.CSV{Path: templateFilePath, Delimiter: "\t"}
 	c.WriteStream(dataT.Stream())
 	testMux.Unlock()
 
@@ -527,7 +528,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
 		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
-		conn, _ := taskCfg.TgtConn.AsDatabase()
+		conn, err := taskCfg.TgtConn.AsDatabase()
+		if !g.AssertNoError(t, err) {
+			return
+		}
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
 		conn.Close()
@@ -774,6 +778,20 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // iceberg uses text for json
 				}
+			case tgtType == dbio.TypeDbDatabricks:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // databricks uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in databricks
+				}
+			case srcType == dbio.TypeDbDatabricks && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampType {
+					correctType = iop.TimestampzType // databricks uses timestampz
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in databricks
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -861,6 +879,15 @@ func TestSuiteDatabaseDuckLake(t *testing.T) {
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck)
+}
+
+func TestSuiteDatabaseDatabricks(t *testing.T) {
+	t.Parallel()
+
+	// test 06 => BAD_REQUEST: Parameterized query has too many parameters: 1812 parameters were given but the limit is 256.
+	// test 10 => misses the test1k_databricks_wide
+	// test 24 => misses the test1k_databricks_wide
+	testSuite(t, dbio.TypeDbDatabricks, "1-5,7-9,11-23")
 }
 
 func TestSuiteDatabaseAthena(t *testing.T) {

@@ -134,11 +134,10 @@ sling -h
 
 #### Binary on Linux
 
-```powershell
+```bash
 curl -LO 'https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_amd64.tar.gz' \
-  && tar xf sling_linux_amd64.tar.gz \
-  && rm -f sling_linux_amd64.tar.gz \
-  && chmod +x sling
+  && tar xzf sling_linux_amd64.tar.gz \
+  && rm -f sling_linux_amd64.tar.gz
 
 # You're good to go!
 sling -h
@@ -256,11 +255,11 @@ You can specify individual test numbers, ranges, or use the '+' suffix to run al
 
 3. **CLI Suite**: Tests command-line interface functionality.
    - Located in: `cmd/sling/sling_cli_test.go`
-   - Configuration: `cmd/sling/tests/suite.cli.tsv`
+   - Configuration: `cmd/sling/tests/suite.cli.yaml`
 
 ### Adding New Tests
 
-When introducing new features or addressing bugs, it's essential to incorporate relevant tests, focusing mainly on the CLI suite file located at `cmd/sling/suite.cli.tsv`. The database and file suites serve as templates applicable across all connectors, making them more sensitive to modifications. Therefore, any changes to these suites will be managed internally.
+When introducing new features or addressing bugs, it's essential to incorporate relevant tests, focusing mainly on the CLI suite file located at `cmd/sling/suite.cli.yaml`. The database and file suites serve as templates applicable across all connectors, making them more sensitive to modifications. Therefore, any changes to these suites will be managed internally.
 
  When adding new test entries in the CLI suite file, feel free to create a new replication file in folder `cmd/sling/tests/replications`, or a corresponding source file in the `cmd/sling/tests/files` directory. Also include the expected output or the number of expected rows/streams in the new test entry.
 

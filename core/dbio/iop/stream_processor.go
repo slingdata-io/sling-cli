@@ -786,6 +786,15 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 			}
 			// is decimal
 			sp.ds.ChangeColumn(i, DecimalType)
+			cs.DecCnt++
+			cs.TotalCnt++
+
+			if fVal < 0 {
+				sp.rowChecksum[i] = uint64(-fVal)
+			} else {
+				sp.rowChecksum[i] = uint64(fVal)
+			}
+
 			return fVal
 		}
 
@@ -824,6 +833,15 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 				}
 				// is decimal
 				sp.ds.ChangeColumn(i, DecimalType)
+				cs.DecCnt++
+				cs.TotalCnt++
+
+				if fVal < 0 {
+					sp.rowChecksum[i] = uint64(-fVal)
+				} else {
+					sp.rowChecksum[i] = uint64(fVal)
+				}
+
 				return fVal
 			}
 		}

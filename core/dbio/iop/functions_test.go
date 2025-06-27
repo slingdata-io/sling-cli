@@ -1,4 +1,4 @@
-package api
+package iop
 
 import (
 	"regexp"
@@ -572,6 +572,28 @@ func TestFunctions(t *testing.T) {
 				assert.Contains(t, []string{"8", "9", "a", "b"}, variantChar, "UUID variant should be correct")
 			}
 		}
+
+		// Test pretty_table output format
+		result, err = eval.Evaluate(`pretty_table([{"name": "John", "age": 30}, {"name": "Jane", "age": 25}])`, variables, Functions.Generate())
+		
+		// Check that no error occurred
+		if assert.NoError(t, err) {
+			// Check that the result is a string
+			tableStr, ok := result.(string)
+			if assert.True(t, ok, "pretty_table result should be a string") {
+				// Check that the table contains expected content
+				assert.Contains(t, tableStr, "AGE", "Table should contain 'AGE' header")
+				assert.Contains(t, tableStr, "NAME", "Table should contain 'NAME' header")
+				assert.Contains(t, tableStr, "John", "Table should contain 'John'")
+				assert.Contains(t, tableStr, "Jane", "Table should contain 'Jane'")
+				assert.Contains(t, tableStr, "30", "Table should contain '30'")
+				assert.Contains(t, tableStr, "25", "Table should contain '25'")
+				
+				// Check that it has table structure (contains separators)
+				assert.Contains(t, tableStr, "+", "Table should contain table borders")
+				assert.Contains(t, tableStr, "|", "Table should contain column separators")
+			}
+		}
 	})
 
 	// Tests for UUID function
@@ -800,6 +822,23 @@ func TestFunctions(t *testing.T) {
 		{"extract_with_date_add", `date_extract(date_add(sampleDate, 1, "day"), "day")`, 16, false},
 		{"int_format_with_extract", `int_format(date_extract(sampleDate, "year"), "")`, "2022", false},
 		{"comparison_with_extract", `is_greater(date_extract(t2, "year"), date_extract(t1, "year"))`, true, false},
+	}
+
+	// Tests for pretty_table
+	testSuites["pretty_table"] = []test{
+		{"no_args", `pretty_table()`, nil, true},
+		{"null_input", `pretty_table(null)`, "", false},
+		{"empty_array", `pretty_table([])`, "", false},
+		{"single_map", `length(pretty_table([{"name": "John", "age": 30}])) > 0`, true, false}, // Just check it returns non-empty string
+		{"multiple_maps", `length(pretty_table([{"name": "John", "age": 30}, {"name": "Jane", "age": 25}])) > 0`, true, false},
+		{"missing_keys", `length(pretty_table([{"name": "John", "age": 30}, {"name": "Jane"}])) > 0`, true, false}, // Missing "age" in second map
+		{"extra_keys", `length(pretty_table([{"name": "John"}, {"name": "Jane", "age": 25}])) > 0`, true, false}, // Extra "age" in second map
+		{"mixed_types", `length(pretty_table([{"id": 1, "value": 3.14, "active": true}])) > 0`, true, false},
+		{"map_string_keys", `length(pretty_table([{"1": "one", "2": "two"}])) > 0`, true, false}, // String keys
+		{"non_array_input", `pretty_table("not an array")`, nil, true},
+		{"array_of_non_maps", `pretty_table([1, 2, 3])`, nil, true},
+		{"null_values", `length(pretty_table([{"name": "John", "age": null}])) > 0`, true, false},
+		{"unicode_values", `length(pretty_table([{"name": "张三", "city": "北京"}])) > 0`, true, false},
 	}
 
 	testSuites["date_range"] = []test{

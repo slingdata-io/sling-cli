@@ -1,4 +1,4 @@
-package api
+package iop
 
 import (
 	"fmt"
@@ -24,17 +24,17 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/json"
 	"github.com/itchyny/timefmt-go"
+	"github.com/jedib0t/go-pretty/table"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
-	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
 type functions struct {
-	sp *iop.StreamProcessor
+	sp *StreamProcessor
 }
 
-var Functions = functions{sp: iop.NewStreamProcessor()}
+var Functions = functions{sp: NewStreamProcessor()}
 
 var GlobalFunctionMap = Functions.Generate()
 
@@ -82,8 +82,8 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	fMap["chunk"] = fns.chunk
 
 	// comparison operations
-	fMap["is_greater"] = fns.isGreater
-	fMap["is_less"] = fns.isLess
+	fMap["is_greater"] = fns.IsGreater
+	fMap["is_less"] = fns.IsLess
 	fMap["equals"] = fns.equals
 	fMap["is_null"] = fns.isNull
 	fMap["is_empty"] = fns.isEmpty
@@ -112,6 +112,7 @@ func (fns functions) Generate() map[string]goval.ExpressionFunction {
 	fMap["decode_base64"] = fns.decodeBase64
 	fMap["uuid"] = fns.uuid
 	fMap["hash"] = fns.hash
+	fMap["pretty_table"] = fns.prettyTable
 
 	return fMap
 }
@@ -613,7 +614,7 @@ func (fns functions) greatest(args ...any) (any, error) {
 			// Compare with remaining elements
 			for i := 1; i < length; i++ {
 				val := v.Index(i).Interface()
-				greater, err := fns.isGreater(val, max)
+				greater, err := fns.IsGreater(val, max)
 				if err != nil {
 					return nil, err
 				}
@@ -628,7 +629,7 @@ func (fns functions) greatest(args ...any) (any, error) {
 	// If not a slice, compare all arguments directly
 	max := args[0]
 	for _, val := range args[1:] {
-		greater, err := fns.isGreater(val, max)
+		greater, err := fns.IsGreater(val, max)
 		if err != nil {
 			return nil, err
 		}
@@ -662,7 +663,7 @@ func (fns functions) least(args ...any) (any, error) {
 			// Compare with remaining elements
 			for i := 1; i < length; i++ {
 				val := v.Index(i).Interface()
-				less, err := fns.isLess(val, min)
+				less, err := fns.IsLess(val, min)
 				if err != nil {
 					return nil, err
 				}
@@ -677,7 +678,7 @@ func (fns functions) least(args ...any) (any, error) {
 	// If not a slice, compare all arguments directly
 	min := args[0]
 	for _, val := range args[1:] {
-		less, err := fns.isLess(val, min)
+		less, err := fns.IsLess(val, min)
 		if err != nil {
 			return nil, err
 		}
@@ -690,7 +691,7 @@ func (fns functions) least(args ...any) (any, error) {
 
 // Helper function to compare if val1 > val2
 // Works for numeric, string, and time.Time types
-func (fns functions) isGreater(args ...any) (any, error) {
+func (fns functions) IsGreater(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, g.Error("isGreater requires exactly 2 arguments")
 	}
@@ -733,7 +734,7 @@ func (fns functions) isGreater(args ...any) (any, error) {
 
 // Helper function to compare if val1 < val2
 // Works for numeric, string, and time.Time types
-func (fns functions) isLess(args ...any) (any, error) {
+func (fns functions) IsLess(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, g.Error("isLess requires exactly 2 arguments")
 	}
@@ -2313,7 +2314,7 @@ func (fns functions) dateDiff(args ...any) (any, error) {
 	}
 }
 
-type chunkResult struct {
+type ChunkResult struct {
 	Chan chan []any
 }
 
@@ -2508,4 +2509,132 @@ func coerceToFloat64(v any) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// prettyTable: creates a pretty table from an array of maps
+func (fns functions) prettyTable(args ...any) (any, error) {
+	if len(args) != 1 {
+		return nil, g.Error("pretty_table requires exactly 1 argument: data")
+	}
+
+	data := args[0]
+	if data == nil {
+		return "", nil
+	}
+
+	// Handle different input types
+	var maps []map[string]any
+
+	// Check if it's already []map[string]any
+	if m, ok := data.([]map[string]any); ok {
+		maps = m
+	} else if m, ok := data.([]map[any]any); ok {
+		// Convert []map[any]any to []map[string]any
+		maps = make([]map[string]any, len(m))
+		for i, row := range m {
+			stringMap := make(map[string]any)
+			for k, v := range row {
+				keyStr, err := cast.ToStringE(k)
+				if err != nil {
+					return nil, g.Error("could not convert key to string: %v", k)
+				}
+				stringMap[keyStr] = v
+			}
+			maps[i] = stringMap
+		}
+	} else {
+		// Try reflection for other slice types
+		v := reflect.ValueOf(data)
+		if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
+			length := v.Len()
+			maps = make([]map[string]any, 0, length)
+
+			for i := 0; i < length; i++ {
+				item := v.Index(i).Interface()
+
+				// Try to convert each item to a map
+				if m, ok := item.(map[string]any); ok {
+					maps = append(maps, m)
+				} else if m, ok := item.(map[any]any); ok {
+					// Convert map[any]any to map[string]any
+					stringMap := make(map[string]any)
+					for k, v := range m {
+						keyStr, err := cast.ToStringE(k)
+						if err != nil {
+							return nil, g.Error("could not convert key to string: %v", k)
+						}
+						stringMap[keyStr] = v
+					}
+					maps = append(maps, stringMap)
+				} else {
+					// Try reflection for map types
+					itemVal := reflect.ValueOf(item)
+					if itemVal.Kind() == reflect.Map {
+						stringMap := make(map[string]any)
+						for _, key := range itemVal.MapKeys() {
+							keyStr, err := cast.ToStringE(key.Interface())
+							if err != nil {
+								return nil, g.Error("could not convert key to string: %v", key.Interface())
+							}
+							stringMap[keyStr] = itemVal.MapIndex(key).Interface()
+						}
+						maps = append(maps, stringMap)
+					} else {
+						return nil, g.Error("array elements must be maps, got %T", item)
+					}
+				}
+			}
+		} else {
+			return nil, g.Error("argument must be an array of maps, got %T", data)
+		}
+	}
+
+	// If empty array, return empty string
+	if len(maps) == 0 {
+		return "", nil
+	}
+
+	// Collect all unique keys in order they appear
+	keyOrder := []string{}
+	keySet := make(map[string]bool)
+
+	for _, m := range maps {
+		for k := range m {
+			if !keySet[k] {
+				keySet[k] = true
+				keyOrder = append(keyOrder, k)
+			}
+		}
+	}
+
+	// Sort keys for consistent output
+	sort.Strings(keyOrder)
+
+	// Create table
+	t := table.NewWriter()
+
+	// Set header
+	header := table.Row{}
+	for _, key := range keyOrder {
+		header = append(header, key)
+	}
+	t.AppendHeader(header)
+
+	// Add rows
+	for _, m := range maps {
+		row := table.Row{}
+		for _, key := range keyOrder {
+			val := m[key]
+			if val == nil {
+				row = append(row, "")
+			} else {
+				// Convert value to string
+				row = append(row, cast.ToString(val))
+			}
+		}
+		t.AppendRow(row)
+	}
+
+	// Return rendered table
+	return "\n" + t.Render(), nil
 }

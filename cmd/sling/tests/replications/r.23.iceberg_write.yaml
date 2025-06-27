@@ -1,0 +1,36 @@
+source: postgres
+target: '{target}'
+
+hooks:
+  end:
+    # does not work for gcp or sql
+    - type: check
+      id: target_check
+      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql"  
+      failure_message: skipping target {target.name}
+      on_failure: break
+      
+    # verify that we can query with custom SQL via duckDB
+    - type: query
+      connection: '{target}'
+      query: select count(*) from iceberg_catalog.public.test1k_mariadb_pg
+      into: count_result
+    
+    - type: log
+      message: 'count_result => { store.count_result[0] }'
+
+streams:
+  test1k_mariadb_pg_full:
+    mode: full-refresh
+    sql: select * from public.test1k_mariadb_pg where create_dt < '2018-12-01'
+    object: public.test1k_mariadb_pg
+
+  test1k_mariadb_pg_incremental:
+    mode: incremental
+    sql: select * from public.test1k_mariadb_pg where {incremental_where_cond}
+    object: public.test1k_mariadb_pg
+    update_key: create_dt
+  
+env:
+  target: ${TARGET}
+  

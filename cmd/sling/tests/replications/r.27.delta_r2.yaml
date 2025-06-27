@@ -1,0 +1,17 @@
+# Test for Delta reader with R2 storage
+# This tests the fix for https://github.com/slingdata-io/sling-cli/issues/564
+
+source: ocral_r2
+target: duckdb
+
+defaults:
+  mode: full-refresh
+
+streams:
+  # Using SQL with delta_scan to force DuckDB to create R2 secret
+  # This will fail because the delta file doesn't exist, but it will test the secret creation
+  delta_r2_test:
+    sql: select * from delta_scan('r2://ocral/test/nonexistent.delta')
+    source_options:
+      format: delta
+    object: delta_r2_test

@@ -1427,11 +1427,12 @@ type TargetOptions struct {
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
 
-	TableKeys database.TableKeys `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
-	TableTmp  string             `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
-	TableDDL  *string            `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
-	PreSQL    *string            `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
-	PostSQL   *string            `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	TableKeys      database.TableKeys       `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
+	TableTmp       string                   `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
+	TableDDL       *string                  `json:"table_ddl,omitempty" yaml:"table_ddl,omitempty"`
+	PreSQL         *string                  `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
+	PostSQL        *string                  `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
+	IsolationLevel *database.IsolationLevel `json:"isolation_level,omitempty" yaml:"isolation_level,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
@@ -1598,6 +1599,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.PostSQL == nil {
 		o.PostSQL = targetOptions.PostSQL
+	}
+	if o.IsolationLevel == nil {
+		o.IsolationLevel = targetOptions.IsolationLevel
 	}
 	if o.TableTmp == "" {
 		o.TableTmp = targetOptions.TableTmp

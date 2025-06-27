@@ -66,6 +66,61 @@ jobs:
           
           bash scripts/test.sh
 
+  build-test-sling-cli:
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
+
+    runs-on: [self-hosted, linux, ubuntu-20]
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v2
+      
+      - uses: myrotvorets/set-commit-status-action@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
+          status: pending
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.24"
+          cache: false
+        
+      - name: Load Secrets
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        
+      - name: Load Secrets (dbio)
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          path: /dbio
+          env: dev
+      
+      - name: Build Binary
+        run: |
+          # Prep
+          bash scripts/ci/prep.linux.sh
+
+          # build
+          bash scripts/ci/build.linux.sh dev
+
+      - name: Run Go Tests (sling)
+        run: |
+          export DEBUG=''
+
+          # Oracle env
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+          export PATH="$PATH:$ORACLE_HOME/bin"
+          
+          bash scripts/test.cli.sh
+
   build-test-dbio:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
 

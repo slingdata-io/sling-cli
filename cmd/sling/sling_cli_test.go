@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
@@ -14,9 +15,39 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
+type testCase struct {
+	ID             int               `yaml:"id"`
+	Needs          []int             `yaml:"needs"`
+	Name           string            `yaml:"name"`
+	Run            string            `yaml:"run"`
+	Env            map[string]string `yaml:"env"`
+	Err            bool              `yaml:"err"`
+	Rows           string            `yaml:"rows"`    // number of rows
+	Bytes          string            `yaml:"bytes"`   // number of bytes
+	Streams        string            `yaml:"streams"` // number of streams
+	Fails          string            `yaml:"fails"`   // number of fails
+	OutputContains []string          `yaml:"output_contains"`
+}
+
 func TestCLI(t *testing.T) {
+	args := os.Args
+	for _, arg := range args {
+		if arg == "-d" || arg == "--debug" {
+			os.Setenv("DEBUG", "true")
+			env.InitLogger()
+		}
+		if arg == "-t" || arg == "--trace" {
+			os.Setenv("DEBUG", "TRACE")
+			env.InitLogger()
+		}
+		if arg != "" && unicode.IsDigit(rune(arg[0])) {
+			os.Setenv("TESTS", arg)
+		}
+	}
+
 	bin := os.Getenv("SLING_BIN")
 	if bin == "" {
 		bin = "./sling"
@@ -26,38 +57,21 @@ func TestCLI(t *testing.T) {
 		}
 	}
 
-	p, err := process.NewProc("bash")
-	if !g.AssertNoError(t, err) {
-		return
-	}
-	p.Capture = true
-	p.WorkDir = "../.."
 	bin = "cmd/sling/" + bin
 
 	defaultEnv := g.KVArrToMap(os.Environ()...)
 
-	// Load tests from suite.cli.tsv
-	filePath := "tests/suite.cli.tsv"
-	dataT, err := iop.ReadCsv(filePath)
+	// Load tests from suite.cli.yaml
+	filePath := "tests/suite.cli.yaml"
+	content, err := os.ReadFile(filePath)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	// rewrite correctly for displaying in Github
-	c := iop.CSV{Path: filePath, Delimiter: '\t'}
-	c.WriteStream(dataT.Stream())
-
-	type testCase struct {
-		Number         int
-		Name           string
-		Command        string
-		Env            map[string]string
-		Err            bool
-		Rows           string // number of rows
-		Bytes          string // number of bytes
-		Streams        string // number of streams
-		Fails          string // number of fails
-		OutputContains []string
+	cases := []testCase{}
+	err = yaml.Unmarshal(content, &cases)
+	if !g.AssertNoError(t, err) {
+		return
 	}
 
 	// get test numbers from env
@@ -68,12 +82,11 @@ func TestCLI(t *testing.T) {
 			if strings.HasSuffix(tn, "+") {
 				start := cast.ToInt(strings.TrimSuffix(tn, "+"))
 
-				for _, rec := range dataT.RecordsString() {
-					n := cast.ToInt(rec["n"])
-					if n < start {
+				for _, tc := range cases {
+					if tc.ID < start {
 						continue
 					}
-					testNumbers = append(testNumbers, n)
+					testNumbers = append(testNumbers, tc.ID)
 				}
 			} else if parts := strings.Split(tn, "-"); len(parts) == 2 {
 				start := cast.ToInt(parts[0])
@@ -88,21 +101,13 @@ func TestCLI(t *testing.T) {
 	}
 
 	tests := []testCase{}
-	for _, record := range dataT.RecordsString() {
-		tc := testCase{
-			Number:         cast.ToInt(record["n"]),
-			Name:           record["test_name"],
-			Command:        record["command"],
-			Env:            map[string]string{},
-			Err:            false,
-			Rows:           record["rows"],
-			Bytes:          record["bytes"],
-			Streams:        record["streams"],
-			Fails:          record["fails"],
-			OutputContains: strings.Split(record["output_contains"], "|"),
-		}
-		if len(testNumbers) > 0 && !g.In(tc.Number, testNumbers...) {
+	for _, tc := range cases {
+		if len(testNumbers) > 0 && !g.In(tc.ID, testNumbers...) {
 			continue
+		}
+
+		if len(tc.Env) == 0 {
+			tc.Env = map[string]string{}
 		}
 
 		if tc.Rows != "" {
@@ -122,13 +127,21 @@ func TestCLI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if !assert.NotEmpty(t, tt.Command, "Command is empty") {
+		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
-		t.Run(g.F("%d/%s", tt.Number, tt.Name), func(t *testing.T) {
-			g.Info(env.GreenString(tt.Command))
+		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
+			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
-			// set env
+			p, err := process.NewProc("bash")
+			if !g.AssertNoError(t, err) {
+				return
+			}
+			p.Capture = true
+			p.Print = true
+			p.WorkDir = "../.."
+
+			// set new env
 			p.Env = map[string]string{}
 			for k, v := range defaultEnv {
 				p.Env[k] = v
@@ -137,12 +150,9 @@ func TestCLI(t *testing.T) {
 				p.Env[k] = v
 			}
 
-			// set print
-			p.Print = true
-
 			// create a tmp bash script with the command in tmp folder
 			tmpDir := os.TempDir()
-			tmpFile, err := os.CreateTemp(tmpDir, "sling_cli_test_*.sh")
+			tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
@@ -154,7 +164,7 @@ func TestCLI(t *testing.T) {
 				"set -e",
 				"shopt -s expand_aliases",
 				g.F("alias sling=%s", bin),
-				tt.Command,
+				tt.Run,
 			}
 			content := strings.Join(lines, "\n")
 			_, err = tmpFile.WriteString(content)
@@ -172,20 +182,22 @@ func TestCLI(t *testing.T) {
 			}
 
 			// check output
-			found := false
 			stderr := p.Stderr.String()
 			stdout := p.Stdout.String()
 			for _, contains := range tt.OutputContains {
+				if contains == "" {
+					continue
+				}
+
+				found := false
 				if strings.Contains(stderr, contains) {
 					found = true
-					break
 				}
 				if strings.Contains(stdout, contains) {
 					found = true
-					break
 				}
+				assert.True(t, found, "Output does not contain %#v", contains)
 			}
-			assert.True(t, found, "Output does not contain %v", tt.OutputContains)
 		})
 		if t.Failed() {
 			break

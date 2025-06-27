@@ -1,0 +1,121 @@
+source: '{my_source}'
+target: '{my_target}'
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE {env.schema}.TEST_NUMBER_PRECISION PURGE';
+        EXCEPTION
+          WHEN OTHERS THEN
+            IF SQLCODE != -942 THEN
+              RAISE;
+            END IF;
+        END;
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        CREATE TABLE {env.schema}.TEST_NUMBER_PRECISION (
+          id NUMBER,
+          -- NUMBER without precision/scale can store decimals
+          value_decimal NUMBER,
+          -- NUMBER(10,2) has explicit scale
+          value_explicit NUMBER(10,2),
+          -- NUMBER(10) has scale of 0 
+          value_integer NUMBER(10)
+        )
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
+        VALUES (1, 0.01233, 0.01, 10)
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
+        VALUES (2, 123.456789, 123.45, 123)
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        select column_name, data_type, data_precision, data_scale
+        from all_tab_columns
+        where owner = '{env.schema}'
+          and table_name = 'TEST_NUMBER_PRECISION'
+          and column_name = 'VALUE_DECIMAL'
+      into: metadata_check
+
+    - type: log
+      message: |
+        Checking Oracle metadata for VALUE_DECIMAL column:
+        metadata_check => {store.metadata_check}
+        data_scale => {store.metadata_check[0].data_scale}
+
+    - type: check
+      check: is_null(store.metadata_check[0].data_scale)
+      message: "VALUE_DECIMAL column should have null data_scale in Oracle metadata"
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists public.test_number_precision
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: select * from public.test_number_precision order by id
+      into: result
+
+    - type: log
+      message: |
+        store.result => { pretty_table(store.result) }
+        store.result[0] => {store.result[0]}
+        store.result[0].value_decimal => {store.result[0].value_decimal}
+        store.result[1] => {store.result[1]}
+        store.result[1].value_decimal => {store.result[1].value_decimal}
+
+    # ensure the decimal values are preserved
+    - type: check
+      check: float_parse(store.result[0].value_decimal) == 0.01233
+
+    - type: check
+      check: float_parse(store.result[0].value_explicit) == 0.01
+
+    - type: check
+      check: float_parse(store.result[1].value_decimal) == 123.456789
+
+    - type: query
+      connection: '{source.name}'
+      query: |
+        BEGIN
+          EXECUTE IMMEDIATE 'DROP TABLE {env.schema}.TEST_NUMBER_PRECISION PURGE';
+        EXCEPTION
+          WHEN OTHERS THEN
+            IF SQLCODE != -942 THEN
+              RAISE;
+            END IF;
+        END;
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists public.test_number_precision
+
+streams:
+  '{schema}.TEST_NUMBER_PRECISION':
+    object: public.test_number_precision
+    # target_options:
+    #   column_typing:
+    #     decimal:
+    #       min_scale: 6
+
+env:
+  schema: ${SCHEMA}
+  my_source: ${SOURCE}
+  my_target: ${TARGET}

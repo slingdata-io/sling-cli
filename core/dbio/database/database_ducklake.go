@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
@@ -23,9 +24,11 @@ type DuckLakeConn struct {
 
 	// Catalog database configuration
 	CatalogType    string // duckdb, sqlite, postgres, mysql
+	CatalogSchema  string // schema to use in postgres or mysql
 	CatalogConnStr string // connection string for catalog database
 	DataPath       string // path to data files (local or cloud storage)
 	Database       string // the database name to attached
+	Encrypted      bool   // whether data is written using Parquet encryption
 }
 
 // Init initiates the object
@@ -33,9 +36,11 @@ func (conn *DuckLakeConn) Init() error {
 
 	// Extract data path from properties
 	conn.CatalogType = conn.GetProp("catalog_type")
+	conn.CatalogSchema = conn.GetProp("catalog_schema")
 	conn.CatalogConnStr = conn.GetProp("catalog_conn_string")
 	conn.DataPath = conn.GetProp("data_path")
 	conn.Database = "ducklake" // for hard-coded  '__ducklake_metadata_ducklake'
+	conn.Encrypted = cast.ToBool(conn.GetProp("encrypted"))
 
 	// Set default catalog type if not specified
 	if conn.CatalogType == "" {
@@ -70,6 +75,11 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 		return g.Error(err, "could not connect to DuckDB for DuckLake")
 	}
 
+	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+
+	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
+
 	// Add required extensions using the DuckDb instance
 	// DuckLake is the table format extension that provides versioned, ACID transactions on DuckDB
 	conn.duck.AddExtension("ducklake")
@@ -85,14 +95,32 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// Add storage-specific extensions based on data path
+	var secret iop.DuckDbSecret
+
 	if conn.DataPath != "" {
-		if strings.HasPrefix(conn.DataPath, "s3://") || strings.HasPrefix(conn.DataPath, "r2://") {
-			conn.duck.AddExtension("httpfs")
-		} else if strings.HasPrefix(conn.DataPath, "az://") || strings.HasPrefix(conn.DataPath, "abfss://") {
-			conn.duck.AddExtension("azure")
-		} else if strings.HasPrefix(conn.DataPath, "gs://") || strings.HasPrefix(conn.DataPath, "gcs://") {
-			conn.duck.AddExtension("httpfs")
-		} else {
+		switch {
+		case strings.HasPrefix(conn.DataPath, "s3://"), strings.HasPrefix(conn.DataPath, "r2://"):
+			secretType := iop.DuckDbSecretTypeS3
+			if strings.HasPrefix(conn.DataPath, "r2://") {
+				secretType = iop.DuckDbSecretTypeR2
+			}
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("s3_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		case strings.HasPrefix(conn.DataPath, "az://"), strings.HasPrefix(conn.DataPath, "abfss://"):
+			secretType := iop.DuckDbSecretTypeAzure
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("azure_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		case strings.HasPrefix(conn.DataPath, "gs://"), strings.HasPrefix(conn.DataPath, "gcs://"):
+			secretType := iop.DuckDbSecretTypeGCS
+			secretProps := MakeDuckDbSecretProps(conn, secretType)
+			secret = iop.NewDuckDbSecret("gcs_secret", secretType, secretProps)
+			conn.duck.AddSecret(secret)
+
+		default:
 			// ensure dir is created
 			os.MkdirAll(conn.DataPath, 0775)
 		}
@@ -105,78 +133,11 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 		return g.Error(err, "could not attach ducklake database")
 	}
 
-	// Configure storage credentials using DuckDB's PrepareFsSecretAndURI method
-	if conn.DataPath != "" {
-		// Prepare fs_props from connection properties for storage credential configuration
-		fsProps := map[string]string{}
-
-		// Map DuckLake connection properties to fs_props format
-		if conn.GetProp("s3_access_key_id") != "" {
-			fsProps["ACCESS_KEY_ID"] = conn.GetProp("s3_access_key_id")
-		}
-		if conn.GetProp("s3_secret_access_key") != "" {
-			fsProps["SECRET_ACCESS_KEY"] = conn.GetProp("s3_secret_access_key")
-		}
-		if conn.GetProp("s3_session_token") != "" {
-			fsProps["SESSION_TOKEN"] = conn.GetProp("s3_session_token")
-		}
-		if conn.GetProp("s3_region") != "" {
-			fsProps["REGION"] = conn.GetProp("s3_region")
-		}
-		if conn.GetProp("s3_endpoint") != "" {
-			fsProps["ENDPOINT"] = conn.GetProp("s3_endpoint")
-		}
-		if conn.GetProp("s3_profile") != "" {
-			fsProps["PROFILE"] = conn.GetProp("s3_profile")
-		}
-
-		// Azure credentials
-		if conn.GetProp("azure_account_name") != "" {
-			fsProps["ACCOUNT"] = conn.GetProp("azure_account_name")
-		}
-		if conn.GetProp("azure_account_key") != "" {
-			fsProps["ACCOUNT_KEY"] = conn.GetProp("azure_account_key")
-		}
-		if conn.GetProp("azure_sas_token") != "" {
-			fsProps["SAS_TOKEN"] = conn.GetProp("azure_sas_token")
-		}
-		if conn.GetProp("azure_tenant_id") != "" {
-			fsProps["TENANT_ID"] = conn.GetProp("azure_tenant_id")
-		}
-		if conn.GetProp("azure_client_id") != "" {
-			fsProps["CLIENT_ID"] = conn.GetProp("azure_client_id")
-		}
-		if conn.GetProp("azure_client_secret") != "" {
-			fsProps["CLIENT_SECRET"] = conn.GetProp("azure_client_secret")
-		}
-		if conn.GetProp("azure_connection_string") != "" {
-			fsProps["CONN_STR"] = conn.GetProp("azure_connection_string")
-		}
-
-		// GCS credentials - HMAC keys for interoperability with S3 API
-		if conn.GetProp("gcs_access_key_id") != "" {
-			fsProps["ACCESS_KEY_ID"] = conn.GetProp("gcs_access_key_id")
-		}
-		if conn.GetProp("gcs_secret_access_key") != "" {
-			fsProps["SECRET_ACCESS_KEY"] = conn.GetProp("gcs_secret_access_key")
-		}
-		// Note: For service account key file, DuckDB expects it to be set via environment
-		// variables or credential chain provider, not as a direct secret parameter
-
-		// Set fs_props on the duck instance
-		conn.duck.SetProp("fs_props", g.Marshal(fsProps))
-
-		// Use DuckDB's PrepareFsSecretAndURI to configure storage secrets
-		_ = conn.duck.PrepareFsSecretAndURI(conn.DataPath)
-	}
-
 	// Use the attached database by default
 	_, err = conn.Exec(fmt.Sprintf("USE %s;", conn.Database) + noDebugKey)
 	if err != nil {
 		return g.Error(err, "could not use ducklake database")
 	}
-
-	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
 
 	return nil
 }
@@ -196,8 +157,18 @@ func (conn *DuckLakeConn) buildAttachSQL() string {
 	}
 
 	// Add data path if specified
+	metaParts := []string{}
 	if conn.DataPath != "" {
-		attachSQL += fmt.Sprintf(" (DATA_PATH '%s')", conn.DataPath)
+		metaParts = append(metaParts, g.F("DATA_PATH '%s'", conn.DataPath))
+	}
+	if conn.CatalogSchema != "" {
+		metaParts = append(metaParts, g.F("META_SCHEMA '%s'", conn.CatalogSchema))
+	}
+	if conn.Encrypted {
+		metaParts = append(metaParts, "ENCRYPTED")
+	}
+	if len(metaParts) > 0 {
+		attachSQL += fmt.Sprintf(" (%s)", strings.Join(metaParts, ", "))
 	}
 
 	return attachSQL
@@ -300,38 +271,6 @@ func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]st
 	}
 
 	return
-}
-
-// GetDatabases returns the available databases
-func (conn *DuckLakeConn) GetDatabases() (iop.Dataset, error) {
-	// For DuckLake, we need to query the attached databases
-	sql := "SELECT database_name FROM duckdb_databases() WHERE database_name != 'system' ORDER BY database_name" + noDebugKey
-	return conn.Query(sql)
-}
-
-// GetSchemas returns schemas for DuckLake
-func (conn *DuckLakeConn) GetSchemas() (iop.Dataset, error) {
-	// Use the current database to get schemas
-	sql := `
-		SELECT DISTINCT schema_name
-		FROM information_schema.schemata
-		WHERE catalog_name = current_database()
-		ORDER BY schema_name
-	` + noDebugKey
-	return conn.Query(sql)
-}
-
-// CurrentDatabase returns the current database name
-func (conn *DuckLakeConn) CurrentDatabase() (string, error) {
-	data, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
-	if err != nil {
-		err = g.Error(err, "could not get current database")
-	} else {
-		dbName := cast.ToString(data.FirstVal())
-		return dbName, nil
-	}
-
-	return "", err
 }
 
 // Close closes the DuckLake connection

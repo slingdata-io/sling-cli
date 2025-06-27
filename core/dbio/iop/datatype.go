@@ -797,7 +797,7 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
+		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			// Check if the values are too large for a regular int
 			if colStats.Min < -2147483648 || colStats.Max > 2147483647 {
 				col.Type = BigIntType
@@ -1498,36 +1498,39 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 
 	precision = col.DbPrecision
 	scale = col.DbScale
-	if col.Stats.MaxDecLen > scale {
-		scale = col.Stats.MaxDecLen
-	}
 
 	if precision == 0 {
+		if scale == 0 {
+			minScale := col.Stats.MaxDecLen
+			scale = lo.Ternary(scale < env.DdlMinDecScale, env.DdlMinDecScale, scale)
+			scale = lo.Ternary(scale < minScale, minScale, scale)
+		}
 		minPrecision := col.Stats.MaxLen + scale
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+		precision = lo.Ternary(precision < env.DdlMinDecLength, env.DdlMinDecLength, precision)
 		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
-	} else if col.Sourced {
-		return
 	}
 
-	dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
-	dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
-	dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
-	dct.MaxPrecision = lo.Ternary(dct.MaxPrecision == 0, env.DdlMaxDecLength, dct.MaxPrecision)
+	if !col.Sourced {
+		dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
+		dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
+		dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
+		dct.MaxPrecision = lo.Ternary(dct.MaxPrecision == 0, env.DdlMaxDecLength, dct.MaxPrecision)
+	}
 
-	if precision < *dct.MinPrecision {
+	if dct.MinPrecision != nil && precision < *dct.MinPrecision {
 		precision = *dct.MinPrecision
 	}
 
-	if precision > dct.MaxPrecision {
+	if dct.MaxPrecision > 0 && precision > dct.MaxPrecision {
 		precision = dct.MaxPrecision
 	}
 
-	if scale < *dct.MinScale {
+	if dct.MinScale != nil && scale < *dct.MinScale {
 		scale = *dct.MinScale
 	}
 
-	if scale > dct.MaxScale {
+	if dct.MaxScale > 0 && scale > dct.MaxScale {
 		scale = dct.MaxScale
 	}
 

@@ -279,7 +279,7 @@ func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (co
 		if err1 != nil {
 			return columns, g.Error(err1, "could not get table or synonym database")
 		} else if len(data.Rows) == 0 {
-			return columns, g.Error("did not find table or synonym")
+			return columns, g.Error("did not find table or synonym: %s", table.FullName())
 		}
 
 		synDbName := cast.ToString(data.Records(true)[0]["database_name"])

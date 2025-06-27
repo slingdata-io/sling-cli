@@ -587,3 +587,38 @@ func (t *BlankTransaction) ExecMultiContext(ctx context.Context, q string, args 
 	}
 	return
 }
+
+type IsolationLevel string
+
+const (
+	IsolationLevelDefault         IsolationLevel = "default"
+	IsolationLevelReadUncommitted IsolationLevel = "read_uncommitted"
+	IsolationLevelReadCommitted   IsolationLevel = "read_committed"
+	IsolationLevelWriteCommitted  IsolationLevel = "write_committed"
+	IsolationLevelRepeatableRead  IsolationLevel = "repeatable_read"
+	IsolationLevelSnapshot        IsolationLevel = "snapshot"
+	IsolationLevelSerializable    IsolationLevel = "serializable"
+	IsolationLevelLinearizable    IsolationLevel = "linearizable"
+)
+
+func (il IsolationLevel) AsSqlIsolationLevel() sql.IsolationLevel {
+	switch il {
+	case IsolationLevelDefault:
+		return sql.LevelDefault
+	case IsolationLevelReadUncommitted:
+		return sql.LevelReadUncommitted
+	case IsolationLevelReadCommitted:
+		return sql.LevelReadCommitted
+	case IsolationLevelWriteCommitted:
+		return sql.LevelWriteCommitted
+	case IsolationLevelRepeatableRead:
+		return sql.LevelRepeatableRead
+	case IsolationLevelSnapshot:
+		return sql.LevelSnapshot
+	case IsolationLevelSerializable:
+		return sql.LevelSerializable
+	case IsolationLevelLinearizable:
+		return sql.LevelLinearizable
+	}
+	return sql.LevelDefault
+}

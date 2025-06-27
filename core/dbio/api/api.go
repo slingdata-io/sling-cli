@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"encoding/base64"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -29,7 +29,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		State: &APIState{
 			Env:    g.KVArrToMap(os.Environ()...),
 			State:  g.M(),
-			Queues: make(map[string]*Queue),
+			Queues: make(map[string]*iop.Queue),
 		},
 		Spec: spec,
 		eval: goval.NewEvaluator(),
@@ -65,60 +65,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	}
 
 	return ac, nil
-}
-
-// Authenticate performs the auth workflow if needed. Like a Connect step.
-// Header based auths (such as Basic, or Bearer) don't need this step
-// save payload in APIState.Auth
-func (ac *APIConnection) Authenticate() (err error) {
-	auth := ac.Spec.Authentication
-
-	// set auth data
-	setAuthenticated := func() {
-		ac.State.Auth.Authenticated = true
-		for key, endpoint := range ac.Spec.EndpointMap {
-			for k, v := range ac.State.Auth.Headers {
-				endpoint.Request.Headers[k] = v
-			}
-			ac.Spec.EndpointMap[key] = endpoint
-		}
-	}
-
-	switch auth.Type {
-	case AuthTypeNone:
-		ac.State.Auth.Authenticated = true
-		return nil
-
-	case AuthTypeBearer:
-		token, err := ac.renderString(auth.Token)
-		if err != nil {
-			return g.Error(err, "could not render token")
-		} else if token == "" {
-			return g.Error(err, "no token was provided for bearer authentication")
-		}
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
-		setAuthenticated()
-		return nil
-
-	case AuthTypeBasic:
-		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
-		if err != nil {
-			return g.Error(err, "could not render user-password")
-		}
-		credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
-		setAuthenticated()
-		return nil
-
-	case AuthTypeOAuth2:
-		// TODO: implement various OAuth2 flows
-
-	default:
-		setAuthenticated()
-		return nil
-	}
-
-	return
 }
 
 // Close performs cleanup of all resources
@@ -218,17 +164,19 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 }
 
 type APIState struct {
-	Env     map[string]string `json:"env,omitempty"`
-	State   map[string]any    `json:"state,omitempty"`
-	Secrets map[string]any    `json:"secrets,omitempty"`
-	Queues  map[string]*Queue `json:"queues,omitempty"` // appends to file
-	Auth    APIStateAuth      `json:"auth,omitempty"`
+	Env     map[string]string     `json:"env,omitempty"`
+	State   map[string]any        `json:"state,omitempty"`
+	Secrets map[string]any        `json:"secrets,omitempty"`
+	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
+	Auth    APIStateAuth          `json:"auth,omitempty"`
 }
 
 type APIStateAuth struct {
 	Authenticated bool              `json:"authenticated,omitempty"`
 	Token         string            `json:"token,omitempty"` // refresh token?
 	Headers       map[string]string `json:"-"`               // to inject
+
+	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
 }
 
 var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
@@ -355,7 +303,7 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 		}
 
 		if callsFunc || err != nil {
-			value, err = ac.eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			value, err = ac.eval.Evaluate(expr, stateMap, iop.GlobalFunctionMap)
 			if err != nil {
 				return "", g.Error(err, "could not render expression")
 			}
@@ -524,7 +472,7 @@ var (
 
 // RegisterQueue creates a new queue with the given name
 // If a queue with the same name already exists, it is returned
-func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
+func (ac *APIConnection) RegisterQueue(name string) (*iop.Queue, error) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 
@@ -534,7 +482,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 	}
 
 	// Create new queue
-	q, err := NewQueue(name)
+	q, err := iop.NewQueue(name)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +493,7 @@ func (ac *APIConnection) RegisterQueue(name string) (*Queue, error) {
 }
 
 // GetQueue retrieves a queue by name
-func (ac *APIConnection) GetQueue(name string) (*Queue, bool) {
+func (ac *APIConnection) GetQueue(name string) (*iop.Queue, bool) {
 	ac.Context.Lock()
 	defer ac.Context.Unlock()
 

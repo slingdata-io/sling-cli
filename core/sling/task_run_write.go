@@ -357,7 +357,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	// need to contain the final write in a transcation after data is loaded
 
-	txOptions := determineTxOptions(tgtConn.GetType())
+	txOptions := determineTxOptions(cfg, tgtConn.GetType())
 	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to final table")
 		return 0, err
@@ -458,7 +458,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	setStage("5 - load-into-final")
 
 	// Begin transaction for final table operations
-	txOptions := determineTxOptions(tgtConn.GetType())
+	txOptions := determineTxOptions(cfg, tgtConn.GetType())
 	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to final table")
 		return 0, err
@@ -541,7 +541,11 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	return cnt, nil
 }
 
-func determineTxOptions(dbType dbio.Type) sql.TxOptions {
+func determineTxOptions(cfg *Config, dbType dbio.Type) sql.TxOptions {
+	if il := cfg.Target.Options.IsolationLevel; il != nil {
+		return sql.TxOptions{Isolation: il.AsSqlIsolationLevel()}
+	}
+
 	switch dbType {
 	case dbio.TypeDbSnowflake, dbio.TypeDbDuckDb:
 		return sql.TxOptions{}
