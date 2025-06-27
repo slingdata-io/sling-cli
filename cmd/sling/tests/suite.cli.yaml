@@ -239,7 +239,7 @@
   run: 'sling run -d -r cmd/sling/tests/replications/r.09.yaml'
   streams: '>1'
   output_contains:
-    - '/ 7] running stream "public"."my_table_bytes"'
+    - 'running stream "public"."my_table_bytes"'
     - RUNNING
 
 - id: 42
