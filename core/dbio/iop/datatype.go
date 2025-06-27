@@ -1498,17 +1498,20 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 
 	precision = col.DbPrecision
 	scale = col.DbScale
-	if col.Stats.MaxDecLen > scale {
-		scale = col.Stats.MaxDecLen
-	}
 
 	if precision == 0 {
+		if scale == 0 {
+			minScale := col.Stats.MaxDecLen
+			scale = lo.Ternary(scale < env.DdlMinDecScale, env.DdlMinDecScale, scale)
+			scale = lo.Ternary(scale < minScale, minScale, scale)
+		}
 		minPrecision := col.Stats.MaxLen + scale
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
+		precision = lo.Ternary(precision < env.DdlMinDecLength, env.DdlMinDecLength, precision)
 		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
 	}
 
-	if precision == 0 || !col.Sourced {
+	if !col.Sourced {
 		dct.MinScale = lo.Ternary(dct.MinScale == nil, g.Ptr(env.DdlMinDecScale), dct.MinScale)
 		dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
 		dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
