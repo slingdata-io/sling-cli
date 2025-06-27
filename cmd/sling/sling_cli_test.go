@@ -137,10 +137,12 @@ func TestCLI(t *testing.T) {
 			break
 		}
 		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
-			env.Println(env.GreenString(g.F("%02d |", tt.ID) + tt.Run))
+			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
 			// set env
-			p.Env = map[string]string{}
+			if len(p.Env) == 0 {
+				p.Env = map[string]string{}
+			}
 			for k, v := range defaultEnv {
 				p.Env[k] = v
 			}
