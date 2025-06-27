@@ -319,40 +319,19 @@ func (fs *S3FileSysClient) GetReader(uri string) (reader io.Reader, err error) {
 		return
 	}
 
-	// https://github.com/chanzuckerberg/s3parcp
-	PartSize := int64(os.Getpagesize()) * 1024 * 10
-	Concurrency := fs.getConcurrency()
-	BufferSize := 64 * 1024
 	svc := s3.NewFromConfig(fs.getConfig())
 
-	// Create a downloader with the config and default options
-	downloader := manager.NewDownloader(svc, func(d *manager.Downloader) {
-		d.PartSize = PartSize
-		d.Concurrency = Concurrency
-		d.BufferProvider = manager.NewPooledBufferedWriterReadFromProvider(BufferSize)
+	// Use GetObject directly for streaming
+	result, err := svc.GetObject(fs.Context().Ctx, &s3.GetObjectInput{
+		Bucket: aws.String(fs.bucket),
+		Key:    aws.String(key),
 	})
-	downloader.Concurrency = 1
+	if err != nil {
+		return nil, g.Error(err, "Error getting S3 object -> "+key)
+	}
 
-	pipeR, pipeW := io.Pipe()
-
-	go func() {
-		defer pipeW.Close()
-
-		// Write the contents of S3 Object to the file
-		_, err := downloader.Download(
-			fs.Context().Ctx,
-			fakeWriterAt{pipeW},
-			&s3.GetObjectInput{
-				Bucket: aws.String(fs.bucket),
-				Key:    aws.String(key),
-			})
-		if err != nil {
-			fs.Context().CaptureErr(g.Error(err, "Error downloading S3 File -> "+key))
-			return
-		}
-	}()
-
-	return pipeR, err
+	// result.Body is already an io.ReadCloser - perfect for streaming
+	return result.Body, nil
 }
 
 // GetWriter creates the file if non-existent and return a writer
