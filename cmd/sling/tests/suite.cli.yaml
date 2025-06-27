@@ -122,7 +122,9 @@
 
 - id: 22
   name: Run sling with JSON source and custom columns
-  run: 'SLING_LOADED_AT_COLUMN=false SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh'
+  run: SLING_STREAM_URL_COLUMN=true SLING_ROW_NUM_COLUMN=true sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh
+  env:
+    SLING_LOADED_AT_COLUMN: 'false'
   rows: 2019
 
 - id: 23
@@ -275,7 +277,9 @@
 
 - id: 47
   name: Run sling with replication configuration 15 incremental
-  run: 'ICEBERG_MODE=incremental sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/'
+  run: sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
+  env:
+    ICEBERG_MODE: incremental
   rows: '>0'
   streams: 1
   output_contains:
@@ -401,7 +405,9 @@
 
 - id: 67
   name: 'Run sling hooks & source partitioned (backfill)'
-  run: 'RESET=true sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01'
+  run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01'
+  env:
+    RESET: 'true'
   rows: 551
   output_contains:
     - 'executed hook "start-02" (type: delete)'
@@ -455,7 +461,9 @@
 
 - id: 74
   name: Run sling iceberg_r2 insert
-  run: 'TARGET=iceberg_r2 sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
+  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  env:
+    TARGET: iceberg_r2
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -464,7 +472,9 @@
 
 - id: 75
   name: Run sling iceberg_s3 insert
-  run: 'TARGET=iceberg_s3 sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
+  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  env:
+    TARGET: iceberg_s3
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -473,7 +483,9 @@
 
 - id: 76
   name: Run sling iceberg_lakekeeper insert
-  run: 'TARGET=iceberg_lakekeeper sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
+  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  env:
+    TARGET: iceberg_lakekeeper
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -482,7 +494,9 @@
 
 - id: 77
   name: Run sling iceberg_sql insert
-  run: 'TARGET=iceberg_sql sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
+  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  env:
+    TARGET: iceberg_sql
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -540,12 +554,20 @@
 
 - id: 84
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
-  run: SCHEMA=ORACLE SOURCE=ORACLE TARGET=SNOWFLAKE sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
+  run: sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
+  env:
+    SCHEMA: ORACLE
+    SOURCE: ORACLE
+    TARGET: SNOWFLAKE
   output_contains:
     - 'execution succeeded'
 
 - id: 85
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
-  run: SCHEMA=ORACLE SOURCE=ORACLE TARGET=POSTGRES sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
+  run: sling run -r cmd/sling/tests/replications/r.28.oracle_number_scale.yaml
+  env:
+    SCHEMA: ORACLE
+    SOURCE: ORACLE
+    TARGET: POSTGRES
   output_contains:
     - 'execution succeeded'

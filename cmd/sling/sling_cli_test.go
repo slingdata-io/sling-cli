@@ -106,8 +106,8 @@ func TestCLI(t *testing.T) {
 			continue
 		}
 
-		tc.Env = map[string]string{
-			"DEBUG": os.Getenv("DEBUG"),
+		if len(tc.Env) == 0 {
+			tc.Env = map[string]string{}
 		}
 
 		if tc.Rows != "" {
