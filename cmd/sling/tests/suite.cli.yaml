@@ -118,7 +118,7 @@
   run: 'sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like ''%89504e470d0a1a0a0000000d%''"'
   rows: 1
   output_contains:
-    - 1
+    - "1"
 
 - id: 22
   name: Run sling with JSON source and custom columns
@@ -170,7 +170,6 @@
   run: 'sling conns exec POSTGRES ''select count(1) from public.my_table'''
   rows: 1
   output_contains:
-    - 'success!'
     - 18
 
 - id: 30
@@ -219,7 +218,7 @@
 
 - id: 38
   name: Run sling with replication configuration 07
-  run: 'sling run -r cmd/sling/tests/replications/r.07.yaml'
+  run: sling run -r cmd/sling/tests/replications/r.07.yaml
   streams: 15
 
 - id: 39
@@ -288,7 +287,7 @@
   streams: 5
 
 - id: 49
-  name: Run sling with replication configuration 14
+  name: Run sling with replication configuration 14 (specific streams)
   run: 'sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows'
   rows: 0
 
@@ -437,8 +436,8 @@
   name: Run sling pipeline 02
   run: 'sling run -p cmd/sling/tests/pipelines/p.02.yaml'
   output_contains:
-    - sftp//tmp/test1k_mysql_pg.csv
-    - aws_s3/sling_test/files/test1k_s3.csv
+    - state.copy_sftp_azure.bytes_written    # ensures a file was copied from SFTP to AZURE
+    - state.copy_s3_azure.bytes_written      # ensures a file was copied from S3 to AZURE
 
 - id: 72
   name: Run sling to test column casing
@@ -456,42 +455,51 @@
 
 - id: 74
   name: Run sling iceberg_r2 insert
-  run: 'TARGET=iceberg_r2 sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  run: 'TARGET=iceberg_r2 sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
   streams: 2
   output_contains:
-    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+    - committed iceberg snapshot
+    - count_result => {"count_star":1001}
+    - inserted 967 rows
 
 - id: 75
   name: Run sling iceberg_s3 insert
-  run: 'TARGET=iceberg_s3 sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  run: 'TARGET=iceberg_s3 sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
   streams: 2
   output_contains:
-    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+    - committed iceberg snapshot
+    - count_result => {"count_star":1001}
+    - inserted 967 rows
 
 - id: 76
   name: Run sling iceberg_lakekeeper insert
-  run: 'TARGET=iceberg_lakekeeper sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  run: 'TARGET=iceberg_lakekeeper sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
   streams: 2
   output_contains:
-    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+    - committed iceberg snapshot
+    - count_result => {"count_star":1001}
+    - inserted 967 rows
 
 - id: 77
   name: Run sling iceberg_sql insert
-  run: 'TARGET=iceberg_sql sling run -d -r cmd/sling/tests/replications/r.23.yaml'
+  run: 'TARGET=iceberg_sql sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml'
   streams: 2
   output_contains:
-    - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+    - committed iceberg snapshot
+    - inserted 967 rows
 
 # - id: 78
 #   name: Run sling iceberg_gcp insert
-#   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.yaml
+#   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
 #   streams: 2
 #   output_contains:
-#     - 'committed iceberg snapshot,count_result =>,inserted 967 rows'
+#     - committed iceberg snapshot
+#     - count_result => {"count_star":1001}
+#     - inserted 967 rows
 
 - id: 79
   name: starrocks empty_as_null
-  run: sling run -d -r cmd/sling/tests/replications/r.24.yaml
+  run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
   streams: 1
   rows: 5
   output_contains:

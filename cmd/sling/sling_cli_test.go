@@ -25,10 +25,10 @@ type testCase struct {
 	Run            string            `yaml:"run"`
 	Env            map[string]string `yaml:"env"`
 	Err            bool              `yaml:"err"`
-	Rows           any               `yaml:"rows"`    // number of rows
-	Bytes          any               `yaml:"bytes"`   // number of bytes
-	Streams        any               `yaml:"streams"` // number of streams
-	Fails          any               `yaml:"fails"`   // number of fails
+	Rows           string            `yaml:"rows"`    // number of rows
+	Bytes          string            `yaml:"bytes"`   // number of bytes
+	Streams        string            `yaml:"streams"` // number of streams
+	Fails          string            `yaml:"fails"`   // number of fails
 	OutputContains []string          `yaml:"output_contains"`
 }
 
@@ -57,12 +57,6 @@ func TestCLI(t *testing.T) {
 		}
 	}
 
-	p, err := process.NewProc("bash")
-	if !g.AssertNoError(t, err) {
-		return
-	}
-	p.Capture = true
-	p.WorkDir = "../.."
 	bin = "cmd/sling/" + bin
 
 	defaultEnv := g.KVArrToMap(os.Environ()...)
@@ -116,17 +110,17 @@ func TestCLI(t *testing.T) {
 			"DEBUG": os.Getenv("DEBUG"),
 		}
 
-		if tc.Rows != nil {
-			tc.Env["SLING_ROW_CNT"] = cast.ToString(tc.Rows)
+		if tc.Rows != "" {
+			tc.Env["SLING_ROW_CNT"] = tc.Rows
 		}
-		if tc.Bytes != nil {
-			tc.Env["SLING_TOTAL_BYTES"] = cast.ToString(tc.Bytes)
+		if tc.Bytes != "" {
+			tc.Env["SLING_TOTAL_BYTES"] = tc.Bytes
 		}
-		if tc.Streams != nil {
-			tc.Env["SLING_STREAM_CNT"] = cast.ToString(tc.Streams)
+		if tc.Streams != "" {
+			tc.Env["SLING_STREAM_CNT"] = tc.Streams
 		}
-		if tc.Fails != nil {
-			tc.Env["SLING_CONSTRAINT_FAILS"] = cast.ToString(tc.Fails)
+		if tc.Fails != "" {
+			tc.Env["SLING_CONSTRAINT_FAILS"] = tc.Fails
 		}
 
 		tests = append(tests, tc)
@@ -139,10 +133,16 @@ func TestCLI(t *testing.T) {
 		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
 			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
-			// set env
-			if len(p.Env) == 0 {
-				p.Env = map[string]string{}
+			p, err := process.NewProc("bash")
+			if !g.AssertNoError(t, err) {
+				return
 			}
+			p.Capture = true
+			p.Print = true
+			p.WorkDir = "../.."
+
+			// set new env
+			p.Env = map[string]string{}
 			for k, v := range defaultEnv {
 				p.Env[k] = v
 			}
@@ -150,12 +150,9 @@ func TestCLI(t *testing.T) {
 				p.Env[k] = v
 			}
 
-			// set print
-			p.Print = true
-
 			// create a tmp bash script with the command in tmp folder
 			tmpDir := os.TempDir()
-			tmpFile, err := os.CreateTemp(tmpDir, "sling_cli_test_*.sh")
+			tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
