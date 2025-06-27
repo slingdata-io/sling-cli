@@ -170,7 +170,7 @@ jobs:
   build-test-success:
 
     runs-on: [self-hosted, linux, ubuntu-20]
-    needs: [ build-test-sling, build-test-dbio ]
+    needs: [ build-test-sling, build-test-dbio, build-test-sling-cli ]
 
     steps:
       - uses: actions/checkout@v2
