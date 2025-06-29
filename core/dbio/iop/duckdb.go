@@ -144,7 +144,7 @@ func (dds *DuckDbSecret) Render() string {
 		}
 	}
 
-	return g.F("CREATE SECRET %s (TYPE %s, %s)",
+	return g.F("CREATE SECRET IF NOT EXISTS %s (TYPE %s, %s)",
 		dds.Name, dds.Type, strings.Join(props, ", "))
 }
 
