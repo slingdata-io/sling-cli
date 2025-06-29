@@ -873,7 +873,11 @@ func TestSuiteDatabaseDuckDb(t *testing.T) {
 
 func TestSuiteDatabaseDuckLake(t *testing.T) {
 	t.Parallel()
-	testSuite(t, dbio.TypeDbDuckLake, "1-17,19+") // soft-delete is not supported
+	tests := "1-17,19+" // soft-delete is not supported
+	testSuite(t, dbio.TypeDbDuckLake, tests)
+	// testSuite(t, dbio.Type("ducklake_az"), tests)
+	testSuite(t, dbio.Type("ducklake_r2"), tests)
+	testSuite(t, dbio.Type("ducklake_s3"), tests)
 }
 
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
