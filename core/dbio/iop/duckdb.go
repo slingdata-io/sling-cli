@@ -1239,7 +1239,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					defer pipeW.Close()
 					_, err := io.Copy(pipeW, batchR.Reader)
 					if err != nil {
-						g.Error(err, "failed to stream arrow batch")
+						g.LogError(g.Error(err, "failed to stream arrow batch"))
 					}
 				}()
 
@@ -1271,7 +1271,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					defer pipeW.Close()
 					_, err := io.Copy(pipeW, batchR.Reader)
 					if err != nil {
-						g.Error(err, "failed to stream csv batch")
+						g.LogError(g.Error(err, "failed to stream csv batch"))
 					}
 				}()
 
