@@ -672,3 +672,18 @@ databricks	variant	json	col_variant variant	FALSE	FALSE	Semi-structured data
 databricks	object	json	col_object object	FALSE	FALSE	VARIANT values with structure
 databricks	interval	string	col_interval interval	FALSE	FALSE	Time intervals
 databricks	void	text	col_void void	FALSE	FALSE	Untyped NULL
+exasol	boolean	bool	col_boolean boolean	TRUE	TRUE	
+exasol	char	string	col_char char(10)	TRUE	TRUE	
+exasol	varchar	string	col_varchar varchar(100)	TRUE	TRUE	
+exasol	decimal	decimal	col_decimal decimal(10,2)	TRUE	TRUE	
+exasol	double	float	col_double double precision	TRUE	TRUE	
+exasol	date	date	col_date date	TRUE	TRUE	
+exasol	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	
+exasol	timestamp with local time zone	timestampz	col_timestamp_tz timestamp with local time zone	TRUE	TRUE	
+exasol	interval year to month	string	col_interval_ym interval year to month	FALSE	FALSE	
+exasol	interval day to second	string	col_interval_ds interval day to second	FALSE	FALSE	
+exasol	geometry	text	col_geometry geometry	FALSE	FALSE	
+exasol	hashtype	string	col_hashtype hashtype	FALSE	FALSE	
+exasol	bigint	bigint	col_bigint bigint	TRUE	TRUE	
+exasol	integer	integer	col_integer integer	TRUE	TRUE	
+exasol	smallint	smallint	col_smallint smallint	TRUE	TRUE	
