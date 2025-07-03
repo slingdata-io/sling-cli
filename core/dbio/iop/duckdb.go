@@ -2,7 +2,6 @@ package iop
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -1210,9 +1209,6 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	time.Sleep(100 * time.Millisecond)
 	df.Defer(func() { server.Shutdown(importContext.Ctx) })
 
-	sc.BatchLimit = 50000               // since it's ready all in memory
-	sc.FileMaxBytes = 100 * 1024 * 1024 // since it's ready all in memory
-
 	df.SetBatchLimit(sc.BatchLimit)
 	ds := MergeDataflow(df)
 
@@ -1225,14 +1221,11 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			for batchR := range ds.NewArrowReaderChnl(sc) {
 				g.Trace("processing duckdb arrow batch %s", batchR.Batch.ID())
 
-				// buffer all the data first to avoid deadlock
-				data, err := io.ReadAll(batchR.Reader)
-				if err != nil {
-					g.Error(err, "failed to read arrow batch")
-					return
-				}
+				// Stream data directly without buffering all in memory
+				// Create a pipe to stream data through
+				pipeR, pipeW := io.Pipe()
 
-				// Use read_arrow_ipc for Arrow format
+				// Use read_arrow for Arrow format
 				fromExpr := g.F(`read_arrow('%s')`, httpURL)
 
 				streamPartChn <- HttpStreamPart{
@@ -1240,7 +1233,17 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					FromExpr: fromExpr,
 					Columns:  batchR.Columns,
 				}
-				readerCh <- bytes.NewReader(data)
+
+				// Stream data through pipe
+				go func() {
+					defer pipeW.Close()
+					_, err := io.Copy(pipeW, batchR.Reader)
+					if err != nil {
+						g.Error(err, "failed to stream arrow batch")
+					}
+				}()
+
+				readerCh <- pipeR
 				<-doneCh
 
 				partIndex++
@@ -1250,12 +1253,9 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 			for batchR := range ds.NewCsvReaderChnl(sc) {
 				g.Trace("processing duckdb batch %s", batchR.Batch.ID())
 
-				// buffer all the data first to avoid deadlock
-				data, err := io.ReadAll(batchR.Reader)
-				if err != nil {
-					g.Error(err, "failed to read csv batch")
-					return
-				}
+				// Stream data directly without buffering all in memory
+				// Create a pipe to stream data through
+				pipeR, pipeW := io.Pipe()
 
 				// can use this as a from table
 				fromExpr := g.F(`read_csv('%s', delim=',', header=True, columns=%s, max_line_size=2000000, parallel=false, quote='"', escape='"', nullstr='\N', auto_detect=false)`, httpURL, duck.GenerateCsvColumns(batchR.Columns))
@@ -1265,7 +1265,17 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 					FromExpr: fromExpr,
 					Columns:  batchR.Columns,
 				}
-				readerCh <- bytes.NewReader(data)
+
+				// Stream data through pipe
+				go func() {
+					defer pipeW.Close()
+					_, err := io.Copy(pipeW, batchR.Reader)
+					if err != nil {
+						g.Error(err, "failed to stream csv batch")
+					}
+				}()
+
+				readerCh <- pipeR
 				<-doneCh
 
 				partIndex++

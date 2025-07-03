@@ -571,3 +571,9 @@
     TARGET: POSTGRES
   output_contains:
     - 'execution succeeded'
+
+- id: 86
+  name: MSSQL to parquet overwrite fix (https://github.com/slingdata-io/sling-cli/issues/588)
+  run: sling run -r cmd/sling/tests/replications/r.29.mssql_parquet_overwrite.yaml
+  output_contains:
+    - 'execution succeeded'

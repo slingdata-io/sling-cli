@@ -1,0 +1,114 @@
+source: mssql
+target: local
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: parquet
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop table if exists
+        IF OBJECT_ID('dbo.test_batch_issue', 'U') IS NOT NULL 
+          DROP TABLE dbo.test_batch_issue;
+          
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Create test table with 50 columns and insert 200000 rows
+        -- This will force multiple batches
+        WITH numbers AS (
+          SELECT TOP 200000 
+            ROW_NUMBER() OVER (ORDER BY s1.object_id) AS n
+          FROM sys.objects s1
+          CROSS JOIN sys.objects s2
+          CROSS JOIN sys.objects s3
+          CROSS JOIN sys.objects s4
+        )
+        SELECT 
+          n as id,
+          'Test data row ' + CAST(n AS VARCHAR(10)) as data,
+          CAST(n AS DECIMAL(10,2)) * 1.5 as value,
+          DATEADD(MINUTE, n % 1440, '2024-01-01') as created_at,
+          'Col_01_' + CAST(n AS VARCHAR(10)) as col_01,
+          'Col_02_' + CAST(n AS VARCHAR(10)) as col_02,
+          'Col_03_' + CAST(n AS VARCHAR(10)) as col_03,
+          'Col_04_' + CAST(n AS VARCHAR(10)) as col_04,
+          'Col_05_' + CAST(n AS VARCHAR(10)) as col_05,
+          'Col_06_' + CAST(n AS VARCHAR(10)) as col_06,
+          'Col_07_' + CAST(n AS VARCHAR(10)) as col_07,
+          'Col_08_' + CAST(n AS VARCHAR(10)) as col_08,
+          'Col_09_' + CAST(n AS VARCHAR(10)) as col_09,
+          'Col_10_' + CAST(n AS VARCHAR(10)) as col_10,
+          'Col_11_' + CAST(n AS VARCHAR(10)) as col_11,
+          'Col_12_' + CAST(n AS VARCHAR(10)) as col_12,
+          'Col_13_' + CAST(n AS VARCHAR(10)) as col_13,
+          'Col_14_' + CAST(n AS VARCHAR(10)) as col_14,
+          'Col_15_' + CAST(n AS VARCHAR(10)) as col_15,
+          'Col_16_' + CAST(n AS VARCHAR(10)) as col_16,
+          'Col_17_' + CAST(n AS VARCHAR(10)) as col_17,
+          'Col_18_' + CAST(n AS VARCHAR(10)) as col_18,
+          'Col_19_' + CAST(n AS VARCHAR(10)) as col_19,
+          'Col_20_' + CAST(n AS VARCHAR(10)) as col_20,
+          'Col_21_' + CAST(n AS VARCHAR(10)) as col_21,
+          'Col_22_' + CAST(n AS VARCHAR(10)) as col_22,
+          'Col_23_' + CAST(n AS VARCHAR(10)) as col_23,
+          'Col_24_' + CAST(n AS VARCHAR(10)) as col_24,
+          'Col_25_' + CAST(n AS VARCHAR(10)) as col_25,
+          'Col_26_' + CAST(n AS VARCHAR(10)) as col_26,
+          'Col_27_' + CAST(n AS VARCHAR(10)) as col_27,
+          'Col_28_' + CAST(n AS VARCHAR(10)) as col_28,
+          'Col_29_' + CAST(n AS VARCHAR(10)) as col_29,
+          'Col_30_' + CAST(n AS VARCHAR(10)) as col_30,
+          'Col_31_' + CAST(n AS VARCHAR(10)) as col_31,
+          'Col_32_' + CAST(n AS VARCHAR(10)) as col_32,
+          'Col_33_' + CAST(n AS VARCHAR(10)) as col_33,
+          'Col_34_' + CAST(n AS VARCHAR(10)) as col_34,
+          'Col_35_' + CAST(n AS VARCHAR(10)) as col_35,
+          'Col_36_' + CAST(n AS VARCHAR(10)) as col_36,
+          'Col_37_' + CAST(n AS VARCHAR(10)) as col_37,
+          'Col_38_' + CAST(n AS VARCHAR(10)) as col_38,
+          'Col_39_' + CAST(n AS VARCHAR(10)) as col_39,
+          'Col_40_' + CAST(n AS VARCHAR(10)) as col_40,
+          'Col_41_' + CAST(n AS VARCHAR(10)) as col_41,
+          'Col_42_' + CAST(n AS VARCHAR(10)) as col_42,
+          'Col_43_' + CAST(n AS VARCHAR(10)) as col_43,
+          'Col_44_' + CAST(n AS VARCHAR(10)) as col_44,
+          'Col_45_' + CAST(n AS VARCHAR(10)) as col_45,
+          'Col_46_' + CAST(n AS VARCHAR(10)) as col_46,
+          n % 10000 as numeric_col_1,
+          n % 5000 as numeric_col_2,
+          n % 2500 as numeric_col_3,
+          n % 1000 as numeric_col_4
+        INTO dbo.test_batch_issue
+        FROM numbers;
+
+  end:
+    - type: query
+      connection: duckdb
+      query: |
+        SELECT COUNT(*) as row_count 
+        FROM read_parquet('/tmp/test_batch_issue.parquet')
+      into: result
+    
+    - type: log
+      message: |
+        Parquet file row count: {store.result[0].row_count}
+        Expected row count: 200000
+    
+    - type: check
+      check: store.result[0].row_count == 200000
+      message: "Expected 200000 rows but got {store.result[0].row_count}"
+    
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_batch_issue', 'U') IS NOT NULL 
+          DROP TABLE dbo.test_batch_issue;
+
+streams:
+  dbo.test_batch_issue:
+    object: '/tmp/test_batch_issue.parquet'
