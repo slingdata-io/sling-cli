@@ -1,0 +1,176 @@
+core:
+  drop_table: drop table if exists {table}
+  drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index if not exists {index} on {table} ({cols})
+  create_schema: create schema if not exists {schema}
+  drop_schema: drop schema if exists {schema} cascade
+  create_table: create table if not exists {table} ({col_types})
+  rename_table: alter table {table} rename to {new_table}
+  rename_column: alter table {table} rename column {column} to {new_column}
+  alter_columns: alter table {table} modify column {col_ddl}
+  modify_column: '{column} {type}'
+  truncate_table: truncate table {table}
+  insert: insert into {table} ({fields}) values ({values})
+  update: update {table} set {set_fields} where {pk_fields_equal}
+  delete: delete from {table} where {where}
+  replace: |
+    merge into {table} tgt
+    using (select {name_values}) src
+    on ({src_tgt_condition})
+    when matched then
+      update set {set_fields}
+    when not matched then
+      insert ({names}) values ({values})
+  select: select {fields} from {table}
+  select_all: select * from {table}
+  sample: select {fields} from {table} where random() <= 0.5 limit {n}
+  limit: select {fields} from {table}{where_prefix} limit {limit}
+  limit_offset: select {fields} from {table}{where_prefix} limit {limit} offset {offset}
+  limit_sql: select * from ({sql}) subq limit {limit}
+
+metadata:
+  
+  current_database: |
+    select current_database
+  
+  databases: |
+    select schema_name as name
+    from EXA_ALL_SCHEMAS
+    order by schema_name
+  
+  schemas: |
+    select schema_name
+    from EXA_ALL_SCHEMAS
+    where 1=1
+      {{if .schema -}} and schema_name = '{schema}' {{- end}}
+    order by schema_name
+    
+  tables: |
+    select 
+      table_schema as schema_name,
+      table_name,
+      case when table_type = 'VIEW' then 'true' else 'false' end as is_view
+    from EXA_ALL_TABLES
+    where 1=1
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .table -}} and table_name = '{table}' {{- end}}
+    order by table_schema, table_name
+  
+  views: |
+    select 
+      view_schema as schema_name,
+      view_name as view_name
+    from EXA_ALL_VIEWS
+    where 1=1
+      {{if .schema -}} and view_schema = '{schema}' {{- end}}
+      {{if .view -}} and view_name = '{view}' {{- end}}
+    order by view_schema, view_name
+      
+  columns: |
+    select
+      column_schema as schema_name,
+      column_table as table_name,
+      column_name,
+      column_type as data_type,
+      column_is_nullable as is_nullable,
+      column_default as column_default,
+      column_ordinal_position as ordinal_position
+    from EXA_ALL_COLUMNS
+    where 1=1
+      {{if .schema -}} and column_schema = '{schema}' {{- end}}
+      {{if .table -}} and column_table = '{table}' {{- end}}
+    order by column_schema, column_table, column_ordinal_position
+  
+  primary_keys: |
+    select
+      constraint_schema as schema_name,
+      constraint_table as table_name,
+      column_name
+    from EXA_ALL_CONSTRAINT_COLUMNS
+    where constraint_type = 'PRIMARY KEY'
+      {{if .schema -}} and constraint_schema = '{schema}' {{- end}}
+      {{if .table -}} and constraint_table = '{table}' {{- end}}
+    order by constraint_schema, constraint_table, ordinal_position
+  
+  indexes: |
+    select
+      table_schema as schema_name,
+      table_name,
+      column_name as index_name,
+      column_name
+    from EXA_ALL_COLUMNS
+    where 1=1
+      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .table -}} and table_name = '{table}' {{- end}}
+    order by table_schema, table_name, column_ordinal_position
+  
+  ddl: |
+    select ddl
+    from (
+      select 
+        'CREATE TABLE ' || table_schema || '.' || table_name || ' (' ||
+        string_agg(
+          column_name || ' ' || column_type || 
+          case when column_is_nullable = 'NO' then ' NOT NULL' else '' end ||
+          case when column_default is not null then ' DEFAULT ' || column_default else '' end,
+          ', '
+        ) || ')' as ddl
+      from EXA_ALL_COLUMNS
+      where table_schema = '{schema}'
+        and table_name = '{table}'
+      group by table_schema, table_name
+    ) t
+
+analysis:
+  # placeholder
+
+general:
+  bind_string: "?"
+  quote_char: '"'
+  ddl_sep: ";"
+  column_upper: true
+  max_column_length: 128
+  boolean_data_type: boolean
+  
+bulk:
+  import: |
+    IMPORT INTO {table} ({columns})
+    FROM LOCAL CSV FILE '{file_path}'
+    COLUMN SEPARATOR = ','
+    COLUMN DELIMITER = '"'
+    ROW SEPARATOR = 'LF'
+    SKIP = 1
+  
+  export: |
+    EXPORT ({sql})
+    INTO LOCAL CSV FILE '{file_path}'
+    COLUMN SEPARATOR = ','
+    COLUMN DELIMITER = '"'
+    ROW SEPARATOR = 'LF'
+    WITH COLUMN NAMES
+
+function:
+  add_months: add_months({field}, {num})
+  cast: cast({field} as {type})
+  concat: concat({strings})
+  date_diff_days: days_between({date1}, {date2})
+  date_diff_seconds: seconds_between({date1}, {date2})
+  date_parse_format: to_timestamp({string}, {format})
+  date_to_epoch_ms: "(floor((cast({field} as timestamp) - timestamp '1970-01-01 00:00:00') * 86400) * 1000)"
+  date_format: to_char({field}, {format})
+  date_trunc_key: date_trunc('{unit}', {field})
+  epoch_ms_to_date: "(timestamp '1970-01-01 00:00:00' + ({field} / 1000) * interval '1' second)"
+  string: varchar(2000000)
+  replace: replace({string}, {search}, {replacement})
+  strcmp_format: "if({s1} = {s2} then 0 elif {s1} < {s2} then -1 else 1 end"
+  datediff_format: "days_between({date1}, {date2})"
+  hash: hashtype_md5({fields})
+  random: random()
+  uuid: sys_guid()
+  
+variable:
+  bool_as: string
+  duplicates_group_by: false
+  handle_null_compare: true
+  null_if_empty: false
