@@ -577,3 +577,9 @@
   run: sling run -r cmd/sling/tests/replications/r.29.mssql_parquet_overwrite.yaml
   output_contains:
     - 'execution succeeded'
+
+- id: 87
+  name: MSSQL to Azure Storage multiple files fix (https://github.com/slingdata-io/sling-cli/issues/586)
+  run: sling run -r cmd/sling/tests/replications/r.30.mssql_azure_multiple_files.yaml
+  output_contains:
+    - 'execution succeeded'
