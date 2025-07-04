@@ -45,6 +45,7 @@ steps:
       - type: copy
         from: "{loop.value.location}"
         to: local/tmp/output/{loop.value.name}
+        single_file: true
         id: copy_file
 
       - type: log
