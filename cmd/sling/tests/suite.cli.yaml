@@ -591,3 +591,17 @@
   output_contains:
     - wrote 3 rows
     - execution succeeded
+
+- id: 89
+  name: Test inspect hook for database tables and files
+  run: sling run -p cmd/sling/tests/pipelines/p.04.test_inspect_hook.yaml
+  output_contains:
+    - 'Database table inspection results:'
+    - 'S3 file inspection results:'
+    - 'Local file inspection results:'
+    - 'Local directory inspection results:'
+    - 'Path: sling-cli-tests/inspect_test.txt'
+    - 'FDQN: "public"."test_inspect_table"'
+    - 'Path: /tmp/sling/inspect_test/test_file.json'
+    - 'URI: file:///tmp/sling/inspect_test/'
+    - 'Is Dir: true'
