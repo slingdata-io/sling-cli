@@ -17,8 +17,7 @@ steps:
 
   - type: inspect
     id: inspect_postgres_table
-    connection: postgres
-    object: public.test_inspect_table
+    location: postgres/public.test_inspect_table
 
   - type: log
     message: |
@@ -28,7 +27,7 @@ steps:
       - Schema: {state.inspect_postgres_table.schema}
       - Name: {state.inspect_postgres_table.name}
       - FDQN: {state.inspect_postgres_table.fdqn}
-      - Column Names: {state.inspect_postgres_table.column_names}
+      - Column Names: {state.inspect_postgres_table.columns[*].name}
       - Column 'value': {state.inspect_postgres_table.column_map.value}
 
   - type: check
@@ -58,8 +57,7 @@ steps:
   # Test inspect on a non-existent table
   - type: inspect
     id: inspect_missing_table
-    connection: postgres
-    object: public.non_existent_table
+    location: postgres/public.non_existent_table
 
   - type: check
     check: state.inspect_missing_table.exists == false
@@ -111,8 +109,7 @@ steps:
 
   - type: inspect
     id: inspect_local_file
-    connection: local
-    path: /tmp/sling/inspect_test/test_file.json
+    location: local//tmp/sling/inspect_test/test_file.json
 
   - type: log
     message: |
@@ -143,8 +140,7 @@ steps:
 
   - type: inspect
     id: inspect_local_dir_recursive
-    connection: local
-    path: /tmp/sling/inspect_test
+    location: local//tmp/sling/inspect_test
     recursive: true
 
   - type: log
@@ -173,9 +169,9 @@ steps:
 
   - type: inspect
     id: inspect_local_dir
-    connection: local
-    path: /tmp/sling/inspect_test
+    location: local//tmp/sling/inspect_test
     recursive: false
+
   - type: log
     message: |
       Local directory inspection results:
