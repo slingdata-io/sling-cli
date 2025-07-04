@@ -541,6 +541,9 @@
     - 'copying single file from'
     - 'Copy result:'
     - 'Output files:'
+    - 'listing path: /tmp/demo_file_1.csv'
+  output_does_not_contain:
+    - 'listing path: /tmp/remote'
 
 - id: 83
   name: Delta R2 secret creation test (https://github.com/slingdata-io/sling-cli/issues/564)

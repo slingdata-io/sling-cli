@@ -3,14 +3,14 @@
 steps:
   # Setup: Create test files
   - type: write
-    to: local/tmp/demo_file_1.csv
+    to: local//tmp/demo_file_1.csv
     content: |
       id,product
       1,Product_A
       2,Product_B
 
   - type: write
-    to: local/tmp/demo_file_2.csv
+    to: local//tmp/demo_file_2.csv
     content: |
       id,product
       3,Product_C
@@ -18,17 +18,17 @@ steps:
 
   # Copy files to simulate remote location (using local as proxy)
   - type: copy
-    from: local/tmp/demo_file_1.csv
-    to: local/tmp/remote/demo_file_1.csv
+    from: local//tmp/demo_file_1.csv
+    to: local//tmp/remote/demo_file_1.csv
     
   - type: copy
-    from: local/tmp/demo_file_2.csv
-    to: local/tmp/remote/demo_file_2.csv
+    from: local//tmp/demo_file_2.csv
+    to: local//tmp/remote/demo_file_2.csv
 
   # List files (simulating customer's list operation)
   - type: list
     id: list_files
-    location: local/tmp/remote/demo_*.csv
+    location: local//tmp/remote/demo_*.csv
     only: files
 
   - type: log
@@ -44,7 +44,7 @@ steps:
       # This copy operation should NOT duplicate the filename
       - type: copy
         from: "{loop.value.location}"
-        to: local/tmp/output/{loop.value.name}
+        to: local//tmp/output/{loop.value.name}
         single_file: true
         id: copy_file
 
@@ -54,7 +54,7 @@ steps:
   # Verify files were copied correctly
   - type: list
     id: verify_output
-    location: local/tmp/output/
+    location: local//tmp/output/
     only: files
 
   - type: log
@@ -62,15 +62,15 @@ steps:
 
   # Cleanup
   - type: delete
-    location: local/tmp/demo_file_1.csv
+    location: local//tmp/demo_file_1.csv
     
   - type: delete
-    location: local/tmp/demo_file_2.csv
+    location: local//tmp/demo_file_2.csv
     
   - type: delete
-    location: local/tmp/remote/
+    location: local//tmp/remote/
     recursive: true
     
   - type: delete
-    location: local/tmp/output/
+    location: local//tmp/output/
     recursive: true
