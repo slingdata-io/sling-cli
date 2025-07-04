@@ -583,3 +583,11 @@
   run: sling run -r cmd/sling/tests/replications/r.30.mssql_azure_multiple_files.yaml
   output_contains:
     - 'execution succeeded'
+
+- id: 88
+  name: Test timestamp to string casting without quotes
+  run: sling run -r cmd/sling/tests/replications/r.31.timestamp_string_quotes.yaml --debug
+  rows: 3
+  output_contains:
+    - wrote 3 rows
+    - execution succeeded

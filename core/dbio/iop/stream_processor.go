@@ -664,6 +664,14 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		sVal = string(v)
 		val = sVal
 		isString = true
+	case time.Time:
+		// Handle time.Time specially when casting to string to avoid JSON marshaling
+		if col.Type.IsString() {
+			// Use CastToString to format properly without quotes
+			sVal = sp.CastToString(i, v, DatetimeType)
+			val = sVal
+			isString = true
+		}
 	case chJSON: // Clickhouse JSON / Variant
 		sBytes, _ := v.MarshalJSON()
 		sVal = string(sBytes)
