@@ -502,6 +502,16 @@
     - committed iceberg snapshot
     - inserted 967 rows
 
+- id: 78
+  name: Run sling iceberg_glue insert
+  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  env:
+    TARGET: iceberg_glue
+  streams: 2
+  output_contains:
+    - committed iceberg snapshot
+    - inserted 967 rows
+
 # - id: 78
 #   name: Run sling iceberg_gcp insert
 #   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
