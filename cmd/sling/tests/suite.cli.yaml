@@ -461,7 +461,9 @@
 
 - id: 74
   name: Run sling iceberg_r2 insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_r2
   streams: 2
@@ -469,10 +471,13 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 75
   name: Run sling iceberg_s3 insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_s3
   streams: 2
@@ -480,10 +485,13 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 76
   name: Run sling iceberg_lakekeeper insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_lakekeeper
   streams: 2
@@ -491,43 +499,46 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 77
   name: Run sling iceberg_sql insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_sql
   streams: 2
   output_contains:
     - committed iceberg snapshot
     - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 78
   name: Run sling iceberg_glue insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_glue
   streams: 2
   output_contains:
     - committed iceberg snapshot
     - inserted 967 rows
-
-# - id: 78
-#   name: Run sling iceberg_gcp insert
-#   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-#   streams: 2
-#   output_contains:
-#     - committed iceberg snapshot
-#     - count_result => {"count_star":1001}
-#     - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 79
-  name: starrocks empty_as_null
-  run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
-  streams: 1
-  rows: 5
+  name: Run sling iceberg_gcp insert
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+  streams: 2
+  env:
+    TARGET: iceberg_gcp
   output_contains:
-    - 'store.result'
+    - committed iceberg snapshot
+    - inserted 967 rows
+    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
 
 - id: 80
   name: Prometheus buffer fix test
@@ -618,3 +629,11 @@
     - 'Path: /tmp/sling/inspect_test/test_file.json'
     - 'URI: file:///tmp/sling/inspect_test/'
     - 'Is Dir: true'
+
+- id: 80
+  name: starrocks empty_as_null
+  run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
+  streams: 1
+  rows: 5
+  output_contains:
+    - 'store.result'

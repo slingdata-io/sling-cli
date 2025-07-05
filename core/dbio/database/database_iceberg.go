@@ -17,6 +17,7 @@ import (
 	"github.com/apache/iceberg-go/catalog/rest"
 	sqlcat "github.com/apache/iceberg-go/catalog/sql"
 	"github.com/apache/iceberg-go/table"
+	"github.com/apache/iceberg-go/utils"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
@@ -221,7 +222,7 @@ func (conn *IcebergConn) connectGlue() error {
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
-		g.Debug("Iceberg: Using static credentials (Key ID: %s)", awsAccessKeyID)
+		g.Debug("iceberg: using static credentials (Key ID: %s)", awsAccessKeyID)
 
 		// Create AWS config with static credentials
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
@@ -238,7 +239,7 @@ func (conn *IcebergConn) connectGlue() error {
 			return g.Error(err, "Failed to create AWS config with static credentials")
 		}
 	} else if awsProfile != "" {
-		g.Debug("Iceberg: Using AWS profile=%s region=%s", awsProfile, awsRegion)
+		g.Debug("iceberg: using AWS profile=%s region=%s", awsProfile, awsRegion)
 
 		// Use specified profile from AWS credentials file
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
@@ -249,7 +250,7 @@ func (conn *IcebergConn) connectGlue() error {
 			return g.Error(err, "Failed to create AWS config with profile %s", awsProfile)
 		}
 	} else {
-		g.Debug("Iceberg: Using default AWS credential chain")
+		g.Debug("iceberg: using default AWS credential chain")
 		// Use default credential chain (env vars, IAM role, credential file, etc.)
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
 			awsv2config.WithRegion(awsRegion),
@@ -273,6 +274,9 @@ func (conn *IcebergConn) connectGlue() error {
 	opts := []glue.Option{glue.WithAwsConfig(awsCfg), glue.WithAwsProperties(props)}
 	cat := glue.NewCatalog(opts...)
 	conn.Catalog = cat
+
+	// Set AWS config in connection context for table operations
+	conn.context.Ctx = utils.WithAwsConfig(conn.context.Ctx, &awsCfg)
 
 	return nil
 }
@@ -705,7 +709,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		return ds, g.Error("Empty Query")
 	}
 
-	if tableName == "" || !g.In(conn.CatalogType, dbio.IcebergCatalogTypeREST, dbio.IcebergCatalogTypeGlue) {
+	if tableName == "" || !g.In(conn.CatalogType, dbio.IcebergCatalogTypeREST, dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeSQL) {
 		// if custom SQL, or glue or s3 tables, use DuckDB
 		return conn.queryViaDuckDB(ctx, sql, opts)
 	}
@@ -963,6 +967,7 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 		return g.Error(err, "could create parse %s", tableName)
 	}
 	tableID := table.Identifier{t.Schema, t.Name}
+	g.Debug("CreateTable: tableName=%s, tableID=%v", tableName, tableID)
 
 	// First check if namespace exists (if schema is specified)
 	if t.Schema != "" {
@@ -997,9 +1002,12 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 	// Create the table
 	conn.LogSQL(g.F("create table %s (%s)", tableName, g.Marshal(icebergSchema)))
 
-	_, err = conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
+	table, err := conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
 	if err != nil {
 		return g.Error(err, "Failed to create table %s", tableName)
+	}
+	if table == nil {
+		return g.Error("CreateTable returned nil table for %s", tableName)
 	}
 
 	return nil
