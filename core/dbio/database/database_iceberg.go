@@ -204,7 +204,7 @@ func (conn *IcebergConn) isS3TablesViaREST() bool {
 func (conn *IcebergConn) connectGlue() error {
 	// Get AWS credentials from connection properties
 	// accountID := conn.GetProp("glue_account_id")
-	namespace := conn.GetProp("glue_namespace")
+	warehouse := conn.GetProp("glue_warehouse")
 	awsAccessKeyID := conn.GetProp("s3_access_key_id")
 	awsSecretAccessKey := conn.GetProp("s3_secret_access_key")
 	awsSessionToken := conn.GetProp("s3_session_token")
@@ -215,7 +215,7 @@ func (conn *IcebergConn) connectGlue() error {
 		return g.Error("AWS region not specified")
 	}
 
-	props := map[string]string{"warehouse": namespace}
+	props := map[string]string{"warehouse": warehouse}
 
 	var awsCfg awsv2.Config
 	var err error
@@ -1591,6 +1591,9 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 	if conn.CatalogType == dbio.IcebergCatalogTypeSQL {
 		g.Warn("for querying iceberg with custom SQL via DuckDB, cannot do so with SQL-Catalog. DuckDB only supports REST and Glue catalog types.")
 		return nil, g.Error("unsupported catalog for DuckDB Iceberg extension.")
+	}
+	if conn.CatalogType == dbio.IcebergCatalogTypeGlue {
+		g.Warn("for querying iceberg with custom SQL via DuckDB, glue catalog doesn't seem to work well. see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse")
 	}
 
 	if !strings.Contains(sql, "iceberg_catalog.") {

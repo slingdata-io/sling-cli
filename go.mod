@@ -344,7 +344,7 @@ replace github.com/flarco/g => ../g
 
 replace github.com/slingdata-io/sling => ../sling
 
-replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250625114951-763f8d92b49e
+replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250705121323-8242bf566290
 
 // replace github.com/apache/iceberg-go => ../iceberg-go
 

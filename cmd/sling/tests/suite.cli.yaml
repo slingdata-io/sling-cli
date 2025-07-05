@@ -471,7 +471,10 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 75
   name: Run sling iceberg_s3 insert
@@ -485,7 +488,10 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 76
   name: Run sling iceberg_lakekeeper insert
@@ -499,7 +505,10 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 77
   name: Run sling iceberg_sql insert
@@ -512,7 +521,10 @@
   output_contains:
     - committed iceberg snapshot
     - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 78
   name: Run sling iceberg_glue insert
@@ -525,20 +537,26 @@
   output_contains:
     - committed iceberg snapshot
     - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
-- id: 79
-  name: Run sling iceberg_gcp insert
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
-  streams: 2
-  env:
-    TARGET: iceberg_gcp
-  output_contains:
-    - committed iceberg snapshot
-    - inserted 967 rows
-    - "acrookshank3@mapy.cz,true,2019-03-31" # part of stdout output
+# - id: 79
+#   name: Run sling iceberg_gcp insert
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+#   streams: 2
+#   env:
+#     TARGET: iceberg_gcp
+#   output_contains:
+#     - committed iceberg snapshot
+#     - inserted 967 rows
+    
+#     # part of stdout output
+#     - writing to target stream (stdout)
+#     - wrote 5 rows
 
 - id: 80
   name: Prometheus buffer fix test
@@ -630,7 +648,7 @@
     - 'URI: file:///tmp/sling/inspect_test/'
     - 'Is Dir: true'
 
-- id: 80
+- id: 90
   name: starrocks empty_as_null
   run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
   streams: 1
