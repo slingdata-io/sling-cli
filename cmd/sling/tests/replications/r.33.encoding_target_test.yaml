@@ -1,0 +1,57 @@
+source: postgres
+target: LOCAL
+
+env:
+  TEST_DIR: /tmp/sling/encoding_target_test
+
+hooks:
+  start:
+    # Clean up any existing test files
+    - type: command
+      command: |
+        rm -rf '{ env.TEST_DIR }'
+        mkdir -p '{ env.TEST_DIR }'
+
+    # Create test data in postgres with special characters
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.encoding_source_test;
+        CREATE TABLE public.encoding_source_test (
+          id INT,
+          name VARCHAR(100),
+          description VARCHAR(200)
+        );
+        INSERT INTO public.encoding_source_test VALUES
+          (1, 'José', 'Café manager'),
+          (2, 'François', 'Naïve résumé writer'),
+          (3, 'María', 'Piñata designer');
+
+  end:
+    # Check that the files were created
+    - type: command
+      command: |
+        ls -la {env.TEST_DIR}/test_encoding_output.csv || echo "File not found"
+
+    - type: log
+      message: |
+        Note: Target encoding feature is not fully implemented in sling yet.
+        This test is a placeholder for future implementation.
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.encoding_source_test;
+
+    - type: command
+      command: 'rm -rf {env.TEST_DIR}'
+
+streams:
+  # Test writing with encoding (placeholder - feature not implemented yet)
+  public.encoding_source_test:
+    object: "file://{TEST_DIR}/test_encoding_output.csv"
+    mode: full-refresh
+    target_options:
+      format: csv
+      # encoding: latin1  # This option is not currently implemented for target

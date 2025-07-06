@@ -655,3 +655,27 @@
   rows: 5
   output_contains:
     - 'store.result'
+
+- id: 91
+  name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.32.encoding_test.yaml
+    sling run -d -r cmd/sling/tests/replications/r.33.encoding_target_test.yaml
+  output_contains:
+    - 'Latin1 results:'
+    - 'José'
+    - 'Café manager'
+    - 'Windows1252 results:'
+    - 'UTF-8 BOM results:'
+    - '张三'
+    - '김철수'
+    - 'Target encoding feature is not fully implemented'
+    - 'execution succeeded'
+
+- id: 92
+  name: Test encoding garbled output when not specified
+  run: sling run -d -r cmd/sling/tests/replications/r.34.encoding_garbled_test.yaml
+  output_contains:
+    - 'SUCCESS: Correct output contains proper special characters'
+    - 'SUCCESS: Garbled output has corrupted special characters as expected'
+    - 'execution succeeded'

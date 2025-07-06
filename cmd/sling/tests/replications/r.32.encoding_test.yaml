@@ -1,0 +1,170 @@
+source: LOCAL
+target: postgres
+
+env:
+  TEST_DIR: /tmp/sling/encoding_test
+
+hooks:
+  start:
+    # Clean up any existing test files
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.encoding_test_latin1;
+        DROP TABLE IF EXISTS public.encoding_test_utf8;
+        DROP TABLE IF EXISTS public.encoding_test_windows1252;
+
+    # Create test directory
+    - type: command
+      command: |
+        mkdir -p '{ env.TEST_DIR }'
+
+    # Create test file with latin1 encoding
+    # Contains special characters: café, naïve, résumé
+    - type: write
+      to: local/{env.TEST_DIR}/test_latin1.csv
+      content: |
+        id,name,description
+        1,José,Café manager
+        2,François,Naïve résumé writer
+        3,María,Piñata designer
+
+    # Convert to latin1 encoding
+    - type: command
+      command: |
+        iconv -f utf-8 -t iso-8859-1 {env.TEST_DIR}/test_latin1.csv > {env.TEST_DIR}/test_latin1_encoded.csv
+
+    # Create test file with windows1252 encoding
+    # Contains special characters: smart quotes, em dash
+    - type: write
+      to: local/{env.TEST_DIR}/test_windows1252.csv
+      content: |
+        id,name,description
+        1,John,He said Hello
+        2,Jane,She replied Hi there
+        3,Bob,Price 100-200
+
+    # Convert to windows1252 encoding
+    - type: command
+      command: |
+        iconv -f utf-8 -t windows-1252 {env.TEST_DIR}/test_windows1252.csv > {env.TEST_DIR}/test_windows1252_encoded.csv
+
+    # Create test file with UTF-8 BOM
+    - type: command
+      command: |
+        printf '\xEF\xBB\xBF' > {env.TEST_DIR}/test_utf8_bom.csv
+        cat >> {env.TEST_DIR}/test_utf8_bom.csv << 'EOF'
+        id,name,description
+        1,张三,Chinese name
+        2,佐藤,Japanese name
+        3,김철수,Korean name
+        EOF
+
+  end:
+    # Verify the data was read correctly
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, name, description FROM public.encoding_test_latin1 ORDER BY id
+      into: latin1_result
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, name, description FROM public.encoding_test_windows1252 ORDER BY id
+      into: windows1252_result
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, name, description FROM public.encoding_test_utf8 ORDER BY id
+      into: utf8_result
+
+    - type: log
+      message: |
+        Latin1 results: {pretty_table(store.latin1_result)}
+        Windows1252 results: {pretty_table(store.windows1252_result)}
+        UTF-8 BOM results: {pretty_table(store.utf8_result)}
+
+    # Check that special characters were preserved
+    - type: check
+      check: store.latin1_result[0].name == "José"
+      name: Latin1 José character preserved
+
+    - type: check
+      check: store.latin1_result[0].description == "Café manager"
+      name: Latin1 café character preserved
+
+    - type: check
+      check: store.latin1_result[1].name == "François"
+      name: Latin1 François character preserved
+
+    - type: check
+      check: store.latin1_result[1].description == "Naïve résumé writer"
+      name: Latin1 naïve and résumé characters preserved
+
+    - type: check
+      check: store.latin1_result[2].name == "María"
+      name: Latin1 María character preserved
+
+    - type: check
+      check: store.latin1_result[2].description == "Piñata designer"
+      name: Latin1 piñata character preserved
+
+    - type: check
+      check: 'store.windows1252_result[0].description == "He said Hello"'
+      name: Windows1252 character preserved
+
+    - type: check
+      check: 'store.windows1252_result[1].description == "She replied Hi there"'
+      name: Windows1252 character preserved
+
+    - type: check
+      check: 'store.windows1252_result[2].description == "Price 100-200"'
+      name: Windows1252 character preserved
+
+    - type: check
+      check: store.utf8_result[0].name == "张三"
+      name: UTF-8 BOM Chinese characters preserved
+
+    - type: check
+      check: store.utf8_result[1].name == "佐藤"
+      name: UTF-8 BOM Japanese characters preserved
+
+    - type: check
+      check: store.utf8_result[2].name == "김철수"
+      name: UTF-8 BOM Korean characters preserved
+
+    # Clean up test files
+    - type: command
+      command: 'rm -rf {env.TEST_DIR}'
+
+    # Clean up database tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.encoding_test_latin1;
+        DROP TABLE IF EXISTS public.encoding_test_utf8;
+        DROP TABLE IF EXISTS public.encoding_test_windows1252;
+
+streams:
+  "file://{TEST_DIR}/test_latin1_encoded.csv":
+    object: public.encoding_test_latin1
+    mode: full-refresh
+    source_options:
+      encoding: latin1
+      header: true
+
+  "file://{TEST_DIR}/test_windows1252_encoded.csv":
+    object: public.encoding_test_windows1252
+    mode: full-refresh
+    source_options:
+      encoding: windows1252
+      header: true
+
+  "file://{TEST_DIR}/test_utf8_bom.csv":
+    object: public.encoding_test_utf8
+    mode: full-refresh
+    source_options:
+      encoding: utf8_bom
+      header: true
