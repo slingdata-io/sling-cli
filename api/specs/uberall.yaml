@@ -5,7 +5,7 @@ defaults:
   request:
     headers:
       Accept: "application/json"
-      privateKey: ${secrets.private_key}
+      privateKey: '{secrets.private_key}'
 
     timeout: 60
     rate: 5   # Adjust based on observed API limits
@@ -19,18 +19,18 @@ endpoints:
     state:
       offset: 0
       limit: 100
-      location_id: ${ coalesce(env.LOCATION_ID, secrets.location_id) }
+      location_id: '{ coalesce(env.LOCATION_ID, secrets.location_id) }'
 
     request:
-      url: https://uberall.com/api/locations/${state.location_id}
+      url: https://uberall.com/api/locations/{state.location_id}
       method: "GET"
       parameters:
-        max: ${state.limit}
-        offset: ${state.offset}
+        max: '{state.limit}'
+        offset: '{state.offset}'
     
     pagination:
       next_state:
-        offset: "${state.offset + state.limit}"
+        offset: "{state.offset + state.limit}"
       stop_condition: "length(response.records) == 0"
     
     response:
