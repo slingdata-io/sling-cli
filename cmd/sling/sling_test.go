@@ -450,6 +450,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
+			if g.In(connType, dbio.TypeDbIceberg) {
+				dropViewSQL = "" // iceberg does not support views
+			}
+
 			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
 				taskCfg.Target.Options.PreSQL = g.String(g.R(
 					*preSQL,

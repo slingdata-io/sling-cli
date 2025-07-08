@@ -257,7 +257,9 @@
 
 - id: 44
   name: Run sling with replication configuration 11 and year parameter
-  run: 'YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml'
+  run: 'sling run -r cmd/sling/tests/replications/r.11.yaml'
+  env:
+    YEAR: 2005
   streams: 2
   output_contains:
     - test1k/2005
