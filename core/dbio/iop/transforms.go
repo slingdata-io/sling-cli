@@ -14,12 +14,34 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/maja42/goval"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
 )
 
-var TransformsMap = map[string]Transform{}
+var (
+	TransformsMap = map[string]Transform{}
+
+	GlobalFunctionMap map[string]goval.ExpressionFunction
+
+	GetTransformFunction = func(string) goval.ExpressionFunction {
+		return nil
+	}
+
+	FunctionToTransform = func(name string, f goval.ExpressionFunction, params ...any) Transform {
+		return Transform{
+			Name: name,
+			Func: func(sp *StreamProcessor, vals ...any) (any, error) {
+				if len(params) > 0 {
+					vals = append(vals, params...) // append params
+				}
+				val, err := f(vals...)
+				return val, err
+			},
+		}
+	}
+)
 
 func init() {
 	for _, t := range []Transform{
@@ -71,6 +93,7 @@ type transformsNS struct{}
 
 type Transform struct {
 	Name       string
+	Func       func(*StreamProcessor, ...any) (any, error)
 	FuncString func(*StreamProcessor, string) (string, error)
 	FuncTime   func(*StreamProcessor, *time.Time) error
 	makeFunc   func(t *Transform, params ...any) error
