@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
@@ -143,9 +145,47 @@ func (fs *S3FileSysClient) Connect() (err error) {
 		region = defaultRegion
 	}
 
+	// Configure HTTP client with connection settings to handle "connection reset by peer" errors
+	// These settings help with connection pooling and timeouts
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second, // Default timeout
+		Transport: &http.Transport{
+			MaxIdleConns:          100,              // Maximum idle connections across all hosts
+			MaxIdleConnsPerHost:   20,               // Maximum idle connections per host
+			IdleConnTimeout:       90 * time.Second, // How long to keep idle connections open
+			TLSHandshakeTimeout:   10 * time.Second, // TLS handshake timeout
+			ExpectContinueTimeout: 1 * time.Second,  // Time to wait for server's first response headers
+			ResponseHeaderTimeout: 10 * time.Second, // Time to wait for server's response headers
+		},
+	}
+
+	// Allow custom timeout configuration
+	if timeoutStr := fs.GetProp("HTTP_TIMEOUT"); timeoutStr != "" {
+		if timeout, err := time.ParseDuration(timeoutStr); err == nil {
+			httpClient.Timeout = timeout
+		}
+	}
+
+	// Configure retry options
+	maxRetryAttempts := 3 // Default retry attempts
+	if maxRetries := fs.GetProp("MAX_RETRIES"); maxRetries != "" {
+		if attempts := cast.ToInt(maxRetries); attempts > 0 {
+			maxRetryAttempts = attempts
+			g.Debug("S3 client configured with %d retry attempts", attempts)
+		}
+	}
+
+	retryOptions := retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = maxRetryAttempts
+		o.MaxBackoff = 20 * time.Second
+		o.Backoff = retry.NewExponentialJitterBackoff(2 * time.Second)
+	})
+
 	// Configure options for AWS SDK v2
 	configOptions := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
+		config.WithHTTPClient(httpClient),
+		config.WithRetryer(func() aws.Retryer { return retryOptions }),
 	}
 
 	// Add endpoint if specified
@@ -310,6 +350,38 @@ func (fs *S3FileSysClient) getConcurrency() int {
 	return conc
 }
 
+// S3ReaderWrapper wraps an io.ReadCloser and ensures proper cleanup
+type S3ReaderWrapper struct {
+	io.ReadCloser
+	closed bool
+}
+
+// Read implements io.Reader and automatically closes on EOF
+func (r *S3ReaderWrapper) Read(p []byte) (n int, err error) {
+	if r.closed {
+		return 0, io.EOF
+	}
+
+	n, err = r.ReadCloser.Read(p)
+	if err == io.EOF {
+		r.closeOnce()
+	}
+	return n, err
+}
+
+// Close ensures the underlying ReadCloser is closed only once
+func (r *S3ReaderWrapper) Close() error {
+	return r.closeOnce()
+}
+
+func (r *S3ReaderWrapper) closeOnce() error {
+	if !r.closed {
+		r.closed = true
+		return r.ReadCloser.Close()
+	}
+	return nil
+}
+
 // GetReader return a reader for the given path
 // path should specify the full path with scheme:
 // `s3://my_bucket/key/to/file.txt` or `s3://my_bucket/key/to/directory`
@@ -330,8 +402,15 @@ func (fs *S3FileSysClient) GetReader(uri string) (reader io.Reader, err error) {
 		return nil, g.Error(err, "Error getting S3 object -> "+key)
 	}
 
-	// result.Body is already an io.ReadCloser - perfect for streaming
-	return result.Body, nil
+	// Wrap the ReadCloser to ensure proper cleanup
+	// AWS documentation requires closing any io.ReadCloser instances
+	wrapper := &S3ReaderWrapper{ReadCloser: result.Body}
+
+	// Set a finalizer as a safety net in case the caller doesn't read to EOF
+	// This helps prevent connection leaks that cause "connection reset by peer" errors
+	runtime.SetFinalizer(wrapper, (*S3ReaderWrapper).Close)
+
+	return wrapper, nil
 }
 
 // GetWriter creates the file if non-existent and return a writer
