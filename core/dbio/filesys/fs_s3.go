@@ -208,28 +208,22 @@ func (fs *S3FileSysClient) Connect() (err error) {
 			})))
 	}
 
-	if cast.ToBool(fs.GetProp("USE_ENVIRONMENT")) {
-		goto useEnv
+	if cast.ToBool(fs.GetProp("ANONYMOUS")) {
+		// Use anonymous credentials for public buckets (no signing)
+		configOptions = append(configOptions, config.WithCredentialsProvider(aws.AnonymousCredentials{}))
+		g.Debug("using anonymous AWS credentials (no signing)")
+	} else if cast.ToBool(fs.GetProp("USE_ENVIRONMENT")) {
+		g.Debug("using default AWS environment credentials")
 	} else if profile := fs.GetProp("PROFILE"); profile != "" {
 		// Fall back to profile if specified
 		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
-		goto skipUseEnv
 	} else if fs.GetProp("ACCESS_KEY_ID") != "" && fs.GetProp("SECRET_ACCESS_KEY") != "" {
 		configOptions = append(configOptions, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			fs.GetProp("ACCESS_KEY_ID"),
 			fs.GetProp("SECRET_ACCESS_KEY"),
 			fs.GetProp("SESSION_TOKEN"),
 		)))
-		goto skipUseEnv
-	} else if val := fs.GetProp("USE_ENVIRONMENT"); val != "" && !cast.ToBool(val) {
-		goto skipUseEnv
 	}
-
-useEnv:
-	// Use environment credentials (AWS SDK will automatically pick these up)
-	g.Debug("using default AWS environment credentials")
-
-skipUseEnv:
 
 	fs.awsConfig, err = config.LoadDefaultConfig(fs.Context().Ctx, configOptions...)
 	if err != nil {
