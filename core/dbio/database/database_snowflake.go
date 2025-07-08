@@ -829,8 +829,7 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		return
 	}
 	df.Defer(func() {
-		if err != nil && strings.Contains(err.Error(), "transaction") {
-			conn.tx = nil // clear any failed transactions
+		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {
 			conn.Exec("REMOVE " + stageFolderPath)
 		}
 	})
