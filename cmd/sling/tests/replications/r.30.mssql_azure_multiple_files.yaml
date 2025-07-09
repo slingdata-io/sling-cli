@@ -1,0 +1,76 @@
+source: mssql
+target: azure_storage
+
+defaults:
+  mode: full-refresh
+  target_options:
+    file_max_rows: 10
+    format: parquet
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_mssql_azure_multi_files', 'U') IS NOT NULL 
+          DROP TABLE dbo.test_mssql_azure_multi_files;
+        
+    - type: query
+      connection: '{source.name}'
+      query: |
+        CREATE TABLE dbo.test_mssql_azure_multi_files (
+          id INT PRIMARY KEY,
+          name VARCHAR(50),
+          value DECIMAL(10, 2),
+          created_at DATETIME
+        );
+        
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Insert 55 records using a CTE approach
+        WITH numbers AS (
+          SELECT TOP 55 
+            ROW_NUMBER() OVER (ORDER BY s1.object_id) AS n
+          FROM sys.objects s1
+        )
+        INSERT INTO dbo.test_mssql_azure_multi_files (id, name, value, created_at)
+        SELECT 
+          n as id,
+          CONCAT('Record_', n) as name,
+          n * 1.23 as value,
+          GETDATE() as created_at
+        FROM numbers;
+
+  end:
+    # List files in the target folder to verify 6 files were created
+    - type: list
+      id: list_files
+      location: azure_storage/sling_tests/mssql_azure_multi_files/*
+      only: files
+
+    - type: log
+      message: |
+        Files created: {length(state.list_files.result)}
+        File list: {state.list_files.result}
+
+    # Check that exactly 6 files were created (55 rows / 10 rows per file = 6 files)
+    - type: check
+      check: length(state.list_files.result) == 6
+      message: "Expected 6 files but got {length(state.list_files.result)}"
+
+    # Clean up Azure Storage files
+    - type: delete
+      location: azure_storage/sling_tests/mssql_azure_multi_files/
+
+    # Clean up test data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_mssql_azure_multi_files', 'U') IS NOT NULL 
+          DROP TABLE dbo.test_mssql_azure_multi_files;
+
+streams:
+  dbo.test_mssql_azure_multi_files:
+    object: "sling_tests/mssql_azure_multi_files/*"
+    mode: full-refresh

@@ -526,49 +526,63 @@ func (ds *Datastream) SetIterator(it *Iterator) {
 }
 
 func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, decoded bool) {
+
+	matchReader := func(encoding string) (r io.Reader) {
+		switch encoding {
+		case TransformDecodeLatin1.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_1)
+		case TransformDecodeLatin5.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_5)
+		case TransformDecodeLatin9.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_15)
+		case TransformDecodeWindows1250.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1250)
+		case TransformDecodeWindows1252.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1252)
+		case TransformDecodeUtf16.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
+		case TransformDecodeUtf8.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8)
+		case TransformDecodeUtf8Bom.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
+
+		case TransformEncodeLatin1.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_1)
+		case TransformEncodeLatin5.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_5)
+		case TransformEncodeLatin9.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_15)
+		case TransformEncodeWindows1250.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1250)
+		case TransformEncodeWindows1252.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1252)
+		case TransformEncodeUtf16.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF16)
+		case TransformEncodeUtf8.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8)
+		case TransformEncodeUtf8Bom.Name:
+			r = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8BOM)
+
+		default:
+			return nil
+		}
+		return r
+	}
+
 	// decode File if requested
-	if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
+	if encoding, ok := ds.Sp.Config.Map["encoding"]; ok {
+		if nr := matchReader(encoding); nr != nil {
+			return nr, true
+		}
+	} else if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
 		columnTransforms := makeColumnTransforms(transformsPayload)
 		applied := []string{}
 
 		if ts, ok := columnTransforms["*"]; ok {
 			for _, t := range ts {
-				switch t {
-				case TransformDecodeLatin1.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_1)
-				case TransformDecodeLatin5.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_5)
-				case TransformDecodeLatin9.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeISO8859_15)
-				case TransformDecodeWindows1250.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1250)
-				case TransformDecodeWindows1252.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeWindows1252)
-				case TransformDecodeUtf16.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF16)
-				case TransformDecodeUtf8.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8)
-				case TransformDecodeUtf8Bom.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.DecodeUTF8BOM)
-
-				case TransformEncodeLatin1.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_1)
-				case TransformEncodeLatin5.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_5)
-				case TransformEncodeLatin9.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeISO8859_15)
-				case TransformEncodeWindows1250.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1250)
-				case TransformEncodeWindows1252.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeWindows1252)
-				case TransformEncodeUtf16.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF16)
-				case TransformEncodeUtf8.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8)
-				case TransformEncodeUtf8Bom.Name:
-					newReader = transform.NewReader(reader, ds.Sp.transformers.EncodeUTF8BOM)
-
-				default:
+				if nr := matchReader(t); nr != nil {
+					newReader = nr
+				} else {
 					continue
 				}
 				applied = append(applied, t) // delete from transforms, already applied

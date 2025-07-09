@@ -1,0 +1,202 @@
+steps:
+  # Test inspect on a database table
+  - type: query
+    id: create_test_table
+    connection: postgres
+    query: |
+      DROP TABLE IF EXISTS public.test_inspect_table;
+      CREATE TABLE public.test_inspect_table (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
+        value NUMERIC(10,2),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO public.test_inspect_table (name, value) VALUES 
+        ('item1', 123.45),
+        ('item2', 678.90);
+
+  - type: inspect
+    id: inspect_postgres_table
+    location: postgres/public.test_inspect_table
+
+  - type: log
+    message: |
+      Database table inspection results:
+      - Exists: {state.inspect_postgres_table.exists}
+      - Database: {state.inspect_postgres_table.database}
+      - Schema: {state.inspect_postgres_table.schema}
+      - Name: {state.inspect_postgres_table.name}
+      - FDQN: {state.inspect_postgres_table.fdqn}
+      - Column Names: {state.inspect_postgres_table.columns[*].name}
+      - Column 'value': {state.inspect_postgres_table.column_map.value}
+
+  - type: check
+    check: state.inspect_postgres_table.exists == true
+    failure_message: "Table should exist"
+
+  - type: check
+    check: length(state.inspect_postgres_table.columns) == 4
+    failure_message: "Table should have 4 columns"
+
+  - type: check
+    check: state.inspect_postgres_table.columns[2].name == "value"
+    failure_message: "Third column should be named 'value'"
+
+  - type: check
+    check: state.inspect_postgres_table.columns[2].precision == 10
+    failure_message: "Value column should have precision 10"
+
+  - type: check
+    check: state.inspect_postgres_table.column_map.value.precision == 10
+    failure_message: "Value column should have precision 10"
+
+  - type: check
+    check: state.inspect_postgres_table.columns[2].scale == 2
+    failure_message: "Value column should have scale 2"
+
+  # Test inspect on a non-existent table
+  - type: inspect
+    id: inspect_missing_table
+    location: postgres/public.non_existent_table
+
+  - type: check
+    check: state.inspect_missing_table.exists == false
+    failure_message: "Non-existent table should not exist"
+
+  # Test inspect on S3 file
+  - type: write
+    id: create_s3_file
+    to: aws_s3/sling-cli-tests/inspect_test.txt
+    content: |
+      This is a test file for inspect hook.
+      It has multiple lines.
+      Created at: {run.start_time}
+
+  - type: inspect
+    id: inspect_s3_file
+    location: aws_s3/sling-cli-tests/inspect_test.txt
+
+  - type: log
+    message: |
+      S3 file inspection results:
+      - Exists: {state.inspect_s3_file.exists}
+      - Path: {state.inspect_s3_file.path}
+      - Name: {state.inspect_s3_file.name}
+      - Size: {state.inspect_s3_file.size}
+      - Is Dir: {state.inspect_s3_file.is_dir}
+
+  - type: check
+    check: state.inspect_s3_file.exists == true
+    failure_message: "S3 file should exist"
+
+  - type: check
+    check: state.inspect_s3_file.name == "inspect_test.txt"
+    failure_message: "File name should be inspect_test.txt"
+
+  - type: check
+    check: state.inspect_s3_file.is_dir == false
+    failure_message: "Should be a file, not a directory"
+
+  # Test inspect on local file
+  - type: write
+    id: create_local_file
+    to: local//tmp/sling/inspect_test/test_file.json
+    content: |
+      {
+        "test": true,
+        "timestamp": "{run.start_time}"
+      }
+
+  - type: inspect
+    id: inspect_local_file
+    location: local//tmp/sling/inspect_test/test_file.json
+
+  - type: log
+    message: |
+      Local file inspection results:
+      - Exists: {state.inspect_local_file.exists}
+      - Path: {state.inspect_local_file.path}
+      - Name: {state.inspect_local_file.name}
+      - Size: {state.inspect_local_file.size}
+
+  - type: check
+    check: state.inspect_local_file.exists == true
+    failure_message: "Local file should exist"
+
+  - type: check
+    check: state.inspect_local_file.name == "test_file.json"
+    failure_message: "File name should be test_file.json"
+
+  # Test inspect on directory with recursive
+  - type: write
+    id: create_dir_files
+    to: local//tmp/sling/inspect_test/subdir/file1.txt
+    content: "File 1 content"
+
+  - type: write
+    id: create_dir_files2
+    to: local//tmp/sling/inspect_test/subdir/file2.txt
+    content: "File 2 content with more text"
+
+  - type: inspect
+    id: inspect_local_dir_recursive
+    location: local//tmp/sling/inspect_test
+    recursive: true
+
+  - type: log
+    message: |
+      Local directory inspection results (recursive):
+      - Name: {state.inspect_local_dir_recursive.name}
+      - Path: {state.inspect_local_dir_recursive.path}
+      - URI: {state.inspect_local_dir_recursive.uri}
+      - Exists: {state.inspect_local_dir_recursive.exists}
+      - Is Dir: {state.inspect_local_dir_recursive.is_dir}
+      - Total Size: {state.inspect_local_dir_recursive.size}
+      - Node Count: {state.inspect_local_dir_recursive.node_count}
+      - File Count: {state.inspect_local_dir_recursive.file_count}
+      - Folder Count: {state.inspect_local_dir_recursive.folder_count}
+
+  - type: check
+    check: state.inspect_local_dir_recursive.exists == true
+    failure_message: "Directory should exist"
+
+  - type: check
+    check: state.inspect_local_dir_recursive.file_count >= 3
+    failure_message: "Should have at least 3 files"
+  - type: check
+    check: state.inspect_local_dir_recursive.is_dir == true
+    failure_message: "Should be a directory"
+
+  - type: inspect
+    id: inspect_local_dir
+    location: local//tmp/sling/inspect_test
+    recursive: false
+
+  - type: log
+    message: |
+      Local directory inspection results:
+      - Name: {state.inspect_local_dir.name}
+      - Path: {state.inspect_local_dir.path}
+      - URI: {state.inspect_local_dir.uri}
+      - Exists: {state.inspect_local_dir.exists}
+      - Is Dir: {state.inspect_local_dir.is_dir}
+
+  - type: check
+    check: state.inspect_local_dir.is_dir == true
+    failure_message: "Should be a directory"
+
+  # Cleanup
+  - type: query
+    id: cleanup_postgres
+    connection: postgres
+    query: DROP TABLE IF EXISTS public.test_inspect_table;
+
+  - type: delete
+    id: cleanup_s3
+    location: aws_s3/sling-cli-tests/inspect_test.txt
+
+  - type: delete
+    id: cleanup_local
+    connection: local
+    path: /tmp/sling/inspect_test
+    recursive: true

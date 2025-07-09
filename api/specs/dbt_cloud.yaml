@@ -4,14 +4,14 @@ description: "API for interacting with dbt Cloud to retrieve jobs, runs, and use
 defaults:
   state:
     base_url: https://cloud.getdbt.com/api/v2
-    account_id: ${ require(secrets.account_id) } # error if account_id is not provided
+    account_id: '{ require(secrets.account_id) }' # error if account_id is not provided
   
   request:
     method: "GET"
     headers:
       Accept: "application/json"
       Content-Type: "application/json"
-      Authorization: Token ${secrets.api_token}
+      Authorization: Token {secrets.api_token}
   
 endpoints:
   jobs:
@@ -21,15 +21,15 @@ endpoints:
       offset: 0
 
     request:
-      url: "${state.base_url}/accounts/${state.account_id}/jobs/"
+      url: "{state.base_url}/accounts/{state.account_id}/jobs/"
       method: "GET"
       parameters:
-        limit: "${state.limit}"
-        offset: "${state.offset}"
+        limit: "{state.limit}"
+        offset: "{state.offset}"
 
     pagination:
       next_state:
-        offset: ${state.offset + state.limit}
+        offset: '{state.offset + state.limit}'
       stop_condition: length(response.records) < state.limit
 
     response:
@@ -43,21 +43,21 @@ endpoints:
     state:
       limit: 100
       offset: 0
-      id__gt: ${ coalesce(env.RUN_START_ID, sync.last_max_id, 0) }
+      id__gt: '{ coalesce(env.RUN_START_ID, sync.last_max_id, 0) }'
       
     sync: [ last_max_id ]
 
     request:
-      url: "${state.base_url}/accounts/${state.account_id}/runs/"
+      url: "{state.base_url}/accounts/{state.account_id}/runs/"
       method: "GET"
       parameters:
-        limit: "${state.limit}"
-        offset: "${state.offset}"
-        id__gt: "${state.id__gt}"
+        limit: "{state.limit}"
+        offset: "{state.offset}"
+        id__gt: "{state.id__gt}"
 
     pagination:
       next_state:
-        offset: "${state.offset + state.limit}"
+        offset: "{state.offset + state.limit}"
       stop_condition: length(response.records) < state.limit
 
     response:
@@ -78,15 +78,15 @@ endpoints:
       offset: 0
 
     request:
-      url: "${state.base_url}/accounts/${state.account_id}/users/"
+      url: "{state.base_url}/accounts/{state.account_id}/users/"
       method: "GET"
       parameters:
-        limit: "${state.limit}"
-        offset: "${state.offset}"
+        limit: "{state.limit}"
+        offset: "{state.offset}"
 
     pagination:
       next_state:
-        offset: "${state.offset + state.limit}"
+        offset: "{state.offset + state.limit}"
       stop_condition: length(response.records) < state.limit
 
     response:

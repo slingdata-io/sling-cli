@@ -6,7 +6,7 @@ hooks:
     # does not work for gcp or sql
     - type: check
       id: target_check
-      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql"  
+      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql"&& lower(target.name) != "iceberg_glue"
       failure_message: skipping target {target.name}
       on_failure: break
       

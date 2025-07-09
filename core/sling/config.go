@@ -1390,6 +1390,7 @@ type SourceOptions struct {
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
+	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
@@ -1426,6 +1427,7 @@ type TargetOptions struct {
 	AdjustColumnType *bool               `json:"adjust_column_type,omitempty" yaml:"adjust_column_type,omitempty"`
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
+	Encoding         *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	TableKeys      database.TableKeys       `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp       string                   `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1546,6 +1548,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = sourceOptions.MaxDecimals
 	}
+	if o.Encoding == nil {
+		o.Encoding = sourceOptions.Encoding
+	}
 	if o.Columns == nil {
 		o.Columns = sourceOptions.Columns // legacy
 	}
@@ -1630,6 +1635,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.ColumnTyping == nil {
 		o.ColumnTyping = targetOptions.ColumnTyping
+	}
+	if o.Encoding == nil {
+		o.Encoding = targetOptions.Encoding
 	}
 	if o.TableKeys == nil {
 		o.TableKeys = targetOptions.TableKeys

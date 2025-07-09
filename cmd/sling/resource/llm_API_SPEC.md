@@ -35,7 +35,7 @@ endpoints:
   endpoint_name:
     description: "Endpoint description"
     request:
-      url: "${state.base_url}/resource"
+      url: "{state.base_url}/resource"
       method: "GET"
     
     response:
@@ -62,17 +62,17 @@ authentication:
   type: "bearer"
 
   # Bearer token for authentication
-  token: "${secrets.api_token}"
+  token: "{secrets.api_token}"
 
   # Basic authentication credentials
-  username: "${secrets.username}"
-  password: "${secrets.password}"
+  username: "{secrets.username}"
+  password: "{secrets.password}"
 
   # OAuth2 Client Credentials Flow (most common for API integrations)
   type: "oauth2"
   flow: "client_credentials"
-  client_id: "${secrets.oauth_client_id}"
-  client_secret: "${secrets.oauth_client_secret}"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   scopes: ["read:data", "write:data"]
 
@@ -117,7 +117,7 @@ endpoints:
     state:
       # Get last sync timestamp from persistent state, default to 30 days ago
       updated_since: >
-        ${ coalesce(
+        { coalesce(
              sync.last_updated,
              date_format(date_add(now(), -30, 'day'), '%Y-%m-%dT%H:%M:%SZ')
            )
@@ -131,7 +131,7 @@ endpoints:
     # HTTP request configuration
     request:
       # Path relative to defaults.request.url
-      url: ${state.base_url}/users
+      url: '{state.base_url}/users'
       # Method overrides default if needed
       method: "GET"
       # Headers merged with defaults.request.headers
@@ -139,15 +139,15 @@ endpoints:
         X-Custom-Header: "value"
       # URL query parameters
       parameters:
-        page: "${state.page}"
-        limit: "${state.limit}"
-        updated_since: "${state.updated_since}" # Use the state variable
+        page: "{state.page}"
+        limit: "{state.limit}"
+        updated_since: "{state.updated_since}" # Use the state variable
 
     # Pagination configuration
     pagination:
       # How to update state for the next page request
       next_state:
-        page: "${state.page + 1}"
+        page: "{state.page + 1}"
       # Overrides default stop_condition
       stop_condition: "response.json.page >= response.json.total_pages"
 
@@ -203,7 +203,7 @@ endpoints:
 
     request:
       # Use the iterated user ID in the URL
-      url: ${state.base_url}/users/${state.current_user_id}
+      url: '{state.base_url}/users/{state.current_user_id}'
       method: "GET"
 
     response:
@@ -240,7 +240,7 @@ endpoints:
       concurrency: 10 # Process 10 products concurrently
     
     request:
-      url: ${state.base_url}/products/${state.current_product_id}/inventory
+      url: '{state.base_url}/products/{state.current_product_id}/inventory'
       # ... other request config ...
     response:
       # ... response config ...
@@ -259,18 +259,18 @@ authentication:
 
   # Basic Auth
   type: "basic"
-  username: "${secrets.username}"
-  password: "${secrets.password}"
+  username: "{secrets.username}"
+  password: "{secrets.password}"
 
   # Bearer Token
   type: "bearer"
-  token: "${secrets.api_token}" # Can use secrets, env, or state vars
+  token: "{secrets.api_token}" # Can use secrets, env, or state vars
 
   # OAuth2 - Client Credentials Flow (recommended for server-to-server)
   type: "oauth2"
   flow: "client_credentials"
-  client_id: "${secrets.oauth_client_id}"
-  client_secret: "${secrets.oauth_client_secret}"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   scopes:
     - "read:data"
@@ -279,8 +279,8 @@ authentication:
   # OAuth2 - Authorization Code Flow (interactive mode for CLI)
   type: "oauth2"
   flow: "authorization_code"
-  client_id: "${secrets.oauth_client_id}"
-  client_secret: "${secrets.oauth_client_secret}"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   # redirect_uri: "" # Leave empty for automatic localhost server
   scopes:
@@ -289,19 +289,19 @@ authentication:
   # OAuth2 - Authorization Code Flow (manual mode for web apps)
   type: "oauth2"
   flow: "authorization_code"
-  client_id: "${secrets.oauth_client_id}"
-  client_secret: "${secrets.oauth_client_secret}"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   redirect_uri: "https://myapp.example.com/callback"
-  token: "${secrets.authorization_code}" # Pre-obtained authorization code
+  token: "{secrets.authorization_code}" # Pre-obtained authorization code
 
   # OAuth2 - Resource Owner Password Credentials (deprecated, avoid if possible)
   type: "oauth2"
   flow: "password"
-  client_id: "${secrets.oauth_client_id}"
-  client_secret: "${secrets.oauth_client_secret}"
-  username: "${secrets.username}"
-  password: "${secrets.password}"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
+  username: "{secrets.username}"
+  password: "{secrets.password}"
   authentication_url: "https://api.example.com/oauth/token"
   scopes:
     - "read:user"
@@ -309,9 +309,9 @@ authentication:
   # OAuth2 - Refresh Token Flow
   type: "oauth2"
   flow: "refresh_token"
-  client_id: "${secrets.oauth_client_id}" # Optional for some providers
-  client_secret: "${secrets.oauth_client_secret}" # Optional for some providers
-  refresh_token: "${secrets.refresh_token}"
+  client_id: "{secrets.oauth_client_id}" # Optional for some providers
+  client_secret: "{secrets.oauth_client_secret}" # Optional for some providers
+  refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
 ```
 
@@ -329,21 +329,21 @@ authentication:
 
 ## Variable Scopes and Expressions
 
-Sling uses `${...}` syntax for embedding expressions and accessing variables within YAML strings. Expressions are evaluated using the `goval` library with custom functions.
+Sling uses `{...}` syntax for embedding expressions and accessing variables within YAML strings. Expressions are evaluated using the `goval` library with custom functions.
 
 Available variable scopes:
-- `env`: Environment variables (e.g., `${env.USER}`).
-- `secrets`: Sensitive credentials passed to Sling (e.g., `${secrets.api_key}`).
+- `env`: Environment variables (e.g., `{env.USER}`).
+- `secrets`: Sensitive credentials passed to Sling (e.g., `{secrets.api_key}`).
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
-- `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `${coalesce(sync.var, state.var, default_value)}`.
-- `auth`: Authentication data after successful authentication (e.g., `${auth.token}` for OAuth2 access tokens, refresh tokens stored here).
+- `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `{coalesce(sync.var, state.var, default_value)}`.
+- `auth`: Authentication data after successful authentication (e.g., `{auth.token}` for OAuth2 access tokens, refresh tokens stored here).
 - `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts`.
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
 - `record`: The current data record being processed by a processor (available only within `response.processors`).
 - `queue`: Access queues declared at the top level (e.g., `iterate.over: queue.my_queue`).
 - `null`: Represents a null value (e.g., `coalesce(state.value, null)`).
 
-State variables (`state.`) within an endpoint have a defined render order. If `state.b` depends on `state.a` (`state.b: "${state.a + 1}"`), `state.a` will be evaluated first. Circular dependencies are detected and cause an error.
+State variables (`state.`) within an endpoint have a defined render order. If `state.b` depends on `state.a` (`state.b: "{state.a + 1}"`), `state.a` will be evaluated first. Circular dependencies are detected and cause an error.
 
 ## Endpoints
 
@@ -369,18 +369,18 @@ Endpoints define specific API operations. They inherit settings from `defaults` 
 ```yaml
 request:
   # Request full URL, can includ state variables
-  url: "${state.base_url}/users/${state.user_id}?active=true"
+  url: "{state.base_url}/users/{state.user_id}?active=true"
   # Method: GET, POST, PUT, PATCH, DELETE, etc.
   method: "POST"
   # Headers: Merged with defaults.request.headers
   headers:
     Content-Type: "application/json"
-    Authorization: "Bearer ${auth.token}"
-    X-Request-ID: "${uuid()}"
+    Authorization: "Bearer {auth.token}"
+    X-Request-ID: "{uuid()}"
   # Parameters: Added as URL query parameters for GET/DELETE,
   # or form-encoded body for POST/PUT/PATCH if Content-Type is application/x-www-form-urlencoded
   parameters:
-    page: ${state.page}
+    page: {state.page}
     limit: 100
     status: "active"
   # Payload: Used as request body for POST/PUT/PATCH.
@@ -388,7 +388,7 @@ request:
   payload:
     user:
       name: "New User"
-      email: "${state.user_email}"
+      email: "{state.user_email}"
   # Timeout: Request timeout in seconds (default: 30)
   timeout: 60
   # Rate: Max requests per second for this endpoint (default: 2)
@@ -430,7 +430,7 @@ iterate:
   concurrency: 10
 request:
   parameters:
-    date: ${date_format(state.current_day, "%Y-%m-%d")}
+    date: '{date_format(state.current_day, "%Y-%m-%d")}'
     # ... other params ...
 ```
 
@@ -445,7 +445,7 @@ iterate:
 request:
   parameters:
     # Join the batch of IDs into a comma-separated string for the API parameter
-    ids: ${join(state.variant_id_batch, ",")}
+    ids: '{join(state.variant_id_batch, ",")}'
 ```
 
 ## Pagination
@@ -458,14 +458,14 @@ pagination:
   # Expressions are evaluated based on the *current* state and response (if needed).
   next_state:
     # Example 1: Cursor-based (using last record ID)
-    starting_after: "${response.records[-1].id}"
+    starting_after: "{response.records[-1].id}"
     # Example 2: Page number based
-    # page: "${state.page + 1}"
+    # page: "{state.page + 1}"
     # Example 3: Offset based
-    # offset: "${state.offset + state.limit}"
+    # offset: "{state.offset + state.limit}"
     # Example 4: Using URL from response header (e.g., Link header)
     # url: >
-    #  ${
+    #  {
     #      if(contains(response.headers.link, "rel=\"next\""),
     #         trim(split_part(split(response.headers.link, ",")[0], ";", 0), "<>"),
     #         null # Or keep current state.url? Needs careful handling.
@@ -562,7 +562,7 @@ endpoints:
       # Read the last sync timestamp from persistent state ('sync.last_sync_ts').
       # If it's the first run (sync.last_sync_ts is null), use a default start date.
       start_timestamp: >
-        ${ coalesce(
+        { coalesce(
              sync.last_sync_ts,
              date_format(date_add(now(), -7, 'day'), '%Y-%m-%dT%H:%M:%SZ')
            )
@@ -575,7 +575,7 @@ endpoints:
 
     request:
       parameters:
-        updated_since: "${state.start_timestamp}"
+        updated_since: "{state.start_timestamp}"
 
     response:
       processors:
@@ -589,8 +589,8 @@ endpoints:
 
 **Workflow:**
 1.  **Run Start:** Sling loads persisted sync values (e.g., `last_sync_ts` from the previous run) into the `sync.` scope.
-2.  **State Initialization:** The endpoint's `state` is initialized. Expressions like `${coalesce(sync.last_sync_ts, ...)}` read the persisted value or use a default.
-3.  **Requests:** Requests are made using the initialized state (e.g., `updated_since: "${state.start_timestamp}"`).
+2.  **State Initialization:** The endpoint's `state` is initialized. Expressions like `{coalesce(sync.last_sync_ts, ...)}` read the persisted value or use a default.
+3.  **Requests:** Requests are made using the initialized state (e.g., `updated_since: "{state.start_timestamp}"`).
 4.  **Processing:** Processors update state variables (e.g., `output: state.last_sync_ts`, `aggregation: maximum`).
 5.  **Run End:** The final values of the state variables listed in the `sync` array (e.g., `state.last_sync_ts`) are persisted for the next run.
 
@@ -606,13 +606,13 @@ description: "API Description"
 
 authentication:
   type: "bearer" # bearer|basic|oauth2|""
-  token: "${secrets.api_token}" # Or username/password, or OAuth2 config
+  token: "{secrets.api_token}" # Or username/password, or OAuth2 config
   
   # OAuth2 Client Credentials example (most common for APIs):
   # type: "oauth2"
   # flow: "client_credentials"
-  # client_id: "${secrets.oauth_client_id}"
-  # client_secret: "${secrets.oauth_client_secret}"
+  # client_id: "{secrets.oauth_client_id}"
+  # client_secret: "{secrets.oauth_client_secret}"
   # authentication_url: "https://api.example.com/oauth/token"
   # scopes: ["read:data"]
 
@@ -635,23 +635,23 @@ endpoints:
     description: "Fetch a list of items"
     state:
       # Example state for pagination or filtering
-      starting_after: ${sync.last_item_id} # For cursor pagination + incremental
-      created_since: ${coalesce(sync.last_sync_time, date_format(date_add(now(), -1, 'day'), '%Y-%m-%d'))}
+      starting_after: '{sync.last_item_id}' # For cursor pagination + incremental
+      created_since: '{coalesce(sync.last_sync_time, date_format(date_add(now(), -1, 'day'), '%Y-%m-%d'))}'
 
     # Persist last item ID and timestamp for next run
     sync: [last_item_id, last_sync_time]
 
     request:
-      url: "${state.base_url}/items" # Relative to defaults.request.url
+      url: "{state.base_url}/items" # Relative to defaults.request.url
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        created_since: ${state.created_since}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        created_since: '{state.created_since}'
 
     pagination:
       # Update 'starting_after' state with the ID of the last record from the response
       next_state:
-        starting_after: "${response.records[-1].id}"
+        starting_after: "{response.records[-1].id}"
       # Stop when the API indicates no more pages or returns an empty list
       stop_condition: "!response.json.has_more || length(response.records) == 0"
 
@@ -690,7 +690,7 @@ endpoints:
   #     into: "state.current_item_id"
   #     concurrency: 10
   #   request:
-  #     url: "${state.base_url}/items/${state.current_item_id}"
+  #     url: "{state.base_url}/items/{state.current_item_id}"
   #   response:
   #     records:
   #       jmespath: "data" # Assuming single item response
@@ -702,7 +702,7 @@ endpoints:
 
 ## Expression Functions
 
-You can use the following functions within `${...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
+You can use the following functions within `{...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
 
 **IMPORTANT:** Always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). This is required by the [goval](https://github.com/maja42/goval) expression library that Sling uses.
 
@@ -777,7 +777,7 @@ Uses Go's `time` package and `strftime` conventions via [timefmt-go](https://git
 # Format for API parameter (ISO 8601 with timezone)
 request:
   parameters:
-    updated_since: "${date_format(date_add(now(), -1, 'hour'), '%Y-%m-%dT%H:%M:%SZ')}"
+    updated_since: "{date_format(date_add(now(), -1, 'hour'), '%Y-%m-%dT%H:%M:%SZ')}"
 ```
 
 ### Value Handling Functions

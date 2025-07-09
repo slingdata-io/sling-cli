@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: [self-hosted, linux, ubuntu-16]
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     outputs:
       VERSION: ${{ steps.get_version.outputs.VERSION }}
@@ -54,7 +54,7 @@ jobs:
     if: "! (contains(github.event.inputs.build_only, 'true'))"
     needs: [build]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     strategy:
       fail-fast: false

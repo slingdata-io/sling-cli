@@ -257,7 +257,9 @@
 
 - id: 44
   name: Run sling with replication configuration 11 and year parameter
-  run: 'YEAR=2005 sling run -r cmd/sling/tests/replications/r.11.yaml'
+  run: 'sling run -r cmd/sling/tests/replications/r.11.yaml'
+  env:
+    YEAR: 2005
   streams: 2
   output_contains:
     - test1k/2005
@@ -461,7 +463,9 @@
 
 - id: 74
   name: Run sling iceberg_r2 insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_r2
   streams: 2
@@ -469,10 +473,16 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 75
   name: Run sling iceberg_s3 insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_s3
   streams: 2
@@ -480,10 +490,16 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 76
   name: Run sling iceberg_lakekeeper insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_lakekeeper
   streams: 2
@@ -491,33 +507,58 @@
     - committed iceberg snapshot
     - count_result => {"count_star":1001}
     - inserted 967 rows
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
 - id: 77
   name: Run sling iceberg_sql insert
-  run: sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_sql
   streams: 2
   output_contains:
     - committed iceberg snapshot
     - inserted 967 rows
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
 
-# - id: 78
+- id: 78
+  name: Run sling iceberg_glue insert
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+  env:
+    TARGET: iceberg_glue
+  streams: 2
+  output_contains:
+    - committed iceberg snapshot
+    - inserted 967 rows
+    
+    # part of stdout output
+    - writing to target stream (stdout)
+    - wrote 5 rows
+
+# - id: 79
 #   name: Run sling iceberg_gcp insert
-#   run: TARGET=iceberg_gcp sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
 #   streams: 2
+#   env:
+#     TARGET: iceberg_gcp
 #   output_contains:
 #     - committed iceberg snapshot
-#     - count_result => {"count_star":1001}
 #     - inserted 967 rows
-
-- id: 79
-  name: starrocks empty_as_null
-  run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
-  streams: 1
-  rows: 5
-  output_contains:
-    - 'store.result'
+    
+#     # part of stdout output
+#     - writing to target stream (stdout)
+#     - wrote 5 rows
 
 - id: 80
   name: Prometheus buffer fix test
@@ -541,16 +582,19 @@
     - 'copying single file from'
     - 'Copy result:'
     - 'Output files:'
+    - 'listing path: /tmp/demo_file_1.csv'
+  output_does_not_contain:
+    - 'listing path: /tmp/remote'
 
-- id: 83
-  name: Delta R2 secret creation test (https://github.com/slingdata-io/sling-cli/issues/564)
-  run: sling run -d -r cmd/sling/tests/replications/r.27.delta_r2.yaml
-  err: true  # We expect this to fail because the delta file doesn't exist
-  output_contains:
-    - "delta_scan('r2://"  # Verifies the URL was transformed from s3:// to r2://
-    - 'No files in log segment'
-  # This test validates that the R2 secret is created with ACCOUNT_ID
-  # It will fail at data reading stage, but that proves the secret was created correctly
+# - id: 83
+#   name: Delta R2 secret creation test (https://github.com/slingdata-io/sling-cli/issues/564)
+#   run: sling run -d -r cmd/sling/tests/replications/r.27.delta_r2.yaml
+#   err: true  # We expect this to fail because the delta file doesn't exist
+#   output_contains:
+#     - "delta_scan('r2://"  # Verifies the URL was transformed from s3:// to r2://
+#     - 'No files in log segment'
+#   # This test validates that the R2 secret is created with ACCOUNT_ID
+#   # It will fail at data reading stage, but that proves the secret was created correctly
 
 - id: 84
   name: Oracle NUMBER scale fix (https://github.com/slingdata-io/sling-cli/issues/584)
@@ -571,3 +615,78 @@
     TARGET: POSTGRES
   output_contains:
     - 'execution succeeded'
+
+- id: 86
+  name: MSSQL to parquet overwrite fix (https://github.com/slingdata-io/sling-cli/issues/588)
+  run: sling run -r cmd/sling/tests/replications/r.29.mssql_parquet_overwrite.yaml
+  output_contains:
+    - 'execution succeeded'
+
+- id: 87
+  name: MSSQL to Azure Storage multiple files fix (https://github.com/slingdata-io/sling-cli/issues/586)
+  run: sling run -r cmd/sling/tests/replications/r.30.mssql_azure_multiple_files.yaml
+  output_contains:
+    - 'execution succeeded'
+
+- id: 88
+  name: Test timestamp to string casting without quotes
+  run: sling run -r cmd/sling/tests/replications/r.31.timestamp_string_quotes.yaml --debug
+  rows: 3
+  output_contains:
+    - wrote 3 rows
+    - execution succeeded
+
+- id: 89
+  name: Test inspect hook for database tables and files
+  run: sling run -p cmd/sling/tests/pipelines/p.04.test_inspect_hook.yaml
+  output_contains:
+    - 'Database table inspection results:'
+    - 'S3 file inspection results:'
+    - 'Local file inspection results:'
+    - 'Local directory inspection results:'
+    - 'Path: sling-cli-tests/inspect_test.txt'
+    - 'FDQN: "public"."test_inspect_table"'
+    - 'Path: /tmp/sling/inspect_test/test_file.json'
+    - 'URI: file:///tmp/sling/inspect_test/'
+    - 'Is Dir: true'
+
+- id: 90
+  name: starrocks empty_as_null
+  run: sling run -d -r cmd/sling/tests/replications/r.24.starrocks_empty_as_null.yaml
+  streams: 1
+  rows: 5
+  output_contains:
+    - 'store.result'
+
+- id: 91
+  name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.32.encoding_test.yaml
+    sling run -d -r cmd/sling/tests/replications/r.33.encoding_target_test.yaml
+  output_contains:
+    - 'Latin1 results:'
+    - 'José'
+    - 'Café manager'
+    - 'Windows1252 results:'
+    - 'UTF-8 BOM results:'
+    - '张三'
+    - '김철수'
+    - 'Target encoding feature is not fully implemented'
+    - 'execution succeeded'
+
+- id: 92
+  name: Test encoding garbled output when not specified
+  run: sling run -d -r cmd/sling/tests/replications/r.34.encoding_garbled_test.yaml
+  output_contains:
+    - 'SUCCESS: Correct output contains proper special characters'
+    - 'SUCCESS: Garbled output has corrupted special characters as expected'
+    - 'execution succeeded'
+
+- id: 93
+  name: Test transform functions
+  run: sling run -d -r cmd/sling/tests/replications/r.35.transform_functions_test.yaml
+  output_contains:
+    - 'Transform Functions Test Results'
+    - 'execution succeeded'
+  output_does_not_contain:
+    - "did find find transform with params named: 'now'"

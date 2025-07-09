@@ -31,7 +31,7 @@ jobs:
 
   release-brew:
     runs-on: [self-hosted-mac]
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -70,7 +70,7 @@ jobs:
   release-scoop:
     # runs-on: [self-hosted, Windows]
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -120,7 +120,7 @@ jobs:
 
   release-linux-arm64:
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -175,7 +175,7 @@ jobs:
     # runs-on: ubuntu-20.04
     runs-on: [self-hosted, Linux, X64, ubuntu-16]
     needs: [ release-linux-arm64 ] # for multi-platform docker image
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout

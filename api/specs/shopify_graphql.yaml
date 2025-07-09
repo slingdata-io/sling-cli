@@ -11,14 +11,14 @@ queues:
 
 defaults:
   state:
-    base_url: "https://${secrets.shop_name}.myshopify.com/admin/api/2025-04/graphql.json"
+    base_url: https://{secrets.shop_name}.myshopify.com/admin/api/2025-04/graphql.json
     limit: 250
   
   request:
     method: "POST"
     headers:
       Accept: "application/json"
-      X-Shopify-Access-Token: ${secrets.access_token}
+      X-Shopify-Access-Token: '{secrets.access_token}'
       Content-Type: "application/json"
     rate: 20        # Default rate limit of 20 requests per second
     concurrency: 5  # Default concurrency of 5
@@ -32,7 +32,7 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Shop
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             {
@@ -93,13 +93,13 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Product
       
       state:
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         cursor: null
       
       sync: [ last_id ]
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!, $query: String) {
@@ -150,13 +150,13 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
-            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
+            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.products.edges) > 0, response.json.data.products.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.products.edges) > 0, response.json.data.products.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.products.pageInfo.hasNextPage) || response.json.data.products.pageInfo.hasNextPage == false || is_null(response.json.data.products.edges) || length(response.json.data.products.edges) == 0"
 
       response:
@@ -177,13 +177,13 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant
       
       state:
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         cursor: null
       
       sync: [ last_id ]
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!, $query: String) {
@@ -222,13 +222,13 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
-            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
+            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.productVariants.edges) > 0, response.json.data.productVariants.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.productVariants.edges) > 0, response.json.data.productVariants.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.productVariants.pageInfo.hasNextPage) || response.json.data.productVariants.pageInfo.hasNextPage == false || is_null(response.json.data.productVariants.edges) || length(response.json.data.productVariants.edges) == 0"
 
       response:
@@ -250,7 +250,7 @@ endpoints:
         into: "state.product_id"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($productId: ID!, $first: Int!) {
@@ -271,8 +271,8 @@ endpoints:
               }
             }
           variables:
-            productId: ${state.product_id}
-            first: ${state.limit}
+            productId: '{state.product_id}'
+            first: '{state.limit}'
       
       response:
         records:
@@ -293,7 +293,7 @@ endpoints:
       sync: [ last_id ]
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!) {
@@ -333,12 +333,12 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.collections.edges) > 0, response.json.data.collections.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.collections.edges) > 0, response.json.data.collections.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.collections.pageInfo.hasNextPage) || response.json.data.collections.pageInfo.hasNextPage == false || is_null(response.json.data.collections.edges) || length(response.json.data.collections.edges) == 0"
 
       response:
@@ -359,11 +359,11 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Order
       
       state:
-        start_date: ${ coalesce(env.START_DATE, "2025-04-01") }
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        start_date: '{ coalesce(env.START_DATE, "2025-04-01") }'
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         cursor: null
-        created_at_min: ${ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }
-        created_at_max: ${ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }
+        created_at_min: '{ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }'
+        created_at_max: '{ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }'
       
       sync: [ last_updated_at ]
 
@@ -378,7 +378,7 @@ endpoints:
         concurrency: 20
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!, $query: String) {
@@ -471,13 +471,13 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
-            query: ${ "created_at:>=" + state.created_at_min + " AND created_at:<" + state.created_at_max }
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
+            query: '{ "created_at:>=" + state.created_at_min + " AND created_at:<" + state.created_at_max }'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.orders.edges) > 0, response.json.data.orders.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.orders.edges) > 0, response.json.data.orders.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.orders.pageInfo.hasNextPage) || response.json.data.orders.pageInfo.hasNextPage == false || is_null(response.json.data.orders.edges) || length(response.json.data.orders.edges) == 0"
 
       response:
@@ -503,7 +503,7 @@ endpoints:
         into: "state.order_id"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($orderId: ID!, $first: Int!) {
@@ -531,8 +531,8 @@ endpoints:
               }
             }
           variables:
-            orderId: ${state.order_id}
-            first: ${state.limit}
+            orderId: '{state.order_id}'
+            first: '{state.limit}'
       
       response:
         records:
@@ -553,7 +553,7 @@ endpoints:
         into: "state.order_id"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($orderId: ID!, $first: Int!) {
@@ -591,8 +591,8 @@ endpoints:
               }
             }
           variables:
-            orderId: ${state.order_id}
-            first: ${state.limit}
+            orderId: '{state.order_id}'
+            first: '{state.limit}'
       
       response:
         records:
@@ -608,13 +608,13 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/Customer
       
       state:
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         cursor: null
       
       sync: [ last_id ]
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!, $query: String) {
@@ -659,13 +659,13 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
-            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
+            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.customers.edges) > 0, response.json.data.customers.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.customers.edges) > 0, response.json.data.customers.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.customers.pageInfo.hasNextPage) || response.json.data.customers.pageInfo.hasNextPage == false || is_null(response.json.data.customers.edges) || length(response.json.data.customers.edges) == 0"
 
       response:
@@ -691,7 +691,7 @@ endpoints:
         into: "state.customer_id"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($customerId: ID!, $first: Int!) {
@@ -721,8 +721,8 @@ endpoints:
               }
             }
           variables:
-            customerId: ${state.customer_id}
-            first: ${state.limit}
+            customerId: '{state.customer_id}'
+            first: '{state.limit}'
       
       response:
         records:
@@ -743,7 +743,7 @@ endpoints:
         into: "state.customer_id"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($customerId: ID!, $first: Int!) {
@@ -791,8 +791,8 @@ endpoints:
               }
             }
           variables:
-            customerId: ${state.customer_id}
-            first: ${state.limit}
+            customerId: '{state.customer_id}'
+            first: '{state.limit}'
       
       response:
         records:
@@ -813,7 +813,7 @@ endpoints:
         into: "state.variant_ids"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($ids: [ID!]!) {
@@ -849,7 +849,7 @@ endpoints:
               }
             }
           variables:
-            ids: ${state.variant_ids}
+            ids: '{state.variant_ids}'
       
       response:
         records:
@@ -866,7 +866,7 @@ endpoints:
         into: "state.variant_ids"
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($ids: [ID!]!) {
@@ -903,7 +903,7 @@ endpoints:
               }
             }
           variables:
-            ids: ${state.variant_ids}
+            ids: '{state.variant_ids}'
       
       response:
         records:
@@ -915,13 +915,13 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-graphql/latest/objects/AbandonedCheckout
       
       state:
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         cursor: null
       
       sync: [ last_id ]
       
       request:
-        url: ${state.base_url}
+        url: '{state.base_url}'
         payload:
           query: >
             query ($cursor: String, $first: Int!, $query: String) {
@@ -995,13 +995,13 @@ endpoints:
               }
             }
           variables:
-            first: ${state.limit}
-            cursor: ${state.cursor}
-            query: ${ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }
+            first: '{state.limit}'
+            cursor: '{state.cursor}'
+            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
-          cursor: ${if(length(response.json.data.abandonedCheckouts.edges) > 0, response.json.data.abandonedCheckouts.edges[-1].cursor, null)}
+          cursor: '{if(length(response.json.data.abandonedCheckouts.edges) > 0, response.json.data.abandonedCheckouts.edges[-1].cursor, null)}'
         stop_condition: "is_null(response.json.data.abandonedCheckouts.pageInfo.hasNextPage) || response.json.data.abandonedCheckouts.pageInfo.hasNextPage == false || is_null(response.json.data.abandonedCheckouts.edges) || length(response.json.data.abandonedCheckouts.edges) == 0"
 
       response:

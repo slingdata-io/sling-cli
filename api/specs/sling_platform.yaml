@@ -6,7 +6,7 @@ defaults:
   
   request:
     headers:
-      Authorization: 'Sling-Project-Token ${secrets.api_token}'
+      Authorization: 'Sling-Project-Token {secrets.api_token}'
       Content-Type: application/json
 
 
@@ -14,7 +14,7 @@ endpoints:
   connections:
       
     request:
-      url: ${state.base_url}/connection/list
+      url: '{state.base_url}/connection/list'
     
     response:
       records:
@@ -29,7 +29,7 @@ endpoints:
   executions:
       
     request:
-      url: ${state.base_url}/execution/list
+      url: '{state.base_url}/execution/list'
     
     response:
       records:
@@ -42,19 +42,19 @@ endpoints:
   executions_many:
     
     state:
-      start_date: ${ coalesce(env.START_DATE, state.max_start_time, "2025-01-01") }
-      end_date: ${ coalesce(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ")) }
+      start_date: '{ coalesce(env.START_DATE, state.max_start_time, "2025-01-01") }'
+      end_date: '{ coalesce(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ")) }'
     
     # external sync on start/end of replication. null on first run.
-    state_sync: [ max_start_time ]
+    sync: [ max_start_time ]
       
     request:
-      url: ${state.base_url}/execution/list
+      url: '{state.base_url}/execution/list'
 
       parameters:
         limit: 500
         filters: >
-          {"period":["${state.start_date}","${state.end_date}"]}
+          {"period":["{state.start_date}","{state.end_date}"]}
     
     response:
       records:

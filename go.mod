@@ -33,7 +33,7 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.152
+	github.com/flarco/g v0.1.154
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.1
 	github.com/gobwas/glob v0.2.3
@@ -52,7 +52,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro/v2 v2.12.0
 	github.com/maja42/goval v1.4.0
-	github.com/mark3labs/mcp-go v0.29.0
+	github.com/mark3labs/mcp-go v0.33.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/microsoft/go-mssqldb v1.8.0
@@ -344,7 +344,7 @@ replace github.com/flarco/g => ../g
 
 replace github.com/slingdata-io/sling => ../sling
 
-replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250625114951-763f8d92b49e
+replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20250705121323-8242bf566290
 
 // replace github.com/apache/iceberg-go => ../iceberg-go
 

@@ -1387,6 +1387,11 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				err = g.Error(err, "Could not write to file")
 				return bw, err
 			}
+
+			// if single file, delete so we don't copy again
+			if localPath != localRoot {
+				env.RemoveLocalTempFile(localPath)
+			}
 			bw += written
 		}
 

@@ -1,4 +1,132 @@
 tools:
+  connection: |
+    **Main connection tool that provides comprehensive connection management capabilities. This is a parent tool that orchestrates various connection operations through sub-actions.**
+    
+    **Parameters**:
+    - `action` (string, required): The connection action to perform. Valid values:
+      - `"list"` - List all available connections
+      - `"discover"` - Discover streams/tables/files in a connection
+      - `"test"` - Test an existing connection
+      - `"set"` - Create or update a connection
+      - `"database_get_schemata"` - Get database schemata (schemas, tables, columns)
+      - `"database_get_schemas"` - Get list of schema names
+      - `"database_query"` - Execute SQL queries (read-only)
+      - `"database_get_columns"` - Get column metadata for a table
+      - `"file_list"` - List files in a file system connection
+      - `"file_copy"` - Copy files between connections
+      - `"file_inspect"` - Inspect file/directory metadata
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+    
+    **For `action: "list"`**:
+    - No parameters required (empty object)
+    
+    **For `action: "discover"`**:
+    - `connection` (string, required): The name of the connection to discover
+    - `pattern` (string, optional): Filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet)
+    - `recursive` (boolean, optional): List all files recursively
+    - `columns` (boolean, optional): Show column level metadata
+      
+      IMPORTANT:
+        - do not discover recursively unless requested by the user
+
+    
+    **For `action: "test"`**:
+    - `connection` (string, required): The name of the connection to test
+    - `debug` (boolean, optional): Enable debug logging during the test (default: false)
+    - `trace` (boolean, optional): Enable trace logging during the test (default: false)
+    - `endpoints` (array, optional): Specify the endpoints to test (only for API connections)
+    
+    **For `action: "set"`**:
+    - `name` (string, required): The name of the connection to set (will be converted to uppercase)
+    - `properties` (object, required): Object containing the connection properties as key-value pairs (e.g. `{"type": "postgres", "host": "localhost", "user": "myuser"}` or for APIs `{"type": "api", "spec": "file:///path/to/spec.yaml", "secrets": {"token": "mytoken"}}`)
+      
+      IMPORTANT:
+        - Before setting a new connection, check if the connection already exists with the `list` action. If a connection exists with the same name, get permission from the user before overwriting the existing connection.
+        - If the connection is set, the user will manually need to put the sensitive credentials in the env.yaml file. Make sure to mention this to the user, along with the file path of the `env.yaml` file.
+    
+    **For `action: "database_get_schemata"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
+    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'
+    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas
+    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels
+    
+    **For `action: "database_get_schemas"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
+    
+    **For `action: "database_query"`**:
+    - `connection` (string, required): The name of the database connection to execute the query on
+    - `query` (string, required): The SQL query to execute
+    - `limit` (number, optional): The limit of rows to return (defaults to 100)
+    - `transient` (boolean, optional): Whether to use a transient connection (default: false)
+      
+      This aciton executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+
+      *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
+      *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
+      *   Always use the LIMIT clause to minimize the number of rows returned.
+    
+    **For `action: "database_get_columns"`**:
+    - `connection` (string, required): The name of the database connection
+    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table')
+    
+    **For `action: "file_list"`**:
+    - `connection` (string, required): The name of the file system connection to list from
+    - `path` (string, required): The path to list files from
+    - `recursive` (boolean, optional): Whether to list files recursively (default: false)
+    - `only` (string, optional): Filter results to only 'files' or 'folders'
+    
+    **For `action: "file_copy"`**:
+    - `source_location` (string, required): The source location in format 'connection_name/path'
+    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local//absolute/path/to/file' or 'local/relative/path/to/file')
+    - `recursive` (boolean, optional): Whether to copy files recursively (default: false)
+    
+    **For `action: "file_inspect"`**:
+    - `connection` (string, required): The name of the file system connection
+    - `path` (string, required): The path to inspect
+    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false)
+    
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or status updates
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # List all connections
+    {
+      "action": "list",
+      "input": {}
+    }
+    
+    # Test a connection
+    {
+      "action": "test",
+      "input": {
+        "connection": "MY_PG",
+        "debug": true
+      }
+    }
+    
+    # Query a database
+    {
+      "action": "database_query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT * FROM users LIMIT 10"
+      }
+    }
+    
+    # Discover tables in a connection
+    {
+      "action": "discover",
+      "input": {
+        "connection": "MY_PG",
+        "pattern": "public.*",
+        "recursive": false,
+        "columns": false
+      }
+    }
+    ```
+    
   conns_list: |
     List the connections detected and available for use.
     
@@ -128,6 +256,81 @@ tools:
     - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false).
     
     **Output**: A JSON string with `type: "file_inspect"`, `connection` name, `path` inspected, `recursive` flag, and a `metadata` object containing detailed file/directory information.
+  
+  api_spec: |
+    **Main API specification tool that provides comprehensive API spec management capabilities. This is a parent tool that orchestrates various API specification operations through sub-actions.**
+    
+    **Parameters**:
+    - `action` (string, required): The API spec action to perform. Valid values:
+      - `"save"` - Validate and save an API specification to the specs folder
+      - `"list"` - List all API specification files in the specs folder
+      - `"get"` - Get the content of an API specification file
+      - `"load"` - Load the YAML content of an API specification
+      - `"edit"` - Edit an API specification file with search and replace
+      - `"docs"` - Fetch the Sling API specification documentation
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+    
+    **For `action: "save"`**:
+    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension). Can also be the full file path
+    - `spec_content` (string, required): The YAML content of the API specification to validate and save
+    
+    **For `action: "list"`**:
+    - No parameters required (empty object)
+    
+    **For `action: "get"`**:
+    - `name` (string, required): The name of the API specification to get (without .yaml extension)
+    
+    **For `action: "load"`**:
+    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path
+    
+    **For `action: "edit"`**:
+    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path
+    - `old_string` (string, required): The exact text to find and replace
+    - `new_string` (string, required): The replacement text
+    - `expected_replacements` (number, optional): Expected number of replacements (default: 1)
+    
+    **For `action: "docs"`**:
+    - No parameters required (empty object)
+    
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or raw content
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # List all API specifications
+    {
+      "action": "list",
+      "input": {}
+    }
+    
+    # Get API specification content
+    {
+      "action": "get",
+      "input": {
+        "name": "github_api"
+      }
+    }
+    
+    # Save a new API specification
+    {
+      "action": "save",
+      "input": {
+        "name": "my_api",
+        "spec_content": "name: my_api\nbase_url: https://api.example.com\n..."
+      }
+    }
+    
+    # Edit an API specification
+    {
+      "action": "edit",
+      "input": {
+        "name": "my_api",
+        "old_string": "old_endpoint",
+        "new_string": "new_endpoint"
+      }
+    }
+    ```
 
   api_spec_save: |
     Validate and save an API specification YAML content to the specs folder in sling home directory.
@@ -188,6 +391,78 @@ tools:
     **Parameters**: None.
     
     **Output**: The raw markdown content of the API specification documentation from https://raw.githubusercontent.com/slingdata-io/sling-cli/refs/heads/main/api/llms.md. Both user and assistant audiences receive the same raw content.
+
+  replication: |
+    **Main replication tool that provides comprehensive data replication management capabilities. This is a parent tool that orchestrates various replication operations through sub-actions.**
+    
+    **Parameters**:
+    - `action` (string, required): The replication action to perform. Valid values:
+      - `"save"` - Save/create a replication configuration file
+      - `"list"` - List all replication configuration files in a directory
+      - `"get"` - Get the content of a replication configuration file
+      - `"compile"` - Compile/validate a replication configuration
+      - `"run"` - Execute a replication configuration
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+    
+    **For `action: "save"`**:
+    - `file_path` (string, required): File path to save the replication configuration
+    - `config_content` (string, required): YAML content of the replication configuration
+    - `working_dir` (string, optional): Working directory to change to before saving
+    
+    **For `action: "list"`**:
+    - `directory` (string, optional): Directory to list files from (defaults to current working directory)
+    - `working_dir` (string, optional): Working directory to change to before listing
+    
+    **For `action: "get"`**:
+    - `file_path` (string, required): Path to the replication configuration file to read
+    - `working_dir` (string, optional): Working directory to change to before reading
+    
+    **For `action: "compile"`**:
+    - `file_path` (string, required): Path to the replication configuration file to compile
+    - `select_streams` (array, optional): List of specific streams to compile (default: all streams)
+    - `working_dir` (string, optional): Working directory to change to before compiling
+    
+    **For `action: "run"`**:
+    - `file_path` (string, required): Path to the replication configuration file to execute
+    - `select_streams` (array, optional): List of specific streams to run (default: all streams)
+    - `working_dir` (string, optional): Working directory to change to before running
+    - `range` (string, optional): Backfill range for source options (e.g., "2024-01-01:2024-01-31")
+    - `mode` (string, optional): Mode override for replication (e.g., "full-refresh", "incremental")
+    - `env` (object, optional): Environment variables to set for the replication run
+    
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or status updates
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # Save a replication configuration
+    {
+      "action": "save",
+      "input": {
+        "file_path": "my_replication.yaml",
+        "config_content": "source: postgres://...\ntarget: s3://...\nstreams:\n  my_table: {}"
+      }
+    }
+    
+    # List all replication files
+    {
+      "action": "list",
+      "input": {
+        "directory": "./replications"
+      }
+    }
+    
+    # Run a replication with specific streams
+    {
+      "action": "run",
+      "input": {
+        "file_path": "my_replication.yaml",
+        "select_streams": ["table1", "table2"],
+        "mode": "incremental"
+      }
+    }
+    ```
 
   replication_save: |
     Save a replication configuration to a specified file path.

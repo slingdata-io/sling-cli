@@ -179,7 +179,7 @@ type APIStateAuth struct {
 	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
 }
 
-var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
+var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
 
 func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []string) map[string]any {
 
@@ -309,7 +309,7 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 			}
 		}
 
-		key := "${" + expr + "}"
+		key := "{" + expr + "}"
 
 		if strings.TrimSpace(cast.ToString(input)) == key {
 			output = value

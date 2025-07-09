@@ -1,0 +1,66 @@
+source: postgres
+target: local
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS test_timestamp_quotes;
+        CREATE TABLE test_timestamp_quotes (
+          id INT PRIMARY KEY,
+          ts_column TIMESTAMP,
+          ts_tz_column TIMESTAMPTZ,
+          date_column DATE
+        );
+        INSERT INTO test_timestamp_quotes VALUES 
+          (1, '2025-06-01 18:00:00.2342', '2025-06-01 18:00:00.2342', '2025-06-01'),
+          (2, '2024-12-25 10:30:45.1234', '2024-12-25 10:30:45.1234', '2024-12-25'),
+          (3, NULL, NULL, NULL);
+
+  end:
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS test_timestamp_quotes;
+
+    - type: query
+      connection: DUCKDB
+      query: |
+        select 
+          ts_column,
+          ts_tz_column,
+          date_column
+        from read_parquet('/tmp/test_timestamp_quotes.parquet')
+        where id = 1
+      into: result
+
+    - type: log
+      message: |
+        Checking timestamp string casting results:
+        ts_column: {store.result[0].ts_column}
+        ts_tz_column: {store.result[0].ts_tz_column}
+        date_column: {store.result[0].date_column}
+
+    # Ensure no quotes in the timestamp strings
+    - type: check
+      check: '!contains(store.result[0].ts_column, "\"")'
+      message: "ts_column should not contain quotes"
+
+    - type: check
+      check: '!contains(store.result[0].ts_tz_column, "\"")'
+      message: "ts_tz_column should not contain quotes"
+
+    - type: check
+      check: '!contains(store.result[0].date_column, "\"")'
+      message: "date_column should not contain quotes"
+
+streams:
+  test_timestamp_quotes:
+    object: 'file:///tmp/test_timestamp_quotes.parquet'
+    columns:
+      ts_column: string
+      ts_tz_column: string
+      date_column: string

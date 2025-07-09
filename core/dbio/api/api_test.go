@@ -119,7 +119,7 @@ func TestAPIConnectionRender(t *testing.T) {
 	}{
 		{
 			name:     "simple_state_variable",
-			input:    "Hello, ${state.name}!",
+			input:    "Hello, {state.name}!",
 			expected: "Hello, World!",
 			setup: func(ac *APIConnection) {
 				ac.State.State["name"] = "World"
@@ -127,7 +127,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "environment_variable",
-			input:    "Environment: ${env.TEST_VAR}",
+			input:    "Environment: {env.TEST_VAR}",
 			expected: "Environment: test_value",
 			setup: func(ac *APIConnection) {
 				ac.State.Env["TEST_VAR"] = "test_value"
@@ -135,7 +135,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "secret_variable",
-			input:    "API Key: ${secrets.API_KEY}",
+			input:    "API Key: {secrets.API_KEY}",
 			expected: "API Key: secret123",
 			setup: func(ac *APIConnection) {
 				ac.State.Secrets["API_KEY"] = "secret123"
@@ -143,7 +143,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "auth_variable",
-			input:    "Token: ${auth.token}",
+			input:    "Token: {auth.token}",
 			expected: "Token: my_token",
 			setup: func(ac *APIConnection) {
 				ac.State.Auth.Token = "my_token"
@@ -151,7 +151,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "multiple_variables",
-			input:    "From ${env.ORIGIN} to ${state.destination}",
+			input:    "From {env.ORIGIN} to {state.destination}",
 			expected: "From Earth to Mars",
 			setup: func(ac *APIConnection) {
 				ac.State.Env["ORIGIN"] = "Earth"
@@ -160,7 +160,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "endpoint_state_override",
-			input:    "Value: ${state.counter}",
+			input:    "Value: {state.counter}",
 			expected: "Value: 10",
 			setup: func(ac *APIConnection) {
 				ac.State.State["counter"] = 5
@@ -169,7 +169,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "object_serialization",
-			input:    "User: ${state.user}",
+			input:    "User: {state.user}",
 			expected: "User: {\"age\":30,\"name\":\"Alice\"}",
 			setup: func(ac *APIConnection) {
 				ac.State.State["user"] = map[string]any{"name": "Alice", "age": 30}
@@ -177,7 +177,7 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "array_serialization",
-			input:    "Items: ${state.items}",
+			input:    "Items: {state.items}",
 			expected: "Items: [\"one\",\"two\",\"three\"]",
 			setup: func(ac *APIConnection) {
 				ac.State.State["items"] = []string{"one", "two", "three"}
@@ -185,22 +185,22 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:     "if_function",
-			input:    "Result: ${if(true, 3, 0)}",
+			input:    "Result: {if(true, 3, 0)}",
 			expected: "Result: 3",
 		},
 		{
 			name:     "now_function",
-			input:    "Current time: ${now()}",
+			input:    "Current time: {now()}",
 			expected: "Current time: ",
 		},
 		{
 			name:     "non_existent_var",
-			input:    `Missing: ${ log("state.missing = " + state.missing) }`,
+			input:    `Missing: { log("state.missing = " + state.missing) }`,
 			expected: "Missing: state.missing = nil",
 		},
 		{
 			name:     "jmespath_lookup",
-			input:    "Name: ${ state.nested.name }",
+			input:    "Name: { state.nested.name }",
 			expected: "Name: John",
 			setup: func(ac *APIConnection) {
 				ac.State.State["nested"] = map[string]any{"name": "John", "age": 42}
@@ -208,13 +208,13 @@ func TestAPIConnectionRender(t *testing.T) {
 		},
 		{
 			name:        "invalid_function",
-			input:       "Invalid: ${invalid_function()}",
+			input:       "Invalid: {invalid_function()}",
 			expected:    "",
 			expectError: true,
 		},
 		{
 			name:        "coalesce",
-			input:       `${ coalesce(env.START_DATE, state.start_time, "2025-01-01") }`,
+			input:       `{ coalesce(env.START_DATE, state.start_time, "2025-01-01") }`,
 			expected:    "2025-01-01",
 			expectError: false,
 		},
@@ -416,8 +416,8 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	auth := Authentication{
 		Type:              AuthTypeOAuth2,
 		Flow:              "client_credentials",
-		ClientID:          "${secrets.CLIENT_ID}",
-		ClientSecret:      "${secrets.CLIENT_SECRET}",
+		ClientID:          "{secrets.CLIENT_ID}",
+		ClientSecret:      "{secrets.CLIENT_SECRET}",
 		AuthenticationURL: "https://api.example.com/oauth/token",
 	}
 

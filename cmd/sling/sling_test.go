@@ -57,10 +57,13 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbClickhouse:        {name: "clickhouse", schema: "default", useBulk: g.Bool(true)},
 	dbio.Type("clickhouse_http"): {name: "clickhouse_http", schema: "default", useBulk: g.Bool(true)},
 	dbio.TypeDbDatabricks:        {name: "databricks", schema: "default", adjustCol: g.Bool(false)},
-	dbio.TypeDbDuckDb:            {name: "duckdb"},
-	dbio.TypeDbDuckLake:          {name: "ducklake"},
+	dbio.TypeDbDuckDb:            {name: "duckdb", adjustCol: g.Bool(false)},
+	dbio.TypeDbDuckLake:          {name: "ducklake", adjustCol: g.Bool(false)},
+	dbio.Type("ducklake_az"):     {name: "ducklake_az", adjustCol: g.Bool(false)},
+	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
+	dbio.Type("ducklake_s3"):     {name: "ducklake_s3", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
-	dbio.TypeDbMotherDuck:        {name: "motherduck"},
+	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
 	dbio.TypeDbMySQL:             {name: "mysql", schema: "mysql"},
@@ -447,6 +450,10 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			viewName := table.FullName()
 			dropViewSQL := g.R(dbConn.GetTemplateValue("core.drop_view"), "view", viewName)
 			dropViewSQL = strings.TrimSpace(dropViewSQL)
+			if g.In(connType, dbio.TypeDbIceberg) {
+				dropViewSQL = "" // iceberg does not support views
+			}
+
 			if preSQL := taskCfg.Target.Options.PreSQL; preSQL != nil {
 				taskCfg.Target.Options.PreSQL = g.String(g.R(
 					*preSQL,
