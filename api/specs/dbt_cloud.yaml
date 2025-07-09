@@ -30,7 +30,7 @@ endpoints:
     pagination:
       next_state:
         offset: '{state.offset + state.limit}'
-      stop_condition: length(response.records) < state.limit
+      stop_condition: length(response.records) <= state.limit
 
     response:
       records:
@@ -58,7 +58,7 @@ endpoints:
     pagination:
       next_state:
         offset: "{state.offset + state.limit}"
-      stop_condition: length(response.records) < state.limit
+      stop_condition: length(response.records) <= state.limit
 
     response:
       records:
@@ -87,7 +87,7 @@ endpoints:
     pagination:
       next_state:
         offset: "{state.offset + state.limit}"
-      stop_condition: length(response.records) < state.limit
+      stop_condition: length(response.records) <= state.limit
 
     response:
       records:
