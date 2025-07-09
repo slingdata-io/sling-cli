@@ -21,6 +21,7 @@ on:
 jobs:
   bump:
     if: (github.event.pull_request.merged == true && (! contains(github.event.head_commit.message, '[skip ci]'))) || github.event_name == 'workflow_dispatch'
+    
     runs-on: ubuntu-latest
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
