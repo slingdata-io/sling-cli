@@ -157,12 +157,16 @@ endpoints:
       records:
         # JMESPath expression to extract records array from response
         jmespath: "data.users[]"
+        
         # Field(s) that uniquely identify each record (used for deduplication)
         primary_key: ["id"]
+
         # Optional: Field used for incremental updates (informational)
         update_key: "updated_at"
+
         # Optional: Max records to process (useful for testing)
         limit: 1000
+        
         # Optional: Specify Bloom filter parameters for efficient deduplication of large datasets
         # Format: "<estimated_items>,<false_positive_probability>" (e.g., "1000000,0.001")
         duplicate_tolerance: "1000000,0.001"
