@@ -252,6 +252,46 @@ func (cfg *Config) IsFileStreamWithStateAndParts() bool {
 			len(iop.ExtractISO8601DateFields(uri)) > 0)
 }
 
+// IsFullRefreshWithRange returns true is the stream is chunking
+func (cfg *Config) IsFullRefreshWithRange() bool {
+	return cfg.Mode == FullRefreshMode && cfg.Source.Options.Range != nil
+}
+
+// IsTruncateWithRange returns true is the stream is chunking
+func (cfg *Config) IsTruncateWithRange() bool {
+	return cfg.Mode == TruncateMode && cfg.Source.Options.Range != nil
+}
+
+// IsIncrementalWithRange returns true is the stream is chunking
+func (cfg *Config) IsIncrementalWithRange() bool {
+	return cfg.Mode == IncrementalMode && cfg.Source.Options.Range != nil
+}
+
+// ClearTableForChunkLoadWithRange clears the table for chunk load with in mode
+// full-refresh or truncate
+func (cfg *Config) ClearTableForChunkLoadWithRange() (err error) {
+
+	if cfg.IsFullRefreshWithRange() || cfg.IsTruncateWithRange() {
+		dbConn, err := cfg.TgtConn.AsDatabase()
+		if err != nil {
+			return g.Error(err, "could not connect to target conn for preparing final table for chunk loading")
+		}
+
+		switch cfg.Mode {
+		case FullRefreshMode:
+			if err = dbConn.DropTable(cfg.Target.Object); err != nil {
+				return g.Error(err, "could not drop final table in target conn for chunk loading")
+			}
+		case TruncateMode:
+			if err := database.TruncateTable(dbConn, cfg.Target.Object); err != nil {
+				return g.Error(err, "could not truncate final table in target conn for chunk loading")
+			}
+		}
+	}
+
+	return
+}
+
 func (cfg *Config) DetermineType() (Type JobType, err error) {
 
 	srcFileProvided := cfg.sourceIsFile()
@@ -1390,6 +1430,7 @@ type SourceOptions struct {
 	Limit          *int                `json:"limit,omitempty" yaml:"limit,omitempty"`
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
+	ChunkCount     *int                `json:"chunk_count,omitempty" yaml:"chunk_count,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	// columns & transforms were moved out of source_options
@@ -1428,6 +1469,7 @@ type TargetOptions struct {
 	ColumnCasing     *iop.ColumnCasing   `json:"column_casing,omitempty" yaml:"column_casing,omitempty"`
 	ColumnTyping     *iop.ColumnTyping   `json:"column_typing,omitempty" yaml:"column_typing,omitempty"`
 	Encoding         *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	DirectInsert     *bool               `json:"direct_insert,omitempty" yaml:"direct_insert,omitempty"`
 
 	TableKeys      database.TableKeys       `json:"table_keys,omitempty" yaml:"table_keys,omitempty"`
 	TableTmp       string                   `json:"table_tmp,omitempty" yaml:"table_tmp,omitempty"`
@@ -1530,6 +1572,9 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	if o.Range == nil {
 		o.Range = sourceOptions.Range
 	}
+	if o.ChunkCount == nil {
+		o.ChunkCount = sourceOptions.ChunkCount
+	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = sourceOptions.DatetimeFormat
 	}
@@ -1620,6 +1665,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 
 	if o.AddNewColumns == nil {
 		o.AddNewColumns = targetOptions.AddNewColumns
+	}
+	if o.DirectInsert == nil {
+		o.DirectInsert = targetOptions.DirectInsert
 	}
 	if o.DatetimeFormat == "" {
 		o.DatetimeFormat = targetOptions.DatetimeFormat

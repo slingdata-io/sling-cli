@@ -73,7 +73,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode {
+	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -100,7 +100,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			cfg.IncrementalValStr = "null"
 		}
 
-		if t.Config.Mode == BackfillMode {
+		if t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 			rangeArr := strings.Split(*cfg.Source.Options.Range, ",")
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]

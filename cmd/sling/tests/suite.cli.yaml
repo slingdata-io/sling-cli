@@ -432,13 +432,23 @@
 
 - id: 70
   name: Run sling chunking
-  run: 'sling run -r cmd/sling/tests/replications/r.20.yaml -d'
-  streams: 10
+  run: >
+    THREADS=5 MODE=full-refresh sling run -r $YAML_FILE -d
+    THREADS=6 MODE=truncate     sling run -r $YAML_FILE -d
+    THREADS=1 MODE=backfill     sling run -r $YAML_FILE -d
+    SLING_STREAM_CNT=15 THREADS=2 MODE=incremental  sling run -r $YAML_FILE -d
+  streams: 23
+  env:
+    YAML_FILE: cmd/sling/tests/replications/r.20.chunking.yaml
   output_contains:
     - '"update_dt" >= ''2018-11-21'
     - '"id" >= 601 and "id" <= 800'
     - TEST1K_SQLSERVER_PG_003
     - TEST1K_SNOWFLAKE_PG_004
+    - ("date" >= '2020-09-26' and "date" <= '2021-04-23') # test1k_duckdb_pg, chunk_count: 4
+    - ("id" >= 502 and "id" <= 668)  # test1k_ducklake_pg, chunk_count: 6
+    # - ("update_dt" >= '2019-11-16 20:39:39' # test1k_clickhouse_pg, incremental
+    - ("id" >= 836  # test1k_ducklake_pg, incremental
 
 - id: 71
   name: Run sling pipeline 02

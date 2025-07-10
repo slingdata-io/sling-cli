@@ -514,9 +514,21 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	counter := 0
+	cleanedForChunkLoad := map[string]bool{}
+
 	for _, cfg := range replication.Tasks {
 		if interrupted {
 			break
+		}
+
+		// if we're chunking and if truncate/full-refresh
+		// truncate or drop right now, the first task will re-create it
+		cleaned := cleanedForChunkLoad[cfg.Target.Object]
+		if !isThreadChild && !cleaned && (cfg.IsFullRefreshWithRange() || cfg.IsTruncateWithRange()) {
+			if err = cfg.ClearTableForChunkLoadWithRange(); err != nil {
+				return g.Error(err, "could not clear table in target conn for chunk loading")
+			}
+			cleanedForChunkLoad[cfg.Target.Object] = true
 		}
 
 		env.LogSink = nil // clear log sink

@@ -474,12 +474,15 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		// apply default
 		SetStreamDefaults(name, &s, *rd)
 
-		chunkSize := ""
+		chunkSpecified := false
 		if g.PtrVal(s.SourceOptions).ChunkSize != nil {
-			chunkSize = cast.ToString(s.SourceOptions.ChunkSize)
+			chunkSpecified = true
+		}
+		if cc := g.PtrVal(s.SourceOptions).ChunkCount; cc != nil && *cc > 0 {
+			chunkSpecified = true
 		}
 
-		if s.Mode != BackfillMode || chunkSize == "" {
+		if !g.In(s.Mode, FullRefreshMode, TruncateMode, BackfillMode, IncrementalMode) || !chunkSpecified {
 			continue
 		}
 
@@ -512,6 +515,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 	for i, stream := range streamsToChunk {
 		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
+		chunkCount := g.PtrVal(stream.config.SourceOptions.ChunkCount)
 		min, max := stream.config.SourceOptions.RangeStartEnd()
 		table, err := database.ParseTableName(stream.name, sourceConn.Connection.Type)
 		if stream.config.SQL != "" {
@@ -531,9 +535,31 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 		if stream.config.UpdateKey == "" {
 			return g.Error(err, "did not provided update_key for stream chunking: %s", stream.name)
+		} else if stream.config.Mode == IncrementalMode {
+			// need to get the max value target side if the table exists
+			var tempCfg Config
+			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name)
+			if err != nil {
+				return g.Error(err, "could not prepare stream config for chunking: %s", stream.name)
+			}
+
+			tgtConn, err := targetConn.Connection.AsDatabase()
+			if err != nil {
+				return g.Error(err, "could not connect to target database for stream chunking: %s", stream.name)
+			}
+			err = getIncrementalValueViaDB(&tempCfg, tgtConn, sourceConnDB.GetType())
+			if err != nil {
+				return g.Error(err, "could not get max range value in target database for stream chunking: %s", stream.name)
+			}
+			min = cast.ToString(tempCfg.IncrementalVal) // set target max value as range min value
 		}
 
-		chunkRanges, err := database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
+		var chunkRanges []string
+		if chunkSize != "" {
+			chunkRanges, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
+		} else if chunkCount > 0 {
+			chunkRanges, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
+		}
 		if err != nil {
 			return g.Error(err, "could not generate chunk ranges: %s", stream.name)
 		}
@@ -544,10 +570,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			continue
 		}
 
-		if table.IsQuery() && strings.Contains(stream.config.Object, "{stream_") {
+		if table.IsQuery() && strings.Contains(stream.config.Object, "{") {
 			// when using custom SQL + chunking + var, causes issues in cfg.GetFormatMap
 			// must specify object name manually
-			g.Warn("please specify object name without {stream_*} runtime variables when chunking (stream=%s)", stream.name)
+			g.Warn("please specify object name without {*} runtime variables when chunking (stream=%s)", stream.name)
 		}
 
 		streamsToChunk[i].chunks = make([]Stream, len(chunkRanges))
@@ -898,48 +924,16 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			}
 		}
 
-		cfg := Config{
-			Source: Source{
-				Conn:        rd.Source,
-				Stream:      name,
-				Query:       stream.SQL,
-				Select:      stream.Select,
-				Where:       stream.Where,
-				PrimaryKeyI: stream.PrimaryKey(),
-				UpdateKey:   stream.UpdateKey,
-			},
-			Target: Target{
-				Conn:    rd.Target,
-				Object:  stream.Object,
-				Columns: stream.Columns,
-			},
-			Mode:              stream.Mode,
-			Transforms:        stream.Transforms,
-			Env:               taskEnv,
-			StreamName:        name,
-			IncrementalValStr: incrementalValStr,
-			ReplicationStream: &stream,
-		}
-
-		// so that the next stream does not retain previous pointer values
-		g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
-		g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
-
-		// if single file target, set file_row_limit and file_bytes_limit
-		if stream.Single != nil && *stream.Single {
-			if cfg.Target.Options == nil {
-				cfg.Target.Options = &TargetOptions{}
-			}
-			cfg.Target.Options.FileMaxBytes = g.Int64(0)
-			cfg.Target.Options.FileMaxRows = g.Int64(0)
-		}
-
-		// prepare config
-		err = cfg.Prepare()
+		var cfg Config
+		cfg, err = rd.StreamToTaskConfig(&stream, name)
 		if err != nil {
-			err = g.Error(err, "could not prepare stream task: %s", name)
+			err = g.Error(err, "could not prepare stream config: %s", name)
 			return
 		}
+
+		// set env, and IncrementalValStr
+		cfg.Env = taskEnv
+		cfg.IncrementalValStr = incrementalValStr
 
 		rd.Tasks = append(rd.Tasks, &cfg)
 	}
@@ -1003,6 +997,51 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 		}
 	}
 	return false
+}
+
+func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string) (cfg Config, err error) {
+	cfg = Config{
+		Source: Source{
+			Conn:        rd.Source,
+			Stream:      name,
+			Query:       stream.SQL,
+			Select:      stream.Select,
+			Where:       stream.Where,
+			PrimaryKeyI: stream.PrimaryKey(),
+			UpdateKey:   stream.UpdateKey,
+		},
+		Target: Target{
+			Conn:    rd.Target,
+			Object:  stream.Object,
+			Columns: stream.Columns,
+		},
+		Mode:              stream.Mode,
+		Transforms:        stream.Transforms,
+		StreamName:        name,
+		ReplicationStream: stream,
+	}
+
+	// so that the next stream does not retain previous pointer values
+	g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
+	g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
+
+	// if single file target, set file_row_limit and file_bytes_limit
+	if stream.Single != nil && *stream.Single {
+		if cfg.Target.Options == nil {
+			cfg.Target.Options = &TargetOptions{}
+		}
+		cfg.Target.Options.FileMaxBytes = g.Int64(0)
+		cfg.Target.Options.FileMaxRows = g.Int64(0)
+	}
+
+	// prepare config
+	err = cfg.Prepare()
+	if err != nil {
+		err = g.Error(err, "could not prepare stream task: %s", name)
+		return
+	}
+
+	return
 }
 
 func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replicationCfg ReplicationConfig) {

@@ -41,6 +41,10 @@ var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max s
 	return []string{}, g.Error("please use the official sling-cli release for chunking")
 }
 
+var ChunkByCount = func(conn Connection, t Table, c string, cc int, min, max string) ([]string, error) {
+	return []string{}, g.Error("please use the official sling-cli release for chunking")
+}
+
 func (t *Table) IsQuery() bool {
 	return t.SQL != ""
 }
