@@ -134,7 +134,7 @@ func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (column
 		return nil, g.Error("did not find collection %s", table.FullName())
 	}
 
-	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10, "silent", true))
+	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10, "silent", true, "get_columns", true))
 	if err != nil {
 		return columns, g.Error("could not query to get columns")
 	}
@@ -314,8 +314,12 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 	ds.SetIterator(ds.NewIterator(ds.Columns, nextFunc))
 	ds.NoDebug = strings.Contains(collectionName, noDebugKey)
-	ds.SetMetadata(conn.GetProp("METADATA"))
-	ds.SetConfig(conn.Props())
+	if !cast.ToBool(opts["get_columns"]) {
+		// only apply metadata, casing transformations when not fetching columns
+		// this can pre-maturely transform the column names casing, returning wrong names
+		ds.SetMetadata(conn.GetProp("METADATA"))
+		ds.SetConfig(conn.Props())
+	}
 	ds.Defer(func() { cur.Close(queryContext.Ctx) }) // close cursor when done
 
 	err = ds.Start()

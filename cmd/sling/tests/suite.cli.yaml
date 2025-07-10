@@ -700,3 +700,12 @@
     - 'execution succeeded'
   output_does_not_contain:
     - "did find find transform with params named: 'now'"
+
+- id: 94
+  name: Test mongo column casing selection
+  run: sling run -d -r cmd/sling/tests/replications/r.36.mongo_snowflake_select.yaml
+  output_contains:
+    - '"projection":[{"Key":"id","Value":1},{"Key":"first_name","Value":1},{"Key":"last_name","Value":1}]}'
+  output_does_not_contain:
+     # before, it would upper-case the columns upon column listing
+    - '"projection":[{"Key":"ID","Value":1},{"Key":"FIRST_NAME","Value":1},{"Key":"LAST_NAME","Value":1}]}}'
