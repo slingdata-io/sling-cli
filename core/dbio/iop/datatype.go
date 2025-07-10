@@ -1226,6 +1226,22 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 			if isSourced {
 				// string length was manually provided
 				length = col.DbPrecision
+
+				// If the source column was a decimal, we need to account for the decimal point
+				// and potential negative sign when converting to string
+				if t := strings.ToLower(col.DbType); strings.Contains(t, "decimal") || strings.Contains(t, "float") {
+					// Add 1 for decimal point if scale > 0
+					if col.DbScale > 0 {
+						length = length + col.DbScale + 1
+					} else {
+						length = length + env.DdlMinDecScale + 1
+					}
+					// Add 1 for potential negative sign
+					length = length + 1
+				} else if col.DbScale > 0 {
+					length = length + col.DbScale + 1 + 1
+				}
+
 				if ct.String != nil {
 					newLength := ct.String.Apply(length, maxStringLength)
 					if newLength != length {

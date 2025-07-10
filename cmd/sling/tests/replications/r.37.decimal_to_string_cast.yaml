@@ -1,0 +1,70 @@
+source: MYSQL
+target: SNOWFLAKE
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.test_decimal_to_string;
+        CREATE TABLE mysql.test_decimal_to_string (
+          id INT PRIMARY KEY,
+          -- Test various decimal precisions and scales
+          decimal_6_3 DECIMAL(6,3),
+          decimal_10_2 DECIMAL(10,2),
+          decimal_15_5 DECIMAL(15,5),
+          decimal_38_10 DECIMAL(38,10)
+        );
+        INSERT INTO mysql.test_decimal_to_string VALUES 
+        (1, 100.000, 12345678.90, 1234567890.12345, 12345678901234567890123456.1234567890),
+        (2, -999.999, -99999999.99, -9999999999.99999, -99999999999999999999999999.9999999999),
+        (3, 0.123, 0.01, 0.00001, 0.0000000001);
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select 
+          id,
+          decimal_6_3,
+          decimal_10_2,
+          decimal_15_5,
+          decimal_38_10
+        from public.test_decimal_to_string
+        order by id
+      into: result
+
+    - type: log
+      message: |
+        Result from Snowflake:
+        {store.result}
+
+    # Verify the values are correct
+    - type: check
+      check: length(store.result) == 3
+
+    - type: check
+      check: store.result[0].decimal_6_3 == "100.000"
+    
+    - type: check
+      check: store.result[1].decimal_6_3 == "-999.999"
+    
+    - type: check
+      check: store.result[2].decimal_15_5 == "0.00001"
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.test_decimal_to_string
+
+streams:
+  mysql.test_decimal_to_string:
+    object: public.test_decimal_to_string
+    columns:
+      # Cast all decimal columns to string
+      decimal_6_3: string
+      decimal_10_2: string
+      decimal_15_5: string
+      decimal_38_10: string

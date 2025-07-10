@@ -709,3 +709,12 @@
   output_does_not_contain:
      # before, it would upper-case the columns upon column listing
     - '"projection":[{"Key":"ID","Value":1},{"Key":"FIRST_NAME","Value":1},{"Key":"LAST_NAME","Value":1}]}}'
+
+- id: 95
+  name: Test decimal to string casting with proper varchar length (https://github.com/slingdata-io/sling-cli/issues/599)
+  run: sling run -d -r cmd/sling/tests/replications/r.37.decimal_to_string_cast.yaml
+  output_contains:
+    - 'Result from Snowflake:'
+    - '"100.000"'
+    - '"-999.999"'
+    - '"0.00001"'
