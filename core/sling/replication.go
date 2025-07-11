@@ -558,7 +558,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		if chunkSize != "" {
 			chunkRanges, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
 		} else if chunkCount > 0 {
-			chunkRanges, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
+			chunkRanges, chunkSize, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
 		}
 		if err != nil {
 			return g.Error(err, "could not generate chunk ranges: %s", stream.name)

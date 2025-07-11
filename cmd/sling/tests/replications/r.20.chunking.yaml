@@ -12,7 +12,7 @@ defaults:
     post:
       # delete some data to allow incremental to work
       - type: query
-        if: env.MODE == "backfill"
+        if: env.MODE == "backfill" && !is_empty(stream.table)
         connection: oracle
         query: delete from oracle.{stream.table} where id > 500
 
@@ -50,7 +50,25 @@ streams:
     source_options:
       chunk_count: 6
 
-  # postgres.public.test1k_ducklake_r2_pg:
+  public.test1k_ducklake_pg_sql:
+    object: oracle.test1k_ducklake_pg_sql
+    sql: >
+      select *
+      from public.test1k_ducklake_pg
+      where {incremental_where_cond} /* custom-sql */
+    update_key: id
+    source_options:
+      chunk_count: 6
+
+  public.test1k_duckdb_pg_sql:
+    object: oracle.test1k_duckdb_pg_sql
+    sql: >
+      select *
+      from public.test1k_duckdb_pg
+      where {incremental_where_cond} /* custom-sql */
+    update_key: update_dt
+    source_options:
+      chunk_count: 3
 
 env:
   MODE: ${MODE}

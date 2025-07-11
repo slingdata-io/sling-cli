@@ -436,8 +436,8 @@
     THREADS=5 MODE=full-refresh sling run -r $YAML_FILE -d
     THREADS=6 MODE=truncate     sling run -r $YAML_FILE -d
     THREADS=1 MODE=backfill     sling run -r $YAML_FILE -d
-    SLING_STREAM_CNT=15 THREADS=2 MODE=incremental  sling run -r $YAML_FILE -d
-  streams: 23
+    SLING_STREAM_CNT=17 THREADS=2 MODE=incremental  sling run -r $YAML_FILE -d
+  streams: 32
   env:
     YAML_FILE: cmd/sling/tests/replications/r.20.chunking.yaml
   output_contains:
@@ -449,6 +449,8 @@
     - ("id" >= 502 and "id" <= 668)  # test1k_ducklake_pg, chunk_count: 6
     # - ("update_dt" >= '2019-11-16 20:39:39' # test1k_clickhouse_pg, incremental
     - ("id" >= 836  # test1k_ducklake_pg, incremental
+    - '"id" <= 1002 /* custom-sql */' # test1k_ducklake_pg_sql, incremental
+    - '"update_dt" <= ''2019-11-16 20:39:39'' /* custom-sql */' # test1k_duckdb_pg_sql, incremental
 
 - id: 71
   name: Run sling pipeline 02
