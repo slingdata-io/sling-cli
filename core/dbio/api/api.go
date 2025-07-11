@@ -8,17 +8,15 @@ import (
 	"strings"
 
 	"github.com/flarco/g"
-	"github.com/jmespath/go-jmespath"
-	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
 type APIConnection struct {
-	Spec    Spec
-	State   *APIState
-	Context *g.Context
-	eval    *goval.Evaluator
+	Spec      Spec
+	State     *APIState
+	Context   *g.Context
+	evaluator *iop.Evaluator `json:"-" yaml:"-"`
 }
 
 // NewAPIConnection creates an
@@ -31,8 +29,8 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			State:  g.M(),
 			Queues: make(map[string]*iop.Queue),
 		},
-		Spec: spec,
-		eval: goval.NewEvaluator(),
+		Spec:      spec,
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 	}
 
 	// load state / secrets
@@ -181,14 +179,19 @@ type APIStateAuth struct {
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
 
-func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []string) map[string]any {
+func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 
 	sections := []string{"env", "state", "secrets", "auth", "sync"}
 
 	ac.Context.Lock()
-	statePayload := g.Marshal(ac.State)
-	stateMap, _ := g.UnmarshalMap(statePayload)
-	stateMap["null"] = nil
+
+	stateMap := g.M(
+		"env", ac.State.Env,
+		"state", ac.State.State,
+		"secrets", ac.State.Secrets,
+		"auth", ac.State.Auth,
+		"null", nil,
+	)
 
 	// Add queues to the state map
 	if ac.State.Queues != nil {
@@ -232,100 +235,25 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []str
 		stateMap[section] = subMap // set back
 	}
 
-	// ensure vars exist. if it doesn't, set at nil
-	for _, varToCheck := range varsToCheck {
-		varToCheck = strings.TrimSpace(varToCheck)
-		parts := strings.Split(varToCheck, ".")
-		if len(parts) != 2 {
-			// continue
-		}
-		section := parts[0]
-		key := parts[1]
-		if g.In(section, sections...) {
-			nested, _ := g.UnmarshalMap(g.Marshal(stateMap[section]))
-			if nested == nil {
-				nested = g.M()
-			}
-			if _, ok := nested[key]; !ok {
-				nested[key] = nil
-			}
-			stateMap[section] = nested // set back
-		}
-	}
-
 	return stateMap
 }
 
 func (ac *APIConnection) renderString(val any, extraMaps ...map[string]any) (newVal string, err error) {
-	output, err := ac.renderAny(val, extraMaps...)
-	if err != nil {
-		return
-	}
-
-	switch output.(type) {
-	case map[string]string, map[string]any, map[any]any, []any, []string:
-		newVal = g.Marshal(output)
-	default:
-		newVal = cast.ToString(output)
-	}
-
-	return
-}
-
-func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (output any, err error) {
-
-	output = input
-
-	matches := bracketRegex.FindAllStringSubmatch(cast.ToString(output), -1)
-
-	expressions := []string{}
-	varsToCheck := []string{} // to ensure existence in state maps
-	for _, match := range matches {
-		expression := match[1]
-		expressions = append(expressions, expression)
-		varsToCheck = append(varsToCheck, extractVars(expression)...)
-	}
 	em := g.M()
 	if len(extraMaps) > 0 {
 		em = extraMaps[0]
 	}
 
-	stateMap := ac.getStateMap(em, varsToCheck)
+	return ac.evaluator.RenderString(val, ac.getStateMap(em))
+}
 
-	// we'll use those keys as jmespath expr
-	for _, expr := range expressions {
-		var value any
-		callsFunc := strings.Contains(expr, "(") && strings.Contains(expr, ")")
-
-		// attempt to resolve with jmespath first if no function is called
-		if !callsFunc {
-			value, err = jmespath.Search(expr, stateMap)
-		}
-
-		if callsFunc || err != nil {
-			value, err = ac.eval.Evaluate(expr, stateMap, iop.GlobalFunctionMap)
-			if err != nil {
-				return "", g.Error(err, "could not render expression")
-			}
-		}
-
-		key := "{" + expr + "}"
-
-		if strings.TrimSpace(cast.ToString(input)) == key {
-			output = value
-		} else {
-			// treat as string if whole input isn't the expression
-			outputStr := cast.ToString(output)
-			switch value.(type) {
-			case map[string]string, map[string]any, map[any]any, []any, []string:
-				output = strings.ReplaceAll(outputStr, key, g.Marshal(value))
-			default:
-				output = strings.ReplaceAll(outputStr, key, cast.ToString(value))
-			}
-		}
+func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (output any, err error) {
+	em := g.M()
+	if len(extraMaps) > 0 {
+		em = extraMaps[0]
 	}
 
-	return output, nil
+	return ac.evaluator.RenderAny(input, ac.getStateMap(em))
 }
 
 // GetSyncedState cycles through each endpoint, and collects the values
@@ -395,65 +323,6 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 
 func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Iterate) (err error) {
 	return
-}
-
-// extractVars identifies variable references in a string expression,
-// ignoring those inside double quotes. It recognizes patterns like env.VAR,
-// state.VAR, secrets.VAR, and auth.VAR.
-func extractVars(expr string) []string {
-	// To track found variable references
-	var references []string
-
-	// Regular expression for finding variable references
-	// Matches env., state., secrets., auth. followed by a variable name
-	refRegex := regexp.MustCompile(`(env|state|secrets|auth|response|request|sync)\.\w+`)
-
-	// First, we need to identify string literals to exclude them
-	// Track positions of string literals
-	inString := false
-	stringRanges := make([][]int, 0)
-	var start int
-
-	for i, char := range expr {
-		if char == '"' {
-			// Check if the quote is escaped
-			if i > 0 && expr[i-1] == '\\' {
-				continue
-			}
-
-			if !inString {
-				// Start of a string
-				inString = true
-				start = i
-			} else {
-				// End of a string
-				inString = false
-				stringRanges = append(stringRanges, []int{start, i})
-			}
-		}
-	}
-
-	// Find all potential references
-	matches := refRegex.FindAllStringIndex(expr, -1)
-
-	// Filter out references that are inside string literals
-	for _, match := range matches {
-		isInString := false
-		for _, strRange := range stringRanges {
-			if match[0] >= strRange[0] && match[1] <= strRange[1] {
-				isInString = true
-				break
-			}
-		}
-
-		if !isInString {
-			// Extract the actual reference
-			reference := expr[match[0]:match[1]]
-			references = append(references, reference)
-		}
-	}
-
-	return references
 }
 
 func hasBrackets(expr string) bool {

@@ -666,11 +666,12 @@ type Evaluator struct {
 	Eval         *goval.Evaluator
 	State        map[string]any
 	NoComputeKey string
+	VarPrefixes  []string
 
 	bracketRegex *regexp.Regexp
 }
 
-func NewEvaluator(states ...map[string]any) *Evaluator {
+func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
 	// set state
 	stateMap := g.M()
 	for _, state := range states {
@@ -683,11 +684,78 @@ func NewEvaluator(states ...map[string]any) *Evaluator {
 		Eval:         goval.NewEvaluator(),
 		State:        stateMap,
 		NoComputeKey: "__sling_no_compute__",
+		VarPrefixes:  varPrefixes,
 		bracketRegex: regexp.MustCompile(`\{([^{}]+)\}`),
 	}
 }
 
-func (e *Evaluator) RenderString(val string, extras ...map[string]any) (newVal string, err error) {
+// ExtractVars identifies variable references in a string expression,
+// ignoring those inside double quotes. It can recognize patterns like env.VAR, state.VAR, secrets.VAR, and auth.VAR.
+func (e *Evaluator) ExtractVars(expr string) []string {
+	// To track found variable references
+	var references []string
+
+	if len(e.VarPrefixes) == 0 {
+		g.Warn("did not set VarPrefixes in Evaluator")
+		return []string{}
+	}
+
+	// Regular expression for finding variable references
+	// Matches env., state., secrets., auth. followed by a variable name
+	// example regex: `(env|state|secrets|auth|response|request|sync)\.\w+`
+	prefixes := strings.Join(e.VarPrefixes, "|")
+	refRegex := regexp.MustCompile(`(` + prefixes + `)\.\w+`)
+
+	// First, we need to identify string literals to exclude them
+	// Track positions of string literals
+	inString := false
+	stringRanges := make([][]int, 0)
+	var start int
+
+	for i, char := range expr {
+		if char == '"' {
+			// Check if the quote is escaped
+			if i > 0 && expr[i-1] == '\\' {
+				continue
+			}
+
+			if !inString {
+				// Start of a string
+				inString = true
+				start = i
+			} else {
+				// End of a string
+				inString = false
+				stringRanges = append(stringRanges, []int{start, i})
+			}
+		}
+	}
+
+	// Find all potential references
+	matches := refRegex.FindAllStringIndex(expr, -1)
+
+	// Filter out references that are inside string literals
+	for _, match := range matches {
+		isInString := false
+		for _, strRange := range stringRanges {
+			if match[0] >= strRange[0] && match[1] <= strRange[1] {
+				isInString = true
+				break
+			}
+		}
+
+		if !isInString {
+			// Extract the actual reference
+			reference := expr[match[0]:match[1]]
+			references = append(references, reference)
+		}
+	}
+
+	return references
+
+}
+
+func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal string, err error) {
 	output, err := e.RenderAny(val, extras...)
 	if err != nil {
 		return
@@ -726,9 +794,12 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 
 	matches := e.bracketRegex.FindAllStringSubmatch(inputStr, -1)
 
-	keysToReplace := []string{}
+	expressions := []string{}
+	varsToCheck := []string{} // to ensure existence in state maps
 	for _, match := range matches {
-		keysToReplace = append(keysToReplace, match[1])
+		expression := match[1]
+		expressions = append(expressions, expression)
+		varsToCheck = append(varsToCheck, e.ExtractVars(expression)...)
 	}
 
 	// Initialize output with input value
@@ -746,13 +817,11 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	}
 
 	// Create evaluator for expression evaluation
-	eval := goval.NewEvaluator()
-
-	canRender := func(e string) bool {
-		e = strings.TrimSpace(e)
+	canRender := func(expr string) bool {
+		expr = strings.TrimSpace(expr)
 		can := false
-		for _, prefix := range g.ArrStr("state", "store", "env", "run", "target", "source", "stream", "object", "timestamp", "execution", "loop") {
-			if strings.HasPrefix(e, prefix) {
+		for _, prefix := range e.VarPrefixes {
+			if strings.Contains(expr, prefix+".") {
 				can = true
 			}
 		}
@@ -760,7 +829,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	}
 
 	// we'll use those keys as jmespath expr
-	for _, expr := range keysToReplace {
+	for _, expr := range expressions {
 		var value any
 		callsFuncOrEvals := false
 
@@ -771,6 +840,29 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 			} else if strings.Contains(expr, funcName+"(") && strings.Contains(expr, ")") {
 				callsFuncOrEvals = true
 				break
+			}
+		}
+
+		// ensure vars exist. if it doesn't, set at nil
+		for _, varToCheck := range varsToCheck {
+			varToCheck = strings.TrimSpace(varToCheck)
+			parts := strings.Split(varToCheck, ".")
+			if len(parts) != 2 {
+				// continue
+			}
+			section := parts[0]
+			key := parts[1]
+			if g.In(section, e.VarPrefixes...) {
+				_, ok := stateMap[section]
+				if !ok {
+					stateMap[section] = g.M()
+				}
+
+				nested := cast.ToStringMap(stateMap[section])
+				if _, ok := nested[key]; !ok {
+					nested[key] = nil
+				}
+				stateMap[section] = nested // set back
 			}
 		}
 
@@ -848,7 +940,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 
 		// If jmespath failed or if we detected evaluation operators/functions, use goval
 		if callsFuncOrEvals || err != nil {
-			value, err = eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			value, err = e.Eval.Evaluate(expr, stateMap, GlobalFunctionMap)
 			if err != nil {
 				// check if jmespath rendered
 				if jpValue != nil && validJmesPath {

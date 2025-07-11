@@ -268,7 +268,7 @@ func TestEvaluator(t *testing.T) {
 			},
 		},
 
-		// Direct value rendering tests - RenderString always returns strings
+		// Direct value rendering tests
 		{
 			name:     "direct_integer_value",
 			input:    "{ state.counter }",
@@ -441,10 +441,22 @@ func TestEvaluator(t *testing.T) {
 			state:    map[string]any{},
 		},
 		{
-			name:     "non_existent_variable",
+			name:     "non_existent_variable_1",
+			input:    "{ state.missing }",
+			expected: nil,
+			state:    map[string]any{"state": map[string]any{}},
+		},
+		{
+			name:     "non_existent_variable_2",
 			input:    "Value: { state.missing }",
 			expected: "Value: ",
 			state:    map[string]any{"state": map[string]any{}},
+		},
+		{
+			name:     "non_existent_variable_3",
+			input:    "Foo: { state.foo } | Bar: { env.bar } ",
+			expected: "Foo:  | Bar:  ",
+			state:    map[string]any{},
 		},
 		{
 			name:     "nested_brackets",
@@ -674,7 +686,7 @@ func TestEvaluator(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create evaluator with initial state
-			eval := NewEvaluator(tt.state)
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "run", "target", "source", "stream", "object", "timestamp", "execution", "loop"), tt.state)
 
 			// Process the input
 			var result any
@@ -701,7 +713,11 @@ func TestEvaluator(t *testing.T) {
 			}
 
 			// Check the result
-			assert.Equal(t, tt.expected, result)
+			if !assert.Equal(t, tt.expected, result) {
+				sm := tt.state
+				g.Warn(g.F("%s => %#v", tt.name, sm))
+				g.Warn(g.F("%s => %s", tt.name, g.Marshal(sm)))
+			}
 		})
 	}
 }
@@ -722,12 +738,14 @@ func TestEvaluatorRenderPayload(t *testing.T) {
 				"name":    "{ state.user.name }",
 				"age":     "{ state.user.age }",
 				"active":  "{ state.active }",
+				"missing": "{ state.missing }",
 				"literal": "plain text",
 			},
 			expected: map[string]any{
 				"name":    "John Doe",
 				"age":     25,
 				"active":  true,
+				"missing": nil,
 				"literal": "plain text",
 			},
 			state: map[string]any{
@@ -963,7 +981,7 @@ func TestEvaluatorRenderPayload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create evaluator with state
-			eval := NewEvaluator(tt.state)
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "run", "target", "source", "stream", "object", "timestamp", "execution", "loop"), tt.state)
 
 			// Render the payload
 			result, err := eval.RenderPayload(tt.input)
@@ -974,6 +992,107 @@ func TestEvaluatorRenderPayload(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEvaluatortExtractVars(t *testing.T) {
+	type testCase struct {
+		name     string
+		expr     string
+		expected []string
+	}
+
+	tests := []testCase{
+		{
+			name:     "empty_string",
+			expr:     ``,
+			expected: []string{},
+		},
+		{
+			name:     "no_references",
+			expr:     `value(123, 456, "2025-01-01")`,
+			expected: []string{},
+		},
+		{
+			name:     "simple_env_reference",
+			expr:     `value(env.START_DATE, "2025-01-01")`,
+			expected: []string{"env.START_DATE"},
+		},
+		{
+			name:     "simple_state_reference",
+			expr:     `value(state.max_start_time, "2025-01-01")`,
+			expected: []string{"state.max_start_time"},
+		},
+		{
+			name:     "simple_secrets_reference",
+			expr:     `value(secrets.API_KEY, "default-key")`,
+			expected: []string{"secrets.API_KEY"},
+		},
+		{
+			name:     "simple_auth_reference",
+			expr:     `value(auth.token, "default-token")`,
+			expected: []string{"auth.token"},
+		},
+		{
+			name:     "multiple_references",
+			expr:     `value(env.START_DATE, state.max_start_time, "2025-01-01")`,
+			expected: []string{"env.START_DATE", "state.max_start_time"},
+		},
+		{
+			name:     "references_with_quotes",
+			expr:     `log("auth.token: " + auth.token)`,
+			expected: []string{"auth.token"},
+		},
+		{
+			name:     "references_in_quotes",
+			expr:     `log("env.DEBUG should not be extracted but " + env.DEBUG + " should")`,
+			expected: []string{"env.DEBUG"},
+		},
+		{
+			name:     "reference_in_the_middle",
+			expr:     `concat("prefix_", state.user_id, "_suffix")`,
+			expected: []string{"state.user_id"},
+		},
+		{
+			name:     "nested_functions",
+			expr:     `value(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ"))`,
+			expected: []string{"env.END_DATE"},
+		},
+		{
+			name:     "complex_expression",
+			expr:     `if(is_null(state.last_run_date), now(), date_add(state.last_run_date, "1d"))`,
+			expected: []string{"state.last_run_date", "state.last_run_date"},
+		},
+		{
+			name:     "reference_with_underscore",
+			expr:     `value(state.last_sync_time, state.default_time)`,
+			expected: []string{"state.last_sync_time", "state.default_time"},
+		},
+		{
+			name:     "reference_with_numbers",
+			expr:     `value(env.API_KEY2, secrets.BACKUP_KEY1)`,
+			expected: []string{"env.API_KEY2", "secrets.BACKUP_KEY1"},
+		},
+		{
+			name:     "parameter_inside_quotes",
+			expr:     `format("The value of state.count is {}", state.count1)`,
+			expected: []string{"state.count1"},
+		},
+		{
+			name:     "escaped_quotes",
+			expr:     `value(state.query, "SELECT * FROM \"table\" WHERE id = 5")`,
+			expected: []string{"state.query"},
+		},
+	}
+
+	for _, tt := range tests {
+
+		t.Run(tt.name, func(t *testing.T) {
+			// Create evaluator with initial state
+			eval := NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync"))
+			result := eval.ExtractVars(tt.expr)
+			assert.ElementsMatch(t, tt.expected, result, "References should match expected values")
 		})
 	}
 }

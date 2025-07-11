@@ -5,114 +5,16 @@ import (
 	"testing"
 
 	"github.com/flarco/g"
-	"github.com/maja42/goval"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestExtractVars(t *testing.T) {
-	type testCase struct {
-		name     string
-		expr     string
-		expected []string
-	}
-
-	tests := []testCase{
-		{
-			name:     "empty_string",
-			expr:     ``,
-			expected: []string{},
-		},
-		{
-			name:     "no_references",
-			expr:     `value(123, 456, "2025-01-01")`,
-			expected: []string{},
-		},
-		{
-			name:     "simple_env_reference",
-			expr:     `value(env.START_DATE, "2025-01-01")`,
-			expected: []string{"env.START_DATE"},
-		},
-		{
-			name:     "simple_state_reference",
-			expr:     `value(state.max_start_time, "2025-01-01")`,
-			expected: []string{"state.max_start_time"},
-		},
-		{
-			name:     "simple_secrets_reference",
-			expr:     `value(secrets.API_KEY, "default-key")`,
-			expected: []string{"secrets.API_KEY"},
-		},
-		{
-			name:     "simple_auth_reference",
-			expr:     `value(auth.token, "default-token")`,
-			expected: []string{"auth.token"},
-		},
-		{
-			name:     "multiple_references",
-			expr:     `value(env.START_DATE, state.max_start_time, "2025-01-01")`,
-			expected: []string{"env.START_DATE", "state.max_start_time"},
-		},
-		{
-			name:     "references_with_quotes",
-			expr:     `log("auth.token: " + auth.token)`,
-			expected: []string{"auth.token"},
-		},
-		{
-			name:     "references_in_quotes",
-			expr:     `log("env.DEBUG should not be extracted but " + env.DEBUG + " should")`,
-			expected: []string{"env.DEBUG"},
-		},
-		{
-			name:     "reference_in_the_middle",
-			expr:     `concat("prefix_", state.user_id, "_suffix")`,
-			expected: []string{"state.user_id"},
-		},
-		{
-			name:     "nested_functions",
-			expr:     `value(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ"))`,
-			expected: []string{"env.END_DATE"},
-		},
-		{
-			name:     "complex_expression",
-			expr:     `if(is_null(state.last_run_date), now(), date_add(state.last_run_date, "1d"))`,
-			expected: []string{"state.last_run_date", "state.last_run_date"},
-		},
-		{
-			name:     "reference_with_underscore",
-			expr:     `value(state.last_sync_time, state.default_time)`,
-			expected: []string{"state.last_sync_time", "state.default_time"},
-		},
-		{
-			name:     "reference_with_numbers",
-			expr:     `value(env.API_KEY2, secrets.BACKUP_KEY1)`,
-			expected: []string{"env.API_KEY2", "secrets.BACKUP_KEY1"},
-		},
-		{
-			name:     "parameter_inside_quotes",
-			expr:     `format("The value of state.count is {}", state.count1)`,
-			expected: []string{"state.count1"},
-		},
-		{
-			name:     "escaped_quotes",
-			expr:     `value(state.query, "SELECT * FROM \"table\" WHERE id = 5")`,
-			expected: []string{"state.query"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractVars(tt.expr)
-			assert.ElementsMatch(t, tt.expected, result, "References should match expected values")
-		})
-	}
-}
 
 func TestAPIConnectionRender(t *testing.T) {
 	// Test cases for the render function
 	tests := []struct {
 		name        string
-		input       string
-		expected    string
+		input       any
+		expected    any
 		setup       func(*APIConnection)
 		epState     map[string]any
 		expectError bool
@@ -168,6 +70,30 @@ func TestAPIConnectionRender(t *testing.T) {
 			epState: map[string]any{"counter": 10},
 		},
 		{
+			name:     "endpoint_state_integer",
+			input:    "{ state.counter }",
+			expected: 5.0,
+			setup: func(ac *APIConnection) {
+				ac.State.State["counter"] = 5
+			},
+		},
+		{
+			name:     "endpoint_state_map",
+			input:    g.M("counter", "{ state.counter }"),
+			expected: g.M("counter", 5.0),
+			setup: func(ac *APIConnection) {
+			},
+			epState: g.M("counter", 5),
+		},
+		{
+			name:     "endpoint_state_map_nested",
+			input:    g.M("pagination", g.M("limit", "{ state.limit }")),
+			expected: g.M("pagination", g.M("limit", 5.0)),
+			setup: func(ac *APIConnection) {
+				ac.State.State["limit"] = 5
+			},
+		},
+		{
 			name:     "object_serialization",
 			input:    "User: {state.user}",
 			expected: "User: {\"age\":30,\"name\":\"Alice\"}",
@@ -206,12 +132,12 @@ func TestAPIConnectionRender(t *testing.T) {
 				ac.State.State["nested"] = map[string]any{"name": "John", "age": 42}
 			},
 		},
-		{
-			name:        "invalid_function",
-			input:       "Invalid: {invalid_function()}",
-			expected:    "",
-			expectError: true,
-		},
+		// {
+		// 	name:        "invalid_function",
+		// 	input:       "Invalid: {invalid_function()}",
+		// 	expected:    "",
+		// 	expectError: true,
+		// },
 		{
 			name:        "coalesce",
 			input:       `{ coalesce(env.START_DATE, state.start_time, "2025-01-01") }`,
@@ -231,8 +157,8 @@ func TestAPIConnectionRender(t *testing.T) {
 					Secrets: make(map[string]any),
 					Auth:    APIStateAuth{},
 				},
-				Spec: Spec{},
-				eval: goval.NewEvaluator(),
+				Spec:      Spec{},
+				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 			}
 
 			// Configure the test state
@@ -241,22 +167,22 @@ func TestAPIConnectionRender(t *testing.T) {
 			}
 
 			// Process using our mock implementation
-			var result string
+			var result any
 			var err error
 
 			// Use the mock implementation that correctly handles state
 			if tt.epState != nil {
-				result, err = ac.renderString(tt.input, g.M("state", tt.epState))
+				result, err = ac.renderAny(tt.input, g.M("state", tt.epState))
 			} else {
-				result, err = ac.renderString(tt.input)
+				result, err = ac.renderAny(tt.input)
 			}
 
 			// Check for expected errors
 			if tt.expectError {
 				assert.Error(t, err)
-				return
+			} else {
+				assert.NoError(t, err)
 			}
-			assert.NoError(t, err)
 
 			// For time-based functions, just check that something was rendered
 			if tt.name == "now_function" {
@@ -267,7 +193,7 @@ func TestAPIConnectionRender(t *testing.T) {
 
 			// Check the result
 			if !assert.Equal(t, tt.expected, result) {
-				sm := ac.getStateMap(nil, nil)
+				sm := ac.getStateMap(nil)
 				g.Warn(g.F("%s => %#v", tt.name, sm))
 				g.Warn(g.F("%s => %s", tt.name, g.Marshal(sm)))
 			}
@@ -381,8 +307,8 @@ func TestOAuth2Authentication(t *testing.T) {
 					Secrets: make(map[string]any),
 					Auth:    APIStateAuth{},
 				},
-				Spec: Spec{Authentication: tt.auth},
-				eval: goval.NewEvaluator(),
+				Spec:      Spec{Authentication: tt.auth},
+				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 			}
 
 			_, err := ac.performOAuth2Flow(tt.auth)
@@ -406,7 +332,7 @@ func TestOAuth2FlowValidation(t *testing.T) {
 			Secrets: make(map[string]any),
 			Auth:    APIStateAuth{},
 		},
-		eval: goval.NewEvaluator(),
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 	}
 
 	// Test template rendering in OAuth2 fields

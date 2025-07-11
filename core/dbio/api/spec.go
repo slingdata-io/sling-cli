@@ -171,8 +171,8 @@ func (eps Endpoints) Sort() {
 	})
 }
 
-func (sm StateMap) DetermineRenderOrder() (order []string, err error) {
-	remaining := lo.Keys(sm)
+func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
+	remaining := lo.Keys(iter.state)
 	processing := map[string]bool{} // track variables being processed in current chain
 
 	addAndRemove := func(key string) {
@@ -200,11 +200,11 @@ func (sm StateMap) DetermineRenderOrder() (order []string, err error) {
 		processing[key] = true
 		defer func() { processing[key] = false }()
 
-		expr := cast.ToString(sm[key])
+		expr := cast.ToString(iter.state[key])
 		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
 		if len(matches) > 0 {
 			for _, match := range matches {
-				varsReferenced := extractVars(match[1])
+				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match[1])
 				for _, varReferenced := range varsReferenced {
 					if strings.HasPrefix(varReferenced, "state.") {
 						refKey := strings.TrimPrefix(varReferenced, "state.")
