@@ -70,6 +70,16 @@ streams:
     source_options:
       chunk_count: 3
 
+  public.test1k_mysql_pg_sql:
+    object: oracle.test1k_mysql_pg_sql
+    sql: >
+      select *
+      from public.test1k_mysql_pg
+      where id <= 500 and ({incremental_where_cond}) /* custom-sql */
+    update_key: id
+    source_options:
+      chunk_size: 600
+
 env:
   MODE: ${MODE}
   SLING_THREADS: ${THREADS}

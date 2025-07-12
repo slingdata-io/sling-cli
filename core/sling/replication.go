@@ -821,6 +821,14 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			}
 			rd.Tasks = selectedTasks
 		}
+
+		// re-prepare tasks
+		for _, task := range rd.Tasks {
+			task.Prepared = false
+			if err = task.Prepare(); err != nil {
+				return g.Error(err, "could not prepare: %s", task.StreamName)
+			}
+		}
 		return nil
 	}
 
