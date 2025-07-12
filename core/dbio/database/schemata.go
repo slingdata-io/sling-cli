@@ -33,16 +33,33 @@ type Table struct {
 	limit, offset int
 }
 
+type Chunk struct {
+	RangeStart string `json:"range_start,omitempty"`
+	RangeEnd   string `json:"range_end,omitempty"`
+	Where      string `json:"where,omitempty"`
+}
+
+func (c *Chunk) Range() string {
+	if c.RangeStart == "" && c.RangeEnd == "" {
+		return ""
+	}
+	return g.F("%s,%s", c.RangeStart, c.RangeEnd)
+}
+
 var ChunkByColumn = func(conn Connection, table Table, c string, p int) ([]Table, error) {
 	return []Table{table}, g.Error("please use the official sling-cli release for chunking columns")
 }
 
-var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max string) ([]string, error) {
-	return []string{}, g.Error("please use the official sling-cli release for chunking")
+var ChunkByColumnRange = func(conn Connection, t Table, c string, cs, min, max string) ([]Chunk, error) {
+	return []Chunk{}, g.Error("please use the official sling-cli release for chunking")
 }
 
-var ChunkByCount = func(conn Connection, t Table, c string, cc int, min, max string) ([]string, string, error) {
-	return []string{}, "", g.Error("please use the official sling-cli release for chunking")
+var ChunkByCount = func(conn Connection, t Table, c string, cc int, min, max string) ([]Chunk, string, error) {
+	return []Chunk{}, "", g.Error("please use the official sling-cli release for chunking")
+}
+
+var ChunkByExpression = func(conn Connection, t Table, e string, cc int) ([]Chunk, error) {
+	return []Chunk{}, g.Error("please use the official sling-cli release for chunking")
 }
 
 func (t *Table) IsQuery() bool {

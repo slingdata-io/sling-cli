@@ -252,26 +252,47 @@ func (cfg *Config) IsFileStreamWithStateAndParts() bool {
 			len(iop.ExtractISO8601DateFields(uri)) > 0)
 }
 
-// IsFullRefreshWithRange returns true is the stream is chunking
+// IsFullRefreshWithRange returns true is the stream has range
 func (cfg *Config) IsFullRefreshWithRange() bool {
 	return cfg.Mode == FullRefreshMode && cfg.Source.Options.Range != nil
 }
 
-// IsTruncateWithRange returns true is the stream is chunking
+// IsTruncateWithRange returns true is the stream has range
 func (cfg *Config) IsTruncateWithRange() bool {
 	return cfg.Mode == TruncateMode && cfg.Source.Options.Range != nil
 }
 
-// IsIncrementalWithRange returns true is the stream is chunking
+// IsIncrementalWithRange returns true is the stream has range
 func (cfg *Config) IsIncrementalWithRange() bool {
 	return cfg.Mode == IncrementalMode && cfg.Source.Options.Range != nil
+}
+
+func (cfg *Config) WithChunking() bool {
+	return cfg.Source.Options.ChunkCount != nil ||
+		cfg.Source.Options.ChunkExpr != nil ||
+		cfg.Source.Options.ChunkSize != nil
+}
+
+// IsFullRefreshWithChunking returns true is the stream is chunking
+func (cfg *Config) IsFullRefreshWithChunking() bool {
+	return cfg.Mode == FullRefreshMode && cfg.WithChunking()
+}
+
+// IsTruncateWithChunking returns true is the stream is chunking
+func (cfg *Config) IsTruncateWithChunking() bool {
+	return cfg.Mode == TruncateMode && cfg.WithChunking()
+}
+
+// IsIncrementalWithChunking returns true is the stream is chunking
+func (cfg *Config) IsIncrementalWithChunking() bool {
+	return cfg.Mode == IncrementalMode && cfg.WithChunking()
 }
 
 // ClearTableForChunkLoadWithRange clears the table for chunk load with in mode
 // full-refresh or truncate
 func (cfg *Config) ClearTableForChunkLoadWithRange() (err error) {
 
-	if cfg.IsFullRefreshWithRange() || cfg.IsTruncateWithRange() {
+	if cfg.IsFullRefreshWithChunking() || cfg.IsTruncateWithChunking() {
 		dbConn, err := cfg.TgtConn.AsDatabase()
 		if err != nil {
 			return g.Error(err, "could not connect to target conn for preparing final table for chunk loading")
@@ -1431,6 +1452,7 @@ type SourceOptions struct {
 	Offset         *int                `json:"offset,omitempty" yaml:"offset,omitempty"`
 	ChunkSize      any                 `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
 	ChunkCount     *int                `json:"chunk_count,omitempty" yaml:"chunk_count,omitempty"`
+	ChunkExpr      *string             `json:"chunk_expr,omitempty" yaml:"chunk_expr,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
 
 	// columns & transforms were moved out of source_options

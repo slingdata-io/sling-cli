@@ -481,6 +481,9 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		if cc := g.PtrVal(s.SourceOptions).ChunkCount; cc != nil && *cc > 0 {
 			chunkSpecified = true
 		}
+		if ce := g.PtrVal(s.SourceOptions).ChunkExpr; ce != nil && *ce != "" {
+			chunkSpecified = true
+		}
 
 		if !g.In(s.Mode, FullRefreshMode, TruncateMode, BackfillMode, IncrementalMode) || !chunkSpecified {
 			continue
@@ -516,6 +519,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 	for i, stream := range streamsToChunk {
 		chunkSize := cast.ToString(stream.config.SourceOptions.ChunkSize)
 		chunkCount := g.PtrVal(stream.config.SourceOptions.ChunkCount)
+		chunkExpr := g.PtrVal(stream.config.SourceOptions.ChunkExpr)
 		min, max := stream.config.SourceOptions.RangeStartEnd()
 		table, err := database.ParseTableName(stream.name, sourceConn.Connection.Type)
 		if stream.config.SQL != "" {
@@ -533,8 +537,10 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			return g.Error(err, "could not parse stream name as table name: %s", stream.name)
 		}
 
-		if stream.config.UpdateKey == "" {
-			return g.Error(err, "did not provided update_key for stream chunking: %s", stream.name)
+		if chunkExpr != "" {
+			// no update_key needed for chunking by expression
+		} else if stream.config.UpdateKey == "" {
+			return g.Error(err, "did not provide update_key for stream chunking: %s", stream.name)
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
@@ -554,19 +560,28 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			min = cast.ToString(tempCfg.IncrementalVal) // set target max value as range min value
 		}
 
-		var chunkRanges []string
+		var chunks []database.Chunk
 		if chunkSize != "" {
-			chunkRanges, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
+			chunks, err = database.ChunkByColumnRange(sourceConnDB, table, stream.config.UpdateKey, chunkSize, min, max)
 		} else if chunkCount > 0 {
-			chunkRanges, chunkSize, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
+			if chunkExpr != "" {
+				if stream.config.Mode == BackfillMode && max == "" {
+					return g.Error("backfill mode requires a range (does not work with chunk_expr). Try incremental mode with only a primary key (no update_key needed)")
+				}
+				chunks, err = database.ChunkByExpression(sourceConnDB, table, chunkExpr, chunkCount)
+			} else {
+				chunks, chunkSize, err = database.ChunkByCount(sourceConnDB, table, stream.config.UpdateKey, chunkCount, min, max)
+			}
+		} else {
+			err = g.Error("must specify chunk_count or chunk_size")
 		}
 		if err != nil {
 			return g.Error(err, "could not generate chunk ranges: %s", stream.name)
 		}
 
-		g.Debug("determined %d chunks (size=%s, stream=%s): %s", len(chunkRanges), chunkSize, stream.name, g.Marshal(chunkRanges))
+		g.Debug("determined %d chunks (size=%s, stream=%s): %s", len(chunks), chunkSize, stream.name, g.Marshal(chunks))
 
-		if len(chunkRanges) == 0 {
+		if len(chunks) == 0 {
 			continue
 		}
 
@@ -576,8 +591,8 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			g.Warn("please specify object name without {*} runtime variables when chunking (stream=%s)", stream.name)
 		}
 
-		streamsToChunk[i].chunks = make([]Stream, len(chunkRanges))
-		for j, chunkRange := range chunkRanges {
+		streamsToChunk[i].chunks = make([]Stream, len(chunks))
+		for j, chunk := range chunks {
 			prefix := lo.Ternary(table.IsQuery(), stream.name, table.FullName())
 			chunkedStream := Stream{
 				name:   prefix + g.F(" (part-%03d)", j+1),
@@ -585,10 +600,25 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			}
 
 			// set range in a copy of source options
-			so := SourceOptions{}
-			g.Unmarshal(g.Marshal(stream.config.SourceOptions), &so)
-			so.Range = g.Ptr(chunkRange)
-			chunkedStream.config.SourceOptions = &so
+			if rangeStr := chunk.Range(); rangeStr != "" {
+				so := SourceOptions{}
+				g.Unmarshal(g.Marshal(stream.config.SourceOptions), &so)
+				so.Range = g.Ptr(rangeStr)
+				chunkedStream.config.SourceOptions = &so
+			} else if where := chunk.Where; where != "" {
+				if stream.config.Mode == IncrementalMode {
+					where = g.F("%s and {incremental_where_cond}", where)
+				}
+				opts := database.SelectOptions{Where: where}
+				if sql := chunkedStream.config.SQL; sql != "" {
+					if !strings.Contains(sql, "{incremental_where_cond}") {
+						return g.Error("custom SQL must contain {incremental_where_cond} for chunking by expression")
+					}
+					chunkedStream.config.SQL = strings.ReplaceAll(sql, "{incremental_where_cond}", where)
+				} else {
+					chunkedStream.config.SQL = table.Select(opts)
+				}
+			}
 
 			// set temp table
 			to := TargetOptions{}
@@ -609,7 +639,6 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		}
 	}
 
-	// generate ranges
 	// arrange order to reflect original
 	newStreamNames := []string{}
 	for _, origName := range rd.streamsOrdered {

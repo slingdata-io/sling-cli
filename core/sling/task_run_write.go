@@ -761,7 +761,7 @@ func prepareFinal(
 
 	// Handle Full Refresh Mode: Drop the target table if it exists
 	// Don't drop if full refreshing with range, will already have been dropped
-	if cfg.Mode == FullRefreshMode && !t.Config.IsFullRefreshWithRange() {
+	if cfg.Mode == FullRefreshMode && !t.Config.IsFullRefreshWithChunking() {
 		if err := tgtConn.DropTable(targetTable.FullName()); err != nil {
 			return g.Error(err, "could not drop table "+targetTable.FullName())
 		}
@@ -777,7 +777,7 @@ func prepareFinal(
 		return g.Error(err, "could not create table "+targetTable.FullName())
 	} else if created {
 		t.SetProgress("created table %s", targetTable.FullName())
-	} else if cfg.Mode == TruncateMode && !t.Config.IsTruncateWithRange() {
+	} else if cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
 		// Truncate table since it exists
 		// Don't truncate if refreshing with range, will already have been truncated
 		if err := database.TruncateTable(tgtConn, targetTable.FullName()); err != nil {
