@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
 func TestAPIConnectionRender(t *testing.T) {
@@ -373,318 +375,68 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
 }
 
-// TestHTTPCallAndResponseExtraction demonstrates HTTP call simulation and response extraction
-// using the API framework with mock HTTP server. It tests:
-// 1. Basic pagination field extraction using response processors
-// 2. JMESPath filtering of response records
-// 3. Complex response processing similar to OneStock API structure
+//go:embed api_suite.yaml
+var templatesSuite embed.FS
+
 func TestHTTPCallAndResponseExtraction(t *testing.T) {
-	tests := []struct {
-		name              string
-		mockResponse      map[string]any
-		expectedRecords   []map[string]any
-		expectedState     map[string]any
-		expectedNextState map[string]any
-		endpointSpec      Endpoint
-	}{
-		{
-			name: "extract_pagination_id_from_response",
-			mockResponse: g.M(
-				"pagination", g.M(
-					"id", "abc123",
-					"hasMore", true,
-					"total", 100,
-				),
-				"data", []any{
-					g.M("id", 1, "name", "Item 1"),
-					g.M("id", 2, "name", "Item 2"),
-				},
-			),
-			endpointSpec: Endpoint{
-				Response: Response{
-					Processors: []Processor{
-						{
-							Expression:  "response.json.pagination.id",
-							Output:      "state.next_page_id",
-							Aggregation: AggregationTypeLast,
-						},
-					},
-					Records: Records{
-						JmesPath: "data",
-					},
-				},
-			},
-			expectedRecords: []map[string]any{
-				{"id": "1", "name": "Item 1"},
-				{"id": "2", "name": "Item 2"},
-			},
-			expectedState: map[string]any{
-				"next_page_id": "abc123",
-			},
-			expectedNextState: map[string]any{},
-		},
-		{
-			name: "extract_records_with_jmespath_filter",
-			mockResponse: g.M(
-				"data", g.M(
-					"items", []any{
-						g.M("id", 1, "name", "Active Item", "active", true),
-						g.M("id", 2, "name", "Inactive Item", "active", false),
-						g.M("id", 3, "name", "Another Active", "active", true),
-					},
-				),
-			),
-			endpointSpec: Endpoint{
-				Response: Response{
-					Records: Records{
-						JmesPath: "data.items[?active==`true`]",
-					},
-				},
-			},
-			expectedRecords: []map[string]any{
-				{"id": "1", "name": "Active Item", "active": "true"},
-				{"id": "3", "name": "Another Active", "active": "true"},
-			},
-			expectedState:     map[string]any{},
-			expectedNextState: map[string]any{},
-		},
-		{
-			name: "onestock_style_response",
-			mockResponse: g.M(
-				"pagination", g.M(
-					"id", "cursor_xyz789",
-					"limit", 50,
-					"hasMore", true,
-				),
-				"items", []any{
-					g.M("id", 1, "status", "shipped", "createdAt", "2025-01-10"),
-					g.M("id", 2, "status", "pending", "createdAt", "2025-01-11"),
-				},
-			),
-			endpointSpec: Endpoint{
-				Response: Response{
-					Processors: []Processor{
-						{
-							Expression:  "response.json.pagination.id",
-							Output:      "state.cursor",
-							Aggregation: AggregationTypeLast,
-						},
-						{
-							Expression:  "response.json.pagination.limit",
-							Output:      "state.limit",
-							Aggregation: AggregationTypeLast,
-						},
-					},
-					Records: Records{
-						JmesPath: "items",
-					},
-				},
-				Pagination: Pagination{
-					StopCondition: "length(response.json.items) == 0",
-					NextState: map[string]any{
-						"page_cursor": "{state.cursor}",
-						"id":          "{response.json.pagination.id}",
-					},
-				},
-			},
-			expectedRecords: []map[string]any{
-				{"id": 1, "status": "shipped", "createdAt": "2025-01-10"},
-				{"id": 2, "status": "pending", "createdAt": "2025-01-11"},
-			},
-			expectedState: map[string]any{
-				"cursor": "cursor_xyz789",
-				"limit":  float64(50),
-			},
-			expectedNextState: map[string]any{
-				"page_cursor": "cursor_xyz789",
-				"id":          "cursor_xyz789", // Since NextState uses {response.json.pagination.id}
-			},
-		},
-		{
-			name: "test_nextstate_rendering_with_mixed_sources",
-			mockResponse: g.M(
-				"meta", g.M(
-					"next_cursor", "next_page_123",
-					"page_size", 25,
-					"total", 150,
-				),
-				"results", []any{
-					g.M("id", "rec1", "value", 100),
-					g.M("id", "rec2", "value", 200),
-				},
-			),
-			endpointSpec: Endpoint{
-				State: map[string]any{
-					"base_url": "https://api.example.com",
-					"version":  "v2",
-				},
-				Response: Response{
-					Processors: []Processor{
-						{
-							Expression:  "response.json.meta.next_cursor",
-							Output:      "state.next_cursor",
-							Aggregation: AggregationTypeLast,
-						},
-						{
-							Expression:  "response.json.meta.page_size",
-							Output:      "state.page_size",
-							Aggregation: AggregationTypeLast,
-						},
-					},
-					Records: Records{
-						JmesPath: "results",
-					},
-				},
-				Pagination: Pagination{
-					StopCondition: "response.json.meta.next_cursor == null",
-					NextState: map[string]any{
-						"cursor":   "{state.next_cursor}",
-						"limit":    "{state.page_size}",
-						"endpoint": "{state.base_url}/{state.version}/data",
-						"total":    "{response.json.meta.total}",
-					},
-				},
-			},
-			expectedRecords: []map[string]any{
-				{"id": "rec1", "value": "100"},
-				{"id": "rec2", "value": "200"},
-			},
-			expectedState: map[string]any{
-				"base_url":    "https://api.example.com",
-				"version":     "v2",
-				"next_cursor": "next_page_123",
-				"page_size":   float64(25),
-			},
-			expectedNextState: map[string]any{
-				"cursor":   "next_page_123",
-				"limit":    float64(25),
-				"endpoint": "https://api.example.com/v2/data",
-				"total":    float64(150),
-			},
-		},
-		{
-			name: "test_nextstate_with_functions",
-			mockResponse: g.M(
-				"pagination", g.M(
-					"next_token", "token_456",
-					"has_more", true,
-					"per_page", nil, // null value to test coalesce
-				),
-				"data", []any{
-					g.M("id", 1, "created", "2025-01-10T10:00:00Z"),
-					g.M("id", 2, "created", "2025-01-10T11:00:00Z"),
-					g.M("id", 3, "created", "2025-01-10T12:00:00Z"),
-				},
-			),
-			endpointSpec: Endpoint{
-				State: map[string]any{
-					"default_limit": 50,
-					"max_limit":     100,
-					"base_time":     "2025-01-10T00:00:00Z",
-				},
-				Response: Response{
-					Processors: []Processor{
-						{
-							Expression:  "response.json.pagination.next_token",
-							Output:      "state.token",
-							Aggregation: AggregationTypeLast,
-						},
-						{
-							Expression:  "response.json.pagination.has_more",
-							Output:      "state.has_more",
-							Aggregation: AggregationTypeLast,
-						},
-						{
-							Expression:  "greatest(response.json.data[0].created, response.json.data[1].created, response.json.data[2].created)",
-							Output:      "state.max_created",
-							Aggregation: AggregationTypeLast,
-						},
-					},
-					Records: Records{
-						JmesPath: "data",
-					},
-				},
-				Pagination: Pagination{
-					StopCondition: "!state.has_more || state.token == null",
-					NextState: map[string]any{
-						// Use coalesce to handle null per_page
-						"limit": "{ coalesce(response.json.pagination.per_page, state.default_limit) }",
-						// Use if function for conditional logic
-						"token": "{ if(state.has_more, state.token, null) }",
-						// Use date_add to calculate next time window
-						"from_time": "{ date_add(state.max_created, 1, \"second\") }",
-						// Use least to ensure we don't exceed max_limit
-						"safe_limit": "{ least(coalesce(response.json.pagination.per_page, state.default_limit), state.max_limit) }",
-						// Use string functions
-						"token_prefix": "{ substring(state.token, 0, 5) }",
-						// Use encode_base64
-						"encoded_token": "{ encode_base64(state.token) }",
-						// Complex expression with multiple functions
-						"query_string": "{ join([\"limit=\", cast(least(state.default_limit, 100), \"string\"), \"&token=\", state.token], \"\") }",
-					},
-				},
-			},
-			expectedRecords: []map[string]any{
-				{"id": "1", "created": "2025-01-10T10:00:00Z"},
-				{"id": "2", "created": "2025-01-10T11:00:00Z"}, 
-				{"id": "3", "created": "2025-01-10T12:00:00Z"},
-			},
-			expectedState: map[string]any{
-				"default_limit": 50,
-				"max_limit":     100,
-				"base_time":     "2025-01-10T00:00:00Z",
-				"token":         "token_456",
-				"has_more":      true,
-				"max_created":   "2025-01-10T12:00:00Z",
-			},
-			expectedNextState: map[string]any{
-				"limit":         float64(50), // coalesce returns default_limit since per_page is nil
-				"token":         "token_456",  // if returns token since has_more is true
-				"from_time":     "2025-01-10T12:00:01Z", // date_add adds 1 second
-				"safe_limit":    float64(50), // least(50, 100) = 50
-				"token_prefix":  "token",     // substring of "token_456"
-				"encoded_token": "dG9rZW5fNDU2", // base64 encoding of "token_456"
-				"query_string":  "limit=50&token=token_456",
-			},
-		},
+	type testCase struct {
+		ID   int               `yaml:"id"`
+		Name string            `yaml:"name"`
+		Spec Spec              `yaml:"spec"`
+		Env  map[string]string `yaml:"env"`
+		Err  bool              `yaml:"err"`
+
+		MockResponse      map[string]any   `yaml:"mock_response"`
+		ExpectedRecords   []map[string]any `yaml:"expected_records"`
+		ExpectedState     map[string]any   `yaml:"expected_state"`
+		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	// Read the YAML file
+	yamlData, err := templatesSuite.ReadFile("api_suite.yaml")
+	assert.NoError(t, err)
+
+	var testCases []testCase
+	err = yaml.Unmarshal(yamlData, &testCases)
+	assert.NoError(t, err)
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
 			// Create a test HTTP server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(tt.mockResponse)
+				json.NewEncoder(w).Encode(tc.MockResponse)
 			}))
 			defer server.Close()
 
+			// Initialize the spec's EndpointMap if it's nil
+			if tc.Spec.EndpointMap == nil {
+				tc.Spec.EndpointMap = make(EndpointMap)
+			}
+
 			// Set up endpoint with test server URL
-			endpoint := tt.endpointSpec
+			endpoint := tc.Spec.EndpointMap["test_endpoint"]
 			endpoint.Name = "test_endpoint"
 			// Initialize state map with predefined values if any
 			if endpoint.State == nil {
 				endpoint.State = make(StateMap)
+			}
+			// Apply any state from YAML spec
+			for k, v := range tc.Spec.EndpointMap["test_endpoint"].State {
+				endpoint.State[k] = v
 			}
 			endpoint.Request = Request{
 				URL:    server.URL + "/test",
 				Method: MethodGet,
 			}
 
-			// Create API spec with the endpoint
-			spec := Spec{
-				Name: "test_api",
-				Authentication: Authentication{
-					Type: AuthTypeNone,
-				},
-				EndpointMap: EndpointMap{
-					"test_endpoint": endpoint,
-				},
-			}
-			spec.endpointsOrdered = []string{"test_endpoint"}
+			// Update the spec with the modified endpoint
+			tc.Spec.EndpointMap["test_endpoint"] = endpoint
+			tc.Spec.endpointsOrdered = []string{"test_endpoint"}
 
 			// Create API connection
-			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+			ac, err := NewAPIConnection(context.Background(), tc.Spec, map[string]any{
 				"state":   map[string]any{},
 				"secrets": map[string]any{},
 			})
@@ -717,20 +469,20 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 
 			// Check records match expected (handling type conversions)
 			// For some tests, we may get more records due to limit, so check at least expected records exist
-			if strings.Contains(tt.name, "onestock") || strings.Contains(tt.name, "nextstate") {
-				assert.GreaterOrEqual(t, len(records), len(tt.expectedRecords))
+			if strings.Contains(tc.Name, "onestock") || strings.Contains(tc.Name, "nextstate") {
+				assert.GreaterOrEqual(t, len(records), len(tc.ExpectedRecords))
 			} else {
-				assert.Equal(t, len(tt.expectedRecords), len(records))
+				assert.Equal(t, len(tc.ExpectedRecords), len(records))
 			}
 
 			// Check each expected record
-			recordsToCheck := len(tt.expectedRecords)
+			recordsToCheck := len(tc.ExpectedRecords)
 			if recordsToCheck > len(records) {
 				recordsToCheck = len(records)
 			}
 
 			for i := 0; i < recordsToCheck; i++ {
-				expectedRecord := tt.expectedRecords[i]
+				expectedRecord := tc.ExpectedRecords[i]
 				actualRecord := records[i]
 				for key, expectedValue := range expectedRecord {
 					actualValue, exists := actualRecord[key]
@@ -763,21 +515,32 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			}
 
 			// Check state was updated correctly
-			if len(tt.expectedState) > 0 {
-				for key, expectedValue := range tt.expectedState {
-					actualValue, exists := spec.EndpointMap["test_endpoint"].State[key]
+			if len(tc.ExpectedState) > 0 {
+				// Get the endpoint from the connection's spec (which was modified during execution)
+				actualEndpoint := ac.Spec.EndpointMap["test_endpoint"]
+				for key, expectedValue := range tc.ExpectedState {
+					actualValue, exists := actualEndpoint.State[key]
 					assert.True(t, exists, "Expected state key %s to exist", key)
-					assert.Equal(t, expectedValue, actualValue)
+
+					// Handle numeric comparisons
+					switch expected := expectedValue.(type) {
+					case int:
+						assert.Equal(t, float64(expected), cast.ToFloat64(actualValue))
+					case float64:
+						assert.Equal(t, expected, cast.ToFloat64(actualValue))
+					default:
+						assert.Equal(t, expectedValue, actualValue)
+					}
 				}
-				
+
 				// Test NextState rendering
-				if len(tt.expectedNextState) > 0 {
-					// Get the endpoint from spec
-					endpointCopy := spec.EndpointMap["test_endpoint"]
+				if len(tc.ExpectedNextState) > 0 {
+					// Get the endpoint from connection's spec
+					endpointCopy := ac.Spec.EndpointMap["test_endpoint"]
 					endpoint := &endpointCopy
 					endpoint.conn = ac
 					endpoint.context = g.NewContext(context.Background())
-					
+
 					// Create a mock single request with our response data
 					iter := &Iteration{
 						id:       1,
@@ -785,14 +548,14 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 						endpoint: endpoint,
 						context:  g.NewContext(context.Background()),
 					}
-					
+
 					req := NewSingleRequest(iter)
 					req.Response = &ResponseState{
 						Status:  200,
 						Headers: g.M("content-type", "application/json"),
-						JSON:    tt.mockResponse,
+						JSON:    tc.MockResponse,
 					}
-					
+
 					// Render the NextState values
 					renderedNextState := make(map[string]any)
 					for key, val := range endpoint.Pagination.NextState {
@@ -800,21 +563,27 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 						assert.NoError(t, err, "Failed to render NextState key %s", key)
 						renderedNextState[key] = rendered
 					}
-					
+
 					// Verify rendered NextState matches expected
-					for key, expectedValue := range tt.expectedNextState {
+					for key, expectedValue := range tc.ExpectedNextState {
 						actualValue, exists := renderedNextState[key]
 						assert.True(t, exists, "Expected NextState key %s to exist", key)
-						
-						// Handle time values specially
-						if expectedStr, ok := expectedValue.(string); ok {
-							if actualTime, ok := actualValue.(time.Time); ok && strings.Contains(expectedStr, "T") {
+
+						// Handle different types of comparisons
+						switch expected := expectedValue.(type) {
+						case string:
+							if actualTime, ok := actualValue.(time.Time); ok && strings.Contains(expected, "T") {
 								// Compare as formatted time string
-								assert.Equal(t, expectedStr, actualTime.Format(time.RFC3339))
+								assert.Equal(t, expected, actualTime.Format(time.RFC3339))
 							} else {
-								assert.Equal(t, expectedValue, actualValue)
+								assert.Equal(t, expected, cast.ToString(actualValue))
 							}
-						} else {
+						case int:
+							// Handle numeric comparisons
+							assert.Equal(t, float64(expected), cast.ToFloat64(actualValue))
+						case float64:
+							assert.Equal(t, expected, cast.ToFloat64(actualValue))
+						default:
 							assert.Equal(t, expectedValue, actualValue)
 						}
 					}
