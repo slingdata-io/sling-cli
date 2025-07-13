@@ -397,3 +397,11 @@ func (ac *APIConnection) CloseAllQueues() {
 		delete(ac.State.Queues, name)
 	}
 }
+
+// RenderDynamicEndpoints will render the dynamic objects
+// basically mutating the spec endpoints.
+// Needs to authenticate first
+func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
+	_ = ac.Spec // will need to be modified
+	return
+}

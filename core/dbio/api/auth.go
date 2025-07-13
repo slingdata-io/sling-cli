@@ -46,17 +46,6 @@ func (ac *APIConnection) Authenticate() (err error) {
 		ac.State.Auth.Authenticated = true
 		return nil
 
-	case AuthTypeBearer:
-		token, err := ac.renderString(auth.Token)
-		if err != nil {
-			return g.Error(err, "could not render token")
-		} else if token == "" {
-			return g.Error(err, "no token was provided for bearer authentication")
-		}
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
-		setAuthenticated()
-		return nil
-
 	case AuthTypeBasic:
 		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
 		if err != nil {
@@ -144,13 +133,13 @@ func (ac *APIConnection) Authenticate() (err error) {
 // performOAuth2Flow handles different OAuth2 flows
 func (ac *APIConnection) performOAuth2Flow(auth Authentication) (token string, err error) {
 	switch auth.Flow {
-	case AuthFlowClientCredentials:
+	case OAuthFlowClientCredentials:
 		return ac.performClientCredentialsFlow(auth)
-	case AuthFlowRefreshToken:
+	case OAuthFlowRefreshToken:
 		return ac.performRefreshTokenFlow(auth)
-	case AuthFlowPassword:
+	case OAuthFlowPassword:
 		return ac.performPasswordFlow(auth)
-	case AuthFlowAuthorizationCode:
+	case OAuthFlowAuthorizationCode:
 		return ac.performAuthorizationCodeFlow(auth)
 	default:
 		return "", g.Error("unsupported OAuth2 flow: %s", auth.Flow)
