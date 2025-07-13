@@ -406,7 +406,18 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(tc.MockResponse)
+
+				// Handle different endpoints for authentication sequence test
+				if r.URL.Path == "/login" {
+					// Return token for login endpoint
+					loginResponse := map[string]any{
+						"token": "mock_token_12345", // Return the expected token
+					}
+					json.NewEncoder(w).Encode(loginResponse)
+				} else {
+					// Return the main mock response for other endpoints
+					json.NewEncoder(w).Encode(tc.MockResponse)
+				}
 			}))
 			defer server.Close()
 
@@ -431,19 +442,39 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 				Method: MethodGet,
 			}
 
+			// Update authentication sequence URLs if present
+			if tc.Spec.Authentication.Type == AuthTypeSequence {
+				for i, call := range tc.Spec.Authentication.Sequence {
+					if call.Request.URL != "" {
+						tc.Spec.Authentication.Sequence[i].Request.URL = server.URL + call.Request.URL
+					}
+				}
+			}
+
 			// Update the spec with the modified endpoint
 			tc.Spec.EndpointMap["test_endpoint"] = endpoint
 			tc.Spec.endpointsOrdered = []string{"test_endpoint"}
 
 			// Create API connection
 			ac, err := NewAPIConnection(context.Background(), tc.Spec, map[string]any{
-				"state":   map[string]any{},
-				"secrets": map[string]any{},
+				"state": map[string]any{},
+				"secrets": map[string]any{
+					"site_id":  "store_123",
+					"user_id":  "test_user",
+					"password": "test_password",
+				},
 			})
 			assert.NoError(t, err)
 
-			// Authenticate (set to true for testing)
-			ac.State.Auth.Authenticated = true
+			// Handle authentication based on type
+			if tc.Spec.Authentication.Type == AuthTypeSequence {
+				// For sequence authentication, actually run the authentication
+				err = ac.Authenticate()
+				assert.NoError(t, err)
+			} else {
+				// For other auth types, bypass authentication for testing
+				ac.State.Auth.Authenticated = true
+			}
 
 			// Execute the API call and get dataflow
 			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
@@ -518,8 +549,19 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			if len(tc.ExpectedState) > 0 {
 				// Get the endpoint from the connection's spec (which was modified during execution)
 				actualEndpoint := ac.Spec.EndpointMap["test_endpoint"]
+
 				for key, expectedValue := range tc.ExpectedState {
 					actualValue, exists := actualEndpoint.State[key]
+
+					// For authentication sequence tests, also check API connection state and auth state
+					if !exists && tc.Spec.Authentication.Type == AuthTypeSequence {
+						actualValue, exists = ac.State.State[key]
+						if !exists && key == "token" {
+							// Check auth token
+							actualValue, exists = ac.State.Auth.Token, ac.State.Auth.Token != ""
+						}
+					}
+
 					assert.True(t, exists, "Expected state key %s to exist", key)
 
 					// Handle numeric comparisons

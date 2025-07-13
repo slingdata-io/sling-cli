@@ -139,6 +139,11 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		return nil, g.Error(err, "endpoint is disabled in spec")
 	}
 
+	// setup if specified
+	if err = endpoint.setup(); err != nil {
+		return nil, g.Error(err, "could not setup for main request")
+	}
+
 	// start request process
 	ds, err := streamRequests(endpoint, sCfg)
 	if err != nil {
@@ -149,6 +154,13 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	if err != nil {
 		return nil, g.Error(err, "could not make dataflow")
 	}
+
+	df.Defer(func() {
+		// teardown if specified
+		if err = endpoint.teardown(); err != nil {
+			df.Context.CaptureErr(g.Error(err, "could not teardown for main request"))
+		}
+	})
 
 	// now that columns are detected, set the metadata for PK
 	if len(df.Buffer) > 0 {
@@ -336,6 +348,9 @@ var (
 	}
 	validateAndSetDefaults = func(ep *Endpoint, spec Spec) (err error) {
 		return g.Error("please use the official sling-cli release for reading APIs")
+	}
+	runSequence = func(s Sequence, ep *Endpoint) (err error) {
+		return g.Error("please use the official sling-cli release for running API sequences")
 	}
 )
 

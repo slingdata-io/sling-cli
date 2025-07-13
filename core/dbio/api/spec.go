@@ -140,7 +140,7 @@ const (
 	OAuthFlowRefreshToken      OAuthFlow = "refresh_token"
 )
 
-// Sequence is many calls (perfect for async jobs)
+// Sequence is many calls (perfect for async jobs, custom auth)
 type Sequence []Call
 
 type Call struct {
@@ -148,9 +148,6 @@ type Call struct {
 	Request    Request    `yaml:"request" json:"request"`
 	Pagination Pagination `yaml:"pagination" json:"pagination"`
 	Response   Response   `yaml:"response" json:"response"`
-
-	context  *g.Context
-	endpoint *Endpoint
 }
 
 // Endpoints is a collection of API endpoints

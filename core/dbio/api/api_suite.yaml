@@ -252,3 +252,60 @@
     token_prefix: token  # substring of "token_456"
     encoded_token: dG9rZW5fNDU2  # base64 encoding of "token_456"
     query_string: "limit=50&token=token_456"
+
+- id: 6
+  name: test_authentication_sequence_token_retrieval
+  mock_response:
+    # This will be the response for the main endpoint after authentication
+    data:
+      - order_id: "ERESA_000000001"
+        site_id: "store_123"
+        status: "shipped"
+        amount: 99.99
+      - order_id: "ERESA_000000002"
+        site_id: "store_123"
+        status: "pending"
+        amount: 149.5
+  spec:
+    name: onestock_api
+    description: "Test authentication sequence for token retrieval"
+    authentication:
+      type: sequence
+      sequence:
+        - request:
+            url: "/login"  # relative URL for test server
+            method: POST
+            payload:
+              site_id: "{secrets.site_id}"
+              user_id: "{secrets.user_id}"
+              password: "{secrets.password}"
+          response:
+            processors:
+              - expression: "response.json.token"
+                output: "state.token"
+                aggregation: last
+    endpoints:
+      test_endpoint:
+        description: "Order history endpoint"
+        request:
+          url: "/history"  # relative URL for test server
+          method: "GET"
+          headers:
+            Authorization: "Bearer {state.token}"
+          parameters:
+            site_id: "{secrets.site_id}"
+            order_id: "ERESA_000000003"
+        response:
+          records:
+            jmespath: data
+  expected_records:
+    - order_id: "ERESA_000000001"
+      site_id: store_123
+      status: shipped
+      amount: "99.99"
+    - order_id: "ERESA_000000002"
+      site_id: store_123
+      status: pending
+      amount: "149.5"
+  expected_state: {}
+  expected_next_state: {}
