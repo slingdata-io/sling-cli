@@ -309,3 +309,81 @@
       amount: "149.5"
   expected_state: {}
   expected_next_state: {}
+
+- id: 7
+  name: test_setup_teardown_lifecycle
+  mock_response:
+    users:
+      - id: 1
+        name: "John Doe"
+        email: "john@example.com"
+      - id: 2
+        name: "Jane Smith"
+        email: "jane@example.com"
+    # Mock responses for setup and teardown
+    config:
+      api_version: "v2"
+      base_url: "https://api.example.com"
+      rate_limit: 100
+    cleanup:
+      status: "success"
+      message: "Session closed"
+  spec:
+    name: lifecycle_test_api
+    description: "Test setup and teardown lifecycle"
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        description: "Main endpoint that uses setup state"
+        setup:
+          - request:
+              url: "/config"
+              method: GET
+            response:
+              processors:
+                - expression: "response.json.config.api_version"
+                  output: "state.api_version"
+                  aggregation: last
+                - expression: "response.json.config.base_url"
+                  output: "state.base_url"  
+                  aggregation: last
+                - expression: "response.json.config.rate_limit"
+                  output: "state.rate_limit"
+                  aggregation: last
+        teardown:
+          - request:
+              url: "/cleanup"
+              method: POST
+              payload:
+                session_id: "test_session"
+                api_version: "{state.api_version}"
+                total_users: 2
+            response:
+              processors:
+                - expression: "response.json.cleanup.status"
+                  output: "state.cleanup_status"
+                  aggregation: last
+        request:
+          url: "/users"
+          method: GET
+          headers:
+            X-API-Version: "{state.api_version}"
+            X-Base-URL: "{state.base_url}"
+          parameters:
+            limit: "{state.rate_limit}"
+        response:
+          records:
+            jmespath: users
+  expected_records:
+    - id: "1"
+      name: "John Doe"
+      email: "john@example.com"
+    - id: "2"
+      name: "Jane Smith"
+      email: "jane@example.com"
+  expected_state:
+    api_version: "v2"
+    base_url: "https://api.example.com"
+    rate_limit: 100
+  expected_next_state: {}

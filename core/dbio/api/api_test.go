@@ -407,14 +407,35 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
-				// Handle different endpoints for authentication sequence test
-				if r.URL.Path == "/login" {
-					// Return token for login endpoint
+				// Handle different endpoints based on path
+				switch r.URL.Path {
+				case "/login":
+					// Return token for authentication sequence test
 					loginResponse := map[string]any{
-						"token": "mock_token_12345", // Return the expected token
+						"token": "mock_token_12345",
 					}
 					json.NewEncoder(w).Encode(loginResponse)
-				} else {
+				case "/config":
+					// Return config for setup test
+					if config, ok := tc.MockResponse["config"]; ok {
+						configResponse := map[string]any{
+							"config": config,
+						}
+						json.NewEncoder(w).Encode(configResponse)
+					} else {
+						json.NewEncoder(w).Encode(tc.MockResponse)
+					}
+				case "/cleanup":
+					// Return cleanup response for teardown test
+					if cleanup, ok := tc.MockResponse["cleanup"]; ok {
+						cleanupResponse := map[string]any{
+							"cleanup": cleanup,
+						}
+						json.NewEncoder(w).Encode(cleanupResponse)
+					} else {
+						json.NewEncoder(w).Encode(tc.MockResponse)
+					}
+				default:
 					// Return the main mock response for other endpoints
 					json.NewEncoder(w).Encode(tc.MockResponse)
 				}
@@ -449,6 +470,23 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 						tc.Spec.Authentication.Sequence[i].Request.URL = server.URL + call.Request.URL
 					}
 				}
+			}
+
+			// Update setup and teardown sequence URLs if present
+			for epName, ep := range tc.Spec.EndpointMap {
+				// Update setup URLs
+				for i, call := range ep.Setup {
+					if call.Request.URL != "" {
+						ep.Setup[i].Request.URL = server.URL + call.Request.URL
+					}
+				}
+				// Update teardown URLs
+				for i, call := range ep.Teardown {
+					if call.Request.URL != "" {
+						ep.Teardown[i].Request.URL = server.URL + call.Request.URL
+					}
+				}
+				tc.Spec.EndpointMap[epName] = ep
 			}
 
 			// Update the spec with the modified endpoint
