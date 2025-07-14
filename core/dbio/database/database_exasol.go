@@ -8,6 +8,7 @@ import (
 
 	_ "github.com/exasol/exasol-driver-go"
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -40,8 +41,57 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 	if len(newURL) > 0 {
 		conn.BaseConn.URL = newURL[0]
 	}
-	// Exasol driver requires specific connection string format
-	// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
+
+	// Property mapping for Exasol connection options
+	propMapping := map[string]string{
+		"validateservercertificate":   "validateservercertificate",
+		"validate_server_certificate": "validateservercertificate",
+
+		"encryption": "encryption",
+
+		"connecttimeout":     "connecttimeout",
+		"connect_timeout":    "connecttimeout",
+		"connection_timeout": "connecttimeout",
+
+		"logintimeout":  "logintimeout",
+		"login_timeout": "logintimeout",
+
+		"compression": "compression",
+
+		"fetchsize":  "fetchsize",
+		"fetch_size": "fetchsize",
+
+		"autocommit": "autocommit",
+
+		"clientname":  "clientname",
+		"client_name": "clientname",
+
+		"clientversion":  "clientversion",
+		"client_version": "clientversion",
+
+		"feedbackinterval":  "feedbackinterval",
+		"feedback_interval": "feedbackinterval",
+
+		"querytimeout":  "querytimeout",
+		"query_timeout": "querytimeout",
+
+		"resultsetmaxrows":   "resultsetmaxrows",
+		"resultset_max_rows": "resultsetmaxrows",
+
+		"sessionidprefix":   "sessionidprefix",
+		"session_id_prefix": "sessionidprefix",
+
+		"snapshottransactions":  "snapshottransactions",
+		"snapshot_transactions": "snapshottransactions",
+	}
+
+	// Parse URL to extract and set parameters
+	U, _ := net.NewURL(conn.BaseConn.URL)
+	for key, newKey := range propMapping {
+		if val := conn.GetProp(key); val != "" {
+			U.SetParam(newKey, val)
+		}
+	}
 
 	// Extract connection properties
 	host := cast.ToString(conn.GetProp("host"))
@@ -60,11 +110,41 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 	}
 
 	// Build the connection string
-	connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s;autocommit=0", host, port, username, password)
+	// Exasol driver requires specific connection string format
+	// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
+	connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s", host, port, username, password)
+
+	// Add autocommit (default to 0 if not specified)
+	autocommit := cast.ToString(conn.GetProp("autocommit"))
+	if autocommit == "" {
+		autocommit = "0"
+	}
+	connURL += fmt.Sprintf(";autocommit=%s", autocommit)
 
 	// Add schema if specified
 	if schema != "" {
 		connURL += fmt.Sprintf(";schema=%s", schema)
+	}
+
+	// Add additional connection options from URL parameters and properties
+	for origKey, mappedKey := range propMapping {
+		if val := conn.GetProp(origKey); val != "" && origKey != "autocommit" { // autocommit already handled above
+			connURL += fmt.Sprintf(";%s=%s", mappedKey, val)
+		}
+	}
+
+	// Also check URL parameters directly
+	if conn.BaseConn.URL != "" {
+		if parsedURL, err := net.NewURL(conn.BaseConn.URL); err == nil {
+			for param, value := range parsedURL.Query() {
+				if mappedParam, exists := propMapping[strings.ToLower(param)]; exists {
+					// Only add if not already present
+					if !strings.Contains(connURL, mappedParam+"=") {
+						connURL += fmt.Sprintf(";%s=%s", mappedParam, value)
+					}
+				}
+			}
+		}
 	}
 
 	return connURL
