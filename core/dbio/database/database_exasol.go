@@ -5,9 +5,11 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	_ "github.com/exasol/exasol-driver-go"
 	"github.com/flarco/g"
+	"github.com/flarco/g/csv"
 	"github.com/flarco/g/net"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
@@ -275,32 +277,22 @@ func (conn *ExasolConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 	// Channel to receive files as they're written
 	fileReadyChn := make(chan filesys.FileReady, 10000)
 
-	// Write dataflow to CSV files
+	// Write dataflow to CSV files with proper timestamp formatting
 	go func() {
-		fs, err := filesys.NewFileSysClient(dbio.TypeFileLocal, conn.PropArrExclude("url")...)
-		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Could not get fs client for Local"))
-			return
-		}
+		defer close(fileReadyChn)
 
-		config := iop.LoaderStreamConfig(true)
-		config.TargetType = conn.GetType()
-		config.Format = dbio.FileTypeCsv
-		config.FileMaxRows = cast.ToInt64(conn.GetProp("file_max_rows"))
-		if config.FileMaxRows == 0 {
-			config.FileMaxRows = 500000
-		}
-		config.Header = true
-		config.Delimiter = ","
-
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
-		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))
-			return
+		// Process each datastream from the dataflow
+		for ds := range df.StreamCh {
+			// Create CSV files with proper timestamp formatting
+			err := conn.writeDataflowToCSV(ds, folderPath, fileReadyChn)
+			if err != nil {
+				df.Context.CaptureErr(g.Error(err, "Error writing dataflow to CSV files"))
+				return
+			}
 		}
 	}()
 
-	// Build column list once
+	// Build column list
 	colNames := []string{}
 	for _, col := range columns {
 		colNames = append(colNames, conn.Quote(col.Name))
@@ -350,6 +342,123 @@ func (conn *ExasolConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 	count = df.Count()
 
 	return count, nil
+}
+
+// writeDataflowToCSV writes a datastream to CSV files with proper timestamp formatting for Exasol
+func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string, fileReadyChn chan filesys.FileReady) error {
+	fileMaxRows := cast.ToInt64(conn.GetProp("file_max_rows"))
+	if fileMaxRows == 0 {
+		fileMaxRows = 500000
+	}
+
+	fileNum := 1
+	rowCount := int64(0)
+	var currentFile *os.File
+	var csvWriter *csv.Writer
+
+	// Create folder if it doesn't exist
+	err := os.MkdirAll(folderPath, 0755)
+	if err != nil {
+		return g.Error(err, "could not create folder: "+folderPath)
+	}
+
+	// Function to create a new CSV file
+	createNewFile := func() error {
+		if currentFile != nil {
+			csvWriter.Flush()
+			currentFile.Close()
+		}
+
+		fileName := fmt.Sprintf("part.%02d.%04d.csv", fileNum, fileNum)
+		filePath := path.Join(folderPath, fileName)
+
+		currentFile, err = os.Create(filePath)
+		if err != nil {
+			return g.Error(err, "could not create CSV file: "+filePath)
+		}
+
+		csvWriter = csv.NewWriter(currentFile)
+
+		// Write header
+		if _, err := csvWriter.Write(ds.Columns.Names()); err != nil {
+			return g.Error(err, "could not write CSV header")
+		}
+
+		// Signal that file is ready for processing
+		fileNode := filesys.FileNode{
+			URI: "file://" + filePath,
+		}
+		fileReadyChn <- filesys.FileReady{
+			Node: fileNode,
+		}
+
+		fileNum++
+		rowCount = 0
+		return nil
+	}
+
+	// Create first file
+	if err := createNewFile(); err != nil {
+		return err
+	}
+
+	// Process rows
+	for row := range ds.Rows() {
+		// Check if we need a new file
+		if rowCount >= fileMaxRows {
+			if err := createNewFile(); err != nil {
+				return err
+			}
+		}
+
+		// Format row values for Exasol
+		formattedRow := make([]string, len(row))
+		for i, val := range row {
+			if val == nil {
+				formattedRow[i] = ""
+				continue
+			}
+
+			col := ds.Columns[i]
+			switch col.Type {
+			case iop.DateType:
+				if t, ok := val.(time.Time); ok {
+					formattedRow[i] = t.Format("2006-01-02 15:04:05")
+				} else {
+					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+				}
+			case iop.DatetimeType, iop.TimestampType:
+				if t, ok := val.(time.Time); ok {
+					formattedRow[i] = t.Format("2006-01-02 15:04:05.000000")
+				} else {
+					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+				}
+			case iop.TimestampzType:
+				if t, ok := val.(time.Time); ok {
+					// Convert to UTC for Exasol timestamp format
+					formattedRow[i] = t.UTC().Format("2006-01-02 15:04:05.000000")
+				} else {
+					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+				}
+			default:
+				formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+			}
+		}
+
+		if _, err := csvWriter.Write(formattedRow); err != nil {
+			return g.Error(err, "could not write CSV row")
+		}
+
+		rowCount++
+	}
+
+	// Close last file
+	if currentFile != nil {
+		csvWriter.Flush()
+		currentFile.Close()
+	}
+
+	return nil
 }
 
 // BulkExportStream performs bulk export for Exasol

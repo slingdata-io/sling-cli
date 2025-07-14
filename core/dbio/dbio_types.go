@@ -187,7 +187,7 @@ func (t Type) DefPort() int {
 
 // DBNameUpperCase returns true is upper case is default
 func (t Type) DBNameUpperCase() bool {
-	return g.In(t, TypeDbOracle, TypeDbSnowflake)
+	return g.In(t, TypeDbOracle, TypeDbSnowflake, TypeDbExasol)
 }
 
 // Kind returns the kind of connection
