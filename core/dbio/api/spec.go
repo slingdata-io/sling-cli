@@ -185,8 +185,11 @@ type Endpoint struct {
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
 	ep.context.Lock()
+	defer ep.context.Unlock()
+	if ep.State == nil {
+		ep.State = make(StateMap)
+	}
 	ep.State[key] = val
-	ep.context.Unlock()
 }
 
 func (eps Endpoints) Sort() {
@@ -212,17 +215,21 @@ func (ep *Endpoint) setup() (err error) {
 	// only copy over headers
 	baseEndpoint.Request.Headers = ep.Request.Headers
 
-	// copy over state from endpoint
+	// copy over state from endpoint with proper locking
+	ep.context.Lock()
 	if ep.State != nil {
 		maps.Copy(baseEndpoint.State, ep.State)
 	}
+	ep.context.Unlock()
 
 	if err := runSequence(ep.Setup, baseEndpoint); err != nil {
 		return g.Error(err, "endpoint setup failed")
 	}
 
-	// sync state back
+	// sync state back with proper locking
+	ep.context.Lock()
 	maps.Copy(ep.State, baseEndpoint.State)
+	ep.context.Unlock()
 
 	g.Debug("endpoint setup completed successfully")
 	return nil
@@ -245,24 +252,31 @@ func (ep *Endpoint) teardown() (err error) {
 	// only copy over headers
 	baseEndpoint.Request.Headers = ep.Request.Headers
 
-	// copy over state from endpoint
+	// copy over state from endpoint with proper locking
+	ep.context.Lock()
 	if ep.State != nil {
 		maps.Copy(baseEndpoint.State, ep.State)
 	}
+	ep.context.Unlock()
 
 	if err := runSequence(ep.Teardown, baseEndpoint); err != nil {
 		return g.Error(err, "endpoint teardown failed")
 	}
 
-	// sync state back
+	// sync state back with proper locking
+	ep.context.Lock()
 	maps.Copy(ep.State, baseEndpoint.State)
+	ep.context.Unlock()
 
 	g.Debug("endpoint teardown completed successfully")
 	return nil
 }
 
 func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
+	iter.context.Lock()
 	remaining := lo.Keys(iter.state)
+	iter.context.Unlock()
+
 	processing := map[string]bool{} // track variables being processed in current chain
 
 	addAndRemove := func(key string) {
@@ -290,7 +304,10 @@ func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
 		processing[key] = true
 		defer func() { processing[key] = false }()
 
+		iter.context.Lock()
 		expr := cast.ToString(iter.state[key])
+		iter.context.Unlock()
+
 		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
 		if len(matches) > 0 {
 			for _, match := range matches {

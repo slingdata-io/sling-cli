@@ -200,11 +200,34 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 	sections := []string{"env", "state", "secrets", "auth", "sync"}
 
 	ac.Context.Lock()
+	defer ac.Context.Unlock()
+
+	// Create deep copies of the state maps to avoid concurrent access issues
+	stateMapCopy := make(map[string]any)
+	if ac.State.State != nil {
+		for k, v := range ac.State.State {
+			stateMapCopy[k] = v
+		}
+	}
+
+	envCopy := make(map[string]string)
+	if ac.State.Env != nil {
+		for k, v := range ac.State.Env {
+			envCopy[k] = v
+		}
+	}
+
+	secretsCopy := make(map[string]any)
+	if ac.State.Secrets != nil {
+		for k, v := range ac.State.Secrets {
+			secretsCopy[k] = v
+		}
+	}
 
 	stateMap := g.M(
-		"env", ac.State.Env,
-		"state", ac.State.State,
-		"secrets", ac.State.Secrets,
+		"env", envCopy,
+		"state", stateMapCopy,
+		"secrets", secretsCopy,
 		"auth", ac.State.Auth,
 		"null", nil,
 	)
@@ -218,8 +241,7 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 		stateMap["queue"] = queueMap
 	}
 
-	ac.Context.Unlock()
-
+	// Process extraMaps without holding the main lock
 	for mapKey, newVal := range extraMaps {
 		// non-map values
 		if g.In(mapKey, "records") {
@@ -288,12 +310,14 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 		// Initialize map for this endpoint
 		data[endpoint.Name] = make(map[string]any)
 
-		// Collect each sync value from endpoint's state
+		// Collect each sync value from endpoint's state with proper locking
+		endpoint.context.Lock()
 		for _, syncKey := range endpoint.Sync {
 			if val, ok := endpoint.State[syncKey]; ok {
 				data[endpoint.Name][syncKey] = val
 			}
 		}
+		endpoint.context.Unlock()
 	}
 
 	return data, nil
@@ -316,7 +340,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 			continue
 		}
 
-		// Initialize state map if nil
+		// Initialize state map if nil and sync state with proper locking
+		endpoint.context.Lock()
 		if endpoint.syncMap == nil {
 			endpoint.syncMap = make(StateMap)
 		}
@@ -331,6 +356,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 				}
 			}
 		}
+		endpoint.context.Unlock()
+
 		ac.Spec.EndpointMap[key] = endpoint
 	}
 
