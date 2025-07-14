@@ -292,7 +292,7 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BigTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "clickhouse:") {
 		conn = &ClickhouseConn{URL: URL}
-	} else if strings.HasPrefix(URL, "exa:") {
+	} else if strings.HasPrefix(URL, "exasol:") {
 		conn = &ExasolConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
 		conn = &ProtonConn{URL: URL}

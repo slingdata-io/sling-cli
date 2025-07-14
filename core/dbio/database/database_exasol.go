@@ -85,6 +85,79 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 		"snapshot_transactions": "snapshottransactions",
 	}
 
+	// makeDSN converts a net.URL to Exasol DSN format
+	makeDSN := func(U *net.URL) string {
+		// Extract connection properties from URL
+		host := U.Hostname()
+		port := cast.ToString(U.Port())
+		username := U.Username()
+		password := U.Password()
+
+		// Use connection properties as fallback
+		if host == "" {
+			host = cast.ToString(conn.GetProp("host"))
+		}
+		if port == "" || port == "0" {
+			port = cast.ToString(conn.GetProp("port"))
+		}
+		if username == "" {
+			username = cast.ToString(conn.GetProp("username"))
+		}
+		if password == "" {
+			password = cast.ToString(conn.GetProp("password"))
+		}
+
+		// Use default port if not specified
+		if port == "" || port == "0" {
+			port = "8563"
+		}
+
+		// Build the connection string
+		// Exasol driver requires specific connection string format
+		// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
+		connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s", host, port, username, password)
+
+		// Add autocommit (default to 0 if not specified)
+		autocommit := cast.ToString(conn.GetProp("autocommit"))
+		if autocommit == "" {
+			autocommit = "0"
+		}
+		connURL += fmt.Sprintf(";autocommit=%s", autocommit)
+
+		// Add schema if specified
+		schema := cast.ToString(conn.GetProp("schema"))
+		if schema == "" && U.Path() != "" {
+			// Extract schema from URL path
+			schema = strings.Trim(U.Path(), "/")
+		}
+		if schema != "" {
+			connURL += fmt.Sprintf(";schema=%s", schema)
+		}
+
+		// Add additional connection options from URL parameters and properties
+		urlParams := U.Query()
+		for origKey, mappedKey := range propMapping {
+			var val string
+			// First check URL parameters
+			if urlVal, exists := urlParams[origKey]; exists && urlVal != "" {
+				val = urlVal
+			} else if urlVal, exists := urlParams[mappedKey]; exists && urlVal != "" {
+				val = urlVal
+			} else if propVal := conn.GetProp(origKey); propVal != "" {
+				val = propVal
+			}
+
+			if val != "" && origKey != "autocommit" { // autocommit already handled above
+				// Only add if not already present
+				if !strings.Contains(connURL, mappedKey+"=") {
+					connURL += fmt.Sprintf(";%s=%s", mappedKey, val)
+				}
+			}
+		}
+
+		return connURL
+	}
+
 	// Parse URL to extract and set parameters
 	U, _ := net.NewURL(conn.BaseConn.URL)
 	for key, newKey := range propMapping {
@@ -106,48 +179,26 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 	}
 
 	if host == "" && conn.BaseConn.URL != "" {
+		if strings.HasPrefix(conn.BaseConn.URL, "exasol://") {
+			// translate to DSN format using makeDSN helper
+			U, _ = net.NewURL(conn.BaseConn.URL)
+			return makeDSN(U)
+		}
 		return conn.BaseConn.URL // if only url was provided
 	}
 
-	// Build the connection string
-	// Exasol driver requires specific connection string format
-	// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
-	connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s", host, port, username, password)
-
-	// Add autocommit (default to 0 if not specified)
-	autocommit := cast.ToString(conn.GetProp("autocommit"))
-	if autocommit == "" {
-		autocommit = "0"
-	}
-	connURL += fmt.Sprintf(";autocommit=%s", autocommit)
-
-	// Add schema if specified
-	if schema != "" {
-		connURL += fmt.Sprintf(";schema=%s", schema)
-	}
-
-	// Add additional connection options from URL parameters and properties
-	for origKey, mappedKey := range propMapping {
-		if val := conn.GetProp(origKey); val != "" && origKey != "autocommit" { // autocommit already handled above
-			connURL += fmt.Sprintf(";%s=%s", mappedKey, val)
+	// If we have host info, use makeDSN helper to build DSN
+	if host != "" {
+		// Create a URL object with the connection details
+		urlStr := fmt.Sprintf("exasol://%s:%s@%s:%s", username, password, host, port)
+		if schema != "" {
+			urlStr += "/" + schema
 		}
+		U, _ := net.NewURL(urlStr)
+		return makeDSN(U)
 	}
 
-	// Also check URL parameters directly
-	if conn.BaseConn.URL != "" {
-		if parsedURL, err := net.NewURL(conn.BaseConn.URL); err == nil {
-			for param, value := range parsedURL.Query() {
-				if mappedParam, exists := propMapping[strings.ToLower(param)]; exists {
-					// Only add if not already present
-					if !strings.Contains(connURL, mappedParam+"=") {
-						connURL += fmt.Sprintf(";%s=%s", mappedParam, value)
-					}
-				}
-			}
-		}
-	}
-
-	return connURL
+	return conn.BaseConn.URL
 }
 
 // Connect connects to the database

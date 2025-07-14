@@ -844,9 +844,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("port", c.Type.DefPort())
 		setIfMissing("schema", "")
 
-		template = "exa:{host}:{port};user={username};password={password};autocommit=0"
+		template = "exasol://{username}:{password}@{host}:{port}/?"
 		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
-			template = template + ";schema={schema}"
+			template = template + "&schema={schema}"
 		}
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
