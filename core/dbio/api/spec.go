@@ -1,6 +1,7 @@
 package api
 
 import (
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -192,6 +193,72 @@ func (eps Endpoints) Sort() {
 	sort.Slice(eps, func(i, j int) bool {
 		return eps[i].Name < eps[j].Name
 	})
+}
+
+// setup executes the setup sequence for an endpoint
+func (ep *Endpoint) setup() (err error) {
+	if len(ep.Setup) == 0 {
+		return nil
+	}
+
+	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
+
+	baseEndpoint := &Endpoint{
+		context: g.NewContext(ep.context.Ctx),
+		conn:    ep.conn,
+		State:   make(StateMap), // Initialize state map
+	}
+
+	// only copy over headers
+	baseEndpoint.Request.Headers = ep.Request.Headers
+
+	// copy over state from endpoint
+	if ep.State != nil {
+		maps.Copy(baseEndpoint.State, ep.State)
+	}
+
+	if err := runSequence(ep.Setup, baseEndpoint); err != nil {
+		return g.Error(err, "endpoint setup failed")
+	}
+
+	// sync state back
+	maps.Copy(ep.State, baseEndpoint.State)
+
+	g.Debug("endpoint setup completed successfully")
+	return nil
+}
+
+// teardown executes the teardown sequence for an endpoint
+func (ep *Endpoint) teardown() (err error) {
+	if len(ep.Teardown) == 0 {
+		return nil
+	}
+
+	g.Debug("running endpoint teardown sequence (%d calls)", len(ep.Teardown))
+
+	baseEndpoint := &Endpoint{
+		context: g.NewContext(ep.context.Ctx),
+		conn:    ep.conn,
+		State:   make(StateMap), // Initialize state map
+	}
+
+	// only copy over headers
+	baseEndpoint.Request.Headers = ep.Request.Headers
+
+	// copy over state from endpoint
+	if ep.State != nil {
+		maps.Copy(baseEndpoint.State, ep.State)
+	}
+
+	if err := runSequence(ep.Teardown, baseEndpoint); err != nil {
+		return g.Error(err, "endpoint teardown failed")
+	}
+
+	// sync state back
+	maps.Copy(ep.State, baseEndpoint.State)
+
+	g.Debug("endpoint teardown completed successfully")
+	return nil
 }
 
 func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
