@@ -6,7 +6,8 @@ defaults:
 
 streams:
   test/parquet/*.parquet:
-    single: true
     object: test/parquet/aws_s3.text
     target_options:
       format: csv
+env:
+  SLING_DUCKDB_COMPUTE: false

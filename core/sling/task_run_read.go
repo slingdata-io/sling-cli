@@ -29,8 +29,13 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	// get source columns
 	st := sTable
-	st.SQL = g.R(st.SQL, "incremental_where_cond", "1=1") // so we get the columns, and not change the orig SQL
-	st.SQL = g.R(st.SQL, "incremental_value", "null")     // so we get the columns, and not change the orig SQL
+
+	// so we get the columns, and not change the orig SQL
+	st.SQL = g.R(st.SQL, "incremental_where_cond", "1=1")
+	st.SQL = g.R(st.SQL, "incremental_value", "null")
+	st.SQL = g.R(st.SQL, "start_value", "null")
+	st.SQL = g.R(st.SQL, "end_value", "null")
+
 	sTable.Columns, err = srcConn.GetSQLColumns(st)
 	if err != nil {
 		err = g.Error(err, "Could not get source columns")
@@ -73,7 +78,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 	}
 
-	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode {
+	if t.isIncrementalWithUpdateKey() || t.hasStateWithUpdateKey() || t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 		// default true value
 		incrementalWhereCond := "1=1"
 
@@ -100,7 +105,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			cfg.IncrementalValStr = "null"
 		}
 
-		if t.Config.Mode == BackfillMode {
+		if t.Config.Mode == BackfillMode || t.Config.IsFullRefreshWithRange() || t.Config.IsTruncateWithRange() || t.Config.IsIncrementalWithRange() {
 			rangeArr := strings.Split(*cfg.Source.Options.Range, ",")
 			startValue := rangeArr[0]
 			endValue := rangeArr[1]

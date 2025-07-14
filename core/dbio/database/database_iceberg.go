@@ -17,6 +17,7 @@ import (
 	"github.com/apache/iceberg-go/catalog/rest"
 	sqlcat "github.com/apache/iceberg-go/catalog/sql"
 	"github.com/apache/iceberg-go/table"
+	"github.com/apache/iceberg-go/utils"
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awsv2config "github.com/aws/aws-sdk-go-v2/config"
 	awsv2creds "github.com/aws/aws-sdk-go-v2/credentials"
@@ -202,6 +203,8 @@ func (conn *IcebergConn) isS3TablesViaREST() bool {
 
 func (conn *IcebergConn) connectGlue() error {
 	// Get AWS credentials from connection properties
+	// accountID := conn.GetProp("glue_account_id")
+	warehouse := conn.GetProp("glue_warehouse")
 	awsAccessKeyID := conn.GetProp("s3_access_key_id")
 	awsSecretAccessKey := conn.GetProp("s3_secret_access_key")
 	awsSessionToken := conn.GetProp("s3_session_token")
@@ -212,13 +215,14 @@ func (conn *IcebergConn) connectGlue() error {
 		return g.Error("AWS region not specified")
 	}
 
+	props := map[string]string{"warehouse": warehouse}
+
 	var awsCfg awsv2.Config
 	var err error
-	opts := []glue.Option{}
 
 	// Set credentials if provided
 	if awsAccessKeyID != "" && awsSecretAccessKey != "" {
-		g.Debug("Iceberg: Using static credentials (Key ID: %s)", awsAccessKeyID)
+		g.Debug("iceberg: using static credentials (Key ID: %s)", awsAccessKeyID)
 
 		// Create AWS config with static credentials
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
@@ -235,7 +239,7 @@ func (conn *IcebergConn) connectGlue() error {
 			return g.Error(err, "Failed to create AWS config with static credentials")
 		}
 	} else if awsProfile != "" {
-		g.Debug("Iceberg: Using AWS profile=%s region=%s", awsProfile, awsRegion)
+		g.Debug("iceberg: using AWS profile=%s region=%s", awsProfile, awsRegion)
 
 		// Use specified profile from AWS credentials file
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
@@ -246,7 +250,7 @@ func (conn *IcebergConn) connectGlue() error {
 			return g.Error(err, "Failed to create AWS config with profile %s", awsProfile)
 		}
 	} else {
-		g.Debug("Iceberg: Using default AWS credential chain")
+		g.Debug("iceberg: using default AWS credential chain")
 		// Use default credential chain (env vars, IAM role, credential file, etc.)
 		awsCfg, err = awsv2config.LoadDefaultConfig(context.Background(),
 			awsv2config.WithRegion(awsRegion),
@@ -256,19 +260,23 @@ func (conn *IcebergConn) connectGlue() error {
 		}
 	}
 
-	opts = append(opts, glue.WithAwsConfig(awsCfg))
-
 	if extra := conn.GetProp("glue_extra_props"); extra != "" {
-		props := map[string]string{}
-		if err := g.Unmarshal(extra, &props); err != nil {
+		extraProps := map[string]string{}
+		if err := g.Unmarshal(extra, &extraProps); err != nil {
 			return g.Error(err, "could not unmarshal glue_extra_props")
 		}
-		opts = append(opts, glue.WithAwsProperties(props))
+		for k, v := range extraProps {
+			props[k] = v
+		}
 	}
 
 	// Create Glue catalog with AWS config
+	opts := []glue.Option{glue.WithAwsConfig(awsCfg), glue.WithAwsProperties(props)}
 	cat := glue.NewCatalog(opts...)
 	conn.Catalog = cat
+
+	// Set AWS config in connection context for table operations
+	conn.context.Ctx = utils.WithAwsConfig(conn.context.Ctx, &awsCfg)
 
 	return nil
 }
@@ -701,7 +709,7 @@ func (conn *IcebergConn) StreamRowsContext(ctx context.Context, sql string, opti
 		return ds, g.Error("Empty Query")
 	}
 
-	if tableName == "" || conn.CatalogType != dbio.IcebergCatalogTypeREST {
+	if tableName == "" || !g.In(conn.CatalogType, dbio.IcebergCatalogTypeREST, dbio.IcebergCatalogTypeGlue, dbio.IcebergCatalogTypeSQL) {
 		// if custom SQL, or glue or s3 tables, use DuckDB
 		return conn.queryViaDuckDB(ctx, sql, opts)
 	}
@@ -921,13 +929,13 @@ func (r icebergResult) RowsAffected() (int64, error) {
 func (conn *IcebergConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
 	switch {
 	case strings.HasPrefix(sql, "create schema "):
-		schema := strings.TrimPrefix(sql, "create schema ")
+		schema := strings.Trim(strings.TrimPrefix(sql, "create schema "), `"`)
 		return icebergResult{}, conn.CreateNamespaceIfNotExists(schema)
 	case strings.HasPrefix(sql, "drop table "):
-		table := strings.TrimPrefix(sql, "drop table ")
+		table := strings.Trim(strings.TrimPrefix(sql, "drop table "), `"`)
 		return icebergResult{}, conn.DropTable(table)
 	case strings.HasPrefix(sql, "drop view "):
-		table := strings.TrimPrefix(sql, "drop view ")
+		table := strings.Trim(strings.TrimPrefix(sql, "drop view "), `"`)
 		return icebergResult{}, conn.DropTable(table)
 	case strings.Contains(sql, `"ddl_columns":`) && strings.Contains(sql, `"table":`):
 		m, _ := g.UnmarshalMap(sql)
@@ -959,6 +967,7 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 		return g.Error(err, "could create parse %s", tableName)
 	}
 	tableID := table.Identifier{t.Schema, t.Name}
+	g.Debug("CreateTable: tableName=%s, tableID=%v", tableName, tableID)
 
 	// First check if namespace exists (if schema is specified)
 	if t.Schema != "" {
@@ -993,9 +1002,12 @@ func (conn *IcebergConn) CreateTable(tableName string, cols iop.Columns, tableDD
 	// Create the table
 	conn.LogSQL(g.F("create table %s (%s)", tableName, g.Marshal(icebergSchema)))
 
-	_, err = conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
+	table, err := conn.Catalog.CreateTable(conn.Context().Ctx, tableID, icebergSchema, createOpts...)
 	if err != nil {
 		return g.Error(err, "Failed to create table %s", tableName)
+	}
+	if table == nil {
+		return g.Error("CreateTable returned nil table for %s", tableName)
 	}
 
 	return nil
@@ -1104,6 +1116,7 @@ func (conn *IcebergConn) CreateNamespaceIfNotExists(schema string) (err error) {
 		// nsProps := iceberg.Properties{
 		// 	"created-by": "sling-cli",
 		// }
+		g.Debug("creating namespace: %s", namespace)
 		if err = conn.Catalog.CreateNamespace(conn.Context().Ctx, namespace, nil); err != nil {
 			return g.Error(err, "could not create namespace %s", schema)
 		}
@@ -1480,7 +1493,11 @@ func (conn *IcebergConn) GetSchemata(level SchemataLevel, schemaName string, tab
 	}
 
 	for _, schemaName := range schemaNames {
-		g.Debug("getting schemata for %s %s", schemaName, g.Marshal(tableNames))
+		if len(tableNames) > 0 && tableNames[0] != "" {
+			g.Debug("getting schemata for %s (tables: %s)", schemaName, g.Marshal(tableNames))
+		} else {
+			g.Debug("getting schemata for %s", schemaName)
+		}
 
 		ctx.Wg.Read.Add()
 		go func() {
@@ -1574,6 +1591,9 @@ func (conn *IcebergConn) queryViaDuckDB(ctx context.Context, sql string, opts ma
 	if conn.CatalogType == dbio.IcebergCatalogTypeSQL {
 		g.Warn("for querying iceberg with custom SQL via DuckDB, cannot do so with SQL-Catalog. DuckDB only supports REST and Glue catalog types.")
 		return nil, g.Error("unsupported catalog for DuckDB Iceberg extension.")
+	}
+	if conn.CatalogType == dbio.IcebergCatalogTypeGlue {
+		g.Warn("for querying iceberg with custom SQL via DuckDB, glue catalog doesn't seem to work well. see https://duckdb.org/docs/stable/core_extensions/iceberg/amazon_sagemaker_lakehouse")
 	}
 
 	if !strings.Contains(sql, "iceberg_catalog.") {

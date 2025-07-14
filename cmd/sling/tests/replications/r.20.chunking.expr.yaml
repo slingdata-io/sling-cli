@@ -1,0 +1,28 @@
+source: postgres
+target: oracle
+
+defaults:
+  mode: '{MODE}'
+  object: oracle.{stream_table_lower}
+  primary_key: [id]
+  target_options:
+    use_bulk: false
+  
+  hooks:
+    post:
+      # delete some data to allow incremental to work
+      - type: query
+        if: env.MODE == "backfill" && !is_empty(stream.table)
+        connection: oracle
+        query: delete from oracle.{stream.table} where id > 500
+
+streams:
+  public.test1k_mysql_pg:
+    object: oracle.test1k_mysql_pg
+    source_options:
+      chunk_expr: mod(abs(hashtext(coalesce(first_name, ''))), {chunk_count})
+      chunk_count: 2
+
+env:
+  MODE: ${MODE}
+  SLING_THREADS: 2

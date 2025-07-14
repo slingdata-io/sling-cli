@@ -1,0 +1,83 @@
+source: LOCAL
+target: LOCAL
+
+env:
+  TEST_DIR: /tmp/sling/encoding_garbled_test
+
+hooks:
+  start:
+    # Clean up any existing test files
+    - type: command
+      command: |
+        rm -rf '{ env.TEST_DIR }'
+        mkdir -p '{ env.TEST_DIR }'
+
+    # Create test file with latin1 encoding
+    # Contains special characters: café, naïve, résumé
+    - type: write
+      to: local/{env.TEST_DIR}/test_latin1.csv
+      content: |
+        id,name,description
+        1,José,Café manager
+        2,François,Naïve résumé writer
+        3,María,Piñata designer
+
+    # Convert to latin1 encoding - create two copies
+    - type: command
+      command: |
+        iconv -f utf-8 -t iso-8859-1 {env.TEST_DIR}/test_latin1.csv > {env.TEST_DIR}/test_latin1_encoded1.csv
+        iconv -f utf-8 -t iso-8859-1 {env.TEST_DIR}/test_latin1.csv > {env.TEST_DIR}/test_latin1_encoded2.csv
+
+  end:
+    # Check the output files
+    - type: command
+      command: |
+        echo "=== Correct output (with encoding specified) ==="
+        cat {env.TEST_DIR}/test_latin1_correct_output.csv
+        echo ""
+        echo "=== Garbled output (without encoding specified) ==="
+        cat {env.TEST_DIR}/test_latin1_garbled_output.csv || echo "File might contain invalid UTF-8"
+
+    # Check that the correct file has the proper characters
+    - type: command
+      command: |
+        if grep -q "José" {env.TEST_DIR}/test_latin1_correct_output.csv && \
+           grep -q "Café" {env.TEST_DIR}/test_latin1_correct_output.csv && \
+           grep -q "François" {env.TEST_DIR}/test_latin1_correct_output.csv; then
+          echo "SUCCESS: Correct output contains proper special characters"
+        else
+          echo "FAILED: Correct output missing special characters"
+          exit 1
+        fi
+
+    # Check that the garbled file does NOT have the proper characters
+    - type: command
+      command: |
+        if grep -q "José" {env.TEST_DIR}/test_latin1_garbled_output.csv || \
+           grep -q "Café" {env.TEST_DIR}/test_latin1_garbled_output.csv || \
+           grep -q "François" {env.TEST_DIR}/test_latin1_garbled_output.csv; then
+          echo "FAILED: Garbled output contains proper special characters (should be corrupted)"
+          exit 1
+        else
+          echo "SUCCESS: Garbled output has corrupted special characters as expected"
+        fi
+
+    # Clean up
+    - type: command
+      command: 'rm -rf {env.TEST_DIR}'
+
+streams:
+  # Read with correct encoding and write to file
+  "file://{TEST_DIR}/test_latin1_encoded1.csv":
+    object: "file://{TEST_DIR}/test_latin1_correct_output.csv"
+    mode: full-refresh
+    source_options:
+      encoding: latin1
+      header: true
+
+  # Read WITHOUT encoding (should produce garbled output)
+  "file://{TEST_DIR}/test_latin1_encoded2.csv":
+    object: "file://{TEST_DIR}/test_latin1_garbled_output.csv"
+    mode: full-refresh
+    source_options:
+      header: true

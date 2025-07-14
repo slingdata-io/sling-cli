@@ -115,7 +115,7 @@ func (conn *RedshiftConn) getS3Props() []string {
 }
 
 // Unload unloads a query to S3
-func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, err error) {
+func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, tables ...Table) (s3Path string, err error) {
 
 	if conn.GetProp("AWS_BUCKET") == "" {
 		return "", g.Error("need to set AWS_BUCKET")
@@ -128,6 +128,14 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 	AwsSessionTokenExpr := ""
 	if AwsSessionToken != "" {
 		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
+	}
+
+	// set format options based on fileformat
+	formatOptions := ""
+	if fileFormat == dbio.FileTypeParquet {
+		formatOptions = g.F("PARQUET")
+	} else {
+		formatOptions = g.F("GZIP CSV NULL '\\N' HEADER DELIMITER ','")
 	}
 
 	g.Info("unloading from redshift to s3")
@@ -154,6 +162,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 				"aws_secret_access_key", AwsAccessKey,
 				"aws_session_token_expr", AwsSessionTokenExpr,
 				"parallel", conn.GetProp("PARALLEL"),
+				"format_options", formatOptions,
 			)
 
 			dropTableSQL := g.F("drop table if exists %s", tempTable.Name)
@@ -177,6 +186,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 				"aws_secret_access_key", AwsAccessKey,
 				"aws_session_token_expr", AwsSessionTokenExpr,
 				"parallel", conn.GetProp("PARALLEL"),
+				"format_options", formatOptions,
 			)
 
 			_, err = conn.Exec(unloadSQL)
@@ -198,7 +208,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, tables ...Table) (s3Path string
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.%s", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()), fileFormat.String())
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {
@@ -241,8 +251,13 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		return
 	}
 
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+	}
+
 	unloadCtx := g.NewContext(conn.Context().Ctx)
-	s3Path, err := conn.Unload(unloadCtx, table)
+	s3Path, err := conn.Unload(unloadCtx, fileFormat, table)
 	if err != nil {
 		err = g.Error(err, "Could not unload.")
 		return
@@ -263,12 +278,18 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		columns.Coerce(coerceCols, true, cc, tgtType)
 	}
 
-	fs.SetProp("format", "csv")
-	fs.SetProp("delimiter", ",")
-	fs.SetProp("header", "true")
-	fs.SetProp("null_if", `\N`)
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
+
+	if fileFormat == dbio.FileTypeParquet {
+		fs.SetProp("format", "parquet")
+	} else {
+		fs.SetProp("format", "csv")
+		fs.SetProp("delimiter", ",")
+		fs.SetProp("header", "true")
+		fs.SetProp("null_if", `\N`)
+	}
+
 	df, err = fs.ReadDataflow(s3Path)
 	if err != nil {
 		err = g.Error(err, "Could not read S3 Path for UNLOAD: "+s3Path)

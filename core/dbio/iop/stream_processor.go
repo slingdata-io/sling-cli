@@ -44,6 +44,7 @@ type StreamProcessor struct {
 	rowBlankValCnt   int
 	transformers     Transformers
 	digitString      map[int]string
+	transformEG      g.ErrorGroup
 }
 
 type StreamConfig struct {
@@ -282,6 +283,7 @@ func NewStreamProcessor() *StreamProcessor {
 		"01/02/2006 03:04:05 PM", // "8/17/1994 12:00:00 AM"
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02T15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999 -07",
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02 15:04",
@@ -465,7 +467,10 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 			t, ok := TransformsMap[name]
 			if ok {
 				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
-			} else if n := strings.TrimSpace(string(name)); strings.Contains(n, "(") && strings.HasSuffix(n, ")") {
+			} else if function := GetTransformFunction(name); function != nil {
+				t := FunctionToTransform(name, function)
+				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
+			} else if n := strings.TrimSpace(name); strings.Contains(n, "(") && strings.HasSuffix(n, ")") {
 				// parse transform with a parameter
 				parts := strings.Split(string(name), "(")
 				if len(parts) != 2 {
@@ -632,7 +637,7 @@ type chJSON interface {
 // CastVal casts values with stats collection
 // which degrades performance by ~10%
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessVal'
-func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interface{} {
+func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 	cs, ok := sp.colStats[i]
 	if !ok {
 		sp.colStats[i] = &ColumnStats{}
@@ -642,7 +647,7 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		}
 	}
 
-	var nVal interface{}
+	var nVal any
 	var sVal string
 	isString := false
 
@@ -664,6 +669,14 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 		sVal = string(v)
 		val = sVal
 		isString = true
+	case time.Time:
+		// Handle time.Time specially when casting to string to avoid JSON marshaling
+		if col.Type.IsString() {
+			// Use CastToString to format properly without quotes
+			sVal = sp.CastToString(i, v, DatetimeType)
+			val = sVal
+			isString = true
+		}
 	case chJSON: // Clickhouse JSON / Variant
 		sBytes, _ := v.MarshalJSON()
 		sVal = string(sBytes)
@@ -698,6 +711,26 @@ func (sp *StreamProcessor) CastVal(i int, val interface{}, col *Column) interfac
 
 	// get transforms
 	transforms := append(sp.Config.transforms[colKey], sp.Config.transforms["*"]...)
+
+	// apply functions
+	for _, t := range transforms {
+		if t.Func != nil {
+			newVal, err := t.Func(sp, val)
+			if err != nil {
+				if len(sp.transformEG.Errors) < 10 {
+					sp.transformEG.Add(err)
+					if g.IsDebug() {
+						g.Warn("transform function failure for `%s` for value %#v: %s", t.Name, val, err.Error())
+					} else {
+						g.Warn("transform function failure for `%s`: %s", t.Name, err.Error())
+					}
+				}
+			} else {
+				val = newVal
+				sVal = "" // reset string val
+			}
+		}
+	}
 
 	switch {
 	case col.Type.IsString():
@@ -1195,6 +1228,12 @@ func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 
 // ParseTime parses a date string and returns time.Time
 func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
+	if tv, ok := i.(time.Time); ok {
+		return tv, nil
+	} else if tv, ok := i.(*time.Time); ok && tv != nil {
+		return *tv, nil
+	}
+
 	s := cast.ToString(i)
 	if s == "" {
 		return t, nil // return zero time, so it become nil

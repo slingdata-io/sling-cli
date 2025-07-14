@@ -11,17 +11,17 @@ queues:
 
 defaults:
   state:
-    base_url: "https://${secrets.shop_name}.myshopify.com/admin/api/2025-04"
+    base_url: "https://{secrets.shop_name}.myshopify.com/admin/api/2025-04"
     limit: 250
   
   request:
     method: "GET"
     headers:
       Accept: "application/json"
-      X-Shopify-Access-Token: ${secrets.access_token}
+      X-Shopify-Access-Token: '{secrets.access_token}'
       Content-Type: "application/json"
     parameters:
-      limit: ${state.limit}
+      limit: '{state.limit}'
     rate: 20        # Default rate limit of 20 requests per second
     concurrency: 5  # Default concurrency of 5
     
@@ -29,7 +29,7 @@ defaults:
     next_state:
       # see https://shopify.dev/docs/api/admin-rest/usage/pagination
       url: >
-        ${ 
+         { 
             if(
               response.headers.link == null,
               state.url,
@@ -55,7 +55,7 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/shop
       
       request:
-        url: ${state.base_url}/shop.json
+        url: '{state.base_url}/shop.json'
       
       response:
         records:
@@ -67,16 +67,16 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/product
       
       state:
-        url: "${state.base_url}/products.json"  # Initial URL or next URL from pagination
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        url: "{state.base_url}/products.json"  # Initial URL or next URL from pagination
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
-          updated_at_min: ${state.updated_at_min}
+          limit: '{state.limit}'
+          updated_at_min: '{state.updated_at_min}'
 
       
       response:
@@ -97,16 +97,16 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/product-variant
       
       state:
-        url: "${state.base_url}/product_variants.json"  # Initial URL or next URL from pagination
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        url: "{state.base_url}/product_variants.json"  # Initial URL or next URL from pagination
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
-          updated_at_min: ${state.updated_at_min}
+          limit: '{state.limit}'
+          updated_at_min: '{state.updated_at_min}'
       
 
       
@@ -129,7 +129,7 @@ endpoints:
         into: "state.product_id"
       
       request:
-        url: ${state.base_url}/products/${state.product_id}/images.json
+        url: '{state.base_url}/products/{state.product_id}/images.json'
       
       response:
         records:
@@ -145,14 +145,14 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/customcollection
       
       state:
-        url: "${state.base_url}/custom_collections.json"  # Initial URL or next URL from pagination
+        url: "{state.base_url}/custom_collections.json"  # Initial URL or next URL from pagination
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
+          limit: '{state.limit}'
       
 
       
@@ -174,14 +174,14 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/smartcollection
       
       state:
-        url: "${state.base_url}/smart_collections.json"  # Initial URL or next URL from pagination
+        url: "{state.base_url}/smart_collections.json"  # Initial URL or next URL from pagination
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
+          limit: '{state.limit}'
       
 
       
@@ -203,12 +203,12 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/order
       
       state:
-        start_date: ${ coalesce(env.START_DATE, "2025-04-01") }
-        url: "${state.base_url}/orders.json"  # Initial URL or next URL from pagination
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        start_date: '{ coalesce(env.START_DATE, "2025-04-01") }'
+        url: "{state.base_url}/orders.json"  # Initial URL or next URL from pagination
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, sync.last_updated_at, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
         status: any
-        created_at_min: ${ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }
-        created_at_max: ${ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }
+        created_at_min: '{ date_format(state.day_start, "%Y-%m-%dT%H:%M:%S%z") }'
+        created_at_max: '{ date_format(date_add(state.day_start, 1, "day"), "%Y-%m-%dT%H:%M:%S%z") }'
       
       sync: [ last_updated_at ]
 
@@ -224,13 +224,13 @@ endpoints:
       
       request:
         
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
-          # updated_at_min: ${state.updated_at_min}
-          status: ${state.status}
-          created_at_min: ${ state.created_at_min }
-          created_at_max: ${ state.created_at_max }
+          limit: '{state.limit}'
+          # updated_at_min: '{state.updated_at_min}'
+          status: '{state.status}'
+          created_at_min: '{ state.created_at_min }'
+          created_at_max: '{ state.created_at_max }'
 
       response:
         records:
@@ -256,7 +256,7 @@ endpoints:
         into: "state.order_id"
       
       request:
-        url: ${state.base_url}/orders/${state.order_id}/transactions.json
+        url: '{state.base_url}/orders/{state.order_id}/transactions.json'
 
       
       response:
@@ -278,7 +278,7 @@ endpoints:
         into: "state.order_id"
       
       request:
-        url: ${state.base_url}/orders/${state.order_id}/refunds.json
+        url: '{state.base_url}/orders/{state.order_id}/refunds.json'
       
       response:
         records:
@@ -294,16 +294,16 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/customer
       
       state:
-        url: "${state.base_url}/customers.json"  # Initial URL or next URL from pagination
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        url: "{state.base_url}/customers.json"  # Initial URL or next URL from pagination
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
-          updated_at_min: ${state.updated_at_min}
+          limit: '{state.limit}'
+          updated_at_min: '{state.updated_at_min}'
       
 
       
@@ -330,7 +330,7 @@ endpoints:
         into: "state.customer_id"
       
       request:
-        url: ${state.base_url}/customers/${state.customer_id}/addresses.json
+        url: '{state.base_url}/customers/{state.customer_id}/addresses.json'
       
       response:
         records:
@@ -351,7 +351,7 @@ endpoints:
         into: "state.customer_id"
       
       request:
-        url: ${state.base_url}/customers/${state.customer_id}/orders.json
+        url: '{state.base_url}/customers/{state.customer_id}/orders.json'
         parameters:
           status: "any"  # Get both open and closed orders
       
@@ -374,9 +374,9 @@ endpoints:
         into: "state.variant_ids"
       
       request:
-        url: ${state.base_url}/inventory_items.json
+        url: '{state.base_url}/inventory_items.json'
         parameters:
-          ids: ${join(state.variant_ids, ",")}
+          ids: '{join(state.variant_ids, ",")}'
       
       response:
         records:
@@ -393,9 +393,9 @@ endpoints:
         into: "state.variant_ids"
       
       request:
-        url: ${state.base_url}/inventory_levels.json
+        url: '{state.base_url}/inventory_levels.json'
         parameters:
-          inventory_item_ids: ${join(state.variant_ids, ",")}
+          inventory_item_ids: '{join(state.variant_ids, ",")}'
       
       response:
         records:
@@ -407,16 +407,16 @@ endpoints:
       docs: https://shopify.dev/docs/api/admin-rest/2025-04/resources/abandoned-checkouts
       
       state:
-        url: "${state.base_url}/checkouts.json"  # Initial URL or next URL from pagination
-        updated_at_min: ${coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}
+        url: "{state.base_url}/checkouts.json"  # Initial URL or next URL from pagination
+        updated_at_min: '{coalesce(env.UPDATED_AT_MIN, date_format(date_add(now(), -30, "day"), "%Y-%m-%dT%H:%M:%S%z"))}'
       
       sync: [ last_id ]
       
       request:
-        url: ${state.url}
+        url: '{state.url}'
         parameters:
-          limit: ${state.limit}
-          updated_at_min: ${state.updated_at_min}
+          limit: '{state.limit}'
+          updated_at_min: '{state.updated_at_min}'
           status: "any"
       
       response:

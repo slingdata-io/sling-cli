@@ -6,10 +6,10 @@ defaults:
   
   request:
     method: POST
-    url: ${state.base_url}/objects/${state.object_id}/records/query
+    url: '{state.base_url}/objects/{state.object_id}/records/query'
 
     headers:
-      Authorization: 'Bearer ${secrets.api_key}'
+      Authorization: 'Bearer {secrets.api_key}'
       Content-Type: application/json
 
     concurrency: 10
@@ -24,14 +24,14 @@ endpoints:
   people:
     
     state:
-      object_id: ${secrets.people_object_id}
+      object_id: '{secrets.people_object_id}'
       limit: 250
       offset: 0
     
     request:
       payload:
-        limit: ${state.limit}
-        offset: ${state.offset}
+        limit: '{state.limit}'
+        offset: '{state.offset}'
           
     pagination:
       # stop if condition is met
@@ -39,7 +39,7 @@ endpoints:
 
       # set state for next page
       next_state:
-        offset: ${state.offset + state.limit}
+        offset: '{state.offset + state.limit}'
     
     response:
       

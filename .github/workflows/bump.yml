@@ -1,6 +1,11 @@
 name: Bump
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'version override'
+        required: false
   pull_request:
     types:
       - closed
@@ -15,7 +20,8 @@ on:
 
 jobs:
   bump:
-    if: github.event.pull_request.merged == true && (! contains(github.event.head_commit.message, '[skip ci]'))
+    if: (github.event.pull_request.merged == true && (! contains(github.event.head_commit.message, '[skip ci]'))) || github.event_name == 'workflow_dispatch'
+    
     runs-on: ubuntu-latest
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
@@ -27,4 +33,4 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ github.event.inputs.new_tag }}
+          custom_tag: ${{ github.event.inputs.version }}

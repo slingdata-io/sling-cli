@@ -163,7 +163,7 @@ func (pl *Pipeline) Execute() (err error) {
 
 		if err != nil {
 			pl.CurrentStep["error"] = err.Error()
-			return g.Error(err, "error executing step")
+			return g.Error(err, "error executing step: %s", step.ID())
 		} else if br, _ := step.Context().Map.Get("break"); br == true {
 			break
 		}

@@ -195,8 +195,11 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// write directly for iceberg full-refresh
 	isIce := tgtConn.GetType() == dbio.TypeDbIceberg
 
+	// set direct insert mode
+	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
+
 	// write directly to the final table (no temp table)
-	if directInsert := cast.ToBool(os.Getenv("SLING_DIRECT_INSERT")); directInsert || isIce {
+	if directInsert || isIce {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else {
@@ -757,7 +760,8 @@ func prepareFinal(
 ) error {
 
 	// Handle Full Refresh Mode: Drop the target table if it exists
-	if cfg.Mode == FullRefreshMode {
+	// Don't drop if full refreshing with range, will already have been dropped
+	if cfg.Mode == FullRefreshMode && !t.Config.IsFullRefreshWithChunking() {
 		if err := tgtConn.DropTable(targetTable.FullName()); err != nil {
 			return g.Error(err, "could not drop table "+targetTable.FullName())
 		}
@@ -773,9 +777,10 @@ func prepareFinal(
 		return g.Error(err, "could not create table "+targetTable.FullName())
 	} else if created {
 		t.SetProgress("created table %s", targetTable.FullName())
-	} else if cfg.Mode == TruncateMode {
+	} else if cfg.Mode == TruncateMode && !t.Config.IsTruncateWithChunking() {
 		// Truncate table since it exists
-		if err := truncateTable(t, tgtConn, targetTable.FullName()); err != nil {
+		// Don't truncate if refreshing with range, will already have been truncated
+		if err := database.TruncateTable(tgtConn, targetTable.FullName()); err != nil {
 			return err
 		}
 		t.SetProgress("truncated table %s", targetTable.FullName())
@@ -863,19 +868,6 @@ func transferBySwappingTables(tgtConn database.Connection, tableTmp, targetTable
 		err = g.Error(err, "could not swap tables %s to %s", tableTmp.FullName(), targetTable.FullName())
 		return err
 	}
-	return nil
-}
-
-func truncateTable(t *TaskExecution, tgtConn database.Connection, tableName string) error {
-	truncSQL := g.R(
-		tgtConn.GetTemplateValue("core.truncate_table"),
-		"table", tableName,
-	)
-	if _, err := tgtConn.Exec(truncSQL); err != nil {
-		err = g.Error(err, "could not truncate table ", tableName)
-		return err
-	}
-
 	return nil
 }
 

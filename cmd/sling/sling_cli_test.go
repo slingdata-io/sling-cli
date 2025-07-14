@@ -19,17 +19,19 @@ import (
 )
 
 type testCase struct {
-	ID             int               `yaml:"id"`
-	Needs          []int             `yaml:"needs"`
-	Name           string            `yaml:"name"`
-	Run            string            `yaml:"run"`
-	Env            map[string]string `yaml:"env"`
-	Err            bool              `yaml:"err"`
-	Rows           string            `yaml:"rows"`    // number of rows
-	Bytes          string            `yaml:"bytes"`   // number of bytes
-	Streams        string            `yaml:"streams"` // number of streams
-	Fails          string            `yaml:"fails"`   // number of fails
-	OutputContains []string          `yaml:"output_contains"`
+	ID      int               `yaml:"id"`
+	Needs   []int             `yaml:"needs"`
+	Name    string            `yaml:"name"`
+	Run     string            `yaml:"run"`
+	Env     map[string]string `yaml:"env"`
+	Err     bool              `yaml:"err"`
+	Rows    string            `yaml:"rows"`    // number of rows
+	Bytes   string            `yaml:"bytes"`   // number of bytes
+	Streams string            `yaml:"streams"` // number of streams
+	Fails   string            `yaml:"fails"`   // number of fails
+
+	OutputContains       []string `yaml:"output_contains"`
+	OutputDoesNotContain []string `yaml:"output_does_not_contain"`
 }
 
 func TestCLI(t *testing.T) {
@@ -197,6 +199,20 @@ func TestCLI(t *testing.T) {
 					found = true
 				}
 				assert.True(t, found, "Output does not contain %#v", contains)
+			}
+			for _, notContain := range tt.OutputDoesNotContain {
+				if notContain == "" {
+					continue
+				}
+
+				found := false
+				if strings.Contains(stderr, notContain) {
+					found = true
+				}
+				if strings.Contains(stdout, notContain) {
+					found = true
+				}
+				assert.False(t, found, "Output contains %#v", notContain)
 			}
 		})
 		if t.Failed() {

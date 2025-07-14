@@ -17,11 +17,11 @@ defaults:
     method: "GET"
     headers:
       Accept: "application/json"
-      Authorization: Bearer ${secrets.api_key}
+      Authorization: Bearer {secrets.api_key}
       Content-Type: "application/json"
       Stripe-Version: "2023-10-16"  # Can be overridden through secrets.api_version
     parameters:
-      limit: ${state.limit}
+      limit: '{state.limit}'
     rate: 20        # Default rate limit of 20 requests per second to avoid hitting rate limits
     concurrency: 5  # Default concurrency of 5
 
@@ -32,7 +32,7 @@ endpoints:
     docs: https://docs.stripe.com/api/accounts
     
     request:
-      url: ${state.base_url}/accounts
+      url: '{state.base_url}/accounts'
     
     response:
       records:
@@ -45,21 +45,21 @@ endpoints:
     docs: https://docs.stripe.com/api/charges
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/charges
+      url: '{state.base_url}/charges'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: s${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -78,11 +78,11 @@ endpoints:
     docs: https://docs.stripe.com/api/coupons
     
     request:
-      url: ${state.base_url}/coupons
+      url: '{state.base_url}/coupons'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -96,11 +96,11 @@ endpoints:
     docs: https://docs.stripe.com/api/credit_notes
     
     request:
-      url: ${state.base_url}/credit_notes
+      url: '{state.base_url}/credit_notes'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -123,7 +123,7 @@ endpoints:
       into: state.credit_note_id
     
     request:
-      url: ${state.base_url}/credit_notes/${state.credit_note_id}/lines
+      url: '{state.base_url}/credit_notes/{state.credit_note_id}/lines'
     
     response:
       records:
@@ -141,21 +141,21 @@ endpoints:
     docs: https://docs.stripe.com/api/customers
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/customers
+      url: '{state.base_url}/customers'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -181,7 +181,7 @@ endpoints:
       into: "state.customer_id"
     
     request:
-      url: ${state.base_url}/customers/${state.customer_id}/balance_transactions
+      url: '{state.base_url}/customers/{state.customer_id}/balance_transactions'
     
     response:
       records:
@@ -198,21 +198,21 @@ endpoints:
     docs: https://docs.stripe.com/api/invoices
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/invoices
+      url: '{state.base_url}/invoices'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -235,21 +235,21 @@ endpoints:
     docs: https://docs.stripe.com/api/invoiceitems
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/invoiceitems
+      url: '{state.base_url}/invoiceitems'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -273,7 +273,7 @@ endpoints:
       into: "state.invoice_id"
     
     request:
-      url: ${state.base_url}/invoices/${state.invoice_id}/lines
+      url: '{state.base_url}/invoices/{state.invoice_id}/lines'
     
     response:
       records:
@@ -286,21 +286,21 @@ endpoints:
     docs: https://docs.stripe.com/api/payment_intents
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/payment_intents
+      url: '{state.base_url}/payment_intents'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -319,21 +319,21 @@ endpoints:
     docs: https://docs.stripe.com/api/payouts
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/payouts
+      url: '{state.base_url}/payouts'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -352,11 +352,11 @@ endpoints:
     docs: https://docs.stripe.com/api/plans
     
     request:
-      url: ${state.base_url}/plans
+      url: '{state.base_url}/plans'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -370,19 +370,19 @@ endpoints:
     docs: https://docs.stripe.com/api/prices
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
+      starting_after: '{ sync.last_id }'  # will be null on first run
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/prices
+      url: '{state.base_url}/prices'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -401,19 +401,19 @@ endpoints:
     docs: https://docs.stripe.com/api/products
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
+      starting_after: '{ sync.last_id }'  # will be null on first run
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/products
+      url: '{state.base_url}/products'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -432,21 +432,21 @@ endpoints:
     docs: https://docs.stripe.com/api/refunds
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/refunds
+      url: '{state.base_url}/refunds'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -469,15 +469,15 @@ endpoints:
       limit: 100
     
     request:
-      url: ${state.base_url}/subscriptions
+      url: '{state.base_url}/subscriptions'
 
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -499,11 +499,11 @@ endpoints:
       into: state.subscription_id
     
     request:
-      url: ${state.base_url}/subscription_items
+      url: '{state.base_url}/subscription_items'
 
       parameters:
         limit: null # remove default
-        subscription: ${state.subscription_id}
+        subscription: '{state.subscription_id}'
         
     
     response:
@@ -521,22 +521,22 @@ endpoints:
     docs: https://docs.stripe.com/api/events
     
     state:
-      starting_after: ${ sync.last_id }  # will be null on first run
-      created_gte: ${coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}
+      starting_after: '{ sync.last_id }'  # will be null on first run
+      created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
     
     request:
-      url: ${state.base_url}/events
+      url: '{state.base_url}/events'
       parameters:
-        limit: ${state.limit}
-        starting_after: ${state.starting_after}
-        # created[gte]: ${state.created_gte}
+        limit: '{state.limit}'
+        starting_after: '{state.starting_after}'
+        # created[gte]: '{state.created_gte}'
         # types: customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
     
     pagination:
       next_state:
-        starting_after: ${response.records[-1].id}
+        starting_after: '{response.records[-1].id}'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:

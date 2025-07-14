@@ -465,7 +465,6 @@ func (conn *BaseConn) Init() (err error) {
 		Databases: map[string]Database{},
 	}
 
-	conn.SetProp("connected", "false")
 	return nil
 }
 
@@ -730,7 +729,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 func reconnectIfClosed(conn Connection) (err error) {
 	// g.Warn("connected => %s", conn.GetProp("connected"))
 	if conn.GetProp("connected") != "true" {
-		if !cast.ToBool(conn.GetProp("silent")) {
+		if !cast.ToBool(conn.GetProp("silent")) && conn.GetProp("connected") == "false" {
 			g.Debug("connection was closed, reconnecting")
 		}
 		err = conn.Self().Connect()
@@ -3545,4 +3544,17 @@ func ChangeColumnTypeViaAdd(conn Connection, table Table, col iop.Column) (err e
 	}
 
 	return
+}
+
+func TruncateTable(conn Connection, tableName string) error {
+	truncSQL := g.R(
+		conn.GetTemplateValue("core.truncate_table"),
+		"table", tableName,
+	)
+	if _, err := conn.Exec(truncSQL); err != nil {
+		err = g.Error(err, "could not truncate table ", tableName)
+		return err
+	}
+
+	return nil
 }

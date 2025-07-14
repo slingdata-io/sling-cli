@@ -70,7 +70,7 @@ func NewParquetArrowReader(reader *os.File, selected []string) (p *ParquetArrowR
 	p = &ParquetArrowReader{
 		Reader:  pqReader,
 		File:    reader,
-		nextRow: make(chan nextRow, 10),
+		nextRow: make(chan nextRow),
 		Context: ctx,
 		Memory:  mem,
 	}
@@ -187,9 +187,15 @@ func (p *ParquetArrowReader) getValueFromColumn(col *arrow.Column, idx int, colM
 func (p *ParquetArrowReader) nextFunc(it *Iterator) bool {
 retry:
 	select {
-	case nextRow := <-p.nextRow:
+	case nextRow, ok := <-p.nextRow:
+		if !ok {
+			return false
+		}
 		if err := nextRow.err; err != nil {
 			it.Context.CaptureErr(g.Error(err, "could not read Parquet row"))
+			return false
+		} else if err := p.Context.Err(); err != nil {
+			it.Context.CaptureErr(g.Error(err, "context error, could not read Parquet row"))
 			return false
 		}
 		it.Row = nextRow.row

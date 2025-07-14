@@ -1,0 +1,95 @@
+source: local
+target: local
+
+defaults:
+  mode: full-refresh
+
+env:
+  test_dir: /tmp/sling_transform_test
+
+hooks:
+  start:
+    - type: command
+      command: mkdir -p '{env.test_dir}'
+    
+    - type: write
+      to: local/{env.test_dir}/input.csv
+      content: |
+        id,name,email,price,quantity,created_date,description,tags,empty
+        1,John Doe,john.doe@example.com,99.99,5,2024-01-15,Product A description,tag1|tag2|tag3,1
+        2,Jane Smith,JANE.SMITH@EXAMPLE.COM,149.50,3,2024-02-20,Product B description,tag2|tag4,1
+        3,Bob Johnson,bob@test.org,29.99,10,2024-03-10,Product C description,tag1|tag3|tag5,
+        4,Alice Brown,alice.brown@company.net,199.00,2,2024-04-05,Product D description,tag4|tag5,
+        5,Charlie Wilson,charlie@email.com,75.25,8,2024-05-12,,tag1|tag2|tag4|tag5,
+
+  end:
+    - type: query
+      connection: duckdb
+      query: "select * from read_csv('{env.test_dir}/output.csv', header=true)"
+      into: output_data
+    
+    - type: log
+      message: |
+        ===== Transform Functions Test Results =====
+        Output data count: {length(store.output_data)}
+        
+        All rows:
+        {pretty_table(store.output_data)}
+
+    # Validate transformations
+    - type: check
+      name: "Check row count"
+      check: length(store.output_data) == 5
+    
+    - type: check
+      name: "Check upper transform on name"
+      check: store.output_data[0].name == "JOHN DOE"
+    
+    - type: check
+      name: "Check lower transform on email"
+      check: store.output_data[1].email == "jane.smith@example.com"
+
+    - type: check
+      name: "Check is_empty"
+      check: store.output_data[0].empty == "false" && store.output_data[2].empty == "true"
+
+    - type: check
+      name: "Check coalesce function"
+      check: store.output_data[0].description != ""
+    
+    - type: check
+      name: "Check if function for low price"
+      check: store.output_data[2].created_date != ""
+    
+    # Cleanup
+    - type: command
+      command: rm -rf '{env.test_dir}'
+
+streams:
+  "file://{test_dir}/input.csv":
+    object: "file://{test_dir}/output.csv"
+    columns:
+      empty: boolean
+    
+    transforms:
+      # String transformations
+      name: ["upper"]
+      email: ["lower"]
+      
+      # New columns with calculations
+      # total_price: ["value * 2"]
+      
+      # Hash function
+      # email_hash: ['hash(value, "mad5")']
+      
+      # # String operations - use existing built-in transforms
+      # first_tag: ['value + split(tags, "|")[0]']
+      
+      # # Conditional logic
+      # price_category: ['value + if(price > 100, "high", "low")']
+      
+      # Default values
+      # description: ['first_valid(value, "No description")']
+      
+      # Is empty
+      empty: ["is_empty"]

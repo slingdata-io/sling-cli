@@ -6,19 +6,19 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/flarco/g"
-	"github.com/jmespath/go-jmespath"
-	"github.com/maja42/goval"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
 
 type APIConnection struct {
-	Spec    Spec
-	State   *APIState
-	Context *g.Context
-	eval    *goval.Evaluator
+	Spec      Spec
+	State     *APIState
+	Context   *g.Context
+	evaluator *iop.Evaluator `json:"-" yaml:"-"`
 }
 
 // NewAPIConnection creates an
@@ -31,8 +31,8 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			State:  g.M(),
 			Queues: make(map[string]*iop.Queue),
 		},
-		Spec: spec,
-		eval: goval.NewEvaluator(),
+		Spec:      spec,
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 	}
 
 	// load state / secrets
@@ -141,6 +141,11 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		return nil, g.Error(err, "endpoint is disabled in spec")
 	}
 
+	// setup if specified
+	if err = endpoint.setup(); err != nil {
+		return nil, g.Error(err, "could not setup for main request")
+	}
+
 	// start request process
 	ds, err := streamRequests(endpoint, sCfg)
 	if err != nil {
@@ -151,6 +156,13 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	if err != nil {
 		return nil, g.Error(err, "could not make dataflow")
 	}
+
+	df.Defer(func() {
+		// teardown if specified
+		if err = endpoint.teardown(); err != nil {
+			df.Context.CaptureErr(g.Error(err, "could not teardown for main request"))
+		}
+	})
 
 	// now that columns are detected, set the metadata for PK
 	if len(df.Buffer) > 0 {
@@ -173,22 +185,52 @@ type APIState struct {
 
 type APIStateAuth struct {
 	Authenticated bool              `json:"authenticated,omitempty"`
-	Token         string            `json:"token,omitempty"` // refresh token?
-	Headers       map[string]string `json:"-"`               // to inject
+	Token         string            `json:"token,omitempty"`      // refresh token?
+	Headers       map[string]string `json:"-"`                    // to inject
+	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
-	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
+	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
+	Mutex sync.Mutex                                         `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
-var bracketRegex = regexp.MustCompile(`\$\{([^\{\}]+)\}`)
+var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
 
-func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []string) map[string]any {
+func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 
 	sections := []string{"env", "state", "secrets", "auth", "sync"}
 
 	ac.Context.Lock()
-	statePayload := g.Marshal(ac.State)
-	stateMap, _ := g.UnmarshalMap(statePayload)
-	stateMap["null"] = nil
+	defer ac.Context.Unlock()
+
+	// Create deep copies of the state maps to avoid concurrent access issues
+	stateMapCopy := make(map[string]any)
+	if ac.State.State != nil {
+		for k, v := range ac.State.State {
+			stateMapCopy[k] = v
+		}
+	}
+
+	envCopy := make(map[string]string)
+	if ac.State.Env != nil {
+		for k, v := range ac.State.Env {
+			envCopy[k] = v
+		}
+	}
+
+	secretsCopy := make(map[string]any)
+	if ac.State.Secrets != nil {
+		for k, v := range ac.State.Secrets {
+			secretsCopy[k] = v
+		}
+	}
+
+	stateMap := g.M(
+		"env", envCopy,
+		"state", stateMapCopy,
+		"secrets", secretsCopy,
+		"auth", ac.State.Auth,
+		"null", nil,
+	)
 
 	// Add queues to the state map
 	if ac.State.Queues != nil {
@@ -199,8 +241,7 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []str
 		stateMap["queue"] = queueMap
 	}
 
-	ac.Context.Unlock()
-
+	// Process extraMaps without holding the main lock
 	for mapKey, newVal := range extraMaps {
 		// non-map values
 		if g.In(mapKey, "records") {
@@ -232,100 +273,25 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any, varsToCheck []str
 		stateMap[section] = subMap // set back
 	}
 
-	// ensure vars exist. if it doesn't, set at nil
-	for _, varToCheck := range varsToCheck {
-		varToCheck = strings.TrimSpace(varToCheck)
-		parts := strings.Split(varToCheck, ".")
-		if len(parts) != 2 {
-			// continue
-		}
-		section := parts[0]
-		key := parts[1]
-		if g.In(section, sections...) {
-			nested, _ := g.UnmarshalMap(g.Marshal(stateMap[section]))
-			if nested == nil {
-				nested = g.M()
-			}
-			if _, ok := nested[key]; !ok {
-				nested[key] = nil
-			}
-			stateMap[section] = nested // set back
-		}
-	}
-
 	return stateMap
 }
 
 func (ac *APIConnection) renderString(val any, extraMaps ...map[string]any) (newVal string, err error) {
-	output, err := ac.renderAny(val, extraMaps...)
-	if err != nil {
-		return
-	}
-
-	switch output.(type) {
-	case map[string]string, map[string]any, map[any]any, []any, []string:
-		newVal = g.Marshal(output)
-	default:
-		newVal = cast.ToString(output)
-	}
-
-	return
-}
-
-func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (output any, err error) {
-
-	output = input
-
-	matches := bracketRegex.FindAllStringSubmatch(cast.ToString(output), -1)
-
-	expressions := []string{}
-	varsToCheck := []string{} // to ensure existence in state maps
-	for _, match := range matches {
-		expression := match[1]
-		expressions = append(expressions, expression)
-		varsToCheck = append(varsToCheck, extractVars(expression)...)
-	}
 	em := g.M()
 	if len(extraMaps) > 0 {
 		em = extraMaps[0]
 	}
 
-	stateMap := ac.getStateMap(em, varsToCheck)
+	return ac.evaluator.RenderString(val, ac.getStateMap(em))
+}
 
-	// we'll use those keys as jmespath expr
-	for _, expr := range expressions {
-		var value any
-		callsFunc := strings.Contains(expr, "(") && strings.Contains(expr, ")")
-
-		// attempt to resolve with jmespath first if no function is called
-		if !callsFunc {
-			value, err = jmespath.Search(expr, stateMap)
-		}
-
-		if callsFunc || err != nil {
-			value, err = ac.eval.Evaluate(expr, stateMap, iop.GlobalFunctionMap)
-			if err != nil {
-				return "", g.Error(err, "could not render expression")
-			}
-		}
-
-		key := "${" + expr + "}"
-
-		if strings.TrimSpace(cast.ToString(input)) == key {
-			output = value
-		} else {
-			// treat as string if whole input isn't the expression
-			outputStr := cast.ToString(output)
-			switch value.(type) {
-			case map[string]string, map[string]any, map[any]any, []any, []string:
-				output = strings.ReplaceAll(outputStr, key, g.Marshal(value))
-			default:
-				output = strings.ReplaceAll(outputStr, key, cast.ToString(value))
-			}
-		}
+func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (output any, err error) {
+	em := g.M()
+	if len(extraMaps) > 0 {
+		em = extraMaps[0]
 	}
 
-	return output, nil
+	return ac.evaluator.RenderAny(input, ac.getStateMap(em))
 }
 
 // GetSyncedState cycles through each endpoint, and collects the values
@@ -344,12 +310,14 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 		// Initialize map for this endpoint
 		data[endpoint.Name] = make(map[string]any)
 
-		// Collect each sync value from endpoint's state
+		// Collect each sync value from endpoint's state with proper locking
+		endpoint.context.Lock()
 		for _, syncKey := range endpoint.Sync {
 			if val, ok := endpoint.State[syncKey]; ok {
 				data[endpoint.Name][syncKey] = val
 			}
 		}
+		endpoint.context.Unlock()
 	}
 
 	return data, nil
@@ -372,7 +340,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 			continue
 		}
 
-		// Initialize state map if nil
+		// Initialize state map if nil and sync state with proper locking
+		endpoint.context.Lock()
 		if endpoint.syncMap == nil {
 			endpoint.syncMap = make(StateMap)
 		}
@@ -387,6 +356,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 				}
 			}
 		}
+		endpoint.context.Unlock()
+
 		ac.Spec.EndpointMap[key] = endpoint
 	}
 
@@ -395,65 +366,6 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 
 func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Iterate) (err error) {
 	return
-}
-
-// extractVars identifies variable references in a string expression,
-// ignoring those inside double quotes. It recognizes patterns like env.VAR,
-// state.VAR, secrets.VAR, and auth.VAR.
-func extractVars(expr string) []string {
-	// To track found variable references
-	var references []string
-
-	// Regular expression for finding variable references
-	// Matches env., state., secrets., auth. followed by a variable name
-	refRegex := regexp.MustCompile(`(env|state|secrets|auth|response|request|sync)\.\w+`)
-
-	// First, we need to identify string literals to exclude them
-	// Track positions of string literals
-	inString := false
-	stringRanges := make([][]int, 0)
-	var start int
-
-	for i, char := range expr {
-		if char == '"' {
-			// Check if the quote is escaped
-			if i > 0 && expr[i-1] == '\\' {
-				continue
-			}
-
-			if !inString {
-				// Start of a string
-				inString = true
-				start = i
-			} else {
-				// End of a string
-				inString = false
-				stringRanges = append(stringRanges, []int{start, i})
-			}
-		}
-	}
-
-	// Find all potential references
-	matches := refRegex.FindAllStringIndex(expr, -1)
-
-	// Filter out references that are inside string literals
-	for _, match := range matches {
-		isInString := false
-		for _, strRange := range stringRanges {
-			if match[0] >= strRange[0] && match[1] <= strRange[1] {
-				isInString = true
-				break
-			}
-		}
-
-		if !isInString {
-			// Extract the actual reference
-			reference := expr[match[0]:match[1]]
-			references = append(references, reference)
-		}
-	}
-
-	return references
 }
 
 func hasBrackets(expr string) bool {
@@ -467,6 +379,9 @@ var (
 	}
 	validateAndSetDefaults = func(ep *Endpoint, spec Spec) (err error) {
 		return g.Error("please use the official sling-cli release for reading APIs")
+	}
+	runSequence = func(s Sequence, ep *Endpoint) (err error) {
+		return g.Error("please use the official sling-cli release for running API sequences")
 	}
 )
 
@@ -527,4 +442,36 @@ func (ac *APIConnection) CloseAllQueues() {
 		}
 		delete(ac.State.Queues, name)
 	}
+}
+
+// RenderDynamicEndpoints will render the dynamic objects
+// basically mutating the spec endpoints.
+// Needs to authenticate first
+func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
+	_ = ac.Spec // will need to be modified
+	return
+}
+
+// IsAuthExpired checks if the authentication has expired
+func (ac *APIConnection) IsAuthExpired() bool {
+	if ac.State.Auth.ExpiresAt == 0 {
+		return false // No expiry set
+	}
+	return time.Now().Unix() >= ac.State.Auth.ExpiresAt
+}
+
+// EnsureAuthenticated checks if authentication is valid and re-authenticates if needed
+// This method ensures thread-safe authentication checks and re-authentication
+func (ac *APIConnection) EnsureAuthenticated() error {
+	ac.State.Auth.Mutex.Lock()
+	defer ac.State.Auth.Mutex.Unlock()
+
+	// Check if authentication has expired or not authenticated
+	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
+		g.Debug("Authentication expired or not authenticated, re-authenticating...")
+		if err := ac.Authenticate(); err != nil {
+			return g.Error(err, "failed to authenticate")
+		}
+	}
+	return nil
 }
