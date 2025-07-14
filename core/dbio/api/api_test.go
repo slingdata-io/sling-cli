@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -373,6 +374,157 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	// We expect this to fail at HTTP request stage, not validation
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+}
+
+func TestAuthenticationExpiry(t *testing.T) {
+	tests := []struct {
+		name           string
+		expiresSeconds int
+		waitSeconds    int
+		shouldExpire   bool
+	}{
+		{
+			name:           "no_expiry_configured",
+			expiresSeconds: 0,
+			waitSeconds:    5,
+			shouldExpire:   false,
+		},
+		{
+			name:           "not_yet_expired",
+			expiresSeconds: 10,
+			waitSeconds:    0,
+			shouldExpire:   false,
+		},
+		{
+			name:           "just_expired",
+			expiresSeconds: 2,
+			waitSeconds:    3,
+			shouldExpire:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create API connection
+			spec := Spec{
+				Authentication: Authentication{
+					Type:    AuthTypeBasic,
+					Expires: tt.expiresSeconds,
+					Username: "test_user",
+					Password: "test_pass",
+				},
+				EndpointMap: make(EndpointMap),
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, nil)
+			assert.NoError(t, err)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err)
+			assert.True(t, ac.State.Auth.Authenticated)
+
+			// Check initial expiry
+			if tt.expiresSeconds > 0 {
+				assert.Greater(t, ac.State.Auth.ExpiresAt, int64(0))
+				assert.False(t, ac.IsAuthExpired())
+			} else {
+				assert.Equal(t, int64(0), ac.State.Auth.ExpiresAt)
+				assert.False(t, ac.IsAuthExpired())
+			}
+
+			// Simulate time passing
+			if tt.waitSeconds > 0 && tt.expiresSeconds > 0 {
+				// Manually set the expiry time to simulate time passing
+				ac.State.Auth.ExpiresAt = time.Now().Add(-time.Duration(tt.waitSeconds) * time.Second).Unix()
+			}
+
+			// Check if expired
+			assert.Equal(t, tt.shouldExpire, ac.IsAuthExpired())
+		})
+	}
+}
+
+func TestEnsureAuthenticated(t *testing.T) {
+	// Test the expiry mechanism with a simple auth type
+	spec := Spec{
+		Authentication: Authentication{
+			Type:     AuthTypeBasic,
+			Expires:  2, // Expires after 2 seconds
+			Username: "test_user",
+			Password: "test_pass",
+		},
+		EndpointMap: make(EndpointMap),
+	}
+
+	ac, err := NewAPIConnection(context.Background(), spec, nil)
+	assert.NoError(t, err)
+
+	// Initially not authenticated
+	assert.False(t, ac.State.Auth.Authenticated)
+
+	// First ensure authenticated
+	err = ac.EnsureAuthenticated()
+	assert.NoError(t, err)
+	assert.True(t, ac.State.Auth.Authenticated)
+	assert.Greater(t, ac.State.Auth.ExpiresAt, int64(0))
+
+	initialExpiresAt := ac.State.Auth.ExpiresAt
+
+	// Call again immediately - should not change expiry
+	err = ac.EnsureAuthenticated()
+	assert.NoError(t, err)
+	assert.Equal(t, initialExpiresAt, ac.State.Auth.ExpiresAt)
+
+	// Manually expire the auth
+	ac.State.Auth.ExpiresAt = time.Now().Add(-1 * time.Second).Unix()
+
+	// Small delay to ensure time difference
+	time.Sleep(1 * time.Second)
+
+	// Call again - should re-authenticate and get new expiry
+	err = ac.EnsureAuthenticated()
+	assert.NoError(t, err)
+	assert.True(t, ac.State.Auth.Authenticated)
+	assert.Greater(t, ac.State.Auth.ExpiresAt, initialExpiresAt)
+}
+
+func TestEnsureAuthenticatedConcurrency(t *testing.T) {
+	// Test that concurrent calls to EnsureAuthenticated don't cause multiple authentications
+	spec := Spec{
+		Authentication: Authentication{
+			Type:     AuthTypeBasic,
+			Expires:  10,
+			Username: "test_user",
+			Password: "test_pass",
+		},
+		EndpointMap: make(EndpointMap),
+	}
+
+	ac, err := NewAPIConnection(context.Background(), spec, nil)
+	assert.NoError(t, err)
+
+	// Run multiple concurrent EnsureAuthenticated calls
+	var wg sync.WaitGroup
+	errors := make([]error, 10)
+	
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errors[idx] = ac.EnsureAuthenticated()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Check all succeeded
+	for i, err := range errors {
+		assert.NoError(t, err, "goroutine %d failed", i)
+	}
+
+	// Should have authenticated successfully
+	assert.True(t, ac.State.Auth.Authenticated)
 }
 
 //go:embed api_suite.yaml

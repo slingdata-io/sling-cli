@@ -387,3 +387,64 @@
     base_url: "https://api.example.com"
     rate_limit: 100
   expected_next_state: {}
+
+- id: 8
+  name: test_authentication_with_expiry
+  mock_response:
+    products:
+      - id: 101
+        name: "Product A"
+        price: 29.99
+      - id: 102
+        name: "Product B"
+        price: 39.99
+  spec:
+    name: expiry_test_api
+    description: "Test authentication expiry functionality"
+    authentication:
+      type: sequence
+      expires: 3  # Auth expires after 3 seconds
+      sequence:
+        - request:
+            url: "/login"
+            method: POST
+            payload:
+              username: "{secrets.user_id}"
+              password: "{secrets.password}"
+          response:
+            processors:
+              - expression: "response.json.token"
+                output: "auth.token"
+                aggregation: last
+              - expression: "response.json.token"
+                output: "auth.headers.Authorization"
+                aggregation: last
+    endpoints:
+      test_endpoint:
+        description: "Products endpoint requiring authentication"
+        request:
+          url: "/products"
+          method: GET
+          headers:
+            Authorization: "Bearer {auth.token}"
+          parameters:
+            category: "electronics"
+        state:
+          request_count: 0
+        response:
+          records:
+            jmespath: products
+          processors:
+            - expression: "state.request_count + 1"
+              output: "state.request_count"
+              aggregation: last
+  expected_records:
+    - id: "101"
+      name: "Product A"
+      price: "29.99"
+    - id: "102"
+      name: "Product B"
+      price: "39.99"
+  expected_state:
+    request_count: 1
+  expected_next_state: {}

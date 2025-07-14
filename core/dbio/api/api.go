@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -183,10 +185,12 @@ type APIState struct {
 
 type APIStateAuth struct {
 	Authenticated bool              `json:"authenticated,omitempty"`
-	Token         string            `json:"token,omitempty"` // refresh token?
-	Headers       map[string]string `json:"-"`               // to inject
+	Token         string            `json:"token,omitempty"`      // refresh token?
+	Headers       map[string]string `json:"-"`                    // to inject
+	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
-	Sign func(context.Context, *http.Request, []byte) error `json:"-"` // for AWS Sigv4
+	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
+	Mutex sync.Mutex                                         `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
@@ -419,4 +423,28 @@ func (ac *APIConnection) CloseAllQueues() {
 func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	_ = ac.Spec // will need to be modified
 	return
+}
+
+// IsAuthExpired checks if the authentication has expired
+func (ac *APIConnection) IsAuthExpired() bool {
+	if ac.State.Auth.ExpiresAt == 0 {
+		return false // No expiry set
+	}
+	return time.Now().Unix() >= ac.State.Auth.ExpiresAt
+}
+
+// EnsureAuthenticated checks if authentication is valid and re-authenticates if needed
+// This method ensures thread-safe authentication checks and re-authentication
+func (ac *APIConnection) EnsureAuthenticated() error {
+	ac.State.Auth.Mutex.Lock()
+	defer ac.State.Auth.Mutex.Unlock()
+
+	// Check if authentication has expired or not authenticated
+	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
+		g.Debug("Authentication expired or not authenticated, re-authenticating...")
+		if err := ac.Authenticate(); err != nil {
+			return g.Error(err, "failed to authenticate")
+		}
+	}
+	return nil
 }

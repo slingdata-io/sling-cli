@@ -30,6 +30,15 @@ func (ac *APIConnection) Authenticate() (err error) {
 	// set auth data
 	setAuthenticated := func() {
 		ac.State.Auth.Authenticated = true
+
+		// Setup auth expiry timer
+		if ac.Spec.Authentication.Expires > 0 {
+			// Calculate expiry time
+			expiryDuration := time.Duration(ac.Spec.Authentication.Expires) * time.Second
+			ac.State.Auth.ExpiresAt = time.Now().Add(expiryDuration).Unix()
+			g.Debug("authentication will expire at %s", time.Unix(ac.State.Auth.ExpiresAt, 0).Format(time.RFC3339))
+		}
+
 		for key, endpoint := range ac.Spec.EndpointMap {
 			for k, v := range ac.State.Auth.Headers {
 				if len(endpoint.Request.Headers) == 0 {
