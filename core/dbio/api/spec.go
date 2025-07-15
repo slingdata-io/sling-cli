@@ -209,7 +209,7 @@ func (ep *Endpoint) setup() (err error) {
 	baseEndpoint := &Endpoint{
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
-		State:   make(StateMap), // Initialize state map
+		State:   g.M(),
 	}
 
 	// only copy over headers
@@ -246,7 +246,7 @@ func (ep *Endpoint) teardown() (err error) {
 	baseEndpoint := &Endpoint{
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
-		State:   make(StateMap), // Initialize state map
+		State:   g.M(),
 	}
 
 	// only copy over headers
