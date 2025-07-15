@@ -767,6 +767,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
 
 	ds.Defer(func() {
+		duck.Context.Mux.TryLock()
 		duck.Context.Unlock() // release lock
 	})
 
