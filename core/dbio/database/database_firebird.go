@@ -90,12 +90,6 @@ func (conn *FirebirdConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 		return ddl, g.Error(err)
 	}
 
-	// Firebird doesn't support temporary tables in the same way
-	if temporary {
-		ddl = strings.Replace(ddl, "CREATE TEMPORARY TABLE", "CREATE TABLE", 1)
-		ddl = strings.Replace(ddl, "CREATE TEMP TABLE", "CREATE TABLE", 1)
-	}
-
 	// Firebird doesn't support schemas, so strip schema from table name
 	ddl = strings.ReplaceAll(ddl, table.FDQN(), table.NameQ())
 
