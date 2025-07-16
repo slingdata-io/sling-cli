@@ -672,3 +672,20 @@ databricks	variant	json	col_variant variant	FALSE	FALSE	Semi-structured data
 databricks	object	json	col_object object	FALSE	FALSE	VARIANT values with structure
 databricks	interval	string	col_interval interval	FALSE	FALSE	Time intervals
 databricks	void	text	col_void void	FALSE	FALSE	Untyped NULL
+firebird	smallint	smallint	col_smallint smallint	TRUE	TRUE	16-bit integer
+firebird	short	smallint	col_smallint smallint	TRUE	TRUE	16-bit integer
+firebird	long	integer	col_integer integer	TRUE	TRUE	32-bit integer
+firebird	integer	integer	col_integer integer	TRUE	TRUE	32-bit integer
+firebird	bigint	bigint	col_bigint bigint	TRUE	TRUE	64-bit integer
+firebird	float	float	col_float float	TRUE	TRUE	Single precision floating point
+firebird	double precision	float	col_double double precision	TRUE	TRUE	Double precision floating point
+firebird	numeric	decimal	col_numeric numeric(10,2)	TRUE	TRUE	Fixed point number
+firebird	decimal	decimal	col_decimal decimal(10,2)	TRUE	TRUE	Fixed point number
+firebird	date	date	col_date date	TRUE	TRUE	Date without time
+firebird	time	time	col_time time	TRUE	TRUE	Time without date
+firebird	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	Date and time
+firebird	char	string	col_char char(10)	TRUE	TRUE	Fixed-length character string
+firebird	varchar	text	col_varchar varchar(100)	TRUE	TRUE	Variable-length character string
+firebird	blob	text	col_blob blob	TRUE	FALSE	Binary large object
+firebird	boolean	bool	col_boolean boolean	TRUE	TRUE	Boolean value
+firebird	varying	text	col_blob blob	TRUE	FALSE	Binary large object

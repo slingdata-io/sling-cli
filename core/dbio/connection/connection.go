@@ -483,6 +483,8 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("database", U.PopParam("database"))
 			} else if c.Type == dbio.TypeDbOracle {
 				setIfMissing("sid", pathValue)
+			} else if c.Type == dbio.TypeDbFirebird {
+				setIfMissing("schema", "main")
 			}
 
 			// set database
@@ -581,6 +583,13 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = "mariadb://{username}:{password}@{host}:{port}/{database}"
+	case dbio.TypeDbFirebird:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("schema", "main")
+		// user:password@servername[:port_number]/database_name_or_file[?params1=value1[&param2=value2]...]
+		template = "firebird://{username}:{password}@{host}:{port}/{database}"
 	case dbio.TypeDbBigQuery:
 		setIfMissing("dataset", c.Data["schema"])
 		setIfMissing("schema", c.Data["dataset"])
