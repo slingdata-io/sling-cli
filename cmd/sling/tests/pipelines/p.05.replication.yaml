@@ -1,0 +1,11 @@
+source: POSTGRES
+target: AWS_S3
+
+defaults:
+  target_options:
+    file_max_rows: 10
+    format: parquet
+
+streams:
+  public.test_parquet_614:
+    object: test_614/test_parquet_614/*.parquet

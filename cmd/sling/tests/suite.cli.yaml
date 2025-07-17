@@ -727,3 +727,9 @@
     - '"100.000"'
     - '"-999.999"'
     - '"0.00001"'
+
+- id: 96
+  name: Test extra files deletion (https://github.com/slingdata-io/sling-cli/issues/614)
+  run: sling run -d -p cmd/sling/tests/pipelines/p.05.extra_parquet_files_deletion.yaml
+  output_does_not_contain:
+    - step (extra_files_check) failed
