@@ -206,7 +206,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 runReplication:
 	defer connection.CloseAll()
 
-	if !cast.ToBool(os.Getenv("SLING_THREAD_CHILD")) {
+	if !env.IsThreadChild {
 		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
 	}
 

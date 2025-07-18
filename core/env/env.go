@@ -32,6 +32,7 @@ var (
 	envMux         = sync.Mutex{}
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
+	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
 )
 
 const (

@@ -55,7 +55,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 
 	// register queues
 	for _, queueName := range ac.Spec.Queues {
-		if val := os.Getenv("SLING_THREADS"); cast.ToInt(val) > 1 {
+		if env.IsThreadChild {
 			g.Warn("API queues may not work correctly for multiple threads.")
 		}
 		_, err = ac.RegisterQueue(queueName)
