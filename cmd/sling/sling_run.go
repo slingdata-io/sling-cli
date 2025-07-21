@@ -207,7 +207,12 @@ runReplication:
 	defer connection.CloseAll()
 
 	if !env.IsThreadChild {
-		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+		text := "Sling CLI | https://slingdata.io"
+		if env.NoColor {
+			g.Info(text)
+		} else {
+			g.Info(g.Colorize(g.ColorCyan, text))
+		}
 	}
 
 	if pipelineCfgPath != "" {
