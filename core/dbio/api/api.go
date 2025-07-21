@@ -11,7 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/spf13/cast"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 type APIConnection struct {
@@ -30,6 +30,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Env:    g.KVArrToMap(os.Environ()...),
 			State:  g.M(),
 			Queues: make(map[string]*iop.Queue),
+			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
 		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
@@ -190,7 +191,7 @@ type APIStateAuth struct {
 	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
 	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
-	Mutex sync.Mutex                                         `json:"-" yaml:"-"` // Mutex for auth operations
+	Mutex *sync.Mutex                                        `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
