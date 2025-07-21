@@ -125,6 +125,8 @@ func SetLogger() {
 		NoColor = true
 		outputOut.NoColor = true
 		outputErr.NoColor = true
+		outputOut.FormatLevel = g.ZLogFormatMessage
+		outputErr.FormatLevel = g.ZLogFormatMessage
 		g.ZLogOut = zerolog.New(outputOut).With().Timestamp().Logger()
 		g.ZLogErr = zerolog.New(outputErr).With().Timestamp().Logger()
 	} else if os.Getenv("SLING_LOGGING") == "JSON" {
