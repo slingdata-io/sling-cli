@@ -85,6 +85,7 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 
 	if ac.Spec.IsDynamic() {
 		// TODO: generate/obtain list of dynamic endpoints
+		return nil, g.Error("dynamic endpoint not yet implemented")
 	}
 
 	if len(patterns) > 0 && patterns[0] != "" {
@@ -134,8 +135,6 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		if err = validateAndSetDefaults(endpoint, ac.Spec); err != nil {
 			return nil, g.Error(err, "endpoint validation failed")
 		}
-
-		// TODO: perform pre-endpoint calls
 	}
 
 	if endpoint.Disabled {
