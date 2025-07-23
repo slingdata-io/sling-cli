@@ -222,7 +222,7 @@ func (fs *GoogleDriveFileSysClient) getFileID(path string) (fileID string, err e
 		g.Trace("Looking for '%s' in parent '%s' (part %d of %d)", part, parentID, i+1, len(parts))
 
 		// Search for the part in the current parent
-		query := fmt.Sprintf("name='%s' and '%s' in parents and trashed=false", part, parentID)
+		query := fmt.Sprintf("name='%s' and '%s' in parents", part, parentID)
 		result, err := fs.client.Files.List().Q(query).Fields("files(id, name, mimeType)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
 		if err != nil {
 			return "", g.Error(err, "Could not search for file: "+part)
@@ -269,7 +269,7 @@ func (fs *GoogleDriveFileSysClient) Write(uri string, reader io.Reader) (bw int6
 	}
 
 	// Check if file already exists
-	query := fmt.Sprintf("name='%s' and '%s' in parents and trashed=false", name, parentID)
+	query := fmt.Sprintf("name='%s' and '%s' in parents", name, parentID)
 	result, err := fs.client.Files.List().Q(query).Fields("files(id)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
 	if err != nil {
 		return 0, g.Error(err, "Could not check if file exists")
@@ -447,7 +447,7 @@ func (fs *GoogleDriveFileSysClient) List(uri string) (nodes FileNodes, err error
 	}
 
 	g.Trace("listing contents of folder ID: %s for path: %s (rootFolderID: %s)", folderID, path, fs.rootFolderID)
-	query := fmt.Sprintf("'%s' in parents and trashed=false", folderID)
+	query := fmt.Sprintf("'%s' in parents", folderID)
 	g.Trace("query => %s", query)
 	fields := googleapi.Field("files(id, name, size, createdTime, modifiedTime, mimeType, owners)")
 
@@ -617,7 +617,7 @@ func (fs *GoogleDriveFileSysClient) ListRecursive(uri string) (nodes FileNodes, 
 		stack = stack[:len(stack)-1]
 
 		// List files in current folder
-		query := fmt.Sprintf("'%s' in parents and trashed=false", current.id)
+		query := fmt.Sprintf("'%s' in parents", current.id)
 		fields := googleapi.Field("files(id, name, size, createdTime, modifiedTime, mimeType, owners)")
 
 		pageToken := ""
@@ -747,7 +747,7 @@ func (fs *GoogleDriveFileSysClient) getOrCreateFolder(path string) (folderID str
 		}
 
 		// Check if folder exists
-		query := fmt.Sprintf("name='%s' and '%s' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false", part, parentID)
+		query := fmt.Sprintf("name='%s' and '%s' in parents and mimeType='application/vnd.google-apps.folder'", part, parentID)
 		result, err := fs.client.Files.List().Q(query).Fields("files(id)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
 		if err != nil {
 			return "", g.Error(err, "Could not search for folder: "+part)
