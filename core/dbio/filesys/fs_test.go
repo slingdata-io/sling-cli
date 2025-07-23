@@ -1320,7 +1320,7 @@ func TestFileSysGoogleDrive(t *testing.T) {
 	t.Parallel()
 
 	// Create Google Drive filesystem client
-	fs, err := NewFileSysClient(dbio.TypeFileGoogleDrive, "folder_id=1J0XayKhZ1Nw4q-awg2y32S18Yy-jLwuR", "GDRIVE_KEY_FILE="+os.Getenv("GDRIVE_KEY_FILE"))
+	fs, err := NewFileSysClient(dbio.TypeFileGoogleDrive, "folder_id=0AGlg37wohIVHUk9PVA", "GDRIVE_KEY_FILE="+os.Getenv("GDRIVE_KEY_FILE"))
 	if !assert.NoError(t, err) {
 		return
 	}
