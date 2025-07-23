@@ -14,6 +14,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding"
@@ -659,4 +660,374 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 	}
 
 	return newVal.String()
+}
+
+type Evaluator struct {
+	Eval         *goval.Evaluator
+	State        map[string]any
+	NoComputeKey string
+	VarPrefixes  []string
+
+	bracketRegex *regexp.Regexp
+}
+
+func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
+	// set state
+	stateMap := g.M()
+	for _, state := range states {
+		for k, v := range state {
+			stateMap[k] = v
+		}
+	}
+
+	return &Evaluator{
+		Eval:         goval.NewEvaluator(),
+		State:        stateMap,
+		NoComputeKey: "__sling_no_compute__",
+		VarPrefixes:  varPrefixes,
+		bracketRegex: regexp.MustCompile(`\{([^{}]+)\}`),
+	}
+}
+
+// ExtractVars identifies variable references in a string expression,
+// ignoring those inside double quotes. It can recognize patterns like env.VAR, state.VAR, secrets.VAR, and auth.VAR.
+func (e *Evaluator) ExtractVars(expr string) []string {
+	// To track found variable references
+	var references []string
+
+	if len(e.VarPrefixes) == 0 {
+		g.Warn("did not set VarPrefixes in Evaluator")
+		return []string{}
+	}
+
+	// Regular expression for finding variable references
+	// Matches env., state., secrets., auth. followed by a variable name
+	// example regex: `(env|state|secrets|auth|response|request|sync)\.\w+`
+	prefixes := strings.Join(e.VarPrefixes, "|")
+	refRegex := regexp.MustCompile(`(` + prefixes + `)\.\w+`)
+
+	// First, we need to identify string literals to exclude them
+	// Track positions of string literals
+	inString := false
+	stringRanges := make([][]int, 0)
+	var start int
+
+	for i, char := range expr {
+		if char == '"' {
+			// Check if the quote is escaped
+			if i > 0 && expr[i-1] == '\\' {
+				continue
+			}
+
+			if !inString {
+				// Start of a string
+				inString = true
+				start = i
+			} else {
+				// End of a string
+				inString = false
+				stringRanges = append(stringRanges, []int{start, i})
+			}
+		}
+	}
+
+	// Find all potential references
+	matches := refRegex.FindAllStringIndex(expr, -1)
+
+	// Filter out references that are inside string literals
+	for _, match := range matches {
+		isInString := false
+		for _, strRange := range stringRanges {
+			if match[0] >= strRange[0] && match[1] <= strRange[1] {
+				isInString = true
+				break
+			}
+		}
+
+		if !isInString {
+			// Extract the actual reference
+			reference := expr[match[0]:match[1]]
+			references = append(references, reference)
+		}
+	}
+
+	return references
+
+}
+
+func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal string, err error) {
+	output, err := e.RenderAny(val, extras...)
+	if err != nil {
+		return
+	}
+
+	switch output.(type) {
+	case map[string]string, map[string]any, map[any]any, []any, []string:
+		newVal = g.Marshal(output)
+	default:
+		newVal = cast.ToString(output)
+	}
+
+	return
+}
+
+func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, err error) {
+
+	// check if it's a payload and render
+	switch input.(type) {
+	case map[any]any, map[string]any, []any, []string:
+		return e.RenderPayload(input, extras...)
+	}
+
+	toString := func(in any) (out string) {
+		inStr, err := cast.ToStringE(in)
+		if err != nil {
+			inStr = g.Marshal(input)
+		}
+		return inStr
+	}
+
+	inputStr := toString(input)
+	if inputStr == "" && input != nil && input != "" {
+		return nil, g.Error("unable to convert RenderAny input to string")
+	}
+
+	matches := e.bracketRegex.FindAllStringSubmatch(inputStr, -1)
+
+	expressions := []string{}
+	varsToCheck := []string{} // to ensure existence in state maps
+	for _, match := range matches {
+		expression := match[1]
+		expressions = append(expressions, expression)
+		varsToCheck = append(varsToCheck, e.ExtractVars(expression)...)
+	}
+
+	// Initialize output with input value
+	output = input
+
+	noCompute := false // especially in SQL queries
+	stateMap := e.State
+	for _, extra := range extras {
+		for k, v := range extra {
+			stateMap[k] = v
+			if k == e.NoComputeKey {
+				noCompute = true
+			}
+		}
+	}
+
+	// Create evaluator for expression evaluation
+	canRender := func(expr string) bool {
+		expr = strings.TrimSpace(expr)
+		can := false
+		for _, prefix := range e.VarPrefixes {
+			if strings.Contains(expr, prefix+".") {
+				can = true
+			}
+		}
+		return can
+	}
+
+	// we'll use those keys as jmespath expr
+	for _, expr := range expressions {
+		var value any
+		callsFuncOrEvals := false
+
+		// Check if expression contains function calls
+		for funcName := range GlobalFunctionMap {
+			if noCompute {
+				break
+			} else if strings.Contains(expr, funcName+"(") && strings.Contains(expr, ")") {
+				callsFuncOrEvals = true
+				break
+			}
+		}
+
+		// ensure vars exist. if it doesn't, set at nil
+		for _, varToCheck := range varsToCheck {
+			varToCheck = strings.TrimSpace(varToCheck)
+			parts := strings.Split(varToCheck, ".")
+			if len(parts) != 2 {
+				// continue
+			}
+			section := parts[0]
+			key := parts[1]
+			if g.In(section, e.VarPrefixes...) {
+				_, ok := stateMap[section]
+				if !ok {
+					stateMap[section] = g.M()
+				}
+
+				nested := cast.ToStringMap(stateMap[section])
+				if _, ok := nested[key]; !ok {
+					nested[key] = nil
+				}
+				stateMap[section] = nested // set back
+			}
+		}
+
+		// Check for operators that indicate evaluation/computation is needed
+		// Based on goval documentation: https://github.com/maja42/goval
+		if !callsFuncOrEvals && !noCompute {
+			evaluationOperators := []string{
+				// Comparison operators
+				"==", "!=", "<=", ">=", "<", ">",
+				// Arithmetic operators
+				"+", "-", "*", "/", "%",
+				// Logical operators
+				"&&", "||", "!",
+				// Bitwise operators
+				"|", "&", "^", "~", "<<", ">>",
+				// Ternary operator
+				"?", ":",
+				// Array/string operations
+				" in ", "[", // array contains, slicing
+			}
+
+			for _, op := range evaluationOperators {
+				if strings.Contains(expr, op) {
+					callsFuncOrEvals = true
+					break
+				}
+			}
+		}
+
+		if !canRender(expr) && !callsFuncOrEvals {
+			continue
+		}
+
+		// Try jmespath first for simple path expressions (when no evaluation operators are detected)
+		validJmesPath := false
+		jmespathOperators := []string{
+			"[", "]", "*", "|", "?", ":", ".", "@",
+			"&&", "||", "!",
+			"==", "!=", "<", "<=", ">", ">=",
+			"abs(",
+			"avg(",
+			"contains(",
+			"ceil(",
+			"ends_with(",
+			"floor(",
+			"join(",
+			"keys(",
+			"length(",
+			"map(",
+			"max(",
+			"max_by(",
+			"merge(",
+			"min(",
+			"min_by(",
+			"not_null(",
+			"reverse(",
+			"sort(",
+			"sort_by(",
+			"starts_with(",
+			"sum(",
+			"to_array(",
+			"to_string(",
+			"to_number(",
+			"type(",
+			"values(",
+		}
+		for _, op := range jmespathOperators {
+			if strings.Contains(expr, op) {
+				validJmesPath = true
+				break
+			}
+		}
+		var jpValue any
+		jpValue, err = jmespath.Search(expr, stateMap)
+
+		// If jmespath failed or if we detected evaluation operators/functions, use goval
+		if callsFuncOrEvals || err != nil {
+			value, err = e.Eval.Evaluate(expr, stateMap, GlobalFunctionMap)
+			if err != nil {
+				// check if jmespath rendered
+				if jpValue != nil && validJmesPath {
+					value = jpValue
+					err = nil // use jmespath result
+				} else {
+					return "", g.Error(err, "could not render expression: %s", expr)
+				}
+			}
+		} else {
+			value = jpValue
+		}
+
+		key := "{" + expr + "}"
+		if strings.TrimSpace(inputStr) == key {
+			output = value
+		} else {
+			// treat as string if whole input isn't the expression
+			switch value.(type) {
+			case nil:
+				// Replace nil values with empty string
+				output = strings.ReplaceAll(toString(output), key, "")
+			case map[string]string, map[string]any, map[any]any, []any, []string:
+				output = strings.ReplaceAll(toString(output), key, g.Marshal(value))
+			default:
+				output = strings.ReplaceAll(toString(output), key, cast.ToString(value))
+			}
+		}
+	}
+
+	return output, nil
+}
+
+func (e *Evaluator) RenderPayload(val any, extras ...map[string]any) (newVal any, err error) {
+	newVal = val
+
+	// Handle different types
+	switch v := val.(type) {
+	case string:
+		// For strings, use the existing renderAny method
+		return e.RenderAny(v, extras...)
+	case map[any]any:
+		// For map[any]any, render each value
+		resultMap := make(map[string]any)
+		for k, mapVal := range v {
+			renderedVal, err := e.RenderPayload(mapVal, extras...)
+			if err != nil {
+				return nil, g.Error(err, "could not render map value for key: %v", k)
+			}
+			resultMap[cast.ToString(k)] = renderedVal
+		}
+		return resultMap, nil
+	case map[string]any:
+		// For map[string]any, render each value
+		resultMap := make(map[string]any)
+		for k, mapVal := range v {
+			renderedVal, err := e.RenderPayload(mapVal, extras...)
+			if err != nil {
+				return nil, g.Error(err, "could not render map value for key: %s", k)
+			}
+			resultMap[k] = renderedVal
+		}
+		return resultMap, nil
+	case []any:
+		// For []any, render each element
+		resultArray := make([]any, len(v))
+		for i, arrVal := range v {
+			renderedVal, err := e.RenderPayload(arrVal, extras...)
+			if err != nil {
+				return nil, g.Error(err, "could not render array value at index: %d", i)
+			}
+			resultArray[i] = renderedVal
+		}
+		return resultArray, nil
+	case []string:
+		// For []string, render each string
+		resultArray := make([]any, len(v))
+		for i, strVal := range v {
+			renderedVal, err := e.RenderString(strVal, extras...)
+			if err != nil {
+				return nil, g.Error(err, "could not render string array value at index: %d", i)
+			}
+			resultArray[i] = renderedVal
+		}
+		return resultArray, nil
+	default:
+		// For other types, return as-is
+		return val, nil
+	}
 }

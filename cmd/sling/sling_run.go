@@ -206,8 +206,13 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 runReplication:
 	defer connection.CloseAll()
 
-	if !cast.ToBool(os.Getenv("SLING_THREAD_CHILD")) {
-		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	if !env.IsThreadChild {
+		text := "Sling CLI | https://slingdata.io"
+		if env.NoColor {
+			g.Info(text)
+		} else {
+			g.Info(g.Colorize(g.ColorCyan, text))
+		}
 	}
 
 	if pipelineCfgPath != "" {
@@ -514,9 +519,21 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 	}
 
 	counter := 0
+	cleanedForChunkLoad := map[string]bool{}
+
 	for _, cfg := range replication.Tasks {
 		if interrupted {
 			break
+		}
+
+		// if we're chunking and if truncate/full-refresh
+		// truncate or drop right now, the first task will re-create it
+		cleaned := cleanedForChunkLoad[cfg.Target.Object]
+		if !isThreadChild && !cleaned && (cfg.IsFullRefreshWithChunking() || cfg.IsTruncateWithChunking()) {
+			if err = cfg.ClearTableForChunkLoadWithRange(); err != nil {
+				return g.Error(err, "could not clear table in target conn for chunk loading")
+			}
+			cleanedForChunkLoad[cfg.Target.Object] = true
 		}
 
 		env.LogSink = nil // clear log sink

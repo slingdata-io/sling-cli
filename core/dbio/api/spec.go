@@ -1,6 +1,7 @@
 package api
 
 import (
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -70,14 +71,13 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 
 // Spec defines the complete API specification with endpoints and authentication
 type Spec struct {
-	Name             string         `yaml:"name" json:"name"`
-	Description      string         `yaml:"description" json:"description"`
-	Calls            Calls          `yaml:"calls" json:"calls"`
-	Queues           []string       `yaml:"queues" json:"queues"`
-	Defaults         Endpoint       `yaml:"defaults" json:"defaults"`
-	Authentication   Authentication `yaml:"authentication" json:"authentication"`
-	EndpointMap      EndpointMap    `yaml:"endpoints" json:"endpoints"`
-	DynamicEndpoints Endpoints      `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
+	Name             string           `yaml:"name" json:"name"`
+	Description      string           `yaml:"description" json:"description"`
+	Queues           []string         `yaml:"queues" json:"queues"`
+	Defaults         Endpoint         `yaml:"defaults" json:"defaults"`
+	Authentication   Authentication   `yaml:"authentication" json:"authentication"`
+	EndpointMap      EndpointMap      `yaml:"endpoints" json:"endpoints"`
+	DynamicEndpoints DynamicEndpoints `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
 	originalMap      map[string]any
 	endpointsOrdered []string
@@ -87,47 +87,77 @@ func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
 }
 
+type DynamicEndpoints []DynamicEndpoint
+
+type DynamicEndpoint struct {
+	Setup    Sequence `yaml:"setup" json:"setup"`
+	Iterate  string   `yaml:"iterate" json:"iterate"`
+	Into     string   `yaml:"into" json:"into"`
+	Endpoint Endpoint `yaml:"endpoint" json:"endpoint"`
+}
+
 // Authentication defines how to authenticate with the API
 type Authentication struct {
-	Type              AuthType           `yaml:"type" json:"type"`
-	Token             string             `yaml:"token" json:"token"`
-	Username          string             `yaml:"username" json:"username"`
-	Password          string             `yaml:"password" json:"password"`
-	Flow              AuthenticationFlow `yaml:"flow" json:"flow"`
-	AuthenticationURL string             `yaml:"authentication_url" json:"authentication_url"`
-	ClientID          string             `yaml:"client_id" json:"client_id"`
-	ClientSecret      string             `yaml:"client_secret" json:"client_secret"`
-	Scopes            []string           `yaml:"scopes" json:"scopes"`
-	RedirectURI       string             `yaml:"redirect_uri" json:"redirect_uri"`
-	RefreshToken      string             `yaml:"refresh_token" json:"refresh_token"`
-	RefreshOnExpire   bool               `yaml:"refresh_on_expire" json:"refresh_on_expire"`
+	Type AuthType `yaml:"type" json:"type"`
 
-	AwsService         string `yaml:"aws_service" json:"aws_service"`
-	AwsAccessKeyID     string `yaml:"aws_access_key_id" json:"aws_access_key_id"`
-	AwsSecretAccessKey string `yaml:"aws_secret_access_key" json:"aws_secret_access_key"`
-	AwsSessionToken    string `yaml:"aws_session_token" json:"aws_session_token"`
-	AwsRegion          string `yaml:"aws_region" json:"aws_region"`
-	AwsProfile         string `yaml:"aws_profile" json:"aws_profile"`
+	// when set, re-auth after number of seconds
+	Expires int `yaml:"expires" json:"expires,omitempty"`
+
+	// custom authentication workflow
+	Sequence Sequence `yaml:"sequence" json:"sequence,omitempty"`
+
+	// Basic Auth
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
+	Password string `yaml:"password,omitempty" json:"password,omitempty"`
+
+	// OAuth
+	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
+	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"`
+	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
+	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
+	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
+	RedirectURI       string    `yaml:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
+	RefreshToken      string    `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
+	RefreshOnExpire   bool      `yaml:"refresh_on_expire,omitempty" json:"refresh_on_expire,omitempty"`
+
+	// AWS
+	AwsService         string `yaml:"aws_service,omitempty" json:"aws_service,omitempty"`
+	AwsAccessKeyID     string `yaml:"aws_access_key_id,omitempty" json:"aws_access_key_id,omitempty"`
+	AwsSecretAccessKey string `yaml:"aws_secret_access_key,omitempty" json:"aws_secret_access_key,omitempty"`
+	AwsSessionToken    string `yaml:"aws_session_token,omitempty" json:"aws_session_token,omitempty"`
+	AwsRegion          string `yaml:"aws_region,omitempty" json:"aws_region,omitempty"`
+	AwsProfile         string `yaml:"aws_profile,omitempty" json:"aws_profile,omitempty"`
 }
 
 type AuthType string
 
 const (
 	AuthTypeNone     AuthType = ""
-	AuthTypeBearer   AuthType = "bearer"
+	AuthTypeSequence AuthType = "sequence"
 	AuthTypeBasic    AuthType = "basic"
 	AuthTypeOAuth2   AuthType = "oauth2"
 	AuthTypeAWSSigV4 AuthType = "aws-sigv4"
 )
 
-type AuthenticationFlow string
+type OAuthFlow string
 
 const (
-	AuthFlowClientCredentials AuthenticationFlow = "client_credentials"
-	AuthFlowAuthorizationCode AuthenticationFlow = "authorization_code"
-	AuthFlowPassword          AuthenticationFlow = "password"
-	AuthFlowRefreshToken      AuthenticationFlow = "refresh_token"
+	OAuthFlowClientCredentials OAuthFlow = "client_credentials"
+	OAuthFlowAuthorizationCode OAuthFlow = "authorization_code"
+	OAuthFlowPassword          OAuthFlow = "password"
+	OAuthFlowRefreshToken      OAuthFlow = "refresh_token"
 )
+
+// Sequence is many calls (perfect for async jobs, custom auth)
+type Sequence []Call
+
+type Call struct {
+	If         string     `yaml:"if" json:"if"`
+	Request    Request    `yaml:"request" json:"request"`
+	Pagination Pagination `yaml:"pagination" json:"pagination"`
+	Response   Response   `yaml:"response" json:"response"`
+}
 
 // Endpoints is a collection of API endpoints
 type EndpointMap map[string]Endpoint
@@ -145,6 +175,8 @@ type Endpoint struct {
 	Pagination  Pagination `yaml:"pagination" json:"pagination"`
 	Response    Response   `yaml:"response" json:"response"`
 	Iterate     Iterate    `yaml:"iterate" json:"iterate,omitempty"` // state expression to use to loop
+	Setup       Sequence   `yaml:"setup" json:"setup,omitempty"`
+	Teardown    Sequence   `yaml:"teardown" json:"teardown,omitempty"`
 
 	stop         bool // whether we should stop the endpoint process
 	conn         *APIConnection
@@ -161,8 +193,11 @@ type Endpoint struct {
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
 	ep.context.Lock()
+	defer ep.context.Unlock()
+	if ep.State == nil {
+		ep.State = make(StateMap)
+	}
 	ep.State[key] = val
-	ep.context.Unlock()
 }
 
 func (eps Endpoints) Sort() {
@@ -171,8 +206,85 @@ func (eps Endpoints) Sort() {
 	})
 }
 
-func (sm StateMap) DetermineRenderOrder() (order []string, err error) {
-	remaining := lo.Keys(sm)
+// setup executes the setup sequence for an endpoint
+func (ep *Endpoint) setup() (err error) {
+	if len(ep.Setup) == 0 {
+		return nil
+	}
+
+	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
+
+	baseEndpoint := &Endpoint{
+		context: g.NewContext(ep.context.Ctx),
+		conn:    ep.conn,
+		State:   g.M(),
+	}
+
+	// only copy over headers
+	baseEndpoint.Request.Headers = ep.Request.Headers
+
+	// copy over state from endpoint with proper locking
+	ep.context.Lock()
+	if ep.State != nil {
+		maps.Copy(baseEndpoint.State, ep.State)
+	}
+	ep.context.Unlock()
+
+	if err := runSequence(ep.Setup, baseEndpoint); err != nil {
+		return g.Error(err, "endpoint setup failed")
+	}
+
+	// sync state back with proper locking
+	ep.context.Lock()
+	maps.Copy(ep.State, baseEndpoint.State)
+	ep.context.Unlock()
+
+	g.Debug("endpoint setup completed successfully")
+	return nil
+}
+
+// teardown executes the teardown sequence for an endpoint
+func (ep *Endpoint) teardown() (err error) {
+	if len(ep.Teardown) == 0 {
+		return nil
+	}
+
+	g.Debug("running endpoint teardown sequence (%d calls)", len(ep.Teardown))
+
+	baseEndpoint := &Endpoint{
+		context: g.NewContext(ep.context.Ctx),
+		conn:    ep.conn,
+		State:   g.M(),
+	}
+
+	// only copy over headers
+	baseEndpoint.Request.Headers = ep.Request.Headers
+
+	// copy over state from endpoint with proper locking
+	ep.context.Lock()
+	if ep.State != nil {
+		maps.Copy(baseEndpoint.State, ep.State)
+	}
+	ep.context.Unlock()
+
+	if err := runSequence(ep.Teardown, baseEndpoint); err != nil {
+		return g.Error(err, "endpoint teardown failed")
+	}
+
+	// sync state back with proper locking
+	ep.context.Lock()
+	maps.Copy(ep.State, baseEndpoint.State)
+	ep.context.Unlock()
+
+	g.Debug("endpoint teardown completed successfully")
+	return nil
+}
+
+func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
+	iter.context.Lock()
+	remaining := lo.Keys(iter.state)
+	iter.context.Unlock()
+
 	processing := map[string]bool{} // track variables being processed in current chain
 
 	addAndRemove := func(key string) {
@@ -200,11 +312,14 @@ func (sm StateMap) DetermineRenderOrder() (order []string, err error) {
 		processing[key] = true
 		defer func() { processing[key] = false }()
 
-		expr := cast.ToString(sm[key])
+		iter.context.Lock()
+		expr := cast.ToString(iter.state[key])
+		iter.context.Unlock()
+
 		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
 		if len(matches) > 0 {
 			for _, match := range matches {
-				varsReferenced := extractVars(match[1])
+				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match[1])
 				for _, varReferenced := range varsReferenced {
 					if strings.HasPrefix(varReferenced, "state.") {
 						refKey := strings.TrimPrefix(varReferenced, "state.")
@@ -250,33 +365,6 @@ type Iteration struct {
 	context  *g.Context
 	endpoint *Endpoint
 }
-
-// Calls are steps that are executed at different stages of the API request lifecycle
-type Calls []Call
-
-// Call defines an executable action to be performed at a specific stage
-type Call interface {
-	ID() string
-	Type() CallType
-	Stage() CallStage
-	Execute() error
-}
-
-type CallType string
-
-const (
-	CallTypeRequest CallType = "request"
-	CallTypeAuth    CallType = "auth"
-)
-
-type CallStage string
-
-const (
-	CallStageStart CallStage = "start" // called once when run begins
-	CallStageEnd   CallStage = "end"   // called once when run finishes
-	CallStagePre   CallStage = "pre"   // called right before each stream begins
-	CallStagePost  CallStage = "post"  // called right after each stream finishes
-)
 
 // StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any

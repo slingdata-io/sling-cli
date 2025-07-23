@@ -1382,6 +1382,12 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				uri = GetDeepestParent(uri) // get target folder, since split by files
 			}
 
+			err = Delete(fs, uri)
+			if err != nil {
+				err = g.Error(err, "Could not delete uri")
+				return bw, err
+			}
+
 			written, err := CopyFromLocalRecursive(fs, localRoot, uri)
 			if err != nil {
 				err = g.Error(err, "Could not write to file")

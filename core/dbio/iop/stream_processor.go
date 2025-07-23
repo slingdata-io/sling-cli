@@ -283,6 +283,7 @@ func NewStreamProcessor() *StreamProcessor {
 		"01/02/2006 03:04:05 PM", // "8/17/1994 12:00:00 AM"
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02T15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999 -07",
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02 15:04",
@@ -1227,6 +1228,12 @@ func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 
 // ParseTime parses a date string and returns time.Time
 func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
+	if tv, ok := i.(time.Time); ok {
+		return tv, nil
+	} else if tv, ok := i.(*time.Time); ok && tv != nil {
+		return *tv, nil
+	}
+
 	s := cast.ToString(i)
 	if s == "" {
 		return t, nil // return zero time, so it become nil

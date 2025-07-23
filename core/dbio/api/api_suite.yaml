@@ -1,0 +1,451 @@
+# Test cases for API HTTP calls and response extraction
+# Each test case validates different aspects of the API framework
+
+- id: 1
+  name: extract_pagination_id_from_response
+  mock_response:
+    pagination:
+      id: abc123
+      hasMore: true
+      total: 100
+    data:
+      - id: 1
+        name: Item 1
+      - id: 2
+        name: Item 2
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            - expression: response.json.pagination.id
+              output: state.next_page_id
+              aggregation: last
+          records:
+            jmespath: data
+  expected_records:
+    - id: "1"
+      name: Item 1
+    - id: "2"
+      name: Item 2
+  expected_state:
+    next_page_id: abc123
+  expected_next_state: {}
+
+- id: 2
+  name: extract_records_with_jmespath_filter
+  mock_response:
+    data:
+      items:
+        - id: 1
+          name: Active Item
+          active: true
+        - id: 2
+          name: Inactive Item
+          active: false
+        - id: 3
+          name: Another Active
+          active: true
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          records:
+            jmespath: "data.items[?active==`true`]"
+  expected_records:
+    - id: "1"
+      name: Active Item
+      active: "true"
+    - id: "3"
+      name: Another Active
+      active: "true"
+  expected_state: {}
+  expected_next_state: {}
+
+- id: 3
+  name: onestock_style_response
+  mock_response:
+    pagination:
+      id: cursor_xyz789
+      limit: 50
+      hasMore: true
+    items:
+      - id: 1
+        status: shipped
+        createdAt: "2025-01-10"
+      - id: 2
+        status: pending
+        createdAt: "2025-01-11"
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            - expression: response.json.pagination.id
+              output: state.cursor
+              aggregation: last
+            - expression: response.json.pagination.limit
+              output: state.limit
+              aggregation: last
+          records:
+            jmespath: items
+        pagination:
+          stop_condition: "length(response.json.items) == 0"
+          next_state:
+            page_cursor: "{state.cursor}"
+            id: "{response.json.pagination.id}"
+  expected_records:
+    - id: 1
+      status: shipped
+      createdAt: "2025-01-10"
+    - id: 2
+      status: pending
+      createdAt: "2025-01-11"
+  expected_state:
+    cursor: cursor_xyz789
+    limit: 50
+  expected_next_state:
+    page_cursor: cursor_xyz789
+    id: cursor_xyz789
+
+- id: 4
+  name: test_nextstate_rendering_with_mixed_sources
+  mock_response:
+    meta:
+      next_cursor: next_page_123
+      page_size: 25
+      total: 150
+    results:
+      - id: rec1
+        value: 100
+      - id: rec2
+        value: 200
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        state:
+          base_url: https://api.example.com
+          version: v2
+        response:
+          processors:
+            - expression: response.json.meta.next_cursor
+              output: state.next_cursor
+              aggregation: last
+            - expression: response.json.meta.page_size
+              output: state.page_size
+              aggregation: last
+          records:
+            jmespath: results
+        pagination:
+          stop_condition: "response.json.meta.next_cursor == null"
+          next_state:
+            cursor: "{state.next_cursor}"
+            limit: "{state.page_size}"
+            endpoint: "{state.base_url}/{state.version}/data"
+            total: "{response.json.meta.total}"
+  expected_records:
+    - id: rec1
+      value: "100"
+    - id: rec2
+      value: "200"
+  expected_state:
+    base_url: https://api.example.com
+    version: v2
+    next_cursor: next_page_123
+    page_size: 25
+  expected_next_state:
+    cursor: next_page_123
+    limit: 25
+    endpoint: https://api.example.com/v2/data
+    total: 150
+
+- id: 5
+  name: test_nextstate_with_functions
+  mock_response:
+    pagination:
+      next_token: token_456
+      has_more: true
+      per_page: null  # null value to test coalesce
+    data:
+      - id: 1
+        created: "2025-01-10T10:00:00Z"
+      - id: 2
+        created: "2025-01-10T11:00:00Z"
+      - id: 3
+        created: "2025-01-10T12:00:00Z"
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        state:
+          default_limit: 50
+          max_limit: 100
+          base_time: "2025-01-10T00:00:00Z"
+        response:
+          processors:
+            - expression: response.json.pagination.next_token
+              output: state.token
+              aggregation: last
+            - expression: response.json.pagination.has_more
+              output: state.has_more
+              aggregation: last
+            - expression: greatest(response.json.data[0].created, response.json.data[1].created, response.json.data[2].created)
+              output: state.max_created
+              aggregation: last
+          records:
+            jmespath: data
+        pagination:
+          stop_condition: "!state.has_more || state.token == null"
+          next_state:
+            # Use coalesce to handle null per_page
+            limit: "{ coalesce(response.json.pagination.per_page, state.default_limit) }"
+            # Use if function for conditional logic
+            token: "{ if(state.has_more, state.token, null) }"
+            # Use date_add to calculate next time window
+            from_time: "{ date_add(state.max_created, 1, \"second\") }"
+            # Use least to ensure we don't exceed max_limit
+            safe_limit: "{ least(coalesce(response.json.pagination.per_page, state.default_limit), state.max_limit) }"
+            # Use string functions
+            token_prefix: "{ substring(state.token, 0, 5) }"
+            # Use encode_base64
+            encoded_token: "{ encode_base64(state.token) }"
+            # Complex expression with multiple functions
+            query_string: "{ join([\"limit=\", cast(least(state.default_limit, 100), \"string\"), \"&token=\", state.token], \"\") }"
+  expected_records:
+    - id: "1"
+      created: "2025-01-10T10:00:00Z"
+    - id: "2"
+      created: "2025-01-10T11:00:00Z"
+    - id: "3"
+      created: "2025-01-10T12:00:00Z"
+  expected_state:
+    default_limit: 50
+    max_limit: 100
+    base_time: "2025-01-10T00:00:00Z"
+    token: token_456
+    has_more: true
+    max_created: "2025-01-10T12:00:00Z"
+  expected_next_state:
+    limit: 50  # coalesce returns default_limit since per_page is nil
+    token: token_456  # if returns token since has_more is true
+    from_time: "2025-01-10T12:00:01Z"  # date_add adds 1 second
+    safe_limit: 50  # least(50, 100) = 50
+    token_prefix: token  # substring of "token_456"
+    encoded_token: dG9rZW5fNDU2  # base64 encoding of "token_456"
+    query_string: "limit=50&token=token_456"
+
+- id: 6
+  name: test_authentication_sequence_token_retrieval
+  mock_response:
+    # This will be the response for the main endpoint after authentication
+    data:
+      - order_id: "ERESA_000000001"
+        site_id: "store_123"
+        status: "shipped"
+        amount: 99.99
+      - order_id: "ERESA_000000002"
+        site_id: "store_123"
+        status: "pending"
+        amount: 149.5
+  spec:
+    name: onestock_api
+    description: "Test authentication sequence for token retrieval"
+    authentication:
+      type: sequence
+      sequence:
+        - request:
+            url: "/login"  # relative URL for test server
+            method: POST
+            payload:
+              site_id: "{secrets.site_id}"
+              user_id: "{secrets.user_id}"
+              password: "{secrets.password}"
+          response:
+            processors:
+              - expression: "response.json.token"
+                output: "state.token"
+                aggregation: last
+    endpoints:
+      test_endpoint:
+        description: "Order history endpoint"
+        request:
+          url: "/history"  # relative URL for test server
+          method: "GET"
+          headers:
+            Authorization: "Bearer {state.token}"
+          parameters:
+            site_id: "{secrets.site_id}"
+            order_id: "ERESA_000000003"
+        response:
+          records:
+            jmespath: data
+  expected_records:
+    - order_id: "ERESA_000000001"
+      site_id: store_123
+      status: shipped
+      amount: "99.99"
+    - order_id: "ERESA_000000002"
+      site_id: store_123
+      status: pending
+      amount: "149.5"
+  expected_state:
+    token: mock_token_12345
+  expected_next_state: {}
+
+- id: 7
+  name: test_setup_teardown_lifecycle
+  mock_response:
+    users:
+      - id: 1
+        name: "John Doe"
+        email: "john@example.com"
+      - id: 2
+        name: "Jane Smith"
+        email: "jane@example.com"
+    # Mock responses for setup and teardown
+    config:
+      api_version: "v2"
+      base_url: "https://api.example.com"
+      rate_limit: 100
+    cleanup:
+      status: "success"
+      message: "Session closed"
+  spec:
+    name: lifecycle_test_api
+    description: "Test setup and teardown lifecycle"
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        description: "Main endpoint that uses setup state"
+        setup:
+          - request:
+              url: "/config"
+              method: GET
+            response:
+              processors:
+                - expression: "response.json.config.api_version"
+                  output: "state.api_version"
+                  aggregation: last
+                - expression: "response.json.config.base_url"
+                  output: "state.base_url"  
+                  aggregation: last
+                - expression: "response.json.config.rate_limit"
+                  output: "state.rate_limit"
+                  aggregation: last
+        teardown:
+          - request:
+              url: "/cleanup"
+              method: POST
+              payload:
+                session_id: "test_session"
+                api_version: "{state.api_version}"
+                total_users: 2
+            response:
+              processors:
+                - expression: "response.json.cleanup.status"
+                  output: "state.cleanup_status"
+                  aggregation: last
+        request:
+          url: "/users"
+          method: GET
+          headers:
+            X-API-Version: "{state.api_version}"
+            X-Base-URL: "{state.base_url}"
+          parameters:
+            limit: "{state.rate_limit}"
+        response:
+          records:
+            jmespath: users
+  expected_records:
+    - id: "1"
+      name: "John Doe"
+      email: "john@example.com"
+    - id: "2"
+      name: "Jane Smith"
+      email: "jane@example.com"
+  expected_state:
+    api_version: "v2"
+    base_url: "https://api.example.com"
+    rate_limit: 100
+  expected_next_state: {}
+
+- id: 8
+  name: test_authentication_with_expiry
+  mock_response:
+    products:
+      - id: 101
+        name: "Product A"
+        price: 29.99
+      - id: 102
+        name: "Product B"
+        price: 39.99
+  spec:
+    name: expiry_test_api
+    description: "Test authentication expiry functionality"
+    authentication:
+      type: sequence
+      expires: 3  # Auth expires after 3 seconds
+      sequence:
+        - request:
+            url: "/login"
+            method: POST
+            payload:
+              username: "{secrets.user_id}"
+              password: "{secrets.password}"
+          response:
+            processors:
+              - expression: "response.json.token"
+                output: "auth.token"
+                aggregation: last
+              - expression: "response.json.token"
+                output: "auth.headers.Authorization"
+                aggregation: last
+    endpoints:
+      test_endpoint:
+        description: "Products endpoint requiring authentication"
+        request:
+          url: "/products"
+          method: GET
+          headers:
+            Authorization: "Bearer {auth.token}"
+          parameters:
+            category: "electronics"
+        state:
+          request_count: 0
+        response:
+          records:
+            jmespath: products
+          processors:
+            - expression: "state.request_count + 1"
+              output: "state.request_count"
+              aggregation: last
+  expected_records:
+    - id: "101"
+      name: "Product A"
+      price: "29.99"
+    - id: "102"
+      name: "Product B"
+      price: "39.99"
+  expected_state:
+    request_count: 1
+  expected_next_state: {}

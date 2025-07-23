@@ -1,0 +1,85 @@
+source: postgres
+target: oracle
+
+defaults:
+  mode: '{MODE}'
+  object: oracle.{stream_table_lower}
+  primary_key: [id]
+  target_options:
+    use_bulk: false
+  
+  hooks:
+    post:
+      # delete some data to allow incremental to work
+      - type: query
+        if: env.MODE == "backfill" && !is_empty(stream.table)
+        connection: oracle
+        query: delete from oracle.{stream.table} where id > 500
+
+streams:
+  public.test1k_mariadb_pg:
+    update_key: update_dt
+    source_options:
+      range: '2018-11-01,2018-12-01'
+      chunk_size: 10d
+
+  public.test1k_sqlserver_pg:
+    update_key: date
+    source_options:
+      range: '2019-01-01,2019-06-01'
+      chunk_size: 2m
+
+  public.test1k_snowflake_pg:
+    update_key: id
+    source_options:
+      range: '1,800'
+      chunk_size: 200
+  
+  postgres.public.test1k_clickhouse_pg:
+    update_key: update_dt
+    source_options:
+      chunk_count: 3
+    
+  postgres.public.test1k_duckdb_pg:
+    update_key: date
+    source_options:
+      chunk_count: 4
+
+  postgres.public.test1k_ducklake_pg:
+    update_key: id
+    source_options:
+      chunk_count: 6
+
+  public.test1k_ducklake_pg_sql:
+    object: oracle.test1k_ducklake_pg_sql
+    sql: >
+      select *
+      from public.test1k_ducklake_pg
+      where {incremental_where_cond} /* custom-sql */
+    update_key: id
+    source_options:
+      chunk_count: 6
+
+  public.test1k_duckdb_pg_sql:
+    object: oracle.test1k_duckdb_pg_sql
+    sql: >
+      select *
+      from public.test1k_duckdb_pg
+      where {incremental_where_cond} /* custom-sql */
+    update_key: update_dt
+    source_options:
+      chunk_count: 3
+
+  public.test1k_mysql_pg_sql:
+    object: oracle.test1k_mysql_pg_sql
+    sql: >
+      select *
+      from public.test1k_mysql_pg
+      where id <= 500 and ({incremental_where_cond}) /* custom-sql */
+    update_key: id
+    source_options:
+      chunk_size: 600
+
+env:
+  MODE: ${MODE}
+  SLING_THREADS: ${THREADS}

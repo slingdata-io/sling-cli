@@ -208,7 +208,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 		return
 	}
 
-	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.csv", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()))
+	s3Path = fmt.Sprintf("s3://%s/%s/stream/%s.%s", conn.GetProp("AWS_BUCKET"), tempCloudStorageFolder, cast.ToString(g.Now()), fileFormat.String())
 
 	filesys.Delete(s3Fs, s3Path)
 	for i, table := range tables {

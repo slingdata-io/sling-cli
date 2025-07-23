@@ -1,0 +1,23 @@
+source: MONGO
+target: SNOWFLAKE
+
+hooks:
+  end:
+    # clean up
+    - type: query
+      connection: snowflake
+      query: drop table PUBLIC.MONGO_SNOWFLAKE_SELECT_TEST
+
+defaults:
+  mode: full-refresh
+  source_options:
+    flatten: true
+  target_options:
+    column_casing: upper
+    adjust_column_type: true
+
+streams:
+  default.test1k_mongodb:
+    object: 'PUBLIC.MONGO_SNOWFLAKE_SELECT_TEST'
+    select: [id, first_name, last_name]
+  

@@ -30,6 +30,15 @@ func (ac *APIConnection) Authenticate() (err error) {
 	// set auth data
 	setAuthenticated := func() {
 		ac.State.Auth.Authenticated = true
+
+		// Setup auth expiry timer
+		if ac.Spec.Authentication.Expires > 0 {
+			// Calculate expiry time
+			expiryDuration := time.Duration(ac.Spec.Authentication.Expires) * time.Second
+			ac.State.Auth.ExpiresAt = time.Now().Add(expiryDuration).Unix()
+			g.Debug("authentication will expire at %s", time.Unix(ac.State.Auth.ExpiresAt, 0).Format(time.RFC3339))
+		}
+
 		for key, endpoint := range ac.Spec.EndpointMap {
 			for k, v := range ac.State.Auth.Headers {
 				if len(endpoint.Request.Headers) == 0 {
@@ -46,17 +55,6 @@ func (ac *APIConnection) Authenticate() (err error) {
 		ac.State.Auth.Authenticated = true
 		return nil
 
-	case AuthTypeBearer:
-		token, err := ac.renderString(auth.Token)
-		if err != nil {
-			return g.Error(err, "could not render token")
-		} else if token == "" {
-			return g.Error(err, "no token was provided for bearer authentication")
-		}
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
-		setAuthenticated()
-		return nil
-
 	case AuthTypeBasic:
 		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
 		if err != nil {
@@ -64,6 +62,33 @@ func (ac *APIConnection) Authenticate() (err error) {
 		}
 		credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
 		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
+		setAuthenticated()
+		return nil
+
+	case AuthTypeSequence:
+		// create ephemeral endpoint
+		baseEndpoint := &Endpoint{
+			State:   g.M(),
+			context: g.NewContext(ac.Context.Ctx),
+			conn:    ac,
+		}
+
+		err = runSequence(auth.Sequence, baseEndpoint)
+		if err != nil {
+			return g.Error(err, "could not auth via sequence")
+		}
+
+		// sync state back to APIConnection
+		ac.Context.Lock()
+
+		// sync the state section back to ac.State.State
+		if stateMap := baseEndpoint.State; len(stateMap) > 0 {
+			for k, v := range stateMap {
+				ac.State.State[k] = v
+			}
+		}
+
+		ac.Context.Unlock()
 		setAuthenticated()
 		return nil
 
@@ -144,13 +169,13 @@ func (ac *APIConnection) Authenticate() (err error) {
 // performOAuth2Flow handles different OAuth2 flows
 func (ac *APIConnection) performOAuth2Flow(auth Authentication) (token string, err error) {
 	switch auth.Flow {
-	case AuthFlowClientCredentials:
+	case OAuthFlowClientCredentials:
 		return ac.performClientCredentialsFlow(auth)
-	case AuthFlowRefreshToken:
+	case OAuthFlowRefreshToken:
 		return ac.performRefreshTokenFlow(auth)
-	case AuthFlowPassword:
+	case OAuthFlowPassword:
 		return ac.performPasswordFlow(auth)
-	case AuthFlowAuthorizationCode:
+	case OAuthFlowAuthorizationCode:
 		return ac.performAuthorizationCodeFlow(auth)
 	default:
 		return "", g.Error("unsupported OAuth2 flow: %s", auth.Flow)

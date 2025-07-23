@@ -472,7 +472,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 			return err
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
-	} else if t.isIncrementalWithUpdateKey() {
+	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
@@ -789,7 +789,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 			return err
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
-	} else if t.isIncrementalWithUpdateKey() {
+	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
 		t.SetProgress(g.F("getting checkpoint value (%s)", t.Config.Source.UpdateKey))
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
