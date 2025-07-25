@@ -307,7 +307,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 					return df, g.Error(err, "could not generate uris from range")
 				}
 
-				fsCfg.FileSelect = g.Ptr(rangeURIs)
+				fsCfg.FileSelect = rangeURIs
 
 				// set as end value
 				cfg.IncrementalVal = end

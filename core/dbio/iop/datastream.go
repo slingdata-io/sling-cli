@@ -81,7 +81,7 @@ type FileStreamConfig struct {
 	Format           dbio.FileType     `json:"format"`
 	IncrementalKey   string            `json:"incremental_key"`
 	IncrementalValue string            `json:"incremental_value"`
-	FileSelect       *[]string         `json:"file_select"`     // a list of files to include.
+	FileSelect       []string          `json:"file_select"`     // a list of files to include.
 	DuckDBFilename   bool              `json:"duckdb_filename"` // stream URL
 	Props            map[string]string `json:"props"`
 }
@@ -1236,6 +1236,8 @@ func (ds *Datastream) ConsumeCsvReaderChl(readerChn chan *ReaderReady) (err erro
 		r, err = nextCSV(reader)
 		if err != nil {
 			return
+		} else if r == nil {
+			return g.Error("no reader was returned for: %s", ds.Metadata.StreamURL.Value)
 		}
 
 		row0, err = r.Read()

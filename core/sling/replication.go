@@ -997,7 +997,7 @@ type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
-	Files         *[]string      `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
+	Files         []string       `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
 	Where         string         `json:"where,omitempty" yaml:"where,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`
