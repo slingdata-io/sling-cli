@@ -35,6 +35,8 @@ type ReplicationConfig struct {
 	Compiled bool      `json:"compiled"`
 	FailErr  string    // error string to fail all (e.g. when the first tasks fails to connect)
 
+	Context *g.Context `json:"-"`
+
 	startHooks, endHooks Hooks
 
 	streamsOrdered []string
@@ -450,7 +452,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	}
 
 	te := &TaskExecution{
-		Context:      g.NewContext(context.Background()),
+		Context:      rd.Context,
 		ExecID:       os.Getenv("SLING_EXEC_ID"),
 		Config:       &cfg,
 		Status:       ExecStatusRunning,
@@ -880,6 +882,8 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 
 // Compile compiles the replication into tasks
 func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
+	rd.Context = g.NewContext(context.Background())
+
 	if rd.Compiled {
 		// apply the selection if specified
 		if len(selectStreams) > 0 {

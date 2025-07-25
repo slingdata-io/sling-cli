@@ -484,11 +484,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return
 	}
 
-	// parse hooks
 	isThreadChild := cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
 
 	eG := g.ErrorGroup{}
 	successes := 0
+	replication.Context = ctx
 
 	// get final stream count
 	streamCnt := 0
