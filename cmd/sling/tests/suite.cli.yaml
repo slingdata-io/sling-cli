@@ -676,6 +676,8 @@
   rows: 5
   output_contains:
     - 'store.result'
+  output_does_not_contain:
+    - 'WARN: Using INSERT mode'
 
 - id: 91
   name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder

@@ -443,8 +443,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
-		fs.SetProp("null_as", `\N`)
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.DefaultStreamConfig())
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.LoaderStreamConfig(false))
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
 			return
