@@ -825,6 +825,9 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 				can = true
 			}
 		}
+		if strings.Contains(expr, "runtime_state") {
+			can = true
+		}
 		return can
 	}
 

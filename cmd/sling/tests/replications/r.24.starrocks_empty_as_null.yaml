@@ -27,7 +27,7 @@ hooks:
 
   end:
     - type: check
-      check: run.status == "success"
+      check: runs.dbo_test_null_values.status == "success"
       on_failure: break
 
     - type: query
