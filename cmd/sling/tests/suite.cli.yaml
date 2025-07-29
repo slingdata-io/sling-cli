@@ -735,3 +735,9 @@
   run: sling run -d -p cmd/sling/tests/pipelines/p.05.extra_parquet_files_deletion.yaml
   output_does_not_contain:
     - step (extra_files_check) failed
+
+- id: 97
+  name: Test to ensure snowflake compression for upload
+  run: sling run -d -r cmd/sling/tests/replications/r.38.snowflake_compression_test.yaml
+  output_contains:
+    - compression=zstd

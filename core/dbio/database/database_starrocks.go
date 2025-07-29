@@ -28,8 +28,9 @@ import (
 // StarRocksConn is a StarRocks connection
 type StarRocksConn struct {
 	BaseConn
-	URL    string
-	fePort string
+	URL     string
+	fePort  string
+	version int
 }
 
 // Init initiates the object
@@ -52,6 +53,30 @@ func (conn *StarRocksConn) Init() error {
 	conn.BaseConn.instance = &instance
 
 	return conn.BaseConn.Init()
+}
+
+func (conn *StarRocksConn) Connect(timeOut ...int) (err error) {
+	err = conn.BaseConn.Connect(timeOut...)
+	if err != nil {
+		return err
+	}
+
+	// get version
+	data, err := conn.Query(`select @@version_comment` + noDebugKey)
+	if err == nil && len(data.Rows) > 0 {
+		version := cast.ToString(data.Rows[0][0])
+		// convert to 3 digit int (3.2.3-a40e2f8 => 323)
+		version = strings.Split(version, "-")[0]
+		versionParts := strings.Split(version, ".")
+		if len(versionParts) >= 3 {
+			major := cast.ToInt(versionParts[0])
+			minor := cast.ToInt(versionParts[1])
+			patch := cast.ToInt(versionParts[2])
+			conn.version = major*100 + minor*10 + patch
+		}
+	}
+
+	return nil
 }
 
 // GetURL returns the processed URL
@@ -443,7 +468,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, iop.LoaderStreamConfig(false))
+		config := iop.LoaderStreamConfig(false)
+		if conn.version >= 327 && conn.GetProp("compression") != "" {
+			config.Compression = iop.CompressorType(conn.GetProp("compression"))
+		}
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, config)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
 			return
@@ -468,6 +497,11 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 		"enclose":          `"`,
 	}
 
+	// putting compression does not work, returns `too many rows filtered` error
+	// if conn.version >= 327 {
+	// 	headers["compression"] = "zstd"
+	// }
+
 	if conn.GetProp("format") == "json" {
 		headers = map[string]string{
 			"expect":  "100-continue",
@@ -481,7 +515,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	timeout := 330
 
 	// set extra headers
-	for _, key := range []string{"max_filter_ratio", "timezone", "strict_mode", "timeout"} {
+	for _, key := range []string{"max_filter_ratio", "timezone", "strict_mode", "timeout", "compression"} {
 		if val := conn.GetProp(key); val != "" {
 			headers[key] = val
 			if key == "timeout" {
@@ -489,6 +523,8 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			}
 		}
 	}
+
+	g.Debug("stream load headers => %s", g.Marshal(headers))
 
 	loadCtx := g.NewContext(conn.context.Ctx, 3)
 
