@@ -741,3 +741,12 @@
   run: sling run -d -r cmd/sling/tests/replications/r.38.snowflake_compression_test.yaml
   output_contains:
     - compression=zstd
+
+- id: 98
+  name: Test SLING_LOADED_AT column type when casting all columns to string
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.39.sling_loaded_at_string_cast.yaml
+    sling run -d -r cmd/sling/tests/replications/r.40.sling_loaded_at_csv_string_cast.yaml
+  output_contains:
+    - 'SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)'
+    - "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (CSV source)"
