@@ -750,3 +750,10 @@
   output_contains:
     - 'SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)'
     - "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (CSV source)"
+
+- id: 99
+  name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
+  run: |
+    sling run -d -r /Users/fritz/__/Git/sling-cli/cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
+  output_contains:
+    - no data or records found in stream
