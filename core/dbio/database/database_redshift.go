@@ -294,7 +294,7 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 	if err != nil {
 		// don't error when 0 files detected (especially in parquet)
 		// https://github.com/slingdata-io/sling-cli/issues/598
-		if strings.Contains(err.Error(), "Provided 0 files") {
+		if fileFormat == dbio.FileTypeParquet && strings.Contains(err.Error(), "Provided 0 files") {
 			data := iop.NewDataset(table.Columns) // no rows
 			df, _ = iop.MakeDataFlow(data.Stream())
 			err = nil
