@@ -762,6 +762,7 @@ skipBuffer:
 		ds.Inferred = true
 	} else if len(ds.Sp.Config.Columns) > 0 || !ds.config.ColumnCasing.IsEmpty() {
 		ds.Columns = ds.Columns.Coerce(ds.Sp.Config.Columns, true, ds.config.ColumnCasing, ds.config.TargetType)
+		ds.Inferred = true
 	}
 
 	// set to have it loop process
@@ -803,6 +804,7 @@ skipBuffer:
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.LoadedAt",
 				Metadata:    map[string]string{"sling_metadata": "loaded_at"},
+				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -818,6 +820,7 @@ skipBuffer:
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.StreamURL",
 				Metadata:    map[string]string{"sling_metadata": "stream_url"},
+				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -833,6 +836,7 @@ skipBuffer:
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.RowNum",
 				Metadata:    map[string]string{"sling_metadata": "row_num"},
+				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -848,6 +852,7 @@ skipBuffer:
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.RowID",
 				Metadata:    map[string]string{"sling_metadata": "row_id"},
+				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
@@ -868,6 +873,7 @@ skipBuffer:
 				Position:    len(ds.Columns) + 1,
 				Description: "Sling.Metadata.ExecID",
 				Metadata:    map[string]string{"sling_metadata": "exec_id"},
+				Sourced:     true,
 			}
 			ds.Columns = append(ds.Columns, col)
 			metaValuesMap[col.Position-1] = func(it *Iterator) any {
