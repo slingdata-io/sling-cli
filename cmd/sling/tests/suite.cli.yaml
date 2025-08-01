@@ -754,6 +754,13 @@
 - id: 99
   name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
   run: |
-    sling run -d -r /Users/fritz/__/Git/sling-cli/cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
+    sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
   output_contains:
     - no data or records found in stream
+
+- id: 100
+  name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.42.mssql_exclude_column_issue607.yaml
+  output_contains:
+    - extra_col column count in parquet file: 0
