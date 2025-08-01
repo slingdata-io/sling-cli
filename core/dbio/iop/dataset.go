@@ -559,9 +559,7 @@ func (data *Dataset) InferColumnTypes() {
 		}
 	}
 
-	g.Info(g.Marshal(data.Columns.GetColumn("_SLING_LOADED_AT")))
 	data.Columns = InferFromStats(columns, data.SafeInference, data.NoDebug)
-	g.Info(g.Marshal(data.Columns.GetColumn("_SLING_LOADED_AT")))
 
 	// overwrite if found in config.columns
 	data.Columns = data.Columns.Coerce(
