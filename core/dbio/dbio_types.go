@@ -81,6 +81,7 @@ const (
 	TypeDbProton        Type = "proton"
 	TypeDbAthena        Type = "athena"
 	TypeDbIceberg       Type = "iceberg"
+	TypeDbAzureTable    Type = "azuretable"
 )
 
 var AllType = []struct {
@@ -124,6 +125,7 @@ var AllType = []struct {
 	{TypeDbMongoDB, "TypeDbMongoDB"},
 	{TypeDbPrometheus, "TypeDbPrometheus"},
 	{TypeDbProton, "TypeDbProton"},
+	{TypeDbAzureTable, "TypeDbAzureTable"},
 }
 
 // ValidateType returns true is type is valid
@@ -144,7 +146,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable:
 		return t, true
 	}
 
@@ -191,7 +193,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -208,7 +210,11 @@ func (t Type) IsDb() bool {
 
 // IsDb returns true if database connection
 func (t Type) IsNoSQL() bool {
-	return t == TypeDbBigTable
+	switch t {
+	case TypeDbBigTable, TypeDbAzureTable, TypeDbMongoDB, TypeDbElasticsearch:
+		return true
+	}
+	return false
 }
 
 // IsFile returns true if file connection
@@ -270,6 +276,7 @@ func (t Type) NameLong() string {
 		TypeDbElasticsearch: "DB - Elasticsearch",
 		TypeDbMongoDB:       "DB - MongoDB",
 		TypeDbProton:        "DB - Proton",
+		TypeDbAzureTable:    "DB - Azure Table",
 	}
 
 	return mapping[t]
@@ -314,6 +321,7 @@ func (t Type) Name() string {
 		TypeDbMongoDB:       "MongoDB",
 		TypeDbAzure:         "Azure",
 		TypeDbProton:        "Proton",
+		TypeDbAzureTable:    "Azure Table",
 	}
 
 	return mapping[t]

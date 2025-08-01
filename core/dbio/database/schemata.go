@@ -235,7 +235,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			t.SQL = g.F("%s\n--iceberg-json=%s", t.SQL, g.Marshal(m))
 		}
 		return t.SQL
-	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch:
+	case dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable:
 		m, _ := g.UnmarshalMap(t.SQL)
 		if m == nil {
 			m = g.M()
