@@ -244,8 +244,20 @@ func (conn *ExasolConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 
 // BulkImportStream performs bulk import for Exasol
 func (conn *ExasolConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
-	// For now, use standard insert mode
-	return conn.BaseConn.InsertBatchStream(tableFName, ds)
+	// Exasol has issues with parameterized batch inserts in prepared statements
+	// Use CSV-based import for all bulk operations
+	df := iop.NewDataflow()
+	
+	// Set the columns on the dataflow from the datastream
+	df.Columns = ds.Columns
+	
+	// Send the datastream through the channel and close it
+	go func() {
+		defer close(df.StreamCh)
+		df.StreamCh <- ds
+	}()
+	
+	return conn.BulkImportFlow(tableFName, df)
 }
 
 // BulkImportFlow performs bulk import for Exasol using temporary CSV files
@@ -294,10 +306,18 @@ func (conn *ExasolConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		}
 	}()
 
-	// Build column list
+	// Build column list - only include columns that exist in the datastream
 	colNames := []string{}
+	dataStreamColMap := make(map[string]bool)
+	for _, col := range df.Columns {
+		dataStreamColMap[strings.ToLower(col.Name)] = true
+	}
+
 	for _, col := range columns {
-		colNames = append(colNames, conn.Quote(col.Name))
+		// Only include columns that exist in the datastream
+		if dataStreamColMap[strings.ToLower(col.Name)] {
+			colNames = append(colNames, conn.Quote(col.Name))
+		}
 	}
 
 	// Process files as they become ready
@@ -309,17 +329,18 @@ func (conn *ExasolConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		os.Chmod(file.Node.Path(), 0644)
 
 		// Build and execute IMPORT statement for this file
+		// Note: Exasol's CSV parser requires proper escaping of quotes and newlines
+		// The CSV files we generate use standard RFC 4180 format with doubled quotes for escaping
 		importSQL := fmt.Sprintf(`IMPORT INTO %s (%s) FROM LOCAL CSV FILE '%s'
   COLUMN SEPARATOR = ','
   COLUMN DELIMITER = '"'
   ROW SEPARATOR = 'LF'
-  SKIP = 1`,
+  SKIP = 1
+  ENCODING = 'UTF-8'`,
 			tableFName,
 			strings.Join(colNames, ", "),
 			file.Node.Path(),
 		)
-
-		g.Debug("Executing Exasol IMPORT: %s", importSQL)
 
 		_, err := conn.Exec(importSQL)
 		if err != nil {
@@ -357,6 +378,8 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 	rowCount := int64(0)
 	var currentFile *os.File
 	var csvWriter *csv.Writer
+	var currentFilePath string
+	filesCreated := []string{}
 
 	// Create folder if it doesn't exist
 	err := os.MkdirAll(folderPath, 0755)
@@ -366,17 +389,27 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 
 	// Function to create a new CSV file
 	createNewFile := func() error {
+		// Close previous file if exists
 		if currentFile != nil {
 			csvWriter.Flush()
 			currentFile.Close()
+
+			// Signal that the previous file is ready
+			fileNode := filesys.FileNode{
+				URI: "file://" + currentFilePath,
+			}
+			fileReadyChn <- filesys.FileReady{
+				Node: fileNode,
+			}
 		}
 
 		fileName := fmt.Sprintf("part.%02d.%04d.csv", fileNum, fileNum)
-		filePath := path.Join(folderPath, fileName)
+		currentFilePath = path.Join(folderPath, fileName)
+		filesCreated = append(filesCreated, currentFilePath)
 
-		currentFile, err = os.Create(filePath)
+		currentFile, err = os.Create(currentFilePath)
 		if err != nil {
-			return g.Error(err, "could not create CSV file: "+filePath)
+			return g.Error(err, "could not create CSV file: "+currentFilePath)
 		}
 
 		csvWriter = csv.NewWriter(currentFile)
@@ -384,14 +417,6 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 		// Write header
 		if _, err := csvWriter.Write(ds.Columns.Names()); err != nil {
 			return g.Error(err, "could not write CSV header")
-		}
-
-		// Signal that file is ready for processing
-		fileNode := filesys.FileNode{
-			URI: "file://" + filePath,
-		}
-		fileReadyChn <- filesys.FileReady{
-			Node: fileNode,
 		}
 
 		fileNum++
@@ -454,19 +479,49 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 		rowCount++
 	}
 
-	// Close last file
+	// Close and signal last file
 	if currentFile != nil {
 		csvWriter.Flush()
 		currentFile.Close()
+
+		// Signal that the last file is ready
+		fileNode := filesys.FileNode{
+			URI: "file://" + currentFilePath,
+		}
+		fileReadyChn <- filesys.FileReady{
+			Node: fileNode,
+		}
 	}
 
 	return nil
 }
 
-// BulkExportStream performs bulk export for Exasol
-func (conn *ExasolConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
-	// For now, use standard select streaming
-	sql := conn.GetTemplateValue("core.select_all")
-	sql = strings.ReplaceAll(sql, "{table}", table.FDQN())
-	return conn.BaseConn.StreamRows(sql)
+// GenerateUpsertSQL generates the upsert SQL for Exasol
+func (conn *ExasolConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+	if err != nil {
+		err = g.Error(err, "could not generate upsert variables")
+		return
+	}
+
+	// Use the template from exasol.yaml
+	sqlTemplate := conn.Template().Core["upsert"]
+	if sqlTemplate == "" {
+		return "", g.Error("Did not find upsert in template for %s", conn.GetType())
+	}
+
+	// Replace ph. with src. in placeholder_fields for the VALUES clause
+	srcFieldsValues := strings.ReplaceAll(upsertMap["placeholder_fields"], "ph.", "src.")
+
+	sql = g.R(
+		sqlTemplate,
+		"src_table", srcTable,
+		"tgt_table", tgtTable,
+		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
+		"set_fields", upsertMap["set_fields"],
+		"insert_fields", upsertMap["insert_fields"],
+		"placeholder_fields", srcFieldsValues,
+	)
+	return
 }
+

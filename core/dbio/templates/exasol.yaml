@@ -22,12 +22,34 @@ core:
       update set {set_fields}
     when not matched then
       insert ({names}) values ({values})
-  select: select {fields} from {table}
-  select_all: select * from {table}
-  sample: select {fields} from {table} where random() <= 0.5 limit {n}
-  limit: select {fields} from {table}{where_prefix} limit {limit}
-  limit_offset: select {fields} from {table}{where_prefix} limit {limit} offset {offset}
-  limit_sql: select * from ({sql}) subq limit {limit}
+  upsert: |
+    merge into {tgt_table} tgt
+    using {src_table} src
+    on ({src_tgt_pk_equal})
+    when matched then
+      update set {set_fields}
+    when not matched then
+      insert ({insert_fields}) values ({placeholder_fields})
+  delete_where_not_exist: |
+    delete from {target_table}
+    where {where}
+      and not exists (
+          select 1 from {temp_table}
+          where {join_where}
+      )
+  update_where_not_exist: |
+    update {target_table}
+    set {set_fields}
+    where {where}
+      and not exists (
+          select 1 from {temp_table} 
+          where {join_where}
+      )
+  # offset with custom sql requires order by
+  limit_sql: |
+    select * from (
+      {sql}
+    ) as t limit {limit} /* offset {offset} */
 
 metadata:
   
@@ -45,12 +67,27 @@ metadata:
     where 1=1
       {{if .schema -}} and schema_name = '{schema}' {{- end}}
     order by schema_name
+  
+  schemata: |
+    select 
+      c.column_schema as schema_name,
+      c.column_table as table_name,
+      'table' as table_type,
+      c.column_name,
+      c.column_type as data_type,
+      c.column_is_nullable as is_nullable,
+      c.column_ordinal_position as "position"
+    from EXA_ALL_COLUMNS c
+    where 1=1
+      {{if .schema -}} and c.column_schema = '{schema}' {{- end}}
+      {{if .tables -}} and c.column_table in ({tables}) {{- end}}
+    order by c.column_schema, c.column_table, c.column_ordinal_position
     
   tables: |
     select 
       table_schema as schema_name,
       table_name,
-      case when table_type = 'VIEW' then 'true' else 'false' end as is_view
+      'false' as is_view
     from EXA_ALL_TABLES
     where 1=1
       {{if .schema -}} and table_schema = '{schema}' {{- end}}
@@ -60,7 +97,8 @@ metadata:
   views: |
     select 
       view_schema as schema_name,
-      view_name as view_name
+      view_name as table_name,
+      'true' as is_view
     from EXA_ALL_VIEWS
     where 1=1
       {{if .schema -}} and view_schema = '{schema}' {{- end}}
@@ -174,3 +212,5 @@ variable:
   duplicates_group_by: false
   handle_null_compare: true
   null_if_empty: false
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  timestampz_layout: '2006-01-02 15:04:05.000000'
