@@ -2,11 +2,13 @@ package database
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/exasol/exasol-driver-go"
 	_ "github.com/exasol/exasol-driver-go"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
@@ -90,6 +92,17 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 		"snapshot_transactions": "snapshottransactions",
 	}
 
+	// escapeExasolValue escapes special characters in Exasol DSN parameter values
+	escapeExasolValue := func(value string) string {
+		// Escape backslashes first (must be done before other escaping)
+		value = strings.ReplaceAll(value, `\`, `\\`)
+		// Escape semicolons (parameter separator)
+		value = strings.ReplaceAll(value, `;`, `\;`)
+		// Escape equals signs
+		value = strings.ReplaceAll(value, `=`, `\=`)
+		return value
+	}
+
 	// makeDSN converts a net.URL to Exasol DSN format
 	makeDSN := func(U *net.URL) string {
 		// Extract connection properties from URL
@@ -117,10 +130,15 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 			port = "8563"
 		}
 
+		// Escape special characters in sensitive parameters
+		username = escapeExasolValue(username)
+		password = escapeExasolValue(password)
+
 		// Build the connection string
 		// Exasol driver requires specific connection string format
 		// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
 		connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s", host, port, username, password)
+		exasol.NewConfig(username, password)
 
 		// Add autocommit (default to 0 if not specified)
 		autocommit := cast.ToString(conn.GetProp("autocommit"))
@@ -195,7 +213,8 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 	// If we have host info, use makeDSN helper to build DSN
 	if host != "" {
 		// Create a URL object with the connection details
-		urlStr := fmt.Sprintf("exasol://%s:%s@%s:%s", username, password, host, port)
+		// URL-escape the password for URL construction, makeDSN will handle Exasol-specific escaping
+		urlStr := fmt.Sprintf("exasol://%s:%s@%s:%s", url.QueryEscape(username), url.QueryEscape(password), host, port)
 		if schema != "" {
 			urlStr += "/" + schema
 		}
