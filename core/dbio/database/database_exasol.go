@@ -71,6 +71,9 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 		"clientversion":  "clientversion",
 		"client_version": "clientversion",
 
+		"certificatefingerprint":  "certificatefingerprint",
+		"certificate_fingerprint": "certificatefingerprint",
+
 		"feedbackinterval":  "feedbackinterval",
 		"feedback_interval": "feedbackinterval",
 
