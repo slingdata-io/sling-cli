@@ -1,0 +1,35 @@
+source: redshift
+target: postgres
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS test_empty_parquet;
+        CREATE TABLE test_empty_parquet (
+          id INTEGER,
+          name VARCHAR(50),
+          value DECIMAL(10,2),
+          created_at TIMESTAMP
+        );
+        INSERT INTO test_empty_parquet VALUES 
+        (1, 'test1', 10.50, '2024-01-01 10:00:00'),
+        (2, 'test2', 20.75, '2024-01-02 11:00:00'),
+        (3, 'test3', 30.99, '2024-01-03 12:00:00');
+  end:
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS test_empty_parquet;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS PUBLIC.test_empty_parquet;
+
+streams:
+  public.test_empty_parquet:
+    sql: select * from public.test_empty_parquet where 1=0
+    object: public.test_empty_parquet
+    mode: full-refresh
+    source_options:
+      format: parquet

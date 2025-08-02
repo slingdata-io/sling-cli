@@ -418,7 +418,7 @@ func (data *Dataset) InferColumnTypes() {
 	var columns Columns
 
 	if len(data.Rows) == 0 {
-		g.Trace("skipping InferColumnTypes [no rows]")
+		g.Debug("skipping InferColumnTypes [no rows]")
 		// For empty datasets, set default types to StringType for all columns
 		for i, column := range data.Columns {
 			column.Type = StringType

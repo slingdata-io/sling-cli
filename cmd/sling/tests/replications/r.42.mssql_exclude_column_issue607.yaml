@@ -1,0 +1,82 @@
+source: mssql
+target: local
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: parquet
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop table if it exists
+        IF OBJECT_ID('dbo.test_exclude_column_607', 'U') IS NOT NULL
+          DROP TABLE dbo.test_exclude_column_607;
+        
+        -- Create test table with multiple columns including extra_col
+        CREATE TABLE dbo.test_exclude_column_607 (
+          id int PRIMARY KEY,
+          name varchar(100),
+          extra_col int,
+          country varchar(50),
+          created_date datetime
+        );
+        
+        -- Insert test data
+        INSERT INTO dbo.test_exclude_column_607 (id, name, extra_col, country, created_date) VALUES
+        (1, 'Test Record 1', 101, 'USA', '2025-01-01 10:00:00'),
+        (2, 'Test Record 2', 102, 'Canada', '2025-01-02 11:00:00'),
+        (3, 'Test Record 3', 103, 'Mexico', '2025-01-03 12:00:00');
+
+  end:
+    # Read the parquet file back to verify if extra_col column is excluded
+    - type: query
+      connection: duckdb
+      query: |
+        SELECT column_name 
+        FROM (
+          DESCRIBE SELECT * FROM '/tmp/test_exclude_column_607.parquet'
+        )
+        ORDER BY column_name
+      into: parquet_columns
+
+    - type: log
+      message: |
+        Columns in the generated parquet file: {store.parquet_columns}
+        
+    # Check if extra_col column is present (it should NOT be present)
+    - type: query
+      connection: duckdb
+      query: |
+        SELECT COUNT(*) as extra_col_count
+        FROM (
+          DESCRIBE SELECT * FROM '/tmp/test_exclude_column_607.parquet'
+        )
+        WHERE column_name = 'extra_col'
+      into: extra_col_check
+
+    - type: log
+      message: |
+        extra_col column count in parquet file: {store.extra_col_check[0].extra_col_count}
+        Expected: 0 (column should be excluded)
+        Actual: {store.extra_col_check[0].extra_col_count}
+
+    # This check should pass when the bug is fixed
+    # For now, it will likely fail since the bug exists
+    - type: check
+      check: store.extra_col_check[0].extra_col_count == 0
+      on_error: "ERROR: Issue #607 reproduced - extra_col column was NOT excluded as expected!"
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_exclude_column_607', 'U') IS NOT NULL
+          DROP TABLE dbo.test_exclude_column_607;
+
+streams:
+  dbo.test_exclude_column_607:
+    select: ["-extra_col"]  # This should exclude the extra_col column
+    object: '/tmp/test_exclude_column_607.parquet'

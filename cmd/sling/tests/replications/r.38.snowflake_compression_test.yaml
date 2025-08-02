@@ -1,0 +1,42 @@
+source: MYSQL
+target: SNOWFLAKE
+
+defaults:
+  mode: full-refresh
+  target_options:
+    compression: gzip
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS compression_test;
+        CREATE TABLE compression_test (
+          id INTEGER PRIMARY KEY,
+          name VARCHAR(100),
+          data TEXT,
+          created_at TIMESTAMP
+        );
+        INSERT INTO mysql.compression_test (id, name, data, created_at) VALUES 
+        (1, 'Test Record 1', 'This is a test data string that should be compressed when written to Snowflake stage', NOW()),
+        (2, 'Test Record 2', 'Another test data string with some additional content to make the file larger', NOW()),
+        (3, 'Test Record 3', 'Yet another test record with even more data to ensure we have enough content', NOW()),
+        (4, 'Test Record 4', 'Fourth test record with data that will help test compression functionality', NOW()),
+        (5, 'Test Record 5', 'Fifth and final test record to ensure we have a decent sized CSV file', NOW());
+
+  end:
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.compression_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.compression_test
+
+env:
+  target_schema: PUBLIC
+
+streams:
+  mysql.compression_test:
+    object: 'public.compression_test'

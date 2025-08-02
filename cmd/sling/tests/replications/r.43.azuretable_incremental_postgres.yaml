@@ -1,0 +1,69 @@
+source: azure_table
+target: postgres
+
+defaults:
+  mode: '{MODE}'
+  primary_key: [id]
+  update_key: Timestamp
+
+hooks:
+  end:
+    # Verify data was loaded
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select count(*) as row_count from public.test1k_azuretable_pg
+      into: target_count
+
+    - type: log
+      message: |
+        Loaded {store.target_count[0].row_count} rows into public.test1k_azuretable_pg
+
+    # Check that we have some data
+    - type: check
+      check: store.target_count[0].row_count > 0
+      failure_message: "ERROR: No rows were loaded into target table"
+
+    # Verify incremental columns exist
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select count(*) as col_count
+        from information_schema.columns 
+        where table_schema = 'public' 
+          and table_name = 'test1k_azuretable_pg'
+          and column_name in ('id', 'Timestamp')
+      into: incremental_col_count
+
+    - type: log
+      message: |
+        Incremental columns count: {store.incremental_col_count[0].col_count}
+
+    - type: check
+      check: store.incremental_col_count[0].col_count == 2
+      failure_message: "ERROR: Expected both 'id' and 'Timestamp' columns to exist"
+
+    # Verify no duplicates (all IDs should be unique)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        select count(*) as total_rows, count(distinct id) as unique_ids 
+        from public.test1k_azuretable_pg
+      into: duplicate_check
+
+    - type: log
+      message: |
+        Total rows: {store.duplicate_check[0].total_rows}
+        Unique IDs: {store.duplicate_check[0].unique_ids}
+
+    - type: check
+      check: store.duplicate_check[0].total_rows == store.duplicate_check[0].unique_ids
+      on_error: "ERROR: Duplicate rows found - incremental mode not working correctly"
+
+streams:
+  default.test1kazuretable:
+    select: [id, first_name, email, create_dt, Timestamp]
+    object: public.test1k_azuretable_pg
+
+env:
+  MODE: ${MODE}

@@ -1311,17 +1311,18 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 func NativeTypeToGeneral(name, dbType string, connType dbio.Type) (colType ColumnType) {
 	dbType = strings.ToLower(dbType)
 
-	if connType == dbio.TypeDbClickhouse {
+	switch connType {
+	case dbio.TypeDbClickhouse:
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")
 		}
-	} else if connType == dbio.TypeDbProton {
+	case dbio.TypeDbProton:
 		if strings.HasPrefix(dbType, "nullable(") {
 			dbType = strings.ReplaceAll(dbType, "nullable(", "")
 			dbType = strings.TrimSuffix(dbType, ")")
 		}
-	} else if connType == dbio.TypeDbDuckDb || connType == dbio.TypeDbMotherDuck {
+	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck:
 		if strings.HasSuffix(dbType, "[]") {
 			dbType = "list"
 		}

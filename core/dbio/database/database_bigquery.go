@@ -601,6 +601,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	go func() {
 		config := iop.LoaderStreamConfig(true)
+		config.Compression = iop.GzipCompressorType
 		config.TargetType = conn.GetType()
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, config)
 
@@ -693,6 +694,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 
 	go func() {
 		config := iop.LoaderStreamConfig(true)
+		config.Compression = iop.GzipCompressorType
 		config.TargetType = conn.GetType()
 		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, config)
 

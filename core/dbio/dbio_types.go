@@ -81,6 +81,8 @@ const (
 	TypeDbProton        Type = "proton"
 	TypeDbAthena        Type = "athena"
 	TypeDbIceberg       Type = "iceberg"
+	TypeDbAzureTable    Type = "azuretable"
+	TypeDbExasol        Type = "exasol"
 )
 
 var AllType = []struct {
@@ -124,6 +126,8 @@ var AllType = []struct {
 	{TypeDbMongoDB, "TypeDbMongoDB"},
 	{TypeDbPrometheus, "TypeDbPrometheus"},
 	{TypeDbProton, "TypeDbProton"},
+	{TypeDbExasol, "TypeDbExasol"},
+	{TypeDbAzureTable, "TypeDbAzureTable"},
 }
 
 // ValidateType returns true is type is valid
@@ -144,7 +148,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbExasol:
 		return t, true
 	}
 
@@ -176,6 +180,7 @@ func (t Type) DefPort() int {
 		TypeDbPrometheus:    9090,
 		TypeDbProton:        8463,
 		TypeDbDatabricks:    443,
+		TypeDbExasol:        8563,
 		TypeFileFtp:         21,
 		TypeFileSftp:        22,
 	}
@@ -184,14 +189,14 @@ func (t Type) DefPort() int {
 
 // DBNameUpperCase returns true is upper case is default
 func (t Type) DBNameUpperCase() bool {
-	return g.In(t, TypeDbOracle, TypeDbSnowflake)
+	return g.In(t, TypeDbOracle, TypeDbSnowflake, TypeDbExasol)
 }
 
 // Kind returns the kind of connection
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -208,7 +213,11 @@ func (t Type) IsDb() bool {
 
 // IsDb returns true if database connection
 func (t Type) IsNoSQL() bool {
-	return t == TypeDbBigTable
+	switch t {
+	case TypeDbBigTable, TypeDbAzureTable, TypeDbMongoDB, TypeDbElasticsearch:
+		return true
+	}
+	return false
 }
 
 // IsFile returns true if file connection
@@ -255,6 +264,7 @@ func (t Type) NameLong() string {
 		TypeDbBigTable:      "DB - BigTable",
 		TypeDbSnowflake:     "DB - Snowflake",
 		TypeDbDatabricks:    "DB - Databricks",
+		TypeDbExasol:        "DB - Exasol",
 		TypeDbD1:            "DB - D1",
 		TypeDbSQLite:        "DB - SQLite",
 		TypeDbDuckDb:        "DB - DuckDB",
@@ -270,6 +280,7 @@ func (t Type) NameLong() string {
 		TypeDbElasticsearch: "DB - Elasticsearch",
 		TypeDbMongoDB:       "DB - MongoDB",
 		TypeDbProton:        "DB - Proton",
+		TypeDbAzureTable:    "DB - Azure Table",
 	}
 
 	return mapping[t]
@@ -299,6 +310,7 @@ func (t Type) Name() string {
 		TypeDbBigTable:      "BigTable",
 		TypeDbSnowflake:     "Snowflake",
 		TypeDbDatabricks:    "Databricks",
+		TypeDbExasol:        "Exasol",
 		TypeDbD1:            "D1",
 		TypeDbSQLite:        "SQLite",
 		TypeDbDuckDb:        "DuckDB",
@@ -314,6 +326,7 @@ func (t Type) Name() string {
 		TypeDbMongoDB:       "MongoDB",
 		TypeDbAzure:         "Azure",
 		TypeDbProton:        "Proton",
+		TypeDbAzureTable:    "Azure Table",
 	}
 
 	return mapping[t]

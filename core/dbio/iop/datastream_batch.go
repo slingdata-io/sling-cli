@@ -133,7 +133,7 @@ func (b *Batch) Shape(tgtColumns Columns, pause ...bool) (err error) {
 	for s, col := range srcColumns {
 		t := lo.IndexOf(tgtColNames, strings.ToLower(col.Name))
 		if t == -1 {
-			return g.Error("column %s not found in target columns", col.Name)
+			return g.Error("column %s not found in target columns. available => %s", col.Name, g.Marshal(tgtColNames))
 		}
 		colMap[s] = t
 		diffCols = s != t ||

@@ -655,7 +655,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// validate capability to write
 	switch cfg.Target.Type {
-	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable:
+	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable, dbio.TypeDbAzureTable:
 		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
 	case dbio.TypeDbIceberg:
 		switch cfg.Mode {

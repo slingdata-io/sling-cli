@@ -676,6 +676,8 @@
   rows: 5
   output_contains:
     - 'store.result'
+  output_does_not_contain:
+    - 'WARN: Using INSERT mode'
 
 - id: 91
   name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder
@@ -733,3 +735,44 @@
   run: sling run -d -p cmd/sling/tests/pipelines/p.05.extra_parquet_files_deletion.yaml
   output_does_not_contain:
     - step (extra_files_check) failed
+
+- id: 97
+  name: Test to ensure snowflake compression for upload
+  run: sling run -d -r cmd/sling/tests/replications/r.38.snowflake_compression_test.yaml
+  output_contains:
+    - compression=zstd
+
+- id: 98
+  name: Test SLING_LOADED_AT column type when casting all columns to string
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.39.sling_loaded_at_string_cast.yaml
+    sling run -d -r cmd/sling/tests/replications/r.40.sling_loaded_at_csv_string_cast.yaml
+  output_contains:
+    - 'SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)'
+    - "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (CSV source)"
+
+- id: 99
+  name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
+  output_contains:
+    - no data or records found in stream
+
+- id: 100
+  name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.42.mssql_exclude_column_issue607.yaml
+  output_contains:
+    - 'extra_col column count in parquet file: 0'
+
+- id: 101
+  name: Test Azure Table incremental mode to PostgreSQL
+  run: |
+    MODE=full-refresh sling run -d -r cmd/sling/tests/replications/r.43.azuretable_incremental_postgres.yaml --limit 5
+    MODE=incremental sling run -d -r cmd/sling/tests/replications/r.43.azuretable_incremental_postgres.yaml
+  streams: 1
+  output_contains:
+    - 'Loaded 5 rows into public.test1k_azuretable_pg'
+    - 'inserted 213 rows'
+    - 'rows into public.test1k_azuretable_pg'
+    - 'id, first_name, email, create_dt, Timestamp'

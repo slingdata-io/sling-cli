@@ -444,6 +444,19 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (err error) {
 
 func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error) {
 
+	switch stage {
+	case HookStageStart:
+		if len(rd.startHooks) == 0 {
+			return nil
+		}
+	case HookStageEnd:
+		if len(rd.endHooks) == 0 {
+			return nil
+		}
+	default:
+		return g.Error("invalid replication hook stage: %s", stage)
+	}
+
 	// create a pseudo-stream for the start and end hook, also with LogSink
 	stream := &ReplicationStreamConfig{Object: "_", replication: rd}
 	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage))
@@ -490,8 +503,6 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 			te.Status = ExecStatusError
 			return g.Error(err, "error executing end hooks")
 		}
-	default:
-		return g.Error("invalid default hook stage: %s", stage)
 	}
 
 	// set success
