@@ -2,14 +2,13 @@ package database
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/exasol/exasol-driver-go"
-	_ "github.com/exasol/exasol-driver-go"
 	"github.com/flarco/g"
 	"github.com/flarco/g/csv"
 	"github.com/flarco/g/net"
@@ -41,188 +40,158 @@ func (conn *ExasolConn) Init() error {
 }
 
 // GetURL returns the processed URL
+// This method uses the official Exasol driver's configuration builder (exasol.NewConfig)
+// to properly handle special characters in passwords and other connection parameters.
+// This ensures passwords with backslashes, semicolons, etc. are correctly escaped.
 func (conn *ExasolConn) GetURL(newURL ...string) string {
 	if len(newURL) > 0 {
 		conn.BaseConn.URL = newURL[0]
 	}
 
-	// Property mapping for Exasol connection options
-	propMapping := map[string]string{
-		"validateservercertificate":   "validateservercertificate",
-		"validate_server_certificate": "validateservercertificate",
-
-		"encryption": "encryption",
-
-		"connecttimeout":     "connecttimeout",
-		"connect_timeout":    "connecttimeout",
-		"connection_timeout": "connecttimeout",
-
-		"logintimeout":  "logintimeout",
-		"login_timeout": "logintimeout",
-
-		"compression": "compression",
-
-		"fetchsize":  "fetchsize",
-		"fetch_size": "fetchsize",
-
-		"autocommit": "autocommit",
-
-		"clientname":  "clientname",
-		"client_name": "clientname",
-
-		"clientversion":  "clientversion",
-		"client_version": "clientversion",
-
-		"certificatefingerprint":  "certificatefingerprint",
-		"certificate_fingerprint": "certificatefingerprint",
-
-		"feedbackinterval":  "feedbackinterval",
-		"feedback_interval": "feedbackinterval",
-
-		"querytimeout":  "querytimeout",
-		"query_timeout": "querytimeout",
-
-		"resultsetmaxrows":   "resultsetmaxrows",
-		"resultset_max_rows": "resultsetmaxrows",
-
-		"sessionidprefix":   "sessionidprefix",
-		"session_id_prefix": "sessionidprefix",
-
-		"snapshottransactions":  "snapshottransactions",
-		"snapshot_transactions": "snapshottransactions",
-	}
-
-	// escapeExasolValue escapes special characters in Exasol DSN parameter values
-	escapeExasolValue := func(value string) string {
-		// Escape backslashes first (must be done before other escaping)
-		value = strings.ReplaceAll(value, `\`, `\\`)
-		// Escape semicolons (parameter separator)
-		value = strings.ReplaceAll(value, `;`, `\;`)
-		// Escape equals signs
-		value = strings.ReplaceAll(value, `=`, `\=`)
-		return value
-	}
-
-	// makeDSN converts a net.URL to Exasol DSN format
-	makeDSN := func(U *net.URL) string {
-		// Extract connection properties from URL
-		host := U.Hostname()
-		port := cast.ToString(U.Port())
-		username := U.Username()
-		password := U.Password()
-
-		// Use connection properties as fallback
-		if host == "" {
-			host = cast.ToString(conn.GetProp("host"))
-		}
-		if port == "" || port == "0" {
-			port = cast.ToString(conn.GetProp("port"))
-		}
-		if username == "" {
-			username = cast.ToString(conn.GetProp("username"))
-		}
-		if password == "" {
-			password = cast.ToString(conn.GetProp("password"))
-		}
-
-		// Use default port if not specified
-		if port == "" || port == "0" {
-			port = "8563"
-		}
-
-		// Escape special characters in sensitive parameters
-		username = escapeExasolValue(username)
-		password = escapeExasolValue(password)
-
-		// Build the connection string
-		// Exasol driver requires specific connection string format
-		// DSN format: "exa:<host>:<port>;user=<username>;password=<password>;autocommit=0"
-		connURL := fmt.Sprintf("exa:%s:%s;user=%s;password=%s", host, port, username, password)
-		exasol.NewConfig(username, password)
-
-		// Add autocommit (default to 0 if not specified)
-		autocommit := cast.ToString(conn.GetProp("autocommit"))
-		if autocommit == "" {
-			autocommit = "0"
-		}
-		connURL += fmt.Sprintf(";autocommit=%s", autocommit)
-
-		// Add schema if specified
-		schema := cast.ToString(conn.GetProp("schema"))
-		if schema == "" && U.Path() != "" {
-			// Extract schema from URL path
-			schema = strings.Trim(U.Path(), "/")
-		}
-		if schema != "" {
-			connURL += fmt.Sprintf(";schema=%s", schema)
-		}
-
-		// Add additional connection options from URL parameters and properties
-		urlParams := U.Query()
-		for origKey, mappedKey := range propMapping {
-			var val string
-			// First check URL parameters
-			if urlVal, exists := urlParams[origKey]; exists && urlVal != "" {
-				val = urlVal
-			} else if urlVal, exists := urlParams[mappedKey]; exists && urlVal != "" {
-				val = urlVal
-			} else if propVal := conn.GetProp(origKey); propVal != "" {
-				val = propVal
-			}
-
-			if val != "" && origKey != "autocommit" { // autocommit already handled above
-				// Only add if not already present
-				if !strings.Contains(connURL, mappedKey+"=") {
-					connURL += fmt.Sprintf(";%s=%s", mappedKey, val)
-				}
-			}
-		}
-
-		return connURL
-	}
-
-	// Parse URL to extract and set parameters
-	U, _ := net.NewURL(conn.BaseConn.URL)
-	for key, newKey := range propMapping {
-		if val := conn.GetProp(key); val != "" {
-			U.SetParam(newKey, val)
-		}
+	// If a complete URL is already provided and it's not an exasol:// scheme, return as-is
+	if conn.BaseConn.URL != "" && !strings.HasPrefix(conn.BaseConn.URL, "exasol://") {
+		return conn.BaseConn.URL
 	}
 
 	// Extract connection properties
 	host := cast.ToString(conn.GetProp("host"))
-	port := cast.ToString(conn.GetProp("port"))
+	port := cast.ToInt(conn.GetProp("port"))
 	username := cast.ToString(conn.GetProp("username"))
 	password := cast.ToString(conn.GetProp("password"))
 	schema := cast.ToString(conn.GetProp("schema"))
 
+	// If we have an exasol:// URL, extract properties from it
+	if strings.HasPrefix(conn.BaseConn.URL, "exasol://") {
+		if U, err := net.NewURL(conn.BaseConn.URL); err == nil {
+			if host == "" {
+				host = U.Hostname()
+			}
+			if port == 0 {
+				port = cast.ToInt(U.Port())
+			}
+			if username == "" {
+				username = U.Username()
+			}
+			if password == "" {
+				password = U.Password()
+			}
+			if schema == "" && U.Path() != "" {
+				schema = strings.Trim(U.Path(), "/")
+			}
+
+			// Extract additional parameters from URL query parameters
+			for param, values := range U.U.Query() {
+				if len(values) > 0 && conn.GetProp(param) == "" {
+					// Only set if not already set through connection properties
+					conn.SetProp(param, values[0])
+				}
+			}
+		}
+	}
+
 	// Use default port if not specified
-	if port == "" {
-		port = "8563"
+	if port == 0 {
+		port = 8563
 	}
 
-	if host == "" && conn.BaseConn.URL != "" {
-		if strings.HasPrefix(conn.BaseConn.URL, "exasol://") {
-			// translate to DSN format using makeDSN helper
-			U, _ = net.NewURL(conn.BaseConn.URL)
-			return makeDSN(U)
+	// Validate required parameters
+	if host == "" || username == "" {
+		// If we don't have enough info, return the original URL
+		return conn.BaseConn.URL
+	}
+
+	// Use Exasol driver's configuration builder for proper escaping
+	config := exasol.NewConfig(username, password).
+		Host(host).
+		Port(port)
+
+	// Add schema if specified
+	if schema != "" {
+		config = config.Schema(schema)
+	}
+
+	// Property mapping for Exasol connection options
+	// Only include properties that are actually supported by the Exasol driver
+	propMapping := map[string]string{
+		"validateservercertificate":   "validateservercertificate",
+		"validate_server_certificate": "validateservercertificate",
+		"encryption":                  "encryption",
+		"compression":                 "compression",
+		"fetchsize":                   "fetchsize",
+		"fetch_size":                  "fetchsize",
+		"autocommit":                  "autocommit",
+		"clientname":                  "clientname",
+		"client_name":                 "clientname",
+		"clientversion":               "clientversion",
+		"client_version":              "clientversion",
+		"certificatefingerprint":      "certificatefingerprint",
+		"certificate_fingerprint":     "certificatefingerprint",
+		"querytimeout":                "querytimeout",
+		"query_timeout":               "querytimeout",
+		"resultsetmaxrows":            "resultsetmaxrows",
+		"resultset_max_rows":          "resultsetmaxrows",
+	}
+
+	// Apply connection options using the builder pattern
+	for origKey, mappedKey := range propMapping {
+		if val := conn.GetProp(origKey); val != "" {
+			switch mappedKey {
+			case "autocommit":
+				if autocommit, err := strconv.ParseBool(val); err == nil {
+					config = config.Autocommit(autocommit)
+				} else if val == "1" {
+					config = config.Autocommit(true)
+				} else if val == "0" {
+					config = config.Autocommit(false)
+				}
+			case "compression":
+				if compression, err := strconv.ParseBool(val); err == nil {
+					config = config.Compression(compression)
+				} else if val == "1" {
+					config = config.Compression(true)
+				} else if val == "0" {
+					config = config.Compression(false)
+				}
+			case "encryption":
+				if encryption, err := strconv.ParseBool(val); err == nil {
+					config = config.Encryption(encryption)
+				} else if val == "1" {
+					config = config.Encryption(true)
+				} else if val == "0" {
+					config = config.Encryption(false)
+				}
+			case "validateservercertificate":
+				if validate, err := strconv.ParseBool(val); err == nil {
+					config = config.ValidateServerCertificate(validate)
+				} else if val == "1" {
+					config = config.ValidateServerCertificate(true)
+				} else if val == "0" {
+					config = config.ValidateServerCertificate(false)
+				}
+			case "certificatefingerprint":
+				config = config.CertificateFingerprint(val)
+			case "fetchsize":
+				if fetchsize, err := strconv.Atoi(val); err == nil {
+					config = config.FetchSize(fetchsize)
+				}
+			case "querytimeout":
+				if timeout, err := strconv.Atoi(val); err == nil {
+					config = config.QueryTimeout(timeout)
+				}
+			case "resultsetmaxrows":
+				if maxrows, err := strconv.Atoi(val); err == nil {
+					config = config.ResultSetMaxRows(maxrows)
+				}
+			case "clientname":
+				config = config.ClientName(val)
+			case "clientversion":
+				config = config.ClientVersion(val)
+			}
 		}
-		return conn.BaseConn.URL // if only url was provided
 	}
 
-	// If we have host info, use makeDSN helper to build DSN
-	if host != "" {
-		// Create a URL object with the connection details
-		// URL-escape the password for URL construction, makeDSN will handle Exasol-specific escaping
-		urlStr := fmt.Sprintf("exasol://%s:%s@%s:%s", url.QueryEscape(username), url.QueryEscape(password), host, port)
-		if schema != "" {
-			urlStr += "/" + schema
-		}
-		U, _ := net.NewURL(urlStr)
-		return makeDSN(U)
-	}
-
-	return conn.BaseConn.URL
+	// Return the properly constructed DSN using the Exasol driver
+	return config.String()
 }
 
 // Connect connects to the database
