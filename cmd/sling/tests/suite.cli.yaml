@@ -763,4 +763,16 @@
   run: |
     sling run -d -r cmd/sling/tests/replications/r.42.mssql_exclude_column_issue607.yaml
   output_contains:
-    - extra_col column count in parquet file: 0
+    - 'extra_col column count in parquet file: 0'
+
+- id: 101
+  name: Test Azure Table incremental mode to PostgreSQL
+  run: |
+    MODE=full-refresh sling run -d -r cmd/sling/tests/replications/r.43.azuretable_incremental_postgres.yaml --limit 5
+    MODE=incremental sling run -d -r cmd/sling/tests/replications/r.43.azuretable_incremental_postgres.yaml
+  streams: 1
+  output_contains:
+    - 'Loaded 5 rows into public.test1k_azuretable_pg'
+    - 'inserted 213 rows'
+    - 'rows into public.test1k_azuretable_pg'
+    - 'id, first_name, email, create_dt, Timestamp'

@@ -252,6 +252,10 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			})
 		}
 
+		if opts.Limit > 0 {
+			m["limit"] = opts.Limit
+		}
+
 		if len(m) > 0 {
 			return g.Marshal(m)
 		}

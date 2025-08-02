@@ -399,13 +399,33 @@ func (conn *AzureTableConn) StreamRowsContext(ctx context.Context, tableName str
 	endValue := cast.ToString(opts["end_value"])
 
 	if updateKey != "" {
+		// Determine if the update key is a datetime field
+		// For now, we'll check common datetime field patterns
+		isDateTimeField := updateKey == "Timestamp" ||
+			strings.HasSuffix(strings.ToLower(updateKey), "_dt") ||
+			strings.HasSuffix(strings.ToLower(updateKey), "_date") ||
+			strings.HasSuffix(strings.ToLower(updateKey), "_time") ||
+			strings.HasSuffix(strings.ToLower(updateKey), "_at")
+
 		if incrementalValue != "" {
 			// Incremental mode
-			filterStr := fmt.Sprintf("%s gt '%s'", updateKey, incrementalValue)
+			var filterStr string
+			if isDateTimeField {
+				// DateTime fields need the datetime prefix
+				filterStr = fmt.Sprintf("%s gt datetime'%s'", updateKey, incrementalValue)
+			} else {
+				filterStr = fmt.Sprintf("%s gt '%s'", updateKey, incrementalValue)
+			}
 			queryOptions.Filter = &filterStr
 		} else if startValue != "" && endValue != "" {
 			// Backfill mode
-			filterStr := fmt.Sprintf("%s ge '%s' and %s le '%s'", updateKey, startValue, updateKey, endValue)
+			var filterStr string
+			if isDateTimeField {
+				// DateTime fields need the datetime prefix
+				filterStr = fmt.Sprintf("%s ge datetime'%s' and %s le datetime'%s'", updateKey, startValue, updateKey, endValue)
+			} else {
+				filterStr = fmt.Sprintf("%s ge '%s' and %s le '%s'", updateKey, startValue, updateKey, endValue)
+			}
 			queryOptions.Filter = &filterStr
 		}
 	}
@@ -414,20 +434,18 @@ func (conn *AzureTableConn) StreamRowsContext(ctx context.Context, tableName str
 	if fields, ok := opts["fields"]; ok {
 		fieldsList := cast.ToStringSlice(fields)
 		if len(fieldsList) > 0 {
-			selectStr := strings.Join(fieldsList, ",")
-			queryOptions.Select = &selectStr
+			selectStr := strings.Join(fieldsList, ", ")
+			queryOptions.Select = g.Ptr(selectStr)
 		}
 	}
 
 	// Set limit for paging
-	if Limit > 0 && Limit < 1000 {
+	if Limit > 0 {
 		top := int32(Limit)
 		queryOptions.Top = &top
-	} else if Limit == 0 {
-		top := int32(1000)
-		queryOptions.Top = &top // Default page size
 	}
 
+	conn.LogSQL(g.F("table=%s options=%s", sanitizedName, g.Marshal(queryOptions)))
 	pager := tableClient.NewListEntitiesPager(queryOptions)
 
 	// Create datastream
@@ -438,6 +456,40 @@ func (conn *AzureTableConn) StreamRowsContext(ctx context.Context, tableName str
 	if err != nil {
 		return nil, g.Error(err, "could not get columns")
 	}
+
+	// Filter columns if select fields are specified
+	if fields, ok := opts["fields"]; ok {
+		fieldsList := cast.ToStringSlice(fields)
+		if len(fieldsList) > 0 && fieldsList[0] != "*" {
+			// Create a new columns slice with only selected fields
+			selectedColumns := iop.Columns{}
+			position := 1
+
+			// Always include system columns
+			for _, col := range columns {
+				if col.Name == "PartitionKey" || col.Name == "RowKey" || col.Name == "Timestamp" {
+					col.Position = position
+					selectedColumns = append(selectedColumns, col)
+					position++
+				}
+			}
+
+			// Add selected fields
+			for _, fieldName := range fieldsList {
+				for _, col := range columns {
+					if strings.EqualFold(col.Name, fieldName) && col.Name != "PartitionKey" && col.Name != "RowKey" && col.Name != "Timestamp" {
+						col.Position = position
+						selectedColumns = append(selectedColumns, col)
+						position++
+						break
+					}
+				}
+			}
+
+			columns = selectedColumns
+		}
+	}
+
 	ds.Columns = columns
 
 	// Setup iterator

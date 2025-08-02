@@ -5,11 +5,11 @@ core:
 
 variable:
   tmp_folder: /tmp
-  timestamp_layout_str: '"{value}"'
+  timestamp_layout_str: '{value}'
   timestamp_layout: '2006-01-02T15:04:05.000Z'
-  timestampz_layout_str: '"{value}"'
+  timestampz_layout_str: '{value}'
   timestampz_layout: '2006-01-02T15:04:05.000Z'
-  date_layout_str: '"{value}"'
+  date_layout_str: '{value}'
   date_layout: '2006-01-02'
   error_filter_table_exists: already
   error_ignore_drop_table: NotFound
