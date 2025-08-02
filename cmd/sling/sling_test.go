@@ -64,6 +64,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("ducklake_s3"):     {name: "ducklake_s3", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
 	dbio.TypeDbExasol:            {name: "exasol", schema: "public"},
+	dbio.TypeDbFirebird:          {name: "firebird", schema: "main"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
@@ -908,6 +909,11 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 func TestSuiteDatabaseExasol(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbExasol)
+}
+
+func TestSuiteDatabaseFirebird(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbFirebird)
 }
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {
