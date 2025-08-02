@@ -193,13 +193,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// write directly for iceberg full-refresh
-	isIce := tgtConn.GetType() == dbio.TypeDbIceberg
+	writeDirectly := g.In(tgtConn.GetType(), dbio.TypeDbIceberg, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbAzureTable)
 
 	// set direct insert mode
 	directInsert := g.PtrVal(cfg.Target.Options.DirectInsert) || cast.ToBool(os.Getenv("SLING_DIRECT_INSERT"))
 
 	// write directly to the final table (no temp table)
-	if directInsert || isIce {
+	if directInsert || writeDirectly {
 		if g.In(cfg.Mode, IncrementalMode, BackfillMode) && len(cfg.Source.PrimaryKey()) > 0 {
 			g.Warn("mode '%s' with a primary-key is not supported for direct write, falling back to using a temporary table.", cfg.Mode)
 		} else {

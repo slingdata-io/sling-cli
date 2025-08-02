@@ -655,7 +655,7 @@ func (cfg *Config) Prepare() (err error) {
 
 	// validate capability to write
 	switch cfg.Target.Type {
-	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable:
+	case dbio.TypeDbPrometheus, dbio.TypeDbMongoDB, dbio.TypeDbElasticsearch, dbio.TypeDbBigTable, dbio.TypeDbAzureTable:
 		return g.Error("sling cannot currently write to %s", cfg.Target.Type)
 	case dbio.TypeDbIceberg:
 		switch cfg.Mode {
@@ -1327,7 +1327,7 @@ type Source struct {
 	Type        dbio.Type      `json:"type,omitempty" yaml:"type,omitempty"`
 	Stream      string         `json:"stream,omitempty" yaml:"stream,omitempty"`
 	Select      []string       `json:"select,omitempty" yaml:"select,omitempty"` // Select or exclude columns. Exclude with prefix "-".
-	Files       *[]string      `json:"files,omitempty" yaml:"files,omitempty"`   // include/exclude files
+	Files       []string       `json:"files,omitempty" yaml:"files,omitempty"`   // include/exclude files
 	Where       string         `json:"where,omitempty" yaml:"where,omitempty"`
 	Query       string         `json:"query,omitempty" yaml:"query,omitempty"`
 	PrimaryKeyI any            `json:"primary_key,omitempty" yaml:"primary_key,omitempty"`

@@ -153,14 +153,15 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 
 	// Validate rootFolderID if provided
 	if fs.rootFolderID != "" {
-		_, err = fs.client.Files.Get(fs.rootFolderID).SupportsAllDrives(true).Fields("id").Do()
+		// Get detailed folder information
+		folderInfo, err := fs.client.Files.Get(fs.rootFolderID).SupportsAllDrives(true).Fields("id,name,mimeType,parents,capabilities,driveId,owners,permissions").Do()
 		if err != nil {
 			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 {
 				return g.Error("Root folder ID '%s' does not exist or is not accessible", fs.rootFolderID)
 			}
 			return g.Error(err, "Could not verify root folder ID: %s", fs.rootFolderID)
 		}
-		g.Trace("Verified root folder ID: %s", fs.rootFolderID)
+		g.Trace("Got root folder: %s", g.Marshal(folderInfo))
 	}
 
 	// Validate fileID if provided
@@ -291,7 +292,7 @@ func (fs *GoogleDriveFileSysClient) Write(uri string, reader io.Reader) (bw int6
 		file := &drive.File{
 			Name: name,
 		}
-		_, err = fs.client.Files.Update(result.Files[0].Id, file).Media(pr).Do()
+		_, err = fs.client.Files.Update(result.Files[0].Id, file).Media(pr).SupportsAllDrives(true).Do()
 	} else {
 		// Create new file
 		file := &drive.File{
@@ -299,7 +300,7 @@ func (fs *GoogleDriveFileSysClient) Write(uri string, reader io.Reader) (bw int6
 			Parents:  []string{parentID},
 			MimeType: "application/octet-stream",
 		}
-		_, err = fs.client.Files.Create(file).Media(pr).Do()
+		_, err = fs.client.Files.Create(file).Media(pr).SupportsAllDrives(true).Do()
 	}
 
 	if err != nil {
@@ -705,7 +706,7 @@ func (fs *GoogleDriveFileSysClient) delete(uri string) (err error) {
 		return g.Error(err, "Could not get file ID for deletion")
 	}
 
-	err = fs.client.Files.Delete(fileID).Do()
+	err = fs.client.Files.Delete(fileID).SupportsAllDrives(true).Do()
 	if err != nil {
 		return g.Error(err, "Could not delete file: "+path)
 	}
@@ -764,7 +765,7 @@ func (fs *GoogleDriveFileSysClient) getOrCreateFolder(path string) (folderID str
 				Parents:  []string{parentID},
 			}
 
-			created, err := fs.client.Files.Create(folder).Fields("id").Do()
+			created, err := fs.client.Files.Create(folder).Fields("id").SupportsAllDrives(true).Do()
 			if err != nil {
 				return "", g.Error(err, "Could not create folder: "+part)
 			}

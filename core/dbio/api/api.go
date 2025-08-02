@@ -11,7 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/spf13/cast"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 type APIConnection struct {
@@ -30,6 +30,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Env:    g.KVArrToMap(os.Environ()...),
 			State:  g.M(),
 			Queues: make(map[string]*iop.Queue),
+			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
 		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
@@ -55,7 +56,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 
 	// register queues
 	for _, queueName := range ac.Spec.Queues {
-		if val := os.Getenv("SLING_THREADS"); cast.ToInt(val) > 1 {
+		if env.IsThreadChild {
 			g.Warn("API queues may not work correctly for multiple threads.")
 		}
 		_, err = ac.RegisterQueue(queueName)
@@ -84,6 +85,7 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 
 	if ac.Spec.IsDynamic() {
 		// TODO: generate/obtain list of dynamic endpoints
+		return nil, g.Error("dynamic endpoint not yet implemented")
 	}
 
 	if len(patterns) > 0 && patterns[0] != "" {
@@ -133,8 +135,6 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		if err = validateAndSetDefaults(endpoint, ac.Spec); err != nil {
 			return nil, g.Error(err, "endpoint validation failed")
 		}
-
-		// TODO: perform pre-endpoint calls
 	}
 
 	if endpoint.Disabled {
@@ -190,7 +190,7 @@ type APIStateAuth struct {
 	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
 	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
-	Mutex sync.Mutex                                         `json:"-" yaml:"-"` // Mutex for auth operations
+	Mutex *sync.Mutex                                        `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)

@@ -58,11 +58,8 @@ queues:
 
 # Authentication configuration for accessing the API
 authentication:
-  # Type of authentication: "bearer", "basic", "oauth2", or empty for none
-  type: "bearer"
-
-  # Bearer token for authentication
-  token: "{secrets.api_token}"
+  # Type of authentication: "basic", "oauth2", "aws-sigv4", "sequence", or empty for none
+  type: "basic"
 
   # Basic authentication credentials
   username: "{secrets.username}"
@@ -75,6 +72,9 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   scopes: ["read:data", "write:data"]
+  
+  # Expiration time in seconds (for re-authentication)
+  expires: 3600
 
 
 # Default settings applied to all endpoints
@@ -112,12 +112,20 @@ endpoints:
   users:
     # Description of what this endpoint does
     description: "Retrieve a list of users with incremental sync"
+    
+    # Documentation URL for this endpoint (optional)
+    docs: "https://api.example.com/docs/users"
+    
+    # Disable this endpoint (optional)
+    disabled: false
 
     # Initial state variables for this endpoint (merged with defaults.state)
     state:
       # Get last sync timestamp from persistent state, default to 30 days ago
+      # Accepts env var override
       updated_since: >
         { coalesce(
+             env.LAST_UPDATED,
              sync.last_updated,
              date_format(date_add(now(), -30, 'day'), '%Y-%m-%dT%H:%M:%SZ')
            )
@@ -127,6 +135,36 @@ endpoints:
     # Variables to persist between API runs for incremental loading
     # Values are read from 'sync.' scope and written to 'state.' scope for the next run.
     sync: ["last_updated"]
+    
+    # Setup sequence - calls executed before the endpoint runs (optional)
+    setup:
+      - request:
+          url: "{state.base_url}/create-job"
+          method: "POST"
+        response:
+          processors:
+            - expression: response.json.job_id
+              output: state.job_id
+
+      - request:
+          url: "{state.base_url}/get-job-status/{state.job_id}"
+          method: "GET"
+        response:
+          rules:
+            - action: retry
+              condition: response.json.status != "DONE"
+              backoff: constant
+              backoff_base: 3
+          processors:
+            - expression: response.json.data_url
+              output: state.data_url
+
+        
+    # Teardown sequence - calls executed after the endpoint runs (optional)
+    teardown:
+      - request:
+          url: "{state.base_url}/cleanup"
+          method: "POST"
 
     # HTTP request configuration
     request:
@@ -153,6 +191,9 @@ endpoints:
 
     # Response processing configuration
     response:
+      # Optional: Force response format interpretation (csv, xml, json)
+      format: "json"
+      
       # How to extract records from response
       records:
         # JMESPath expression to extract records array from response
@@ -266,10 +307,6 @@ authentication:
   username: "{secrets.username}"
   password: "{secrets.password}"
 
-  # Bearer Token
-  type: "bearer"
-  token: "{secrets.api_token}" # Can use secrets, env, or state vars
-
   # OAuth2 - Client Credentials Flow (recommended for server-to-server)
   type: "oauth2"
   flow: "client_credentials"
@@ -317,6 +354,33 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}" # Optional for some providers
   refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
+  
+  # AWS Signature v4 Authentication
+  type: "aws-sigv4"
+  aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
+  aws_region: "{secrets.aws_region}"
+  aws_access_key_id: "{secrets.aws_access_key_id}"
+  aws_secret_access_key: "{secrets.aws_secret_access_key}"
+  aws_session_token: "{secrets.aws_session_token}"  # Optional for temporary credentials
+  aws_profile: "{secrets.aws_profile}"  # Optional, use AWS profile instead of keys
+  
+  # Custom Authentication Sequence
+  type: "sequence"
+  sequence:
+    - request:
+        url: "https://api.example.com/auth/login"
+        method: "POST"
+        payload:
+          username: "{secrets.username}"
+          password: "{secrets.password}"
+      response:
+        processors:
+          - expression: "response.json.token"
+            output: "state.access_token"
+    - request:
+        url: "https://api.example.com/auth/validate"
+        headers:
+          Authorization: "Bearer {state.access_token}"
 ```
 
 ### OAuth2 Flow Details
@@ -415,7 +479,7 @@ iterate:
   # Optional: Number of iterations to run concurrently (default: 10).
   concurrency: 5
   # Optional: Condition to evaluate before starting iteration.
-  # if: "state.process_details == true"
+  if: "state.process_details == true"
 ```
 
 Each iteration runs independently with its own copy of the initial state, modified by the `into` variable and subsequent pagination/processors within that iteration.
@@ -553,7 +617,13 @@ response:
 
 **Deduplication:** If `primary_key` is defined, Sling automatically tracks seen keys within the current run and skips duplicate records. For very large datasets where storing all keys in memory is infeasible, specifying `duplicate_tolerance` activates a Bloom filter for probabilistic deduplication.
 
-**Rules & Retries:** Sling automatically handles standard `RateLimit-Reset` or `Retry-After` headers when `response.status == 429` and the action is `retry`, using the header value for the backoff duration if available, otherwise falling back to the configured `backoff` strategy.
+**Rules & Retries:** Sling automatically handles rate limiting:
+- When `response.status == 429` and the action is `retry`, it checks for standard rate limit headers:
+  - `RateLimit-Reset`: Direct seconds to wait before retrying
+  - `Retry-After`: HTTP standard header for retry delays
+  - `RateLimit-Policy` with `RateLimit-Remaining`: IETF draft format for complex rate limiting
+- If rate limit headers are present, they override the configured backoff strategy
+- Otherwise, it falls back to the configured `backoff` strategy (constant, linear, exponential, jitter)
 
 ## Sync State for Incremental Loads
 
@@ -598,6 +668,52 @@ endpoints:
 4.  **Processing:** Processors update state variables (e.g., `output: state.last_sync_ts`, `aggregation: maximum`).
 5.  **Run End:** The final values of the state variables listed in the `sync` array (e.g., `state.last_sync_ts`) are persisted for the next run.
 
+## Dynamic Endpoints
+
+For APIs where endpoints need to be generated dynamically (e.g., based on API discovery), you can use dynamic endpoints:
+
+```yaml
+name: "Dynamic API"
+description: "API with dynamically generated endpoints"
+
+defaults:
+  request:
+    headers:
+      Authorization: Bearer {secrets.api_key}
+
+
+# Define dynamic endpoints that will be generated at runtime
+# The authentication flow will be triggered prior
+# default state applies
+dynamic_endpoints:
+  - setup:
+    - request:
+        url: "{state.base_url}/api/endpoints"
+      response:
+        processors:
+          - expression: "response.json.endpoints"
+            output: "state.objects" # array of objects
+
+    iterate: state.objects
+    into: state.object
+
+    endpoint:
+      name: "{state.object.name}"
+      description: "{state.object.description}"
+
+      state:
+        endpoint_path: "{state.object.path}"
+      
+      request:
+        url: "{state.base_url}{state.endpoint_path}"
+        method: "GET"
+      
+      response:
+        records:
+          jmespath: "data[]"
+          primary_key: ["id"]
+```
+
 ## Template for New API Specs
 
 ```yaml
@@ -609,8 +725,9 @@ description: "API Description"
 #   - item_ids
 
 authentication:
-  type: "bearer" # bearer|basic|oauth2|""
-  token: "{secrets.api_token}" # Or username/password, or OAuth2 config
+  type: "basic" # basic|oauth2|aws-sigv4|sequence|""
+  username: "{secrets.username}"
+  password: "{secrets.password}"
   
   # OAuth2 Client Credentials example (most common for APIs):
   # type: "oauth2"
@@ -709,11 +826,6 @@ endpoints:
 You can use the following functions within `{...}` expressions in your API spec. Functions provide capabilities for data manipulation, type casting, date operations, control flow, and more.
 
 **IMPORTANT:** Always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). This is required by the [goval](https://github.com/maja42/goval) expression library that Sling uses.
-
-See [functions.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions.go) for the source code and authoritative list.
-See [functions_test.go](https://github.com/slingdata-io/sling-cli/blob/main/core/dbio/api/functions_test.go) for usage examples.
-
-*(Function tables need careful review against functions.go - the following is based on the previous version and source analysis)*
 
 ### String Functions
 

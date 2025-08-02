@@ -307,7 +307,8 @@
       site_id: store_123
       status: pending
       amount: "149.5"
-  expected_state: {}
+  expected_state:
+    token: mock_token_12345
   expected_next_state: {}
 
 - id: 7

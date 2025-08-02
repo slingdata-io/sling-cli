@@ -68,10 +68,11 @@ func (ac *APIConnection) Authenticate() (err error) {
 	case AuthTypeSequence:
 		// create ephemeral endpoint
 		baseEndpoint := &Endpoint{
-			State:   ac.getStateMap(nil),
+			State:   g.M(),
 			context: g.NewContext(ac.Context.Ctx),
 			conn:    ac,
 		}
+
 		err = runSequence(auth.Sequence, baseEndpoint)
 		if err != nil {
 			return g.Error(err, "could not auth via sequence")
@@ -81,25 +82,9 @@ func (ac *APIConnection) Authenticate() (err error) {
 		ac.Context.Lock()
 
 		// sync the state section back to ac.State.State
-		if stateSection, ok := baseEndpoint.State["state"]; ok {
-			if stateMap, ok := stateSection.(map[string]any); ok {
-				for k, v := range stateMap {
-					ac.State.State[k] = v
-				}
-			}
-		}
-
-		// sync the auth section back to ac.State.Auth if modified
-		if authSection, ok := baseEndpoint.State["auth"]; ok {
-			if authData, ok := authSection.(APIStateAuth); ok {
-				ac.State.Auth = authData
-			} else {
-				// handle case where auth section might be a map
-				if authMap, ok := authSection.(map[string]any); ok {
-					if err := g.JSONConvert(authMap, &ac.State.Auth); err != nil {
-						g.Warn("could not sync auth state back: %v", err)
-					}
-				}
+		if stateMap := baseEndpoint.State; len(stateMap) > 0 {
+			for k, v := range stateMap {
+				ac.State.State[k] = v
 			}
 		}
 

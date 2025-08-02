@@ -633,6 +633,10 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "prometheus://{host}"
+	case dbio.TypeDbAzureTable:
+		setIfMissing("account_name", c.Data["account"])
+		setIfMissing("account_key", "")
+		template = "azuretable://{account_name}"
 	case dbio.TypeDbBigTable:
 		template = "bigtable://{project}/{instance}?"
 		if _, ok := c.Data["keyfile"]; ok {

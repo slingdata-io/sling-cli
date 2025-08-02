@@ -79,6 +79,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbAzureTable:        {name: "azure_table", schema: "default"},
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
@@ -615,7 +616,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB) || g.In(tgtType, dbio.TypeDbMongoDB) {
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) || g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) {
 				continue
 			}
 
@@ -956,6 +957,11 @@ func TestSuiteDatabaseTrino(t *testing.T) {
 func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+func TestSuiteDatabaseAzureTable(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbAzureTable, "table_full_refresh_into_postgres,discover_schemas")
 }
 
 func TestSuiteDatabasePrometheus(t *testing.T) {

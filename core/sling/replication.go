@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 )
@@ -32,6 +34,10 @@ type ReplicationConfig struct {
 	Tasks    []*Config `json:"tasks"`
 	Compiled bool      `json:"compiled"`
 	FailErr  string    // error string to fail all (e.g. when the first tasks fails to connect)
+
+	Context *g.Context `json:"-"`
+
+	startHooks, endHooks Hooks
 
 	streamsOrdered []string
 	originalCfg    string
@@ -395,7 +401,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 	return nil
 }
 
-func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks, err error) {
+func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (err error) {
 	var hooksRaw []any
 	switch stage {
 	case HookStageStart:
@@ -403,7 +409,7 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks,
 	case HookStageEnd:
 		hooksRaw = rd.Hooks.End
 	default:
-		return nil, g.Error("invalid default hook stage: %s", stage)
+		return g.Error("invalid default hook stage: %s", stage)
 	}
 
 	if hooksRaw == nil {
@@ -412,19 +418,97 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (hooks Hooks,
 
 	state, err := rd.RuntimeState()
 	if err != nil {
-		return nil, g.Error(err, "could not render runtime state")
+		return g.Error(err, "could not render runtime state")
 	}
 
+	var hooks Hooks
 	for i, hook := range hooksRaw {
 		opts := ParseOptions{stage: stage, index: i, state: state, kind: HookKindHook}
 		hook, err := ParseHook(hook, opts)
 		if err != nil {
-			return nil, g.Error(err, "error parsing %s-hook", stage)
+			return g.Error(err, "error parsing %s-hook", stage)
 		} else if hook != nil {
 			hooks = append(hooks, hook)
 		}
 	}
-	return hooks, nil
+
+	switch stage {
+	case HookStageStart:
+		rd.startHooks = hooks
+	case HookStageEnd:
+		rd.endHooks = hooks
+	}
+
+	return nil
+}
+
+func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error) {
+
+	switch stage {
+	case HookStageStart:
+		if len(rd.startHooks) == 0 {
+			return nil
+		}
+	case HookStageEnd:
+		if len(rd.endHooks) == 0 {
+			return nil
+		}
+	default:
+		return g.Error("invalid replication hook stage: %s", stage)
+	}
+
+	// create a pseudo-stream for the start and end hook, also with LogSink
+	stream := &ReplicationStreamConfig{Object: "_", replication: rd}
+	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage))
+	if err != nil {
+		return g.Error(err, "could not make replication hook: %s", stage)
+	}
+
+	te := &TaskExecution{
+		Context:      rd.Context,
+		ExecID:       os.Getenv("SLING_EXEC_ID"),
+		Config:       &cfg,
+		Status:       ExecStatusRunning,
+		StartTime:    g.Ptr(time.Now()),
+		ProgressHist: []string{},
+		cleanupFuncs: []func(){},
+		OutputLines:  make(chan *g.LogLine, 5000),
+		df:           iop.NewDataflow(),
+		Replication:  rd,
+	}
+	StateSet(te)
+
+	// recover from panic and set state
+	defer func() {
+		if r := recover(); r != nil {
+			err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+		}
+		te.EndTime = g.Ptr(time.Now())
+		StateSet(te)
+	}()
+
+	env.LogSink = func(ll *g.LogLine) {
+		ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
+		te.AppendOutput(ll)
+	}
+
+	switch stage {
+	case HookStageStart:
+		if err = rd.startHooks.Execute(); err != nil {
+			te.Status = ExecStatusError
+			return g.Error(err, "error executing start hooks")
+		}
+	case HookStageEnd:
+		if err = rd.endHooks.Execute(); err != nil {
+			te.Status = ExecStatusError
+			return g.Error(err, "error executing end hooks")
+		}
+	}
+
+	// set success
+	te.Status = ExecStatusSuccess
+
+	return nil
 }
 
 func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStreamConfig) (hooks Hooks, err error) {
@@ -809,6 +893,8 @@ func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patte
 
 // Compile compiles the replication into tasks
 func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...string) (err error) {
+	rd.Context = g.NewContext(context.Background())
+
 	if rd.Compiled {
 		// apply the selection if specified
 		if len(selectStreams) > 0 {
@@ -829,6 +915,14 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 				return g.Error(err, "could not prepare: %s", task.StreamName)
 			}
 		}
+
+		if err = rd.ParseReplicationHook(HookStageStart); err != nil {
+			return g.Error(err, "could not parse start hooks")
+		}
+		if err = rd.ParseReplicationHook(HookStageEnd); err != nil {
+			return g.Error(err, "could not parse end hooks")
+		}
+
 		return nil
 	}
 
@@ -975,6 +1069,13 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		rd.Tasks = append(rd.Tasks, &cfg)
 	}
 
+	if err = rd.ParseReplicationHook(HookStageStart); err != nil {
+		return g.Error(err, "could not parse start hooks")
+	}
+	if err = rd.ParseReplicationHook(HookStageEnd); err != nil {
+		return g.Error(err, "could not parse end hooks")
+	}
+
 	rd.Compiled = true
 
 	// generate state
@@ -997,7 +1098,7 @@ type ReplicationStreamConfig struct {
 	Mode          Mode           `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Object        string         `json:"object,omitempty" yaml:"object,omitempty"`
 	Select        []string       `json:"select,omitempty" yaml:"select,flow,omitempty"`
-	Files         *[]string      `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
+	Files         []string       `json:"files,omitempty" yaml:"files,omitempty"` // include/exclude files
 	Where         string         `json:"where,omitempty" yaml:"where,omitempty"`
 	PrimaryKeyI   any            `json:"primary_key,omitempty" yaml:"primary_key,flow,omitempty"`
 	UpdateKey     string         `json:"update_key,omitempty" yaml:"update_key,omitempty"`

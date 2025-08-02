@@ -767,6 +767,7 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 	ds.SetConfig(map[string]string{"delimiter": ",", "header": "true", "transforms": g.Marshal(transforms), "null_if": `\N\`})
 
 	ds.Defer(func() {
+		duck.Context.Mux.TryLock()
 		duck.Context.Unlock() // release lock
 	})
 
@@ -1048,7 +1049,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
 
 		case "linux/aarch64":
-			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-aarch64.zip"
+			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-arm64.zip"
 
 		default:
 			return "", g.Error("OS %s/%s not handled", runtime.GOOS, runtime.GOARCH)

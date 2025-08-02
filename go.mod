@@ -10,7 +10,7 @@ require (
 	cloud.google.com/go/bigtable v1.37.0
 	cloud.google.com/go/storage v1.53.0
 	github.com/360EntSecGroup-Skylar/excelize v1.4.1
-	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.9.0
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.10.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
 	github.com/ClickHouse/clickhouse-go/v2 v2.34.0
 	github.com/PuerkitoBio/goquery v1.6.0
@@ -34,7 +34,7 @@ require (
 	github.com/exasol/exasol-driver-go v1.0.14
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
-	github.com/flarco/g v0.1.154
+	github.com/flarco/g v0.1.155
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-sql-driver/mysql v1.9.1
 	github.com/gobwas/glob v0.2.3
@@ -80,7 +80,7 @@ require (
 	github.com/xo/dburl v0.3.0
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	go.mongodb.org/mongo-driver v1.14.0
-	golang.org/x/crypto v0.38.0
+	golang.org/x/crypto v0.39.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/text v0.26.0
 	google.golang.org/api v0.236.0
@@ -109,6 +109,7 @@ require (
 	github.com/99designs/keyring v1.2.2 // indirect
 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.18.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/data/aztables v1.4.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.1 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
 	github.com/Azure/go-autorest/autorest/to v0.4.1 // indirect
@@ -317,7 +318,7 @@ require (
 	golang.org/x/exp v0.0.0-20250531010427-b6e5de432a8b // indirect
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
