@@ -24,9 +24,12 @@ func (conn *FirebirdConn) Init() error {
 	conn.BaseConn.Type = dbio.TypeDbFirebird
 	conn.BaseConn.defaultPort = 3050
 
-	// Turn off Bulk export/import for now
+	// Turn off Bulk export/import for now due to hanging issues
 	conn.BaseConn.SetProp("allow_bulk_export", "false")
 	conn.BaseConn.SetProp("allow_bulk_import", "false")
+	
+	// Set batch limit to 1 to force single-row inserts
+	conn.BaseConn.SetProp("batch_limit", "1")
 
 	// Firebird doesn't support schemas, but we use 'main' as default
 	conn.BaseConn.SetProp("default_schema", "main")
@@ -171,4 +174,25 @@ func (conn *FirebirdConn) CreateTable(tableName string, cols iop.Columns, tableD
 	}
 
 	return conn.BaseConn.CreateTable(tblName, cols, tableDDL)
+}
+
+// GenerateInsertStatement returns the proper INSERT statement for Firebird
+func (conn *FirebirdConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+	// Strip schema from table name since Firebird doesn't support schemas
+	_, tblName := SplitTableFullName(tableName)
+	
+	// Firebird doesn't support multi-row inserts, so we always generate for single row
+	// The actual batching will be handled by executing multiple single-row inserts
+	return conn.BaseConn.GenerateInsertStatement(conn.Quote(tblName), cols, 1)
+}
+
+// InsertBatchStream inserts a stream into a table in batch
+func (conn *FirebirdConn) InsertBatchStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	// Strip schema from table name since Firebird doesn't support schemas
+	_, tblName := SplitTableFullName(tableFName)
+	
+	// Use just the table name without schema
+	// Call the original InsertBatchStream which should work with our 
+	// GenerateInsertStatement override that returns single-row statements
+	return InsertBatchStream(conn, conn.tx, conn.Quote(tblName), ds)
 }
