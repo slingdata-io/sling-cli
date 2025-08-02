@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path"
@@ -137,7 +139,7 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 		if val := conn.GetProp(origKey); val != "" {
 			switch mappedKey {
 			case "autocommit":
-				if autocommit, err := strconv.ParseBool(val); err == nil {
+				if autocommit, err := cast.ToBoolE(val); err == nil {
 					config = config.Autocommit(autocommit)
 				} else if val == "1" {
 					config = config.Autocommit(true)
@@ -145,7 +147,7 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 					config = config.Autocommit(false)
 				}
 			case "compression":
-				if compression, err := strconv.ParseBool(val); err == nil {
+				if compression, err := cast.ToBoolE(val); err == nil {
 					config = config.Compression(compression)
 				} else if val == "1" {
 					config = config.Compression(true)
@@ -153,7 +155,7 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 					config = config.Compression(false)
 				}
 			case "encryption":
-				if encryption, err := strconv.ParseBool(val); err == nil {
+				if encryption, err := cast.ToBoolE(val); err == nil {
 					config = config.Encryption(encryption)
 				} else if val == "1" {
 					config = config.Encryption(true)
@@ -161,7 +163,7 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 					config = config.Encryption(false)
 				}
 			case "validateservercertificate":
-				if validate, err := strconv.ParseBool(val); err == nil {
+				if validate, err := cast.ToBoolE(val); err == nil {
 					config = config.ValidateServerCertificate(validate)
 				} else if val == "1" {
 					config = config.ValidateServerCertificate(true)
@@ -217,6 +219,15 @@ func (conn *ExasolConn) Connect(timeOut ...int) error {
 	}
 
 	return nil
+}
+
+// NewTransaction creates a new transaction
+func (conn *ExasolConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
+	if val := conn.GetProp("autocommit"); cast.ToBool(val) {
+		return nil, nil // transactions not supported with auto-commit
+	}
+
+	return conn.BaseConn.NewTransaction(ctx, options...)
 }
 
 // GenerateDDL generates DDL for Exasol
