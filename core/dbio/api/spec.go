@@ -71,14 +71,13 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 
 // Spec defines the complete API specification with endpoints and authentication
 type Spec struct {
-	Name             string         `yaml:"name" json:"name"`
-	Description      string         `yaml:"description" json:"description"`
-	Lifecycle        LifecycleMap   `yaml:"lifecycle" json:"lifecycle"`
-	Queues           []string       `yaml:"queues" json:"queues"`
-	Defaults         Endpoint       `yaml:"defaults" json:"defaults"`
-	Authentication   Authentication `yaml:"authentication" json:"authentication"`
-	EndpointMap      EndpointMap    `yaml:"endpoints" json:"endpoints"`
-	DynamicEndpoints Endpoints      `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
+	Name             string           `yaml:"name" json:"name"`
+	Description      string           `yaml:"description" json:"description"`
+	Queues           []string         `yaml:"queues" json:"queues"`
+	Defaults         Endpoint         `yaml:"defaults" json:"defaults"`
+	Authentication   Authentication   `yaml:"authentication" json:"authentication"`
+	EndpointMap      EndpointMap      `yaml:"endpoints" json:"endpoints"`
+	DynamicEndpoints DynamicEndpoints `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
 	originalMap      map[string]any
 	endpointsOrdered []string
@@ -86,6 +85,15 @@ type Spec struct {
 
 func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
+}
+
+type DynamicEndpoints []DynamicEndpoint
+
+type DynamicEndpoint struct {
+	Setup    Sequence `yaml:"setup" json:"setup"`
+	Iterate  string   `yaml:"iterate" json:"iterate"`
+	Into     string   `yaml:"into" json:"into"`
+	Endpoint Endpoint `yaml:"endpoint" json:"endpoint"`
 }
 
 // Authentication defines how to authenticate with the API
@@ -357,21 +365,6 @@ type Iteration struct {
 	context  *g.Context
 	endpoint *Endpoint
 }
-
-// LifecycleMap are steps that are executed at different stages of the API request lifecycle
-type LifecycleMap map[LifecycleStage]Sequence
-
-type LifecycleStage string
-
-const (
-	StageInit        LifecycleStage = "init"         // called once when api initiates (dynamic streams)
-	StageStart       LifecycleStage = "start"        // called once when stream begins
-	StageEnd         LifecycleStage = "end"          // called once when stream finishes
-	StagePostAuth    LifecycleStage = "post_auth"    // called once right after authentication
-	StageInterval    LifecycleStage = "interval"     // called every interval
-	StagePreRequest  LifecycleStage = "pre_request"  // called before each endpoint request
-	StagePostRequest LifecycleStage = "post_request" // called after each endpoint request
-)
 
 // StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any

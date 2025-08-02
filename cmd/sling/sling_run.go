@@ -206,8 +206,13 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 runReplication:
 	defer connection.CloseAll()
 
-	if !cast.ToBool(os.Getenv("SLING_THREAD_CHILD")) {
-		g.Info(g.Colorize(g.ColorCyan, "Sling CLI | https://slingdata.io"))
+	if !env.IsThreadChild {
+		text := "Sling CLI | https://slingdata.io"
+		if env.NoColor {
+			g.Info(text)
+		} else {
+			g.Info(g.Colorize(g.ColorCyan, text))
+		}
 	}
 
 	if pipelineCfgPath != "" {
@@ -479,19 +484,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		return
 	}
 
-	// parse hooks
 	isThreadChild := cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
-	startHooks, err := replication.ParseReplicationHook(sling.HookStageStart)
-	if err != nil {
-		return g.Error(err, "could not parse start hooks")
-	}
-	endHooks, err := replication.ParseReplicationHook(sling.HookStageEnd)
-	if err != nil {
-		return g.Error(err, "could not parse end hooks")
-	}
 
 	eG := g.ErrorGroup{}
 	successes := 0
+	replication.Context = ctx
 
 	// get final stream count
 	streamCnt := 0
@@ -508,7 +505,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	// run start hooks if not thread child
 	if !isThreadChild {
-		if err = startHooks.Execute(); err != nil {
+		if err = replication.ExecuteReplicationHook(sling.HookStageStart); err != nil {
 			return g.Error(err, "error executing start hooks")
 		}
 	}
@@ -562,7 +559,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	// run end hooks if not thread child
 	if !isThreadChild {
-		if err = endHooks.Execute(); err != nil {
+		if err = replication.ExecuteReplicationHook(sling.HookStageEnd); err != nil {
 			eG.Capture(err, "end-hooks")
 		}
 	}

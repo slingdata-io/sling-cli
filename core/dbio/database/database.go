@@ -25,6 +25,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/env"
 
 	_ "github.com/databricks/databricks-sql-go"
+	_ "github.com/exasol/exasol-driver-go"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -294,6 +295,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BigTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "clickhouse:") {
 		conn = &ClickhouseConn{URL: URL}
+	} else if strings.HasPrefix(URL, "exasol:") {
+		conn = &ExasolConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
 		conn = &ProtonConn{URL: URL}
 	} else if strings.HasPrefix(URL, "firebird:") {
@@ -312,6 +315,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "iceberg:") {
 		conn = &IcebergConn{URL: URL}
+	} else if strings.HasPrefix(URL, "azuretable:") {
+		conn = &AzureTableConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -375,6 +380,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "trino"
 	case dbio.TypeDbProton:
 		driverName = "proton"
+	case dbio.TypeDbExasol:
+		driverName = "exasol"
 	default:
 		driverName = dbType.String()
 	}

@@ -1,0 +1,86 @@
+steps:
+  # Create a test table with 25 rows
+  - type: query
+    id: create_table
+    connection: POSTGRES
+    query: |
+      DROP TABLE IF EXISTS test_parquet_614;
+      CREATE TABLE test_parquet_614 (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(50),
+        value DECIMAL(10,2),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      -- Insert 25 rows
+      INSERT INTO test_parquet_614 (name, value)
+      SELECT 
+        'Name_' || generate_series,
+        generate_series * 10.5
+      FROM generate_series(1, 25);
+      
+      SELECT COUNT(*) as row_count FROM test_parquet_614;
+
+  - type: log
+    message: "Initial table has {state.create_table.result[0].row_count} rows"
+
+  - type: delete
+    location: aws_s3/test_614/test_parquet_614
+    recursive: true
+
+  # Write to S3 with file_max_rows=10 (should create 3 files)
+  - type: replication
+    id: write_to_s3_first
+    path: cmd/sling/tests/pipelines/p.05.replication.yaml
+
+  # List files created
+  - type: list
+    id: list_files_first
+    location: aws_s3/test_614/test_parquet_614/
+    only: files
+
+  - type: log
+    message: |
+      First write created found {length(state.list_files_first.result)} files.
+
+  # Shrink the table to 5 rows
+  - type: query
+    id: shrink_table
+    connection: POSTGRES
+    query: |
+      DELETE FROM test_parquet_614 WHERE id > 5;
+      SELECT COUNT(*) as row_count FROM test_parquet_614;
+
+  - type: log
+    message: "Table now has {state.shrink_table.result[0].row_count} rows"
+
+  # Write again - should delete old files and create 1 new file
+  - type: replication
+    id: write_to_s3_second
+    path: cmd/sling/tests/pipelines/p.05.replication.yaml
+
+  # List files again to check if old ones still exist
+  - type: list
+    id: list_files_second
+    location: aws_s3/test_614/test_parquet_614/
+    only: files
+
+  - type: log
+    message: |
+      After second write, found {length(state.list_files_second.result)} files.      
+      
+      Bug confirmed if more than 1 file exists (should only have 1 file for 5 rows)
+  
+  - type: check
+    id: extra_files_check
+    check: length(state.list_files_second.result) == 1
+    on_failure: warn
+
+  # Clean up
+  - type: delete
+    location: aws_s3/test_614/test_parquet_614
+    recursive: true
+
+  - type: query
+    connection: POSTGRES
+    query: DROP TABLE IF EXISTS test_parquet_614

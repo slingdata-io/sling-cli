@@ -599,7 +599,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	var nodes FileNodes
 	if g.In(Cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || Cfg.SQL != "" {
 		nodes = FileNodes{FileNode{URI: url}}
-	} else if prefixes := g.PtrVal(Cfg.FileSelect); len(prefixes) > 0 {
+	} else if prefixes := Cfg.FileSelect; len(prefixes) > 0 {
 		rootPath := GetDeepestPartitionParent(url)
 		g.Trace("listing path: %s", rootPath)
 		nodes, err = fs.Self().ListRecursive(rootPath)
@@ -1382,6 +1382,12 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				uri = GetDeepestParent(uri) // get target folder, since split by files
 			}
 
+			err = Delete(fs, uri)
+			if err != nil {
+				err = g.Error(err, "Could not delete uri")
+				return bw, err
+			}
+
 			written, err := CopyFromLocalRecursive(fs, localRoot, uri)
 			if err != nil {
 				err = g.Error(err, "Could not write to file")
@@ -1529,11 +1535,11 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 	}
 
 	// excluding files
-	includeAll := cfg.FileSelect == nil // nil means include all. if not nil and empty, include none
+	includeAll := len(cfg.FileSelect) == 0 // if empty, include all
 	includeMap := map[string]struct{}{}
 	excludeMap := map[string]struct{}{}
 	if !includeAll {
-		for _, name := range *cfg.FileSelect {
+		for _, name := range cfg.FileSelect {
 			if strings.HasPrefix(name, "-!") {
 				excludeMap[strings.TrimPrefix(name, "-!")] = struct{}{}
 			} else {

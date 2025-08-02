@@ -63,6 +63,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_s3"):     {name: "ducklake_s3", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbExasol:            {name: "exasol", schema: "public"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
@@ -79,6 +80,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
+	dbio.TypeDbAzureTable:        {name: "azure_table", schema: "default"},
 	dbio.TypeDbElasticsearch:     {name: "elasticsearch", schema: "default"},
 	dbio.TypeDbPrometheus:        {name: "prometheus", schema: "prometheus"},
 	dbio.TypeDbProton:            {name: "proton", schema: "default", useBulk: g.Bool(true)},
@@ -615,7 +617,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB) || g.In(tgtType, dbio.TypeDbMongoDB) {
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) || g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) {
 				continue
 			}
 
@@ -799,6 +801,17 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in databricks
 				}
+			case tgtType == dbio.TypeDbExasol:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // exasol uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.StringType // we're using string for json in exasol
+				}
+			case srcType == dbio.TypeDbExasol && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in exasol
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -892,6 +905,11 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	testSuite(t, dbio.TypeDbMotherDuck)
 }
 
+func TestSuiteDatabaseExasol(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbExasol)
+}
+
 func TestSuiteDatabaseDatabricks(t *testing.T) {
 	t.Parallel()
 
@@ -956,6 +974,11 @@ func TestSuiteDatabaseTrino(t *testing.T) {
 func TestSuiteDatabaseMongo(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMongoDB, "table_full_refresh_into_postgres,discover_schemas")
+}
+
+func TestSuiteDatabaseAzureTable(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbAzureTable, "table_full_refresh_into_postgres,discover_schemas")
 }
 
 func TestSuiteDatabasePrometheus(t *testing.T) {

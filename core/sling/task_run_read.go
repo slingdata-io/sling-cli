@@ -200,7 +200,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	// construct select statement for selected fields or where condition
 	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
-		if sTable.SQL != "" {
+		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() {
 			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
 			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.
 			selectFields = []string{"*"}
@@ -307,7 +307,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 					return df, g.Error(err, "could not generate uris from range")
 				}
 
-				fsCfg.FileSelect = g.Ptr(rangeURIs)
+				fsCfg.FileSelect = rangeURIs
 
 				// set as end value
 				cfg.IncrementalVal = end
