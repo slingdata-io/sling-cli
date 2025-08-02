@@ -322,6 +322,12 @@ github.com/envoyproxy/go-control-plane/ratelimit v0.1.0/go.mod h1:Wk+tMFAFbCXaJP
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/envoyproxy/protoc-gen-validate v1.2.1 h1:DEo3O99U8j4hBFwbJfrz9VtgcDfUKS7KJ7spH3d86P8=
 github.com/envoyproxy/protoc-gen-validate v1.2.1/go.mod h1:d/C80l/jxXLdfEIhX1W2TmLfsJ31lvEjwamM4DxlWXU=
+github.com/exasol/error-reporting-go v0.2.0 h1:nKIe4zYiTHbYrKJRlSNJcmGjTJCZredDh5akVHfIbRs=
+github.com/exasol/error-reporting-go v0.2.0/go.mod h1:lUzRJqKLiSuYpqRUN2LVyj08WeHzhMEC/8Gmgtuqh1Y=
+github.com/exasol/exasol-driver-go v1.0.14 h1:7O8Zs0OCJOBlXmmHAjyBP2WB8wmJo3DcDX9hX93D034=
+github.com/exasol/exasol-driver-go v1.0.14/go.mod h1:3ln2Ms/F8o1H0L1C652EdOlp3NJ8gvT4his/gTTaWtI=
+github.com/exasol/exasol-test-setup-abstraction-server/go-client v0.3.11 h1:8tFp8h5yTpzjMr7l41QCdDwwluN9q6jMcg+JLU0TXOE=
+github.com/exasol/exasol-test-setup-abstraction-server/go-client v0.3.11/go.mod h1:QCTSSXd4SwEAdey6Y8NDOhD4/5m++tOzuhxOi43WE7s=
 github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=

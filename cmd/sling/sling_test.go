@@ -63,6 +63,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.Type("ducklake_r2"):     {name: "ducklake_r2", adjustCol: g.Bool(false)},
 	dbio.Type("ducklake_s3"):     {name: "ducklake_s3", adjustCol: g.Bool(false)},
 	dbio.TypeDbMariaDB:           {name: "mariadb", schema: "mariadb"},
+	dbio.TypeDbExasol:            {name: "exasol", schema: "public"},
 	dbio.TypeDbMotherDuck:        {name: "motherduck", adjustCol: g.Bool(false)},
 	dbio.TypeDbAthena:            {name: "athena", adjustCol: g.Bool(false)},
 	dbio.TypeDbIceberg:           {name: "iceberg_r2", adjustCol: g.Bool(false)},
@@ -800,6 +801,17 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in databricks
 				}
+			case tgtType == dbio.TypeDbExasol:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // exasol uses timestamp
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.StringType // we're using string for json in exasol
+				}
+			case srcType == dbio.TypeDbExasol && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in exasol
+				}
 			}
 
 			col := columns.GetColumn(colName)
@@ -891,6 +903,11 @@ func TestSuiteDatabaseDuckLake(t *testing.T) {
 func TestSuiteDatabaseMotherDuck(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeDbMotherDuck)
+}
+
+func TestSuiteDatabaseExasol(t *testing.T) {
+	t.Parallel()
+	testSuite(t, dbio.TypeDbExasol)
 }
 
 func TestSuiteDatabaseDatabricks(t *testing.T) {

@@ -31,6 +31,7 @@ require (
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/elastic/go-elasticsearch/v8 v8.17.0
+	github.com/exasol/exasol-driver-go v1.0.14
 	github.com/fatih/color v1.18.0
 	github.com/flarco/bigquery v0.0.9
 	github.com/flarco/g v0.1.155
@@ -163,6 +164,7 @@ require (
 	github.com/elastic/elastic-transport-go/v8 v8.6.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.32.4 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
+	github.com/exasol/error-reporting-go v0.2.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
@@ -195,6 +197,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.2 // indirect
 	github.com/gookit/color v1.5.4 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hamba/avro/v2 v2.28.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

@@ -842,6 +842,16 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "proton://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
+	case dbio.TypeDbExasol:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("schema", "")
+
+		template = "exasol://{username}:{password}@{host}:{port}/?"
+		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
+			template = template + "&schema={schema}"
+		}
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
