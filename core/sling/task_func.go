@@ -17,7 +17,7 @@ import (
 )
 
 func createSchemaIfNotExists(conn database.Connection, schemaName string) (created bool, err error) {
-	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1) {
+	if g.In(conn.GetType(), dbio.TypeDbSQLite, dbio.TypeDbD1, dbio.TypeDbFirebird) {
 		return
 	}
 

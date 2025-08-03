@@ -33,6 +33,7 @@ import (
 	_ "github.com/microsoft/go-mssqldb"
 	_ "github.com/microsoft/go-mssqldb/azuread"
 	_ "github.com/microsoft/go-mssqldb/integratedauth/krb5"
+	_ "github.com/nakagami/firebirdsql"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	_ "github.com/snowflakedb/gosnowflake"
 
@@ -286,6 +287,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	} else if strings.HasPrefix(URL, "oracle:") {
 		conn = &OracleConn{URL: URL}
 		// concurrency = 2
+	} else if strings.HasPrefix(URL, "firebird:") || strings.HasPrefix(URL, "firebirdsql:") {
+		conn = &FirebirdConn{URL: URL}
 	} else if strings.HasPrefix(URL, "bigquery:") {
 		conn = &BigQueryConn{URL: URL}
 	} else if strings.HasPrefix(URL, "bigtable:") {
@@ -296,6 +299,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &ExasolConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
 		conn = &ProtonConn{URL: URL}
+	} else if strings.HasPrefix(URL, "firebird:") {
+		conn = &FirebirdConn{URL: URL}
 	} else if strings.HasPrefix(URL, "snowflake") {
 		conn = &SnowflakeConn{URL: URL}
 	} else if strings.HasPrefix(URL, "databricks") {
@@ -357,6 +362,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "mysql"
 	case dbio.TypeDbOracle:
 		driverName = "oracle"
+	case dbio.TypeDbFirebird:
+		driverName = "firebirdsql"
 	case dbio.TypeDbBigQuery:
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:
