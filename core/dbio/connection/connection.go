@@ -633,6 +633,10 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "prometheus://{host}"
+	case dbio.TypeDbAzureTable:
+		setIfMissing("account_name", c.Data["account"])
+		setIfMissing("account_key", "")
+		template = "azuretable://{account_name}"
 	case dbio.TypeDbBigTable:
 		template = "bigtable://{project}/{instance}?"
 		if _, ok := c.Data["keyfile"]; ok {
@@ -838,6 +842,16 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "proton://{username}:{password}@{host}:{port}/{database}?secure={secure}&skip_verify={skip_verify}"
+	case dbio.TypeDbExasol:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		setIfMissing("schema", "")
+
+		template = "exasol://{username}:{password}@{host}:{port}/?"
+		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
+			template = template + "&schema={schema}"
+		}
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

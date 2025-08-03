@@ -42,9 +42,9 @@ hooks:
                CASE WHEN string_col IS NULL THEN 'NULL' ELSE CONCAT('VALUE:', string_col) END as string_col_check,
                empty_string_col,
                CASE WHEN empty_string_col IS NULL THEN 'NULL' ELSE CONCAT('VALUE:', empty_string_col) END as empty_string_check,
-               int_col,
-               decimal_col,
-               date_col
+               case when int_col is null then -1 else int_col end as int_col,
+               case when decimal_col is null then -1 else decimal_col end as decimal_col,
+               case when date_col is null then current_date else date_col end as date_col
         FROM public.test_null_values
         ORDER BY id
       into: result
@@ -58,7 +58,11 @@ hooks:
 
     - type: check
       check: store.result[2].string_col_check == "NULL"
-      name: Row 3 string_col should be NULL
+      failure_message: Row 3 string_col should be NULL
+
+    - type: check
+      check: int_parse(store.result[1].decimal_col) == -1
+      failure_message: Row 2 decimal_col should be -1 (for null). Is {store.result[1].decimal_col}
 
 streams:
   dbo.test_null_values:

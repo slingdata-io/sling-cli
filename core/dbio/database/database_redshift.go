@@ -292,9 +292,18 @@ func (conn *RedshiftConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 
 	df, err = fs.ReadDataflow(s3Path)
 	if err != nil {
-		err = g.Error(err, "Could not read S3 Path for UNLOAD: "+s3Path)
-		return
+		// don't error when 0 files detected (especially in parquet)
+		// https://github.com/slingdata-io/sling-cli/issues/598
+		if fileFormat == dbio.FileTypeParquet && strings.Contains(err.Error(), "Provided 0 files") {
+			data := iop.NewDataset(table.Columns) // no rows
+			df, _ = iop.MakeDataFlow(data.Stream())
+			err = nil
+		} else {
+			err = g.Error(err, "Could not read S3 Path for UNLOAD: "+s3Path)
+			return
+		}
 	}
+
 	df.MergeColumns(columns, true) // overwrite types so we don't need to infer
 	df.Defer(func() {
 		if !cast.ToBool(os.Getenv("SLING_KEEP_TEMP")) {

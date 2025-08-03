@@ -1,0 +1,61 @@
+source: postgres
+target: snowflake
+
+defaults:
+  mode: full-refresh
+
+env:
+  SLING_LOADED_AT_COLUMN: timestamp
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS test_sling_loaded_at_cast;
+        CREATE TABLE test_sling_loaded_at_cast (
+          id INTEGER,
+          name VARCHAR(50),
+          value DECIMAL(10,2),
+          created_at TIMESTAMP
+        );
+        INSERT INTO test_sling_loaded_at_cast VALUES 
+        (1, 'test1', 10.50, '2024-01-01 10:00:00'),
+        (2, 'test2', 20.75, '2024-01-02 11:00:00'),
+        (3, 'test3', 30.99, '2024-01-03 12:00:00');
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          COLUMN_NAME, 
+          DATA_TYPE 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = 'PUBLIC' 
+          AND TABLE_NAME = 'TEST_SLING_LOADED_AT_CAST'
+          AND COLUMN_NAME = '_SLING_LOADED_AT'
+      into: column_info
+
+    - type: log
+      message: |
+        Column info for _SLING_LOADED_AT:
+        {store.column_info}
+
+    - type: check
+      check: |
+        store.column_info[0].data_type == "TIMESTAMP_TZ"
+      success_message: "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)"
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS test_sling_loaded_at_cast;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS PUBLIC.TEST_SLING_LOADED_AT_CAST;
+
+streams:
+  test_sling_loaded_at_cast:
+    object: public.test_sling_loaded_at_cast
+    columns: {"*": "string"}

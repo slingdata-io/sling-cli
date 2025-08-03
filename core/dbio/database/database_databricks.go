@@ -955,6 +955,7 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 		config := iop.LoaderStreamConfig(true)
 		config.TargetType = conn.GetType()
 		config.Format = fileFormat
+		config.Compression = iop.ZStandardCompressorType
 		config.FileMaxRows = cast.ToInt64(conn.GetProp("file_max_rows"))
 		if config.FileMaxRows == 0 {
 			config.FileMaxRows = 500000
