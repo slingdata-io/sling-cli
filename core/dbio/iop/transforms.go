@@ -122,15 +122,34 @@ var (
 	EncodingUtf16       Encoding = "utf16"
 	EncodingWindows1250 Encoding = "windows1250"
 	EncodingWindows1252 Encoding = "windows1252"
+
+	Encodings = []Encoding{
+		EncodingLatin1,
+		EncodingLatin5,
+		EncodingLatin9,
+		EncodingUtf8,
+		EncodingUtf8Bom,
+		EncodingUtf16,
+		EncodingWindows1250,
+		EncodingWindows1252,
+	}
 )
 
 func (e Encoding) String() string {
 	return string(e)
 }
 
+func (e Encoding) DecodeString() string {
+	return g.F("decode_%s", e)
+}
+
+func (e Encoding) EncodeString() string {
+	return g.F("encode_%s", e)
+}
+
 var (
 	TransformDecodeLatin1 = Transform{
-		Name: EncodingLatin1.String(),
+		Name: EncodingLatin1.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_1, val)
 			return newVal, err
@@ -138,7 +157,7 @@ var (
 	}
 
 	TransformDecodeLatin5 = Transform{
-		Name: EncodingLatin5.String(),
+		Name: EncodingLatin5.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_5, val)
 			return newVal, err
@@ -146,7 +165,7 @@ var (
 	}
 
 	TransformDecodeLatin9 = Transform{
-		Name: EncodingLatin9.String(),
+		Name: EncodingLatin9.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_15, val)
 			return newVal, err
@@ -154,7 +173,7 @@ var (
 	}
 
 	TransformDecodeUtf8 = Transform{
-		Name: EncodingUtf8.String(),
+		Name: EncodingUtf8.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF8, val)
 			return newVal, err
@@ -162,7 +181,7 @@ var (
 	}
 
 	TransformDecodeUtf8Bom = Transform{
-		Name: EncodingUtf8Bom.String(),
+		Name: EncodingUtf8Bom.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF8BOM, val)
 			return newVal, err
@@ -170,7 +189,7 @@ var (
 	}
 
 	TransformDecodeUtf16 = Transform{
-		Name: EncodingUtf16.String(),
+		Name: EncodingUtf16.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF16, val)
 			return newVal, err
@@ -178,7 +197,7 @@ var (
 	}
 
 	TransformDecodeWindows1250 = Transform{
-		Name: EncodingWindows1250.String(),
+		Name: EncodingWindows1250.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeWindows1250, val)
 			return newVal, err
@@ -186,7 +205,7 @@ var (
 	}
 
 	TransformDecodeWindows1252 = Transform{
-		Name: EncodingWindows1252.String(),
+		Name: EncodingWindows1252.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeWindows1252, val)
 			return newVal, err
@@ -201,7 +220,7 @@ var (
 	}
 
 	TransformEncodeLatin1 = Transform{
-		Name: EncodingLatin1.String(),
+		Name: EncodingLatin1.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_1, val)
 			return newVal, err
@@ -209,7 +228,7 @@ var (
 	}
 
 	TransformEncodeLatin5 = Transform{
-		Name: EncodingLatin5.String(),
+		Name: EncodingLatin5.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_5, val)
 			return newVal, err
@@ -217,7 +236,7 @@ var (
 	}
 
 	TransformEncodeLatin9 = Transform{
-		Name: EncodingLatin9.String(),
+		Name: EncodingLatin9.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_15, val)
 			return newVal, err
@@ -225,7 +244,7 @@ var (
 	}
 
 	TransformEncodeUtf8 = Transform{
-		Name: EncodingUtf8.String(),
+		Name: EncodingUtf8.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return fmt.Sprintf("%q", val), nil
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF8, val)
@@ -234,7 +253,7 @@ var (
 	}
 
 	TransformEncodeUtf8Bom = Transform{
-		Name: EncodingUtf8Bom.String(),
+		Name: EncodingUtf8Bom.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF8BOM, val)
 			return newVal, err
@@ -242,7 +261,7 @@ var (
 	}
 
 	TransformEncodeUtf16 = Transform{
-		Name: EncodingUtf16.String(),
+		Name: EncodingUtf16.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF16, val)
 			return newVal, err
@@ -250,7 +269,7 @@ var (
 	}
 
 	TransformEncodeWindows1250 = Transform{
-		Name: EncodingWindows1250.String(),
+		Name: EncodingWindows1250.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeWindows1250, val)
 			return newVal, err
@@ -258,7 +277,7 @@ var (
 	}
 
 	TransformEncodeWindows1252 = Transform{
-		Name: EncodingWindows1252.String(),
+		Name: EncodingWindows1252.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeWindows1252, val)
 			return newVal, err
