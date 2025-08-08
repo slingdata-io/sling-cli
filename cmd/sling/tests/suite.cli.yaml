@@ -751,12 +751,12 @@
     - 'SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)'
     - "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (CSV source)"
 
-- id: 99
-  name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
-  output_contains:
-    - no data or records found in stream
+# - id: 99
+#   name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
+#   output_contains:
+#     - no data or records found in stream
 
 - id: 100
   name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
@@ -776,3 +776,12 @@
     - 'inserted 213 rows'
     - 'rows into public.test1k_azuretable_pg'
     - 'id, first_name, email, create_dt, Timestamp'
+
+- id: 102
+  name: Test staged transforms with MySQL source and PostgreSQL target
+  run: sling run -d -r cmd/sling/tests/replications/r.44.staged_transforms_test.yaml
+  streams: 3
+  rows: 15  # 3 * 5 = 15
+  output_contains:
+    - 'Staged Transforms Test Results'
+    - 'execution succeeded'

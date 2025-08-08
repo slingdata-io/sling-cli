@@ -574,32 +574,6 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 		if nr := matchReader(encoding); nr != nil {
 			return nr, true
 		}
-	} else if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
-		columnTransforms := makeColumnTransforms(transformsPayload)
-		applied := []string{}
-
-		if ts, ok := columnTransforms["*"]; ok {
-			for _, t := range ts {
-				if nr := matchReader(t); nr != nil {
-					newReader = nr
-				} else {
-					continue
-				}
-				applied = append(applied, t) // delete from transforms, already applied
-			}
-
-			ts = lo.Filter(ts, func(t string, i int) bool {
-				return !g.In(t, applied...)
-			})
-			columnTransforms["*"] = ts
-		}
-
-		if len(applied) > 0 {
-			// re-apply transforms
-			ds.Sp.applyTransforms(g.Marshal(columnTransforms))
-
-			return newReader, true
-		}
 	} else {
 		// auto-decode
 		bReader, ok := reader.(*bufio.Reader)
@@ -665,7 +639,6 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 	}
 
 	data.Result = nil
-	data.Columns = ds.Columns
 	data.Rows = [][]any{}
 	limited := false
 
@@ -676,6 +649,8 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 			break
 		}
 	}
+
+	data.Columns = ds.Columns
 
 	if !limited {
 		ds.SetEmpty()
@@ -945,6 +920,13 @@ skipBuffer:
 				if ds.it.IsCasted || ds.it.RowIsCasted {
 					row = ds.it.Row
 				} else {
+					// evaluate transforms
+					if transforms := ds.Sp.Config.transforms; transforms != nil {
+						ds.it.Row, err = ds.Sp.Config.transforms.Evaluate(ds.it.Row)
+						if ds.Context.CaptureErr(err) {
+							break loop
+						}
+					}
 					row = ds.Sp.CastRow(ds.it.Row, ds.Columns)
 				}
 				if ds.config.SkipBlankLines && ds.Sp.rowBlankValCnt == len(row) {

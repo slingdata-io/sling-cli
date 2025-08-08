@@ -111,6 +111,18 @@ func (tl TransformList) HasTransform(t Transform) bool {
 	return false
 }
 
+type Transforms2 interface {
+	Evaluate(row []any) (newRow []any, err error)
+}
+
+var NewTransform2 = func(t []map[string]string, _ *StreamProcessor) Transforms2 {
+	return nil
+}
+
+var ParseStageTransforms = func(payload any) ([]map[string]string, error) {
+	return nil, g.Error("please use the official sling-cli release for using transforms")
+}
+
 type Encoding string
 
 var (
@@ -393,8 +405,14 @@ var (
 	// used as lookup, cannot return null since is not pointer
 	TransformEmptyAsNull = Transform{
 		Name: "empty_as_null",
-		FuncString: func(sp *StreamProcessor, val string) (string, error) {
-			return val, nil
+		Func: func(sp *StreamProcessor, vals ...any) (any, error) {
+			if len(vals) == 0 {
+				return nil, nil
+			}
+			if vals[0] == "" {
+				return nil, nil
+			}
+			return vals[0], nil
 		},
 	}
 
