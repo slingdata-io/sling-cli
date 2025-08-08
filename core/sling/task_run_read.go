@@ -248,7 +248,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
-	options := t.getOptionsMap()
+	options := t.getSourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
@@ -394,7 +394,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Limit:       cfg.Source.Limit(),
 		Metadata:    t.setGetMetadata(),
 		Mode:        strings.ToLower(string(cfg.Mode)),
-		DsConfigMap: t.getOptionsMap(),
+		DsConfigMap: t.getSourceOptionsMap(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {

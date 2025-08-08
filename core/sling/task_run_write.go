@@ -36,8 +36,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		}
 
 		// construct props by merging with options
-		options := g.M()
-		g.Unmarshal(g.Marshal(cfg.Target.Options), &options)
+		options := t.getTargetOptionsMap()
 		props := append(
 			g.MapToKVArr(cfg.TgtConn.DataS()),
 			g.MapToKVArr(g.ToMapString(options))...,

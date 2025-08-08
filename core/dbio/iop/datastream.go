@@ -570,7 +570,11 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 	}
 
 	// decode File if requested
-	if encoding, ok := ds.Sp.Config.Map["encoding"]; ok {
+	if encoding, ok := ds.Sp.Config.Map["decode"]; ok {
+		if nr := matchReader(encoding); nr != nil {
+			return nr, true
+		}
+	} else if encoding, ok := ds.Sp.Config.Map["encode"]; ok {
 		if nr := matchReader(encoding); nr != nil {
 			return nr, true
 		}

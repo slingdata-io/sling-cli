@@ -289,7 +289,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// sets metadata
 	metadata := t.setGetMetadata()
 
-	options := t.getOptionsMap()
+	options := t.getSourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	// merge options

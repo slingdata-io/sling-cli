@@ -680,7 +680,7 @@
     - 'WARN: Using INSERT mode'
 
 - id: 91
-  name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder
+  name: Test encoding source options (latin1, windows1252, utf8_bom) and target encoding
   run: |
     sling run -d -r cmd/sling/tests/replications/r.32.encoding_test.yaml
     sling run -d -r cmd/sling/tests/replications/r.33.encoding_target_test.yaml
@@ -692,7 +692,7 @@
     - 'UTF-8 BOM results:'
     - '张三'
     - '김철수'
-    - 'Target encoding feature is not fully implemented'
+    - 'wrote 3 rows'
     - 'execution succeeded'
 
 - id: 92
