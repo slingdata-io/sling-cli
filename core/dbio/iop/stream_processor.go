@@ -71,7 +71,7 @@ type StreamConfig struct {
 	TargetType        dbio.Type      `json:"target_type"`
 	BoolAsInt         bool           `json:"-"`
 	Columns           Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        Transforms2
+	transforms        Transform
 	maxDecimalsFormat string `json:"-"`
 
 	Map map[string]string `json:"-"`
@@ -454,7 +454,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	stageTransforms := []map[string]string{}
 	g.Unmarshal(transformsPayload, &stageTransforms)
-	sp.Config.transforms = NewTransform2(stageTransforms, sp)
+	sp.Config.transforms = NewTransform(stageTransforms, sp)
 }
 
 // CastVal  casts the type of an interface based on its value
