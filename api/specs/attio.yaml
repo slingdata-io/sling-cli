@@ -35,7 +35,7 @@ endpoints:
           
     pagination:
       # stop if condition is met
-      stop_condition: length(records) == 0 || state.offset > 2500
+      stop_condition: length(response.records) == 0 || state.offset > 2500
 
       # set state for next page
       next_state:
