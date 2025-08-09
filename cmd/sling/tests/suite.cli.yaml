@@ -785,3 +785,13 @@
   output_contains:
     - 'Staged Transforms Test Results'
     - 'execution succeeded'
+
+- id: 103
+  name: Test Exasol large CSV file ingestion (100K rows)
+  run: sling run -d -r cmd/sling/tests/replications/r.45.exasol_large_csv.yaml
+  streams: 1
+  rows: 100000
+  output_contains:
+    - 'inserted 100000 rows'
+    - 'Row count: 100000'
+    - 'execution succeeded'
