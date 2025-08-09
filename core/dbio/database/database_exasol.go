@@ -104,8 +104,7 @@ func (conn *ExasolConn) GetURL(newURL ...string) string {
 
 	// Use Exasol driver's configuration builder for proper escaping
 	config := exasol.NewConfig(username, password).
-		Host(host).
-		Port(port)
+		Host(host).Port(port).Autocommit(false)
 
 	// Add schema if specified
 	if schema != "" {
@@ -247,16 +246,16 @@ func (conn *ExasolConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 	// Exasol has issues with parameterized batch inserts in prepared statements
 	// Use CSV-based import for all bulk operations
 	df := iop.NewDataflow()
-	
+
 	// Set the columns on the dataflow from the datastream
 	df.Columns = ds.Columns
-	
+
 	// Send the datastream through the channel and close it
 	go func() {
 		defer close(df.StreamCh)
 		df.StreamCh <- ds
 	}()
-	
+
 	return conn.BulkImportFlow(tableFName, df)
 }
 
@@ -524,4 +523,3 @@ func (conn *ExasolConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFi
 	)
 	return
 }
-
