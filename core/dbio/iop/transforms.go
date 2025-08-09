@@ -78,7 +78,6 @@ func init() {
 		TransformTrimSpace,
 		TransformLower,
 		TransformUpper,
-		TransformSetTimezone,
 	} {
 		TransformsLegacyMap[t.Name] = t
 	}
@@ -97,7 +96,6 @@ type TransformLegacy struct {
 	Func       func(*StreamProcessor, ...any) (any, error)
 	FuncString func(*StreamProcessor, string) (string, error)
 	FuncTime   func(*StreamProcessor, *time.Time) error
-	makeFunc   func(t *TransformLegacy, params ...any) error
 }
 
 type TransformLegacyList []TransformLegacy
@@ -413,28 +411,6 @@ var (
 				return nil, nil
 			}
 			return vals[0], nil
-		},
-	}
-
-	TransformSetTimezone = TransformLegacy{
-		Name: "set_timezone",
-		makeFunc: func(t *TransformLegacy, location ...any) error {
-			if len(location) == 0 {
-				return g.Error("param for 'set_timezone' should be the a compatible IANA Time Zone")
-			}
-			loc, err := time.LoadLocation(strings.Trim(cast.ToString(location[0]), `"'`))
-			if err != nil {
-				return g.Error(err, "could not load timezone (%s), should be the a compatible IANA Time Zone", location[0])
-			}
-
-			// create FuncTime with provided location
-			t.FuncTime = func(sp *StreamProcessor, val *time.Time) error {
-				newVal := val.In(loc)
-				*val = newVal
-				return nil
-			}
-
-			return nil
 		},
 	}
 )
