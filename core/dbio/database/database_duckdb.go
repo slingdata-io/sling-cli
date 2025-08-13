@@ -414,7 +414,14 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 			"url_style":            "URL_STYLE",
 			"assume_role_arn":      "ASSUME_ROLE_ARN",
 			"chain":                "CHAIN",
+			"provider":             "PROVIDER",
 		})
+		// If user supplied CHAIN but no PROVIDER, default to credential_chain
+        if _, hasChain := secretProps["CHAIN"]; hasChain {
+            if _, hasProv := secretProps["PROVIDER"]; !hasProv {
+                secretProps["PROVIDER"] = "credential_chain"
+            }
+        }
 	case iop.DuckDbSecretTypeAzure:
 		fillSecretProps(map[string]string{
 			"azure_connection_string": "CONNECTION_STRING",
