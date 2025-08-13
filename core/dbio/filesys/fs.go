@@ -1415,11 +1415,24 @@ func MakeDatastream(reader io.Reader, cfg map[string]string) (ds *iop.Datastream
 	}
 
 	peekStr := string(data)
-	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") {
+	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") || cfg["format"] == "json" {
 		ds = iop.NewDatastream(iop.Columns{})
 		ds.SafeInference = true
 		ds.SetConfig(cfg)
 		err = ds.ConsumeJsonReader(reader2)
+		if err != nil {
+			return nil, err
+		}
+	} else if strings.HasPrefix(peekStr, "ARROW1") || cfg["format"] == "arrow" {
+		ds = iop.NewDatastream(iop.Columns{})
+		ds.SetConfig(cfg)
+		if strings.HasPrefix(peekStr, "ARROW1") {
+			// if file format
+			err = ds.ConsumeArrowReader(reader2)
+		} else {
+			// assume stream format
+			err = ds.ConsumeArrowReaderStream(reader2)
+		}
 		if err != nil {
 			return nil, err
 		}

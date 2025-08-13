@@ -1491,7 +1491,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
 
-	a, err := NewArrowReader(reader, selected)
+	a, err := NewArrowFileReader(reader, selected)
 	if err != nil {
 		return g.Error(err, "could create arrow stream")
 	}
@@ -1558,30 +1558,64 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	return ds.ConsumeParquetReaderSeeker(file)
 }
 
-// ConsumeArrowReader uses the provided reader to stream rows
+// ConsumeArrowReaderStream uses the provided reader to stream rows
+func (ds *Datastream) ConsumeArrowReaderStream(reader io.Reader) (err error) {
+
+	selected := ds.Columns.Names()
+
+	a, err := NewArrowReader(reader, selected)
+	if err != nil {
+		return g.Error(err, "could create arrow stream")
+	}
+
+	ds.Columns = a.Columns()
+	ds.Inferred = ds.Columns.Sourced()
+	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
 func (ds *Datastream) ConsumeArrowReader(reader io.Reader) (err error) {
-	// need to write to temp file prior
-	arrowPath := path.Join(env.GetTempFolder(), g.NewTsID("arrow.temp")+".arrows")
-	ds.Defer(func() { env.RemoveLocalTempFile(arrowPath) })
 
-	file, err := os.Create(arrowPath)
+	data, reader2, err := g.Peek(reader, 0)
 	if err != nil {
-		return g.Error(err, "Unable to create temp file: "+arrowPath)
+		return err
 	}
 
-	g.Debug("downloading to temp file on disk: %s", arrowPath)
-	bw, err := io.Copy(file, reader)
-	if err != nil {
-		return g.Error(err, "Unable to write to temp file: "+arrowPath)
-	}
-	g.Debug("wrote %d bytes to %s", bw, arrowPath)
+	if peekStr := string(data); strings.HasPrefix(peekStr, "ARROW1") {
 
-	_, err = file.Seek(0, 0) // reset to beginning
-	if err != nil {
-		return g.Error(err, "Unable to seek to beginning of temp file: "+arrowPath)
+		// need to write to temp file prior
+		arrowPath := path.Join(env.GetTempFolder(), g.NewTsID("arrow.temp")+".arrows")
+		ds.Defer(func() { env.RemoveLocalTempFile(arrowPath) })
+
+		file, err := os.Create(arrowPath)
+		if err != nil {
+			return g.Error(err, "Unable to create temp file: "+arrowPath)
+		}
+
+		g.Debug("downloading to temp file on disk: %s", arrowPath)
+		bw, err := io.Copy(file, reader2)
+		if err != nil {
+			return g.Error(err, "Unable to write to temp file: "+arrowPath)
+		}
+		g.Debug("wrote %d bytes to %s", bw, arrowPath)
+
+		_, err = file.Seek(0, 0) // reset to beginning
+		if err != nil {
+			return g.Error(err, "Unable to seek to beginning of temp file: "+arrowPath)
+		}
+
+		return ds.ConsumeArrowReaderSeeker(file)
 	}
 
-	return ds.ConsumeParquetReaderSeeker(file)
+	// if IPC stream
+	return ds.ConsumeArrowReaderStream(reader2)
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
