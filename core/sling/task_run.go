@@ -525,6 +525,11 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
+	// if delete missing is specified
+	if t.Config.Target.Options.DeleteMissing != nil {
+		g.Warn("`delete_missing` is only supported for database-to-database run types.")
+	}
+
 	return
 }
 
@@ -615,6 +620,11 @@ skipGetState:
 				return err
 			}
 		}
+	}
+
+	// if delete missing is specified
+	if t.Config.Target.Options.DeleteMissing != nil {
+		g.Warn("`delete_missing` is only supported for database-to-database run types.")
 	}
 
 	return
