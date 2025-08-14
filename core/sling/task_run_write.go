@@ -142,7 +142,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		return
 	}
 
-	g.DebugLow(
+	g.Debug(
 		"wrote %s: %d rows [%s r/s]",
 		humanize.Bytes(cast.ToUint64(bw)), cnt, getRate(cnt),
 	)

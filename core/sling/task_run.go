@@ -116,7 +116,7 @@ func (t *TaskExecution) Execute() error {
 		// update into store
 		StateSet(t)
 
-		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
+		g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
 		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms, "select", t.Config.Source.Select)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
