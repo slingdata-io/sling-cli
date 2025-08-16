@@ -610,7 +610,12 @@ func (t transformsNS) BinaryToHex(val string) string {
 }
 
 func (t transformsNS) Replace0x00(sp *StreamProcessor, val string) (string, error) {
-	return strings.ReplaceAll(strings.ReplaceAll(val, "\x00", ""), "\\u0000", "u-0000"), nil // replace the NUL character
+	// Remove null bytes and common null representations
+	val = strings.ReplaceAll(val, "\x00", "")       // actual null byte
+	val = strings.ReplaceAll(val, "\\u0000", "")    // escaped unicode null
+	val = strings.ReplaceAll(val, "\\x00", "")      // escaped hex null
+	val = strings.ReplaceAll(val, "\u0000", "")     // unicode null character
+	return val, nil
 }
 
 // ParseFIX converts a FIX message into a json format
@@ -657,11 +662,47 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 		}
 
 		switch r {
-		case 127: //
+		case 127: // DEL character
 			continue // remove those
 		case 160: // NO-BREAK SPACE
 			newVal.WriteRune(' ') // replace with space
 			continue
+		
+		// Zero-width characters - remove these
+		case 0x200B: // ZERO WIDTH SPACE
+			continue
+		case 0x200C: // ZERO WIDTH NON-JOINER
+			continue
+		case 0x200D: // ZERO WIDTH JOINER
+			continue
+		case 0x2060: // WORD JOINER
+			continue
+		case 0xFEFF: // ZERO WIDTH NO-BREAK SPACE (BOM)
+			continue
+		
+		// Directional formatting characters - remove these
+		case 0x200E: // LEFT-TO-RIGHT MARK
+			continue
+		case 0x200F: // RIGHT-TO-LEFT MARK
+			continue
+		case 0x202A: // LEFT-TO-RIGHT EMBEDDING
+			continue
+		case 0x202B: // RIGHT-TO-LEFT EMBEDDING
+			continue
+		case 0x202C: // POP DIRECTIONAL FORMATTING
+			continue
+		case 0x202D: // LEFT-TO-RIGHT OVERRIDE
+			continue
+		case 0x202E: // RIGHT-TO-LEFT OVERRIDE
+			continue
+		
+		// Other problematic characters
+		case 0x00AD: // SOFT HYPHEN
+			continue // remove
+		case 0xFFFC: // OBJECT REPLACEMENT CHARACTER
+			continue // remove
+		case 0xFFFD: // REPLACEMENT CHARACTER
+			continue // remove
 		}
 
 		if !unicode.IsGraphic(r) {
