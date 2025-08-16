@@ -624,7 +624,7 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		// Handle time.Time specially when casting to string to avoid JSON marshaling
 		if col.Type.IsString() {
 			// Use CastToString to format properly without quotes
-			sVal = sp.CastToString(i, v, DatetimeType)
+			sVal = sp.CastToStringCSV(i, v, DatetimeType)
 			val = sVal
 			isString = true
 		}
@@ -950,9 +950,42 @@ func (sp *StreamProcessor) bytesToHexEscape(b []byte) string {
 	return string(result)
 }
 
-// CastToString to string. used for csv writing
+func (sp *StreamProcessor) CastToString(val any) (valString string) {
+	valString, _ = sp.CastToStringE(val)
+	return
+}
+
+func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) {
+
+	switch v := val.(type) {
+	case []uint8:
+		valString = string(v)
+	case chJSON: // Clickhouse JSON / Variant
+		var sBytes []byte
+		sBytes, err = v.MarshalJSON()
+		if err != nil {
+			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
+		}
+		valString = string(sBytes)
+	case *string:
+		valString = *v
+	case string:
+		valString = v
+	case map[string]string, map[string]any, map[any]any, []any, []string:
+		valString = g.Marshal(v)
+	default:
+		valString, err = cast.ToStringE(v)
+		if err != nil {
+			return "", g.Error(err, "could not cast to string: %#v", v)
+		}
+	}
+
+	return valString, nil
+}
+
+// CastToStringCSV to string. used for csv writing
 // slows processing down 5% with upstream CastRow or 35% without upstream CastRow
-func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...ColumnType) string {
+func (sp *StreamProcessor) CastToStringCSV(i int, val interface{}, valType ...ColumnType) string {
 	typ := ColumnType("")
 	switch v := val.(type) {
 	case time.Time:

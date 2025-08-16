@@ -220,7 +220,7 @@ func BenchmarkCastToStringTime(b *testing.B) {
 	_, row := initProcessRow("timestamp")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val)
+			row[i] = sp.CastToStringCSV(i, val)
 		}
 	}
 }
@@ -229,7 +229,7 @@ func BenchmarkCastToStringFloat(b *testing.B) {
 	_, row := initProcessRow("float")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val)
+			row[i] = sp.CastToStringCSV(i, val)
 		}
 	}
 }
@@ -238,7 +238,7 @@ func BenchmarkCastToStringNumeric(b *testing.B) {
 	_, row := initProcessRow("decimal")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val, "decimal")
+			row[i] = sp.CastToStringCSV(i, val, "decimal")
 		}
 	}
 }
@@ -247,7 +247,7 @@ func BenchmarkCastToStringInt(b *testing.B) {
 	_, row := initProcessRow("int")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val)
+			row[i] = sp.CastToStringCSV(i, val)
 		}
 	}
 }
@@ -256,7 +256,7 @@ func BenchmarkCastToStringInt64(b *testing.B) {
 	_, row := initProcessRow("int64")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val)
+			row[i] = sp.CastToStringCSV(i, val)
 		}
 	}
 }
@@ -265,7 +265,7 @@ func BenchmarkCastToStringString(b *testing.B) {
 	_, row := initProcessRow("string")
 	for n := 0; n < b.N; n++ {
 		for i, val := range row {
-			row[i] = sp.CastToString(i, val)
+			row[i] = sp.CastToStringCSV(i, val)
 		}
 	}
 }

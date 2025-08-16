@@ -115,8 +115,8 @@ func (data *Dataset) Sort(args ...any) {
 				a = fmt.Sprintf("%20.9f", valI)
 				b = fmt.Sprintf("%20.9f", valJ)
 			} else {
-				a = data.Sp.CastToString(colID, valI, colType)
-				b = data.Sp.CastToString(colID, valJ, colType)
+				a = data.Sp.CastToStringCSV(colID, valI, colType)
+				b = data.Sp.CastToStringCSV(colID, valJ, colType)
 			}
 
 			arrA = append(arrA, a)
@@ -214,7 +214,7 @@ func (data *Dataset) WriteCsv(dest io.Writer) (tbw int, err error) {
 	for _, row := range data.Rows {
 		rec := make([]string, len(row))
 		for i, val := range row {
-			rec[i] = data.Sp.CastToString(i, val, data.Columns[i].Type)
+			rec[i] = data.Sp.CastToStringCSV(i, val, data.Columns[i].Type)
 		}
 		bw, err := w.Write(rec)
 		if err != nil {
@@ -343,7 +343,7 @@ func (data *Dataset) Pick(colNames ...string) (nData Dataset) {
 func (data *Dataset) ColValuesStr(col int) []string {
 	vals := make([]string, len(data.Rows))
 	for i, row := range data.Rows {
-		vals[i] = data.Sp.CastToString(i, row[col], data.Columns[col].Type)
+		vals[i] = data.Sp.CastToStringCSV(i, row[col], data.Columns[col].Type)
 	}
 	return vals
 

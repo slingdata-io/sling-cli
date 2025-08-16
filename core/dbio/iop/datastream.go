@@ -316,7 +316,7 @@ func (ds *Datastream) GetConfig() (configMap map[string]string) {
 func (ds *Datastream) CastRowToString(row []any) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
-		rowStr[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+		rowStr[i] = ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 	}
 	return rowStr
 }
@@ -2234,7 +2234,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 				// convert to csv string
 				row := make([]string, len(row0))
 				for i, val := range row0 {
-					row[i] = sp.CastToString(i, val, batch.Columns[i].Type)
+					row[i] = sp.CastToStringCSV(i, val, batch.Columns[i].Type)
 				}
 				mux.Lock()
 
@@ -2780,7 +2780,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 			// convert to csv string
 			row := make([]string, len(row0))
 			for i, val := range row0 {
-				row[i] = sp.CastToString(i, val, ds.Columns[i].Type)
+				row[i] = sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 			}
 			bw, err := w.Write(row)
 			tbw = tbw + cast.ToInt64(bw)

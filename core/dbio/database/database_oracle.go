@@ -482,7 +482,7 @@ func (conn *OracleConn) writeCsv(ds *iop.Datastream, writer io.Writer, pu *cmap.
 				continue
 			}
 
-			valS := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+			valS := ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 			if strings.Contains(valS, "\n") {
 				valS = strings.ReplaceAll(valS, "\r", "")
 				valS = strings.ReplaceAll(valS, "\n", `~/N/~`)

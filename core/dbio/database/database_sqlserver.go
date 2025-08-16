@@ -876,7 +876,7 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 		cnt++
 		row := make([]string, len(row0))
 		for i, val := range row0 {
-			row[i] = Sp.CastToString(i, val, batch.Columns[i].Type)
+			row[i] = Sp.CastToStringCSV(i, val, batch.Columns[i].Type)
 		}
 
 		// Write row

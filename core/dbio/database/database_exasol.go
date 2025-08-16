@@ -528,7 +528,7 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 						formattedRow[i] = t.Format("2006-01-02 15:04:05")
 					}
 				} else {
-					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+					formattedRow[i] = ds.Sp.CastToStringCSV(i, val, col.Type)
 				}
 			case iop.DatetimeType, iop.TimestampType:
 				if t, ok := val.(time.Time); ok {
@@ -539,7 +539,7 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 						formattedRow[i] = t.Format("2006-01-02 15:04:05.000000")
 					}
 				} else {
-					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+					formattedRow[i] = ds.Sp.CastToStringCSV(i, val, col.Type)
 				}
 			case iop.TimestampzType:
 				if t, ok := val.(time.Time); ok {
@@ -551,10 +551,10 @@ func (conn *ExasolConn) writeDataflowToCSV(ds *iop.Datastream, folderPath string
 						formattedRow[i] = t.UTC().Format("2006-01-02 15:04:05.000000Z")
 					}
 				} else {
-					formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+					formattedRow[i] = ds.Sp.CastToStringCSV(i, val, col.Type)
 				}
 			default:
-				formattedRow[i] = ds.Sp.CastToString(i, val, col.Type)
+				formattedRow[i] = ds.Sp.CastToStringCSV(i, val, col.Type)
 			}
 		}
 
