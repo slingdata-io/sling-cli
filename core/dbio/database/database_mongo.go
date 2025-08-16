@@ -159,6 +159,12 @@ func (conn *MongoDBConn) ExecContext(ctx context.Context, sql string, args ...in
 
 func (conn *MongoDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	options, _ := g.UnmarshalMap(table.SQL)
+
+	// add columns if present
+	if len(table.Columns) > 0 {
+		options["columns"] = table.Columns
+	}
+
 	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.FullName(), options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
@@ -326,6 +332,12 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 	if err != nil {
 		queryContext.Cancel()
 		return ds, g.Error(err, "could start datastream")
+	}
+
+	// unmarshal columns if none detected
+	// otherwise this may error when creating a temp table with no columns
+	if len(ds.Columns) == 0 {
+		g.JSONConvert(opts["columns"], &ds.Columns)
 	}
 
 	return
