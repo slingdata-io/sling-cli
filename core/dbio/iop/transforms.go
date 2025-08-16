@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	TransformsMap = map[string]Transform{}
+	TransformsLegacyMap = map[string]TransformLegacy{}
 
 	GlobalFunctionMap map[string]goval.ExpressionFunction
 
@@ -30,8 +30,8 @@ var (
 		return nil
 	}
 
-	FunctionToTransform = func(name string, f goval.ExpressionFunction, params ...any) Transform {
-		return Transform{
+	FunctionToTransform = func(name string, f goval.ExpressionFunction, params ...any) TransformLegacy {
+		return TransformLegacy{
 			Name: name,
 			Func: func(sp *StreamProcessor, vals ...any) (any, error) {
 				if len(params) > 0 {
@@ -45,7 +45,7 @@ var (
 )
 
 func init() {
-	for _, t := range []Transform{
+	for _, t := range []TransformLegacy{
 		TransformDecodeLatin1,
 		TransformDecodeLatin5,
 		TransformDecodeLatin9,
@@ -78,9 +78,8 @@ func init() {
 		TransformTrimSpace,
 		TransformLower,
 		TransformUpper,
-		TransformSetTimezone,
 	} {
-		TransformsMap[t.Name] = t
+		TransformsLegacyMap[t.Name] = t
 	}
 }
 
@@ -92,23 +91,34 @@ var Transforms transformsNS
 // transformsNS is a namespace for transforms
 type transformsNS struct{}
 
-type Transform struct {
+type TransformLegacy struct {
 	Name       string
 	Func       func(*StreamProcessor, ...any) (any, error)
 	FuncString func(*StreamProcessor, string) (string, error)
 	FuncTime   func(*StreamProcessor, *time.Time) error
-	makeFunc   func(t *Transform, params ...any) error
 }
 
-type TransformList []Transform
+type TransformLegacyList []TransformLegacy
 
-func (tl TransformList) HasTransform(t Transform) bool {
+func (tl TransformLegacyList) HasTransform(t TransformLegacy) bool {
 	for _, t0 := range tl {
 		if t.Name == t0.Name {
 			return true
 		}
 	}
 	return false
+}
+
+type Transform interface {
+	Evaluate(row []any) (newRow []any, err error)
+}
+
+var NewTransform = func(t []map[string]string, _ *StreamProcessor) Transform {
+	return nil
+}
+
+var ParseStageTransforms = func(payload any) ([]map[string]string, error) {
+	return nil, g.Error("please use the official sling-cli release for using transforms")
 }
 
 type Encoding string
@@ -122,110 +132,129 @@ var (
 	EncodingUtf16       Encoding = "utf16"
 	EncodingWindows1250 Encoding = "windows1250"
 	EncodingWindows1252 Encoding = "windows1252"
+
+	Encodings = []Encoding{
+		EncodingLatin1,
+		EncodingLatin5,
+		EncodingLatin9,
+		EncodingUtf8,
+		EncodingUtf8Bom,
+		EncodingUtf16,
+		EncodingWindows1250,
+		EncodingWindows1252,
+	}
 )
 
 func (e Encoding) String() string {
 	return string(e)
 }
 
+func (e Encoding) DecodeString() string {
+	return g.F("decode_%s", e)
+}
+
+func (e Encoding) EncodeString() string {
+	return g.F("encode_%s", e)
+}
+
 var (
-	TransformDecodeLatin1 = Transform{
-		Name: EncodingLatin1.String(),
+	TransformDecodeLatin1 = TransformLegacy{
+		Name: EncodingLatin1.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_1, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeLatin5 = Transform{
-		Name: EncodingLatin5.String(),
+	TransformDecodeLatin5 = TransformLegacy{
+		Name: EncodingLatin5.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_5, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeLatin9 = Transform{
-		Name: EncodingLatin9.String(),
+	TransformDecodeLatin9 = TransformLegacy{
+		Name: EncodingLatin9.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeISO8859_15, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeUtf8 = Transform{
-		Name: EncodingUtf8.String(),
+	TransformDecodeUtf8 = TransformLegacy{
+		Name: EncodingUtf8.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF8, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeUtf8Bom = Transform{
-		Name: EncodingUtf8Bom.String(),
+	TransformDecodeUtf8Bom = TransformLegacy{
+		Name: EncodingUtf8Bom.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF8BOM, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeUtf16 = Transform{
-		Name: EncodingUtf16.String(),
+	TransformDecodeUtf16 = TransformLegacy{
+		Name: EncodingUtf16.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeUTF16, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeWindows1250 = Transform{
-		Name: EncodingWindows1250.String(),
+	TransformDecodeWindows1250 = TransformLegacy{
+		Name: EncodingWindows1250.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeWindows1250, val)
 			return newVal, err
 		},
 	}
 
-	TransformDecodeWindows1252 = Transform{
-		Name: EncodingWindows1252.String(),
+	TransformDecodeWindows1252 = TransformLegacy{
+		Name: EncodingWindows1252.DecodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.DecodeWindows1252, val)
 			return newVal, err
 		},
 	}
 
-	TransformDuckdbListToText = Transform{
+	TransformDuckdbListToText = TransformLegacy{
 		Name: "duckdb_list_to_text",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.duckDbListAsText(val), nil
 		},
 	}
 
-	TransformEncodeLatin1 = Transform{
-		Name: EncodingLatin1.String(),
+	TransformEncodeLatin1 = TransformLegacy{
+		Name: EncodingLatin1.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_1, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeLatin5 = Transform{
-		Name: EncodingLatin5.String(),
+	TransformEncodeLatin5 = TransformLegacy{
+		Name: EncodingLatin5.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_5, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeLatin9 = Transform{
-		Name: EncodingLatin9.String(),
+	TransformEncodeLatin9 = TransformLegacy{
+		Name: EncodingLatin9.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeISO8859_15, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeUtf8 = Transform{
-		Name: EncodingUtf8.String(),
+	TransformEncodeUtf8 = TransformLegacy{
+		Name: EncodingUtf8.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return fmt.Sprintf("%q", val), nil
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF8, val)
@@ -233,109 +262,109 @@ var (
 		},
 	}
 
-	TransformEncodeUtf8Bom = Transform{
-		Name: EncodingUtf8Bom.String(),
+	TransformEncodeUtf8Bom = TransformLegacy{
+		Name: EncodingUtf8Bom.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF8BOM, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeUtf16 = Transform{
-		Name: EncodingUtf16.String(),
+	TransformEncodeUtf16 = TransformLegacy{
+		Name: EncodingUtf16.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeUTF16, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeWindows1250 = Transform{
-		Name: EncodingWindows1250.String(),
+	TransformEncodeWindows1250 = TransformLegacy{
+		Name: EncodingWindows1250.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeWindows1250, val)
 			return newVal, err
 		},
 	}
 
-	TransformEncodeWindows1252 = Transform{
-		Name: EncodingWindows1252.String(),
+	TransformEncodeWindows1252 = TransformLegacy{
+		Name: EncodingWindows1252.EncodeString(),
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.EncodeWindows1252, val)
 			return newVal, err
 		},
 	}
 
-	TransformHashMd5 = Transform{
+	TransformHashMd5 = TransformLegacy{
 		Name: "hash_md5",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return g.MD5(val), nil
 		},
 	}
 
-	TransformHashSha256 = Transform{
+	TransformHashSha256 = TransformLegacy{
 		Name: "hash_sha256",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.SHA256(val), nil
 		},
 	}
 
-	TransformHashSha512 = Transform{
+	TransformHashSha512 = TransformLegacy{
 		Name: "hash_sha512",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.SHA512(val), nil
 		},
 	}
 
-	TransformParseBit = Transform{
+	TransformParseBit = TransformLegacy{
 		Name: "parse_bit",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ParseBit(sp, val)
 		},
 	}
 
-	TransformBinaryToDecimal = Transform{
+	TransformBinaryToDecimal = TransformLegacy{
 		Name: "binary_to_decimal",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.BinaryToDecimal(sp, val)
 		},
 	}
 
-	TransformBinaryToHex = Transform{
+	TransformBinaryToHex = TransformLegacy{
 		Name: "binary_to_hex",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.BinaryToHex(val), nil
 		},
 	}
 
-	TransformParseFix = Transform{
+	TransformParseFix = TransformLegacy{
 		Name: "parse_fix",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ParseFIX(sp, val)
 		},
 	}
 
-	TransformParseUuid = Transform{
+	TransformParseUuid = TransformLegacy{
 		Name: "parse_uuid",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ParseUUID(sp, val)
 		},
 	}
 
-	TransformParseMsUuid = Transform{
+	TransformParseMsUuid = TransformLegacy{
 		Name: "parse_ms_uuid",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ParseMsUUID(sp, val)
 		},
 	}
 
-	TransformReplace0x00 = Transform{
+	TransformReplace0x00 = TransformLegacy{
 		Name: "replace_0x00",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.Replace0x00(sp, val)
 		},
 	}
 
-	TransformReplaceAccents = Transform{
+	TransformReplaceAccents = TransformLegacy{
 		Name: "replace_accents",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			newVal, _, err := transform.String(sp.transformers.Accent, val)
@@ -343,28 +372,28 @@ var (
 		},
 	}
 
-	TransformReplaceNonPrintable = Transform{
+	TransformReplaceNonPrintable = TransformLegacy{
 		Name: "replace_non_printable",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return Transforms.ReplaceNonPrintable(val), nil
 		},
 	}
 
-	TransformTrimSpace = Transform{
+	TransformTrimSpace = TransformLegacy{
 		Name: "trim_space",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return strings.TrimSpace(val), nil
 		},
 	}
 
-	TransformLower = Transform{
+	TransformLower = TransformLegacy{
 		Name: "lower",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return strings.ToLower(val), nil
 		},
 	}
 
-	TransformUpper = Transform{
+	TransformUpper = TransformLegacy{
 		Name: "upper",
 		FuncString: func(sp *StreamProcessor, val string) (string, error) {
 			return strings.ToUpper(val), nil
@@ -372,32 +401,16 @@ var (
 	}
 
 	// used as lookup, cannot return null since is not pointer
-	TransformEmptyAsNull = Transform{
+	TransformEmptyAsNull = TransformLegacy{
 		Name: "empty_as_null",
-		FuncString: func(sp *StreamProcessor, val string) (string, error) {
-			return val, nil
-		},
-	}
-
-	TransformSetTimezone = Transform{
-		Name: "set_timezone",
-		makeFunc: func(t *Transform, location ...any) error {
-			if len(location) == 0 {
-				return g.Error("param for 'set_timezone' should be the a compatible IANA Time Zone")
+		Func: func(sp *StreamProcessor, vals ...any) (any, error) {
+			if len(vals) == 0 {
+				return nil, nil
 			}
-			loc, err := time.LoadLocation(strings.Trim(cast.ToString(location[0]), `"'`))
-			if err != nil {
-				return g.Error(err, "could not load timezone (%s), should be the a compatible IANA Time Zone", location[0])
+			if vals[0] == "" {
+				return nil, nil
 			}
-
-			// create FuncTime with provided location
-			t.FuncTime = func(sp *StreamProcessor, val *time.Time) error {
-				newVal := val.In(loc)
-				*val = newVal
-				return nil
-			}
-
-			return nil
+			return vals[0], nil
 		},
 	}
 )
@@ -597,7 +610,12 @@ func (t transformsNS) BinaryToHex(val string) string {
 }
 
 func (t transformsNS) Replace0x00(sp *StreamProcessor, val string) (string, error) {
-	return strings.ReplaceAll(strings.ReplaceAll(val, "\x00", ""), "\\u0000", "u-0000"), nil // replace the NUL character
+	// Remove null bytes and common null representations
+	val = strings.ReplaceAll(val, "\x00", "")       // actual null byte
+	val = strings.ReplaceAll(val, "\\u0000", "")    // escaped unicode null
+	val = strings.ReplaceAll(val, "\\x00", "")      // escaped hex null
+	val = strings.ReplaceAll(val, "\u0000", "")     // unicode null character
+	return val, nil
 }
 
 // ParseFIX converts a FIX message into a json format
@@ -644,11 +662,47 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 		}
 
 		switch r {
-		case 127: //
+		case 127: // DEL character
 			continue // remove those
 		case 160: // NO-BREAK SPACE
 			newVal.WriteRune(' ') // replace with space
 			continue
+		
+		// Zero-width characters - remove these
+		case 0x200B: // ZERO WIDTH SPACE
+			continue
+		case 0x200C: // ZERO WIDTH NON-JOINER
+			continue
+		case 0x200D: // ZERO WIDTH JOINER
+			continue
+		case 0x2060: // WORD JOINER
+			continue
+		case 0xFEFF: // ZERO WIDTH NO-BREAK SPACE (BOM)
+			continue
+		
+		// Directional formatting characters - remove these
+		case 0x200E: // LEFT-TO-RIGHT MARK
+			continue
+		case 0x200F: // RIGHT-TO-LEFT MARK
+			continue
+		case 0x202A: // LEFT-TO-RIGHT EMBEDDING
+			continue
+		case 0x202B: // RIGHT-TO-LEFT EMBEDDING
+			continue
+		case 0x202C: // POP DIRECTIONAL FORMATTING
+			continue
+		case 0x202D: // LEFT-TO-RIGHT OVERRIDE
+			continue
+		case 0x202E: // RIGHT-TO-LEFT OVERRIDE
+			continue
+		
+		// Other problematic characters
+		case 0x00AD: // SOFT HYPHEN
+			continue // remove
+		case 0xFFFC: // OBJECT REPLACEMENT CHARACTER
+			continue // remove
+		case 0xFFFD: // REPLACEMENT CHARACTER
+			continue // remove
 		}
 
 		if !unicode.IsGraphic(r) {

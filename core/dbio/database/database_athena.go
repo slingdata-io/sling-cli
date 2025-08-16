@@ -805,7 +805,7 @@ func (conn *AthenaConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
-	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
+	g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
 	_, err = conn.LoadFromS3(tableFName, s3Path, df.Columns)
 	if err != nil {

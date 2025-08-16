@@ -674,7 +674,7 @@ func (cols Columns) Merge(newCols Columns, overwrite bool) (col2 Columns, added 
 				}
 			}
 		} else {
-			newCol.Position = len(cols)
+			newCol.Position = len(cols) + 1
 			cols = append(cols, newCol)
 			added.AddedCols = append(added.AddedCols, newCol)
 		}

@@ -26,12 +26,12 @@ import (
 
 // ArrowReader is a arrow reader object using arrow v18
 type ArrowReader struct {
-	Path    string
-	Reader  *ipc.FileReader
-	File    *os.File
-	Data    *Dataset
-	Context *g.Context
-	Memory  memory.Allocator
+	Path          string
+	IpcReader     *ipc.Reader
+	IpcFileReader *ipc.FileReader
+	Data          *Dataset
+	Context       *g.Context
+	Memory        memory.Allocator
 
 	selectedColIndices []int
 	colMap             map[string]int
@@ -41,7 +41,7 @@ type ArrowReader struct {
 	columns            Columns
 }
 
-func NewArrowReader(reader *os.File, selected []string) (a *ArrowReader, err error) {
+func NewArrowFileReader(reader *os.File, selected []string) (a *ArrowReader, err error) {
 	ctx := g.NewContext(context.Background())
 
 	// recover from panic
@@ -55,17 +55,68 @@ func NewArrowReader(reader *os.File, selected []string) (a *ArrowReader, err err
 	mem := memory.NewGoAllocator()
 
 	// Create arrow file reader
-	arrowReader, err := ipc.NewFileReader(reader, ipc.WithAllocator(mem))
+	ipcFileReader, err := ipc.NewFileReader(reader, ipc.WithAllocator(mem))
 	if err != nil {
 		return a, g.Error(err, "could not create arrow reader")
 	}
 
 	a = &ArrowReader{
-		Reader:  arrowReader,
-		File:    reader,
-		nextRow: make(chan nextRow, 10),
-		Context: ctx,
-		Memory:  mem,
+		IpcFileReader: ipcFileReader,
+		nextRow:       make(chan nextRow, 10),
+		Context:       ctx,
+		Memory:        mem,
+	}
+
+	// Get schema
+	a.schema = ipcFileReader.Schema()
+
+	// Convert arrow schema to columns
+	a.columns = ArrowSchemaToColumns(a.schema)
+	a.colMap = a.columns.FieldMap(true)
+
+	a.selectedColIndices = lo.Map(a.columns, func(c Column, i int) int { return i })
+
+	if len(selected) > 0 {
+		colMap := a.columns.FieldMap(true)
+		a.selectedColIndices = []int{}
+		for _, colName := range selected {
+			if index, found := colMap[strings.ToLower(colName)]; found {
+				a.selectedColIndices = append(a.selectedColIndices, index)
+			} else {
+				return a, g.Error("selected column '%s' not found", colName)
+			}
+		}
+	}
+
+	go a.readFileRowsLoop()
+
+	return
+}
+
+func NewArrowReader(reader io.Reader, selected []string) (a *ArrowReader, err error) {
+	ctx := g.NewContext(context.Background())
+
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			ctx.CaptureErr(err)
+		}
+	}()
+
+	mem := memory.NewGoAllocator()
+
+	// Create arrow reader
+	arrowReader, err := ipc.NewReader(reader, ipc.WithAllocator(mem))
+	if err != nil {
+		return a, g.Error(err, "could not create arrow reader")
+	}
+
+	a = &ArrowReader{
+		IpcReader: arrowReader,
+		nextRow:   make(chan nextRow, 10),
+		Context:   ctx,
+		Memory:    mem,
 	}
 
 	// Get schema
@@ -182,8 +233,55 @@ func (a *ArrowReader) readRowsLoop() {
 	}()
 
 	// Read all records
-	for i := 0; i < a.Reader.NumRecords(); i++ {
-		record, err := a.Reader.ReadAt(int64(i))
+
+	for a.IpcReader.Next() {
+		record := a.IpcReader.Record()
+
+		// Process all rows in the record
+		numRows := int(record.NumRows())
+		numCols := int(record.NumCols())
+
+		// Create selected columns slice
+		selectedCols := make([]arrow.Array, len(a.selectedColIndices))
+		for j, idx := range a.selectedColIndices {
+			if idx < numCols {
+				selectedCols[j] = record.Column(idx)
+			}
+		}
+
+		// Process rows
+		for rowIdx := 0; rowIdx < numRows; rowIdx++ {
+			row := make([]any, len(a.selectedColIndices))
+
+			for j, arr := range selectedCols {
+				if arr != nil && arr.Len() > rowIdx {
+					val := GetValueFromArrowArray(arr, rowIdx)
+					row[j] = val
+				}
+			}
+
+			a.nextRow <- nextRow{row: row}
+		}
+
+		// Release the record after processing
+		record.Release()
+	}
+}
+
+func (a *ArrowReader) readFileRowsLoop() {
+	// recover from panic
+	defer func() {
+		if r := recover(); r != nil {
+			err := g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
+			a.Context.CaptureErr(err)
+		}
+		a.done = true
+		close(a.nextRow)
+	}()
+
+	// Read all records
+	for i := 0; i < a.IpcFileReader.NumRecords(); i++ {
+		record, err := a.IpcFileReader.ReadAt(int64(i))
 		if err != nil {
 			a.nextRow <- nextRow{err: g.Error(err, "could not read record")}
 			return

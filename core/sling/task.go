@@ -463,7 +463,7 @@ func (t *TaskExecution) hasStateWithUpdateKey() bool {
 	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey()
 }
 
-func (t *TaskExecution) getOptionsMap() (options map[string]any) {
+func (t *TaskExecution) getSourceOptionsMap() (options map[string]any) {
 	options = g.M()
 
 	if t.Config.SrcConn.Type.IsAPI() && t.Config.Source.Options.Flatten == nil {
@@ -479,6 +479,12 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 		g.Warn("could not unmarshal source options: %w", err)
 	}
 
+	if encoding := t.Config.Source.Options.Encoding; encoding != nil {
+		// set as decode for source options
+		delete(options, "encoding")
+		options["decode"] = encoding.DecodeString()
+	}
+
 	if columns := t.Config.ColumnsPrepared(); len(columns) > 0 {
 		// set as string so that StreamProcessor parses it
 		options["columns"] = g.Marshal(columns)
@@ -487,6 +493,31 @@ func (t *TaskExecution) getOptionsMap() (options map[string]any) {
 	if colTransforms := t.Config.TransformsPrepared(); len(colTransforms) > 0 {
 		// set as string so that StreamProcessor parses it
 		options["transforms"] = g.Marshal(colTransforms)
+	}
+
+	if cc := t.Config.Target.Options.ColumnCasing; cc != nil {
+		// set as string so that StreamProcessor parses it
+		options["column_casing"] = string(*cc)
+	}
+
+	// set target type for column casing, name length validation
+	options["target_type"] = string(t.Config.TgtConn.Type)
+
+	return
+}
+
+func (t *TaskExecution) getTargetOptionsMap() (options map[string]any) {
+	options = g.M()
+
+	err := g.Unmarshal(g.Marshal(t.Config.Target.Options), &options)
+	if err != nil {
+		g.Warn("could not unmarshal target options: %w", err)
+	}
+
+	if encoding := t.Config.Target.Options.Encoding; encoding != nil {
+		// set as encode for target options
+		delete(options, "encoding")
+		options["encode"] = encoding.EncodeString()
 	}
 
 	if cc := t.Config.Target.Options.ColumnCasing; cc != nil {

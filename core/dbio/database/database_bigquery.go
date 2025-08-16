@@ -176,7 +176,7 @@ func (conn *BigQueryConn) Connect(timeOut ...int) error {
 	// get list of datasets
 	_, err = conn.GetSchemas()
 	if err != nil {
-		return g.Error(err, "Failed to get datasets in project: %s", conn.Client.Project())
+		g.Warn("Failed to get datasets in project %s: %s", conn.Client.Project(), err.Error())
 	}
 
 	return conn.BaseConn.Connect()

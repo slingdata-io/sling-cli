@@ -583,7 +583,7 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 }
 
 func runPipeline(pipelineCfgPath string) (err error) {
-	g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
+	g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 
 	pipeline, err := sling.LoadPipelineConfigFromFile(pipelineCfgPath)
 	if err != nil {

@@ -116,7 +116,7 @@ func (t *TaskExecution) Execute() error {
 		// update into store
 		StateSet(t)
 
-		g.DebugLow("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
+		g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
 		g.Debug("using: %s", g.Marshal(g.M("mode", t.Config.Mode, "columns", t.Config.Target.Columns, "transforms", t.Config.Transforms, "select", t.Config.Source.Select)))
 		g.Debug("using source options: %s", g.Marshal(t.Config.Source.Options))
@@ -289,7 +289,7 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	// sets metadata
 	metadata := t.setGetMetadata()
 
-	options := t.getOptionsMap()
+	options := t.getSourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	// merge options
@@ -525,6 +525,11 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		}
 	}
 
+	// if delete missing is specified
+	if t.Config.Target.Options.DeleteMissing != nil {
+		g.Warn("`delete_missing` is only supported for database-to-database run types.")
+	}
+
 	return
 }
 
@@ -615,6 +620,11 @@ skipGetState:
 				return err
 			}
 		}
+	}
+
+	// if delete missing is specified
+	if t.Config.Target.Options.DeleteMissing != nil {
+		g.Warn("`delete_missing` is only supported for database-to-database run types.")
 	}
 
 	return

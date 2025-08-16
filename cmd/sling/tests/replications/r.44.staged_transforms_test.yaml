@@ -1,0 +1,229 @@
+source: mysql
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Create test table in MySQL with various data types
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.test_staged_transforms;
+        CREATE TABLE mysql.test_staged_transforms (
+          id INT PRIMARY KEY,
+          text_field VARCHAR(100),
+          email VARCHAR(100),
+          numeric_str VARCHAR(20),
+          decimal_val DECIMAL(10,2),
+          date_str VARCHAR(20),
+          status VARCHAR(20),
+          first_name VARCHAR(50),
+          last_name VARCHAR(50),
+          amount DECIMAL(8,2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+    # Insert test data with various edge cases
+    - type: query
+      connection: '{source.name}'
+      query: |
+        INSERT INTO mysql.test_staged_transforms 
+        (id, text_field, email, numeric_str, decimal_val, date_str, status, first_name, last_name, amount) 
+        VALUES 
+        (1, '  HELLO WORLD  ', 'JOHN@EXAMPLE.COM', '123', 100.50, '2023-01-15', 'premium', '  John  ', 'Doe', 500.00),
+        (2, 'test with\x00null', 'jane@TEST.ORG', '456.78', 250.75, '2023-02-20', 'standard', 'Jane', 'Smith', 750.25),
+        (3, '  trim-me  ', 'BOB@DOMAIN.COM', 'N/A', 0.00, '2023-03-25', 'basic', '  Bob  ', '  Johnson  ', 1000.00),
+        (4, 'MixedCase123', 'alice@company.net', '999', 99.99, '2023-04-30', 'premium', 'Alice', 'Williams', 250.50),
+        (5, '  ', 'empty@test.com', '', 0.01, '', 'standard', '', 'Brown', 0.00);
+
+  end:
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS mysql.test_staged_transforms
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_staged_transforms
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_staged_transforms2
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_staged_transforms3
+
+streams:
+  mysql.test_staged_transforms:
+    object: public.test_staged_transforms
+    mode: full-refresh
+    transforms:
+      # Stage 1: Clean and normalize text fields
+      - text_field: "trim_space(value)"
+      - text_field: "replace_non_printable(value)"
+      - text_field: "lower(record.text_field)"
+        email: "lower(value)"
+        first_name: "trim_space(value)"
+        last_name: "trim_space(value)"
+      
+      # Stage 2: Handle null/empty values
+      - numeric_str: 'coalesce(record.numeric_str, "N/A") == "N/A" ? "0" : value'
+      
+      # Stage 3: Create new calculated columns using record references
+      - full_name: 'record.first_name == "" ? record.last_name : (record.last_name == "" ? record.first_name : record.first_name + " " + record.last_name)'
+        email_hash: 'hash(record.email, "md5")'
+        calculated_amount: 'float_parse(record.amount) * (record.status == "premium" || record.status == "standard" ? 1.1 : 1.0)'
+      
+      # Stage 4: Conditional logic based on multiple fields
+      - category: 'record.status == "premium" && float_parse(record.amount) >= 500 ? "premium_customer" : (record.status == "standard" && float_parse(record.amount) >= 250 ? "standard_customer" : "basic_customer")'
+        display_name: 'record.last_name + (record.first_name != "" ? ", " + record.first_name : "")'
+        processed_status: 'upper(record.status) + "_PROCESSED"'
+      
+      # Stage 5: Final cleanup - cast numeric fields
+      - "*": 'cast(value, "string")'
+      - calculated_amount: 'cast(value, "decimal")'
+        
+    hooks:
+      post:
+        # Verify the transformed data
+        - type: query
+          connection: '{target.name}'
+          query: |
+            SELECT 
+              id,
+              text_field,
+              email,
+              numeric_str,
+              full_name,
+              email_hash,
+              calculated_amount,
+              category,
+              display_name,
+              processed_status
+            FROM public.test_staged_transforms 
+            ORDER BY id
+          into: result
+
+        # Log results for verification
+        - type: log
+          message: |
+            Staged Transforms Test Results:
+            Row 1: {store.result[0]}
+            Row 2: {store.result[1]} 
+            Row 3: {store.result[2]}
+            Row 4: {store.result[3]}
+            Row 5: {store.result[4]}
+
+        # Verify specific transformations
+        - type: check
+          check: store.result[0].text_field == "hello world"  # trimmed and lowercased
+
+        - type: check  
+          check: store.result[0].email == "john@example.com"  # lowercased
+
+        - type: check
+          check: store.result[0].full_name == "John Doe"  # record reference combining trimmed names
+
+        - type: check
+          check: store.result[0].category == "premium_customer"  # conditional based on status and amount
+
+        - type: check
+          check: store.result[1].text_field == "test withx00null"  # non-printable chars replaced
+
+        - type: check
+          check: float_parse(store.result[1].calculated_amount) > 825  # 750.25 * 1.1 = 825.275
+
+        - type: check
+          check: store.result[2].numeric_str == "0"  # coalesce N/A to 0
+
+        - type: check  
+          check: store.result[3].display_name == "Williams, Alice"  # last, first format
+
+        - type: check
+          check: store.result[4].full_name == "Brown"  # handles empty first name
+
+        - type: check
+          check: store.result[0].processed_status == "PREMIUM_PROCESSED"  # upper() + concatenation
+        
+        
+  mysql.test_staged_transforms2:
+    sql: select * from mysql.test_staged_transforms
+    object: public.test_staged_transforms2
+    mode: full-refresh
+
+    # Use legacy transforms
+    transforms:
+      text_field: [ trim_space, replace_non_printable, lower ]
+      email: [ lower ]
+      
+    hooks:
+      post:
+        # Verify the transformed data
+        - type: query
+          connection: '{target.name}'
+          query: |
+            SELECT 
+              text_field,
+              email
+            FROM public.test_staged_transforms2
+            ORDER BY id
+          into: result
+
+        # Log results for verification
+        - type: log
+          message: |
+            Staged Transforms Test Results:
+            Row 1: {store.result[0]}
+            Row 2: {store.result[1]} 
+            Row 3: {store.result[2]}
+            Row 4: {store.result[3]}
+            Row 5: {store.result[4]}
+
+        # Verify specific transformations
+        - type: check
+          check: store.result[0].text_field == "hello world"  # trimmed and lowercased
+
+        - type: check  
+          check: store.result[0].email == "john@example.com"  # lowercased
+        
+  mysql.test_staged_transforms3:
+    sql: select text_field, email from mysql.test_staged_transforms
+    object: public.test_staged_transforms3
+    mode: full-refresh
+
+    # Use legacy transforms
+    transforms: [ trim_space, lower ]
+      
+    hooks:
+      post:
+        # Verify the transformed data
+        - type: query
+          connection: '{target.name}'
+          query: |
+            SELECT 
+              text_field,
+              email
+            FROM public.test_staged_transforms2
+            ORDER BY id
+          into: result
+
+        # Log results for verification
+        - type: log
+          message: |
+            Staged Transforms Test Results:
+            Row 1: {store.result[0]}
+            Row 2: {store.result[1]} 
+            Row 3: {store.result[2]}
+            Row 4: {store.result[3]}
+            Row 5: {store.result[4]}
+
+        # Verify specific transformations
+        - type: check
+          check: store.result[0].text_field == "hello world"  # trimmed and lowercased
+
+        - type: check  
+          check: store.result[0].email == "john@example.com"  # lowercased

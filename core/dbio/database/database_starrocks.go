@@ -214,7 +214,7 @@ func (conn *StarRocksConn) InsertBatchStream(tableFName string, ds *iop.Datastre
 		for _, row := range rows {
 			rowVals := lo.Map(row, func(val any, i int) string {
 				valCount++
-				newVal := ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+				newVal := ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 				switch {
 				case val == nil:
 					return "NULL"
