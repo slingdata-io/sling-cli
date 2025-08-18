@@ -795,3 +795,13 @@
     - 'inserted 100000 rows'
     - 'Row count: 100000'
     - 'execution succeeded'
+
+- id: 104
+  name: Test PostgreSQL TIME datatype preservation
+  run: sling run -d -r cmd/sling/tests/replications/r.46.postgres_time_datatype.yaml
+  streams: 1
+  rows: 3
+  output_contains:
+    - "time_col should be 'time without time zone'"
+    - "time_tz_col should be 'time with time zone'"
+    - "time_precision_col should be 'time without time zone'"

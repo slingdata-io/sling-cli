@@ -1111,7 +1111,7 @@ func (ct ColumnType) IsBinary() bool {
 // IsString returns whether the column is a string
 func (ct ColumnType) IsString() bool {
 	switch ct {
-	case StringType, TextType, JsonType, TimeType, BinaryType, UUIDType:
+	case StringType, TextType, JsonType, BinaryType, UUIDType:
 		return true
 	}
 	return false
@@ -1173,9 +1173,18 @@ func (ct ColumnType) IsDatetime() bool {
 	return false
 }
 
+// IsTime returns whether the column is a time object
+func (ct ColumnType) IsTime() bool {
+	switch ct {
+	case TimeType, TimezType:
+		return true
+	}
+	return false
+}
+
 // IsValid returns whether the column has a valid type
 func (ct ColumnType) IsValid() bool {
-	return ct.IsBinary() || ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime()
+	return ct.IsBinary() || ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime() || ct.IsTime()
 }
 
 func isDate(t *time.Time) bool {
