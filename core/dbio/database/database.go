@@ -1009,7 +1009,8 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	}
 
 	if len(colTransforms) > 0 {
-		conn.SetProp("transforms", g.Marshal(colTransforms))
+		transforms, _ := iop.ParseStageTransforms(colTransforms)
+		conn.SetProp("transforms", g.Marshal(transforms))
 	}
 }
 
