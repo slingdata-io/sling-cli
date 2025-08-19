@@ -94,7 +94,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 		if strings.Contains(err.Error(), "Invalid refresh token provided") {
 			return g.Error("could not connect. Please renew your session.\n%s", err.Error())
 		} else {
-			g.Warn("Could not get workgroup details: %v", err)
+			g.Warn("Could not get workgroup details for `%s`: %v", conn.GetProp("workgroup"), err)
 		}
 	} else if wgOutput.WorkGroup != nil {
 		g.Trace("connected to Athena. workgroup=%s catalog=%s", conn.GetProp("workgroup"), conn.GetProp("catalog"))

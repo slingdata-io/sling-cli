@@ -17,7 +17,7 @@ func MakeAwsConfig(ctx context.Context, props map[string]string) (cfg aws.Config
 
 	getProp := func(key ...string) string {
 		for _, k := range key {
-			if val, ok := props[strings.ToLower(k)]; ok {
+			if val, ok := props[strings.ToLower(k)]; ok && val != "" {
 				return val
 			}
 		}
