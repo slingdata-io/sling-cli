@@ -30,6 +30,7 @@ func MakeAwsConfig(ctx context.Context, props map[string]string) (cfg aws.Config
 	awsSessionToken := getProp("aws_session_token", "session_token")
 	awsRegion := getProp("aws_region", "region")
 	awsProfile := getProp("aws_profile", "profile")
+	awsEndpoint := getProp("aws_endpoint", "endpoint")
 
 	if awsRegion == "" {
 		return cfg, g.Error("AWS region not specified")
@@ -40,6 +41,11 @@ func MakeAwsConfig(ctx context.Context, props map[string]string) (cfg aws.Config
 
 	// Add region to config options
 	configOptions = append(configOptions, awsconfig.WithRegion(awsRegion))
+
+	// Set custom endpoint if provided
+	if awsEndpoint != "" {
+		configOptions = append(configOptions, awsconfig.WithBaseEndpoint(awsEndpoint))
+	}
 
 	// Set timeout if provided
 	if timeOut := cast.ToInt(getProp("timeout")); timeOut > 0 {

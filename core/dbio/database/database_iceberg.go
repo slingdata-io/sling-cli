@@ -156,6 +156,25 @@ func (conn *IcebergConn) connectREST() error {
 		opts = append(opts, rest.WithAdditionalProps(props))
 	}
 
+	// Pass through S3 properties for REST access
+	awsProps := map[string]string{}
+	for key, value := range conn.properties {
+		switch key {
+		case "s3_access_key_id", "s3_secret_access_key", "s3_session_token", "s3_region", "s3_endpoint", "s3_profile":
+			newKey := strings.TrimPrefix(key, "s3_")
+			awsProps[newKey] = value
+		}
+	}
+
+	if len(awsProps) > 0 {
+		cfg, err := iop.MakeAwsConfig(conn.context.Ctx, awsProps)
+		if err != nil {
+			return g.Error(err, "failed to create AWS config for iceberg")
+		}
+		g.Trace("using S3 props for iceberg REST: %s", g.Marshal(lo.Keys(awsProps)))
+		opts = append(opts, rest.WithAwsConfig(cfg))
+	}
+
 	// Add authentication if provided
 	if token := conn.GetProp("rest_token"); token != "" {
 		opts = append(opts, rest.WithOAuthToken(token))
