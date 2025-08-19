@@ -741,6 +741,7 @@
   run: sling run -d -r cmd/sling/tests/replications/r.38.snowflake_compression_test.yaml
   output_contains:
     - compression=zstd
+    - compression=gzip
 
 - id: 98
   name: Test SLING_LOADED_AT column type when casting all columns to string
@@ -802,6 +803,16 @@
   streams: 1
   rows: 3
   output_contains:
-    - "time_col should be 'time without time zone'"
-    - "time_tz_col should be 'time with time zone'"
-    - "time_precision_col should be 'time without time zone'"
+    - '| time without time zone |'
+    - '| time with time zone    |'
+
+- id: 105
+  name: Test MSSQL uniqueidentifier datatype preservation
+  run: sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
+  streams: 1
+  rows: 5
+  output_contains:
+    - "guid_col should be 'uniqueidentifier' type in target"
+    - "GUID value for record 1 should match"
+    - "GUID value for record 5 should match"
+    - "execution succeeded"
