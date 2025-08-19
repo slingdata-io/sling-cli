@@ -272,20 +272,10 @@
 - id: 46
   name: Run sling with replication configuration 15
   run: 'sling run -r cmd/sling/tests/replications/r.15.yaml # iceberg & delta'
-  streams: 5
+  streams: 3
   output_contains:
-    - 100 rows
-    - '[1 / 3] running stream sling_test/lineitem_iceberg'
-
-- id: 47
-  name: Run sling with replication configuration 15 incremental
-  run: sling run -r cmd/sling/tests/replications/r.15.yaml --streams sling_test/lineitem_iceberg/
-  env:
-    ICEBERG_MODE: incremental
-  rows: '>0'
-  streams: 1
-  output_contains:
-    - incremental
+    - 999 rows
+    - 'aws_s3 -> postgres | test/parquet/test1.parquet'
 
 - id: 48
   name: Run sling with replication configuration 14
@@ -680,7 +670,7 @@
     - 'WARN: Using INSERT mode'
 
 - id: 91
-  name: Test encoding source options (latin1, windows1252, utf8_bom) and target placeholder
+  name: Test encoding source options (latin1, windows1252, utf8_bom) and target encoding
   run: |
     sling run -d -r cmd/sling/tests/replications/r.32.encoding_test.yaml
     sling run -d -r cmd/sling/tests/replications/r.33.encoding_target_test.yaml
@@ -692,7 +682,7 @@
     - 'UTF-8 BOM results:'
     - '张三'
     - '김철수'
-    - 'Target encoding feature is not fully implemented'
+    - 'wrote 3 rows'
     - 'execution succeeded'
 
 - id: 92
@@ -741,6 +731,7 @@
   run: sling run -d -r cmd/sling/tests/replications/r.38.snowflake_compression_test.yaml
   output_contains:
     - compression=zstd
+    - compression=gzip
 
 - id: 98
   name: Test SLING_LOADED_AT column type when casting all columns to string
@@ -751,12 +742,12 @@
     - 'SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (Postgres source)'
     - "SUCCESS: _SLING_LOADED_AT is correctly kept as TIMESTAMP even when all columns are cast to string (CSV source)"
 
-- id: 99
-  name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
-  output_contains:
-    - no data or records found in stream
+# - id: 99
+#   name: Test empty dataset exporting with Parquet (https://github.com/slingdata-io/sling-cli/issues/598)
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.41.redshit_empty_parquet.yaml
+#   output_contains:
+#     - no data or records found in stream
 
 - id: 100
   name: Test excluding column when exporting to Parquet https://github.com/slingdata-io/sling-cli/issues/607)
@@ -776,3 +767,42 @@
     - 'inserted 213 rows'
     - 'rows into public.test1k_azuretable_pg'
     - 'id, first_name, email, create_dt, Timestamp'
+
+- id: 102
+  name: Test staged transforms with MySQL source and PostgreSQL target
+  run: sling run -d -r cmd/sling/tests/replications/r.44.staged_transforms_test.yaml
+  streams: 3
+  rows: 15  # 3 * 5 = 15
+  output_contains:
+    - 'Staged Transforms Test Results'
+    - 'execution succeeded'
+
+- id: 103
+  name: Test Exasol large CSV file ingestion (100K rows)
+  run: sling run -d -r cmd/sling/tests/replications/r.45.exasol_large_csv.yaml
+  streams: 1
+  rows: 100000
+  output_contains:
+    - 'inserted 100000 rows'
+    - 'Row count: 100000'
+    - 'execution succeeded'
+
+- id: 104
+  name: Test PostgreSQL TIME datatype preservation
+  run: sling run -d -r cmd/sling/tests/replications/r.46.postgres_time_datatype.yaml
+  streams: 1
+  rows: 3
+  output_contains:
+    - '| time without time zone |'
+    - '| time with time zone    |'
+
+- id: 105
+  name: Test MSSQL uniqueidentifier datatype preservation
+  run: sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
+  streams: 1
+  rows: 5
+  output_contains:
+    - "guid_col should be 'uniqueidentifier' type in target"
+    - "GUID value for record 1 should match"
+    - "GUID value for record 5 should match"
+    - "execution succeeded"

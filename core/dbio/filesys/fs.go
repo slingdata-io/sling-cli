@@ -626,7 +626,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
 		// if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
 		// azure read gives issues...
-		if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3) {
+		if g.In(fs.FsType(), dbio.TypeFileLocal) {
 			// duckdb read natively
 			df, err = GetDataflowViaDuckDB(fs.Self(), url, nodes, Cfg)
 		} else {
@@ -712,7 +712,7 @@ func WriteDataflow(fs FileSysClient, df *iop.Dataflow, url string) (bw int64, er
 	if cast.ToBool(fs.GetProp("ignore_existing")) {
 		paths, err := fs.List(url)
 		if err != nil {
-			if g.IsDebugLow() {
+			if g.IsDebug() {
 				g.Warn("could not list path %s\n%s", url, err.Error())
 			}
 			err = nil
@@ -1002,7 +1002,7 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 			partURL = url
 		}
 
-		g.DebugLow("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, useBufferedStream, sc.Format, singleFile)
+		g.Debug("writing to %s [fileRowLimit=%d fileBytesLimit=%d compression=%s concurrency=%d useBufferedStream=%v fileFormat=%v singleFile=%v]", partURL, sc.FileMaxRows, sc.FileMaxBytes, sc.Compression, concurrency, useBufferedStream, sc.Format, singleFile)
 
 		df.Context.Wg.Read.Add()
 		ds.SetConfig(fs.Props()) // pass options
@@ -1061,7 +1061,7 @@ func Delete(fs FileSysClient, uri string) (err error) {
 
 	err = fs.delete(uri)
 	if err != nil && !strings.Contains(err.Error(), "exist") {
-		if g.IsDebugLow() {
+		if g.IsDebug() {
 			g.Warn("could not delete path %s\n%s", uri, err.Error())
 		}
 		err = nil
@@ -1153,7 +1153,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 				if g.In(cfg.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) {
 					uri = strings.TrimSuffix(uri, "/") // remove trailing slash
 				} else {
-					g.DebugLow("skipping %s because is not file", uri)
+					g.Debug("skipping %s because is not file", uri)
 					continue
 				}
 			}
@@ -1415,11 +1415,24 @@ func MakeDatastream(reader io.Reader, cfg map[string]string) (ds *iop.Datastream
 	}
 
 	peekStr := string(data)
-	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") {
+	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") || cfg["format"] == "json" {
 		ds = iop.NewDatastream(iop.Columns{})
 		ds.SafeInference = true
 		ds.SetConfig(cfg)
 		err = ds.ConsumeJsonReader(reader2)
+		if err != nil {
+			return nil, err
+		}
+	} else if strings.HasPrefix(peekStr, "ARROW1") || cfg["format"] == "arrow" {
+		ds = iop.NewDatastream(iop.Columns{})
+		ds.SetConfig(cfg)
+		if strings.HasPrefix(peekStr, "ARROW1") {
+			// if file format
+			err = ds.ConsumeArrowReader(reader2)
+		} else {
+			// assume stream format
+			err = ds.ConsumeArrowReaderStream(reader2)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1566,14 +1579,14 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 		concurrency = 3
 	}
 
-	g.DebugLow("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
+	g.Debug("merging %s readers of %d files [concurrency=%d] from %s", fileType, len(nodes), concurrency, url)
 	readerChn := make(chan *iop.ReaderReady, concurrency)
 	go func() {
 		defer close(readerChn)
 
 		for _, node := range nodes {
 			if strings.HasSuffix(node.URI, "/") {
-				g.DebugLow("skipping %s because is not file", node.URI)
+				g.Debug("skipping %s because is not file", node.URI)
 				continue
 			}
 

@@ -316,7 +316,7 @@ func (ds *Datastream) GetConfig() (configMap map[string]string) {
 func (ds *Datastream) CastRowToString(row []any) []string {
 	rowStr := make([]string, len(row))
 	for i, val := range row {
-		rowStr[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+		rowStr[i] = ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 	}
 	return rowStr
 }
@@ -570,35 +570,13 @@ func (ds *Datastream) transformReader(reader io.Reader) (newReader io.Reader, de
 	}
 
 	// decode File if requested
-	if encoding, ok := ds.Sp.Config.Map["encoding"]; ok {
+	if encoding, ok := ds.Sp.Config.Map["decode"]; ok {
 		if nr := matchReader(encoding); nr != nil {
 			return nr, true
 		}
-	} else if transformsPayload, ok := ds.Sp.Config.Map["transforms"]; ok {
-		columnTransforms := makeColumnTransforms(transformsPayload)
-		applied := []string{}
-
-		if ts, ok := columnTransforms["*"]; ok {
-			for _, t := range ts {
-				if nr := matchReader(t); nr != nil {
-					newReader = nr
-				} else {
-					continue
-				}
-				applied = append(applied, t) // delete from transforms, already applied
-			}
-
-			ts = lo.Filter(ts, func(t string, i int) bool {
-				return !g.In(t, applied...)
-			})
-			columnTransforms["*"] = ts
-		}
-
-		if len(applied) > 0 {
-			// re-apply transforms
-			ds.Sp.applyTransforms(g.Marshal(columnTransforms))
-
-			return newReader, true
+	} else if encoding, ok := ds.Sp.Config.Map["encode"]; ok {
+		if nr := matchReader(encoding); nr != nil {
+			return nr, true
 		}
 	} else {
 		// auto-decode
@@ -665,7 +643,6 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 	}
 
 	data.Result = nil
-	data.Columns = ds.Columns
 	data.Rows = [][]any{}
 	limited := false
 
@@ -676,6 +653,8 @@ func (ds *Datastream) Collect(limit int) (Dataset, error) {
 			break
 		}
 	}
+
+	data.Columns = ds.Columns
 
 	if !limited {
 		ds.SetEmpty()
@@ -945,6 +924,13 @@ skipBuffer:
 				if ds.it.IsCasted || ds.it.RowIsCasted {
 					row = ds.it.Row
 				} else {
+					// evaluate transforms
+					if transforms := ds.Sp.Config.transforms; transforms != nil {
+						ds.it.Row, err = ds.Sp.Config.transforms.Evaluate(ds.it.Row)
+						if ds.Context.CaptureErr(err) {
+							break loop
+						}
+					}
 					row = ds.Sp.CastRow(ds.it.Row, ds.Columns)
 				}
 				if ds.config.SkipBlankLines && ds.Sp.rowBlankValCnt == len(row) {
@@ -1505,7 +1491,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 func (ds *Datastream) ConsumeArrowReaderSeeker(reader *os.File) (err error) {
 	selected := ds.Columns.Names()
 
-	a, err := NewArrowReader(reader, selected)
+	a, err := NewArrowFileReader(reader, selected)
 	if err != nil {
 		return g.Error(err, "could create arrow stream")
 	}
@@ -1572,30 +1558,64 @@ func (ds *Datastream) ConsumeParquetReader(reader io.Reader) (err error) {
 	return ds.ConsumeParquetReaderSeeker(file)
 }
 
-// ConsumeArrowReader uses the provided reader to stream rows
+// ConsumeArrowReaderStream uses the provided reader to stream rows
+func (ds *Datastream) ConsumeArrowReaderStream(reader io.Reader) (err error) {
+
+	selected := ds.Columns.Names()
+
+	a, err := NewArrowReader(reader, selected)
+	if err != nil {
+		return g.Error(err, "could create arrow stream")
+	}
+
+	ds.Columns = a.Columns()
+	ds.Inferred = ds.Columns.Sourced()
+	ds.it = ds.NewIterator(ds.Columns, a.nextFunc)
+	ds.SetFileURI()
+
+	err = ds.Start()
+	if err != nil {
+		return g.Error(err, "could start datastream")
+	}
+
+	return
+}
+
 func (ds *Datastream) ConsumeArrowReader(reader io.Reader) (err error) {
-	// need to write to temp file prior
-	arrowPath := path.Join(env.GetTempFolder(), g.NewTsID("arrow.temp")+".arrows")
-	ds.Defer(func() { env.RemoveLocalTempFile(arrowPath) })
 
-	file, err := os.Create(arrowPath)
+	data, reader2, err := g.Peek(reader, 0)
 	if err != nil {
-		return g.Error(err, "Unable to create temp file: "+arrowPath)
+		return err
 	}
 
-	g.Debug("downloading to temp file on disk: %s", arrowPath)
-	bw, err := io.Copy(file, reader)
-	if err != nil {
-		return g.Error(err, "Unable to write to temp file: "+arrowPath)
-	}
-	g.Debug("wrote %d bytes to %s", bw, arrowPath)
+	if peekStr := string(data); strings.HasPrefix(peekStr, "ARROW1") {
 
-	_, err = file.Seek(0, 0) // reset to beginning
-	if err != nil {
-		return g.Error(err, "Unable to seek to beginning of temp file: "+arrowPath)
+		// need to write to temp file prior
+		arrowPath := path.Join(env.GetTempFolder(), g.NewTsID("arrow.temp")+".arrows")
+		ds.Defer(func() { env.RemoveLocalTempFile(arrowPath) })
+
+		file, err := os.Create(arrowPath)
+		if err != nil {
+			return g.Error(err, "Unable to create temp file: "+arrowPath)
+		}
+
+		g.Debug("downloading to temp file on disk: %s", arrowPath)
+		bw, err := io.Copy(file, reader2)
+		if err != nil {
+			return g.Error(err, "Unable to write to temp file: "+arrowPath)
+		}
+		g.Debug("wrote %d bytes to %s", bw, arrowPath)
+
+		_, err = file.Seek(0, 0) // reset to beginning
+		if err != nil {
+			return g.Error(err, "Unable to seek to beginning of temp file: "+arrowPath)
+		}
+
+		return ds.ConsumeArrowReaderSeeker(file)
 	}
 
-	return ds.ConsumeParquetReaderSeeker(file)
+	// if IPC stream
+	return ds.ConsumeArrowReaderStream(reader2)
 }
 
 // ConsumeParquetReader uses the provided reader to stream rows
@@ -2214,7 +2234,7 @@ func (ds *Datastream) NewCsvReaderChnl(sc StreamConfig) (readerChn chan *BatchRe
 				// convert to csv string
 				row := make([]string, len(row0))
 				for i, val := range row0 {
-					row[i] = sp.CastToString(i, val, batch.Columns[i].Type)
+					row[i] = sp.CastToStringCSV(i, val, batch.Columns[i].Type)
 				}
 				mux.Lock()
 
@@ -2760,7 +2780,7 @@ func (ds *Datastream) NewCsvReader(sc StreamConfig) *io.PipeReader {
 			// convert to csv string
 			row := make([]string, len(row0))
 			for i, val := range row0 {
-				row[i] = sp.CastToString(i, val, ds.Columns[i].Type)
+				row[i] = sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 			}
 			bw, err := w.Write(row)
 			tbw = tbw + cast.ToInt64(bw)

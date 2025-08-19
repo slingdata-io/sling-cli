@@ -104,7 +104,7 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 
 	bin, err := EnsureBinSQLite()
 	if err != nil {
-		g.DebugLow("sqlite3 not found in path. Using cursor... %s", err.Error())
+		g.Debug("sqlite3 not found in path. Using cursor... %s", err.Error())
 		return conn.BaseConn.BulkImportStream(tableFName, ds)
 	}
 

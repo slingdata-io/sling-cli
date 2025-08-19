@@ -360,6 +360,12 @@ func (r *AzureTableResult) RowsAffected() (int64, error) {
 
 func (conn *AzureTableConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	options, _ := g.UnmarshalMap(table.SQL)
+
+	// add columns if present
+	if len(table.Columns) > 0 {
+		options["columns"] = table.Columns
+	}
+
 	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.FullName(), options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
@@ -569,6 +575,12 @@ func (conn *AzureTableConn) StreamRowsContext(ctx context.Context, tableName str
 	err = ds.Start()
 	if err != nil {
 		return ds, g.Error(err, "could start datastream")
+	}
+
+	// unmarshal columns if none detected
+	// otherwise this may error when creating a temp table with no columns
+	if len(ds.Columns) == 0 {
+		g.JSONConvert(opts["columns"], &ds.Columns)
 	}
 
 	return

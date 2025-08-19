@@ -736,7 +736,7 @@ func (conn *MsSQLServerConn) CopyViaAzure(tableFName string, df *iop.Dataflow) (
 	go func() {
 		var bw int64
 		bw, err = azFs.WriteDataflowReady(df, azPath, fileReadyChn, iop.DefaultStreamConfig())
-		g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), azPath)
+		g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), azPath)
 
 		if err != nil {
 			err = g.Error(err, "Error writing dataflow to azure blob: "+azPath)
@@ -876,7 +876,7 @@ func writeCsvWithoutQuotes(path string, batch *iop.Batch, limit int) (cnt uint64
 		cnt++
 		row := make([]string, len(row0))
 		for i, val := range row0 {
-			row[i] = Sp.CastToString(i, val, batch.Columns[i].Type)
+			row[i] = Sp.CastToStringCSV(i, val, batch.Columns[i].Type)
 		}
 
 		// Write row

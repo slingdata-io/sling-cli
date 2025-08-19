@@ -627,8 +627,6 @@ trino	unknown	text
 trino	timestamp	timestamp				
 trino	timestamp with time zone	timestampz				
 trino	double	float				
-trino	varchar	time				
-trino	varchar	timez				
 iceberg	boolean	bool	col_boolean boolean	TRUE	TRUE	Boolean type
 iceberg	int	integer	col_int int	TRUE	TRUE	32-bit signed integer
 iceberg	int32	integer	col_int32 int32	TRUE	TRUE	32-bit signed integer

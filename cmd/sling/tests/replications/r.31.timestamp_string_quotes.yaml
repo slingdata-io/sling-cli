@@ -9,14 +9,14 @@ hooks:
     - type: query
       connection: '{source.name}'
       query: |
-        DROP TABLE IF EXISTS test_timestamp_quotes;
-        CREATE TABLE test_timestamp_quotes (
+        DROP TABLE IF EXISTS public.test_timestamp_quotes;
+        CREATE TABLE public.test_timestamp_quotes (
           id INT PRIMARY KEY,
           ts_column TIMESTAMP,
           ts_tz_column TIMESTAMPTZ,
           date_column DATE
         );
-        INSERT INTO test_timestamp_quotes VALUES 
+        INSERT INTO public.test_timestamp_quotes VALUES 
           (1, '2025-06-01 18:00:00.2342', '2025-06-01 18:00:00.2342', '2025-06-01'),
           (2, '2024-12-25 10:30:45.1234', '2024-12-25 10:30:45.1234', '2024-12-25'),
           (3, NULL, NULL, NULL);
@@ -24,7 +24,7 @@ hooks:
   end:
     - type: query
       connection: '{source.name}'
-      query: DROP TABLE IF EXISTS test_timestamp_quotes;
+      query: DROP TABLE IF EXISTS public.test_timestamp_quotes;
 
     - type: query
       connection: DUCKDB
@@ -58,7 +58,7 @@ hooks:
       message: "date_column should not contain quotes"
 
 streams:
-  test_timestamp_quotes:
+  public.test_timestamp_quotes:
     object: 'file:///tmp/test_timestamp_quotes.parquet'
     columns:
       ts_column: string

@@ -352,7 +352,7 @@ func (conn *DatabricksConn) CopyViaS3(tableFName string, df *iop.Dataflow) (coun
 	if err != nil {
 		return df.Count(), g.Error(err, "Error in FileSysWriteDataflow")
 	}
-	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
+	g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
 	return df.Count(), conn.CopyFromS3(tableFName, s3Path, format)
 }
@@ -956,6 +956,9 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 		config.TargetType = conn.GetType()
 		config.Format = fileFormat
 		config.Compression = iop.ZStandardCompressorType
+		if val := strings.ToLower(conn.GetProp("COMPRESSION")); val != "" {
+			config.Compression = iop.CompressorType(val)
+		}
 		config.FileMaxRows = cast.ToInt64(conn.GetProp("file_max_rows"))
 		if config.FileMaxRows == 0 {
 			config.FileMaxRows = 500000

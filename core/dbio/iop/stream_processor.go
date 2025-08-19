@@ -48,31 +48,31 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	EmptyAsNull       bool                     `json:"empty_as_null"`
-	Header            bool                     `json:"header"`
-	Compression       CompressorType           `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string                   `json:"null_if"`
-	NullAs            string                   `json:"null_as"`
-	DatetimeFormat    string                   `json:"datetime_format"`
-	SkipBlankLines    bool                     `json:"skip_blank_lines"`
-	Format            dbio.FileType            `json:"format"`
-	Delimiter         string                   `json:"delimiter"`
-	Escape            string                   `json:"escape"`
-	Quote             string                   `json:"quote"`
-	FileMaxRows       int64                    `json:"file_max_rows"`
-	FileMaxBytes      int64                    `json:"file_max_bytes"`
-	BatchLimit        int64                    `json:"batch_limit"`
-	MaxDecimals       int                      `json:"max_decimals"`
-	Flatten           int                      `json:"flatten"`
-	FieldsPerRec      int                      `json:"fields_per_rec"`
-	Jmespath          string                   `json:"jmespath"`
-	Sheet             string                   `json:"sheet"`
-	ColumnCasing      ColumnCasing             `json:"column_casing"`
-	TargetType        dbio.Type                `json:"target_type"`
-	BoolAsInt         bool                     `json:"-"`
-	Columns           Columns                  `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        map[string]TransformList // array of transform functions to apply
-	maxDecimalsFormat string                   `json:"-"`
+	EmptyAsNull       bool           `json:"empty_as_null"`
+	Header            bool           `json:"header"`
+	Compression       CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf            string         `json:"null_if"`
+	NullAs            string         `json:"null_as"`
+	DatetimeFormat    string         `json:"datetime_format"`
+	SkipBlankLines    bool           `json:"skip_blank_lines"`
+	Format            dbio.FileType  `json:"format"`
+	Delimiter         string         `json:"delimiter"`
+	Escape            string         `json:"escape"`
+	Quote             string         `json:"quote"`
+	FileMaxRows       int64          `json:"file_max_rows"`
+	FileMaxBytes      int64          `json:"file_max_bytes"`
+	BatchLimit        int64          `json:"batch_limit"`
+	MaxDecimals       int            `json:"max_decimals"`
+	Flatten           int            `json:"flatten"`
+	FieldsPerRec      int            `json:"fields_per_rec"`
+	Jmespath          string         `json:"jmespath"`
+	Sheet             string         `json:"sheet"`
+	ColumnCasing      ColumnCasing   `json:"column_casing"`
+	TargetType        dbio.Type      `json:"target_type"`
+	BoolAsInt         bool           `json:"-"`
+	Columns           Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms        Transform
+	maxDecimalsFormat string `json:"-"`
 
 	Map map[string]string `json:"-"`
 }
@@ -451,57 +451,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 	}
 }
 
-func makeColumnTransforms(transformsPayload string) map[string][]string {
-	columnTransforms := map[string][]string{}
-	g.Unmarshal(transformsPayload, &columnTransforms)
-	return columnTransforms
-}
-
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
-	columnTransforms := makeColumnTransforms(transformsPayload)
-	sp.Config.transforms = map[string]TransformList{}
-	for key, names := range columnTransforms {
-		key = strings.ToLower(key)
-		sp.Config.transforms[key] = TransformList{}
-		for _, name := range names {
-			t, ok := TransformsMap[name]
-			if ok {
-				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
-			} else if function := GetTransformFunction(name); function != nil {
-				t := FunctionToTransform(name, function)
-				sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
-			} else if n := strings.TrimSpace(name); strings.Contains(n, "(") && strings.HasSuffix(n, ")") {
-				// parse transform with a parameter
-				parts := strings.Split(string(name), "(")
-				if len(parts) != 2 {
-					g.Warn("invalid transform: '%s'", name)
-					continue
-				}
-				tName := parts[0]
-				param := strings.TrimSuffix(parts[1], ")")
-				if t, ok := TransformsMap[tName]; ok {
-					if t.makeFunc == nil {
-						g.Warn("makeFunc not found for transform '%s'. Please contact support", tName)
-						continue
-					}
-					var params []any
-					for _, p := range strings.Split(param, ",") {
-						params = append(params, strings.TrimSpace(p))
-					}
-					err := t.makeFunc(&t, params...)
-					if err != nil {
-						g.Warn("invalid parameter for transform '%s' (%s)", tName, err.Error())
-					} else {
-						sp.Config.transforms[key] = append(sp.Config.transforms[key], t)
-					}
-				} else {
-					g.Warn("did find find transform with params named: '%s'", tName)
-				}
-			} else {
-				g.Warn("did find find transform named: '%s'", name)
-			}
-		}
-	}
+	stageTransforms := []map[string]string{}
+	g.Unmarshal(transformsPayload, &stageTransforms)
+	sp.Config.transforms = NewTransform(stageTransforms, sp)
 }
 
 // CastVal  casts the type of an interface based on its value
@@ -658,8 +611,6 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		return nil
 	}
 
-	colKey := strings.ToLower(col.Name)
-
 	switch v := val.(type) {
 	case big.Int:
 		val = v.Int64()
@@ -673,7 +624,7 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		// Handle time.Time specially when casting to string to avoid JSON marshaling
 		if col.Type.IsString() {
 			// Use CastToString to format properly without quotes
-			sVal = sp.CastToString(i, v, DatetimeType)
+			sVal = sp.CastToStringCSV(i, v, DatetimeType)
 			val = sVal
 			isString = true
 		}
@@ -697,7 +648,7 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		}
 		if sVal == "" {
 			sp.rowBlankValCnt++
-			if sp.Config.EmptyAsNull || !col.IsString() || sp.Config.transforms[colKey].HasTransform(TransformEmptyAsNull) {
+			if sp.Config.EmptyAsNull || !col.IsString() {
 				cs.TotalCnt++
 				cs.NullCnt++
 				return nil
@@ -709,29 +660,6 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		}
 	}
 
-	// get transforms
-	transforms := append(sp.Config.transforms[colKey], sp.Config.transforms["*"]...)
-
-	// apply functions
-	for _, t := range transforms {
-		if t.Func != nil {
-			newVal, err := t.Func(sp, val)
-			if err != nil {
-				if len(sp.transformEG.Errors) < 10 {
-					sp.transformEG.Add(err)
-					if g.IsDebug() {
-						g.Warn("transform function failure for `%s` for value %#v: %s", t.Name, val, err.Error())
-					} else {
-						g.Warn("transform function failure for `%s`: %s", t.Name, err.Error())
-					}
-				}
-			} else {
-				val = newVal
-				sVal = "" // reset string val
-			}
-		}
-	}
-
 	switch {
 	case col.Type.IsString():
 		if sVal == "" && val != nil {
@@ -739,13 +667,6 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 				sVal = g.Marshal(val)
 			} else {
 				sVal = cast.ToString(val)
-			}
-		}
-
-		// apply transforms
-		for _, t := range transforms {
-			if t.FuncString != nil {
-				sVal, _ = t.FuncString(sp, sVal)
 			}
 		}
 
@@ -976,6 +897,24 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		}
 
 		cs.BoolCnt++
+	case col.Type.IsTime():
+		dVal, err := sp.CastToTime(val)
+		if err != nil {
+			sp.ds.ChangeColumn(i, StringType)
+			cs.StringCnt++
+			sVal = cast.ToString(val)
+			sp.rowChecksum[i] = uint64(len(sVal))
+			nVal = sVal
+		}
+
+		if col.Type == TimezType {
+			sVal = dVal.Format("15:04:05.999999-07:00")
+		} else if isUTC(&dVal) {
+			sVal = dVal.Format("15:04:05.999999")
+		}
+		nVal = sVal
+		sp.rowChecksum[i] = uint64(len(sVal))
+		cs.StringCnt++ // count as string
 	case col.Type.IsDatetime() || col.Type.IsDate():
 		dVal, err := sp.CastToTime(val)
 		if err != nil && !g.In(val, "0000-00-00", "0000-00-00 00:00:00") {
@@ -989,17 +928,6 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			cs.NullCnt++
 			sp.rowBlankValCnt++
 		} else {
-			// apply transforms
-			for _, t := range transforms {
-				if t.FuncTime != nil {
-					_ = t.FuncTime(sp, &dVal)
-				}
-
-				// column needs to be set to timestampz
-				if t.Name == "set_timezone" && col.Type != TimestampzType {
-					sp.ds.ChangeColumn(i, TimestampzType)
-				}
-			}
 			nVal = dVal
 			if isDate(&dVal) {
 				cs.DateCnt++
@@ -1040,9 +968,42 @@ func (sp *StreamProcessor) bytesToHexEscape(b []byte) string {
 	return string(result)
 }
 
-// CastToString to string. used for csv writing
+func (sp *StreamProcessor) CastToString(val any) (valString string) {
+	valString, _ = sp.CastToStringE(val)
+	return
+}
+
+func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) {
+
+	switch v := val.(type) {
+	case []uint8:
+		valString = string(v)
+	case chJSON: // Clickhouse JSON / Variant
+		var sBytes []byte
+		sBytes, err = v.MarshalJSON()
+		if err != nil {
+			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
+		}
+		valString = string(sBytes)
+	case *string:
+		valString = *v
+	case string:
+		valString = v
+	case map[string]string, map[string]any, map[any]any, []any, []string:
+		valString = g.Marshal(v)
+	default:
+		valString, err = cast.ToStringE(v)
+		if err != nil {
+			return "", g.Error(err, "could not cast to string: %#v", v)
+		}
+	}
+
+	return valString, nil
+}
+
+// CastToStringCSV to string. used for csv writing
 // slows processing down 5% with upstream CastRow or 35% without upstream CastRow
-func (sp *StreamProcessor) CastToString(i int, val interface{}, valType ...ColumnType) string {
+func (sp *StreamProcessor) CastToStringCSV(i int, val interface{}, valType ...ColumnType) string {
 	typ := ColumnType("")
 	switch v := val.(type) {
 	case time.Time:

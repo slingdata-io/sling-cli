@@ -414,7 +414,7 @@ func (c *CSV) WriteStream(ds *Datastream) (cnt uint64, err error) {
 		cnt++
 		row := make([]string, len(row0))
 		for i, val := range row0 {
-			row[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+			row[i] = ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 		}
 		_, err = w.Write(row)
 		if err != nil {
@@ -447,7 +447,7 @@ func (c *CSV) NewReader() (*io.PipeReader, error) {
 			// convert to csv string
 			row := make([]string, len(row0))
 			for i, val := range row0 {
-				row[i] = ds.Sp.CastToString(i, val, ds.Columns[i].Type)
+				row[i] = ds.Sp.CastToStringCSV(i, val, ds.Columns[i].Type)
 			}
 			_, err := w.Write(row)
 			if err != nil {

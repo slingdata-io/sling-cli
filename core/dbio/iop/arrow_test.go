@@ -62,7 +62,7 @@ func TestArrowReadWrite(t *testing.T) {
 	defer readFile.Close()
 
 	// Create reader
-	reader, err := NewArrowReader(readFile, nil)
+	reader, err := NewArrowFileReader(readFile, nil)
 	assert.NoError(t, err)
 
 	// Verify columns
@@ -158,7 +158,7 @@ func TestArrowReaderWithSelectedColumns(t *testing.T) {
 	defer readFile.Close()
 
 	// Create reader with only "id" and "value" columns
-	reader, err := NewArrowReader(readFile, []string{"id", "value"})
+	reader, err := NewArrowFileReader(readFile, []string{"id", "value"})
 	assert.NoError(t, err)
 
 	// Verify selected columns

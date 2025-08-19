@@ -1080,7 +1080,7 @@ func generateLargeDataset(numCols, numRows int, force bool) (path string, err er
 				rec[j] = ""
 			} else {
 				val := data.Rows[i%50][j-1]
-				rec[j] = data.Sp.CastToString(j, val, data.Columns[j].Type)
+				rec[j] = data.Sp.CastToStringCSV(j, val, data.Columns[j].Type)
 			}
 		}
 

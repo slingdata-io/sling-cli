@@ -771,7 +771,7 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 
-	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
 	conn, err := c.AsDatabase(true)
 	if err != nil {
@@ -815,7 +815,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
-	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
 	ac, err := c.AsAPI(true)
 	if err != nil {
@@ -848,7 +848,7 @@ func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patter
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
-	g.DebugLow("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
 	fs, err := c.AsFile(true)
 	if err != nil {

@@ -94,7 +94,7 @@ func (conn *AthenaConn) Connect(timeOut ...int) (err error) {
 		if strings.Contains(err.Error(), "Invalid refresh token provided") {
 			return g.Error("could not connect. Please renew your session.\n%s", err.Error())
 		} else {
-			g.Warn("Could not get workgroup details: %v", err)
+			g.Warn("Could not get workgroup details for `%s`: %v", conn.GetProp("workgroup"), err)
 		}
 	} else if wgOutput.WorkGroup != nil {
 		g.Trace("connected to Athena. workgroup=%s catalog=%s", conn.GetProp("workgroup"), conn.GetProp("catalog"))
@@ -805,7 +805,7 @@ func (conn *AthenaConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 	if err != nil {
 		return df.Count(), g.Error(err, "error writing to s3")
 	}
-	g.DebugLow("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
+	g.Debug("total written: %s to %s", humanize.Bytes(cast.ToUint64(bw)), s3Path)
 
 	_, err = conn.LoadFromS3(tableFName, s3Path, df.Columns)
 	if err != nil {

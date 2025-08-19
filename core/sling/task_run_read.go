@@ -92,11 +92,16 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		}
 
 		// select only records that have been modified after last max value
-		if cfg.IncrementalValStr != "" {
+		if incValStr := cfg.IncrementalValStr; incValStr != "" {
+			if srcConn.GetType().IsNoSQL() {
+				// escape double quote since this uses JSON
+				incValStr = strings.ReplaceAll(incValStr, `"`, `\"`)
+			}
+
 			incrementalWhereCond = g.R(
 				srcConn.GetTemplateValue("core.incremental_where"),
 				"update_key", srcConn.Quote(cfg.Source.UpdateKey),
-				"value", cfg.IncrementalValStr,
+				"value", incValStr,
 				"gt", lo.Ternary(t.Config.IncrementalGTE, ">=", ">"),
 			)
 		} else {
@@ -248,7 +253,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 	metadata := t.setGetMetadata()
 
 	var stream *iop.Datastream
-	options := t.getOptionsMap()
+	options := t.getSourceOptionsMap()
 	options["METADATA"] = g.Marshal(metadata)
 
 	if t.Config.HasIncrementalVal() && !t.Config.IsFileStreamWithStateAndParts() {
@@ -394,7 +399,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Limit:       cfg.Source.Limit(),
 		Metadata:    t.setGetMetadata(),
 		Mode:        strings.ToLower(string(cfg.Mode)),
-		DsConfigMap: t.getOptionsMap(),
+		DsConfigMap: t.getSourceOptionsMap(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)
 	if err != nil {

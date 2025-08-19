@@ -3,8 +3,6 @@ target: SNOWFLAKE
 
 defaults:
   mode: full-refresh
-  target_options:
-    compression: gzip
 
 hooks:
   start:
@@ -40,3 +38,8 @@ env:
 streams:
   mysql.compression_test:
     object: 'public.compression_test'
+  mysql.compression_test2:
+    sql: select * from mysql.compression_test
+    object: 'public.compression_test'
+    target_options:
+      compression: gzip

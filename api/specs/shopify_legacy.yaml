@@ -34,7 +34,7 @@ defaults:
               response.headers.link == null,
               state.url,
               if(
-                length(split(response.headers.link, " ")) == 2,
+                length(split(response.headers["link"], " ")) == 2,
                 trim(split_part(response.headers.link, " ", 0), "<>;"),
                 trim(split_part(response.headers.link, " ", 2), "<>;")
               )
