@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -148,32 +149,64 @@ func (conn *IcebergConn) connectREST() error {
 		opts = append(opts, rest.WithPrefix(prefix))
 	}
 
+	props := map[string]string{}
 	if extra := conn.GetProp("rest_extra_props"); extra != "" {
-		props := map[string]string{}
 		if err := g.Unmarshal(extra, &props); err != nil {
 			return g.Error(err, "could not unmarshal rest_extra_props")
 		}
+	}
+
+	// Pass through S3 properties for filesystem access
+	for key, value := range conn.properties {
+		if strings.HasPrefix(key, "s3") {
+			// Map common S3 properties to what iceberg-go expects
+			// FIXME: for now set through env, need to refactor iceberg-go
+			switch key {
+			case "s3_access_key_id":
+				os.Setenv("AWS_ACCESS_KEY_ID", value)
+				props["s3.access-key-id"] = value
+			case "s3_secret_access_key":
+				os.Setenv("AWS_SECRET_ACCESS_KEY", value)
+				props["s3.secret-access-key"] = value
+			case "s3_session_token":
+				os.Setenv("AWS_SESSION_TOKEN", value)
+				props["s3.session-token"] = value
+			case "s3_region":
+				os.Setenv("AWS_REGION", value)
+				props["s3.region"] = value
+			case "s3_endpoint":
+				os.Setenv("AWS_ENDPOINT", value)
+				props["s3.endpoint"] = value
+			case "s3_profile":
+				os.Setenv("AWS_PROFILE", value)
+				props["s3.profile"] = value
+			}
+		}
+	}
+
+	if len(props) > 0 {
+		g.Debug("using additional props for iceberg REST: %s", g.Marshal(lo.Keys(props)))
 		opts = append(opts, rest.WithAdditionalProps(props))
 	}
 
 	// Pass through S3 properties for REST access
-	awsProps := map[string]string{}
-	for key, value := range conn.properties {
-		switch key {
-		case "s3_access_key_id", "s3_secret_access_key", "s3_session_token", "s3_region", "s3_endpoint", "s3_profile":
-			newKey := strings.TrimPrefix(key, "s3_")
-			awsProps[newKey] = value
-		}
-	}
+	// awsProps := map[string]string{}
+	// for key, value := range conn.properties {
+	// 	switch key {
+	// 	case "s3_access_key_id", "s3_secret_access_key", "s3_session_token", "s3_region", "s3_endpoint", "s3_profile":
+	// 		newKey := strings.TrimPrefix(key, "s3_")
+	// 		awsProps[newKey] = value
+	// 	}
+	// }
 
-	if len(awsProps) > 0 {
-		cfg, err := iop.MakeAwsConfig(conn.context.Ctx, awsProps)
-		if err != nil {
-			return g.Error(err, "failed to create AWS config for iceberg")
-		}
-		g.Trace("using S3 props for iceberg REST: %s", g.Marshal(lo.Keys(awsProps)))
-		opts = append(opts, rest.WithAwsConfig(cfg))
-	}
+	// if len(awsProps) > 0 {
+	// 	cfg, err := iop.MakeAwsConfig(conn.context.Ctx, awsProps)
+	// 	if err != nil {
+	// 		return g.Error(err, "failed to create AWS config for iceberg")
+	// 	}
+	// 	g.Trace("using S3 props for iceberg REST: %s", g.Marshal(lo.Keys(awsProps)))
+	// 	opts = append(opts, rest.WithAwsConfig(cfg))
+	// }
 
 	// Add authentication if provided
 	if token := conn.GetProp("rest_token"); token != "" {
