@@ -21,6 +21,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 )
 
 // ClickhouseConn is a Clikchouse connection
@@ -253,6 +254,19 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 func (conn *ClickhouseConn) ConnString() string {
 
 	if url := conn.GetProp("http_url"); url != "" {
+		if strings.HasPrefix(url, "https://") && !strings.Contains(url, "secure=true") {
+			// let's add `secure=true` query param
+			parsedURL, err := net.NewURL(url)
+			if err != nil {
+				return url // fallback to original URL if parsing fails
+			}
+
+			query := parsedURL.U.Query()
+			query.Set("secure", "true")
+			parsedURL.U.RawQuery = query.Encode()
+
+			url = parsedURL.String()
+		}
 		return url
 	}
 
