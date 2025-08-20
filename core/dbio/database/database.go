@@ -3151,7 +3151,7 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 }
 
 func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
-	if val := strings.ToLower(conn.GetProp("tls")); g.In(val, "true", "skip-verify") {
+	if val := strings.ToLower(conn.GetProp("tls")); g.In(val, "true", "skip-verify", "custom") {
 		tlsConfig = &tls.Config{}
 		if val == "skip-verify" {
 			tlsConfig.InsecureSkipVerify = true
