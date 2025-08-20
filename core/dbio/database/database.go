@@ -3151,8 +3151,11 @@ func (conn *BaseConn) credsProvided(provider string) bool {
 }
 
 func (conn *BaseConn) makeTlsConfig() (tlsConfig *tls.Config, err error) {
-	if cast.ToBool(conn.GetProp("tls")) {
+	if val := strings.ToLower(conn.GetProp("tls")); g.In(val, "true", "skip-verify") {
 		tlsConfig = &tls.Config{}
+		if val == "skip-verify" {
+			tlsConfig.InsecureSkipVerify = true
+		}
 	}
 
 	// legacy only handles files
