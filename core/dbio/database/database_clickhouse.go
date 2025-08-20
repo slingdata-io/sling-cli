@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -148,20 +147,21 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 
 	// start SSH Tunnel with SSH_TUNNEL prop
 	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
-
-		connU, err := url.Parse(connURL)
-		if err != nil {
-			return g.Error(err, "could not parse connection URL for SSH forwarding")
+		// Extract host and port from chOptions.Addr
+		if len(chOptions.Addr) == 0 {
+			return g.Error("no addresses configured for SSH tunnel")
 		}
-
-		connHost := connU.Hostname()
-		connPort := cast.ToInt(connU.Port())
+		
+		originalAddr := chOptions.Addr[0] // use first address
+		parts := strings.Split(originalAddr, ":")
+		if len(parts) != 2 {
+			return g.Error("invalid address format for SSH tunnel: %s", originalAddr)
+		}
+		
+		connHost := parts[0]
+		connPort := cast.ToInt(parts[1])
 		if connPort == 0 {
-			connPort = conn.defaultPort
-			connURL = strings.ReplaceAll(
-				connURL, g.F("@%s", connHost),
-				g.F("@%s:%d", connHost, connPort),
-			)
+			connPort = conn.GetType().DefPort()
 		}
 
 		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
@@ -169,12 +169,12 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 			return g.Error(err, "could not connect to ssh tunnel server")
 		}
 
-		connURL = strings.ReplaceAll(
-			connURL, g.F("@%s:%d", connHost, connPort),
-			g.F("@127.0.0.1:%d", localPort),
-		)
-		g.Trace("new connection URL: " + conn.Self().GetURL(connURL))
-		conn.SetProp("ssh_url", connURL) // set ssh url for 3rd party bulk loading
+		// Update chOptions.Addr to use localhost with the local tunnel port
+		newAddr := g.F("127.0.0.1:%d", localPort)
+		chOptions.Addr[0] = newAddr
+		
+		g.Trace("SSH tunnel established: %s -> %s", originalAddr, newAddr)
+		conn.SetProp("ssh_tunnel_local_addr", newAddr) // store for potential 3rd party bulk loading
 	}
 
 	if conn.db == nil {
