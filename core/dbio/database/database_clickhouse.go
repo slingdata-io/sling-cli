@@ -42,18 +42,23 @@ func (conn *ClickhouseConn) Init() error {
 }
 
 func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
-
-	// use base connect for HTTP
-	if url := conn.GetProp("http_url"); url != "" {
-		return conn.BaseConn.Connect(timeOut...)
-	}
-
-	// build chOptions
 	tlsConfig, err := conn.makeTlsConfig()
 	if err != nil {
 		return g.Error(err, "could not make tls config")
 	}
 
+	// use base connect for HTTP and non-TLS connection
+	if tlsConfig == nil {
+		err = conn.BaseConn.Connect(timeOut...)
+		if err != nil {
+			if strings.Contains(err.Error(), "unexpected packet") {
+				g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+			}
+		}
+		return err
+	}
+
+	// build chOptions
 	// Handle ClickHouse specific TLS settings
 	if cast.ToBool(conn.GetProp("secure")) {
 		if tlsConfig == nil {
@@ -151,13 +156,13 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		if len(chOptions.Addr) == 0 {
 			return g.Error("no addresses configured for SSH tunnel")
 		}
-		
+
 		originalAddr := chOptions.Addr[0] // use first address
 		parts := strings.Split(originalAddr, ":")
 		if len(parts) != 2 {
 			return g.Error("invalid address format for SSH tunnel: %s", originalAddr)
 		}
-		
+
 		connHost := parts[0]
 		connPort := cast.ToInt(parts[1])
 		if connPort == 0 {
@@ -172,7 +177,7 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		// Update chOptions.Addr to use localhost with the local tunnel port
 		newAddr := g.F("127.0.0.1:%d", localPort)
 		chOptions.Addr[0] = newAddr
-		
+
 		g.Trace("SSH tunnel established: %s -> %s", originalAddr, newAddr)
 		conn.SetProp("ssh_tunnel_local_addr", newAddr) // store for potential 3rd party bulk loading
 	}
