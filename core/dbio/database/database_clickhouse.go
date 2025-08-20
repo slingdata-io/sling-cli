@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"os"
@@ -58,12 +57,8 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		return err
 	}
 
-	// build chOptions
 	// Handle ClickHouse specific TLS settings
 	if cast.ToBool(conn.GetProp("secure")) {
-		if tlsConfig == nil {
-			tlsConfig = &tls.Config{}
-		}
 		if cast.ToBool(conn.GetProp("skip_verify")) {
 			tlsConfig.InsecureSkipVerify = true
 		}
@@ -83,6 +78,7 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 	}
 	addr := host + ":" + port
 
+	// build chOptions
 	chOptions := clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
