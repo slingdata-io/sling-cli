@@ -986,7 +986,11 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		if !g.PathExists(envPath) {
 			return "", g.Error("duckdb binary not found: %s", envPath)
 		}
-		return envPath, nil
+		if stat, _ := os.Stat(envPath); stat.IsDir() {
+			return "", g.Error("DUCKDB_PATH provided is a directory, should be a file: %s", envPath)
+		} else {
+			return envPath, nil
+		}
 	}
 
 	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
@@ -1048,7 +1052,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		case "linux/amd64":
 			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
 
-		case "linux/aarch64":
+		case "linux/aarch64", "linux/arm64", "linux/arm":
 			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-arm64.zip"
 
 		default:
