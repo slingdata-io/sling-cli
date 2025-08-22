@@ -204,6 +204,10 @@ func (data *Dataset) PrettyTable(fields ...string) (output string) {
 // WriteCsv writes to a writer
 func (data *Dataset) WriteCsv(dest io.Writer) (tbw int, err error) {
 	w := csv.NewWriter(dest)
+	if val := data.Sp.Config.Delimiter; val != "" {
+		w.Comma = val
+	}
+
 	defer w.Flush()
 
 	tbw, err = w.Write(data.GetFields())
