@@ -1512,11 +1512,6 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	// clean up for clickhouse subquery
-	if conn.Type == dbio.TypeDbClickhouse {
-		table.SQL = strings.ReplaceAll(table.SQL, "FORMAT CSVWithNames", "")
-	}
-
 	limitSQL := table.Select(SelectOptions{Limit: 1})
 	if table.IsProcedural() {
 		limitSQL = table.Raw // don't wrap in limit

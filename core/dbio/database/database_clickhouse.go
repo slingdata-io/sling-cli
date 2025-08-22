@@ -502,6 +502,18 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 	return count, nil
 }
 
+// BulkExportStream streams the rows in bulk
+func (conn *ClickhouseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// append SELECT FORMAT if specified (such as CSVWithNames)
+	// low-memory streaming!
+	sql := table.Select()
+	if val := conn.GetProp("export_stream_format"); val != "" {
+		sql = sql + " FORMAT " + val
+	}
+
+	return conn.BaseConn.StreamRows(sql, g.M("columns", table.Columns))
+}
+
 // GenerateInsertStatement returns the proper INSERT statement
 func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
 	values := make([]string, len(cols))
