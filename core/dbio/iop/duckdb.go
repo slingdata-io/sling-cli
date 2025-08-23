@@ -95,6 +95,33 @@ func (duck *DuckDb) AddExtension(extension string) {
 	}
 }
 
+// CheckExtension checks if an extension is installed in DuckDB
+func (duck *DuckDb) CheckExtension(extension string) (bool, error) {
+	if !cast.ToBool(duck.GetProp("connected")) {
+		if err := duck.Open(); err != nil {
+			return false, g.Error(err, "Could not open DuckDB connection")
+		}
+	}
+
+	duck.Query("select 1 as a" + env.NoDebugKey) // installs pending extensions
+
+	sql := fmt.Sprintf("SELECT extension_name, loaded, installed FROM duckdb_extensions() WHERE extension_name = '%s'", extension)
+	data, err := duck.Query(sql + env.NoDebugKey)
+	if err != nil {
+		return false, g.Error(err, "could not check extension status")
+	}
+
+	// Check if extension exists in the results and is installed
+	for _, row := range data.Rows {
+		if len(row) >= 3 {
+			installed := cast.ToBool(row[2]) // installed column
+			return installed, nil
+		}
+	}
+
+	return false, nil // extension not found or not installed
+}
+
 type DuckDbSecret struct {
 	Type  DuckDbSecretType  `json:"type"`
 	Name  string            `json:"name"`
@@ -1172,8 +1199,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	contentType := "text/csv"
 	format := dbio.FileTypeCsv // default to CSV
 	if sc.Format == dbio.FileTypeArrow {
-		contentType = "application/vnd.apache.arrow.stream"
-		format = dbio.FileTypeArrow
+		if installed, _ := duck.CheckExtension("arrow"); installed {
+			contentType = "application/vnd.apache.arrow.stream"
+			format = dbio.FileTypeArrow
+		} else {
+			g.Warn("duckdb extension arrow is not installed")
+		}
 	}
 
 	// create http server to serve data
