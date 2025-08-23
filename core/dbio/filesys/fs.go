@@ -1289,6 +1289,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	// merge into single stream to push into duckdb
 	duckSc := duck.DefaultCsvConfig()
 	duckSc.FileMaxRows = sc.FileMaxRows
+	duckSc.Format = dbio.FileTypeArrow
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
