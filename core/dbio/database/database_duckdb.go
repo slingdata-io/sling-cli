@@ -292,7 +292,11 @@ func (conn *DuckDbConn) importViaHTTP(tableFName string, df *iop.Dataflow, forma
 }
 
 func (conn *DuckDbConn) defaultCsvConfig() (config iop.StreamConfig) {
-	return conn.duck.DefaultCsvConfig()
+	config = conn.duck.DefaultCsvConfig()
+	if val := conn.GetProp("file_max_rows"); val != "" {
+		config.FileMaxRows = cast.ToInt64(val)
+	}
+	return config
 }
 
 func (conn *DuckDbConn) generateCsvColumns(columns iop.Columns) (colStr string) {
@@ -417,11 +421,11 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 			"provider":             "PROVIDER",
 		})
 		// If user supplied CHAIN but no PROVIDER, default to credential_chain
-        if _, hasChain := secretProps["CHAIN"]; hasChain {
-            if _, hasProv := secretProps["PROVIDER"]; !hasProv {
-                secretProps["PROVIDER"] = "credential_chain"
-            }
-        }
+		if _, hasChain := secretProps["CHAIN"]; hasChain {
+			if _, hasProv := secretProps["PROVIDER"]; !hasProv {
+				secretProps["PROVIDER"] = "credential_chain"
+			}
+		}
 	case iop.DuckDbSecretTypeAzure:
 		fillSecretProps(map[string]string{
 			"azure_connection_string": "CONNECTION_STRING",
