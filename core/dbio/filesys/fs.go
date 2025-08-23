@@ -1268,7 +1268,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 
 	props := g.MapToKVArr(fs.Props())
 	duck := iop.NewDuckDb(context.Background(), props...)
-	duck.AddExtension("arrow from community")
+	duck.AddExtension("arrow")
 	duckURI := duck.PrepareFsSecretAndURI(uri)
 
 	sp := iop.NewStreamProcessor()
