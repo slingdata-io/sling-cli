@@ -94,7 +94,7 @@ func (p *Parquet) nextFunc(it *Iterator) bool {
 		return false
 	}
 
-	it.Row = make([]interface{}, len(it.ds.Columns))
+	it.Row = make([]any, len(it.ds.Columns))
 	for k, v := range row {
 		col := it.ds.Columns[p.colMap[strings.ToLower(k)]]
 		i := col.Position - 1

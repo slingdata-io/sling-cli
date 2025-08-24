@@ -36,7 +36,7 @@ type StreamProcessor struct {
 	unrecognizedDate string
 	warn             bool
 	skipCurrent      bool // whether to skip current row (for constraints)
-	parseFuncs       map[string]func(s string) (interface{}, error)
+	parseFuncs       map[string]func(s string) (any, error)
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
 	dateLayouts      []string
@@ -211,24 +211,24 @@ func NewStreamProcessor() *StreamProcessor {
 	// if val is '0400', '0401'. Such as codes.
 	hasZeroPrefix := func(s string) bool { return len(s) >= 2 && s[0] == '0' && s[1] != '.' }
 
-	sp.parseFuncs = map[string]func(s string) (interface{}, error){
-		"int": func(s string) (interface{}, error) {
+	sp.parseFuncs = map[string]func(s string) (any, error){
+		"int": func(s string) (any, error) {
 			if hasZeroPrefix(s) {
 				return s, errors.New("number has zero prefix, treat as string")
 			}
 			// return fastfloat.ParseInt64(s)
 			return strconv.ParseInt(s, 10, 64)
 		},
-		"float": func(s string) (interface{}, error) {
+		"float": func(s string) (any, error) {
 			if hasZeroPrefix(s) {
 				return s, errors.New("number has zero prefix, treat as string")
 			}
 			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
 		},
-		"time": func(s string) (interface{}, error) {
+		"time": func(s string) (any, error) {
 			return sp.ParseTime(s)
 		},
-		"bool": func(s string) (interface{}, error) {
+		"bool": func(s string) (any, error) {
 			return cast.ToBoolE(s)
 		},
 	}
@@ -462,7 +462,7 @@ func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 // Copyright 2011 The Go Authors. All rights reserved.
 // indirect returns the value, after dereferencing as many times
 // as necessary to reach the base type (or nil).
-func (sp *StreamProcessor) indirect(a interface{}) interface{} {
+func (sp *StreamProcessor) indirect(a any) any {
 	if a == nil {
 		return nil
 	}
@@ -477,7 +477,7 @@ func (sp *StreamProcessor) indirect(a interface{}) interface{} {
 	return v.Interface()
 }
 
-func (sp *StreamProcessor) toFloat64E(i interface{}) (float64, error) {
+func (sp *StreamProcessor) toFloat64E(i any) (float64, error) {
 	i = sp.indirect(i)
 
 	switch s := i.(type) {
@@ -529,8 +529,8 @@ func (sp *StreamProcessor) toFloat64E(i interface{}) (float64, error) {
 
 // CastType casts the type of an interface
 // CastType is used to cast the interface place holders?
-func (sp *StreamProcessor) CastType(val interface{}, typ ColumnType) interface{} {
-	var nVal interface{}
+func (sp *StreamProcessor) CastType(val any, typ ColumnType) any {
+	var nVal any
 
 	switch {
 	case typ.IsBinary():
@@ -558,7 +558,7 @@ func (sp *StreamProcessor) CastType(val interface{}, typ ColumnType) interface{}
 }
 
 // GetType returns the type of an interface
-func (sp *StreamProcessor) GetType(val interface{}) (typ ColumnType) {
+func (sp *StreamProcessor) GetType(val any) (typ ColumnType) {
 	data := NewDataset(NewColumnsFromFields("col"))
 	data.Append([]any{val})
 	if ds := sp.ds; ds != nil {
@@ -999,7 +999,7 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 
 // CastToStringCSV to string. used for csv writing
 // slows processing down 5% with upstream CastRow or 35% without upstream CastRow
-func (sp *StreamProcessor) CastToStringCSV(i int, val interface{}, valType ...ColumnType) string {
+func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType) string {
 	typ := ColumnType("")
 	switch v := val.(type) {
 	case time.Time:
@@ -1059,7 +1059,7 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val interface{}, valType ...Co
 }
 
 // CastToStringSafe to masks to count bytes (even safer)
-func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType ...ColumnType) string {
+func (sp *StreamProcessor) CastToStringSafeMask(i int, val any, valType ...ColumnType) string {
 	typ := ColumnType("")
 	switch v := val.(type) {
 	case time.Time:
@@ -1098,8 +1098,8 @@ func (sp *StreamProcessor) CastToStringSafeMask(i int, val interface{}, valType 
 }
 
 // CastValWithoutStats casts the value without counting stats
-func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ ColumnType) interface{} {
-	var nVal interface{}
+func (sp *StreamProcessor) CastValWithoutStats(i int, val any, typ ColumnType) any {
+	var nVal any
 	if nil == val {
 		return nil
 	}
@@ -1145,7 +1145,7 @@ func (sp *StreamProcessor) CastValWithoutStats(i int, val interface{}, typ Colum
 }
 
 // CastToBool converts interface to bool
-func (sp *StreamProcessor) CastToBool(i interface{}) (b bool, err error) {
+func (sp *StreamProcessor) CastToBool(i any) (b bool, err error) {
 	i = sp.indirect(i)
 
 	switch b := i.(type) {
@@ -1169,7 +1169,7 @@ func (sp *StreamProcessor) CastToBool(i interface{}) (b bool, err error) {
 }
 
 // CastToTime converts interface to time
-func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
+func (sp *StreamProcessor) CastToTime(i any) (t time.Time, err error) {
 	i = sp.indirect(i)
 	switch v := i.(type) {
 	case nil:
@@ -1184,7 +1184,7 @@ func (sp *StreamProcessor) CastToTime(i interface{}) (t time.Time, err error) {
 }
 
 // ParseTime parses a date string and returns time.Time
-func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
+func (sp *StreamProcessor) ParseTime(i any) (t time.Time, err error) {
 	if tv, ok := i.(time.Time); ok {
 		return tv, nil
 	} else if tv, ok := i.(*time.Time); ok && tv != nil {
@@ -1228,7 +1228,7 @@ func (sp *StreamProcessor) ParseTime(i interface{}) (t time.Time, err error) {
 // datetime: "timestamp"
 // timestamp: "timestamp"
 // text: "text"
-func (sp *StreamProcessor) ParseString(s string, jj ...int) interface{} {
+func (sp *StreamProcessor) ParseString(s string, jj ...int) any {
 	if s == "" {
 		return nil
 	}
@@ -1285,8 +1285,8 @@ func (sp *StreamProcessor) ParseString(s string, jj ...int) interface{} {
 }
 
 // ProcessVal processes a value
-func (sp *StreamProcessor) ProcessVal(val interface{}) interface{} {
-	var nVal interface{}
+func (sp *StreamProcessor) ProcessVal(val any) any {
+	var nVal any
 	switch v := val.(type) {
 	case []uint8:
 		nVal = cast.ToString(val)
@@ -1299,8 +1299,8 @@ func (sp *StreamProcessor) ProcessVal(val interface{}) interface{} {
 }
 
 // ParseVal parses the value into its appropriate type
-func (sp *StreamProcessor) ParseVal(val interface{}) interface{} {
-	var nVal interface{}
+func (sp *StreamProcessor) ParseVal(val any) any {
+	var nVal any
 	switch v := val.(type) {
 	case time.Time:
 		nVal = cast.ToTime(val)
@@ -1334,7 +1334,7 @@ func (sp *StreamProcessor) ParseVal(val interface{}) interface{} {
 
 // CastRow casts each value of a row
 // slows down processing about 40%?
-func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interface{} {
+func (sp *StreamProcessor) CastRow(row []any, columns Columns) []any {
 	sp.N++
 	// Ensure usable types
 	sp.rowBlankValCnt = 0
@@ -1373,7 +1373,7 @@ func (sp *StreamProcessor) CastRow(row []interface{}, columns Columns) []interfa
 }
 
 // ProcessRow processes a row
-func (sp *StreamProcessor) ProcessRow(row []interface{}) []interface{} {
+func (sp *StreamProcessor) ProcessRow(row []any) []any {
 	// Ensure usable types
 	for i, val := range row {
 		row[i] = sp.ProcessVal(val)

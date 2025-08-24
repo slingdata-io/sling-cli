@@ -472,7 +472,7 @@ func (duck *DuckDb) Close() error {
 }
 
 // Exec executes a SQL query and returns the result
-func (duck *DuckDb) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
+func (duck *DuckDb) Exec(sql string, args ...any) (result sql.Result, err error) {
 
 	result, err = duck.ExecContext(duck.Context.Ctx, sql, args...)
 	if err != nil {
@@ -571,7 +571,7 @@ func (duck *DuckDb) closeStdinAndWait() (err error) {
 }
 
 // ExecContext executes a SQL query with context and returns the result
-func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...any) (result sql.Result, err error) {
 	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
@@ -697,12 +697,12 @@ func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error
 }
 
 // Query runs a sql query, returns `Dataset`
-func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data Dataset, err error) {
+func (duck *DuckDb) Query(sql string, options ...map[string]any) (data Dataset, err error) {
 	return duck.QueryContext(context.Background(), sql, options...)
 }
 
 // QueryContext runs a sql query with context, returns `Dataset`
-func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
+func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]any) (data Dataset, err error) {
 
 	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
@@ -720,12 +720,12 @@ func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map
 }
 
 // Stream runs a sql query, returns `Datastream`
-func (duck *DuckDb) Stream(sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+func (duck *DuckDb) Stream(sql string, options ...map[string]any) (ds *Datastream, err error) {
 	return duck.StreamContext(duck.Context.Ctx, sql, options...)
 }
 
 // StreamContext runs a sql query with context, returns `Datastream`
-func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]any) (ds *Datastream, err error) {
 	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
