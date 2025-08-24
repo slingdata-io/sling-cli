@@ -798,6 +798,9 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		duck.Context.Unlock() // release lock
 	})
 
+	// TODO: Add Arrows output
+	// COPY  (SELECT extension_name, loaded, installed FROM duckdb_extensions())  TO '/dev/stdout' (FORMAT ARROWS, BATCH_SIZE 100);
+
 	err = ds.ConsumeCsvReader(dq.reader)
 	if err != nil {
 		ds.Close()
