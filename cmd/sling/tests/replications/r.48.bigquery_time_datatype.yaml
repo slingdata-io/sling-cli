@@ -1,0 +1,63 @@
+source: POSTGRES
+target: BIGQUERY
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_time_datatype;
+        CREATE TABLE public.test_time_datatype (
+          id INTEGER,
+          time_col TIME,
+          time_tz_col TIME WITH TIME ZONE,
+          time_precision_col TIME(3)
+        );
+        INSERT INTO public.test_time_datatype VALUES 
+          (1, '08:30:45', '08:31:45+02:00', '08:30:45.123'),
+          (2, '12:15:30', '12:11:30-05:00', '12:15:30.456'),
+          (3, '23:59:59', '23:51:59+00:00', '23:59:59.789');
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          column_name, 
+          data_type
+        FROM `public`.INFORMATION_SCHEMA.COLUMNS 
+        WHERE table_name = 'test_time_datatype2' 
+        ORDER BY ordinal_position
+      into: column_info
+
+    - type: log
+      message: |
+        Target table column info:
+        { pretty_table(store.column_info) }
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM public.test_time_datatype2 ORDER BY id
+      into: result_data
+
+    - type: log
+      message: |
+        Target table data:
+        { pretty_table(store.result_data) }
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_time_datatype
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_time_datatype2
+
+streams:
+  public.test_time_datatype:
+    object: public.test_time_datatype2
+    mode: full-refresh

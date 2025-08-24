@@ -900,17 +900,13 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 	case col.Type.IsTime():
 		dVal, err := sp.CastToTime(val)
 		if err != nil {
-			sp.ds.ChangeColumn(i, StringType)
-			cs.StringCnt++
-			sVal = cast.ToString(val)
-			sp.rowChecksum[i] = uint64(len(sVal))
-			nVal = sVal
-		}
-
-		if col.Type == TimezType {
-			sVal = dVal.Format("15:04:05.999999-07:00")
-		} else if isUTC(&dVal) {
-			sVal = dVal.Format("15:04:05.999999")
+			sVal = sp.CastToString(val)
+		} else {
+			if col.Type == TimezType {
+				sVal = dVal.Format("15:04:05.999999-07:00")
+			} else if isUTC(&dVal) {
+				sVal = dVal.Format("15:04:05.999999")
+			}
 		}
 		nVal = sVal
 		sp.rowChecksum[i] = uint64(len(sVal))
