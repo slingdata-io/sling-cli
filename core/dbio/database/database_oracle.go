@@ -345,6 +345,7 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 		defer func() { env.RemoveLocalTempFile(logPath) }()
 	}
 
+retry:
 	proc := exec.Command(
 		conn.sqlldrPath(),
 		"'"+credHost+"'",
@@ -373,6 +374,12 @@ func (conn *OracleConn) SQLLoad(tableFName string, ds *iop.Datastream) (count ui
 	defer func() { env.RemoveLocalTempFile(ctlPath) }()
 
 	if err != nil {
+		if strings.Contains(err.Error(), "text file busy") {
+			g.Warn("could not start sqlldr (%s), retrying...", err.Error())
+			time.Sleep(1 * time.Second)
+			goto retry
+		}
+
 		err = g.Error(
 			err,
 			fmt.Sprintf(
