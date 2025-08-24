@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -567,6 +568,73 @@ func (sp *StreamProcessor) GetType(val any) (typ ColumnType) {
 	}
 	data.InferColumnTypes()
 	return data.Columns[0].Type
+}
+
+// CheckType returns the type of an interface
+func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
+	switch v.(type) {
+	// Integer types
+	case int, int8, int16, int32:
+		return IntegerType
+	case int64:
+		return BigIntType
+	case uint, uint8, uint16, uint32, uint64:
+		return BigIntType
+
+	// Float types
+	case float32, float64:
+		return FloatType
+
+	// Decimal types
+	case decimal.Decimal:
+		return DecimalType
+
+	// Boolean
+	case bool:
+		return BoolType
+
+	// Time types
+	case time.Time, *time.Time:
+		return TimestampType
+
+	// String/Text types
+	case string:
+		return StringType
+	case *string:
+		return StringType
+	case []uint8:
+		return StringType
+
+	// BigInt types
+	case *big.Int, big.Int:
+		return BigIntType
+
+	// JSON types
+	case json.Number:
+		return DecimalType
+	case json.RawMessage:
+		return JsonType
+	case map[string]string, map[string]any, map[any]any, []any, []string:
+		return JsonType
+	case chJSON: // Clickhouse JSON interface
+		return JsonType
+
+	// SQL Null types
+	case sql.NullString:
+		return StringType
+	case sql.NullInt64:
+		return BigIntType
+	case sql.NullFloat64:
+		return FloatType
+	case sql.NullBool:
+		return BoolType
+	case sql.NullTime:
+		return TimestampType
+
+	// Default case
+	default:
+		return StringType
+	}
 }
 
 // commitChecksum increments the checksum. This is needed due to reprocessing rows
