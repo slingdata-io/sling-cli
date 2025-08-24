@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"io"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/flarco/g"
@@ -372,11 +373,16 @@ func (template Template) Value(path string) (value string) {
 
 // a cache for templates (so we only read once)
 var typeTemplate = map[Type]Template{}
+var typeTemplateMutex sync.RWMutex
 
 func (t Type) Template() (template Template, err error) {
+	// Check if template exists in cache (with read lock)
+	typeTemplateMutex.RLock()
 	if val, ok := typeTemplate[t]; ok {
+		typeTemplateMutex.RUnlock()
 		return val, nil
 	}
+	typeTemplateMutex.RUnlock()
 
 	template = Template{
 		Core:           map[string]string{},
@@ -510,8 +516,10 @@ func (t Type) Template() (template Template, err error) {
 		template.GeneralTypeMap[gt] = rec[t.String()]
 	}
 
-	// cache
+	// cache with write lock
+	typeTemplateMutex.Lock()
 	typeTemplate[t] = template
+	typeTemplateMutex.Unlock()
 
 	return template, nil
 }
