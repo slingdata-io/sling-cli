@@ -1035,8 +1035,14 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 
 	checkVersion := func() (bool, error) {
 
+	retry:
 		out, err := exec.Command(binPath, "-version").Output()
 		if err != nil {
+			if strings.Contains(err.Error(), "text file busy") {
+				g.Warn("could not get version for duckdb (%s), retrying...", err.Error())
+				time.Sleep(1 * time.Second)
+				goto retry
+			}
 			return false, g.Error(err, "could not get version for duckdb")
 		}
 
