@@ -1208,11 +1208,16 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	contentType := "text/csv"
 	format := dbio.FileTypeCsv // default to CSV
 	if sc.Format == dbio.FileTypeArrow {
-		if installed, _ := duck.CheckExtension("arrow"); installed {
+		useArrow := true
+		if val := os.Getenv("SLING_DUCKDB_ARROW"); val != "" {
+			useArrow = cast.ToBool(val)
+		}
+		duck.AddExtension("arrow")
+		if installed, _ := duck.CheckExtension("arrow"); installed && useArrow {
 			contentType = "application/vnd.apache.arrow.stream"
 			format = dbio.FileTypeArrow
 		} else {
-			g.Warn("duckdb extension arrow is not installed")
+			g.Warn("duckdb extension arrow is not installed or is disabled")
 		}
 	}
 

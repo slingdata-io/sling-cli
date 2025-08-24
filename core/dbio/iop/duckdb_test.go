@@ -142,6 +142,9 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 
 		df := NewDataflow()
 		columns := NewColumnsFromFields("id", "name", "value")
+		columns[0].Type = IntegerType
+		columns[1].Type = StringType
+		columns[2].Type = DecimalType
 		df.Columns = columns
 		df.Ready = true
 
