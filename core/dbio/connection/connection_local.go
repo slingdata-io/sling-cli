@@ -202,6 +202,14 @@ func GetLocalConns(options ...any) ConnEntries {
 				g.Warn(e)
 				continue
 			}
+		} else if url, ok := payload["url"]; ok && err == nil {
+			cType := SchemeType(cast.ToString(url))
+			conn, err = NewConnectionFromMap(g.M("name", key, "type", cType, "data", payload))
+			if err != nil {
+				e := g.F("could not parse env payload %s: %s", key, g.ErrMsgSimple(err))
+				g.Warn(e)
+				continue
+			}
 		} else {
 			// Parse URL
 			if !strings.Contains(val, "://") || strings.Contains(val, "{") || strings.Contains(val, "[") {
