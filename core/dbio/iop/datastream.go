@@ -723,7 +723,10 @@ loop:
 			// evaluate transforms, only to determine if type change
 			// will be re-evaluated again below for storing result
 			if transforms := ds.Sp.Config.transforms; transforms != nil {
-				newRow, err := ds.Sp.Config.transforms.Evaluate(row)
+				// make a copy of row so we don't reference the pointed values
+				rowCopy := make([]any, len(row))
+				copy(rowCopy, row)
+				newRow, err := ds.Sp.Config.transforms.Evaluate(rowCopy)
 				if ds.Context.CaptureErr(err) {
 					break loop
 				}
