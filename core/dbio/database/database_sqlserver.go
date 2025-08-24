@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
