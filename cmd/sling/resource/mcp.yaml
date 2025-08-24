@@ -2,22 +2,15 @@ tools:
   connection: |
     **Main connection tool that provides comprehensive connection management capabilities. This is a parent tool that orchestrates various connection operations through sub-actions.**
 
-    **IMPORTANT**: To fully understand how to use connections, first call the `connection/docs` tool.
+    **IMPORTANT**: Call the `connection/docs` tool to fully understand how to use connections tool.
     
     **Parameters**:
     - `action` (string, required): The connection action to perform. Valid values:
-      - `"docs"` - Fetch documentation on how to use connections
+      - `"docs"` - Fetch documentation on how to use connections. Call this tool first before interacting with the `connection` tools.
       - `"list"` - List all available connections
       - `"discover"` - Discover tables/files in a connection
       - `"test"` - Test an existing connection
       - `"set"` - Create or update a connection
-      - `"database_get_schemata"` - Get database schemata (schemas, tables, columns)
-      - `"database_get_schemas"` - Get list of schema names
-      - `"database_query"` - Execute SQL queries (read-only)
-      - `"database_get_columns"` - Get column metadata for a table
-      - `"file_list"` - List files in a file system connection
-      - `"file_copy"` - Copy files between connections
-      - `"file_inspect"` - Inspect file/directory metadata
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
     **For `action: "list"`**:
@@ -47,53 +40,14 @@ tools:
         - Before setting a new connection, check if the connection already exists with the `list` action. If a connection exists with the same name, get permission from the user before overwriting the existing connection.
         - If the connection is set, the user will manually need to put the sensitive credentials in the env.yaml file. Make sure to mention this to the user, along with the file path of the `env.yaml` file.
     
-    **For `action: "database_get_schemata"`**:
-    - `connection` (string, required): The name of the connection to get schemata from
-    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'
-    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas
-    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels
-    
-    **For `action: "database_get_schemas"`**:
-    - `connection` (string, required): The name of the connection to get schemata from
-    
-    **For `action: "database_query"`**:
-    - `connection` (string, required): The name of the database connection to execute the query on
-    - `query` (string, required): The SQL query to execute
-    - `limit` (number, optional): The limit of rows to return (defaults to 100)
-    - `transient` (boolean, optional): Whether to use a transient connection (default: false)
-      
-      This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
-
-      *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
-      *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
-      *   Always use the LIMIT clause to minimize the number of rows returned.
-    
-    **For `action: "database_get_columns"`**:
-    - `connection` (string, required): The name of the database connection
-    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table')
-    
-    **For `action: "file_list"`**:
-    - `connection` (string, required): The name of the file system connection to list from
-    - `path` (string, required): The path to list files from
-    - `recursive` (boolean, optional): Whether to list files recursively (default: false)
-    - `only` (string, optional): Filter results to only 'files' or 'folders'
-    
-    **For `action: "file_copy"`**:
-    - `source_location` (string, required): The source location in format 'connection_name/path'
-    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local//absolute/path/to/file' or 'local/relative/path/to/file')
-    - `recursive` (boolean, optional): Whether to copy files recursively (default: false)
-    
-    **For `action: "file_inspect"`**:
-    - `connection` (string, required): The name of the file system connection
-    - `path` (string, required): The path to inspect
-    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false)
-    
-    **Output**: The output format depends on the action and audience:
-    - **For User**: Human-readable messages, CSV tables, or status updates
-    - **For Assistant**: JSON strings with detailed metadata and operation results
-    
     **Example Usage**:
     ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
+
     # List all connections
     {
       "action": "list",
@@ -108,16 +62,7 @@ tools:
         "debug": true
       }
     }
-    
-    # Query a database
-    {
-      "action": "database_query",
-      "input": {
-        "connection": "MY_PG",
-        "query": "SELECT * FROM users LIMIT 10"
-      }
-    }
-    
+
     # Discover tables in a connection
     {
       "action": "discover",
@@ -126,6 +71,231 @@ tools:
         "pattern": "public.*",
         "recursive": false,
         "columns": false
+      }
+    }
+    ```
+
+  database: |
+    **Main database tool that provides database interaction capabilities. This is a parent tool that orchestrates various database operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use the `database` tool, first call the `database/docs` tool.
+    
+    **Parameters**:
+    - `action` (string, required): The database action to perform. Valid values:
+      - `"get_schemata"` - Get database schemata (schemas, tables, columns)
+      - `"get_schemas"` - Get list of schema names
+      - `"query"` - Execute SQL queries (read-only)
+      - `"get_columns"` - Get column metadata for a table
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+        
+    **For `action: "get_schemata"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
+    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'
+    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas
+    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels
+    
+    **For `action: "get_schemas"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
+    
+    **For `action: "query"`**:
+    - `connection` (string, required): The name of the database connection to execute the query on
+    - `query` (string, required): The SQL query to execute
+    - `limit` (number, optional): The limit of rows to return (defaults to 100)
+    - `transient` (boolean, optional): Whether to use a transient connection (default: false)
+      
+      This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
+
+      *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
+      *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
+      *   Always use the LIMIT clause to minimize the number of rows returned.
+    
+    **For `action: "get_columns"`**:
+    - `connection` (string, required): The name of the database connection
+    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table')
+      
+    **Example Usage**:
+    ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
+
+    # Query a database
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT * FROM users LIMIT 10"
+      }
+    }
+    
+    # Get all schemas in a database
+    {
+      "action": "get_schemas",
+      "input": {
+        "connection": "MY_PG"
+      }
+    }
+    
+    # Get schema-level schemata (list of schemas)
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "schema"
+      }
+    }
+    
+    # Get table-level schemata for a specific schema
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "table",
+        "schema_name": "public"
+      }
+    }
+    
+    # Get column-level schemata for specific tables
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "column",
+        "schema_name": "public",
+        "table_names": ["users", "orders"]
+      }
+    }
+    
+    # Get column metadata for a specific table
+    {
+      "action": "get_columns",
+      "input": {
+        "connection": "MY_PG",
+        "table_name": "public.users"
+      }
+    }
+    
+    # Execute a complex analytical query
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT status, COUNT(*) as count FROM orders WHERE created_date >= '2024-01-01' GROUP BY status ORDER BY count DESC LIMIT 50",
+        "limit": 50
+      }
+    }
+    
+    # Use transient connection for one-off query
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT version()",
+        "transient": true
+      }
+    }
+    ```
+  
+  file_system: |
+    **Main file_system system tool that provides file system interaction capabilities. This is a parent tool that orchestrates various file operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use the `file_system` tool, first call the `file_system/docs` tool.
+    
+    **Parameters**:
+    - `action` (string, required): The connection action to perform. Valid values:
+      - `"docs"` - Fetch documentation on how to use file
+      - `"list"` - List files in a file system connection
+      - `"copy"` - Copy files between connections
+      - `"inspect"` - Inspect file/directory metadata
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+    
+    **For `action: "list"`**:
+    - `connection` (string, required): The name of the file system connection to list from
+    - `path` (string, required): The path to list files from
+    - `recursive` (boolean, optional): Whether to list files recursively (default: false)
+    - `only` (string, optional): Filter results to only 'files' or 'folders'
+    
+    **For `action: "copy"`**:
+    - `source_location` (string, required): The source location in format 'connection_name/path'
+    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local//absolute/path/to/file' or 'local/relative/path/to/file')
+    - `recursive` (boolean, optional): Whether to copy files recursively (default: false)
+    
+    **For `action: "inspect"`**:
+    - `connection` (string, required): The name of the file system connection
+    - `path` (string, required): The path to inspect
+    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false)
+    
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or status updates
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
+
+    # List files in a directory
+    {
+      "action": "list",
+      "input": {
+        "connection": "MY_S3",
+        "path": "data/csv_files/",
+        "recursive": false,
+        "only": "files"
+      }
+    }
+    
+    # List all files recursively in a folder
+    {
+      "action": "list",
+      "input": {
+        "connection": "LOCAL_FS",
+        "path": "/home/user/documents",
+        "recursive": true
+      }
+    }
+    
+    # Copy a file between connections
+    {
+      "action": "copy",
+      "input": {
+        "source_location": "local/path/to/source.csv",
+        "target_location": "s3/bucket/folder/destination.csv",
+        "recursive": false
+      }
+    }
+    
+    # Copy entire directory recursively
+    {
+      "action": "copy",
+      "input": {
+        "source_location": "s3/bucket/source_folder/",
+        "target_location": "local/backup/target_folder/",
+        "recursive": true
+      }
+    }
+    
+    # Inspect file metadata
+    {
+      "action": "inspect",
+      "input": {
+        "connection": "MY_S3",
+        "path": "data/large_file.parquet"
+      }
+    }
+    
+    # Get recursive directory statistics
+    {
+      "action": "inspect",
+      "input": {
+        "connection": "LOCAL_FS",
+        "path": "/var/log/",
+        "recursive": true
       }
     }
     ```
