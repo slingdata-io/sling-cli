@@ -148,6 +148,7 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 			}
 		}
 
+	retry:
 		cmd := exec.Command(bin)
 
 		sameCols := g.Marshal(ds.Columns.Names(true, true)) == g.Marshal(columns.Names(true, true))
@@ -236,6 +237,11 @@ func (conn *SQLiteConn) BulkImportStream(tableFName string, ds *iop.Datastream) 
 		out, err := cmd.Output()
 		stderrVal := stderr.String()
 		if err != nil {
+			if strings.Contains(err.Error(), "text file busy") {
+				g.Warn("could not start sqlite (%s), retrying...", err.Error())
+				time.Sleep(1 * time.Second)
+				goto retry
+			}
 			return 0, g.Error(err, "could not ingest csv file: %s\n%s", string(out), stderrVal)
 		}
 	}

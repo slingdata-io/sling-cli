@@ -29,6 +29,7 @@ type DuckLakeConn struct {
 	DataPath       string // path to data files (local or cloud storage)
 	Database       string // the database name to attached
 	Encrypted      bool   // whether data is written using Parquet encryption
+	InliningLimit  int    // where to enable data inlining when attaching
 }
 
 // Init initiates the object
@@ -37,6 +38,7 @@ func (conn *DuckLakeConn) Init() error {
 	// Extract data path from properties
 	conn.CatalogType = conn.GetProp("catalog_type")
 	conn.CatalogSchema = conn.GetProp("catalog_schema")
+	conn.InliningLimit = cast.ToInt(conn.GetProp("data_inlining_limit"))
 	conn.CatalogConnStr = conn.GetProp("catalog_conn_string")
 	conn.DataPath = conn.GetProp("data_path")
 	conn.Database = "ducklake" // for hard-coded  '__ducklake_metadata_ducklake'
@@ -163,6 +165,9 @@ func (conn *DuckLakeConn) buildAttachSQL() string {
 	}
 	if conn.CatalogSchema != "" {
 		metaParts = append(metaParts, g.F("META_SCHEMA '%s'", conn.CatalogSchema))
+	}
+	if conn.InliningLimit > 0 {
+		metaParts = append(metaParts, g.F("DATA_INLINING_ROW_LIMIT %d", conn.InliningLimit))
 	}
 	if conn.Encrypted {
 		metaParts = append(metaParts, "ENCRYPTED")

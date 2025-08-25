@@ -13,6 +13,8 @@ func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 		return conn.importViaTempCSVs(tableFName, df)
 	case "csv_http":
 		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
+	case "arrow_http":
+		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
 	default:
 		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
 	}

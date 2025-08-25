@@ -788,13 +788,29 @@
     - 'execution succeeded'
 
 - id: 104
-  name: Test PostgreSQL TIME datatype preservation
-  run: sling run -d -r cmd/sling/tests/replications/r.46.postgres_time_datatype.yaml
-  streams: 1
-  rows: 3
+  name: Test PostgreSQL & BigQury TIME datatype preservation
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.46.postgres_time_datatype.yaml
+    sling run -d -r cmd/sling/tests/replications/r.48.bigquery_time_datatype.yaml
   output_contains:
     - '| time without time zone |'
     - '| time with time zone    |'
+    - | # pg output
+      +----+----------+--------------------+----------------+
+      | ID | TIME_COL | TIME_PRECISION_COL | TIME_TZ_COL    |
+      +----+----------+--------------------+----------------+
+      | 1  | 08:30:45 | 08:30:45.123       | 08:30:45+02:00 |
+      | 2  | 12:15:30 | 12:15:30.456       | 12:15:30-05:00 |
+      | 3  | 23:59:59 | 23:59:59.789       | 23:59:59+00:00 |
+      +----+----------+--------------------+----------------+
+    - | # bq output
+      +----+----------+--------------------+----------------+
+      | ID | TIME_COL | TIME_PRECISION_COL | TIME_TZ_COL    |
+      +----+----------+--------------------+----------------+
+      | 1  | 08:30:45 | 08:30:45.123       | 08:31:45+02:00 |
+      | 2  | 12:15:30 | 12:15:30.456       | 12:11:30-05:00 |
+      | 3  | 23:59:59 | 23:59:59.789       | 23:51:59+00:00 |
+      +----+----------+--------------------+----------------+
 
 - id: 105
   name: Test MSSQL uniqueidentifier datatype preservation

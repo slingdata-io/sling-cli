@@ -4,19 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
+	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
 
 	"github.com/flarco/g"
+	"github.com/flarco/g/net"
 )
 
 // ClickhouseConn is a Clikchouse connection
@@ -37,6 +42,204 @@ func (conn *ClickhouseConn) Init() error {
 }
 
 func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
+	tlsConfig, err := conn.makeTlsConfig()
+	if err != nil {
+		return g.Error(err, "could not make tls config")
+	}
+
+	// use base connect for HTTP and non-TLS connection
+	if tlsConfig == nil {
+		err = conn.BaseConn.Connect(timeOut...)
+		if err != nil {
+			if strings.Contains(err.Error(), "unexpected packet") {
+				g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+			}
+		}
+		return err
+	}
+
+	// Handle ClickHouse specific TLS settings
+	if cast.ToBool(conn.GetProp("secure")) {
+		if cast.ToBool(conn.GetProp("skip_verify")) {
+			tlsConfig.InsecureSkipVerify = true
+		}
+	}
+
+	settings := clickhouse.Settings{}
+	g.JSONConvert(conn.GetProp("extra_settings"), &settings)
+
+	// Build address from host and port
+	host := conn.GetProp("host")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := conn.GetProp("port")
+	if port == "" {
+		port = "9000"
+	}
+	addr := host + ":" + port
+
+	// build chOptions
+	chOptions := clickhouse.Options{
+		Addr: []string{addr},
+		Auth: clickhouse.Auth{
+			Database: conn.GetProp("database"),
+			Username: conn.GetProp("username"),
+			Password: conn.GetProp("password"),
+		},
+		TLS:         tlsConfig,
+		Settings:    settings,
+		DialTimeout: time.Second * 30,
+		Compression: &clickhouse.Compression{
+			Method: clickhouse.CompressionZSTD,
+		},
+		Debug:                cast.ToBool(conn.GetProp("debug")),
+		BlockBufferSize:      10,
+		MaxCompressionBuffer: 10240,
+		ClientInfo: clickhouse.ClientInfo{
+			Products: []struct {
+				Name    string
+				Version string
+			}{
+				{Name: "sling", Version: core.Version},
+			},
+		},
+	}
+
+	// for debugging
+	chOptionsMap := g.M(
+		"addr", chOptions.Addr,
+		"auth", g.M(
+			"database", chOptions.Auth.Database,
+			"username", chOptions.Auth.Username,
+			"password", chOptions.Auth.Password,
+		),
+		"tls", g.M(
+			"enabled", chOptions.TLS != nil,
+			"insecure_skip_verify", chOptions.TLS != nil && chOptions.TLS.InsecureSkipVerify,
+		),
+		"settings", chOptions.Settings,
+		"dial_timeout", chOptions.DialTimeout.String(),
+		"compression", g.M(
+			"method", chOptions.Compression.Method.String(),
+		),
+		"debug", chOptions.Debug,
+		"block_buffer_size", chOptions.BlockBufferSize,
+		"max_compression_buffer", chOptions.MaxCompressionBuffer,
+		"client_info", g.M(
+			"products", chOptions.ClientInfo.Products,
+		),
+	)
+
+	var tryNum int
+
+	to := 15
+	if len(timeOut) > 0 && timeOut[0] != 0 {
+		to = timeOut[0]
+	}
+
+	usePool = os.Getenv("USE_POOL") == "TRUE"
+	// g.Trace("conn.Type: %s", conn.Type)
+	// g.Trace("conn.URL: " + conn.Self().GetURL())
+	if conn.Type == "" {
+		return g.Error("Invalid URL? conn.Type needs to be specified")
+	}
+
+	connURL := conn.Self().ConnString()
+
+	// start SSH Tunnel with SSH_TUNNEL prop
+	if sshURL := conn.GetProp("SSH_TUNNEL"); sshURL != "" {
+		// Extract host and port from chOptions.Addr
+		if len(chOptions.Addr) == 0 {
+			return g.Error("no addresses configured for SSH tunnel")
+		}
+
+		originalAddr := chOptions.Addr[0] // use first address
+		parts := strings.Split(originalAddr, ":")
+		if len(parts) != 2 {
+			return g.Error("invalid address format for SSH tunnel: %s", originalAddr)
+		}
+
+		connHost := parts[0]
+		connPort := cast.ToInt(parts[1])
+		if connPort == 0 {
+			connPort = conn.GetType().DefPort()
+		}
+
+		localPort, err := iop.OpenTunnelSSH(connHost, connPort, sshURL, conn.GetProp("SSH_PRIVATE_KEY"), conn.GetProp("SSH_PASSPHRASE"))
+		if err != nil {
+			return g.Error(err, "could not connect to ssh tunnel server")
+		}
+
+		// Update chOptions.Addr to use localhost with the local tunnel port
+		newAddr := g.F("127.0.0.1:%d", localPort)
+		chOptions.Addr[0] = newAddr
+
+		g.Trace("SSH tunnel established: %s -> %s", originalAddr, newAddr)
+		conn.SetProp("ssh_tunnel_local_addr", newAddr) // store for potential 3rd party bulk loading
+	}
+
+	if conn.db == nil {
+		connURL = conn.Self().GetURL(connURL)
+		connPool.Mux.Lock()
+		db, poolOk := connPool.Dbs[connURL]
+		connPool.Mux.Unlock()
+
+		driver := getDriverName(conn)
+		g.Trace("driver=%s conn_options=%s", driver, g.Marshal(chOptionsMap))
+
+		if !usePool || !poolOk {
+
+			dbConn := clickhouse.OpenDB(&chOptions)
+			dbConn.SetMaxIdleConns(5)
+			dbConn.SetMaxOpenConns(10)
+
+			db = sqlx.NewDb(dbConn, driver)
+		} else {
+			conn.SetProp("POOL_USED", cast.ToString(poolOk))
+		}
+
+		conn.db = db
+
+		tryNum++
+
+		// 15 sec timeout
+		pingCtx, cancel := context.WithTimeout(conn.Context().Ctx, time.Duration(to)*time.Second)
+		_ = cancel // lint complaint
+
+		err = conn.db.PingContext(pingCtx)
+		if err != nil {
+			if strings.Contains(err.Error(), "unexpected packet") {
+				g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
+			}
+			return g.Error(err, "could not connect to database")
+		}
+
+		if !cast.ToBool(conn.GetProp("silent")) {
+			g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+		}
+
+		// add to pool after successful connection
+		if usePool && !poolOk {
+			connPool.Mux.Lock()
+			connPool.Dbs[connURL] = db
+			connPool.Mux.Unlock()
+
+			// expire the connection from pool after 10 minutes of
+			timer := time.NewTimer(time.Duration(10*60) * time.Second)
+			go func() {
+				select {
+				case <-timer.C:
+					connPool.Mux.Lock()
+					delete(connPool.Dbs, connURL)
+					connPool.Mux.Unlock()
+				}
+			}()
+		}
+	}
+
+	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
@@ -51,6 +254,19 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 func (conn *ClickhouseConn) ConnString() string {
 
 	if url := conn.GetProp("http_url"); url != "" {
+		if strings.HasPrefix(url, "https://") && !strings.Contains(url, "secure=true") {
+			// let's add `secure=true` query param
+			parsedURL, err := net.NewURL(url)
+			if err != nil {
+				return url // fallback to original URL if parsing fails
+			}
+
+			query := parsedURL.U.Query()
+			query.Set("secure", "true")
+			parsedURL.U.RawQuery = query.Encode()
+
+			url = parsedURL.String()
+		}
 		return url
 	}
 
@@ -284,6 +500,18 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 	g.Trace("COPY %d ROWS", count)
 	return count, nil
+}
+
+// BulkExportStream streams the rows in bulk
+func (conn *ClickhouseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// append SELECT FORMAT if specified (such as CSVWithNames)
+	// low-memory streaming!
+	sql := table.Select()
+	if val := conn.GetProp("export_stream_format"); val != "" {
+		sql = sql + " FORMAT " + val
+	}
+
+	return conn.BaseConn.StreamRows(sql, g.M("columns", table.Columns))
 }
 
 // GenerateInsertStatement returns the proper INSERT statement

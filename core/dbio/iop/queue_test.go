@@ -34,10 +34,10 @@ func TestQueue_WriteAndRead(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test writing json-serializable data
-	testData := map[string]interface{}{
+	testData := map[string]any{
 		"name":  "test",
 		"value": 123,
-		"nested": map[string]interface{}{
+		"nested": map[string]any{
 			"key": "value",
 		},
 	}
@@ -64,13 +64,13 @@ func TestQueue_WriteAndRead(t *testing.T) {
 	assert.True(t, hasMore)
 
 	// Should be our map data
-	mapItem, ok := item.(map[string]interface{})
+	mapItem, ok := item.(map[string]any)
 	assert.True(t, ok)
 	assert.Equal(t, "test", mapItem["name"])
 	assert.Equal(t, float64(123), mapItem["value"]) // JSON numbers are floats
 
 	// Check nested map
-	nestedMap, ok := mapItem["nested"].(map[string]interface{})
+	nestedMap, ok := mapItem["nested"].(map[string]any)
 	assert.True(t, ok)
 	assert.Equal(t, "value", nestedMap["key"])
 
@@ -249,7 +249,7 @@ func TestQueue_LargeDataVolume(t *testing.T) {
 	// Generate a larger dataset
 	const itemCount = 1000
 	for i := 0; i < itemCount; i++ {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"id":    i,
 			"value": "This is test value " + string(rune(i%26+65)), // A-Z repeating
 		}
@@ -270,7 +270,7 @@ func TestQueue_LargeDataVolume(t *testing.T) {
 			break
 		}
 
-		mapItem, ok := item.(map[string]interface{})
+		mapItem, ok := item.(map[string]any)
 		assert.True(t, ok)
 
 		id := int(mapItem["id"].(float64))

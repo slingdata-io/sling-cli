@@ -1,20 +1,16 @@
 tools:
   connection: |
     **Main connection tool that provides comprehensive connection management capabilities. This is a parent tool that orchestrates various connection operations through sub-actions.**
+
+    **IMPORTANT**: Call the `connection/docs` tool to fully understand how to use connections tool.
     
     **Parameters**:
     - `action` (string, required): The connection action to perform. Valid values:
+      - `"docs"` - Fetch documentation on how to use connections. Call this tool first before interacting with the `connection` tools.
       - `"list"` - List all available connections
-      - `"discover"` - Discover streams/tables/files in a connection
+      - `"discover"` - Discover tables/files in a connection
       - `"test"` - Test an existing connection
       - `"set"` - Create or update a connection
-      - `"database_get_schemata"` - Get database schemata (schemas, tables, columns)
-      - `"database_get_schemas"` - Get list of schema names
-      - `"database_query"` - Execute SQL queries (read-only)
-      - `"database_get_columns"` - Get column metadata for a table
-      - `"file_list"` - List files in a file system connection
-      - `"file_copy"` - Copy files between connections
-      - `"file_inspect"` - Inspect file/directory metadata
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
     **For `action: "list"`**:
@@ -44,53 +40,14 @@ tools:
         - Before setting a new connection, check if the connection already exists with the `list` action. If a connection exists with the same name, get permission from the user before overwriting the existing connection.
         - If the connection is set, the user will manually need to put the sensitive credentials in the env.yaml file. Make sure to mention this to the user, along with the file path of the `env.yaml` file.
     
-    **For `action: "database_get_schemata"`**:
-    - `connection` (string, required): The name of the connection to get schemata from
-    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'
-    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas
-    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels
-    
-    **For `action: "database_get_schemas"`**:
-    - `connection` (string, required): The name of the connection to get schemata from
-    
-    **For `action: "database_query"`**:
-    - `connection` (string, required): The name of the database connection to execute the query on
-    - `query` (string, required): The SQL query to execute
-    - `limit` (number, optional): The limit of rows to return (defaults to 100)
-    - `transient` (boolean, optional): Whether to use a transient connection (default: false)
-      
-      This aciton executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
-
-      *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
-      *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
-      *   Always use the LIMIT clause to minimize the number of rows returned.
-    
-    **For `action: "database_get_columns"`**:
-    - `connection` (string, required): The name of the database connection
-    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table')
-    
-    **For `action: "file_list"`**:
-    - `connection` (string, required): The name of the file system connection to list from
-    - `path` (string, required): The path to list files from
-    - `recursive` (boolean, optional): Whether to list files recursively (default: false)
-    - `only` (string, optional): Filter results to only 'files' or 'folders'
-    
-    **For `action: "file_copy"`**:
-    - `source_location` (string, required): The source location in format 'connection_name/path'
-    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local//absolute/path/to/file' or 'local/relative/path/to/file')
-    - `recursive` (boolean, optional): Whether to copy files recursively (default: false)
-    
-    **For `action: "file_inspect"`**:
-    - `connection` (string, required): The name of the file system connection
-    - `path` (string, required): The path to inspect
-    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false)
-    
-    **Output**: The output format depends on the action and audience:
-    - **For User**: Human-readable messages, CSV tables, or status updates
-    - **For Assistant**: JSON strings with detailed metadata and operation results
-    
     **Example Usage**:
     ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
+
     # List all connections
     {
       "action": "list",
@@ -105,16 +62,7 @@ tools:
         "debug": true
       }
     }
-    
-    # Query a database
-    {
-      "action": "database_query",
-      "input": {
-        "connection": "MY_PG",
-        "query": "SELECT * FROM users LIMIT 10"
-      }
-    }
-    
+
     # Discover tables in a connection
     {
       "action": "discover",
@@ -126,171 +74,256 @@ tools:
       }
     }
     ```
-    
-  conns_list: |
-    List the connections detected and available for use.
-    
-    **Parameters**: None.
-    
-    **Output (for User)**: A CSV string listing connections with columns: `name`, `description`, `type`. The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string representing a list of connections, each with `name`, `description`, `source`, and `type`.
 
-  conns_discover: |
-    Discover available streams/tables/files in a connection.
+  database: |
+    **Main database tool that provides database interaction capabilities. This is a parent tool that orchestrates various database operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use the `database` tool, first call the `database/docs` tool.
     
     **Parameters**:
-    - `connection` (string, required): The name of the connection to discover.
-    - `pattern` (string, required): Filter stream name by glob pattern (e.g. schema.prefix_*, dir/*.csv, dir/**/*.json, */*/*.parquet).
-    - `recursive` (boolean, required): List all files recursively.
-    - `columns` (boolean, required): Show column level metadata.
+    - `action` (string, required): The database action to perform. Valid values:
+      - `"get_schemata"` - Get database schemata (schemas, tables, columns)
+      - `"get_schemas"` - Get list of schema names
+      - `"query"` - Execute SQL queries (read-only)
+      - `"get_columns"` - Get column metadata for a table
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
+        
+    **For `action: "get_schemata"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
+    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'
+    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas
+    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels
     
-    **Output (for User)**: A CSV string with varying columns depending on discovery type:
-    - For database columns: `database`, `schema`, `table`, `name`, `type`, `position`
-    - For database tables: `database`, `schema`, `name`, `type`
-    - For database schemas: `database`, `name`
-    - For file columns: `file`, `name`, `type`, `position`
-    - For files: `name`, `type`, `size`, `updated`, `is_dir`
-    - For API endpoints: `name`
-    The assistant should display this as a pretty table if possible.
+    **For `action: "get_schemas"`**:
+    - `connection` (string, required): The name of the connection to get schemata from
     
-    **Output (for Assistant)**: A JSON string detailing the discovered items. The structure varies based on connection type and discovery level.
+    **For `action: "query"`**:
+    - `connection` (string, required): The name of the database connection to execute the query on
+    - `query` (string, required): The SQL query to execute
+    - `limit` (number, optional): The limit of rows to return (defaults to 100)
+    - `transient` (boolean, optional): Whether to use a transient connection (default: false)
+      
+      This action executes a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
 
-  conns_database_get_schemata: |
-    Obtains schemata (databases, schemas, tables, columns) from a database connection.
+      *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
+      *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
+      *   Always use the LIMIT clause to minimize the number of rows returned.
+    
+    **For `action: "get_columns"`**:
+    - `connection` (string, required): The name of the database connection
+    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table')
+      
+    **Example Usage**:
+    ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
+
+    # Query a database
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT * FROM users LIMIT 10"
+      }
+    }
+    
+    # Get all schemas in a database
+    {
+      "action": "get_schemas",
+      "input": {
+        "connection": "MY_PG"
+      }
+    }
+    
+    # Get schema-level schemata (list of schemas)
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "schema"
+      }
+    }
+    
+    # Get table-level schemata for a specific schema
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "table",
+        "schema_name": "public"
+      }
+    }
+    
+    # Get column-level schemata for specific tables
+    {
+      "action": "get_schemata",
+      "input": {
+        "connection": "MY_PG",
+        "level": "column",
+        "schema_name": "public",
+        "table_names": ["users", "orders"]
+      }
+    }
+    
+    # Get column metadata for a specific table
+    {
+      "action": "get_columns",
+      "input": {
+        "connection": "MY_PG",
+        "table_name": "public.users"
+      }
+    }
+    
+    # Execute a complex analytical query
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT status, COUNT(*) as count FROM orders WHERE created_date >= '2024-01-01' GROUP BY status ORDER BY count DESC LIMIT 50",
+        "limit": 50
+      }
+    }
+    
+    # Use transient connection for one-off query
+    {
+      "action": "query",
+      "input": {
+        "connection": "MY_PG",
+        "query": "SELECT version()",
+        "transient": true
+      }
+    }
+    ```
+  
+  file_system: |
+    **Main file_system system tool that provides file system interaction capabilities. This is a parent tool that orchestrates various file operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use the `file_system` tool, first call the `file_system/docs` tool.
     
     **Parameters**:
-    - `connection` (string, required): The name of the connection to get schemata from.
-    - `level` (string, required): The level of schemata to retrieve: 'schema', 'table', or 'column'.
-    - `schema_name` (string, optional): The specific schema name to inspect. Required for 'table' and 'column' levels if not fetching all schemas.
-    - `table_names` (array, optional): Optional list of table names to focus on. Relevant for 'table' and 'column' levels.
+    - `action` (string, required): The connection action to perform. Valid values:
+      - `"docs"` - Fetch documentation on how to use file
+      - `"list"` - List files in a file system connection
+      - `"copy"` - Copy files between connections
+      - `"inspect"` - Inspect file/directory metadata
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
-    **Output**: A JSON string representing the database schemata (databases, schemas, tables, columns) according to the specified `level`, `schema_name`, and `table_names`.
+    **For `action: "list"`**:
+    - `connection` (string, required): The name of the file system connection to list from
+    - `path` (string, required): The path to list files from
+    - `recursive` (boolean, optional): Whether to list files recursively (default: false)
+    - `only` (string, optional): Filter results to only 'files' or 'folders'
+    
+    **For `action: "copy"`**:
+    - `source_location` (string, required): The source location in format 'connection_name/path'
+    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local//absolute/path/to/file' or 'local/relative/path/to/file')
+    - `recursive` (boolean, optional): Whether to copy files recursively (default: false)
+    
+    **For `action: "inspect"`**:
+    - `connection` (string, required): The name of the file system connection
+    - `path` (string, required): The path to inspect
+    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false)
+    
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or status updates
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # Fetch documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
 
-  conns_database_get_schemas: |
-    Retrieves a list of schema names from a database connection.
+    # List files in a directory
+    {
+      "action": "list",
+      "input": {
+        "connection": "MY_S3",
+        "path": "data/csv_files/",
+        "recursive": false,
+        "only": "files"
+      }
+    }
     
-    **Parameters**:
-    - `connection` (string, required): The name of the connection to get schemata from.
+    # List all files recursively in a folder
+    {
+      "action": "list",
+      "input": {
+        "connection": "LOCAL_FS",
+        "path": "/home/user/documents",
+        "recursive": true
+      }
+    }
     
-    **Output**: A JSON string representing an `iop.Dataset` where each row contains a schema name from the specified database connection.
-
-  conns_database_query: |
-    Execute a SQL query on a database connection and return the results. **WARNING: Only use this tool for SELECT queries and other read-only operations. Never execute destructive queries such as DELETE, DROP, TRUNCATE, ALTER, UPDATE, INSERT, or any other data modification operations.**
-
-    *   If a destructive operation (e.g., dropping an object, deleting significant data, altering table structures) is deemed necessary, **DO NOT execute it directly**. Instead, formulate the required SQL query/statement and **return it to the USER for manual review and execution**.
-    *   Always use the least number of columns, to minimize computation and the amount of data being retrieved.
-    *   Always use the LIMIT clause to minimize the number of rows returned.
+    # Copy a file between connections
+    {
+      "action": "copy",
+      "input": {
+        "source_location": "local/path/to/source.csv",
+        "target_location": "s3/bucket/folder/destination.csv",
+        "recursive": false
+      }
+    }
     
-    **Parameters**:
-    - `connection` (string, required): The name of the database connection to execute the query on.
-    - `query` (string, required): The SQL query to execute.
-    - `limit` (number, optional): The limit of rows to return (defaults to 100).
-    - `transient` (boolean, optional): Whether to use a transient connection (default: false).
+    # Copy entire directory recursively
+    {
+      "action": "copy",
+      "input": {
+        "source_location": "s3/bucket/source_folder/",
+        "target_location": "local/backup/target_folder/",
+        "recursive": true
+      }
+    }
     
-    **Output (for User)**: A CSV formatted string of the query results. The assistant should display this as a pretty table if possible.
+    # Inspect file metadata
+    {
+      "action": "inspect",
+      "input": {
+        "connection": "MY_S3",
+        "path": "data/large_file.parquet"
+      }
+    }
     
-    **Output (for Assistant)**: A JSON string containing the `query` executed, `connection` name, an array of `columns` names, an array of `rows` (each row being an array of values), and the `row_count`.
-
-  conns_database_get_columns: |
-    Get column metadata for a specific table in a database connection.
-    
-    **Parameters**:
-    - `connection` (string, required): The name of the database connection.
-    - `table_name` (string, required): The fully qualified table name (e.g. 'schema.table' or just 'table').
-    
-    **Output (for User)**: A CSV string listing columns with: `name`, `type`, `position`. The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string with `type: "columns"`, `connection` name, `table_name`, `full_table_name`, `column_count`, and an array of `columns` with detailed metadata.
-
-  conns_test: |
-    Test a database, API or file system connection to verify it works correctly.
-    
-    **Parameters**:
-    - `debug` (boolean, optional): Enable debug logging during the test (default: false).
-    - `trace` (boolean, optional): Enable trace logging during the test (default: false).
-    - `endpoints` (array, optional): Specify the endpoints to test (only for API connections)
-    
-    **Output (for User)**: A simple text message: "Connection test for '[connection_name]': SUCCESS" or "Connection test for '[connection_name]': FAILED - [error_message]".
-    
-    **Output (for Assistant)**: A JSON string with `type: "connection_test"`, `connection` name, `success` (boolean), `error` (string, null if success), and captured `logs` from the test.
-
-  conns_set: |
-    Create or update a connection by setting its properties. For API Specs, if secrets are required, put in a nested object under the `secrets` key.
-    
-    **Parameters**:
-    - `name` (string, required): The name of the connection to set (will be converted to uppercase).
-    - `properties` (object, required): Object containing the connection properties as key-value pairs (e.g. `{"type": "postgres", "host": "localhost", "user": "myuser"}` or for APIs `{"type": "api", "spec": "file:///path/to/spec.yaml", "secrets": {"token", "mytoken"}}`).
-    
-    **Output (for User)**: A text message: "Connection '[NAME]' has been set in [env_file_path]. Please test with `sling conns test [NAME]`".
-    
-    **Output (for Assistant)**: A JSON string with `type: "connection_set"`, `connection` name, the `properties` that were set (keys normalized to lowercase), `env_file_path`, and `success: true`.
-
-  conns_file_list: |
-    List files and directories in a file system connection path.
-    
-    **Parameters**:
-    - `connection` (string, required): The name of the file system connection to list from.
-    - `path` (string, required): The path to list files from.
-    - `recursive` (boolean, optional): Whether to list files recursively (default: false).
-    - `only` (string, optional): Filter results to only 'files' or 'folders'.
-    
-    **Output (for User)**: A CSV string listing items with columns: `path`, `type` (directory/file), `size` (human-readable), `last_updated` (formatted timestamp and time ago). The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string with `type: "file_list"`, `connection` name, `path` queried, `recursive` flag, `only` filter, `count` of items, and a `files` array with detailed metadata for each item.
-
-  conns_file_copy: |
-    Copy files from one file system connection to another.
-    
-    **Parameters**:
-    - `target_location` (string, required): The target location in format 'connection_name/path' (e.g. 's3/folder/file.txt' or 'local/path/to/file').
-    - `recursive` (boolean, optional): Whether to copy files recursively (default: false).
-    
-    **Output**: A JSON string with `type: "file_copy"`, details of `source_location`, `source_connection`, `source_path`, `source_uri`, `target_location`, `target_connection`, `target_path`, `target_uri`, `bytes_written`, and `recursive` flag.
-
-  conns_file_inspect: |
-    Inspect a file or directory in a file system connection to get metadata.
-    
-    **Parameters**:
-    - `path` (string, required): The path to inspect.
-    - `recursive` (boolean, optional): Whether to get recursive statistics for directories (default: false).
-    
-    **Output**: A JSON string with `type: "file_inspect"`, `connection` name, `path` inspected, `recursive` flag, and a `metadata` object containing detailed file/directory information.
+    # Get recursive directory statistics
+    {
+      "action": "inspect",
+      "input": {
+        "connection": "LOCAL_FS",
+        "path": "/var/log/",
+        "recursive": true
+      }
+    }
+    ```
   
   api_spec: |
     **Main API specification tool that provides comprehensive API spec management capabilities. This is a parent tool that orchestrates various API specification operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use replications, first call the `api_spec/docs` tool.
     
     **Parameters**:
     - `action` (string, required): The API spec action to perform. Valid values:
-      - `"save"` - Validate and save an API specification to the specs folder
-      - `"list"` - List all API specification files in the specs folder
-      - `"get"` - Get the content of an API specification file
-      - `"load"` - Load the YAML content of an API specification
-      - `"edit"` - Edit an API specification file with search and replace
+      - `"parse"` - Load and parse the API specification file, will return various details
       - `"docs"` - Fetch the Sling API specification documentation
+      - `"test"` - Test an existing API Spec connection
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
-    **For `action: "save"`**:
-    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension). Can also be the full file path
-    - `spec_content` (string, required): The YAML content of the API specification to validate and save
-    
-    **For `action: "list"`**:
-    - No parameters required (empty object)
-    
-    **For `action: "get"`**:
-    - `name` (string, required): The name of the API specification to get (without .yaml extension)
-    
-    **For `action: "load"`**:
-    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path
-    
-    **For `action: "edit"`**:
-    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path
-    - `old_string` (string, required): The exact text to find and replace
-    - `new_string` (string, required): The replacement text
-    - `expected_replacements` (number, optional): Expected number of replacements (default: 1)
+    **For `action: "parse"`**:
+    - `file_path` (string, required): The file path of the API specification.
     
     **For `action: "docs"`**:
     - No parameters required (empty object)
+    
+    **For `action: "test"`**:
+    - `connection` (string, required): The name of the connection to test
+    - `debug` (boolean, optional): Enable debug logging during the test (default: false)
+    - `trace` (boolean, optional): Enable trace logging during the test (default: false)
+    - `endpoints` (array, optional): Specify the endpoints to test (only for API connections)
+    - `limit` (integer, optional): Specify the maximum number of records to process.
     
     **Output**: The output format depends on the action and audience:
     - **For User**: Human-readable messages, CSV tables, or raw content
@@ -298,122 +331,49 @@ tools:
     
     **Example Usage**:
     ```
-    # List all API specifications
+    # Obtain API specification Documentation
     {
-      "action": "list",
+      "action": "docs",
       "input": {}
     }
     
-    # Get API specification content
+    # Test an API Spec connection
     {
-      "action": "get",
+      "action": "test",
       "input": {
-        "name": "github_api"
+        "connection": "MY_API",
+        "debug": true,
+        "limit": 15
       }
     }
     
-    # Save a new API specification
+    # Parse API specification content
     {
-      "action": "save",
+      "action": "parse",
       "input": {
-        "name": "my_api",
-        "spec_content": "name: my_api\nbase_url: https://api.example.com\n..."
-      }
-    }
-    
-    # Edit an API specification
-    {
-      "action": "edit",
-      "input": {
-        "name": "my_api",
-        "old_string": "old_endpoint",
-        "new_string": "new_endpoint"
+        "file_path": "path/to/github_api.yaml"
       }
     }
     ```
 
-  api_spec_save: |
-    Validate and save an API specification YAML content to the specs folder in sling home directory.
-    
-    **Parameters**:
-    - `name` (string, required): The name of the API specification (will be used as filename without .yaml extension).  Can also be the full file path.
-    - `spec_content` (string, required): The YAML content of the API specification to validate and save.
-    
-    **Output (for User)**: A text message: "API specification '[name]' validated and saved to [file_path]".
-    
-    **Output (for Assistant)**: A JSON string with `type: "api_spec_save"`, `name` of the spec, `file_path` where it was saved, `specs_dir` (sling home specs folder), and `success: true`.
-
-  api_spec_list: |
-    List all YAML API specification files in the sling home specs folder.
-    
-    **Parameters**: None.
-    
-    **Output (for User)**: A CSV string listing `spec_file_name` for each API specification found. The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string with `type: "api_spec_list"`, `specs_dir`, `count` of specs found, and a `specs` array with detailed metadata for each specification.
-
-  api_spec_get: |
-    Get the content of an API specification by name from the sling home specs folder.
-    
-    **Parameters**:
-    - `name` (string, required): The name of the API specification to get (without .yaml extension).
-    
-    **Output (for User)**: If parsing is successful, a CSV string listing endpoints with columns: `endpoint_name`, `endpoint_description`, `endpoint_method`. If parsing fails, a text message: "Error parsing API spec: [error_message]".
-    
-    **Output (for Assistant)**: A JSON string with `type: "api_spec_get"`, `name` of the spec, `file_path`, and raw `content` (string). If parsing was successful, includes additional parsed metadata.
-
-  api_spec_load: |
-    Load the YAML content of an API specification by name or file path.
-    
-    **Parameters**:
-    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path.
-    
-    **Output (for User)**: The raw YAML content of the API specification.
-    
-    **Output (for Assistant)**: A JSON string with `type: "api_spec_load"`, `name` parameter, `file_path` of the loaded file, and the raw `content` (string) of the YAML specification.
-
-  api_spec_edit: |
-    Edit an API specification file by performing a search and replace operation.
-    
-    **Parameters**:
-    - `name` (string, required): The name of the API specification (without .yaml extension) or full file path.
-    - `old_string` (string, required): The exact text to find and replace.
-    - `new_string` (string, required): The replacement text.
-    - `expected_replacements` (number, optional): Expected number of replacements (default: 1).
-    
-    **Output (for User)**: A text message: "API specification '[name]' edited successfully - made [count] replacements".
-    
-    **Output (for Assistant)**: A JSON string with `type: "api_spec_edit"`, `name` parameter, `file_path` of the edited file, `old_string`, `new_string`, `expected_replacements`, `actual_replacements`, and `success: true`.
-
-  api_spec_docs: |
-    Fetch the Sling API specification documentation from the official repository.
-    
-    **Parameters**: None.
-    
-    **Output**: The raw markdown content of the API specification documentation from https://raw.githubusercontent.com/slingdata-io/sling-cli/refs/heads/main/api/llms.md. Both user and assistant audiences receive the same raw content.
-
   replication: |
     **Main replication tool that provides comprehensive data replication management capabilities. This is a parent tool that orchestrates various replication operations through sub-actions.**
+
+    **IMPORTANT**: To fully understand how to use replications, first call the `replication/docs` tool.
     
     **Parameters**:
     - `action` (string, required): The replication action to perform. Valid values:
-      - `"save"` - Save/create a replication configuration file
-      - `"list"` - List all replication configuration files in a directory
-      - `"get"` - Get the content of a replication configuration file
+      - `"docs"` - Fetch documentation on how to use replications
+      - `"parse"` - Parse the content of a replication configuration file (non-compile validation)
       - `"compile"` - Compile/validate a replication configuration
       - `"run"` - Execute a replication configuration
+    
     - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
-    **For `action: "save"`**:
-    - `file_path` (string, required): File path to save the replication configuration
-    - `config_content` (string, required): YAML content of the replication configuration
-    - `working_dir` (string, optional): Working directory to change to before saving
+    **For `action: "docs"`**:
+    - No parameters required (empty object)
     
-    **For `action: "list"`**:
-    - `directory` (string, optional): Directory to list files from (defaults to current working directory)
-    - `working_dir` (string, optional): Working directory to change to before listing
-    
-    **For `action: "get"`**:
+    **For `action: "parse"`**:
     - `file_path` (string, required): Path to the replication configuration file to read
     - `working_dir` (string, optional): Working directory to change to before reading
     
@@ -436,20 +396,25 @@ tools:
     
     **Example Usage**:
     ```
-    # Save a replication configuration
+    # Obtain replication Documentation
     {
-      "action": "save",
+      "action": "docs",
+      "input": {}
+    }
+
+    # Parse a replication file
+    {
+      "action": "parse",
       "input": {
-        "file_path": "my_replication.yaml",
-        "config_content": "source: postgres://...\ntarget: s3://...\nstreams:\n  my_table: {}"
+        "file_path": "path/to/my_replication.yaml",
       }
     }
-    
-    # List all replication files
+
+    # Compile a replication file
     {
-      "action": "list",
+      "action": "compile",
       "input": {
-        "directory": "./replications"
+        "file_path": "path/to/my_replication.yaml",
       }
     }
     
@@ -457,69 +422,57 @@ tools:
     {
       "action": "run",
       "input": {
-        "file_path": "my_replication.yaml",
+        "file_path": "path/to/my_replication.yaml",
         "select_streams": ["table1", "table2"],
         "mode": "incremental"
       }
     }
     ```
+  
+  pipeline: |
+    **Main pipeline tool that provides comprehensive data pipeline management capabilities. This is a parent tool that orchestrates various pipeline operations through sub-actions.**
 
-  replication_save: |
-    Save a replication configuration to a specified file path.
+    **IMPORTANT**: To fully understand how to use pipelines, first call the `pipeline/docs` tool.
     
     **Parameters**:
-    - `file_path` (string, required): The file path where to save the replication configuration (can be absolute or relative to current working directory).
-    - `config_content` (string, required): The YAML content of the replication configuration to validate and save.
-    - `working_dir` (string, optional): Working directory to change to before saving replication configuration.
+    - `action` (string, required): The pipeline action to perform. Valid values:
+      - `"docs"` - Fetch documentation on how to use pipelines
+      - `"parse"` - Parse and validate the content of a pipeline configuration file
+      - `"run"` - Execute a pipeline configuration
+    - `input` (object, required): The input parameters for the specific action. The structure varies based on the action:
     
-    **Output (for User)**: A text message: "Replication configuration validated and saved to [absFilePath]".
+    **For `action: "docs"`**:
+    - No parameters required (empty object)
     
-    **Output (for Assistant)**: A JSON string with `type: "replication_save"`, `file_path` (absolute), `directory` (absolute path to dir of file), `working_dir` (if provided), and `success: true`.
+    **Output**: The output format depends on the action and audience:
+    - **For User**: Human-readable messages, CSV tables, or status updates
+    - **For Assistant**: JSON strings with detailed metadata and operation results
+    
+    **Example Usage**:
+    ```
+    # Obtain pipeline Documentation
+    {
+      "action": "docs",
+      "input": {}
+    }
 
-  replication_list: |
-    List all YAML replication configuration files in a directory.
+    # Parse a pipeline file
+    {
+      "action": "parse",
+      "input": {
+        "file_path": "path/to/my_pipeline.yaml",
+      }
+    }
     
-    **Parameters**:
-    - `directory` (string, optional): Directory to list replication files from (defaults to current working directory).
-    - `working_dir` (string, optional): Working directory to change to before listing replication files.
+    # Run a pipeline
+    {
+      "action": "run",
+      "input": {
+        "file_path": "path/to/my_pipeline.yaml"
+      }
+    }
+    ```
     
-    **Output (for User)**: A CSV string listing `config_file_name` for each replication configuration found. The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string with `type: "replication_list"`, `directory` (absolute path searched), `working_dir` (if provided), `count` of files found, and a `files` array with detailed metadata.
-
-  replication_get: |
-    Get the content of a replication configuration file.
-    
-    **Parameters**:
-    - `file_path` (string, required): The file path of the replication configuration to get (can be absolute or relative to current working directory).
-    - `working_dir` (string, optional): Working directory to change to before getting replication configuration.
-    
-    **Output (for User)**: If parsing is successful, a CSV string listing streams with columns: `stream_name`, `object`, `mode`. If parsing fails, a text message: "Error parsing replication config: [error_message]". The assistant should display this as a pretty table if possible.
-    
-    **Output (for Assistant)**: A JSON string with `type: "replication_get"`, `file_path` (absolute), `working_dir` (if provided), and raw `content` (string). If parsing was successful, includes additional parsed metadata.
-
-  replication_compile: |
-    Compile a replication configuration to validate and prepare it for execution.
-    
-    **Parameters**:
-    - `select_streams` (array, optional): Optional list of specific streams to compile (default: all streams).
-    - `working_dir` (string, optional): Working directory to change to before compiling replication configuration.
-    
-    **Output (for User)**: A text message: "Replication configuration '[absFilePath]' compiled successfully with [task_count] tasks".
-    
-    **Output (for Assistant)**: A JSON string with `type: "replication_compile"`, `file_path` (absolute), `working_dir` (if provided), `success: true`, `task_count`, `compiled` (boolean status), `streams_selected` (array), and a `tasks` array with detailed task metadata.
-
-  replication_run: |
-    Run a replication configuration.
-    
-    **Parameters**:
-    - `range` (string, optional): Backfill range for source options.
-    - `mode` (string, optional): Mode override for replication (e.g. full-refresh, incremental).
-    - `env` (object, optional): Environment variables to set for the replication run.
-    
-    **Output (for User)**: A simple text message: "Replication '[absFilePath]': SUCCESS" or "Replication '[absFilePath]': FAILED - [error_message]".
-    
-    **Output (for Assistant)**: A JSON string with `type: "replication_run"`, `file_path` (absolute), `success` (boolean), `streams_selected` (array), `working_dir` (if provided), `range` (if provided), `mode` (if provided), `env` variables (if provided), and captured `logs`. If an error occurred, includes error details.
 
 resources:
   "docs://API_SPEC": |
@@ -535,7 +488,7 @@ prompts:
     inputs:
       spec_name: "Name for the API specification (will be used as filename)"
       spec_file_path: "Optional full file path for the spec file" # optional
-      connection_name: "Name for the API connection to create and test"
+      connection_name: "Name for the API connection to create (if needed) and test"
       api_docs_url: "URL to the API documentation website"
       endpoint_names: "Comma-separated list of endpoint names to include in the spec"
       additional_info: "Additional instructions or requirements for the API spec" # optional
@@ -543,26 +496,32 @@ prompts:
       You are an expert at creating Sling API specifications. Your task is to create a complete, working API spec by following this workflow:
 
       ## Workflow Steps:
-      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
-      2. **Analyze API Documentation**: Navigate to the provided API docs URL using the browser to understand:
+      1. **Get Documentation**: Call the tool api_spec/docs to obtain the latest Sling API specification guide
+
+      2. **Analyze API Documentation**: Navigate to the provided API docs URL using the browser to fully understand:
          - Authentication methods and requirements
          - Endpoint structures and parameters
          - Response formats and data structures
          - Pagination patterns
          - Rate limiting constraints
          - Determine what capabilities are available for incremental updates (Typically for a date/ID anchor/watermark, or range) in the filters
-      3. **Create Specification**: Use `api_spec_save` to save the complete YAML spec in the specs directory
-      4. **Create Connection**: Use `conns_set` to create a connection using the spec. When using the `conns_set` tools, the `properties` parameters must contain `type` (which is always "api") and `spec` (which is the local path of the spec file with prefix `file://`) keys. 
+         
+         The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
+
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+         
+      3. **Create Specification**: Now that the API is greatly understood, formulate and create a fully functional Sling API Spec in file path {spec_file_path}. If the assistant sees obstacles or issues in developing the spec, or does not have sufficient information, this is the time to alert the user with any concerns or questions for clarification.
+
+      4. **Create Connection**: Use tool connection/list to determine if connection `{connection_name}` exists. If it exists, proceed to the next step, we will use the existing connection to test our API Spec. If it does not exist, use the connection/set tool to create a connection using the spec. When using the connection/set tool, the `properties` parameters must contain `type` (which is always "api") and `spec` (which is the local path of `file://{spec_file_path}`) keys. 
       
       If the API connection requires authentication credentials (such as token or client ID/Secret), they should be put under the `secrets` key as a nested object.
       
-      Furthermore, if the API connection requires authentication credentials, STOP and ask the user to open their env.yaml file (in folder ~/.sling/env.yaml), and to manually set the sensitive values. Assistant should have already ran `conns_set` with placeholder values (under the `secrets` key). When the user is done setting the creds, to mention so that the assistant can continue with testing. If Authentication fails, and the assistant believes there may be a error with the sensitive values, to STOP and mention so the user can correct the inputs.
+      Furthermore, if the API connection requires authentication credentials, STOP and ask the user to open their env.yaml file (in folder ~/.sling/env.yaml), and to manually set the sensitive values. Assistant should have already ran connection/set with placeholder values (under the `secrets` key). When the user is done setting the creds, to mention so that the assistant can continue with testing. If Authentication fails, and the assistant believes there may be a error with the sensitive values, to STOP and mention so the user can correct the inputs.
 
-      5. **Test and Iterate**: Use `conn_test` with debug enabled to test the connection
-         - If test fails, analyze errors and modify the spec
-         - Repeat testing until all endpoints return data without errors
+      5. **Test and Iterate**: Use api_spec/test with debug enabled to test the API connection
+         - If test fails, analyze errors and modify the spec accordingly
+         - Repeat testing until all endpoints return data without errors or determining that no progress can be made
          - Success means no errors and records are returned
-         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
 
       ## Key Requirements:
       - Follow the Sling API specification format exactly
@@ -574,9 +533,11 @@ prompts:
       - Add primary keys for deduplication when applicable
       - Use appropriate state management for incremental loading
       - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`).
+      - If having access to VS Code, recommend to the user to download the VS Code extension (share with user the url https://docs.slingdata.io/sling-cli/vscode). The extension will evaluate the YAML for any formatting errors. This will help the assistant with a feedback loop to better design the API Spec.
 
       ## Inputs Provided:
       - **API Spec Name**: {spec_name}
+      - **API Spec Path**: {spec_file_path}
       - **Connection Name**: {connection_name}
       - **API Documentation URL**: {api_docs_url}
       - **Endpoints to Include**: {endpoint_names}
@@ -587,31 +548,40 @@ prompts:
   api_spec_add_endpoint:
     description: "Add a new endpoint to an existing Sling API specification by analyzing endpoint documentation and implementing proper configuration"
     inputs:
-      spec_name: "Name of the existing API specification"
-      spec_file_path: "Full file path to the existing spec file (must exist)" # optional
+      spec_file_path: "Full file path to the existing spec file (must exist)"
       endpoint_name: "Name of the new endpoint to add"
       endpoint_docs_url: "URL to the specific endpoint documentation" # optional
       additional_info: "Additional instructions for the endpoint implementation" # optional
     message: |
-      You are an expert at extending Sling API specifications. Your task is to add a new endpoint to an existing API spec by following this workflow:
+      You are an expert at extending Sling API specifications. Learn about the Sling API specifications here: https://raw.githubusercontent.com/slingdata-io/sling-cli/refs/heads/main/cmd/sling/resource/llm_API_SPEC.md
+      
+      Your task is to add a new endpoint to an existing API spec by following this workflow:
 
       ## Workflow Steps:
-      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
-      2. **Load Existing Spec**: Use `api_spec_load` to load the current specification content
-      3. **Read Raw Spec**: Examine the existing spec structure and patterns
-      4. **Analyze Endpoint Documentation**: Navigate to the endpoint docs URL (if provided) or the main API docs to understand:
+        
+      1. **Get Documentation**: Call the tool `api_spec/docs` to obtain the latest Sling API specification guide
+
+      2. **Load Existing Spec**: Use `api_spec/parse` to load the current specification content. 
+
+      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/parse` until there are no errors or determining that no progress can be made.
+
+      4. **Analyze Endpoint Documentation**: Navigate to the endpoint docs URL (if provided) or the main API docs, using the browser to fully understand:
          - Endpoint URL structure and parameters
          - HTTP method and headers required
          - Request/response format
          - Pagination requirements
          - Authentication needs
          - Rate limiting considerations
-         - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). 
-      5. **Implement Endpoint**: Add the new endpoint configuration following existing patterns
-      6. **Test Endpoint**: Use `conn_test` with debug enabled, specifying the endpoint name
+         
+         The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
+
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+      
+      5. **Implement Endpoint**: Add the new endpoint configuration to the spec file following existing patterns.
+
+      6. **Test Endpoint**: Use tool `api_spec/test` with debug enabled, specifying the endpoint name
          - If test fails, analyze errors and modify the endpoint configuration
-         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
-         - Repeat testing until the endpoint returns data without errors
+         - Repeat testing until the endpoint returns data without errors or determining that no progress can be made
          - Success means no errors and records are returned
 
       ## Key Requirements:
@@ -622,9 +592,10 @@ prompts:
       - Include error handling rules
       - Add primary keys if applicable
       - Use consistent naming conventions
+      - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`). 
+      - If having access to VS Code, recommend to the user to download the VS Code extension (share with user the url https://docs.slingdata.io/sling-cli/vscode). The extension will evaluate the YAML for any formatting errors. This will help the assistant with a feedback loop to better design the API Spec.
 
       ## Inputs Provided:
-      - **Spec Name**: {spec_name}
       - **Spec File Path**: {spec_file_path}
       - **New Endpoint Name**: {endpoint_name}
       - **Endpoint Documentation URL**: {endpoint_docs_url}
@@ -635,7 +606,6 @@ prompts:
   api_spec_debug_endpoint:
     description: "Debug and fix issues with an existing endpoint in a Sling API specification by analyzing errors and adjusting configuration"
     inputs:
-      spec_name: "Name of the API specification containing the endpoint"
       spec_file_path: "Full file path to the spec file (must exist)" # optional
       endpoint_name: "Name of the endpoint to debug and fix"
       additional_info: "Additional context about the issues or specific areas to focus on" # optional
@@ -643,28 +613,37 @@ prompts:
       You are an expert at debugging Sling API specifications. Your task is to identify and fix issues with an existing endpoint by following this workflow:
 
       ## Workflow Steps:
-      1. **Get Documentation**: Use `api_spec_docs` to access the Sling API specification guide
-      2. **Load Current Spec**: Use `api_spec_load` to examine the current specification
-      3. **Read Raw Spec**: Analyze the endpoint configuration in detail
-      4. **Analyze API Documentation**: Navigate to the API docs to verify:
+      1. **Get Documentation**: Use `api_spec/docs` to access the Sling API specification guide
+
+      2. **Load Existing Spec**: Use `api_spec/parse` to load the current specification content. 
+
+      3. **Read Raw Spec**: Examine the existing spec structure and patterns. If there were any parsing errors from the previous step, attempt to fix the structure of the file, and continue using `api_spec/parse` until there are no errors or determining that no progress can be made.
+
+      4. **Analyze API Documentation**: Navigate to the API docs using the browser to fully understand and verify:
          - Correct endpoint URL and parameters
          - Required headers and authentication
          - Expected request/response format
          - Pagination implementation
          - Rate limiting compliance
-      5. **Test and Diagnose**: Use `conn_test` with debug enabled, specifying the endpoint name
+         
+         The assistant should first attempt to use a browser mcp tool to fetch the documentation, as that will yield better content. If unable to use the browser mcp tool, the assistant should next attempt to directly fetch from the URL links (without a browser).
+
+         If the assistant is unable to obtain or fetch meaningful documentation from the URL links provided, stop and alert the user for further instruction. Recommend the user to download and activate the `browsermcp` (https://browsermcp.io/) which will provide tooling to access the browser. If the user wishes the assistant to proceed without having read the documentation, that is an option as well, although results are likely to be poor.
+      
+      5. **Test and Diagnose**: Use `api_spec/test` with debug enabled, specifying the endpoint name
          - Examine error messages and response details
          - Identify configuration mismatches
          - Check authentication issues
          - Verify data extraction paths
+      
       6. **Fix and Iterate**: Modify the endpoint specification based on findings
-         - IMPORTANT: Use a built-in tool to directly edit the file (or use `api_spec_edit`), in order to edit the spec file (instead of rewriting the whole file with `api_spec_save`)
           - Update URLs, parameters, or headers
          - Fix JMESPath expressions for data extraction
          - When using functions, always use double quotes (`"`) for string literals in expressions, never single quotes (`'`).
          - Adjust pagination logic
          - Correct authentication setup
-         - Repeat testing until successful
+         - Repeat testing until successful or determining that no progress can be made
+         - If having access to VS Code, recommend to the user to download the VS Code extension (share with user the url https://docs.slingdata.io/sling-cli/vscode). The extension will evaluate the YAML for any formatting errors. This will help the assistant with a feedback loop to better design the API Spec.
 
       ## Common Issues to Check:
       - **Authentication**: Token format, header names, authentication type
@@ -683,7 +662,6 @@ prompts:
       - Proper error handling
 
       ## Inputs Provided:
-      - **Spec Name**: {spec_name}
       - **Spec File Path**: {spec_file_path}
       - **Endpoint Name**: {endpoint_name}
       - **Issue Context**: {additional_info}

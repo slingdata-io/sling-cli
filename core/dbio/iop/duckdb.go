@@ -95,6 +95,33 @@ func (duck *DuckDb) AddExtension(extension string) {
 	}
 }
 
+// CheckExtension checks if an extension is installed in DuckDB
+func (duck *DuckDb) CheckExtension(extension string) (bool, error) {
+	if !cast.ToBool(duck.GetProp("connected")) {
+		if err := duck.Open(); err != nil {
+			return false, g.Error(err, "Could not open DuckDB connection")
+		}
+	}
+
+	duck.Query("select 1 as a" + env.NoDebugKey) // installs pending extensions
+
+	sql := fmt.Sprintf("SELECT extension_name, loaded, installed FROM duckdb_extensions() WHERE extension_name = '%s'", extension)
+	data, err := duck.Query(sql + env.NoDebugKey)
+	if err != nil {
+		return false, g.Error(err, "could not check extension status")
+	}
+
+	// Check if extension exists in the results and is installed
+	for _, row := range data.Rows {
+		if len(row) >= 3 {
+			installed := cast.ToBool(row[2]) // installed column
+			return installed, nil
+		}
+	}
+
+	return false, nil // extension not found or not installed
+}
+
 type DuckDbSecret struct {
 	Type  DuckDbSecretType  `json:"type"`
 	Name  string            `json:"name"`
@@ -445,7 +472,7 @@ func (duck *DuckDb) Close() error {
 }
 
 // Exec executes a SQL query and returns the result
-func (duck *DuckDb) Exec(sql string, args ...interface{}) (result sql.Result, err error) {
+func (duck *DuckDb) Exec(sql string, args ...any) (result sql.Result, err error) {
 
 	result, err = duck.ExecContext(duck.Context.Ctx, sql, args...)
 	if err != nil {
@@ -544,7 +571,7 @@ func (duck *DuckDb) closeStdinAndWait() (err error) {
 }
 
 // ExecContext executes a SQL query with context and returns the result
-func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+func (duck *DuckDb) ExecContext(ctx context.Context, sql string, args ...any) (result sql.Result, err error) {
 	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
@@ -670,12 +697,12 @@ func (duck *DuckDb) waitForResult(dq *duckDbQuery) (result sql.Result, err error
 }
 
 // Query runs a sql query, returns `Dataset`
-func (duck *DuckDb) Query(sql string, options ...map[string]interface{}) (data Dataset, err error) {
+func (duck *DuckDb) Query(sql string, options ...map[string]any) (data Dataset, err error) {
 	return duck.QueryContext(context.Background(), sql, options...)
 }
 
 // QueryContext runs a sql query with context, returns `Dataset`
-func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]interface{}) (data Dataset, err error) {
+func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map[string]any) (data Dataset, err error) {
 
 	ds, err := duck.StreamContext(ctx, sql, options...)
 	if err != nil {
@@ -693,12 +720,12 @@ func (duck *DuckDb) QueryContext(ctx context.Context, sql string, options ...map
 }
 
 // Stream runs a sql query, returns `Datastream`
-func (duck *DuckDb) Stream(sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+func (duck *DuckDb) Stream(sql string, options ...map[string]any) (ds *Datastream, err error) {
 	return duck.StreamContext(duck.Context.Ctx, sql, options...)
 }
 
 // StreamContext runs a sql query with context, returns `Datastream`
-func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]interface{}) (ds *Datastream, err error) {
+func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...map[string]any) (ds *Datastream, err error) {
 	if !cast.ToBool(duck.GetProp("connected")) {
 		if err = duck.Open(); err != nil {
 			return nil, g.Error(err, "Could not open DuckDB connection")
@@ -770,6 +797,9 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		duck.Context.Mux.TryLock()
 		duck.Context.Unlock() // release lock
 	})
+
+	// TODO: Add Arrows output
+	// COPY  (SELECT extension_name, loaded, installed FROM duckdb_extensions())  TO '/dev/stdout' (FORMAT ARROWS, BATCH_SIZE 100);
 
 	err = ds.ConsumeCsvReader(dq.reader)
 	if err != nil {
@@ -986,7 +1016,11 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		if !g.PathExists(envPath) {
 			return "", g.Error("duckdb binary not found: %s", envPath)
 		}
-		return envPath, nil
+		if stat, _ := os.Stat(envPath); stat.IsDir() {
+			return "", g.Error("DUCKDB_PATH provided is a directory, should be a file: %s", envPath)
+		} else {
+			return envPath, nil
+		}
 	}
 
 	if useTempFile := os.Getenv("DUCKDB_USE_TMP_FILE"); useTempFile != "" {
@@ -1004,8 +1038,14 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 
 	checkVersion := func() (bool, error) {
 
+	retry:
 		out, err := exec.Command(binPath, "-version").Output()
 		if err != nil {
+			if strings.Contains(err.Error(), "text file busy") {
+				g.Warn("could not get version for duckdb (%s), retrying...", err.Error())
+				time.Sleep(1 * time.Second)
+				goto retry
+			}
 			return false, g.Error(err, "could not get version for duckdb")
 		}
 
@@ -1048,7 +1088,7 @@ func EnsureBinDuckDB(version string) (binPath string, err error) {
 		case "linux/amd64":
 			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-amd64.zip"
 
-		case "linux/aarch64":
+		case "linux/aarch64", "linux/arm64", "linux/arm":
 			downloadURL = "https://github.com/duckdb/duckdb/releases/download/v{version}/duckdb_cli-linux-arm64.zip"
 
 		default:
@@ -1168,8 +1208,16 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	contentType := "text/csv"
 	format := dbio.FileTypeCsv // default to CSV
 	if sc.Format == dbio.FileTypeArrow {
-		contentType = "application/vnd.apache.arrow.stream"
-		format = dbio.FileTypeArrow
+		useArrow := true
+		if val := os.Getenv("SLING_DUCKDB_ARROW"); val != "" {
+			useArrow = cast.ToBool(val)
+		}
+		if useArrow {
+			contentType = "application/vnd.apache.arrow.stream"
+			format = dbio.FileTypeArrow
+		} else {
+			g.Debug("duckdb extension arrow is disabled, using csv")
+		}
 	}
 
 	// create http server to serve data
@@ -1197,7 +1245,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		// start server in background, wait for it to start
 		importContext.Wg.Read.Add()
 		go func() {
-			g.Debug("started %s for duckdb direct stream", httpURL)
+			g.Debug("started %s for duckdb direct %s stream", httpURL, sc.Format)
 			importContext.Wg.Read.Done()
 			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
 				g.Error(err, "duckdb import http server error")

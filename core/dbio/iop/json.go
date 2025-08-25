@@ -26,7 +26,7 @@ type jsonStream struct {
 	decoder  decoderLike
 	jmespath string
 	flatten  int
-	buffer   chan []interface{}
+	buffer   chan []any
 }
 
 func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath string) *jsonStream {
@@ -36,7 +36,7 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath st
 		decoder:   decoder,
 		flatten:   flatten,
 		jmespath:  jmespath,
-		buffer:    make(chan []interface{}, 100000),
+		buffer:    make(chan []any, 100000),
 		sp:        NewStreamProcessor(),
 	}
 	if flatten < 0 {
@@ -55,7 +55,7 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath st
 }
 
 func (js *jsonStream) NextFunc(it *Iterator) bool {
-	var recordsInterf []map[string]interface{}
+	var recordsInterf []map[string]any
 	var err error
 	if it.Closed {
 		return false
@@ -68,7 +68,7 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	default:
 	}
 
-	var payload interface{}
+	var payload any
 	if js.HasMapPayload {
 		m := g.M()
 		err = js.decoder.Decode(&m)
@@ -93,58 +93,58 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	}
 
 	switch payloadV := payload.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		// is one record
 		recordsInterf = js.extractNestedArray(payloadV)
 		if len(recordsInterf) == 0 {
-			recordsInterf = []map[string]interface{}{payloadV}
+			recordsInterf = []map[string]any{payloadV}
 		}
-	case map[interface{}]interface{}:
+	case map[any]any:
 		// is one record
-		interf := map[string]interface{}{}
+		interf := map[string]any{}
 		for k, v := range payloadV {
 			interf[cast.ToString(k)] = v
 		}
 		recordsInterf = js.extractNestedArray(interf)
 		if len(recordsInterf) == 0 {
-			recordsInterf = []map[string]interface{}{interf}
+			recordsInterf = []map[string]any{interf}
 		}
-	case []interface{}:
-		recordsInterf = []map[string]interface{}{}
+	case []any:
+		recordsInterf = []map[string]any{}
 		recList := payloadV
 		if len(recList) == 0 {
 			return js.NextFunc(it)
 		}
 
 		switch recList[0].(type) {
-		case map[interface{}]interface{}:
+		case map[any]any:
 			for _, rec := range recList {
-				newRec := map[string]interface{}{}
-				for k, v := range rec.(map[interface{}]interface{}) {
+				newRec := map[string]any{}
+				for k, v := range rec.(map[any]any) {
 					newRec[cast.ToString(k)] = v
 				}
 				recordsInterf = append(recordsInterf, newRec)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			for _, val := range recList {
-				recordsInterf = append(recordsInterf, val.(map[string]interface{}))
+				recordsInterf = append(recordsInterf, val.(map[string]any))
 			}
 		default:
 			// is array of single values
 			for _, val := range recList {
-				recordsInterf = append(recordsInterf, map[string]interface{}{"data": val})
+				recordsInterf = append(recordsInterf, map[string]any{"data": val})
 			}
 		}
-	case []map[interface{}]interface{}:
-		recordsInterf = []map[string]interface{}{}
+	case []map[any]any:
+		recordsInterf = []map[string]any{}
 		for _, rec := range payloadV {
-			newRec := map[string]interface{}{}
+			newRec := map[string]any{}
 			for k, v := range rec {
 				newRec[cast.ToString(k)] = v
 			}
 			recordsInterf = append(recordsInterf, newRec)
 		}
-	case []map[string]interface{}:
+	case []map[string]any:
 		recordsInterf = payloadV
 	default:
 		err = g.Error("unhandled JSON interface type: %#v", payloadV)
@@ -180,11 +180,11 @@ func (js *jsonStream) addColumn(cols ...Column) {
 	mux.Unlock()
 }
 
-func (js *jsonStream) parseRecords(records []map[string]interface{}) {
+func (js *jsonStream) parseRecords(records []map[string]any) {
 
 	for _, rec := range records {
 		if js.flatten < 0 {
-			js.buffer <- []interface{}{g.Marshal(rec)}
+			js.buffer <- []any{g.Marshal(rec)}
 			continue
 		}
 
@@ -192,11 +192,11 @@ func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 		keys := lo.Keys(newRec)
 		sort.Strings(keys)
 
-		row := make([]interface{}, len(js.ds.Columns))
+		row := make([]any, len(js.ds.Columns))
 		colsToAdd := Columns{}
 		for _, colName := range keys {
 			// cast arrays as string
-			if arr, ok := newRec[colName].([]interface{}); ok {
+			if arr, ok := newRec[colName].([]any); ok {
 				newRec[colName] = g.Marshal(arr)
 			}
 
@@ -224,12 +224,12 @@ func (js *jsonStream) parseRecords(records []map[string]interface{}) {
 	// g.Debug("JSON Stream -> Parsed %d records", len(records))
 }
 
-func (js *jsonStream) extractNestedArray(rec map[string]interface{}) (recordsInterf []map[string]interface{}) {
+func (js *jsonStream) extractNestedArray(rec map[string]any) (recordsInterf []map[string]any) {
 	if js.flatten < 0 {
-		return []map[string]interface{}{rec}
+		return []map[string]any{rec}
 	}
 
-	recordsInterf = []map[string]interface{}{}
+	recordsInterf = []map[string]any{}
 	sliceKeyValLen := map[string]int{}
 	maxLen := 0
 
@@ -247,7 +247,7 @@ func (js *jsonStream) extractNestedArray(rec map[string]interface{}) (recordsInt
 		return sliceKeyValLen[k] == maxLen
 	})
 
-	var payload interface{}
+	var payload any
 	for _, key := range keys {
 		// have predefined list for now
 		switch strings.ToLower(key) {
@@ -257,42 +257,42 @@ func (js *jsonStream) extractNestedArray(rec map[string]interface{}) (recordsInt
 	}
 
 	switch payloadV := payload.(type) {
-	case []interface{}:
-		recordsInterf = []map[string]interface{}{}
+	case []any:
+		recordsInterf = []map[string]any{}
 		recList := payloadV
 		if len(recList) == 0 {
 			return
 		}
 
 		switch recList[0].(type) {
-		case map[interface{}]interface{}:
+		case map[any]any:
 			for _, rec := range recList {
-				newRec := map[string]interface{}{}
-				for k, v := range rec.(map[interface{}]interface{}) {
+				newRec := map[string]any{}
+				for k, v := range rec.(map[any]any) {
 					newRec[cast.ToString(k)] = v
 				}
 				recordsInterf = append(recordsInterf, newRec)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			for _, val := range recList {
-				recordsInterf = append(recordsInterf, val.(map[string]interface{}))
+				recordsInterf = append(recordsInterf, val.(map[string]any))
 			}
 		default:
 			// is array of single values
 			for _, val := range recList {
-				recordsInterf = append(recordsInterf, map[string]interface{}{"data": val})
+				recordsInterf = append(recordsInterf, map[string]any{"data": val})
 			}
 		}
-	case []map[interface{}]interface{}:
-		recordsInterf = []map[string]interface{}{}
+	case []map[any]any:
+		recordsInterf = []map[string]any{}
 		for _, rec := range payloadV {
-			newRec := map[string]interface{}{}
+			newRec := map[string]any{}
 			for k, v := range rec {
 				newRec[cast.ToString(k)] = v
 			}
 			recordsInterf = append(recordsInterf, newRec)
 		}
-	case []map[string]interface{}:
+	case []map[string]any:
 		recordsInterf = payloadV
 	}
 

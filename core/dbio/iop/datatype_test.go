@@ -53,28 +53,28 @@ func BenchmarkParseString8Bool(b *testing.B) {
 	bParseString(sp, "true", b)
 }
 
-func initProcessRow(name string) (columns []Column, row []interface{}) {
+func initProcessRow(name string) (columns []Column, row []any) {
 
 	if name == "float" {
-		row = []interface{}{5535.21414}
+		row = []any{5535.21414}
 	} else if name == "decimal" {
-		row = []interface{}{[]byte{0x31, 0x30, 0x33, 0x32, 0x2e, 0x34, 0x34, 0x32, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30}}
-		row = []interface{}{"5535.214140000"}
+		row = []any{[]byte{0x31, 0x30, 0x33, 0x32, 0x2e, 0x34, 0x34, 0x32, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30}}
+		row = []any{"5535.214140000"}
 	} else if name == "int" {
-		row = []interface{}{int(48714719874194)}
+		row = []any{int(48714719874194)}
 	} else if name == "int64" {
-		row = []interface{}{int64(48714719874194)}
+		row = []any{int64(48714719874194)}
 	} else if name == "string" {
-		row = []interface{}{g.RandString(g.AlphaNumericRunes, 1000)}
+		row = []any{g.RandString(g.AlphaNumericRunes, 1000)}
 	} else if name == "timestamp" || name == "timestampz" {
-		row = []interface{}{time.Now()}
-		// row = []interface{}{"17-OCT-20 07.01.59.000000 PM"}
+		row = []any{time.Now()}
+		// row = []any{"17-OCT-20 07.01.59.000000 PM"}
 	} else if name == "bool" {
-		row = []interface{}{false}
+		row = []any{false}
 	} else if name == "blank" {
-		row = []interface{}{""}
+		row = []any{""}
 	} else {
-		row = []interface{}{
+		row = []any{
 			"fritz", "larco", 55, 563525, 5535.21414, true, time.Now(),
 		}
 	}
@@ -285,7 +285,7 @@ func BenchmarkIsUTC(b *testing.B) {
 }
 
 func TestInterfVal(t *testing.T) {
-	row := make([]interface{}, 3)
+	row := make([]any, 3)
 	g.P(row[0])
 	row[0] = float64(0)
 	g.P(row[0])

@@ -719,6 +719,30 @@ loop:
 			}
 
 			row := ds.Sp.ProcessRow(ds.it.Row)
+
+			// evaluate transforms, only to determine if type change
+			// will be re-evaluated again below for storing result
+			if transforms := ds.Sp.Config.transforms; transforms != nil {
+				// make a copy of row so we don't reference the pointed values
+				rowCopy := make([]any, len(row))
+				copy(rowCopy, row)
+				newRow, err := ds.Sp.Config.transforms.Evaluate(rowCopy)
+				if ds.Context.CaptureErr(err) {
+					break loop
+				}
+
+				// determine if column type changed
+				for i, oldVal := range row {
+					newVal := newRow[i]
+					colType := ds.Columns[i].Type
+					oldType := ds.Sp.CheckType(oldVal)
+					newType := ds.Sp.CheckType(newVal)
+					if oldType != newType && colType != newType {
+						ds.Sp.ds.ChangeColumn(i, newType)
+					}
+				}
+			}
+
 			ds.Buffer = append(ds.Buffer, row)
 			if ds.it.Counter >= cast.ToUint64(SampleSize) {
 				break loop

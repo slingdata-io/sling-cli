@@ -37,7 +37,7 @@ func NewDataset(columns Columns) (data Dataset) {
 	data = Dataset{
 		Result:  nil,
 		Columns: NewColumns(columns...),
-		Rows:    [][]interface{}{},
+		Rows:    [][]any{},
 		Sp:      NewStreamProcessor(),
 	}
 
@@ -45,24 +45,24 @@ func NewDataset(columns Columns) (data Dataset) {
 }
 
 // NewDatasetFromMap return a new dataset
-func NewDatasetFromMap(m map[string]interface{}) (data Dataset) {
+func NewDatasetFromMap(m map[string]any) (data Dataset) {
 	data = Dataset{
 		Result:  nil,
 		Columns: Columns{},
-		Rows:    [][]interface{}{},
+		Rows:    [][]any{},
 		Sp:      NewStreamProcessor(),
 	}
 
 	if fieldsI, ok := m["headers"]; ok {
 		fields := []string{}
-		for _, f := range fieldsI.([]interface{}) {
+		for _, f := range fieldsI.([]any) {
 			fields = append(fields, cast.ToString(f))
 		}
 		data.Columns = NewColumnsFromFields(fields...)
 	}
 	if rowsI, ok := m["rows"]; ok {
-		for _, rowI := range rowsI.([]interface{}) {
-			data.Rows = append(data.Rows, rowI.([]interface{}))
+		for _, rowI := range rowsI.([]any) {
+			data.Rows = append(data.Rows, rowI.([]any))
 		}
 	}
 
@@ -204,6 +204,10 @@ func (data *Dataset) PrettyTable(fields ...string) (output string) {
 // WriteCsv writes to a writer
 func (data *Dataset) WriteCsv(dest io.Writer) (tbw int, err error) {
 	w := csv.NewWriter(dest)
+	if val := data.Sp.Config.Delimiter; val != "" {
+		w.Comma = val
+	}
+
 	defer w.Flush()
 
 	tbw, err = w.Write(data.GetFields())
@@ -299,7 +303,7 @@ func (data *Dataset) Stream(Props ...map[string]string) *Datastream {
 }
 
 // FirstVal returns the first value from the first row
-func (data *Dataset) FirstVal() interface{} {
+func (data *Dataset) FirstVal() any {
 	if len(data.Rows) > 0 && len(data.Rows[0]) > 0 {
 		return data.Rows[0][0]
 	}
@@ -307,7 +311,7 @@ func (data *Dataset) FirstVal() interface{} {
 }
 
 // FirstRow returns the first row
-func (data *Dataset) FirstRow() []interface{} {
+func (data *Dataset) FirstRow() []any {
 	if len(data.Rows) > 0 {
 		return data.Rows[0]
 	}
@@ -315,8 +319,8 @@ func (data *Dataset) FirstRow() []interface{} {
 }
 
 // ColValues returns the values of a one column as array
-func (data *Dataset) ColValues(col int) []interface{} {
-	vals := make([]interface{}, len(data.Rows))
+func (data *Dataset) ColValues(col int) []any {
+	vals := make([]any, len(data.Rows))
 	for i, row := range data.Rows {
 		vals[i] = row[col]
 	}
@@ -350,14 +354,14 @@ func (data *Dataset) ColValuesStr(col int) []string {
 }
 
 // Records return rows of maps
-func (data *Dataset) Records(lower ...bool) []map[string]interface{} {
+func (data *Dataset) Records(lower ...bool) []map[string]any {
 	Lower := true
 	if len(lower) > 0 {
 		Lower = lower[0]
 	}
-	records := make([]map[string]interface{}, len(data.Rows))
+	records := make([]map[string]any, len(data.Rows))
 	for i, row := range data.Rows {
-		rec := map[string]interface{}{}
+		rec := map[string]any{}
 		for j, field := range data.GetFields(Lower) {
 			rec[field] = row[j]
 		}
@@ -388,14 +392,14 @@ func (data *Dataset) RecordsString(lower ...bool) []map[string]string {
 }
 
 // RecordsCasted return rows of maps or casted values
-func (data *Dataset) RecordsCasted(lower ...bool) []map[string]interface{} {
+func (data *Dataset) RecordsCasted(lower ...bool) []map[string]any {
 	Lower := true
 	if len(lower) > 0 {
 		Lower = lower[0]
 	}
-	records := make([]map[string]interface{}, len(data.Rows))
+	records := make([]map[string]any, len(data.Rows))
 	for i, row := range data.Rows {
-		rec := map[string]interface{}{}
+		rec := map[string]any{}
 		for j, field := range data.GetFields(Lower) {
 			if row[j] == nil {
 				rec[field] = nil
@@ -409,7 +413,7 @@ func (data *Dataset) RecordsCasted(lower ...bool) []map[string]interface{} {
 }
 
 // ToJSONMap converst to a JSON object
-func (data *Dataset) ToJSONMap() map[string]interface{} {
+func (data *Dataset) ToJSONMap() map[string]any {
 	return g.M("headers", data.GetFields(), "rows", data.Rows)
 }
 
@@ -531,7 +535,7 @@ func (data *Dataset) InferColumnTypes() {
 					}
 
 					if looksLikeJson(valStr) {
-						var v interface{}
+						var v any
 						if err := g.Unmarshal(valStr, &v); err == nil {
 							columns[j].Stats.JsonCnt++
 						} else {

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -600,6 +601,7 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 		bcpArgs = append(bcpArgs, bcpExtraParts...)
 	}
 
+retry:
 	proc := exec.Command(conn.bcpPath(), bcpArgs...)
 	proc.Stderr = &stderr
 	proc.Stdout = &stdout
@@ -636,6 +638,12 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 	}
 
 	if err != nil {
+		if strings.Contains(err.Error(), "text file busy") {
+			g.Warn("could not start bcp (%s), retrying...", err.Error())
+			time.Sleep(1 * time.Second)
+			goto retry
+		}
+
 		errOut := stderr.String()
 		if errPath != "/dev/stderr" {
 			errOutB, _ := os.ReadFile(errPath)

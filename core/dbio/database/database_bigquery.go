@@ -530,6 +530,7 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 		iop.DecimalType: bigquery.NumericFieldType,
 		// "decimal":   bigquery.FloatFieldType,
 		iop.TimeType:       bigquery.StringFieldType,
+		iop.TimezType:      bigquery.StringFieldType,
 		iop.TimestampType:  bigquery.TimestampFieldType,
 		iop.TimestampzType: bigquery.TimestampFieldType,
 	}

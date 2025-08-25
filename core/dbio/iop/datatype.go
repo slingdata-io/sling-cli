@@ -1308,6 +1308,13 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 			"(,)",
 			fmt.Sprintf("(%d,%d)", precision, scale),
 		)
+
+		// BigQuery: use BIGNUMERIC if scale > 9 or precision > 38
+		if t == dbio.TypeDbBigQuery && strings.EqualFold(nativeType, "numeric") &&
+			(scale > 9 || precision > 38) {
+			nativeType = "bignumeric"
+		}
+
 	} else if col.Type.IsJSON() {
 		if ct.JSON != nil {
 			ct.JSON.Apply(col)
