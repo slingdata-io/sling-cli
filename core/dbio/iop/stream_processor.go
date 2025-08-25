@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flarco/g"
+	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -82,6 +83,13 @@ func (sc *StreamConfig) ToMap() map[string]string {
 	m := g.M()
 	g.Unmarshal(g.Marshal(sc), &m)
 	return g.ToMapString(m)
+}
+
+func (sc *StreamConfig) SetMaxDecimals(val int) {
+	sc.MaxDecimals = val
+	if sc.MaxDecimals > -1 {
+		sc.maxDecimalsFormat = "%." + cast.ToString(sc.MaxDecimals) + "f"
+	}
 }
 
 type Transformers struct {
@@ -203,10 +211,7 @@ func NewStreamProcessor() *StreamProcessor {
 
 	sp.ResetConfig()
 	if val := os.Getenv("MAX_DECIMALS"); val != "" && val != "-1" {
-		sp.Config.MaxDecimals = cast.ToInt(os.Getenv("MAX_DECIMALS"))
-		if sp.Config.MaxDecimals > -1 {
-			sp.Config.maxDecimalsFormat = "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
-		}
+		sp.Config.SetMaxDecimals(cast.ToInt(val))
 	}
 
 	// if val is '0400', '0401'. Such as codes.
@@ -383,11 +388,11 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if configMap["max_decimals"] != "" && configMap["max_decimals"] != "-1" {
 		var err error
-		sp.Config.MaxDecimals, err = cast.ToIntE(configMap["max_decimals"])
+		val, err := cast.ToIntE(configMap["max_decimals"])
 		if err != nil {
 			sp.Config.MaxDecimals = -1
-		} else if sp.Config.MaxDecimals > -1 {
-			sp.Config.maxDecimalsFormat = "%." + cast.ToString(sp.Config.MaxDecimals) + "f"
+		} else {
+			sp.Config.SetMaxDecimals(val)
 		}
 	}
 
@@ -679,11 +684,22 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		return nil
 	}
 
+	maxDec := 12
+	if sp.Config.MaxDecimals > -1 {
+		maxDec = sp.Config.MaxDecimals
+	}
+
 	switch v := val.(type) {
 	case big.Int:
 		val = v.Int64()
 	case *big.Int:
 		val = v.Int64()
+	case big.Rat:
+		decCount := lo.Ternary(col.DbScale > 0, col.DbScale, maxDec)
+		val = v.FloatString(decCount)
+	case *big.Rat:
+		decCount := lo.Ternary(col.DbScale > 0, col.DbScale, maxDec)
+		val = v.FloatString(decCount)
 	case []uint8:
 		sVal = string(v)
 		val = sVal
@@ -1049,6 +1065,12 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
 		}
 		valString = string(sBytes)
+	case *big.Rat:
+		decCount := 12
+		if sp.Config.MaxDecimals > -1 {
+			decCount = sp.Config.MaxDecimals
+		}
+		valString = v.FloatString(decCount)
 	case *string:
 		valString = *v
 	case string:
@@ -1093,8 +1115,14 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
+		} else if sp.Config.maxDecimalsFormat != "" {
+			if sp.Config.MaxDecimals <= 10 {
+				if fVal, err := cast.ToFloat64E(val); err == nil {
+					return g.F(sp.Config.maxDecimalsFormat, fVal)
+				}
+			}
 		}
-		return cast.ToString(val)
+		return sp.CastToString(val)
 		// return fmt.Sprintf("%v", val)
 	case typ.IsDate():
 		tVal, err := sp.CastToTime(val)

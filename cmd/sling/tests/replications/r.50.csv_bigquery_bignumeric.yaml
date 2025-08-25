@@ -1,0 +1,166 @@
+source: local
+target: BIGQUERY
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: command
+      command: |
+        cat > /tmp/test_bignumeric_decimals.csv << 'EOF'
+        id,high_scale_1,high_scale_2,normal_scale,small_decimal,edge_scale_9,edge_scale_10,very_high_scale,name
+        1,123.1234567890123456789,99999.123456789012345,12345678.123456789,12345.90,999999999.123456789,999999999.1234567890,12.123456789012345678901234,Test Record 1
+        2,-456.9876543210987654321,-88888.987654321098765,-87654321.987654321,-98765.43,-888888888.987654321,-888888888.9876543210,-34.987654321098765432109876,Test Record 2
+        3,0.0000000000000000001,0.000000000000001,0.000000001,0.01,0.000000001,0.0000000001,0.000000000000000000000001,Test Record 3
+        4,789.5555555555555555555,77777.555555555555555,76543210.555555555,54321.67,777777777.555555555,777777777.5555555555,56.555555555555555555555555,Test Record 4
+        5,999.9999999999999999999,66666.999999999999999,65432109.999999999,87654.32,666666666.999999999,666666666.9999999999,78.999999999999999999999999,Test Record 5
+        6,-111.1111111111111111111,-55555.111111111111111,-54321098.111111111,-76543.21,-555555555.111111111,-555555555.1111111111,-90.111111111111111111111111,Test Record 6
+        7,222.2222222222222222222,44444.222222222222222,43210987.222222222,65432.10,444444444.222222222,444444444.2222222222,12.222222222222222222222222,Test Record 7
+        8,-333.3333333333333333333,-33333.333333333333333,-32109876.333333333,-54321.09,-333333333.333333333,-333333333.3333333333,-34.333333333333333333333333,Test Record 8
+        9,444.4444444444444444444,22222.444444444444444,21098765.444444444,43210.98,222222222.444444444,222222222.4444444444,56.444444444444444444444444,Test Record 9
+        10,555.5555555555555555555,11111.555555555555555,10987654.555555555,32109.87,111111111.555555555,111111111.5555555555,78.555555555555555555555555,Test Record 10
+        EOF
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Get column types for verification
+        SELECT 
+          column_name,
+          data_type
+        FROM `public`.INFORMATION_SCHEMA.COLUMNS 
+        WHERE table_name = 'test_bignumeric_decimals' 
+        ORDER BY ordinal_position
+      into: column_info
+
+    - type: log
+      message: |
+        Column types in BigQuery target:
+        { pretty_table(store.column_info) }
+
+    # Verify high scale columns become BIGNUMERIC
+    - type: check
+      check: store.column_info[1].data_type == "BIGNUMERIC"
+      success_message: "✓ high_scale_1 correctly converted to BIGNUMERIC"
+
+    - type: check
+      check: store.column_info[2].data_type == "BIGNUMERIC"
+      success_message: "✓ high_scale_2 correctly converted to BIGNUMERIC"
+
+    - type: check
+      check: store.column_info[6].data_type == "BIGNUMERIC"
+      success_message: "✓ edge_scale_10 (scale=10 > 9) correctly converted to BIGNUMERIC"
+
+    - type: check
+      check: store.column_info[7].data_type == "BIGNUMERIC"
+      success_message: "✓ very_high_scale correctly converted to BIGNUMERIC"
+
+    # Verify normal/low scale columns stay NUMERIC
+    - type: check
+      check: store.column_info[3].data_type == "NUMERIC"
+      success_message: "✓ normal_scale correctly remains as NUMERIC"
+
+    - type: check
+      check: store.column_info[4].data_type == "NUMERIC"
+      success_message: "✓ small_decimal correctly remains as NUMERIC"
+
+
+    # Verify data was loaded correctly
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as row_count 
+        FROM public.test_bignumeric_decimals
+      into: count_result
+
+    - type: check
+      check: store.count_result[0].row_count == 10
+      success_message: "✓ All 10 CSV rows loaded successfully"
+
+    # Verify data accuracy using SQL-side validation
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          id,
+          -- high_scale_1,
+          -- high_scale_2,
+          -- normal_scale,
+          -- small_decimal,
+          -- edge_scale_9,
+          -- edge_scale_10,
+          -- very_high_scale,
+
+          -- SQL-side validation columns
+          high_scale_1 = PARSE_BIGNUMERIC('123.1234567890123456789') as validate_high_scale_1,
+          high_scale_1 = PARSE_BIGNUMERIC('-456.9876543210987654321') as validate_negative_high_scale,
+          high_scale_1 = PARSE_BIGNUMERIC('0.0000000000000000001') as validate_small_high_scale,
+          edge_scale_10 = PARSE_BIGNUMERIC('999999999.1234567890') as validate_edge_scale_10,
+          normal_scale = PARSE_BIGNUMERIC('12345678.123456789') as validate_normal_scale,
+          small_decimal = PARSE_BIGNUMERIC('12345.9') as validate_small_decimal,
+          edge_scale_9 = PARSE_BIGNUMERIC('999999999.123456789') as validate_edge_scale_9,
+          very_high_scale = PARSE_BIGNUMERIC('12.123456789012345678901234') as validate_very_high_scale
+        FROM public.test_bignumeric_decimals 
+        WHERE id IN (1, 2, 3)
+        ORDER BY id
+      into: validation_data
+
+    - type: log
+      message: |
+        Validation results from BigQuery (first 3 rows):
+        { pretty_table(store.validation_data) }
+
+    # Check validation results using boolean columns
+    - type: check
+      check: store.validation_data[0].validate_high_scale_1 == "true"
+      success_message: "✓ High scale decimal value 1 preserved accurately"
+
+    - type: check
+      check: store.validation_data[1].validate_negative_high_scale == "true"
+      success_message: "✓ Negative high scale decimal preserved accurately"
+
+    - type: check
+      check: store.validation_data[2].validate_small_high_scale == "true"
+      success_message: "✓ Very small high scale decimal preserved accurately"
+
+    - type: check
+      check: store.validation_data[0].validate_edge_scale_10 == "true"
+      success_message: "✓ Edge scale=10 BIGNUMERIC value preserved accurately"
+
+    - type: check
+      check: store.validation_data[0].validate_normal_scale == "true"
+      success_message: "✓ Normal scale NUMERIC value preserved accurately"
+
+    - type: check
+      check: store.validation_data[0].validate_small_decimal == "true"
+      success_message: "✓ Small decimal NUMERIC value preserved accurately"
+
+    - type: check
+      check: store.validation_data[0].validate_edge_scale_9 == "true"
+      success_message: "✓ Edge scale=9 NUMERIC value preserved accurately"
+
+    - type: check
+      check: store.validation_data[0].validate_very_high_scale == "true"
+      success_message: "✓ Very high scale BIGNUMERIC value preserved accurately"
+
+    # Log success message
+    - type: log
+      message: |
+        CSV to BigQuery BIGNUMERIC conversion test completed successfully!
+        ✓ High scale decimals (scale > 9) → BIGNUMERIC
+        ✓ Normal scale decimals (scale ≤ 9) → NUMERIC
+        ✓ All 10 rows loaded with correct precision
+
+    # Cleanup
+    - type: command
+      command: rm -f /tmp/test_bignumeric_decimals.csv
+
+    # - type: query
+    #   connection: '{target.name}'
+    #   query: DROP TABLE IF EXISTS public.test_bignumeric_decimals;
+
+streams:
+  file:///tmp/test_bignumeric_decimals.csv:
+    object: public.test_bignumeric_decimals

@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"path"
 	"strings"
@@ -87,9 +86,6 @@ func (conn *BigQueryConn) Init() error {
 	if conn.GetProp("GC_KEY_BODY") == "" {
 		conn.SetProp("GC_KEY_BODY", conn.GetProp("KEY_BODY"))
 	}
-
-	// set MAX_DECIMALS to fix bigquery import for numeric types
-	conn.SetProp("MAX_DECIMALS", "9")
 
 	return nil
 }
@@ -309,13 +305,6 @@ type bQTypeCols struct {
 }
 
 func processBQTypeCols(row []interface{}, bqTC *bQTypeCols, ds *iop.Datastream) []interface{} {
-	for _, j := range bqTC.numericCols {
-		var vBR *big.Rat
-		vBR, ok := row[j].(*big.Rat)
-		if ok {
-			row[j] = vBR.FloatString(9)
-		}
-	}
 	for _, j := range bqTC.datetimeCols {
 		if row[j] != nil {
 			vDT, ok := row[j].(civil.DateTime)
@@ -510,8 +499,8 @@ func (conn *BigQueryConn) InsertStream(tableFName string, ds *iop.Datastream) (c
 	return conn.BulkImportStream(tableFName, ds)
 }
 
-func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
-	schema = make([]*bigquery.FieldSchema, len(columns))
+func getBqSchema(dsColumns, tableCols iop.Columns) (schema bigquery.Schema) {
+	schema = make([]*bigquery.FieldSchema, len(dsColumns))
 	mapping := map[iop.ColumnType]bigquery.FieldType{
 		iop.ColumnType(""): bigquery.StringFieldType,
 		iop.StringType:     bigquery.StringFieldType,
@@ -535,12 +524,27 @@ func getBqSchema(columns iop.Columns) (schema bigquery.Schema) {
 		iop.TimestampzType: bigquery.TimestampFieldType,
 	}
 
-	for i, col := range columns {
-		g.Trace("bigquery.Schema for %s (%s) -> %#v", col.Name, col.Type, mapping[col.Type])
+	for i, col := range dsColumns {
 		schema[i] = &bigquery.FieldSchema{
 			Name: col.Name,
 			Type: mapping[col.Type],
 		}
+
+		tableCol := tableCols.GetColumn(col.Name)
+		switch strings.ToLower(g.PtrVal(tableCol).DbType) {
+		case "numeric":
+			schema[i].Type = bigquery.NumericFieldType
+		case "bignumeric":
+			schema[i].Type = bigquery.BigNumericFieldType
+		default:
+			// logic for BIGNUMERIC if scale > 9 or precision > 38
+			if schema[i].Type == bigquery.NumericFieldType &&
+				(col.DbScale > 9 || col.DbPrecision > 38) {
+				schema[i].Type = bigquery.BigNumericFieldType
+			}
+		}
+
+		g.Trace("bigquery.Schema for %s (%s) [precision=%d scale=%d] -> %#v", col.Name, col.Type, col.DbPrecision, col.DbScale, schema[i].Type)
 	}
 	return
 }
@@ -579,6 +583,42 @@ func (conn *BigQueryConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	return conn.importViaGoogleStorage(tableFName, df)
 }
 
+func (conn *BigQueryConn) importStreamConfig(columns iop.Columns) (config iop.StreamConfig) {
+
+	config = iop.LoaderStreamConfig(true)
+	config.Compression = iop.GzipCompressorType
+	config.TargetType = conn.GetType()
+
+	// set max decimal for only numeric
+	{
+		hasNumeric := false
+		hasBigNumeric := false
+
+		for _, col := range columns {
+			if strings.EqualFold(col.DbType, "numeric") {
+				hasNumeric = true
+			}
+			if strings.EqualFold(col.DbType, "bignumeric") {
+				hasBigNumeric = true
+			}
+		}
+
+		if hasBigNumeric {
+			if val := conn.GetProp("column_typing"); val != "" {
+				var ct iop.ColumnTyping
+				g.Unmarshal(val, &ct)
+				if dec := ct.Decimal; dec != nil && dec.MaxScale > 0 {
+					config.MaxDecimals = dec.MaxScale
+				}
+			}
+		} else if hasNumeric {
+			config.MaxDecimals = 9
+		}
+		config.SetMaxDecimals(config.MaxDecimals)
+	}
+
+	return config
+}
 func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	settingMppBulkImportFlow(conn, iop.GzipCompressorType)
 
@@ -594,25 +634,6 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		return count, g.Error(err, "Could not Delete: "+localPath)
 	}
 
-	df.Defer(func() { env.RemoveAllLocalTempFile(localPath) })
-
-	g.Info("importing into bigquery via local storage")
-
-	fileReadyChn := make(chan filesys.FileReady, 10)
-
-	go func() {
-		config := iop.LoaderStreamConfig(true)
-		config.Compression = iop.GzipCompressorType
-		config.TargetType = conn.GetType()
-		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, config)
-
-		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
-			return
-		}
-
-	}()
-
 	table, err := ParseTableName(tableFName, conn.Type)
 	if err != nil {
 		err = g.Error(err, "could not parse table name: "+tableFName)
@@ -624,6 +645,23 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 		err = g.Error(err, "could not get table columns: "+tableFName)
 		return
 	}
+
+	df.Defer(func() { env.RemoveAllLocalTempFile(localPath) })
+
+	g.Info("importing into bigquery via local storage")
+
+	fileReadyChn := make(chan filesys.FileReady, 10)
+
+	go func() {
+		config := conn.importStreamConfig(table.Columns)
+		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, config)
+
+		if err != nil {
+			df.Context.CaptureErr(g.Error(err, "error writing dataflow to local storage: "+localPath))
+			return
+		}
+
+	}()
 
 	copyFromLocal := func(localFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
@@ -665,6 +703,19 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	if gcBucket == "" {
 		return count, g.Error("Need to set 'GC_BUCKET' to copy to google storage")
 	}
+
+	table, err := ParseTableName(tableFName, conn.Type)
+	if err != nil {
+		err = g.Error(err, "could not parse table name: "+tableFName)
+		return
+	}
+
+	table.Columns, err = conn.GetSQLColumns(table)
+	if err != nil {
+		err = g.Error(err, "could not get table columns: "+tableFName)
+		return
+	}
+
 	fs, err := filesys.NewFileSysClient(dbio.TypeFileGoogle, conn.PropArr()...)
 	if err != nil {
 		err = g.Error(err, "Could not get fs client for GCS")
@@ -694,9 +745,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		config := iop.LoaderStreamConfig(true)
-		config.Compression = iop.GzipCompressorType
-		config.TargetType = conn.GetType()
+		config := conn.importStreamConfig(table.Columns)
 		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, config)
 
 		if err != nil {
@@ -706,18 +755,6 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		}
 
 	}()
-
-	table, err := ParseTableName(tableFName, conn.Type)
-	if err != nil {
-		err = g.Error(err, "could not parse table name: "+tableFName)
-		return
-	}
-
-	table.Columns, err = conn.GetSQLColumns(table)
-	if err != nil {
-		err = g.Error(err, "could not get table columns: "+tableFName)
-		return
-	}
 
 	copyFromGCS := func(gcsFile filesys.FileReady, table Table) {
 		defer conn.Context().Wg.Write.Done()
@@ -750,7 +787,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 }
 
 // CopyFromGCS into bigquery from google storage
-func (conn *BigQueryConn) CopyFromLocal(localURI string, table Table, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) CopyFromLocal(localURI string, table Table, dsColumns iop.Columns) error {
 
 	file, err := os.Open(localURI)
 	if err != nil {
@@ -774,7 +811,7 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 	source.Quote = `"`
 	source.NullMarker = `\N`
 	source.SkipLeadingRows = 1
-	source.Schema = getBqSchema(dsColumns)
+	source.Schema = getBqSchema(dsColumns, table.Columns)
 	source.SourceFormat = bigquery.CSV
 
 	loader := client.Dataset(table.Schema).Table(table.Name).LoaderFrom(source)
@@ -821,7 +858,7 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 	gcsRef.Quote = `"`
 	gcsRef.NullMarker = `\N`
 	gcsRef.SkipLeadingRows = 1
-	gcsRef.Schema = getBqSchema(dsColumns)
+	gcsRef.Schema = getBqSchema(dsColumns, table.Columns)
 	if strings.HasSuffix(strings.ToLower(gcsURI), ".gz") {
 		gcsRef.Compression = bigquery.Gzip
 	}
@@ -1023,6 +1060,10 @@ func (conn *BigQueryConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 		selectStr = g.F("to_json(%s)", qName)
 	case !srcCol.IsFloat() && tgtCol.IsFloat():
 		selectStr = g.F("cast(%s as float64)", qName)
+	case strings.EqualFold(srcCol.DbType, "bignumeric") && strings.EqualFold(tgtCol.DbType, "numeric"):
+		selectStr = g.F("cast(%s as numeric)", qName)
+	case srcCol.IsString() && strings.EqualFold(tgtCol.DbType, "bignumeric"):
+		selectStr = g.F("parse_bignumeric(%s)", qName)
 	case srcCol.IsString() && tgtCol.IsDecimal():
 		selectStr = g.F("parse_numeric(%s)", qName)
 	case !srcCol.IsDecimal() && tgtCol.IsDecimal():
