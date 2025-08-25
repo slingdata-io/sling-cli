@@ -28,7 +28,7 @@ func (conn *DuckDbConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (cou
 	case "arrow_http":
 		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
 	default:
-		return conn.importViaHTTP(tableFName, df, dbio.FileTypeArrow)
+		return conn.importViaHTTP(tableFName, df, dbio.FileTypeCsv)
 	}
 }
 
