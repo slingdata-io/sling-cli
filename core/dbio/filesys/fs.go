@@ -1268,7 +1268,6 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 
 	props := g.MapToKVArr(fs.Props())
 	duck := iop.NewDuckDb(context.Background(), props...)
-	duck.AddExtension("arrow")
 	duckURI := duck.PrepareFsSecretAndURI(uri)
 
 	sp := iop.NewStreamProcessor()
@@ -1290,7 +1289,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	// merge into single stream to push into duckdb
 	duckSc := duck.DefaultCsvConfig()
 	duckSc.FileMaxRows = sc.FileMaxRows
-	duckSc.Format = dbio.FileTypeArrow
+	// duckSc.Format = dbio.FileTypeArrow
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
