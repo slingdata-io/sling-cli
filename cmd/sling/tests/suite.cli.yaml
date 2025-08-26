@@ -858,3 +858,17 @@
     - "Very high scale BIGNUMERIC value preserved accurately"
     - "CSV to BigQuery BIGNUMERIC conversion test completed successfully!"
     - "execution succeeded"
+
+- id: 108
+  name: Run XML to PostgreSQL import test
+  run: 'sling run -r cmd/sling/tests/replications/r.51.xml_postgres_import.yaml'
+  streams: 1
+  rows: 5
+  output_contains:
+    - 'execution succeeded'
+    - '✓ All 5 XML records imported successfully'
+    - '✓ Name field imported correctly'
+    - '✓ Email field imported correctly'
+    - '✓ Age field imported correctly'
+    - '✓ Salary field imported correctly'
+    - '✓ XML to PostgreSQL import test completed successfully!'

@@ -1106,7 +1106,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 		reader2 = newReader
 	}
 
-	decoder := xml.NewDecoder(reader2)
+	decoder := NewXMLDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 

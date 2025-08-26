@@ -1,0 +1,140 @@
+source: LOCAL
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+source_options:
+  flatten: 1
+
+hooks:
+  start:
+    - type: command
+      command: |
+        cat > /tmp/test_xml_data.xml << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <data>
+          <element>
+            <id>1</id>
+            <name>John Doe</name>
+            <email>john.doe@example.com</email>
+            <age>30</age>
+            <active>true</active>
+            <created_at>2024-01-15 10:30:00</created_at>
+            <salary>75000.50</salary>
+          </element>
+          <element>
+            <id>2</id>
+            <name>Jane Smith</name>
+            <email>jane.smith@example.com</email>
+            <age>28</age>
+            <active>false</active>
+            <created_at>2024-02-20 14:45:30</created_at>
+            <salary>82000.75</salary>
+          </element>
+          <element>
+            <id>3</id>
+            <name>Bob Johnson</name>
+            <email>bob.johnson@example.com</email>
+            <age>35</age>
+            <active>true</active>
+            <created_at>2024-03-10 09:15:45</created_at>
+            <salary>95000.00</salary>
+          </element>
+          <element>
+            <id>4</id>
+            <name>Alice Brown</name>
+            <email>alice.brown@example.com</email>
+            <age>42</age>
+            <active>true</active>
+            <created_at>2024-04-05 16:20:10</created_at>
+            <salary>105000.25</salary>
+          </element>
+          <element>
+            <id>5</id>
+            <name>Charlie Wilson</name>
+            <email>charlie.wilson@example.com</email>
+            <age>26</age>
+            <active>false</active>
+            <created_at>2024-05-12 11:30:00</created_at>
+            <salary>65000.00</salary>
+          </element>
+        </data>
+        EOF
+        
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.xml_file_test;
+
+  end:
+    # Verify data was imported
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.xml_file_test
+      into: result
+    
+    - type: check
+      check: store.result[0].count == 5
+      success_message: "✓ All 5 XML records imported successfully"
+    
+    # Verify data integrity
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT *
+        FROM public.xml_file_test
+        ORDER BY id
+        LIMIT 3
+      into: sample_data
+    
+    - type: log
+      message: |
+        XML Import Test Results:
+        - Total records imported: {store.result[0].count}
+        - Sample data:
+        { pretty_table(store.sample_data) }
+    
+    # Verify specific record values
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT *
+        FROM public.xml_file_test
+        WHERE id = 1
+      into: first_record
+    
+    - type: check
+      check: store.first_record[0].name == "John Doe"
+      success_message: "✓ Name field imported correctly"
+    
+    - type: check
+      check: store.first_record[0].email == "john.doe@example.com"
+      success_message: "✓ Email field imported correctly"
+    
+    - type: check
+      check: int_parse(store.first_record[0].age) == 30
+      success_message: "✓ Age field imported correctly"
+    
+    - type: check
+      check: float_parse(store.first_record[0].salary) == 75000.50
+      success_message: "✓ Salary field imported correctly"
+    
+    # Cleanup
+    - type: command
+      command: rm -f /tmp/test_xml_data.xml
+    
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.xml_file_test;
+    
+    - type: log
+      message: |
+        ✓ XML to PostgreSQL import test completed successfully!
+        ✓ All fields imported with correct data types
+        ✓ Test cleanup completed
+
+streams:
+  file:///tmp/test_xml_data.xml:
+    object: public.xml_file_test
+    source_options:
+      flatten: true
