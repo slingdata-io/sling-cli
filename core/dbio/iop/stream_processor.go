@@ -1048,6 +1048,20 @@ func (sp *StreamProcessor) bytesToHexEscape(b []byte) string {
 	return string(result)
 }
 
+func (sp *StreamProcessor) CountDigits(number string) (precision, scale int) {
+	inDecimal := false
+	for _, c := range number {
+		if c == '.' {
+			inDecimal = true
+			continue
+		} else if inDecimal {
+			scale++ // only decimal digits
+		}
+		precision++ // total number of digits
+	}
+	return
+}
+
 func (sp *StreamProcessor) CastToString(val any) (valString string) {
 	valString, _ = sp.CastToStringE(val)
 	return
@@ -1056,8 +1070,12 @@ func (sp *StreamProcessor) CastToString(val any) (valString string) {
 func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) {
 
 	switch v := val.(type) {
+	case string:
+		valString = v
 	case []uint8:
 		valString = string(v)
+	case *string:
+		valString = *v
 	case chJSON: // Clickhouse JSON / Variant
 		var sBytes []byte
 		sBytes, err = v.MarshalJSON()
@@ -1071,10 +1089,6 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 			decCount = sp.Config.MaxDecimals
 		}
 		valString = v.FloatString(decCount)
-	case *string:
-		valString = *v
-	case string:
-		valString = v
 	case map[string]string, map[string]any, map[any]any, []any, []string:
 		valString = g.Marshal(v)
 	default:
@@ -1116,9 +1130,15 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
 		} else if sp.Config.maxDecimalsFormat != "" {
-			if sp.Config.MaxDecimals <= 10 {
-				if fVal, err := cast.ToFloat64E(val); err == nil {
-					return g.F(sp.Config.maxDecimalsFormat, fVal)
+			if sp.Config.MaxDecimals > -1 && sp.Config.MaxDecimals <= 10 {
+				sVal := sp.CastToString(val)
+				_, scale := sp.CountDigits(sVal)
+				if scale > sp.Config.MaxDecimals {
+					if fVal, err := cast.ToFloat64E(val); err == nil {
+						return g.F(sp.Config.maxDecimalsFormat, fVal)
+					}
+				} else {
+					return sVal
 				}
 			}
 		}
