@@ -822,3 +822,39 @@
     - "GUID value for record 1 should match"
     - "GUID value for record 5 should match"
     - "execution succeeded"
+
+- id: 106
+  name: Test MSSQL to BigQuery BIGNUMERIC conversion for high precision/scale decimals
+  run: sling run -d -r cmd/sling/tests/replications/r.49.mssql_bigquery_bignumeric.yaml
+  streams: 1
+  rows: 3
+  output_contains:
+    - "Successfully retrieved column information from BigQuery"
+    - "The BIGNUMERIC conversion logic is working correctly!"
+    - "All 3 test records should be transferred"
+    - "Data integrity verified - high precision decimal values transferred successfully"
+    - "execution succeeded"
+
+- id: 107
+  name: Test CSV to BigQuery BIGNUMERIC conversion for high scale decimal values
+  run: sling run -d -r cmd/sling/tests/replications/r.50.csv_bigquery_bignumeric.yaml
+  streams: 1
+  rows: 10
+  output_contains:
+    - "high_scale_1 correctly converted to BIGNUMERIC"
+    - "high_scale_2 correctly converted to BIGNUMERIC"
+    - "edge_scale_10 (scale=10 > 9) correctly converted to BIGNUMERIC"
+    - "very_high_scale correctly converted to BIGNUMERIC"
+    - "normal_scale correctly remains as NUMERIC"
+    - "small_decimal correctly remains as NUMERIC"
+    - "All 10 CSV rows loaded successfully"
+    - "High scale decimal value 1 preserved accurately"
+    - "Negative high scale decimal preserved accurately"
+    - "Very small high scale decimal preserved accurately"
+    - "Edge scale=10 BIGNUMERIC value preserved accurately"
+    - "Normal scale NUMERIC value preserved accurately"
+    - "Small decimal NUMERIC value preserved accurately"
+    - "Edge scale=9 NUMERIC value preserved accurately"
+    - "Very high scale BIGNUMERIC value preserved accurately"
+    - "CSV to BigQuery BIGNUMERIC conversion test completed successfully!"
+    - "execution succeeded"

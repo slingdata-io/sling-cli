@@ -84,7 +84,8 @@ streams:
         processed_status: 'upper(record.status) + "_PROCESSED"'
       
       # Stage 5: Final cleanup - cast numeric fields
-      - "*": 'cast(value, "string")'
+      - "*": cast(value, "string")
+      - "*": remove_diacritics(value)
       - calculated_amount: 'cast(value, "decimal")'
         
     hooks:

@@ -825,6 +825,8 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 		} else if colStats.DecCnt > 0 && colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DecimalType
 			col.goType = reflect.TypeOf(float64(0.0))
+			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, colStats.MaxLen, col.DbPrecision)
+			col.DbScale = lo.Ternary(col.DbScale == 0, colStats.MaxDecLen, col.DbScale)
 		} else {
 			// Mixed types or unrecognized - default to string/text
 			if colStats.MaxLen >= 4000 {
@@ -1291,7 +1293,7 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 				fmt.Sprintf("(%d)", length),
 			)
 		}
-	} else if strings.Contains(nativeType, "(,)") {
+	} else if strings.Contains(nativeType, "(,)") || g.In(nativeType, "numeric") {
 
 		precision := col.DbPrecision
 		scale := col.DbScale
@@ -1477,6 +1479,21 @@ type ColumnTyping struct {
 	String  *StringColumnTyping  `json:"string,omitempty" yaml:"string,omitempty"`
 	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
 	JSON    *JsonColumnTyping    `json:"json,omitempty" yaml:"json,omitempty"`
+}
+
+func (ct *ColumnTyping) MaxDecimals() int {
+	if ct == nil {
+		return -1
+	}
+
+	dec := g.PtrVal(ct.Decimal)
+	if dec.MaxScale > 0 {
+		return dec.MaxScale
+	} else if minScale := g.PtrVal(dec.MinScale); minScale > 0 {
+		return minScale
+	}
+
+	return -1
 }
 
 // StringColumnTyping contains string type mapping configurations
