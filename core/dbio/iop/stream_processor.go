@@ -554,7 +554,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 
 	// Float types
 	case float32, float64:
-		return FloatType
+		return DecimalType
 
 	// Decimal types
 	case decimal.Decimal:
@@ -566,7 +566,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 
 	// Time types
 	case time.Time, *time.Time:
-		return TimestampType
+		return TimestampzType
 
 	// String/Text types
 	case string:
@@ -600,7 +600,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 	case sql.NullBool:
 		return BoolType
 	case sql.NullTime:
-		return TimestampType
+		return TimestampzType
 
 	// Default case
 	default:
