@@ -996,7 +996,7 @@ func TestEvaluatorRenderPayload(t *testing.T) {
 	}
 }
 
-func TestEvaluatortExtractVars(t *testing.T) {
+func TestEvaluatorExtractVars(t *testing.T) {
 	type testCase struct {
 		name     string
 		expr     string
@@ -1093,6 +1093,324 @@ func TestEvaluatortExtractVars(t *testing.T) {
 			eval := NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync"))
 			result := eval.ExtractVars(tt.expr)
 			assert.ElementsMatch(t, tt.expected, result, "References should match expected values")
+		})
+	}
+}
+
+func TestEvaluatorCheckExpression(t *testing.T) {
+	tests := []struct {
+		name        string
+		expression  string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "empty_expression",
+			expression:  "",
+			expectError: false,
+		},
+		{
+			name:        "simple_expression_no_quotes",
+			expression:  "state.counter > 10",
+			expectError: false,
+		},
+		{
+			name:        "valid_double_quotes",
+			expression:  `state.name == "John"`,
+			expectError: false,
+		},
+		{
+			name:        "multiple_valid_double_quotes",
+			expression:  `state.firstName == "John" && state.lastName == "Doe"`,
+			expectError: false,
+		},
+		{
+			name:        "nested_double_quotes_with_escape",
+			expression:  `state.message == "He said \"Hello\""`,
+			expectError: false,
+		},
+		{
+			name:        "single_quote_error",
+			expression:  `state.name == 'John'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "single_quote_in_middle",
+			expression:  `state.name == "John" && state.title == 'Mr'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "single_quote_at_beginning",
+			expression:  `'test' == state.value`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "apostrophe_outside_double_quotes",
+			expression:  `state.name == "John's car"`,
+			expectError: false,
+		},
+		{
+			name:        "apostrophe_and_single_quote_mix",
+			expression:  `state.name == "John's car" && state.other == 'test'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "escaped_double_quote",
+			expression:  `state.quote == "She said \"hi\""`,
+			expectError: false,
+		},
+		{
+			name:        "multiple_escaped_double_quotes",
+			expression:  `state.json == "{\"name\": \"John\", \"age\": 30}"`,
+			expectError: false,
+		},
+		{
+			name:        "single_quote_after_escaped_double_quote",
+			expression:  `state.text == "He said \"hello\"" && state.bad == 'world'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "complex_valid_expression",
+			expression:  `response.status == 200 && response.data.message == "Success" && len(response.items) > 0`,
+			expectError: false,
+		},
+		{
+			name:        "backslash_before_single_quote_still_error",
+			expression:  `state.test == "valid" && state.invalid == \'bad\'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "double_backslash_before_double_quote",
+			expression:  `state.path == "C:\\Program Files\\"`,
+			expectError: false,
+		},
+		{
+			name:        "single_quote_inside_double_quotes_is_valid",
+			expression:  `state.message == "Don't do that"`,
+			expectError: false,
+		},
+		{
+			name:        "unclosed_double_quote_with_single_quote",
+			expression:  `state.name == "John && state.other == 'test'`,
+			expectError: true,
+			errorMsg:    "unclosed double quote",
+		},
+		{
+			name:        "only_single_quotes",
+			expression:  `'hello world'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "only_double_quotes",
+			expression:  `"hello world"`,
+			expectError: false,
+		},
+		{
+			name:        "mixed_quotes_complex",
+			expression:  `state.a == "test" && state.b == 'invalid' && state.c == "valid"`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "unicode_characters_with_double_quotes",
+			expression:  `state.emoji == "Hello 👋 world"`,
+			expectError: false,
+		},
+		{
+			name:        "unicode_characters_with_single_quotes",
+			expression:  `state.emoji == 'Hello 👋 world'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "json_like_string",
+			expression:  `state.config == "{\"timeout\": 30, \"retries\": 3}"`,
+			expectError: false,
+		},
+		{
+			name:        "regex_like_pattern_double_quotes",
+			expression:  `state.pattern == "^[a-zA-Z0-9]+$"`,
+			expectError: false,
+		},
+		{
+			name:        "regex_like_pattern_single_quotes",
+			expression:  `state.pattern == '^[a-zA-Z0-9]+$'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "empty_string_double_quotes",
+			expression:  `state.value == ""`,
+			expectError: false,
+		},
+		{
+			name:        "empty_string_single_quotes",
+			expression:  `state.value == ''`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "multiple_consecutive_escapes",
+			expression:  `state.path == "C:\\\\server\\\\path\\\\"`,
+			expectError: false,
+		},
+		{
+			name:        "quote_at_end_of_string",
+			expression:  `state.sql == "SELECT * FROM table WHERE name = \"John\""`,
+			expectError: false,
+		},
+		{
+			name:        "single_quote_at_very_end",
+			expression:  `someexpression'`,
+			expectError: true,
+			errorMsg:    "cannot use single quotes",
+		},
+		{
+			name:        "double_quote_at_very_end",
+			expression:  `someexpression"`,
+			expectError: true,
+			errorMsg:    "unclosed double quote",
+		},
+		// Parentheses tests
+		{
+			name:        "valid_parentheses_simple",
+			expression:  `func(arg1, arg2)`,
+			expectError: false,
+		},
+		{
+			name:        "valid_parentheses_nested",
+			expression:  `outer(inner(value), other)`,
+			expectError: false,
+		},
+		{
+			name:        "valid_parentheses_multiple",
+			expression:  `func1() && func2(arg) || func3(a, b)`,
+			expectError: false,
+		},
+		{
+			name:        "unclosed_parenthesis_simple",
+			expression:  `func(arg1, arg2`,
+			expectError: true,
+			errorMsg:    "unclosed parenthesis",
+		},
+		{
+			name:        "unclosed_parenthesis_nested",
+			expression:  `outer(inner(value), other`,
+			expectError: true,
+			errorMsg:    "unclosed parenthesis",
+		},
+		{
+			name:        "extra_closing_parenthesis",
+			expression:  `func(arg1, arg2))`,
+			expectError: true,
+			errorMsg:    "unmatched closing parenthesis",
+		},
+		{
+			name:        "parentheses_inside_double_quotes_valid",
+			expression:  `state.value == "text with (parentheses)"`,
+			expectError: false,
+		},
+		{
+			name:        "unclosed_quote_simple",
+			expression:  `state.name == "John`,
+			expectError: true,
+			errorMsg:    "unclosed double quote",
+		},
+		{
+			name:        "unclosed_quote_at_beginning",
+			expression:  `"unclosed string and other code`,
+			expectError: true,
+			errorMsg:    "unclosed double quote",
+		},
+		{
+			name:        "mixed_unclosed_quote_and_paren",
+			expression:  `func("unclosed string and missing paren`,
+			expectError: true,
+			errorMsg:    "unclosed double quote", // Quote error should be caught first
+		},
+		{
+			name:        "mixed_unclosed_paren_after_quote",
+			expression:  `func("closed string" and missing paren`,
+			expectError: true,
+			errorMsg:    "unclosed parenthesis",
+		},
+		{
+			name:        "complex_valid_expression_with_quotes_and_parens",
+			expression:  `len(state.items) > 0 && state.name == "John" && func(state.age)`,
+			expectError: false,
+		},
+		{
+			name:        "parentheses_with_escaped_quotes",
+			expression:  `func(state.message == "He said \"Hello\"")`,
+			expectError: false,
+		},
+		{
+			name:        "multiple_unclosed_parentheses",
+			expression:  `outer(inner(deep(value)`,
+			expectError: true,
+			errorMsg:    "unclosed parenthesis",
+		},
+		{
+			name:        "parentheses_only_closing",
+			expression:  `)`,
+			expectError: true,
+			errorMsg:    "unmatched closing parenthesis",
+		},
+		{
+			name:        "parentheses_only_opening",
+			expression:  `(`,
+			expectError: true,
+			errorMsg:    "unclosed parenthesis",
+		},
+		{
+			name:        "empty_parentheses",
+			expression:  `func()`,
+			expectError: false,
+		},
+		// Additional edge cases for escape handling
+		{
+			name:        "odd_escapes_before_quote",
+			expression:  `state.text == "He said \\\"Hello\\\""`,
+			expectError: false,
+		},
+		{
+			name:        "escaped_backslash_before_quote",
+			expression:  `state.path == "C:\\\\"`,
+			expectError: false,
+		},
+		{
+			name:        "parentheses_and_quotes_complex",
+			expression:  `func(state.name == "value") && other("test")`,
+			expectError: false,
+		},
+		{
+			name:        "nested_parens_with_unclosed_quote",
+			expression:  `func(inner(state.name == "unclosed))`,
+			expectError: true,
+			errorMsg:    "unclosed double quote",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(nil)
+			err := eval.Check(tt.expression)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" && err != nil {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
