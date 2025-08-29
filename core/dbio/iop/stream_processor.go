@@ -46,7 +46,6 @@ type StreamProcessor struct {
 	rowBlankValCnt   int
 	transformers     Transformers
 	digitString      map[int]string
-	transformEG      g.ErrorGroup
 }
 
 type StreamConfig struct {
