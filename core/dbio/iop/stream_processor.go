@@ -48,31 +48,30 @@ type StreamProcessor struct {
 }
 
 type StreamConfig struct {
-	EmptyAsNull       bool           `json:"empty_as_null"`
-	Header            bool           `json:"header"`
-	Compression       CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string         `json:"null_if"`
-	NullAs            string         `json:"null_as"`
-	DatetimeFormat    string         `json:"datetime_format"`
-	SkipBlankLines    bool           `json:"skip_blank_lines"`
-	Format            dbio.FileType  `json:"format"`
-	Delimiter         string         `json:"delimiter"`
-	Escape            string         `json:"escape"`
-	Quote             string         `json:"quote"`
-	FileMaxRows       int64          `json:"file_max_rows"`
-	FileMaxBytes      int64          `json:"file_max_bytes"`
-	BatchLimit        int64          `json:"batch_limit"`
-	MaxDecimals       int            `json:"max_decimals"`
-	Flatten           int            `json:"flatten"`
-	FieldsPerRec      int            `json:"fields_per_rec"`
-	Jmespath          string         `json:"jmespath"`
-	Sheet             string         `json:"sheet"`
-	ColumnCasing      ColumnCasing   `json:"column_casing"`
-	TargetType        dbio.Type      `json:"target_type"`
-	BoolAsInt         bool           `json:"-"`
-	Columns           Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        Transform
-	maxDecimalsFormat string `json:"-"`
+	EmptyAsNull    bool           `json:"empty_as_null"`
+	Header         bool           `json:"header"`
+	Compression    CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf         string         `json:"null_if"`
+	NullAs         string         `json:"null_as"`
+	DatetimeFormat string         `json:"datetime_format"`
+	SkipBlankLines bool           `json:"skip_blank_lines"`
+	Format         dbio.FileType  `json:"format"`
+	Delimiter      string         `json:"delimiter"`
+	Escape         string         `json:"escape"`
+	Quote          string         `json:"quote"`
+	FileMaxRows    int64          `json:"file_max_rows"`
+	FileMaxBytes   int64          `json:"file_max_bytes"`
+	BatchLimit     int64          `json:"batch_limit"`
+	MaxDecimals    int            `json:"max_decimals"`
+	Flatten        int            `json:"flatten"`
+	FieldsPerRec   int            `json:"fields_per_rec"`
+	Jmespath       string         `json:"jmespath"`
+	Sheet          string         `json:"sheet"`
+	ColumnCasing   ColumnCasing   `json:"column_casing"`
+	TargetType     dbio.Type      `json:"target_type"`
+	BoolAsInt      bool           `json:"-"`
+	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms     Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -81,13 +80,6 @@ func (sc *StreamConfig) ToMap() map[string]string {
 	m := g.M()
 	g.Unmarshal(g.Marshal(sc), &m)
 	return g.ToMapString(m)
-}
-
-func (sc *StreamConfig) SetMaxDecimals(val int) {
-	sc.MaxDecimals = val
-	if sc.MaxDecimals > -1 {
-		sc.maxDecimalsFormat = "%." + cast.ToString(sc.MaxDecimals) + "f"
-	}
 }
 
 type Transformers struct {
@@ -209,7 +201,7 @@ func NewStreamProcessor() *StreamProcessor {
 
 	sp.ResetConfig()
 	if val := os.Getenv("MAX_DECIMALS"); val != "" && val != "-1" {
-		sp.Config.SetMaxDecimals(cast.ToInt(val))
+		sp.Config.MaxDecimals = cast.ToInt(val)
 	}
 
 	sp.dateLayouts = []string{
@@ -366,7 +358,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		if err != nil {
 			sp.Config.MaxDecimals = -1
 		} else {
-			sp.Config.SetMaxDecimals(val)
+			sp.Config.MaxDecimals = val
 		}
 	}
 
@@ -933,9 +925,9 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 		}
 
 		if sp.Config.MaxDecimals > -1 && !isInt {
-			nVal = g.F(sp.Config.maxDecimalsFormat, fVal)
+			nVal = sp.TruncateDecimalString(sp.CastToString(val), sp.Config.MaxDecimals)
 		} else {
-			nVal = strings.Replace(cast.ToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
+			nVal = strings.Replace(sp.CastToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
 		}
 
 	case col.Type.IsBool():
@@ -1036,6 +1028,41 @@ func (sp *StreamProcessor) CountDigits(number string) (precision, scale int) {
 	return
 }
 
+// TruncateDecimalString return up to specified scale, without converting
+func (sp *StreamProcessor) TruncateDecimalString(number string, decCount int) (newNumber string) {
+
+	var precision, scale int
+	var inDecimal bool
+	newNumber = number
+
+	for i, c := range newNumber {
+		switch c {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			if inDecimal {
+				scale++ // count decimal digits
+				if scale > decCount {
+					return newNumber[0:i]
+				}
+			}
+		case '.':
+			if inDecimal {
+				// Multiple decimal points - treat subsequent ones as the end of valid decimal
+				return newNumber[0:i]
+			} else {
+				inDecimal = true
+				// If decCount is 0 or negative, truncate right at the decimal point
+				if decCount <= 0 {
+					return newNumber[0:i]
+				}
+			}
+		default:
+			return number // if not a digit, return as is (is a string?)
+		}
+		precision++ // total number of digits
+	}
+	return newNumber
+}
+
 func (sp *StreamProcessor) CastToString(val any) (valString string) {
 	valString, _ = sp.CastToStringE(val)
 	return
@@ -1103,18 +1130,8 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
-		} else if sp.Config.maxDecimalsFormat != "" {
-			if sp.Config.MaxDecimals > -1 && sp.Config.MaxDecimals <= 10 {
-				sVal := sp.CastToString(val)
-				_, scale := sp.CountDigits(sVal)
-				if scale > sp.Config.MaxDecimals {
-					if fVal, err := cast.ToFloat64E(val); err == nil {
-						return g.F(sp.Config.maxDecimalsFormat, fVal)
-					}
-				} else {
-					return sVal
-				}
-			}
+		} else if sp.Config.MaxDecimals > -1 {
+			return sp.TruncateDecimalString(sp.CastToString(val), sp.Config.MaxDecimals)
 		}
 		return sp.CastToString(val)
 		// return fmt.Sprintf("%v", val)
@@ -1416,8 +1433,40 @@ func (sp *StreamProcessor) parseStringFloat(s string) (newVal any, err error) {
 	if sp.hasZeroPrefix(s) {
 		return s, errors.New("number has zero prefix, treat as string")
 	}
-	// return fastfloat.ParseInt64(s)
 	return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+}
+
+func (sp *StreamProcessor) parseStringBigFloat(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	var ok bool
+	newVal, ok = new(big.Float).SetString(strings.Replace(s, ",", ".", 1))
+	if !ok {
+		return nil, errors.New("could not cast to big.Rat, treat as string")
+	}
+	return newVal, nil
+}
+
+func (sp *StreamProcessor) parseStringIsDecimal(s string) bool {
+	if sp.hasZeroPrefix(s) {
+		return false
+	}
+
+	var inDecimal bool
+	for _, c := range s {
+		switch c {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		case '.':
+			if inDecimal {
+				return false // can only have 1 dot
+			}
+			inDecimal = true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (sp *StreamProcessor) parseStringDecimal(s string) (newVal any, err error) {
@@ -1426,6 +1475,19 @@ func (sp *StreamProcessor) parseStringDecimal(s string) (newVal any, err error) 
 	}
 
 	return decimal.NewFromString(strings.Replace(s, ",", ".", 1))
+}
+
+func (sp *StreamProcessor) parseStringRational(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+
+	var ok bool
+	newVal, ok = new(big.Rat).SetString(strings.Replace(s, ",", ".", 1))
+	if !ok {
+		return nil, errors.New("could not cast to big.Rat, treat as string")
+	}
+	return newVal, nil
 }
 
 func (sp *StreamProcessor) parseStringTime(s string) (newVal any, err error) {

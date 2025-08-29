@@ -2,8 +2,6 @@ package iop
 
 import (
 	"testing"
-
-	"github.com/spf13/cast"
 )
 
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkProcessDecimal'
@@ -14,9 +12,39 @@ func BenchmarkProcessDecimal1(b *testing.B) {
 	}
 }
 func BenchmarkProcessDecimal2(b *testing.B) {
-
+	sp := NewStreamProcessor()
 	for n := 0; n < b.N; n++ {
-		cast.ToFloat64E("1273192311231.9382471941")
+		sp.parseStringFloat("1273192311231.9382471941")
+	}
+}
+func BenchmarkProcessDecimal3(b *testing.B) {
+	sp := NewStreamProcessor()
+	for n := 0; n < b.N; n++ {
+		sp.parseStringDecimal("1273192311231.9382471941")
+	}
+}
+func BenchmarkProcessDecimal4(b *testing.B) {
+	sp := NewStreamProcessor()
+	for n := 0; n < b.N; n++ {
+		sp.parseStringRational("1273192311231.9382471941")
+	}
+}
+func BenchmarkProcessDecimal5(b *testing.B) {
+	sp := NewStreamProcessor()
+	for n := 0; n < b.N; n++ {
+		sp.parseStringBigFloat("1273192311231.9382471941")
+	}
+}
+func BenchmarkProcessDecimal6(b *testing.B) {
+	sp := NewStreamProcessor()
+	for n := 0; n < b.N; n++ {
+		sp.parseStringIsDecimal("1273192311231.9382471941")
+	}
+}
+func BenchmarkProcessDecimal7(b *testing.B) {
+	sp := NewStreamProcessor()
+	for n := 0; n < b.N; n++ {
+		sp.TruncateDecimalString("1273192311231.9382471941", 9)
 	}
 }
 
@@ -158,6 +186,215 @@ func TestStreamProcessor_countDigits(t *testing.T) {
 
 			if scale != tt.scale {
 				t.Errorf("countDigits(%q) scale = %d, want %d", tt.number, scale, tt.scale)
+			}
+		})
+	}
+}
+
+func TestStreamProcessor_TruncateDecimalString(t *testing.T) {
+	sp := NewStreamProcessor()
+
+	tests := []struct {
+		name     string
+		number   string
+		decCount int
+		expected string
+	}{
+		// Basic decimal rounding
+		{
+			name:     "round to 2 decimals",
+			number:   "123.456789",
+			decCount: 2,
+			expected: "123.45",
+		},
+		{
+			name:     "round to 1 decimal",
+			number:   "123.456789",
+			decCount: 1,
+			expected: "123.4",
+		},
+		{
+			name:     "round to 0 decimals",
+			number:   "123.456789",
+			decCount: 0,
+			expected: "123",
+		},
+
+		// Exact decimal count matches
+		{
+			name:     "exact decimal count match",
+			number:   "123.45",
+			decCount: 2,
+			expected: "123.45",
+		},
+		{
+			name:     "fewer decimals than requested",
+			number:   "123.4",
+			decCount: 3,
+			expected: "123.4",
+		},
+
+		// Integer cases
+		{
+			name:     "integer with decimal count",
+			number:   "123",
+			decCount: 2,
+			expected: "123",
+		},
+
+		// Edge cases with zeros
+		{
+			name:     "trailing zeros",
+			number:   "123.450000",
+			decCount: 2,
+			expected: "123.45",
+		},
+		{
+			name:     "leading zeros in decimal",
+			number:   "123.001234",
+			decCount: 3,
+			expected: "123.001",
+		},
+
+		// Zero values
+		{
+			name:     "zero value",
+			number:   "0.123456",
+			decCount: 2,
+			expected: "0.12",
+		},
+		{
+			name:     "zero integer",
+			number:   "0",
+			decCount: 2,
+			expected: "0",
+		},
+
+		// Large numbers
+		{
+			name:     "large number",
+			number:   "1234567890.123456789",
+			decCount: 4,
+			expected: "1234567890.1234",
+		},
+
+		// Small decimals
+		{
+			name:     "very small decimal",
+			number:   "0.000001234",
+			decCount: 6,
+			expected: "0.000001",
+		},
+
+		// Decimal point at end
+		{
+			name:     "decimal point at end",
+			number:   "123.",
+			decCount: 2,
+			expected: "123.",
+		},
+
+		// Decimal point at start
+		{
+			name:     "decimal point at start",
+			number:   ".123456",
+			decCount: 2,
+			expected: ".12",
+		},
+
+		// Empty string
+		{
+			name:     "empty string",
+			number:   "",
+			decCount: 2,
+			expected: "",
+		},
+
+		// Just decimal point
+		{
+			name:     "just decimal point",
+			number:   ".",
+			decCount: 2,
+			expected: ".",
+		},
+
+		// Non-numeric characters (should return original)
+		{
+			name:     "non-numeric string",
+			number:   "abc",
+			decCount: 2,
+			expected: "abc",
+		},
+		{
+			name:     "mixed characters",
+			number:   "123.45abc",
+			decCount: 2,
+			expected: "123.45abc", // returns original when encountering non-digit
+		},
+
+		// Multiple decimal points (truncate at second decimal point)
+		{
+			name:     "multiple decimal points",
+			number:   "12.34.56",
+			decCount: 1,
+			expected: "12.3", // truncate at second decimal point
+		},
+
+		// Negative numbers (note: the method doesn't handle signs, treats as non-digit)
+		{
+			name:     "negative number",
+			number:   "-123.456",
+			decCount: 2,
+			expected: "-123.456", // returns original due to '-' being non-digit
+		},
+
+		// Scientific notation (treated as string)
+		{
+			name:     "scientific notation",
+			number:   "1.23e+10",
+			decCount: 2,
+			expected: "1.23e+10", // returns original due to 'e' being non-digit
+		},
+
+		// Very high decimal count
+		{
+			name:     "very high decimal count",
+			number:   "123.456",
+			decCount: 100,
+			expected: "123.456",
+		},
+
+		// Negative decimal count behavior
+		{
+			name:     "negative decimal count",
+			number:   "123.456",
+			decCount: -1,
+			expected: "123", // truncates at decimal point since -1 <= 0
+		},
+
+		// Edge case: zero decimal count
+		{
+			name:     "zero decimal count with integer",
+			number:   "123",
+			decCount: 0,
+			expected: "123",
+		},
+
+		// Very long decimal precision
+		{
+			name:     "very long decimal",
+			number:   "1.123456789012345678901234567890",
+			decCount: 10,
+			expected: "1.1234567890",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sp.TruncateDecimalString(tt.number, tt.decCount)
+
+			if result != tt.expected {
+				t.Errorf("RoundDecimalString(%q, %d) = %q, want %q", tt.number, tt.decCount, result, tt.expected)
 			}
 		})
 	}
