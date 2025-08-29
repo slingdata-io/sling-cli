@@ -32,13 +32,12 @@ import (
 type StreamProcessor struct {
 	N                uint64
 	dateLayoutCache  string
-	stringTypeCache  map[int]string
+	stringTypeCache  map[int]parseStringType
 	colStats         map[int]*ColumnStats
 	rowChecksum      []uint64
 	unrecognizedDate string
 	warn             bool
 	skipCurrent      bool // whether to skip current row (for constraints)
-	parseFuncs       map[string]func(s string) (any, error)
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
 	dateLayouts      []string
@@ -201,7 +200,7 @@ func NewTransformers() Transformers {
 // NewStreamProcessor returns a new StreamProcessor
 func NewStreamProcessor() *StreamProcessor {
 	sp := StreamProcessor{
-		stringTypeCache: map[int]string{},
+		stringTypeCache: map[int]parseStringType{},
 		colStats:        map[int]*ColumnStats{},
 		decReplRegex:    regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
 		transformers:    NewTransformers(),
@@ -213,30 +212,6 @@ func NewStreamProcessor() *StreamProcessor {
 		sp.Config.SetMaxDecimals(cast.ToInt(val))
 	}
 
-	// if val is '0400', '0401'. Such as codes.
-	hasZeroPrefix := func(s string) bool { return len(s) >= 2 && s[0] == '0' && s[1] != '.' }
-
-	sp.parseFuncs = map[string]func(s string) (any, error){
-		"int": func(s string) (any, error) {
-			if hasZeroPrefix(s) {
-				return s, errors.New("number has zero prefix, treat as string")
-			}
-			// return fastfloat.ParseInt64(s)
-			return strconv.ParseInt(s, 10, 64)
-		},
-		"float": func(s string) (any, error) {
-			if hasZeroPrefix(s) {
-				return s, errors.New("number has zero prefix, treat as string")
-			}
-			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
-		},
-		"time": func(s string) (any, error) {
-			return sp.ParseTime(s)
-		},
-		"bool": func(s string) (any, error) {
-			return cast.ToBoolE(s)
-		},
-	}
 	sp.dateLayouts = []string{
 		"2006-01-02",
 		"2006-01-02 15:04:05",
@@ -1335,6 +1310,16 @@ func (sp *StreamProcessor) ParseTime(i any) (t time.Time, err error) {
 	return
 }
 
+type parseStringType string
+
+const (
+	parseStringTypeInt     parseStringType = "int"
+	parseStringTypeDecimal parseStringType = "decimal"
+	parseStringTypeFloat   parseStringType = "float"
+	parseStringTypeTime    parseStringType = "time"
+	parseStringTypeBool    parseStringType = "bool"
+)
+
 // ParseString return an interface
 // string: "varchar"
 // integer: "integer"
@@ -1343,7 +1328,7 @@ func (sp *StreamProcessor) ParseTime(i any) (t time.Time, err error) {
 // datetime: "timestamp"
 // timestamp: "timestamp"
 // text: "text"
-func (sp *StreamProcessor) ParseString(s string, jj ...int) any {
+func (sp *StreamProcessor) ParseString(s string, jj ...int) (val any) {
 	if s == "" {
 		return nil
 	}
@@ -1353,50 +1338,102 @@ func (sp *StreamProcessor) ParseString(s string, jj ...int) any {
 		j = jj[0]
 	}
 
-	stringTypeCache := sp.stringTypeCache[j]
-
-	if stringTypeCache != "" {
-		i, err := sp.parseFuncs[stringTypeCache](s)
-		if err == nil {
-			return i
-		}
+	var err error
+	switch sp.stringTypeCache[j] {
+	case parseStringTypeInt:
+		val, err = sp.parseStringInt(s)
+	case parseStringTypeDecimal:
+		val, err = sp.parseStringDecimal(s)
+	case parseStringTypeFloat:
+		val, err = sp.parseStringFloat(s)
+	case parseStringTypeTime:
+		val, err = sp.parseStringTime(s)
+	case parseStringTypeBool:
+		val, err = sp.parseStringBool(s)
+	}
+	if val != nil && err == nil {
+		return val
 	}
 
 	// int
-	i, err := sp.parseFuncs["int"](s)
+	i, err := sp.parseStringInt(s)
 	if err == nil {
 		// if s = 0100, casting to int64 will return 64
 		// need to mitigate by when s starts with 0
 		if len(s) > 1 && s[0] == '0' {
 			return s
 		}
-		sp.stringTypeCache[j] = "int"
+		sp.stringTypeCache[j] = parseStringTypeInt
 		return i
 	}
 
-	// float
-	f, err := sp.parseFuncs["float"](s)
+	// // float
+	// f, err := sp.parseStringFloat(s)
+	// if err == nil {
+	// 	sp.stringTypeCache[j] = parseStringTypeFloat
+	// 	return f
+	// }
+
+	// decimal
+	d, err := sp.parseStringDecimal(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "float"
-		return f
+		sp.stringTypeCache[j] = parseStringTypeDecimal
+		return d
 	}
 
 	// date/time
-	t, err := sp.parseFuncs["time"](s)
+	t, err := sp.parseStringTime(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "time"
+		sp.stringTypeCache[j] = parseStringTypeTime
 		return t
 	}
 
 	// boolean
 	// FIXME: causes issues in SQLite and Oracle, needed for correct boolean parsing
-	b, err := sp.parseFuncs["bool"](s)
+	b, err := sp.parseStringBool(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "bool"
+		sp.stringTypeCache[j] = parseStringTypeBool
 		return b
 	}
 
 	return s
+}
+
+// if val is '0400', '0401'. Such as codes.
+func (sp *StreamProcessor) hasZeroPrefix(s string) bool {
+	return len(s) >= 2 && s[0] == '0' && s[1] != '.'
+}
+
+func (sp *StreamProcessor) parseStringInt(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	// return fastfloat.ParseInt64(s)
+	return strconv.ParseInt(s, 10, 64)
+}
+
+func (sp *StreamProcessor) parseStringFloat(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	// return fastfloat.ParseInt64(s)
+	return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+}
+
+func (sp *StreamProcessor) parseStringDecimal(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+
+	return decimal.NewFromString(strings.Replace(s, ",", ".", 1))
+}
+
+func (sp *StreamProcessor) parseStringTime(s string) (newVal any, err error) {
+	return sp.ParseTime(s)
+}
+
+func (sp *StreamProcessor) parseStringBool(s string) (newVal any, err error) {
+	return cast.ToBoolE(s)
 }
 
 // ProcessVal processes a value

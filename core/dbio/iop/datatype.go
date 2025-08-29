@@ -1546,6 +1546,7 @@ type DecimalColumnTyping struct {
 
 func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 
+	minPrecision := col.Stats.MaxLen
 	precision = col.DbPrecision
 	scale = col.DbScale
 
@@ -1555,7 +1556,6 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 			scale = lo.Ternary(scale < env.DdlMinDecScale, env.DdlMinDecScale, scale)
 			scale = lo.Ternary(scale < minScale, minScale, scale)
 		}
-		minPrecision := col.Stats.MaxLen + scale
 		precision = lo.Ternary(precision < (scale*2), scale*2, precision)
 		precision = lo.Ternary(precision < env.DdlMinDecLength, env.DdlMinDecLength, precision)
 		precision = lo.Ternary(precision < minPrecision, minPrecision, precision)
@@ -1570,6 +1570,10 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 
 	if dct.MinPrecision != nil && precision < *dct.MinPrecision {
 		precision = *dct.MinPrecision
+	}
+
+	if precision < minPrecision {
+		precision = minPrecision
 	}
 
 	if dct.MaxPrecision > 0 && precision > dct.MaxPrecision {
