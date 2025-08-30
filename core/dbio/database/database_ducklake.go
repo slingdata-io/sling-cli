@@ -53,6 +53,10 @@ func (conn *DuckLakeConn) Init() error {
 		return g.Error("did not provide 'catalog_conn_string'")
 	}
 
+	if _, ok := conn.properties["copy_method"]; !ok {
+		conn.SetProp("copy_method", "arrow_http") // default to arrow_http
+	}
+
 	// Set base properties
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbDuckLake

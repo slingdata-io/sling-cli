@@ -733,12 +733,26 @@ loop:
 
 				// determine if column type changed
 				for i, oldVal := range row {
+					col := ds.Columns[i]
 					newVal := newRow[i]
-					colType := ds.Columns[i].Type
+					colType := col.Type
 					oldType := ds.Sp.CheckType(oldVal)
 					newType := ds.Sp.CheckType(newVal)
 					if oldType != newType && colType != newType {
-						ds.Sp.ds.ChangeColumn(i, newType)
+						switch {
+						case colType.IsDatetime() && TimestampzType.IsDatetime(): // leave as is on orig column
+						case colType.IsDecimal() && newType.IsNumber(): // leave decimal on orig column
+						case colType.IsString() && newType.IsString(): // leave string as is
+						default:
+							// set directly since we're still profiling
+							g.Debug("column type change from transforms for %s (from %s to %s)", col.Name, col.Type, newType)
+							ds.Columns[i].Type = newType
+							if ds.df != nil {
+								if col := ds.df.Columns.GetColumn(ds.Columns[i].Name); col != nil {
+									col.Type = newType
+								}
+							}
+						}
 					}
 				}
 			}
@@ -1106,7 +1120,7 @@ func (ds *Datastream) ConsumeXmlReader(reader io.Reader) (err error) {
 		reader2 = newReader
 	}
 
-	decoder := xml.NewDecoder(reader2)
+	decoder := NewXMLDecoder(reader2)
 	js := NewJSONStream(ds, decoder, ds.Sp.Config.Flatten, ds.Sp.Config.Jmespath)
 	ds.it = ds.NewIterator(ds.Columns, js.NextFunc)
 

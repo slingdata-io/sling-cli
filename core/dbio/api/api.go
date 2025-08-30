@@ -68,6 +68,25 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	return ac, nil
 }
 
+func (ac *APIConnection) GetReplicationStore() (store map[string]any) {
+	err := g.JSONConvert(ac.State.State["replication_store"], &store)
+	if err != nil {
+		g.Warn("could not unmarshal from API state replication_store: " + err.Error())
+	}
+
+	if store == nil {
+		store = g.M()
+	}
+	return store
+}
+
+func (ac *APIConnection) SetReplicationStore(store map[string]any) {
+	if store == nil {
+		store = g.M()
+	}
+	ac.State.State["replication_store"] = store
+}
+
 // Close performs cleanup of all resources
 func (ac *APIConnection) Close() error {
 	ac.CloseAllQueues()
@@ -296,9 +315,9 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 
 // GetSyncedState cycles through each endpoint, and collects the values
 // for each of the Endpoint.Sync values. Output is a
-// map[Endpoint.Name]map[Sync.value] = Endpoint.syncMap[Sync.value]
-func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]map[string]any, err error) {
-	data = make(map[string]map[string]any)
+// map[Sync.value] = Endpoint.syncMap[Sync.value]
+func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]any, err error) {
+	data = make(map[string]any)
 
 	// Iterate through all endpoints
 	for _, endpoint := range ac.Spec.EndpointMap {
@@ -307,14 +326,11 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 			continue
 		}
 
-		// Initialize map for this endpoint
-		data[endpoint.Name] = make(map[string]any)
-
 		// Collect each sync value from endpoint's state with proper locking
 		endpoint.context.Lock()
 		for _, syncKey := range endpoint.Sync {
 			if val, ok := endpoint.State[syncKey]; ok {
-				data[endpoint.Name][syncKey] = val
+				data[syncKey] = val
 			}
 		}
 		endpoint.context.Unlock()
@@ -325,18 +341,13 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]ma
 
 // PutSyncedState restores the state from previous run in each endpoint
 // using the Endpoint.Sync values.
-// Inputs is map[Endpoint.Name]map[Sync.value] = Endpoint.syncMap[Sync.value]
-func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map[string]any) (err error) {
+// Inputs is map[Sync.value] = Endpoint.syncMap[Sync.value]
+func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any) (err error) {
 	// Iterate through all endpoints
 	for key, endpoint := range ac.Spec.EndpointMap {
 
 		// Skip if no sync values defined or no data for this endpoint
 		if len(endpoint.Sync) == 0 || !strings.EqualFold(endpoint.Name, endpointName) || len(data) == 0 {
-			continue
-		}
-
-		endpointData, exists := data[endpoint.Name]
-		if !exists {
 			continue
 		}
 
@@ -347,7 +358,7 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]map
 		}
 
 		// Restore each sync value to endpoint's state
-		for key, val := range endpointData {
+		for key, val := range data {
 			// Only restore if it's in the sync list
 			for _, syncKey := range endpoint.Sync {
 				if syncKey == key {

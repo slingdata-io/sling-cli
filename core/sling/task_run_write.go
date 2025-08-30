@@ -103,7 +103,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			sc := df.StreamConfig()
 			if ct := cfg.Target.Options.ColumnTyping; ct != nil {
 				if dec := ct.MaxDecimals(); dec > 0 {
-					sc.SetMaxDecimals(dec) // set max decimals if specified
+					sc.MaxDecimals = dec // set max decimals if specified
 				}
 			}
 

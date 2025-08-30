@@ -443,6 +443,13 @@ tools:
     
     **For `action: "docs"`**:
     - No parameters required (empty object)
+
+    **For `action: "parse"`**:
+    - `file_path` (string, required): Path to the pipeline configuration file to read.
+    
+    **For `action: "run"`**:
+    - `file_path` (string, required): Path to the pipeline configuration file to execute.
+    - `env` (object, optional): Environment variables to set for the pipeline run.
     
     **Output**: The output format depends on the action and audience:
     - **For User**: Human-readable messages, CSV tables, or status updates
@@ -460,7 +467,7 @@ tools:
     {
       "action": "parse",
       "input": {
-        "file_path": "path/to/my_pipeline.yaml",
+        "file_path": "path/to/my_pipeline.yaml"
       }
     }
     
@@ -469,6 +476,17 @@ tools:
       "action": "run",
       "input": {
         "file_path": "path/to/my_pipeline.yaml"
+      }
+    }
+
+    # Run a pipeline with environment variables
+    {
+      "action": "run",
+      "input": {
+        "file_path": "path/to/my_pipeline.yaml",
+        "env": {
+          "MY_VAR": "my_value"
+        }
       }
     }
     ```

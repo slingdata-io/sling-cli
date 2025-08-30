@@ -34,14 +34,15 @@ hooks:
     - type: query
       connection: '{source.name}'
       query: |
-        INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
-        VALUES (1, 0.01233, 0.01, 10)
 
-    - type: query
-      connection: '{source.name}'
-      query: |
         INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
-        VALUES (2, 123.456789, 123.45, 123)
+        VALUES (3, 123456789123456789.123456789, 1234567.12, 123456789);
+
+        INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
+        VALUES (1, 0.01233, 0.01, 10);
+
+        INSERT INTO {env.schema}.TEST_NUMBER_PRECISION (id, value_decimal, value_explicit, value_integer) 
+        VALUES (2, 123.456789, 123.45, 123);
 
     - type: query
       connection: '{source.name}'
@@ -80,6 +81,8 @@ hooks:
         store.result[0].value_decimal => {store.result[0].value_decimal}
         store.result[1] => {store.result[1]}
         store.result[1].value_decimal => {store.result[1].value_decimal}
+        store.result[2] => {store.result[2]}
+        store.result[2].value_decimal => {store.result[2].value_decimal}
 
     # ensure the decimal values are preserved
     - type: check
@@ -90,6 +93,9 @@ hooks:
 
     - type: check
       check: float_parse(store.result[1].value_decimal) == 123.456789
+
+    - type: check
+      check: store.result[2].value_decimal == "123456789123456789.123456789"
 
     - type: query
       connection: '{source.name}'

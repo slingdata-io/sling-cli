@@ -614,7 +614,6 @@ func (conn *BigQueryConn) importStreamConfig(columns iop.Columns) (config iop.St
 		} else if hasNumeric {
 			config.MaxDecimals = 9
 		}
-		config.SetMaxDecimals(config.MaxDecimals)
 	}
 
 	return config
