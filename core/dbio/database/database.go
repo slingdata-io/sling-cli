@@ -2279,60 +2279,6 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns
 	return statement
 }
 
-// Merge inserts / updates from a srcTable into a target table.
-// Assuming the srcTable has some or all of the tgtTable fields with matching types
-func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
-	var cnt int64
-	if conn.tx != nil {
-		cnt, err = Merge(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
-	} else {
-		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
-	}
-	if err != nil {
-		err = g.Error(err, "could not upsert")
-	}
-	return cast.ToInt64(cnt), err
-}
-
-// SwapTable swaps two table
-func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
-
-	tgtTableTemp := tgtTable + "_tmp" + g.RandString(g.AlphaRunesLower, 2)
-	conn.DropTable(tgtTableTemp)
-
-	sql := g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", tgtTable,
-		"new_table", tgtTableTemp,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+tgtTable)
-	}
-
-	sql = g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", srcTable,
-		"new_table", tgtTable,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+srcTable)
-	}
-
-	sql = g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", tgtTableTemp,
-		"new_table", srcTable,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+tgtTableTemp)
-	}
-
-	return
-}
-
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
 	var ct iop.ColumnTyping
@@ -2619,6 +2565,60 @@ const (
 	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
 	MergeStrategyReplace      MergeStrategy = "replace"
 )
+
+// Merge inserts / updates from a srcTable into a target table.
+// Assuming the srcTable has some or all of the tgtTable fields with matching types
+func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
+	var cnt int64
+	if conn.tx != nil {
+		cnt, err = Merge(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
+	} else {
+		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
+	}
+	if err != nil {
+		err = g.Error(err, "could not upsert")
+	}
+	return cast.ToInt64(cnt), err
+}
+
+// SwapTable swaps two table
+func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
+
+	tgtTableTemp := tgtTable + "_tmp" + g.RandString(g.AlphaRunesLower, 2)
+	conn.DropTable(tgtTableTemp)
+
+	sql := g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", tgtTable,
+		"new_table", tgtTableTemp,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+tgtTable)
+	}
+
+	sql = g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", srcTable,
+		"new_table", tgtTable,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+srcTable)
+	}
+
+	sql = g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", tgtTableTemp,
+		"new_table", srcTable,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+tgtTableTemp)
+	}
+
+	return
+}
 
 // GenerateMergeSQL returns a sql for upsert
 func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
