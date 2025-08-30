@@ -463,7 +463,7 @@ func Upsert(conn Connection, tx Transaction, sourceTable, targetTable string, pk
 		return
 	}
 
-	q, err := conn.GenerateUpsertSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
+	q, err := conn.GenerateIncrementalSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert sql")
 		return

@@ -389,10 +389,10 @@ func (conn *RedshiftConn) BulkImportStream(tableFName string, ds *iop.Datastream
 	return conn.BulkImportFlow(tableFName, df)
 }
 
-// GenerateUpsertSQL generates the upsert SQL
-func (conn *RedshiftConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateIncrementalSQL generates the upsert SQL
+func (conn *RedshiftConn) GenerateIncrementalSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+	upsertMap, err := conn.BaseConn.GenerateIncrementalExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return

@@ -303,10 +303,10 @@ func (conn *DuckDbConn) generateCsvColumns(columns iop.Columns) (colStr string) 
 	return conn.duck.GenerateCsvColumns(columns)
 }
 
-// GenerateUpsertSQL generates the upsert SQL
-func (conn *DuckDbConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateIncrementalSQL generates the upsert SQL
+func (conn *DuckDbConn) GenerateIncrementalSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+	upsertMap, err := conn.BaseConn.GenerateIncrementalExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return
