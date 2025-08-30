@@ -2610,6 +2610,16 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 	return
 }
 
+// MergeStrategy is for incremental loading
+type MergeStrategy string
+
+const (
+	MergeStrategyAppend       MergeStrategy = "append"
+	MergeStrategyMerge        MergeStrategy = "merge"
+	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
+	MergeStrategyReplace      MergeStrategy = "replace"
+)
+
 // GenerateMergeSQL returns a sql for upsert
 func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
