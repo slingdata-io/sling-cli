@@ -192,11 +192,11 @@ func (conn *DuckLakeConn) GetURL(newURL ...string) string {
 	return connURL
 }
 
-// GenerateIncrementalSQL generates the upsert SQL for DuckLake
-func (conn *DuckLakeConn) GenerateIncrementalSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQL generates the upsert SQL for DuckLake
+func (conn *DuckLakeConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 	// DuckLake supports transactions and proper ACID operations
 	// For now, use the same approach as DuckDB
-	return conn.DuckDbConn.GenerateIncrementalSQL(srcTable, tgtTable, pkFields)
+	return conn.DuckDbConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
 }
 
 func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]any) (data iop.Dataset, err error) {

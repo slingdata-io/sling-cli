@@ -86,7 +86,7 @@ type Connection interface {
 	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string
-	GenerateIncrementalSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
+	GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
 	GetAnalysis(string, map[string]interface{}) (string, error)
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
 	GetColumnsFull(string) (iop.Dataset, error)
@@ -2610,10 +2610,10 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 	return
 }
 
-// GenerateIncrementalSQL returns a sql for upsert
-func (conn *BaseConn) GenerateIncrementalSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQL returns a sql for upsert
+func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.GenerateIncrementalExpressions(srcTable, tgtTable, pkFields)
+	upsertMap, err := conn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return
@@ -2639,8 +2639,8 @@ func (conn *BaseConn) GenerateIncrementalSQL(srcTable string, tgtTable string, p
 	return
 }
 
-// GenerateIncrementalExpressions returns a map with needed expressions
-func (conn *BaseConn) GenerateIncrementalExpressions(srcTable string, tgtTable string, pkFields []string) (exprs map[string]string, err error) {
+// GenerateMergeExpressions returns a map with needed expressions
+func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string, pkFields []string) (exprs map[string]string, err error) {
 
 	srcColumns, err := conn.GetColumns(srcTable)
 	if err != nil {
