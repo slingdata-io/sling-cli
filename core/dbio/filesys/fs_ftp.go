@@ -204,7 +204,7 @@ func (fs *FtpFileSysClient) List(url string) (nodes FileNodes, err error) {
 
 	entries, err := fs.client.List(path)
 	if err != nil {
-		return nodes, g.Error(err, "error listing path")
+		return nodes, g.Error(err, "error listing path: %#v", path)
 	}
 
 	for _, file := range entries {
