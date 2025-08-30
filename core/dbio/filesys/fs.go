@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -224,7 +225,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
-			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, url.QueryEscape(password))
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
 			path = strings.TrimPrefix(path, "/")
@@ -238,7 +239,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
-			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, url.QueryEscape(password))
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
 			path = strings.TrimPrefix(path, "/")
