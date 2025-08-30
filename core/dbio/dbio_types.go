@@ -84,6 +84,7 @@ const (
 	TypeDbIceberg       Type = "iceberg"
 	TypeDbAzureTable    Type = "azuretable"
 	TypeDbExasol        Type = "exasol"
+	TypeDbArrowFlight   Type = "flightsql"
 )
 
 var AllType = []struct {

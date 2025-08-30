@@ -24,6 +24,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
 	_ "github.com/go-sql-driver/mysql"
@@ -312,6 +313,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
+	} else if strings.HasPrefix(URL, "flightsql:") {
+		conn = &AzureTableConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -375,6 +378,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
+	case dbio.TypeDbArrowFlight:
+		driverName = "flightsql"
 	default:
 		driverName = dbType.String()
 	}
