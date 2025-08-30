@@ -856,6 +856,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = c.Type.String() + "://{user}:{password}@{host}:{port}/"
+		if path := cast.ToString(c.Data["path"]); path != "" {
+			template = template + path
+		}
 	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure,
 		dbio.TypeFileLocal:
 		return nil
