@@ -24,7 +24,7 @@ endpoints:
       processors:
         - expression: int_parse(date_format(now(), "%Y"))
           output: record.loaded_year
-        - expression: log(record)
+        # - expression: log(record)
       
   executions:
       

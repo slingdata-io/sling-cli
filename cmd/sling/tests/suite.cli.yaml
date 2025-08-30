@@ -872,3 +872,10 @@
     - '✓ Age field imported correctly'
     - '✓ Salary field imported correctly'
     - '✓ XML to PostgreSQL import test completed successfully!'
+
+- id: 108
+  name: Test Sling Platform
+  run: sling run -r cmd/sling/tests/replications/r.52.api_sling_platform.yaml
+  streams: 3
+  output_contains:
+    - 'execution succeeded'
