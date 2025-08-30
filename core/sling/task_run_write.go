@@ -987,7 +987,7 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 	}
 	g.Debug("performing upsert from temporary table %s to target table %s with primary keys %v",
 		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
-	rowAffCnt, err := tgtConn.Upsert(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
+	rowAffCnt, err := tgtConn.Merge(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	if err != nil {
 		err = g.Error(err, "could not perform upsert from temp")
 		return err

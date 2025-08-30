@@ -223,9 +223,9 @@ func (t *BaseTransaction) InsertBatchStream(tableFName string, ds *iop.Datastrea
 	return
 }
 
-// Upsert does an upsert from source table into target table
-func (t *BaseTransaction) Upsert(sourceTable, targetTable string, pkFields []string) (count uint64, err error) {
-	cnt, err := Upsert(t.Conn, t, sourceTable, targetTable, pkFields)
+// Merge does an upsert from source table into target table
+func (t *BaseTransaction) Merge(sourceTable, targetTable string, pkFields []string) (count uint64, err error) {
+	cnt, err := Merge(t.Conn, t, sourceTable, targetTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "Could not upsert from %s into %s", sourceTable, targetTable)
 	}
@@ -448,8 +448,8 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 	return count, nil
 }
 
-// Upsert upserts from source table into target table
-func Upsert(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string) (count int64, err error) {
+// Merge upserts from source table into target table
+func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkFields []string) (count int64, err error) {
 
 	srcTable, err := ParseTableName(sourceTable, conn.GetType())
 	if err != nil {

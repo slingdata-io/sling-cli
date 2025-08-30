@@ -141,7 +141,7 @@ type Connection interface {
 	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
-	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
+	Merge(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
@@ -2279,14 +2279,14 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns
 	return statement
 }
 
-// Upsert inserts / updates from a srcTable into a target table.
+// Merge inserts / updates from a srcTable into a target table.
 // Assuming the srcTable has some or all of the tgtTable fields with matching types
-func (conn *BaseConn) Upsert(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
+func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
 	var cnt int64
 	if conn.tx != nil {
-		cnt, err = Upsert(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
+		cnt, err = Merge(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
 	} else {
-		cnt, err = Upsert(conn.Self(), nil, srcTable, tgtTable, primKeys)
+		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
 	}
 	if err != nil {
 		err = g.Error(err, "could not upsert")
