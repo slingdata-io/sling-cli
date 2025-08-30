@@ -2,7 +2,7 @@ name: sling-platform
 
 defaults:
   state:
-    base_url: https://api.slingdata.io
+    base_url: '{ coalesce(secrets.base_url, "https://api.slingdata.io") }'
   
   request:
     headers:
@@ -22,7 +22,7 @@ endpoints:
         primary_key: [name]
       
       processors:
-        - expression: date_format(now(), "%Y")
+        - expression: int_parse(date_format(now(), "%Y"))
           output: record.loaded_year
         - expression: log(record)
       
@@ -42,7 +42,7 @@ endpoints:
   executions_many:
     
     state:
-      start_date: '{ coalesce(env.START_DATE, state.max_start_time, "2025-01-01") }'
+      start_date: '{ coalesce(env.START_DATE, sync.max_start_time, "2025-01-01T00:00:00.000000Z") }'
       end_date: '{ coalesce(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ")) }'
     
     # external sync on start/end of replication. null on first run.
@@ -52,7 +52,8 @@ endpoints:
       url: '{state.base_url}/execution/list'
 
       parameters:
-        limit: 500
+        limit: 100
+        order: asc
         filters: >
           {"period":["{state.start_date}","{state.end_date}"]}
     
@@ -67,7 +68,6 @@ endpoints:
             start_time: start_time
           }
         primary_key: [exec_id]
-        # limit: 3
       
       processors:
         - aggregation: maximum
@@ -78,14 +78,11 @@ endpoints:
             )
           output: state.max_start_time
 
-      # pagination:
-      #   # stop if condition is met
-      #   stop_condition: >
-      #     length(response.records) == 0 || 
-      #     state.max_start_time == state.start_date
+    pagination:
+      # stop if condition is met
+      stop_condition: length(response.records) == 0
 
-      #   # set state for next page
-      #   next_state:
-      #     start_date: state.max_start_time
-      #     end_date: date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ")
+      # set state for next page
+      next_state:
+        start_date: '{state.max_start_time}'
         
