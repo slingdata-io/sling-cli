@@ -1,0 +1,92 @@
+name: sling-platform
+
+defaults:
+  state:
+    base_url: '{ secrets.base_url }'
+  
+  request:
+    headers:
+      Authorization: 'Sling-Project-Token {secrets.api_token}'
+      Content-Type: application/json
+
+
+endpoints:
+  connections:
+
+    iterate:
+      over: "state.replication_store.records"
+      into: "state.test_record"
+      
+    request:
+      url: '{state.base_url}/connection/list?test-value={state.test_record.id}'
+    
+    response:
+      records:
+        jmespath: connections[*]
+        primary_key: [name]
+      
+      processors:
+        - expression: int_parse(date_format(now(), "%Y"))
+          output: record.loaded_year
+        # - expression: log(record)
+      
+  executions:
+      
+    request:
+      url: '{state.base_url}/execution/list'
+    
+    response:
+      records:
+        jmespath: executions[*]
+        primary_key: [exec_id]
+      
+      # processors:
+      #   - expression: log(record)
+      
+  executions_many:
+    
+    state:
+      start_date: '{ coalesce(env.START_DATE, sync.max_start_time, "2025-01-01T00:00:00.000000Z") }'
+      end_date: '{ coalesce(env.END_DATE, date_format(now(), "%Y-%m-%dT%H:%M:%S.%fZ")) }'
+    
+    # external sync on start/end of replication. null on first run.
+    sync: [ max_start_time ]
+      
+    request:
+      url: '{state.base_url}/execution/list'
+
+      parameters:
+        limit: 100
+        order: asc
+        filters: >
+          {"period":["{state.start_date}","{state.end_date}"]}
+    
+    response:
+      records:
+        jmespath: >
+          executions[*].{
+            exec_id: exec_id,
+            rows: rows,
+            replication_md5: replication_md5,
+            task_md5: task_md5,
+            start_time: start_time
+          }
+        primary_key: [exec_id]
+      
+      processors:
+        - aggregation: maximum
+          expression: |
+            date_format(
+              date_parse(record.start_time),
+              "%Y-%m-%dT%H:%M:%S.%fZ"
+            )
+          output: state.max_start_time
+
+    pagination:
+      # stop if condition is met
+      stop_condition: length(response.records) == 0
+
+      # set state for next page
+      next_state:
+        start_date: '{state.max_start_time}'
+        

@@ -1,0 +1,26 @@
+source: sling_platform_api_test
+target: postgres
+
+defaults:
+  object: '{source_name}.{stream_name}'
+  mode: full-refresh
+
+streams:
+  '*':
+  connections:
+    hooks:
+      pre:
+        - type: query
+          connection: postgres
+          query: |
+            with cte as (
+              select 1 as id union select 2 as id union select 3 as id union select 4 as id
+            )
+            select id from cte order by id
+          into: records
+
+  executions_many:
+    mode: incremental
+
+env:
+  SLING_STATE: postgres/sling_state.sling_platform_api_staging

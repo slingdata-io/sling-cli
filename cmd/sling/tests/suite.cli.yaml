@@ -873,9 +873,16 @@
     - '✓ Salary field imported correctly'
     - '✓ XML to PostgreSQL import test completed successfully!'
 
-- id: 108
-  name: Test Sling Platform
-  run: sling run -r cmd/sling/tests/replications/r.52.api_sling_platform.yaml
+- id: 109
+  name: Test API -- Sling Platform
+  run: sling run -r cmd/sling/tests/replications/apis/r.sling_platform.yaml -d
   streams: 3
   output_contains:
     - 'execution succeeded'
+    
+    # test iterations
+    - '/connection/list?test-value=1'
+    - '/connection/list?test-value=2'
+    - '/connection/list?test-value=3'
+    - '/connection/list?test-value=4'
+    - '/execution/list?filters=%7B%22period'
