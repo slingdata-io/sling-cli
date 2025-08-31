@@ -14,6 +14,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/jinzhu/copier"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/spf13/cast"
@@ -860,7 +861,12 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	output = input
 
 	noCompute := false // especially in SQL queries
-	stateMap := e.State
+	stateMap := g.M()
+	err = copier.CopyWithOption(&stateMap, &e.State, copier.Option{DeepCopy: true})
+	if err != nil {
+		return nil, g.Error(err, "could not deep copy for evaluation")
+	}
+
 	for _, extra := range extras {
 		for k, v := range extra {
 			stateMap[k] = v

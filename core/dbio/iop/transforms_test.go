@@ -1414,3 +1414,39 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		})
 	}
 }
+
+// go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkPtEvaluatorRenderPayload'
+func BenchmarkPtEvaluatorRenderPayload(b *testing.B) {
+
+	eState := g.M("value1", 1, "value2", g.M("nested1", "a"))
+	eval := NewEvaluator(g.ArrStr("state", "store", "env", "run", "target", "source", "stream", "object", "timestamp", "execution", "loop"), eState)
+
+	// Render the payload
+	var err error
+	expr := "value1={state.value1} | value2={state.value2.nested1}"
+	for n := 0; n < b.N; n++ {
+		newState := g.M("value1", 11)
+		_, err = eval.RenderPayload(expr, newState)
+		if err != nil {
+			return
+		}
+	}
+}
+
+// go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkPtEvaluatorRenderPayload'
+func BenchmarkPtEvaluatorEval(b *testing.B) {
+
+	eState := g.M("value1", 1, "value2", g.M("nested1", "a"))
+	eval := NewEvaluator(g.ArrStr("state", "store", "env", "run", "target", "source", "stream", "object", "timestamp", "execution", "loop"), eState)
+
+	// Render the payload
+	var err error
+	expr := "value1={state.value1} | value2={state.value2.nested1}"
+	for n := 0; n < b.N; n++ {
+		newState := g.M("value1", 1, "value2", g.M("nested1", "a"))
+		_, err = eval.Eval.Evaluate(expr, newState, GlobalFunctionMap)
+		if err != nil {
+			return
+		}
+	}
+}
