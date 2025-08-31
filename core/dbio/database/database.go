@@ -2560,10 +2560,11 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 type MergeStrategy string
 
 const (
-	MergeStrategyAppend       MergeStrategy = "append"
-	MergeStrategyMerge        MergeStrategy = "merge"
+	MergeStrategyNone         MergeStrategy = ""
+	MergeStrategyInsert       MergeStrategy = "insert"
+	MergeStrategyUpdate       MergeStrategy = "update"
+	MergeStrategyUpdateInsert MergeStrategy = "update_insert"
 	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
-	MergeStrategyReplace      MergeStrategy = "replace"
 )
 
 // Merge inserts / updates from a srcTable into a target table.
@@ -2623,7 +2624,7 @@ func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
 // GenerateMergeSQL returns a sql for upsert
 func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
+	mc, err := conn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return
@@ -2638,19 +2639,25 @@ func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkField
 		sqlTemplate,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"pk_fields", upsertMap["pk_fields"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
+		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
+		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"pk_fields", mc.Map["pk_fields"],
+		"set_fields", mc.Map["set_fields"],
+		"insert_fields", mc.Map["insert_fields"],
+		"src_fields", mc.Map["src_fields"],
 	)
 
 	return
 }
 
-// GenerateMergeExpressions returns a map with needed expressions
-func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string, pkFields []string) (exprs map[string]string, err error) {
+type MergeConfig struct {
+	Strategy MergeStrategy
+	Template string
+	Map      map[string]string
+}
+
+// GenerateMergeConfig returns the merge config
+func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFields []string) (mc MergeConfig, err error) {
 
 	srcColumns, err := conn.GetColumns(srcTable)
 	if err != nil {
@@ -2701,7 +2708,7 @@ func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string,
 		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
 		tgtCol := tgtColumns.GetColumn(tgtColName)
 		if tgtCol == nil {
-			return nil, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
+			return mc, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
 		}
 
 		// don't normalize, use raw name
@@ -2725,20 +2732,48 @@ func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string,
 	// cast into the correct type
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
-	exprs = map[string]string{
-		"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
-		"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
-		"src_fields":         strings.Join(srcFields, ", "),
-		"tgt_fields":         strings.Join(tgtFields, ", "),
-		"insert_fields":      strings.Join(insertFields, ", "),
-		"pk_fields":          strings.Join(pkFields, ", "),
-		"src_pk_fields":      strings.Join(srcPkFields, ", "),
-		"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
-		"set_fields":         strings.Join(setFields, ", "),
-		"placeholder_fields": strings.Join(placeholderFields, ", "),
+	mc = MergeConfig{
+		Strategy: MergeStrategy(conn.GetTemplateValue("variable.merge_strategy")),
+		Template: "",
+		Map: map[string]string{
+			"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
+			"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+			"src_fields":         strings.Join(srcFields, ", "),
+			"tgt_fields":         strings.Join(tgtFields, ", "),
+			"insert_fields":      strings.Join(insertFields, ", "),
+			"pk_fields":          strings.Join(pkFields, ", "),
+			"src_pk_fields":      strings.Join(srcPkFields, ", "),
+			"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
+			"set_fields":         strings.Join(setFields, ", "),
+			"placeholder_fields": strings.Join(placeholderFields, ", "),
+		},
+	}
+
+	switch mc.Strategy {
+	case MergeStrategyInsert, MergeStrategyUpdate, MergeStrategyUpdateInsert, MergeStrategyDeleteInsert:
+	case MergeStrategyNone:
+		return mc, g.Error("no default merge strategy specified for %s", conn.GetType())
+	default:
+		return mc, g.Error("invalid merge strategy %s", mc.Strategy)
+	}
+
+	key := g.F("core.merge_%s", mc.Strategy)
+	mc.Template = conn.GetTemplateValue(key)
+
+	if mc.Template == "" {
+		return mc, g.Error("merge strategy `%s` not supported for %s (did not find SQL template key `%s`)", mc.Strategy, conn.GetType(), key)
 	}
 
 	return
+}
+
+// GenerateMergeExpressions returns a map with needed expressions
+func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string, pkFields []string) (upsertMap map[string]string, err error) {
+	mc, err := conn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
+	if err != nil {
+		return nil, err
+	}
+	return mc.Map, nil
 }
 
 // GetColumnStats analyzes the table and returns the column statistics

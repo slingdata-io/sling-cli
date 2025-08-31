@@ -273,85 +273,44 @@ func (conn *PostgresConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Colu
 // GenerateMergeSQL generates the upsert SQL
 func (conn *PostgresConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
+	mc, err := conn.BaseConn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return
 	}
 
 	pkFieldsQ := lo.Map(pkFields, func(f string, i int) string { return conn.Quote(f) })
-	indexSQL := g.R(
-		conn.GetTemplateValue("core.create_unique_index"),
-		"index", strings.Join(pkFields, "_")+"_idx",
-		"table", tgtTable,
-		"cols", strings.Join(pkFieldsQ, ", "),
-	)
-
-	// in order to use on conflict, the target table needs
-	//  a unique index on the PK. We will not use it since
-	// it complicates matters
-	sqlTempl := `
-	{indexSQL};
-	insert into {tgt_table}
-	({insert_fields})
-	select {src_fields} from {src_table} src
-	on conflict ({tgt_pk_fields})
-	DO UPDATE 
-	SET {set_fields}
-	`
 
 	tempTable := g.RandSuffix("temp", 5)
 
-	tempIndexSQL := g.R(
+	tempTableIndexSQL := g.R(
 		conn.GetTemplateValue("core.create_unique_index"),
 		"index", tempTable+"_idx",
 		"table", tempTable,
 		"cols", strings.Join(pkFieldsQ, ", "),
 	)
 
-	sqlTempl = `
-	create temporary table {temp_table} as
-	with src_table as (
-		select {src_fields} from {src_table}
+	finalTableIndexSQL := g.R(
+		conn.GetTemplateValue("core.create_unique_index"),
+		"index", strings.Join(pkFields, "_")+"_idx",
+		"table", tgtTable,
+		"cols", strings.Join(pkFieldsQ, ", "),
 	)
-	, updates as (
-		update {tgt_table} tgt
-		set {set_fields}
-		from src_table src
-		where {src_tgt_pk_equal}
-		returning tgt.*
-	)
-	select * from updates;
-
-	{tempIndexSQL};
-
-	with src_table as (
-		select {src_fields} from {src_table}
-	)
-	insert into {tgt_table}
-	({insert_fields})
-	select {src_fields} from src_table src
-	where not exists (
-		select 1
-		from {temp_table} upd
-		where {src_upd_pk_equal}
-	)
-	`
 
 	sql = g.R(
-		sqlTempl,
+		mc.Template,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
 		"temp_table", tempTable,
-		"indexSQL", indexSQL,
-		"tempIndexSQL", tempIndexSQL,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"src_fields", upsertMap["src_fields"],
-		"tgt_pk_fields", upsertMap["tgt_pk_fields"],
+		"final_table_index_sql", finalTableIndexSQL,
+		"temp_table_index_sql", tempTableIndexSQL,
+		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
+		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"src_fields", mc.Map["src_fields"],
+		"tgt_pk_fields", mc.Map["tgt_pk_fields"],
 		// "set_fields", strings.ReplaceAll(upsertMap["set_fields"], "src.", "excluded."),
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
+		"set_fields", mc.Map["set_fields"],
+		"insert_fields", mc.Map["insert_fields"],
 	)
 
 	return

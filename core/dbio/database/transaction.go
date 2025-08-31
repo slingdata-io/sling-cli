@@ -463,7 +463,7 @@ func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkF
 		return
 	}
 
-	q, err := conn.GenerateMergeSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
+	q, err := conn.Self().GenerateMergeSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert sql")
 		return
