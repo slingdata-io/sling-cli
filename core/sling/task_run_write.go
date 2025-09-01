@@ -925,6 +925,12 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
 	}
 
+	// if one wishes to not write the partition columns
+	// see https://github.com/slingdata-io/sling-cli/issues/634
+	if val := os.Getenv("DUCKDB_WRITE_PARTITION_COLS"); val != "" {
+		copyOptions.WritePartitionCols = cast.ToBool(val)
+	}
+
 	if len(copyOptions.PartitionFields) > 0 && copyOptions.PartitionKey == "" {
 		return bw, g.Error("missing update_key in order to partition")
 	}
