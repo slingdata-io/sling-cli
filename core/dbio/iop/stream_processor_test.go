@@ -345,7 +345,7 @@ func TestStreamProcessor_TruncateDecimalString(t *testing.T) {
 			name:     "negative number",
 			number:   "-123.456",
 			decCount: 2,
-			expected: "-123.456", // returns original due to '-' being non-digit
+			expected: "-123.45",
 		},
 
 		// Scientific notation (treated as string)
