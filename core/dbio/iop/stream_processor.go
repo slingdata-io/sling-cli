@@ -1044,6 +1044,7 @@ func (sp *StreamProcessor) TruncateDecimalString(number string, decCount int) (n
 					return newNumber[0:i]
 				}
 			}
+		case '-':
 		case '.':
 			if inDecimal {
 				// Multiple decimal points - treat subsequent ones as the end of valid decimal
