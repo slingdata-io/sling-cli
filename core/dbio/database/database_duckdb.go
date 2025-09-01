@@ -133,7 +133,7 @@ func (conn *DuckDbConn) Connect(timeOut ...int) (err error) {
 
 	// add extensions
 	if conn.GetProp("copy_method") == "arrow_http" {
-		conn.duck.AddExtension("arrow")
+		conn.duck.AddExtension("arrow from community")
 	}
 
 	return nil
