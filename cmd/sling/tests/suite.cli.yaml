@@ -886,3 +886,9 @@
     - '/connection/list?test-value=3'
     - '/connection/list?test-value=4'
     - '/execution/list?filters=%7B%22period'
+
+- id: 110
+  name: Test API -- Sling Stripe
+  run: sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
+  output_contains:
+    - 'execution succeeded'

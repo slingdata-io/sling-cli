@@ -647,7 +647,7 @@ skipGetState:
 func (t *TaskExecution) runApiToFile() (err error) {
 
 	start = time.Now()
-	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+	t.SetProgress("connecting to source api (%s)", strings.ToLower(t.Config.SrcConn.Name))
 
 	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
 	if err != nil {

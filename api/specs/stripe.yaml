@@ -509,7 +509,7 @@ endpoints:
     response:
       records:
         jmespath: "data[]"
-        primary_key: ["id"]
+        primary_key: [ subscription_id, id ]
       
       processors:
         - expression: "state.subscription_id"

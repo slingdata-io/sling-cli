@@ -211,7 +211,7 @@ runReplication:
 		if env.NoColor {
 			g.Info(text)
 		} else {
-			g.Info(g.Colorize(g.ColorCyan, text))
+			g.Info(env.CyanString(text))
 		}
 	}
 

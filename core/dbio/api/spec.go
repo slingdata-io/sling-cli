@@ -366,6 +366,14 @@ type Iteration struct {
 	endpoint *Endpoint
 }
 
+func (iter *Iteration) Debug(text string, args ...any) {
+	if iter.field != "" {
+		id := g.F("i%02d", iter.id)
+		text = env.DarkGrayString(id) + " " + text
+	}
+	g.Debug(text, args...)
+}
+
 // StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any
 
