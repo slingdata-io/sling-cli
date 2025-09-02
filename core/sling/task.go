@@ -528,6 +528,9 @@ func (t *TaskExecution) getTargetOptionsMap() (options map[string]any) {
 	// set target type for column casing, name length validation
 	options["target_type"] = string(t.Config.TgtConn.Type)
 
+	// set to delete file/folder
+	options["delete_file"] = true
+
 	return
 }
 

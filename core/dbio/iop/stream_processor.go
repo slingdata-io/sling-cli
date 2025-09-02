@@ -69,6 +69,7 @@ type StreamConfig struct {
 	Sheet          string         `json:"sheet"`
 	ColumnCasing   ColumnCasing   `json:"column_casing"`
 	TargetType     dbio.Type      `json:"target_type"`
+	DeleteFile     bool           `json:"delete"` // whether to delete before writing
 	BoolAsInt      bool           `json:"-"`
 	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
 	transforms     Transform
@@ -388,6 +389,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["skip_blank_lines"]; ok {
 		sp.Config.SkipBlankLines = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["delete_file"]; ok {
+		sp.Config.DeleteFile = cast.ToBool(val)
 	}
 
 	if val, ok := configMap["column_casing"]; ok {

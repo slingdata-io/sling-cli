@@ -960,10 +960,12 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		localCtx.Wg.Read.Wait()
 	}
 
-	err = Delete(fsClient, url)
-	if err != nil {
-		err = g.Error(err, "Could not delete url")
-		return
+	if sc.DeleteFile {
+		err = Delete(fsClient, url)
+		if err != nil {
+			err = g.Error(err, "Could not delete url")
+			return
+		}
 	}
 
 	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
@@ -1301,7 +1303,7 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		fileFormat = InferFileFormat(uri)
 	}
 
-	if deleteURI := uri; true {
+	if deleteURI := uri; sc.DeleteFile {
 		if strings.Contains(deleteURI, "*") {
 			deleteURI = GetDeepestParent(deleteURI) // get target folder, since split by files
 		}
