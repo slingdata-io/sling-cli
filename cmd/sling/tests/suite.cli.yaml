@@ -932,3 +932,16 @@
   rows: 1000
   output_contains:
     - 'execution succeeded'
+
+# Test Prometheus with no data (should not error)
+- id: 115
+  run: 'sling run -r cmd/sling/tests/replications/r.53.prometheus_incremental.yaml'
+  env:
+    SLING_ALLOW_EMPTY: 'TRUE'
+  conns:
+    - prometheus
+    - postgres
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'execution succeeded'

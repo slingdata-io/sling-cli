@@ -1,0 +1,21 @@
+source: prometheus
+target: postgres
+  
+hooks:
+  start:
+    # Clean up test table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.prometheus_no_data_test;
+
+  end:
+    # Clean up
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.prometheus_no_data_test;
+
+streams:
+  # Query for data that doesn't exist - should not error in full-refresh mode
+  'go_memstats_alloc_bytes_total{job="nonexistent_job_that_will_not_match"} # {"start": "now-1h", "end": "now", "step": "5m"}':
+    object: public.prometheus_no_data_test
+    mode: full-refresh
