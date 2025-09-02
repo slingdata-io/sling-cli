@@ -892,3 +892,43 @@
   run: sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
   output_contains:
     - 'execution succeeded'
+
+- id: 111
+  name: Run AWS S3 file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: aws_s3
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 112
+  name: Run AZURE_STORAGE file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: AZURE_STORAGE
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 113
+  name: Run GOOGLE_STORAGE file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: GOOGLE_STORAGE
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 114
+  name: Run local file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: local
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'

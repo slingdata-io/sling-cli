@@ -1,0 +1,39 @@
+source: postgres
+target: '{my_target}'
+
+defaults:
+  mode: full-refresh
+  object: 'test-splitting/{stream_schema}/{stream_table}'
+
+hooks:
+  end:
+    # List files in the target folder to verify correct chunking
+    - type: list
+      id: list_files
+      location: '{env.my_target}/test-splitting/public/test1k_athena_pg/'
+      only: files
+
+    - type: log
+      message: |
+        Files created: {length(state.list_files.result)}
+        File list: {state.list_files.result}
+
+    # Check that exactly 11 files were created (1000 rows / 100 rows per file = 10 files + 1 manifest)
+    - type: check
+      check: length(state.list_files.result) == 11
+      failure_message: "Expected 11 files but got {length(state.list_files.result)}"
+
+    # Clean up files after test
+    - type: delete
+      location: '{env.my_target}/test-splitting/'
+
+streams:
+  public.test1k_athena_pg:
+    sql: select * from {stream_schema}.{stream_table}
+    mode: full-refresh
+    target_options:
+      file_max_rows: 100
+      format: parquet
+
+env:
+  my_target: ${MY_TARGET}
