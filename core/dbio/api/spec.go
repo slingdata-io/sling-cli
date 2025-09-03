@@ -189,6 +189,7 @@ type Endpoint struct {
 	context      *g.Context
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
 	bloomFilter  *bloom.BloomFilter
+	aggregate    AggregateState
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -486,7 +487,6 @@ type Rule struct {
 type SingleRequest struct {
 	Request    *RequestState  `yaml:"request" json:"request"`
 	Response   *ResponseState `yaml:"response" json:"response"`
-	Aggregate  AggregateState `yaml:"-" json:"-"`
 	httpReq    *http.Request  `yaml:"-" json:"-"`
 	httpRespWg sync.WaitGroup `yaml:"-" json:"-"`
 	id         string         `yaml:"-" json:"-"`
