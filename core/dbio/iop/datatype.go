@@ -797,7 +797,7 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			col.Type = BoolType
 			col.goType = reflect.TypeOf(true)
 			colStats.Min = 0
-		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
+		} else if colStats.IntCnt > 0 && colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt && col.Type != DecimalType {
 			// Check if the values are too large for a regular int
 			if colStats.Min < -2147483648 || colStats.Max > 2147483647 {
 				col.Type = BigIntType
@@ -810,6 +810,11 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 				// cast as bigint for safety
 				col.Type = BigIntType
 			}
+		} else if (colStats.DecCnt > 0 && colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt) || col.Type == DecimalType { // keep as decimal if already set from mapping
+			col.Type = DecimalType
+			col.goType = reflect.TypeOf(float64(0.0))
+			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, colStats.MaxLen, col.DbPrecision)
+			col.DbScale = lo.Ternary(col.DbScale == 0, colStats.MaxDecLen, col.DbScale)
 		} else if colStats.DateCnt > 0 && colStats.DateCnt+colStats.NullCnt == colStats.TotalCnt {
 			col.Type = DateType
 			col.goType = reflect.TypeOf(time.Now())
@@ -822,11 +827,6 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
-		} else if colStats.DecCnt > 0 && colStats.DecCnt+colStats.IntCnt+colStats.NullCnt == colStats.TotalCnt {
-			col.Type = DecimalType
-			col.goType = reflect.TypeOf(float64(0.0))
-			col.DbPrecision = lo.Ternary(col.DbPrecision == 0, colStats.MaxLen, col.DbPrecision)
-			col.DbScale = lo.Ternary(col.DbScale == 0, colStats.MaxDecLen, col.DbScale)
 		} else {
 			// Mixed types or unrecognized - default to string/text
 			if colStats.MaxLen >= 4000 {
