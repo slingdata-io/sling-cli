@@ -58,9 +58,6 @@ func (conn *OracleConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
-	// set MAX_DECIMALS to import for numeric types
-	conn.SetProp("MAX_DECIMALS", "9")
-
 	return conn.BaseConn.Init()
 }
 
