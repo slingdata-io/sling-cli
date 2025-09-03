@@ -104,7 +104,45 @@ func (conn *PrometheusConn) NewTransaction(ctx context.Context, options ...*sql.
 	return
 }
 func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err error) {
-	return iop.Columns{{Name: "metric"}}, nil
+	// For Prometheus, we need to examine the query to determine expected columns
+	// Default columns for time series data
+	columns = iop.Columns{
+		{Name: "__name__", Type: iop.StringType, Position: 1},
+		{Name: "job", Type: iop.StringType, Position: 2},
+		{Name: "instance", Type: iop.StringType, Position: 3},
+		{Name: "timestamp", Type: iop.BigIntType, Position: 4},
+		{Name: "value", Type: iop.DecimalType, Position: 5},
+	}
+	
+	// Try to get actual columns by querying with a very small time range
+	if table.SQL != "" {
+		// Extract the base query without options
+		baseQuery := table.SQL
+		if idx := strings.Index(baseQuery, "#"); idx != -1 {
+			baseQuery = strings.TrimSpace(baseQuery[:idx])
+		}
+		
+		// Query with a minimal time range to get column structure
+		testOpts := g.M(
+			"start", "now-1m",
+			"end", "now",
+			"step", "1m",
+			"limit", 1,
+			"get_columns", true,
+		)
+		
+		ds, err := conn.StreamRowsContext(conn.Context().Ctx, baseQuery, testOpts)
+		if err == nil && ds != nil {
+			// Wait for columns to be initialized
+			ds.WaitReady()
+			if len(ds.Columns) > 0 {
+				columns = ds.Columns
+			}
+			ds.Close()
+		}
+	}
+	
+	return columns, nil
 }
 
 // NewTransaction creates a new transaction
@@ -125,7 +163,7 @@ func (conn *PrometheusConn) GetTableColumns(table *Table, fields ...string) (col
 		return nil, g.Error("did not find collection %s", table.FullName())
 	}
 
-	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10))
+	ds, err := conn.StreamRows(table.FullName(), g.M("limit", 10, "silent", true, "get_columns", true))
 	if err != nil {
 		return columns, g.Error("could not query to get columns")
 	}
@@ -149,6 +187,11 @@ func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 		lastPart := parts[len(parts)-1]
 		g.Unmarshal(lastPart, &options)
 		g.Debug("query options: %s", g.Marshal(options))
+	}
+
+	// Pass table columns for fallback when no data is returned
+	if len(table.Columns) > 0 {
+		options["columns"] = table.Columns
 	}
 
 	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.SQL, options)
@@ -505,6 +548,17 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		return nil, g.Error("invalid result: %#v", result)
 	}
 
+	// If no columns were detected (no data), use columns from options
+	if len(data.Columns) == 0 && opts["columns"] != nil {
+		switch cols := opts["columns"].(type) {
+		case iop.Columns:
+			data.Columns = cols
+		default:
+			// Try to convert from options
+			g.JSONConvert(opts["columns"], &data.Columns)
+		}
+	}
+
 	ds = data.Stream(conn.Props())
 
 	return
@@ -824,8 +878,17 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 			time.Sleep(100 * time.Millisecond)
 		}
 
-		// If no columns were initialized (no data), create empty columns and set ready
+		// If no columns were initialized (no data), use columns from options if available
 		if !columnsInitialized {
+			if opts["columns"] != nil {
+				switch cols := opts["columns"].(type) {
+				case iop.Columns:
+					ds.Columns = cols
+				default:
+					// Try to convert from options
+					g.JSONConvert(opts["columns"], &ds.Columns)
+				}
+			}
 			ds.SetReady()
 		}
 	}()

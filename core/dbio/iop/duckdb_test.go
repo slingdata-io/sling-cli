@@ -274,7 +274,7 @@ func TestDuckDbDataflowToHttpStream(t *testing.T) {
 
 		// Create DuckDB instance
 		duck := NewDuckDb(ctx)
-		duck.AddExtension("arrow")
+		duck.AddExtension("arrow from community")
 		defer duck.Close()
 
 		// Test DataflowToHttpStream with Arrow format

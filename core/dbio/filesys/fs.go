@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -224,7 +225,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
-			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, url.QueryEscape(password))
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
 			path = strings.TrimPrefix(path, "/")
@@ -238,7 +239,7 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, u.U.User.Username())
 			path = strings.TrimPrefix(path, ":")
 			password, _ := u.U.User.Password()
-			path = strings.TrimPrefix(path, password)
+			path = strings.TrimPrefix(path, url.QueryEscape(password))
 			path = strings.TrimPrefix(path, "@")
 			path = strings.TrimPrefix(path, u.U.Host)
 			path = strings.TrimPrefix(path, "/")
@@ -959,10 +960,12 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 		localCtx.Wg.Read.Wait()
 	}
 
-	err = Delete(fsClient, url)
-	if err != nil {
-		err = g.Error(err, "Could not delete url")
-		return
+	if sc.DeleteFile {
+		err = Delete(fsClient, url)
+		if err != nil {
+			err = g.Error(err, "Could not delete url")
+			return
+		}
 	}
 
 	if !singleFile && g.In(fsClient.FsType(), dbio.TypeFileLocal, dbio.TypeFileSftp, dbio.TypeFileFtp) {
@@ -1300,6 +1303,17 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 		fileFormat = InferFileFormat(uri)
 	}
 
+	if deleteURI := uri; sc.DeleteFile {
+		if strings.Contains(deleteURI, "*") {
+			deleteURI = GetDeepestParent(deleteURI) // get target folder, since split by files
+		}
+		err = Delete(fs, deleteURI)
+		if err != nil {
+			err = g.Error(err, "Could not delete uri")
+			return bw, err
+		}
+	}
+
 	for streamPart := range streamPartChn {
 		copyOptions := iop.DuckDbCopyOptions{
 			Format:        fileFormat,
@@ -1323,17 +1337,15 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			}
 
 			// create the parent folder if needed
-			if fs.FsType() == dbio.TypeFileLocal {
-				parent := path.Dir(localPath)
-				if err = os.MkdirAll(parent, 0755); err != nil {
-					err = g.Error(err, "Could not create output folder")
-					return bw, err
-				}
-				if duckSc.FileMaxRows > 0 {
-					copyOptions.FileSizeBytes = 0 // since we are splitting by rows already
-					os.MkdirAll(localPath, 0755)  // make root dir first
-					localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
-				}
+			parent := path.Dir(localPath)
+			if err = os.MkdirAll(parent, 0755); err != nil {
+				err = g.Error(err, "Could not create output folder")
+				return bw, err
+			}
+			if duckSc.FileMaxRows > 0 {
+				copyOptions.FileSizeBytes = 0 // since we are splitting by rows already
+				os.MkdirAll(localPath, 0755)  // make root dir first
+				localPath = g.F("%s/data_%03d.parquet", localPath, streamPart.Index+1)
 			}
 
 			sql, err := duck.GenerateCopyStatement(streamPart.FromExpr, localPath, copyOptions)
@@ -1381,12 +1393,6 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			// copy files bytes recursively to target
 			if strings.Contains(uri, "*") {
 				uri = GetDeepestParent(uri) // get target folder, since split by files
-			}
-
-			err = Delete(fs, uri)
-			if err != nil {
-				err = g.Error(err, "Could not delete uri")
-				return bw, err
 			}
 
 			written, err := CopyFromLocalRecursive(fs, localRoot, uri)

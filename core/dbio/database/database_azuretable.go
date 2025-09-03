@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type AzureTableConn struct {
 	AccountKey    string
 	SASToken      string
 	ConnectionStr string
+	TableName     string // Specific table name for table-specific SAS tokens
 }
 
 // Init initiates the object
@@ -56,6 +58,17 @@ func (conn *AzureTableConn) getNewClient(timeOut ...int) (client *aztables.Servi
 		return client, nil
 	} else if conn.SASToken != "" {
 		// Use SAS token
+		// Check if the SAS token contains a table name in the URL
+		if strings.Contains(conn.SASToken, "tn=") {
+			// Extract table name from SAS token if present
+			if u, err := url.Parse("?" + strings.TrimPrefix(conn.SASToken, "?")); err == nil {
+				if tn := u.Query().Get("tn"); tn != "" {
+					conn.TableName = tn
+					g.Debug("Extracted table name from SAS token: %s", tn)
+				}
+			}
+		}
+
 		sasURL := serviceURL + "?" + strings.TrimPrefix(conn.SASToken, "?")
 		client, err = aztables.NewServiceClientWithNoCredential(sasURL, nil)
 		if err != nil {
@@ -100,6 +113,7 @@ func (conn *AzureTableConn) Connect(timeOut ...int) error {
 	}
 	conn.SASToken = conn.GetProp("sas_token")
 	conn.ConnectionStr = conn.GetProp("conn_str")
+	conn.TableName = conn.GetProp("table_name")
 
 	var err error
 	conn.Client, err = conn.getNewClient(timeOut...)
@@ -107,15 +121,28 @@ func (conn *AzureTableConn) Connect(timeOut ...int) error {
 		return g.Error(err, "Failed to connect to client")
 	}
 
-	// Test connection by listing tables
-	ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, 5*time.Second)
-	defer cancel()
+	// Test connection
+	// For SAS tokens, we may not have permissions to list tables
+	// Only test listing if we're not using a SAS token or if it's likely an account-level SAS
+	if conn.SASToken == "" || strings.Contains(conn.SASToken, "ss=t") {
+		// ss=t indicates table service permissions in account SAS
+		ctx, cancel := context.WithTimeout(conn.BaseConn.Context().Ctx, 5*time.Second)
+		defer cancel()
 
-	pager := conn.Client.NewListTablesPager(nil)
-	if pager.More() {
-		_, err = pager.NextPage(ctx)
-		if err != nil {
-			return g.Error(err, "Failed to list tables")
+		pager := conn.Client.NewListTablesPager(nil)
+		if pager.More() {
+			_, err = pager.NextPage(ctx)
+			if err != nil {
+				// If using SAS token and we get authorization error, that's ok
+				// The SAS token might be table-specific
+				if conn.SASToken != "" && strings.Contains(err.Error(), "AuthorizationFailure") {
+					g.Debug("SAS token does not have list permissions, assuming table-specific SAS")
+				} else if strings.Contains(err.Error(), "AuthorizationResourceTypeMismatch") {
+					g.Debug("SAS token does not have list permissions: AuthorizationResourceTypeMismatch")
+				} else {
+					g.Warn("Failed to list tables: %s", err.Error())
+				}
+			}
 		}
 	}
 
@@ -645,13 +672,42 @@ func (conn *AzureTableConn) TableExists(table Table) (exists bool, err error) {
 	// Sanitize table name for Azure Table Storage
 	sanitizedName := sanitizeAzureTableName(table.Name)
 
-	// List tables and check if our table exists
+	// If we have a specific table name from SAS token, check if it matches
+	if conn.TableName != "" {
+		return sanitizedName == conn.TableName, nil
+	}
+
+	// Try to list tables and check if our table exists
 	ctx := conn.Context().Ctx
 	pager := conn.Client.NewListTablesPager(nil)
 
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
+			// Handle authorization errors for SAS tokens
+			if conn.SASToken != "" && strings.Contains(err.Error(), "AuthorizationFailure") {
+				// Can't list tables, try to access the table directly
+				tableClient := conn.Client.NewClient(sanitizedName)
+				// Try to get a single entity to check if table exists
+				queryOptions := &aztables.ListEntitiesOptions{
+					Top: g.Ptr(int32(1)),
+				}
+				pager := tableClient.NewListEntitiesPager(queryOptions)
+				if pager.More() {
+					_, err := pager.NextPage(ctx)
+					if err == nil {
+						return true, nil
+					}
+					// Check if error is table not found
+					if strings.Contains(err.Error(), "TableNotFound") || strings.Contains(err.Error(), "ResourceNotFound") {
+						return false, nil
+					}
+					// Some other error (could be auth or network issue)
+					return false, g.Error(err, "could not verify table existence")
+				}
+				// Assume table exists if we can't verify otherwise
+				return true, nil
+			}
 			return false, g.Error(err, "could not list tables")
 		}
 
@@ -700,14 +756,27 @@ func (conn *AzureTableConn) GetSchemas() (data iop.Dataset, err error) {
 
 // GetTables returns tables
 func (conn *AzureTableConn) GetTables(schema string) (data iop.Dataset, err error) {
+	data = iop.NewDataset(iop.NewColumnsFromFields("table_name"))
+
+	// If we have a specific table name (from table-specific SAS), return just that
+	if conn.TableName != "" {
+		data.Append([]any{conn.TableName})
+		return data, nil
+	}
+
+	// Try to list tables
 	ctx := conn.Context().Ctx
 	pager := conn.Client.NewListTablesPager(nil)
-
-	data = iop.NewDataset(iop.NewColumnsFromFields("table_name"))
 
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
+			// Handle authorization errors gracefully for SAS tokens
+			if conn.SASToken != "" && strings.Contains(err.Error(), "AuthorizationFailure") {
+				g.Debug("Cannot list tables with current SAS token permissions")
+				// Return empty dataset instead of error
+				return data, nil
+			}
 			return data, g.Error(err, "could not list tables")
 		}
 

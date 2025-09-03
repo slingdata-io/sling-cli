@@ -509,7 +509,7 @@ endpoints:
     response:
       records:
         jmespath: "data[]"
-        primary_key: ["id"]
+        primary_key: [ subscription_id, id ]
       
       processors:
         - expression: "state.subscription_id"
@@ -521,7 +521,7 @@ endpoints:
     docs: https://docs.stripe.com/api/events
     
     state:
-      starting_after: '{ sync.last_id }'  # will be null on first run
+      ending_before: '{ sync.last_id }'  # will be null on first run
       created_gte: '{coalesce(env.CREATED_GTE, date_format(date_add(now(), -30, "day"), "%s"))}'
     
     sync: [ last_id ]
@@ -530,13 +530,20 @@ endpoints:
       url: '{state.base_url}/events'
       parameters:
         limit: '{state.limit}'
+        ending_before: '{state.ending_before}'
         starting_after: '{state.starting_after}'
         # created[gte]: '{state.created_gte}'
         # types: customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
     
+    # Strange pagination logic:
+    # on first run (no `sync.last_id` value), the most recent event is first,
+    # so we have to use `starting_after` to paginate through all the records.
+    # on incremental run (with a `sync.last_id` value), in order to get the
+    # records created after the last known event ID, we have to use `ending_before`
     pagination:
       next_state:
-        starting_after: '{response.records[-1].id}'
+        starting_after: '{ is_null(sync.last_id) ? response.records[length(response.records)-1].id : nil }'
+        ending_before: '{ !is_null(sync.last_id) ? response.records[0].id : nil }'
       stop_condition: "response.json.has_more == false || length(response.records) < 1"
     
     response:
@@ -547,4 +554,4 @@ endpoints:
       processors:
         - expression: "record.id"
           output: "state.last_id"
-          aggregation: "last"
+          aggregation: "first"

@@ -441,8 +441,8 @@ func (x *DbX) Update(o interface{}, fields ...string) (cnt int, err error) {
 	return
 }
 
-// Upsert upserts from object or slice
-func (x *DbX) Upsert(o interface{}, fields ...string) (cnt int, err error) {
+// Merge upserts from object or slice
+func (x *DbX) Merge(o interface{}, fields ...string) (cnt int, err error) {
 	defer x.Where() // reset where clause
 	return
 }

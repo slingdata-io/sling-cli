@@ -58,9 +58,6 @@ func (conn *OracleConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
-	// set MAX_DECIMALS to import for numeric types
-	conn.SetProp("MAX_DECIMALS", "9")
-
 	return conn.BaseConn.Init()
 }
 
@@ -526,10 +523,10 @@ func (conn *OracleConn) writeCsv(ds *iop.Datastream, writer io.Writer, pu *cmap.
 	return
 }
 
-// GenerateUpsertSQL generates the upsert SQL
-func (conn *OracleConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQL generates the upsert SQL
+func (conn *OracleConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return

@@ -858,3 +858,90 @@
     - "Very high scale BIGNUMERIC value preserved accurately"
     - "CSV to BigQuery BIGNUMERIC conversion test completed successfully!"
     - "execution succeeded"
+
+- id: 108
+  name: Run XML to PostgreSQL import test
+  run: 'sling run -r cmd/sling/tests/replications/r.51.xml_postgres_import.yaml'
+  streams: 1
+  rows: 5
+  output_contains:
+    - 'execution succeeded'
+    - '✓ All 5 XML records imported successfully'
+    - '✓ Name field imported correctly'
+    - '✓ Email field imported correctly'
+    - '✓ Age field imported correctly'
+    - '✓ Salary field imported correctly'
+    - '✓ XML to PostgreSQL import test completed successfully!'
+
+- id: 109
+  name: Test API -- Sling Platform
+  run: sling run -r cmd/sling/tests/replications/apis/r.sling_platform.yaml -d
+  streams: 3
+  output_contains:
+    - 'execution succeeded'
+    
+    # test iterations
+    - '/connection/list?test-value=1'
+    - '/connection/list?test-value=2'
+    - '/connection/list?test-value=3'
+    - '/connection/list?test-value=4'
+    - '/execution/list?filters=%7B%22period'
+
+- id: 110
+  name: Test API -- Sling Stripe
+  run: sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
+  output_contains:
+    - 'execution succeeded'
+
+- id: 111
+  name: Run AWS S3 file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: aws_s3
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 112
+  name: Run AZURE_STORAGE file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: AZURE_STORAGE
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 113
+  name: Run GOOGLE_STORAGE file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: GOOGLE_STORAGE
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+- id: 114
+  name: Run local file splitting test
+  run: 'sling run -r cmd/sling/tests/replications/r.52.parquet_file_splitting.yaml'
+  env:
+    MY_TARGET: local
+  streams: 1
+  rows: 1000
+  output_contains:
+    - 'execution succeeded'
+
+# Test Prometheus with no data (should not error)
+- id: 115
+  run: 'sling run -r cmd/sling/tests/replications/r.53.prometheus_incremental.yaml'
+  env:
+    SLING_ALLOW_EMPTY: 'TRUE'
+  conns:
+    - prometheus
+    - postgres
+  streams: 1
+  rows: 0
+  output_contains:
+    - 'execution succeeded'

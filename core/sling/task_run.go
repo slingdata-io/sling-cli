@@ -2,6 +2,7 @@ package sling
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"os"
 	"runtime"
@@ -275,6 +276,14 @@ func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnect
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
+	}
+
+	// set replication store
+	state, err := t.Replication.RuntimeState()
+	if err != nil {
+		g.Warn("could not get replication store to put into API state: " + err.Error())
+	} else {
+		conn.SetReplicationStore(state.Store)
 	}
 
 	if err := conn.Authenticate(); err != nil {
@@ -565,7 +574,7 @@ func (t *TaskExecution) runApiToDb() (err error) {
 			err = g.Error(err, "Could not get incremental value")
 			return err
 		}
-		var syncState map[string]map[string]any
+		var syncState map[string]any
 		if t.Config.IncrementalVal != nil {
 			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
 			if err != nil {
@@ -594,6 +603,11 @@ skipGetState:
 	if err != nil {
 		err = g.Error(err, "could not write to database")
 		return
+	}
+
+	// sync back replication store
+	if state, err := t.Replication.RuntimeState(); err == nil {
+		maps.Copy(state.Store, srcConn.GetReplicationStore())
 	}
 
 	elapsed := int(time.Since(start).Seconds())
@@ -633,7 +647,7 @@ skipGetState:
 func (t *TaskExecution) runApiToFile() (err error) {
 
 	start = time.Now()
-	t.SetProgress("connecting to source api (%s)", t.Config.SrcConn.Type)
+	t.SetProgress("connecting to source api (%s)", strings.ToLower(t.Config.SrcConn.Name))
 
 	srcConn, err := t.getSrcApiConn(t.Context.Ctx)
 	if err != nil {
@@ -651,7 +665,7 @@ func (t *TaskExecution) runApiToFile() (err error) {
 			return err
 		}
 
-		var syncState map[string]map[string]any
+		var syncState map[string]any
 		if t.Config.IncrementalVal != nil {
 			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
 			if err != nil {
@@ -684,6 +698,11 @@ skipGetState:
 	if err != nil {
 		err = g.Error(err, "Could not WriteToFile")
 		return
+	}
+
+	// sync back replication store
+	if state, err := t.Replication.RuntimeState(); err == nil {
+		maps.Copy(state.Store, srcConn.GetReplicationStore())
 	}
 
 	elapsed := int(time.Since(start).Seconds())

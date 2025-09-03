@@ -13,6 +13,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -77,7 +78,10 @@ func (c *Connection) Test() (ok bool, err error) {
 		}
 
 		limit := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_LIMIT", "10"))
-		g.Debug("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)
+		if limit > 1000 {
+			limit = 1000 // let's set the max limit to 1000 for testing
+		}
+		g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
 
 		for _, endpoint := range endpoints {
 			// check for match to test (if provided)

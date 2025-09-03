@@ -167,7 +167,7 @@ func (fs *SftpFileSysClient) List(url string) (nodes FileNodes, err error) {
 	}
 	files, err = fs.client.ReadDir(path)
 	if err != nil {
-		return nodes, g.Error(err, "error listing path")
+		return nodes, g.Error(err, "error listing path: %#v", path)
 	}
 
 	if path == "/" {
@@ -223,7 +223,7 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes FileNodes, err err
 	path = strings.TrimSuffix(path, "/")
 	files, err = fs.client.ReadDir(path)
 	if err != nil {
-		return nodes, g.Error(err, "error listing path")
+		return nodes, g.Error(err, "error listing path: %#v", path)
 	}
 
 	for _, file := range files {
@@ -237,7 +237,7 @@ func (fs *SftpFileSysClient) ListRecursive(uri string) (nodes FileNodes, err err
 		if file.IsDir() {
 			subNodes, err := fs.ListRecursive(node.Path() + "/")
 			if err != nil {
-				return nil, g.Error(err, "error listing sub path")
+				return nil, g.Error(err, "error listing sub path: %#v", node.Path())
 			}
 			nodes.AddWhere(pattern, ts, subNodes...)
 		} else {

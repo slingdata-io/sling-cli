@@ -25,6 +25,48 @@ core:
   rename_table: ALTER TABLE {table} RENAME TO {new_table}
   modify_column: alter column {column} type {type}
   use_database: SET search_path TO {database}
+  
+  # in order to use on conflict, the target table needs
+  #  a unique index on the PK. We will not use it since
+  # it complicates matters
+  # merge_update_insert: |
+  #   {final_table_index_sql};
+  #   insert into {tgt_table}
+  #   ({insert_fields})
+  #   select {src_fields} from {src_table} src
+  #   on conflict ({tgt_pk_fields})
+  #   do update 
+  #   SET {set_fields}
+    
+  merge_update_insert: |
+    create temporary table {temp_table} as
+    with src_table as (
+      select {src_fields} from {src_table}
+    )
+    , updates as (
+      update {tgt_table} tgt
+      set {set_fields}
+      from src_table src
+      where {src_tgt_pk_equal}
+      returning tgt.*
+    )
+    select * from updates;
+
+    {temp_table_index_sql};
+
+    with src_table as (
+      select {src_fields} from {src_table}
+    )
+    insert into {tgt_table}
+    ({insert_fields})
+    select {src_fields} from src_table src
+    where not exists (
+      select 1
+      from {temp_table} upd
+      where {src_upd_pk_equal}
+    )
+    
+    
 
 metadata:
 

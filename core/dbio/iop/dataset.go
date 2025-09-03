@@ -16,6 +16,7 @@ import (
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
 )
 
@@ -383,7 +384,7 @@ func (data *Dataset) RecordsString(lower ...bool) []map[string]string {
 			if row[j] == nil {
 				rec[field] = ""
 			} else {
-				rec[field] = cast.ToString(row[j])
+				rec[field] = data.Sp.CastToString(row[j])
 			}
 		}
 		records[i] = rec
@@ -404,7 +405,7 @@ func (data *Dataset) RecordsCasted(lower ...bool) []map[string]any {
 			if row[j] == nil {
 				rec[field] = nil
 			} else {
-				rec[field] = data.Sp.ParseString(cast.ToString(row[j]), j)
+				rec[field] = data.Sp.ParseString(data.Sp.CastToString(row[j]), j)
 			}
 		}
 		records[i] = rec
@@ -458,7 +459,7 @@ func (data *Dataset) InferColumnTypes() {
 
 			valStr := ""
 			if val != nil {
-				valStr = cast.ToString(val)
+				valStr = data.Sp.CastToString(val)
 				// Handle maps by marshaling them to JSON
 				if reflect.TypeOf(val) != nil && reflect.TypeOf(val).Kind() == reflect.Map {
 					valStr = g.Marshal(val)
@@ -506,22 +507,53 @@ func (data *Dataset) InferColumnTypes() {
 				if val0 < columns[j].Stats.Min {
 					columns[j].Stats.Min = val0
 				}
-			case float32, float64:
-				columns[j].Stats.DecCnt++
-				val0 := cast.ToInt64(val)
-				if val0 > columns[j].Stats.Max {
-					columns[j].Stats.Max = val0
-				}
-				if val0 < columns[j].Stats.Min {
-					columns[j].Stats.Min = val0
-				}
+			case decimal.Decimal:
 
-				if parts := strings.Split(cast.ToString(val), "."); len(parts) == 2 {
+				columns[j].Stats.DecCnt++
+
+				valStr = strings.Replace(valStr, ",", ".", 1) // when comma is used a a decimal point
+				if parts := strings.Split(valStr, "."); len(parts) == 2 {
+
+					val0 := cast.ToInt64(parts[0])
+					if val0 > columns[j].Stats.Max {
+						columns[j].Stats.Max = val0
+					}
+					if val0 < columns[j].Stats.Min {
+						columns[j].Stats.Min = val0
+					}
+
 					decLen := len(parts[1])
 					if decLen > columns[j].Stats.MaxDecLen {
 						columns[j].Stats.MaxDecLen = decLen
 					}
+				} else {
+					val0 := cast.ToInt64(valStr)
+					if val0 > columns[j].Stats.Max {
+						columns[j].Stats.Max = val0
+					}
+					if val0 < columns[j].Stats.Min {
+						columns[j].Stats.Min = val0
+					}
 				}
+
+			// float64 can only handle up to 15 total digits
+			// case float32, float64:
+			// 	columns[j].Stats.DecCnt++
+			// 	val0 := cast.ToInt64(val)
+			// 	if val0 > columns[j].Stats.Max {
+			// 		columns[j].Stats.Max = val0
+			// 	}
+			// 	if val0 < columns[j].Stats.Min {
+			// 		columns[j].Stats.Min = val0
+			// 	}
+
+			// 	if parts := strings.Split(data.Sp.CastToString(val), "."); len(parts) == 2 {
+			// 		g.Warn("%#v", parts)
+			// 		decLen := len(parts[1])
+			// 		if decLen > columns[j].Stats.MaxDecLen {
+			// 			columns[j].Stats.MaxDecLen = decLen
+			// 		}
+			// 	}
 
 			case bool:
 				columns[j].Stats.BoolCnt++

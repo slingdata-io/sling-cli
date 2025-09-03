@@ -103,7 +103,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 			sc := df.StreamConfig()
 			if ct := cfg.Target.Options.ColumnTyping; ct != nil {
 				if dec := ct.MaxDecimals(); dec > 0 {
-					sc.SetMaxDecimals(dec) // set max decimals if specified
+					sc.MaxDecimals = dec // set max decimals if specified
 				}
 			}
 
@@ -925,6 +925,12 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 		FileSizeBytes:      g.PtrVal(t.Config.Target.Options.FileMaxBytes),
 	}
 
+	// if one wishes to not write the partition columns
+	// see https://github.com/slingdata-io/sling-cli/issues/634
+	if val := os.Getenv("DUCKDB_WRITE_PARTITION_COLS"); val != "" {
+		copyOptions.WritePartitionCols = cast.ToBool(val)
+	}
+
 	if len(copyOptions.PartitionFields) > 0 && copyOptions.PartitionKey == "" {
 		return bw, g.Error("missing update_key in order to partition")
 	}
@@ -987,7 +993,7 @@ func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.T
 	}
 	g.Debug("performing upsert from temporary table %s to target table %s with primary keys %v",
 		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
-	rowAffCnt, err := tgtConn.Upsert(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
+	rowAffCnt, err := tgtConn.Merge(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	if err != nil {
 		err = g.Error(err, "could not perform upsert from temp")
 		return err

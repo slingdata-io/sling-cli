@@ -93,6 +93,8 @@ func (js *jsonStream) NextFunc(it *Iterator) bool {
 	}
 
 	switch payloadV := payload.(type) {
+	case nil:
+		recordsInterf = nil
 	case map[string]any:
 		// is one record
 		recordsInterf = js.extractNestedArray(payloadV)
@@ -181,6 +183,10 @@ func (js *jsonStream) addColumn(cols ...Column) {
 }
 
 func (js *jsonStream) parseRecords(records []map[string]any) {
+	if records == nil {
+		js.buffer <- nil
+		return
+	}
 
 	for _, rec := range records {
 		if js.flatten < 0 {

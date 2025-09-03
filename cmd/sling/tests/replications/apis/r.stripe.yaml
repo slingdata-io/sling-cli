@@ -1,4 +1,4 @@
-# ./sling run -r cmd/sling/tests/replications/apis/r.61.stripe.yaml --streams customer,customer_balance_transaction -d --mode full-refresh
+# ./sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml --streams customer,customer_balance_transaction -d --mode full-refresh
 
 source: stripe_sling
 target: postgres

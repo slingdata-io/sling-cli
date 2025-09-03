@@ -53,6 +53,10 @@ func (conn *DuckLakeConn) Init() error {
 		return g.Error("did not provide 'catalog_conn_string'")
 	}
 
+	if _, ok := conn.properties["copy_method"]; !ok {
+		conn.SetProp("copy_method", "arrow_http") // default to arrow_http
+	}
+
 	// Set base properties
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbDuckLake
@@ -188,11 +192,11 @@ func (conn *DuckLakeConn) GetURL(newURL ...string) string {
 	return connURL
 }
 
-// GenerateUpsertSQL generates the upsert SQL for DuckLake
-func (conn *DuckLakeConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQL generates the upsert SQL for DuckLake
+func (conn *DuckLakeConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 	// DuckLake supports transactions and proper ACID operations
 	// For now, use the same approach as DuckDB
-	return conn.DuckDbConn.GenerateUpsertSQL(srcTable, tgtTable, pkFields)
+	return conn.DuckDbConn.GenerateMergeSQL(srcTable, tgtTable, pkFields)
 }
 
 func (conn *DuckLakeConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]any) (data iop.Dataset, err error) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/google/uuid"
+	"github.com/jinzhu/copier"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/spf13/cast"
@@ -611,10 +612,10 @@ func (t transformsNS) BinaryToHex(val string) string {
 
 func (t transformsNS) Replace0x00(sp *StreamProcessor, val string) (string, error) {
 	// Remove null bytes and common null representations
-	val = strings.ReplaceAll(val, "\x00", "")       // actual null byte
-	val = strings.ReplaceAll(val, "\\u0000", "")    // escaped unicode null
-	val = strings.ReplaceAll(val, "\\x00", "")      // escaped hex null
-	val = strings.ReplaceAll(val, "\u0000", "")     // unicode null character
+	val = strings.ReplaceAll(val, "\x00", "")    // actual null byte
+	val = strings.ReplaceAll(val, "\\u0000", "") // escaped unicode null
+	val = strings.ReplaceAll(val, "\\x00", "")   // escaped hex null
+	val = strings.ReplaceAll(val, "\u0000", "")  // unicode null character
 	return val, nil
 }
 
@@ -667,7 +668,7 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 		case 160: // NO-BREAK SPACE
 			newVal.WriteRune(' ') // replace with space
 			continue
-		
+
 		// Zero-width characters - remove these
 		case 0x200B: // ZERO WIDTH SPACE
 			continue
@@ -679,7 +680,7 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 			continue
 		case 0xFEFF: // ZERO WIDTH NO-BREAK SPACE (BOM)
 			continue
-		
+
 		// Directional formatting characters - remove these
 		case 0x200E: // LEFT-TO-RIGHT MARK
 			continue
@@ -695,7 +696,7 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 			continue
 		case 0x202E: // RIGHT-TO-LEFT OVERRIDE
 			continue
-		
+
 		// Other problematic characters
 		case 0x00AD: // SOFT HYPHEN
 			continue // remove
@@ -860,7 +861,12 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	output = input
 
 	noCompute := false // especially in SQL queries
-	stateMap := e.State
+	stateMap := g.M()
+	err = copier.CopyWithOption(&stateMap, &e.State, copier.Option{DeepCopy: true})
+	if err != nil {
+		return nil, g.Error(err, "could not deep copy for evaluation")
+	}
+
 	for _, extra := range extras {
 		for k, v := range extra {
 			stateMap[k] = v
@@ -1087,4 +1093,47 @@ func (e *Evaluator) RenderPayload(val any, extras ...map[string]any) (newVal any
 		// For other types, return as-is
 		return val, nil
 	}
+}
+
+func (e *Evaluator) Check(expr string) (err error) {
+	inDouble := false
+	parenCount := 0
+
+	runes := []rune(expr)
+	for i, c := range runes {
+		if c == '\'' && !inDouble {
+			return g.Error("cannot use single quotes (') for strings in expression, use double quotes (\"): %s", expr)
+		} else if c == '"' {
+			// Check if this quote is escaped by counting preceding backslashes
+			backslashCount := 0
+			for j := i - 1; j >= 0 && runes[j] == '\\'; j-- {
+				backslashCount++
+			}
+			// If even number of backslashes (including 0), the quote is not escaped
+			if backslashCount%2 == 0 {
+				inDouble = !inDouble
+			}
+		} else if !inDouble {
+			// Only track parentheses when not inside double quotes
+			switch c {
+			case '(':
+				parenCount++
+			case ')':
+				parenCount--
+				if parenCount < 0 {
+					return g.Error("unmatched closing parenthesis ')' in expression: %s", expr)
+				}
+			}
+		}
+	}
+
+	if inDouble {
+		return g.Error("unclosed double quote in expression: %s", expr)
+	}
+
+	if parenCount > 0 {
+		return g.Error("unclosed parenthesis '(' in expression: %s", expr)
+	}
+
+	return nil
 }

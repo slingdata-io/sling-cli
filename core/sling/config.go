@@ -1459,6 +1459,7 @@ type TargetOptions struct {
 	PreSQL         *string                  `json:"pre_sql,omitempty" yaml:"pre_sql,omitempty"`
 	PostSQL        *string                  `json:"post_sql,omitempty" yaml:"post_sql,omitempty"`
 	IsolationLevel *database.IsolationLevel `json:"isolation_level,omitempty" yaml:"isolation_level,omitempty"`
+	MergeStrategy  *database.MergeStrategy  `json:"merge_strategy,omitempty" yaml:"merge_strategy,omitempty"`
 }
 
 var SourceFileOptionsDefault = SourceOptions{
@@ -1634,6 +1635,9 @@ func (o *TargetOptions) SetDefaults(targetOptions TargetOptions) {
 	}
 	if o.IsolationLevel == nil {
 		o.IsolationLevel = targetOptions.IsolationLevel
+	}
+	if o.MergeStrategy == nil {
+		o.MergeStrategy = targetOptions.MergeStrategy
 	}
 	if o.TableTmp == "" {
 		o.TableTmp = targetOptions.TableTmp

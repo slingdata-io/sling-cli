@@ -2,7 +2,7 @@ name: sling-platform
 
 defaults:
   state:
-    base_url: '{ coalesce(secrets.base_url, "https://api.slingdata.io") }'
+    base_url: '{ secrets.base_url }'
   
   request:
     headers:
@@ -12,9 +12,13 @@ defaults:
 
 endpoints:
   connections:
+
+    iterate:
+      over: "state.replication_store.records"
+      into: "state.test_record"
       
     request:
-      url: '{state.base_url}/connection/list'
+      url: '{state.base_url}/connection/list?test-value={state.test_record.id}'
     
     response:
       records:

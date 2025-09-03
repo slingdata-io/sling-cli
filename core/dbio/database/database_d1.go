@@ -584,10 +584,10 @@ func (conn *D1Conn) GetSchemata(level SchemataLevel, schemaName string, tableNam
 	return schemata, nil
 }
 
-// GenerateUpsertSQL generates the upsert SQL
-func (conn *D1Conn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// GenerateMergeSQL generates the upsert SQL
+func (conn *D1Conn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 
-	upsertMap, err := conn.BaseConn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return

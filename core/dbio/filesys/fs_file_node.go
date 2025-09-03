@@ -286,7 +286,7 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 	host = u.Hostname()
 
 	path = strings.TrimPrefix(uri, g.F("%s://%s/", scheme, u.U.Host))
-	// g.Info("uri => %s, host => %s, path => %s (%s)", uri, host, path, u.U.Path)
+	// g.Info("uri => %s | host => %s | path => %s (%s)", uri, host, path, u.U.Path)
 
 	if scheme == "" || host == "" {
 		err = errors.New("Invalid URL: " + uri)

@@ -32,13 +32,12 @@ import (
 type StreamProcessor struct {
 	N                uint64
 	dateLayoutCache  string
-	stringTypeCache  map[int]string
+	stringTypeCache  map[int]parseStringType
 	colStats         map[int]*ColumnStats
 	rowChecksum      []uint64
 	unrecognizedDate string
 	warn             bool
 	skipCurrent      bool // whether to skip current row (for constraints)
-	parseFuncs       map[string]func(s string) (any, error)
 	decReplRegex     *regexp.Regexp
 	ds               *Datastream
 	dateLayouts      []string
@@ -46,35 +45,34 @@ type StreamProcessor struct {
 	rowBlankValCnt   int
 	transformers     Transformers
 	digitString      map[int]string
-	transformEG      g.ErrorGroup
 }
 
 type StreamConfig struct {
-	EmptyAsNull       bool           `json:"empty_as_null"`
-	Header            bool           `json:"header"`
-	Compression       CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
-	NullIf            string         `json:"null_if"`
-	NullAs            string         `json:"null_as"`
-	DatetimeFormat    string         `json:"datetime_format"`
-	SkipBlankLines    bool           `json:"skip_blank_lines"`
-	Format            dbio.FileType  `json:"format"`
-	Delimiter         string         `json:"delimiter"`
-	Escape            string         `json:"escape"`
-	Quote             string         `json:"quote"`
-	FileMaxRows       int64          `json:"file_max_rows"`
-	FileMaxBytes      int64          `json:"file_max_bytes"`
-	BatchLimit        int64          `json:"batch_limit"`
-	MaxDecimals       int            `json:"max_decimals"`
-	Flatten           int            `json:"flatten"`
-	FieldsPerRec      int            `json:"fields_per_rec"`
-	Jmespath          string         `json:"jmespath"`
-	Sheet             string         `json:"sheet"`
-	ColumnCasing      ColumnCasing   `json:"column_casing"`
-	TargetType        dbio.Type      `json:"target_type"`
-	BoolAsInt         bool           `json:"-"`
-	Columns           Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms        Transform
-	maxDecimalsFormat string `json:"-"`
+	EmptyAsNull    bool           `json:"empty_as_null"`
+	Header         bool           `json:"header"`
+	Compression    CompressorType `json:"compression"` // AUTO | ZIP | GZIP | SNAPPY | NONE
+	NullIf         string         `json:"null_if"`
+	NullAs         string         `json:"null_as"`
+	DatetimeFormat string         `json:"datetime_format"`
+	SkipBlankLines bool           `json:"skip_blank_lines"`
+	Format         dbio.FileType  `json:"format"`
+	Delimiter      string         `json:"delimiter"`
+	Escape         string         `json:"escape"`
+	Quote          string         `json:"quote"`
+	FileMaxRows    int64          `json:"file_max_rows"`
+	FileMaxBytes   int64          `json:"file_max_bytes"`
+	BatchLimit     int64          `json:"batch_limit"`
+	MaxDecimals    int            `json:"max_decimals"`
+	Flatten        int            `json:"flatten"`
+	FieldsPerRec   int            `json:"fields_per_rec"`
+	Jmespath       string         `json:"jmespath"`
+	Sheet          string         `json:"sheet"`
+	ColumnCasing   ColumnCasing   `json:"column_casing"`
+	TargetType     dbio.Type      `json:"target_type"`
+	DeleteFile     bool           `json:"delete"` // whether to delete before writing
+	BoolAsInt      bool           `json:"-"`
+	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
+	transforms     Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -83,13 +81,6 @@ func (sc *StreamConfig) ToMap() map[string]string {
 	m := g.M()
 	g.Unmarshal(g.Marshal(sc), &m)
 	return g.ToMapString(m)
-}
-
-func (sc *StreamConfig) SetMaxDecimals(val int) {
-	sc.MaxDecimals = val
-	if sc.MaxDecimals > -1 {
-		sc.maxDecimalsFormat = "%." + cast.ToString(sc.MaxDecimals) + "f"
-	}
 }
 
 type Transformers struct {
@@ -202,7 +193,7 @@ func NewTransformers() Transformers {
 // NewStreamProcessor returns a new StreamProcessor
 func NewStreamProcessor() *StreamProcessor {
 	sp := StreamProcessor{
-		stringTypeCache: map[int]string{},
+		stringTypeCache: map[int]parseStringType{},
 		colStats:        map[int]*ColumnStats{},
 		decReplRegex:    regexp.MustCompile(`^(\d*[\d.]*?)\.?0*$`),
 		transformers:    NewTransformers(),
@@ -211,33 +202,9 @@ func NewStreamProcessor() *StreamProcessor {
 
 	sp.ResetConfig()
 	if val := os.Getenv("MAX_DECIMALS"); val != "" && val != "-1" {
-		sp.Config.SetMaxDecimals(cast.ToInt(val))
+		sp.Config.MaxDecimals = cast.ToInt(val)
 	}
 
-	// if val is '0400', '0401'. Such as codes.
-	hasZeroPrefix := func(s string) bool { return len(s) >= 2 && s[0] == '0' && s[1] != '.' }
-
-	sp.parseFuncs = map[string]func(s string) (any, error){
-		"int": func(s string) (any, error) {
-			if hasZeroPrefix(s) {
-				return s, errors.New("number has zero prefix, treat as string")
-			}
-			// return fastfloat.ParseInt64(s)
-			return strconv.ParseInt(s, 10, 64)
-		},
-		"float": func(s string) (any, error) {
-			if hasZeroPrefix(s) {
-				return s, errors.New("number has zero prefix, treat as string")
-			}
-			return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
-		},
-		"time": func(s string) (any, error) {
-			return sp.ParseTime(s)
-		},
-		"bool": func(s string) (any, error) {
-			return cast.ToBoolE(s)
-		},
-	}
 	sp.dateLayouts = []string{
 		"2006-01-02",
 		"2006-01-02 15:04:05",
@@ -392,7 +359,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 		if err != nil {
 			sp.Config.MaxDecimals = -1
 		} else {
-			sp.Config.SetMaxDecimals(val)
+			sp.Config.MaxDecimals = val
 		}
 	}
 
@@ -422,6 +389,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["skip_blank_lines"]; ok {
 		sp.Config.SkipBlankLines = cast.ToBool(val)
+	}
+
+	if val, ok := configMap["delete_file"]; ok {
+		sp.Config.DeleteFile = cast.ToBool(val)
 	}
 
 	if val, ok := configMap["column_casing"]; ok {
@@ -588,7 +559,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 
 	// Float types
 	case float32, float64:
-		return FloatType
+		return DecimalType
 
 	// Decimal types
 	case decimal.Decimal:
@@ -600,7 +571,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 
 	// Time types
 	case time.Time, *time.Time:
-		return TimestampType
+		return TimestampzType
 
 	// String/Text types
 	case string:
@@ -634,7 +605,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 	case sql.NullBool:
 		return BoolType
 	case sql.NullTime:
-		return TimestampType
+		return TimestampzType
 
 	// Default case
 	default:
@@ -958,10 +929,12 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			cs.DecCnt++
 		}
 
+		// use string to keep accuracy, replace comma as decimal point
+		sVal := strings.Replace(sp.CastToString(val), ",", ".", 1)
 		if sp.Config.MaxDecimals > -1 && !isInt {
-			nVal = g.F(sp.Config.maxDecimalsFormat, fVal)
+			nVal = sp.TruncateDecimalString(sVal, sp.Config.MaxDecimals)
 		} else {
-			nVal = strings.Replace(cast.ToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
+			nVal = sVal
 		}
 
 	case col.Type.IsBool():
@@ -1048,6 +1021,56 @@ func (sp *StreamProcessor) bytesToHexEscape(b []byte) string {
 	return string(result)
 }
 
+func (sp *StreamProcessor) CountDigits(number string) (precision, scale int) {
+	inDecimal := false
+	for _, c := range number {
+		if c == '.' {
+			inDecimal = true
+			continue
+		} else if inDecimal {
+			scale++ // only decimal digits
+		}
+		precision++ // total number of digits
+	}
+	return
+}
+
+// TruncateDecimalString return up to specified scale, without converting
+func (sp *StreamProcessor) TruncateDecimalString(number string, decCount int) (newNumber string) {
+
+	var precision, scale int
+	var inDecimal bool
+	newNumber = number
+
+	for i, c := range newNumber {
+		switch c {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			if inDecimal {
+				scale++ // count decimal digits
+				if scale > decCount {
+					return newNumber[0:i]
+				}
+			}
+		case '-':
+		case '.':
+			if inDecimal {
+				// Multiple decimal points - treat subsequent ones as the end of valid decimal
+				return newNumber[0:i]
+			} else {
+				inDecimal = true
+				// If decCount is 0 or negative, truncate right at the decimal point
+				if decCount <= 0 {
+					return newNumber[0:i]
+				}
+			}
+		default:
+			return number // if not a digit, return as is (is a string?)
+		}
+		precision++ // total number of digits
+	}
+	return newNumber
+}
+
 func (sp *StreamProcessor) CastToString(val any) (valString string) {
 	valString, _ = sp.CastToStringE(val)
 	return
@@ -1056,8 +1079,12 @@ func (sp *StreamProcessor) CastToString(val any) (valString string) {
 func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) {
 
 	switch v := val.(type) {
+	case string:
+		valString = v
 	case []uint8:
 		valString = string(v)
+	case *string:
+		valString = *v
 	case chJSON: // Clickhouse JSON / Variant
 		var sBytes []byte
 		sBytes, err = v.MarshalJSON()
@@ -1071,10 +1098,6 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 			decCount = sp.Config.MaxDecimals
 		}
 		valString = v.FloatString(decCount)
-	case *string:
-		valString = *v
-	case string:
-		valString = v
 	case map[string]string, map[string]any, map[any]any, []any, []string:
 		valString = g.Marshal(v)
 	default:
@@ -1115,12 +1138,8 @@ func (sp *StreamProcessor) CastToStringCSV(i int, val any, valType ...ColumnType
 		if RemoveTrailingDecZeros {
 			// attempt to remove trailing zeros, but is 10 times slower
 			return sp.decReplRegex.ReplaceAllString(cast.ToString(val), "$1")
-		} else if sp.Config.maxDecimalsFormat != "" {
-			if sp.Config.MaxDecimals <= 10 {
-				if fVal, err := cast.ToFloat64E(val); err == nil {
-					return g.F(sp.Config.maxDecimalsFormat, fVal)
-				}
-			}
+		} else if sp.Config.MaxDecimals > -1 {
+			return sp.TruncateDecimalString(sp.CastToString(val), sp.Config.MaxDecimals)
 		}
 		return sp.CastToString(val)
 		// return fmt.Sprintf("%v", val)
@@ -1316,6 +1335,16 @@ func (sp *StreamProcessor) ParseTime(i any) (t time.Time, err error) {
 	return
 }
 
+type parseStringType string
+
+const (
+	parseStringTypeInt     parseStringType = "int"
+	parseStringTypeDecimal parseStringType = "decimal"
+	parseStringTypeFloat   parseStringType = "float"
+	parseStringTypeTime    parseStringType = "time"
+	parseStringTypeBool    parseStringType = "bool"
+)
+
 // ParseString return an interface
 // string: "varchar"
 // integer: "integer"
@@ -1324,7 +1353,7 @@ func (sp *StreamProcessor) ParseTime(i any) (t time.Time, err error) {
 // datetime: "timestamp"
 // timestamp: "timestamp"
 // text: "text"
-func (sp *StreamProcessor) ParseString(s string, jj ...int) any {
+func (sp *StreamProcessor) ParseString(s string, jj ...int) (val any) {
 	if s == "" {
 		return nil
 	}
@@ -1334,50 +1363,147 @@ func (sp *StreamProcessor) ParseString(s string, jj ...int) any {
 		j = jj[0]
 	}
 
-	stringTypeCache := sp.stringTypeCache[j]
-
-	if stringTypeCache != "" {
-		i, err := sp.parseFuncs[stringTypeCache](s)
-		if err == nil {
-			return i
-		}
+	var err error
+	switch sp.stringTypeCache[j] {
+	case parseStringTypeInt:
+		val, err = sp.parseStringInt(s)
+	case parseStringTypeDecimal:
+		val, err = sp.parseStringDecimal(s)
+	case parseStringTypeFloat:
+		val, err = sp.parseStringFloat(s)
+	case parseStringTypeTime:
+		val, err = sp.parseStringTime(s)
+	case parseStringTypeBool:
+		val, err = sp.parseStringBool(s)
+	}
+	if val != nil && err == nil {
+		return val
 	}
 
 	// int
-	i, err := sp.parseFuncs["int"](s)
+	i, err := sp.parseStringInt(s)
 	if err == nil {
 		// if s = 0100, casting to int64 will return 64
 		// need to mitigate by when s starts with 0
 		if len(s) > 1 && s[0] == '0' {
 			return s
 		}
-		sp.stringTypeCache[j] = "int"
+		sp.stringTypeCache[j] = parseStringTypeInt
 		return i
 	}
 
-	// float
-	f, err := sp.parseFuncs["float"](s)
+	// // float
+	// f, err := sp.parseStringFloat(s)
+	// if err == nil {
+	// 	sp.stringTypeCache[j] = parseStringTypeFloat
+	// 	return f
+	// }
+
+	// decimal
+	d, err := sp.parseStringDecimal(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "float"
-		return f
+		sp.stringTypeCache[j] = parseStringTypeDecimal
+		return d
 	}
 
 	// date/time
-	t, err := sp.parseFuncs["time"](s)
+	t, err := sp.parseStringTime(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "time"
+		sp.stringTypeCache[j] = parseStringTypeTime
 		return t
 	}
 
 	// boolean
 	// FIXME: causes issues in SQLite and Oracle, needed for correct boolean parsing
-	b, err := sp.parseFuncs["bool"](s)
+	b, err := sp.parseStringBool(s)
 	if err == nil {
-		sp.stringTypeCache[j] = "bool"
+		sp.stringTypeCache[j] = parseStringTypeBool
 		return b
 	}
 
 	return s
+}
+
+// if val is '0400', '0401'. Such as codes.
+func (sp *StreamProcessor) hasZeroPrefix(s string) bool {
+	return len(s) >= 2 && s[0] == '0' && s[1] != '.'
+}
+
+func (sp *StreamProcessor) parseStringInt(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	// return fastfloat.ParseInt64(s)
+	return strconv.ParseInt(s, 10, 64)
+}
+
+func (sp *StreamProcessor) parseStringFloat(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	return strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+}
+
+func (sp *StreamProcessor) parseStringBigFloat(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+	var ok bool
+	newVal, ok = new(big.Float).SetString(strings.Replace(s, ",", ".", 1))
+	if !ok {
+		return nil, errors.New("could not cast to big.Rat, treat as string")
+	}
+	return newVal, nil
+}
+
+func (sp *StreamProcessor) parseStringIsDecimal(s string) bool {
+	if sp.hasZeroPrefix(s) {
+		return false
+	}
+
+	var inDecimal bool
+	for _, c := range s {
+		switch c {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		case '.':
+			if inDecimal {
+				return false // can only have 1 dot
+			}
+			inDecimal = true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (sp *StreamProcessor) parseStringDecimal(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+
+	return decimal.NewFromString(strings.Replace(s, ",", ".", 1))
+}
+
+func (sp *StreamProcessor) parseStringRational(s string) (newVal any, err error) {
+	if sp.hasZeroPrefix(s) {
+		return s, errors.New("number has zero prefix, treat as string")
+	}
+
+	var ok bool
+	newVal, ok = new(big.Rat).SetString(strings.Replace(s, ",", ".", 1))
+	if !ok {
+		return nil, errors.New("could not cast to big.Rat, treat as string")
+	}
+	return newVal, nil
+}
+
+func (sp *StreamProcessor) parseStringTime(s string) (newVal any, err error) {
+	return sp.ParseTime(s)
+}
+
+func (sp *StreamProcessor) parseStringBool(s string) (newVal any, err error) {
+	return cast.ToBoolE(s)
 }
 
 // ProcessVal processes a value

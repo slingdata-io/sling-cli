@@ -24,6 +24,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
 	_ "github.com/go-sql-driver/mysql"
@@ -85,7 +86,7 @@ type Connection interface {
 	ExecMultiContext(ctx context.Context, sqls ...string) (result sql.Result, err error)
 	GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error)
 	GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string
-	GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
+	GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error)
 	GetAnalysis(string, map[string]interface{}) (string, error)
 	GetColumns(tableFName string, fields ...string) (iop.Columns, error)
 	GetColumnsFull(string) (iop.Dataset, error)
@@ -140,7 +141,7 @@ type Connection interface {
 	Template() dbio.Template
 	Tx() Transaction
 	Unquote(string) string
-	Upsert(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
+	Merge(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
 }
@@ -312,6 +313,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
+	} else if strings.HasPrefix(URL, "flightsql:") {
+		conn = &AzureTableConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -375,6 +378,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
+	case dbio.TypeDbArrowFlight:
+		driverName = "flightsql"
 	default:
 		driverName = dbType.String()
 	}
@@ -2274,60 +2279,6 @@ func (conn *BaseConn) GenerateInsertStatement(tableName string, cols iop.Columns
 	return statement
 }
 
-// Upsert inserts / updates from a srcTable into a target table.
-// Assuming the srcTable has some or all of the tgtTable fields with matching types
-func (conn *BaseConn) Upsert(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
-	var cnt int64
-	if conn.tx != nil {
-		cnt, err = Upsert(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
-	} else {
-		cnt, err = Upsert(conn.Self(), nil, srcTable, tgtTable, primKeys)
-	}
-	if err != nil {
-		err = g.Error(err, "could not upsert")
-	}
-	return cast.ToInt64(cnt), err
-}
-
-// SwapTable swaps two table
-func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
-
-	tgtTableTemp := tgtTable + "_tmp" + g.RandString(g.AlphaRunesLower, 2)
-	conn.DropTable(tgtTableTemp)
-
-	sql := g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", tgtTable,
-		"new_table", tgtTableTemp,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+tgtTable)
-	}
-
-	sql = g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", srcTable,
-		"new_table", tgtTable,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+srcTable)
-	}
-
-	sql = g.R(
-		conn.GetTemplateValue("core.rename_table"),
-		"table", tgtTableTemp,
-		"new_table", srcTable,
-	)
-	_, err = conn.Exec(sql)
-	if err != nil {
-		return g.Error(err, "could not rename table "+tgtTableTemp)
-	}
-
-	return
-}
-
 // GetNativeType returns the native column type from generic
 func (conn *BaseConn) GetNativeType(col iop.Column) (nativeType string, err error) {
 	var ct iop.ColumnTyping
@@ -2605,10 +2556,75 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 	return
 }
 
-// GenerateUpsertSQL returns a sql for upsert
-func (conn *BaseConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+// MergeStrategy is for incremental loading
+type MergeStrategy string
 
-	upsertMap, err := conn.GenerateUpsertExpressions(srcTable, tgtTable, pkFields)
+const (
+	MergeStrategyNone         MergeStrategy = ""
+	MergeStrategyInsert       MergeStrategy = "insert"
+	MergeStrategyUpdate       MergeStrategy = "update"
+	MergeStrategyUpdateInsert MergeStrategy = "update_insert"
+	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
+)
+
+// Merge inserts / updates from a srcTable into a target table.
+// Assuming the srcTable has some or all of the tgtTable fields with matching types
+func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
+	var cnt int64
+	if conn.tx != nil {
+		cnt, err = Merge(conn.Self(), conn.tx, srcTable, tgtTable, primKeys)
+	} else {
+		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
+	}
+	if err != nil {
+		err = g.Error(err, "could not upsert")
+	}
+	return cast.ToInt64(cnt), err
+}
+
+// SwapTable swaps two table
+func (conn *BaseConn) SwapTable(srcTable string, tgtTable string) (err error) {
+
+	tgtTableTemp := tgtTable + "_tmp" + g.RandString(g.AlphaRunesLower, 2)
+	conn.DropTable(tgtTableTemp)
+
+	sql := g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", tgtTable,
+		"new_table", tgtTableTemp,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+tgtTable)
+	}
+
+	sql = g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", srcTable,
+		"new_table", tgtTable,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+srcTable)
+	}
+
+	sql = g.R(
+		conn.GetTemplateValue("core.rename_table"),
+		"table", tgtTableTemp,
+		"new_table", srcTable,
+	)
+	_, err = conn.Exec(sql)
+	if err != nil {
+		return g.Error(err, "could not rename table "+tgtTableTemp)
+	}
+
+	return
+}
+
+// GenerateMergeSQL returns a sql for upsert
+func (conn *BaseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
+
+	mc, err := conn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
 	if err != nil {
 		err = g.Error(err, "could not generate upsert variables")
 		return
@@ -2623,19 +2639,25 @@ func (conn *BaseConn) GenerateUpsertSQL(srcTable string, tgtTable string, pkFiel
 		sqlTemplate,
 		"src_table", srcTable,
 		"tgt_table", tgtTable,
-		"src_tgt_pk_equal", upsertMap["src_tgt_pk_equal"],
-		"src_upd_pk_equal", strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", "upd."),
-		"pk_fields", upsertMap["pk_fields"],
-		"set_fields", upsertMap["set_fields"],
-		"insert_fields", upsertMap["insert_fields"],
-		"src_fields", upsertMap["src_fields"],
+		"src_tgt_pk_equal", mc.Map["src_tgt_pk_equal"],
+		"src_upd_pk_equal", strings.ReplaceAll(mc.Map["src_tgt_pk_equal"], "tgt.", "upd."),
+		"pk_fields", mc.Map["pk_fields"],
+		"set_fields", mc.Map["set_fields"],
+		"insert_fields", mc.Map["insert_fields"],
+		"src_fields", mc.Map["src_fields"],
 	)
 
 	return
 }
 
-// GenerateUpsertExpressions returns a map with needed expressions
-func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string, pkFields []string) (exprs map[string]string, err error) {
+type MergeConfig struct {
+	Strategy MergeStrategy
+	Template string
+	Map      map[string]string
+}
+
+// GenerateMergeConfig returns the merge config
+func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFields []string) (mc MergeConfig, err error) {
 
 	srcColumns, err := conn.GetColumns(srcTable)
 	if err != nil {
@@ -2686,7 +2708,7 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 		srcCol := g.PtrVal(srcColumns.GetColumn(tgtColName)) // should be found
 		tgtCol := tgtColumns.GetColumn(tgtColName)
 		if tgtCol == nil {
-			return nil, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
+			return mc, g.Error("did not find target column: %s (has %s)", tgtColName, g.Marshal(tgtColumns.Names()))
 		}
 
 		// don't normalize, use raw name
@@ -2710,20 +2732,48 @@ func (conn *BaseConn) GenerateUpsertExpressions(srcTable string, tgtTable string
 	// cast into the correct type
 	srcFields := conn.Self().CastColumnsForSelect(srcColumns, tgtColumns)
 
-	exprs = map[string]string{
-		"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
-		"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
-		"src_fields":         strings.Join(srcFields, ", "),
-		"tgt_fields":         strings.Join(tgtFields, ", "),
-		"insert_fields":      strings.Join(insertFields, ", "),
-		"pk_fields":          strings.Join(pkFields, ", "),
-		"src_pk_fields":      strings.Join(srcPkFields, ", "),
-		"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
-		"set_fields":         strings.Join(setFields, ", "),
-		"placeholder_fields": strings.Join(placeholderFields, ", "),
+	mc = MergeConfig{
+		Strategy: MergeStrategy(conn.GetTemplateValue("variable.merge_strategy")),
+		Template: "",
+		Map: map[string]string{
+			"src_tgt_pk_equal":   strings.Join(pkEqualFields, " and "),
+			"src_upd_pk_equal":   strings.ReplaceAll(strings.Join(pkEqualFields, ", "), "tgt.", "upd."),
+			"src_fields":         strings.Join(srcFields, ", "),
+			"tgt_fields":         strings.Join(tgtFields, ", "),
+			"insert_fields":      strings.Join(insertFields, ", "),
+			"pk_fields":          strings.Join(pkFields, ", "),
+			"src_pk_fields":      strings.Join(srcPkFields, ", "),
+			"tgt_pk_fields":      strings.Join(tgtPkFields, ", "),
+			"set_fields":         strings.Join(setFields, ", "),
+			"placeholder_fields": strings.Join(placeholderFields, ", "),
+		},
+	}
+
+	switch mc.Strategy {
+	case MergeStrategyInsert, MergeStrategyUpdate, MergeStrategyUpdateInsert, MergeStrategyDeleteInsert:
+	case MergeStrategyNone:
+		return mc, g.Error("no default merge strategy specified for %s", conn.GetType())
+	default:
+		return mc, g.Error("invalid merge strategy %s", mc.Strategy)
+	}
+
+	key := g.F("core.merge_%s", mc.Strategy)
+	mc.Template = conn.GetTemplateValue(key)
+
+	if mc.Template == "" {
+		return mc, g.Error("merge strategy `%s` not supported for %s (did not find SQL template key `%s`)", mc.Strategy, conn.GetType(), key)
 	}
 
 	return
+}
+
+// GenerateMergeExpressions returns a map with needed expressions
+func (conn *BaseConn) GenerateMergeExpressions(srcTable string, tgtTable string, pkFields []string) (upsertMap map[string]string, err error) {
+	mc, err := conn.GenerateMergeConfig(srcTable, tgtTable, pkFields)
+	if err != nil {
+		return nil, err
+	}
+	return mc.Map, nil
 }
 
 // GetColumnStats analyzes the table and returns the column statistics

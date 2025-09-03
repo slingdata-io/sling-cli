@@ -189,6 +189,7 @@ type Endpoint struct {
 	context      *g.Context
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
 	bloomFilter  *bloom.BloomFilter
+	aggregate    AggregateState
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -366,6 +367,14 @@ type Iteration struct {
 	endpoint *Endpoint
 }
 
+func (iter *Iteration) Debug(text string, args ...any) {
+	if iter.field != "" {
+		id := g.F("i%02d", iter.id)
+		text = env.DarkGrayString(id) + " " + text
+	}
+	g.Debug(text, args...)
+}
+
 // StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any
 
@@ -478,7 +487,6 @@ type Rule struct {
 type SingleRequest struct {
 	Request    *RequestState  `yaml:"request" json:"request"`
 	Response   *ResponseState `yaml:"response" json:"response"`
-	Aggregate  AggregateState `yaml:"-" json:"-"`
 	httpReq    *http.Request  `yaml:"-" json:"-"`
 	httpRespWg sync.WaitGroup `yaml:"-" json:"-"`
 	id         string         `yaml:"-" json:"-"`
