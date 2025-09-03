@@ -535,6 +535,11 @@ endpoints:
         # created[gte]: '{state.created_gte}'
         # types: customer.subscription.created,customer.subscription.updated,customer.subscription.deleted
     
+    # Strange pagination logic:
+    # on first run (no `sync.last_id` value), the most recent event is first,
+    # so we have to use `starting_after` to paginate through all the records.
+    # on incremental run (with a `sync.last_id` value), in order to get the
+    # records created after the last known event ID, we have to use `ending_before`
     pagination:
       next_state:
         starting_after: '{ is_null(sync.last_id) ? response.records[length(response.records)-1].id : nil }'
