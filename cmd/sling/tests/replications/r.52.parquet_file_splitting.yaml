@@ -3,14 +3,14 @@ target: '{my_target}'
 
 defaults:
   mode: full-refresh
-  object: 'test-splitting/{stream_schema}/{stream_table}'
+  object: 'splitting-test/{stream_schema}/{stream_table}'
 
 hooks:
   end:
     # List files in the target folder to verify correct chunking
     - type: list
       id: list_files
-      location: '{env.my_target}/test-splitting/public/test1k_athena_pg/'
+      location: '{env.my_target}/splitting-test/public/test1k_athena_pg/'
       only: files
 
     - type: log
@@ -25,7 +25,8 @@ hooks:
 
     # Clean up files after test
     - type: delete
-      location: '{env.my_target}/test-splitting/'
+      location: '{env.my_target}/splitting-test/'
+      recursive: true
 
 streams:
   public.test1k_athena_pg:
