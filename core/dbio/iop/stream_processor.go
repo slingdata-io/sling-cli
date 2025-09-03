@@ -929,10 +929,12 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			cs.DecCnt++
 		}
 
+		// use string to keep accuracy, replace comma as decimal point
+		sVal := strings.Replace(sp.CastToString(val), ",", ".", 1)
 		if sp.Config.MaxDecimals > -1 && !isInt {
-			nVal = sp.TruncateDecimalString(sp.CastToString(val), sp.Config.MaxDecimals)
+			nVal = sp.TruncateDecimalString(sVal, sp.Config.MaxDecimals)
 		} else {
-			nVal = strings.Replace(sp.CastToString(val), ",", ".", 1) // use string to keep accuracy, replace comma as decimal point
+			nVal = sVal
 		}
 
 	case col.Type.IsBool():
