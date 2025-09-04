@@ -945,3 +945,8 @@
   rows: 0
   output_contains:
     - 'execution succeeded'
+
+# Test MongoDB ObjectID filtering
+- id: 116
+  name: MongoDB ObjectID filter test
+  run: 'sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml'
