@@ -769,17 +769,6 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		// fileFormat = dbio.FileTypeParquet
 	}
 
-	// get target columns
-	columns, err := conn.GetSQLColumns(table)
-	if err != nil {
-		return 0, g.Error("could not get columns for %s", table.FullName())
-	}
-
-	columns, err = conn.ValidateColumnNames(columns, df.Columns.Names())
-	if err != nil {
-		return 0, g.Error("could not validate columns prior to COPY from STAGE for %s", table.FullName())
-	}
-
 	tableFName := table.FullName()
 
 	// Write the ds to a temp file
@@ -895,6 +884,21 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 	doCopyFolder := func() {
 
 		if df.Err() != nil {
+			return
+		}
+
+		// get target columns
+		columns, err := conn.GetSQLColumns(table)
+		if err != nil {
+			err = g.Error("could not get columns for %s", table.FullName())
+			df.Context.CaptureErr(err)
+			return
+		}
+
+		columns, err = conn.ValidateColumnNames(columns, df.Columns.Names())
+		if err != nil {
+			err = g.Error("could not validate columns prior to COPY from STAGE for %s", table.FullName())
+			df.Context.CaptureErr(err)
 			return
 		}
 
