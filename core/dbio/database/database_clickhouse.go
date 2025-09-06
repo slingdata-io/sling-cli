@@ -575,6 +575,33 @@ func (conn *ClickhouseConn) GenerateInsertStatement(tableName string, cols iop.C
 	return statement
 }
 
+// Merge inserts / updates from a srcTable into a target table.
+// Assuming the srcTable has some or all of the tgtTable fields with matching types
+func (conn *ClickhouseConn) Merge(srcTable string, tgtTable string, primKeys []string) (rowAffCnt int64, err error) {
+	maxTries := 10
+	tryCount := 0
+
+retry:
+	tryCount++
+	rowAffCnt, err = conn.BaseConn.Merge(srcTable, tgtTable, primKeys)
+	if err != nil && strings.Contains(err.Error(), "Too many unfinished mutations") && tryCount <= maxTries {
+		g.Warn("got error: `Too many unfinished mutations`. Retrying after 5 seconds... (attempt %d/%d)", tryCount, maxTries)
+		time.Sleep(5 * time.Second)
+
+		// re-open transaction
+		conn.Rollback()
+		txOptions := sql.TxOptions{Isolation: sql.LevelDefault}
+		if err = conn.BeginContext(conn.context.Ctx, &txOptions); err != nil {
+			err = g.Error(err, "could not re-open transaction to complete merge")
+			return 0, err
+		}
+
+		goto retry
+	}
+
+	return rowAffCnt, err
+}
+
 // GenerateMergeSQL generates the upsert SQL
 func (conn *ClickhouseConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFields []string) (sql string, err error) {
 	upsertMap, err := conn.BaseConn.GenerateMergeExpressions(srcTable, tgtTable, pkFields)
