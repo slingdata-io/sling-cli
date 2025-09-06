@@ -601,7 +601,7 @@ func (conn *ClickhouseConn) GenerateMergeSQL(srcTable string, tgtTable string, p
 		// use lightweight delete
 		// see https://github.com/slingdata-io/sling-cli/issues/593
 		sqlTempl = `
-	delete from table {tgt_table}
+	delete from {tgt_table}
 	where ({tgt_pk_fields}) in (
 			select {src_pk_fields}
 			from {src_table} src
