@@ -202,7 +202,7 @@ createNew:
 		defStaging, _ := ParseTableName(internalStage, dbio.TypeDbSnowflake)
 		if defStaging.Schema == "" {
 			g.Warn("did not specify a fully qualified stage name in `internal_stage`. Need: `DATABASE.SCHEMA.TABLE` format. Using default.")
-			// create new staging if schema is different
+			// create new staging if schema is not provided
 			internalStage = ""
 			goto createNew
 		}
