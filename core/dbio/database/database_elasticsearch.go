@@ -153,7 +153,7 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 	// Navigate to properties
 	indexMapping, ok := mappingResponse[table.Name].(map[string]interface{})
 	if !ok {
-		return columns, g.Error("unexpected mapping structure for index %s", table.Name)
+		return columns, g.Error("unexpected mapping structure for index %s: %s", table.Name, g.Marshal(mappingResponse[table.Name]))
 	}
 
 	mappings, ok := indexMapping["mappings"].(map[string]interface{})
