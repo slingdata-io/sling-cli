@@ -27,7 +27,8 @@ import (
 // ClickhouseConn is a Clikchouse connection
 type ClickhouseConn struct {
 	BaseConn
-	URL string
+	URL     string
+	version string
 }
 
 // Init initiates the object
@@ -39,6 +40,27 @@ func (conn *ClickhouseConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 	return conn.BaseConn.Init()
+}
+
+func (conn *ClickhouseConn) getVersion() {
+	data, err := conn.Query(`SELECT version()` + env.NoDebugKey)
+	if err != nil {
+		conn.version = "21.0"
+	} else if len(data.Rows) > 0 {
+		conn.version = cast.ToString(data.Rows[0][0])
+	}
+}
+
+func (conn *ClickhouseConn) Version() int {
+	parts := strings.Split(conn.version, ".")
+	if len(parts) > 0 {
+		v := cast.ToInt(parts[0])
+		if v == 0 {
+			v = 21
+		}
+		return v
+	}
+	return 21
 }
 
 func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
@@ -54,6 +76,8 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 			if strings.Contains(err.Error(), "unexpected packet") {
 				g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 			}
+		} else {
+			conn.getVersion()
 		}
 		return err
 	}
@@ -246,6 +270,8 @@ func (conn *ClickhouseConn) Connect(timeOut ...int) (err error) {
 		if strings.Contains(err.Error(), "unexpected packet") {
 			g.Info(env.MagentaString("Try using the `http_url` instead to connect to Clickhouse via HTTP. See https://docs.slingdata.io/connections/database-connections/clickhouse"))
 		}
+	} else {
+		conn.getVersion()
 	}
 
 	return err
@@ -570,6 +596,25 @@ func (conn *ClickhouseConn) GenerateMergeSQL(srcTable string, tgtTable string, p
 	select {src_fields}
 	from {src_table} src
 	`
+
+	if conn.Version() >= 23 {
+		// use lightweight delete
+		// see https://github.com/slingdata-io/sling-cli/issues/593
+		sqlTempl = `
+	delete from table {tgt_table}
+	where ({tgt_pk_fields}) in (
+			select {src_pk_fields}
+			from {src_table} src
+	)
+	;
+
+	insert into {tgt_table}
+		({insert_fields})
+	select {src_fields}
+	from {src_table} src
+	`
+	}
+
 	sql = g.R(
 		sqlTempl,
 		"src_table", srcTable,
