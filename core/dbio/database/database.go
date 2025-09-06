@@ -2577,7 +2577,7 @@ func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string)
 		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
 	}
 	if err != nil {
-		err = g.Error(err, "could not upsert")
+		err = g.Error(err, "could not merge")
 	}
 	return cast.ToInt64(cnt), err
 }

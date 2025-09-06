@@ -1,0 +1,39 @@
+source: mongo
+target: postgres
+
+defaults:
+  mode: full-refresh
+  source_options:
+    flatten: 1
+
+hooks:
+  start:
+    # Clean up test table if exists
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.mongo_objectid_test;
+      
+  end:
+    # Verify records were inserted
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.mongo_objectid_test
+      into: result
+    
+    - type: check
+      check: int_parse(store.result[0].count) == 90
+      failure_message: Should have 90 rows
+    
+    # Clean up test table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.mongo_objectid_test;
+
+streams:
+  # Test ObjectID filtering on existing collection
+  # This tests that ObjectID hex strings in filters are properly converted
+  default.test1k_mongodb:
+    object: public.mongo_objectid_test
+    # Filter using ObjectID range - these will be converted to proper ObjectID types
+    # Using a range that should capture some documents
+    where: '{"_id": {"$gte": "67859d8ee682ab32317abc6f", "$lte": "67859d8ee682ab32317abcc8"}}'

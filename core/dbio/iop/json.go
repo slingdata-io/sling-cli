@@ -210,6 +210,7 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 			if !ok {
 				col = &Column{
 					Name:     colName,
+					Type:     js.ds.Sp.CheckType(newRec[colName]),
 					Position: len(js.ds.Columns) + len(colsToAdd) + 1,
 					FileURI:  cast.ToString(js.ds.Metadata.StreamURL.Value),
 				}

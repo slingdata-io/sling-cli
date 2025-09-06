@@ -190,22 +190,22 @@ createNew:
 			Name:    "SLING_STAGING",
 			Dialect: dbio.TypeDbSnowflake,
 		}
-		conn.Exec("USE SCHEMA " + defStaging.Schema + noDebugKey)
-		_, err := conn.Exec("CREATE STAGE IF NOT EXISTS " + defStaging.FullName())
+
+		_, err := conn.Exec("CREATE STAGE IF NOT EXISTS " + defStaging.FDQN())
 		if err != nil {
-			g.Warn("Tried to create Internal Snowflake Stage but failed.\n" + g.ErrMsgSimple(err))
+			g.Warn("Tried to create Internal Snowflake Stage but failed. Please provide a stage name with `internal_stage`.\n" + g.ErrMsgSimple(err))
 			return ""
 		}
 		conn.SetProp("schema", schema)
-		conn.SetProp("internal_stage", defStaging.FullName())
+		conn.SetProp("internal_stage", defStaging.FDQN())
 	} else {
 		defStaging, _ := ParseTableName(internalStage, dbio.TypeDbSnowflake)
-		if defStaging.Schema != schema {
-			// create new staging if schema is different
+		if defStaging.Schema == "" {
+			g.Warn("did not specify a fully qualified stage name in `internal_stage`. Need: `DATABASE.SCHEMA.TABLE` format. Using default.")
+			// create new staging if schema is not provided
 			internalStage = ""
 			goto createNew
 		}
-		conn.Exec("USE SCHEMA " + defStaging.Schema + noDebugKey)
 	}
 	return conn.GetProp("internal_stage")
 }
@@ -769,17 +769,6 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		// fileFormat = dbio.FileTypeParquet
 	}
 
-	// get target columns
-	columns, err := conn.GetSQLColumns(table)
-	if err != nil {
-		return 0, g.Error("could not get columns for %s", table.FullName())
-	}
-
-	columns, err = conn.ValidateColumnNames(columns, df.Columns.Names())
-	if err != nil {
-		return 0, g.Error("could not validate columns prior to COPY from STAGE for %s", table.FullName())
-	}
-
 	tableFName := table.FullName()
 
 	// Write the ds to a temp file
@@ -895,6 +884,21 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 	doCopyFolder := func() {
 
 		if df.Err() != nil {
+			return
+		}
+
+		// get target columns
+		columns, err := conn.GetSQLColumns(table)
+		if err != nil {
+			err = g.Error("could not get columns for %s", table.FullName())
+			df.Context.CaptureErr(err)
+			return
+		}
+
+		columns, err = conn.ValidateColumnNames(columns, df.Columns.Names())
+		if err != nil {
+			err = g.Error("could not validate columns prior to COPY from STAGE for %s", table.FullName())
+			df.Context.CaptureErr(err)
 			return
 		}
 

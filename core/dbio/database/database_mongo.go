@@ -153,7 +153,7 @@ func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (column
 	return data.Columns, nil
 }
 
-func (conn *MongoDBConn) ExecContext(ctx context.Context, sql string, args ...interface{}) (result sql.Result, err error) {
+func (conn *MongoDBConn) ExecContext(ctx context.Context, sql string, args ...any) (result sql.Result, err error) {
 	return nil, g.Error("ExecContext not implemented on MongoConn")
 }
 
@@ -178,7 +178,115 @@ func (conn *MongoDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 	return
 }
 
-func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName string, Opts ...map[string]interface{}) (ds *iop.Datastream, err error) {
+// processMongoFilter recursively processes filter values to convert ObjectID strings
+func (conn *MongoDBConn) processMongoFilter(filter any) any {
+	switch v := filter.(type) {
+	case map[string]any:
+		// Process map recursively
+		result := make(map[string]any)
+		for key, val := range v {
+			if key == "_id" || strings.HasSuffix(key, "_id") {
+				// Special handling for _id fields
+				result[key] = conn.processObjectIDValue(val)
+			} else {
+				result[key] = conn.processMongoFilter(val)
+			}
+		}
+		return result
+	case map[any]any:
+		// Process map recursively
+		result := make(map[string]any)
+		for key, val := range v {
+			keyStr := cast.ToString(key)
+			if keyStr == "_id" || strings.HasSuffix(keyStr, "_id") {
+				result[keyStr] = conn.processObjectIDValue(val)
+			} else {
+				result[keyStr] = conn.processMongoFilter(val)
+			}
+		}
+		return result
+	case []any:
+		// Process array recursively
+		result := make([]any, len(v))
+		for i, item := range v {
+			result[i] = conn.processMongoFilter(item)
+		}
+		return result
+	case string:
+		// Check if string is ObjectID format
+		if conn.isObjectIDString(v) {
+			oid, err := primitive.ObjectIDFromHex(v)
+			if err == nil {
+				return oid
+			}
+		}
+		return v
+	default:
+		return filter
+	}
+}
+
+// processObjectIDValue handles ObjectID conversion for _id fields
+func (conn *MongoDBConn) processObjectIDValue(val any) any {
+	switch v := val.(type) {
+	case string:
+		// Direct ObjectID hex string
+		if conn.isObjectIDString(v) {
+			if oid, err := primitive.ObjectIDFromHex(v); err == nil {
+				return oid
+			}
+		}
+		// ObjectId("...") format
+		if strings.HasPrefix(v, "ObjectId(") && strings.HasSuffix(v, ")") {
+			hex := strings.TrimSuffix(strings.TrimPrefix(v, "ObjectId(\""), "\")")
+			if oid, err := primitive.ObjectIDFromHex(hex); err == nil {
+				return oid
+			}
+		}
+		return v
+	case map[string]any:
+		// Handle operators like $gte, $lt
+		result := make(map[string]any)
+		for op, opVal := range v {
+			if strings.HasPrefix(op, "$") {
+				result[op] = conn.processObjectIDValue(opVal)
+			} else {
+				result[op] = conn.processMongoFilter(opVal)
+			}
+		}
+		return result
+	case map[any]any:
+		// Handle operators like $gte, $lt
+		result := make(map[string]any)
+		for op, opVal := range v {
+			opStr := cast.ToString(op)
+			if strings.HasPrefix(opStr, "$") {
+				result[opStr] = conn.processObjectIDValue(opVal)
+			} else {
+				result[opStr] = conn.processMongoFilter(opVal)
+			}
+		}
+		return result
+	default:
+		return conn.processMongoFilter(val)
+	}
+}
+
+// isObjectIDString checks if a string is a valid ObjectID hex format
+func (conn *MongoDBConn) isObjectIDString(s string) bool {
+	// ObjectID is 24 hex characters
+	if len(s) != 24 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName string, Opts ...map[string]any) (ds *iop.Datastream, err error) {
 	opts := getQueryOptions(Opts)
 	Limit := int64(0) // infinite
 	if val := cast.ToInt64(opts["limit"]); val > 0 {
@@ -202,7 +310,12 @@ func (conn *MongoDBConn) StreamRowsContext(ctx context.Context, collectionName s
 
 	filter := bson.D{}
 	if filterOpt, ok := opts["filter"]; ok {
-		// Convert filter option to bson.D
+		// Process the filter to convert ObjectID strings
+		if filterString := g.Marshal(filterOpt); strings.Contains(filterString, "ObjectId(") || strings.Contains(filterString, `"_id"`) {
+			filterOpt = conn.processMongoFilter(filterOpt)
+		}
+
+		// Convert processed filter to bson.D
 		switch v := filterOpt.(type) {
 		case map[any]any:
 			// Simple filter format: {"field": "value", "field2": {"$gt": 100}}
@@ -353,7 +466,7 @@ func (conn *MongoDBConn) GetSchemas() (data iop.Dataset, err error) {
 
 	data = iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
 	for _, db := range res.Databases {
-		data.Append([]interface{}{db.Name})
+		data.Append([]any{db.Name})
 	}
 
 	return data, nil
@@ -370,7 +483,7 @@ func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) 
 
 	data = iop.NewDataset(iop.NewColumnsFromFields("table_name"))
 	for _, name := range names {
-		data.Append([]interface{}{name})
+		data.Append([]any{name})
 	}
 
 	return data, nil

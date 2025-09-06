@@ -149,6 +149,7 @@ func (cfg *Config) SetDefault() {
 	for k, v := range cfg.Env {
 		os.Setenv(k, v)
 	}
+	iop.SetSampleSize()
 
 	// default mode
 	if cfg.Mode == "" {

@@ -1,0 +1,41 @@
+source: LOCAL
+target: SNOWFLAKE
+
+hooks:
+  start:
+    - type: command
+      command: bash cmd/sling/tests/replications/r.55.json_snowflake_nested.yaml.prep.sh
+        
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.sling_nested_json;
+
+  end:
+    # Verify total records were imported
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.sling_nested_json
+      into: result
+    
+    - type: check
+      check: int_parse(store.result[0].count) == 1700
+      success_message: "✓ All 1700 JSON records imported successfully (1200 from nested1.json + 500 from nested2.json)"
+    
+    # Cleanup files
+    - type: command
+      command: rm -rf /tmp/sling-test-files/
+    
+    # Cleanup table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.sling_nested_json;
+
+streams:
+  file:///tmp/sling-test-files/*.json:
+    object: public.sling_nested_json
+    mode: full-refresh
+    source_options:
+      flatten: 1
+
+env:
+  SLING_SAMPLE_SIZE: 100

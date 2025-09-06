@@ -227,7 +227,7 @@ func (t *BaseTransaction) InsertBatchStream(tableFName string, ds *iop.Datastrea
 func (t *BaseTransaction) Merge(sourceTable, targetTable string, pkFields []string) (count uint64, err error) {
 	cnt, err := Merge(t.Conn, t, sourceTable, targetTable, pkFields)
 	if err != nil {
-		err = g.Error(err, "Could not upsert from %s into %s", sourceTable, targetTable)
+		err = g.Error(err, "Could not merge from %s into %s", sourceTable, targetTable)
 	}
 	count = cast.ToUint64(cnt)
 	return
@@ -476,7 +476,7 @@ func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkF
 		result, err = conn.ExecMulti(q)
 	}
 	if err != nil {
-		err = g.Error(err, "Could not upsert")
+		err = g.Error(err, "Could not merge")
 		return
 	}
 

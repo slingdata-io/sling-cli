@@ -1398,9 +1398,9 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		},
 	}
 
+	eval := NewEvaluator(nil)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eval := NewEvaluator(nil)
 			err := eval.Check(tt.expression)
 
 			if tt.expectError {
