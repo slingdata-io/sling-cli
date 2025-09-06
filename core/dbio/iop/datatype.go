@@ -140,6 +140,10 @@ func (cs *ColumnStats) DuplicatePercent() float64 {
 }
 
 func init() {
+	SetSampleSize()
+}
+
+func SetSampleSize() {
 	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
 		SampleSize = cast.ToInt(val) // legacy
 	}
