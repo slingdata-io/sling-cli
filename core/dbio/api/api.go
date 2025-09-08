@@ -394,6 +394,9 @@ var (
 	runSequence = func(s Sequence, ep *Endpoint) (err error) {
 		return g.Error("please use the official sling-cli release for running API sequences")
 	}
+	FetchSpec = func(_ string) (string, error) {
+		return "", g.Error("please use the official sling-cli release for fetching API specs")
+	}
 )
 
 // RegisterQueue creates a new queue with the given name
