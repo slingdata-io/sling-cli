@@ -2702,6 +2702,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 
 	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
+	setFieldsAll := []string{}
 	insertFields := []string{}
 	placeholderFields := []string{}
 	for _, tgtColName := range tgtCols.Names() {
@@ -2721,12 +2722,19 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 
 		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
+
+		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
+		setFieldsAll = append(setFieldsAll, setField)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
-			setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
-			setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
+	}
+
+	// if PK is all the available columns
+	if len(setFields) == 0 && len(setFieldsAll) > 0 {
+		setFields = setFieldsAll
 	}
 
 	// cast into the correct type
