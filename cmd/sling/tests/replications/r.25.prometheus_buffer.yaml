@@ -9,6 +9,8 @@ defaults:
 
 streams:
   prometheus_metrics:
+    transforms:
+      - event_date: date_format(now(), "%Y-%m-%d")
     sql: |
       up#{"start": "now-30m", "end": "now", "step": "5m"}
     object: '/tmp/prometheus_test_{run_timestamp}.csv'

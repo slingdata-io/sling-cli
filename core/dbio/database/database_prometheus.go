@@ -113,7 +113,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 		{Name: "timestamp", Type: iop.BigIntType, Position: 4},
 		{Name: "value", Type: iop.DecimalType, Position: 5},
 	}
-	
+
 	// Try to get actual columns by querying with a very small time range
 	if table.SQL != "" {
 		// Extract the base query without options
@@ -121,7 +121,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 		if idx := strings.Index(baseQuery, "#"); idx != -1 {
 			baseQuery = strings.TrimSpace(baseQuery[:idx])
 		}
-		
+
 		// Query with a minimal time range to get column structure
 		testOpts := g.M(
 			"start", "now-1m",
@@ -130,7 +130,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 			"limit", 1,
 			"get_columns", true,
 		)
-		
+
 		ds, err := conn.StreamRowsContext(conn.Context().Ctx, baseQuery, testOpts)
 		if err == nil && ds != nil {
 			// Wait for columns to be initialized
@@ -141,7 +141,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 			ds.Close()
 		}
 	}
-	
+
 	return columns, nil
 }
 
@@ -311,257 +311,303 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		}
 	}
 
-	Range := v1.Range{
-		Start: start,
-		End:   end,
-		Step:  step,
-	}
-	g.Debug("using range %s", g.Marshal(Range))
-	result, warnings, err := conn.Client.QueryRange(queryContext.Ctx, query, Range)
-	if err != nil {
-		return nil, g.Error(err, "Error querying Prometheus: %s", query)
-	}
+	// Initialize datastream
+	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
+	ds.SetConfig(conn.Props())
 
-	for _, warning := range warnings {
-		g.Warn(warning)
-	}
+	// State variables for the iterator closure
+	var result model.Value
+	var resultFetched bool
+	var warnings []string
+	var matrix model.Matrix
+	var vector model.Vector
+	var matrixIndex, valueIndex, histogramIndex, bucketIndex int
+	var currentSample *model.SampleStream
+	var columnsInitialized bool
+	var fieldMap map[string]int
+	limit := uint64(Limit)
 
-	data := iop.NewDataset(iop.Columns{})
-	fieldMap := data.Columns.FieldMap(true)
+	// Create the nextFunc closure
+	nextFunc := func(it *iop.Iterator) bool {
+		// Check context cancellation
+		if it.Context.Err() != nil {
+			return false
+		}
 
-	index := func(k string) int { return fieldMap[strings.ToLower(k)] }
+		// Check limit
+		if Limit > 0 && it.Counter >= limit {
+			return false
+		}
 
-	if matrix, ok := result.(model.Matrix); ok {
-		for _, sample := range matrix {
+		// Initial query execution (only once)
+		if !resultFetched {
+			Range := v1.Range{
+				Start: start,
+				End:   end,
+				Step:  step,
+			}
+			g.Debug("using range %s", g.Marshal(Range))
 
-			metricMap := map[string]string{}
-			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
-
-			if len(data.Columns) == 0 {
-				labels := lo.Keys(metricMap)
-				sort.Strings(labels)
-
-				columns := iop.NewColumnsFromFields(labels...)
-
-				if len(sample.Histograms) > 0 {
-					columns = append(columns, iop.Column{
-						Name:     "timestamp",
-						Type:     iop.BigIntType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "count",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "sum",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_boundaries",
-						Type:     iop.IntegerType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_count",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_lower",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_upper",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-				} else {
-					columns = append(columns, iop.Column{
-						Name:     "timestamp",
-						Type:     iop.BigIntType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "value",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-				}
-
-				data = iop.NewDataset(columns)
-				fieldMap = data.Columns.FieldMap(true)
+			result, warnings, err = conn.Client.QueryRange(queryContext.Ctx, query, Range)
+			if err != nil {
+				it.Context.CaptureErr(g.Error(err, "Error querying Prometheus: %s", query))
+				return false
 			}
 
-			for _, value := range sample.Values {
-				row := make([]any, len(data.Columns))
-				for k, v := range metricMap {
-					row[index(k)] = v
-				}
-				row[index("timestamp")] = value.Timestamp.Unix()
-				row[index("value")] = value.Value
-				data.Append(row)
+			for _, warning := range warnings {
+				g.Warn(warning)
 			}
 
-			for _, value := range sample.Histograms {
-				for _, bucket := range value.Histogram.Buckets {
-					row := make([]any, len(data.Columns))
-					for k, v := range metricMap {
-						row[index(k)] = v
+			resultFetched = true
+
+			// Type switch to initialize the appropriate variables
+			switch v := result.(type) {
+			case model.Matrix:
+				matrix = v
+				matrixIndex = 0
+			case model.Vector:
+				vector = v
+				matrixIndex = 0
+			case *model.Scalar:
+				// Handle scalar - single row
+				if !columnsInitialized {
+					ds.Columns = iop.Columns{
+						{Name: "timestamp", Type: iop.BigIntType, Position: 1},
+						{Name: "value", Type: iop.DecimalType, Position: 2},
 					}
-					row[index("timestamp")] = value.Timestamp.Unix()
-					row[index("count")] = cast.ToFloat64(value.Histogram.Count)
-					row[index("sum")] = cast.ToFloat64(value.Histogram.Sum)
-					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
-					data.Append(row)
+					it.Row = make([]any, len(ds.Columns))
+					columnsInitialized = true
 				}
-			}
-
-			if Limit > 0 && len(data.Rows) >= Limit {
-				break
+				it.Row[0] = v.Timestamp.Unix()
+				it.Row[1] = cast.ToFloat64(v.Value)
+				result = nil // Mark as processed
+				return true
+			case *model.String:
+				// Handle string - single row
+				if !columnsInitialized {
+					ds.Columns = iop.Columns{
+						{Name: "timestamp", Type: iop.BigIntType, Position: 1},
+						{Name: "value", Type: iop.StringType, Position: 2},
+					}
+					it.Row = make([]any, len(ds.Columns))
+					columnsInitialized = true
+				}
+				it.Row[0] = v.Timestamp.Unix()
+				it.Row[1] = cast.ToString(v.Value)
+				result = nil // Mark as processed
+				return true
+			default:
+				it.Context.CaptureErr(g.Error("invalid result: %#v", result))
+				return false
 			}
 		}
-	} else if vector, ok := result.(model.Vector); ok {
-		for _, sample := range vector {
-			metricMap := map[string]string{}
-			g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
 
-			if len(data.Columns) == 0 {
-				labels := lo.Keys(metricMap)
-				sort.Strings(labels)
+		// Process Matrix results
+		if matrix != nil {
+			// Find next value to return
+			for matrixIndex < len(matrix) {
+				if currentSample == nil {
+					currentSample = matrix[matrixIndex]
+					valueIndex = 0
+					histogramIndex = 0
+					bucketIndex = 0
 
-				columns := iop.NewColumnsFromFields(labels...)
+					// Initialize columns on first sample
+					if !columnsInitialized {
+						metricMap := map[string]string{}
+						g.Unmarshal(g.Marshal(currentSample.Metric), &metricMap)
+
+						labels := lo.Keys(metricMap)
+						sort.Strings(labels)
+						columns := iop.NewColumnsFromFields(labels...)
+
+						if len(currentSample.Histograms) > 0 {
+							// Add histogram columns
+							columns = append(columns,
+								iop.Column{Name: "timestamp", Type: iop.BigIntType, Position: len(columns) + 1},
+								iop.Column{Name: "count", Type: iop.DecimalType, Position: len(columns) + 1},
+								iop.Column{Name: "sum", Type: iop.DecimalType, Position: len(columns) + 1},
+								iop.Column{Name: "bucket_boundaries", Type: iop.IntegerType, Position: len(columns) + 1},
+								iop.Column{Name: "bucket_count", Type: iop.DecimalType, Position: len(columns) + 1},
+								iop.Column{Name: "bucket_lower", Type: iop.DecimalType, Position: len(columns) + 1},
+								iop.Column{Name: "bucket_upper", Type: iop.DecimalType, Position: len(columns) + 1},
+							)
+						} else {
+							columns = append(columns,
+								iop.Column{Name: "timestamp", Type: iop.BigIntType, Position: len(columns) + 1},
+								iop.Column{Name: "value", Type: iop.DecimalType, Position: len(columns) + 1},
+							)
+						}
+
+						ds.Columns = columns
+						it.Row = make([]any, len(columns))
+						fieldMap = ds.Columns.FieldMap(true)
+						columnsInitialized = true
+					}
+				}
+
+				metricMap := map[string]string{}
+				g.Unmarshal(g.Marshal(currentSample.Metric), &metricMap)
+
+				// Process regular values
+				if valueIndex < len(currentSample.Values) {
+					value := currentSample.Values[valueIndex]
+
+					// Fill row
+					for k, v := range metricMap {
+						if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+							it.Row[idx] = v
+						}
+					}
+					it.Row[fieldMap["timestamp"]] = value.Timestamp.Unix()
+					it.Row[fieldMap["value"]] = float64(value.Value)
+
+					valueIndex++
+					return true
+				}
+
+				// Process histogram values
+				if histogramIndex < len(currentSample.Histograms) {
+					hist := currentSample.Histograms[histogramIndex]
+
+					if bucketIndex < len(hist.Histogram.Buckets) {
+						bucket := hist.Histogram.Buckets[bucketIndex]
+
+						// Fill row
+						for k, v := range metricMap {
+							if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+								it.Row[idx] = v
+							}
+						}
+						it.Row[fieldMap["timestamp"]] = hist.Timestamp.Unix()
+						it.Row[fieldMap["count"]] = cast.ToFloat64(hist.Histogram.Count)
+						it.Row[fieldMap["sum"]] = cast.ToFloat64(hist.Histogram.Sum)
+						it.Row[fieldMap["bucket_boundaries"]] = cast.ToInt(bucket.Boundaries)
+						it.Row[fieldMap["bucket_count"]] = cast.ToFloat64(bucket.Count)
+						it.Row[fieldMap["bucket_lower"]] = cast.ToFloat64(bucket.Lower)
+						it.Row[fieldMap["bucket_upper"]] = cast.ToFloat64(bucket.Upper)
+
+						bucketIndex++
+						return true
+					}
+
+					bucketIndex = 0
+					histogramIndex++
+					if histogramIndex < len(currentSample.Histograms) {
+						continue // Process next histogram
+					}
+				}
+
+				// Move to next sample
+				currentSample = nil
+				matrixIndex++
+			}
+
+			// No more data in matrix
+			matrix = nil
+		}
+
+		// Process Vector results
+		if vector != nil {
+			if matrixIndex < len(vector) {
+				sample := vector[matrixIndex]
+
+				// Initialize columns on first sample
+				if !columnsInitialized {
+					metricMap := map[string]string{}
+					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+					labels := lo.Keys(metricMap)
+					sort.Strings(labels)
+					columns := iop.NewColumnsFromFields(labels...)
+
+					if sample.Histogram != nil {
+						// Add histogram columns
+						columns = append(columns,
+							iop.Column{Name: "timestamp", Type: iop.BigIntType, Position: len(columns) + 1},
+							iop.Column{Name: "count", Type: iop.DecimalType, Position: len(columns) + 1},
+							iop.Column{Name: "sum", Type: iop.DecimalType, Position: len(columns) + 1},
+							iop.Column{Name: "bucket_boundaries", Type: iop.IntegerType, Position: len(columns) + 1},
+							iop.Column{Name: "bucket_count", Type: iop.DecimalType, Position: len(columns) + 1},
+							iop.Column{Name: "bucket_lower", Type: iop.DecimalType, Position: len(columns) + 1},
+							iop.Column{Name: "bucket_upper", Type: iop.DecimalType, Position: len(columns) + 1},
+						)
+					} else {
+						columns = append(columns,
+							iop.Column{Name: "timestamp", Type: iop.BigIntType, Position: len(columns) + 1},
+							iop.Column{Name: "value", Type: iop.DecimalType, Position: len(columns) + 1},
+						)
+					}
+
+					ds.Columns = columns
+					it.Row = make([]any, len(columns))
+					fieldMap = ds.Columns.FieldMap(true)
+					columnsInitialized = true
+				}
+
+				metricMap := map[string]string{}
+				g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+				// Fill row
+				for k, v := range metricMap {
+					if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+						it.Row[idx] = v
+					}
+				}
+
 				if sample.Histogram != nil {
-					columns = append(columns, iop.Column{
-						Name:     "timestamp",
-						Type:     iop.BigIntType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "count",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "sum",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_boundaries",
-						Type:     iop.IntegerType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_count",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_lower",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "bucket_upper",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
+					it.Row[fieldMap["timestamp"]] = sample.Timestamp.Unix()
+					it.Row[fieldMap["count"]] = cast.ToFloat64(sample.Histogram.Count)
+					it.Row[fieldMap["sum"]] = cast.ToFloat64(sample.Histogram.Sum)
+
+					// Note: simplified - only processing first bucket for vector
+					if len(sample.Histogram.Buckets) > 0 {
+						bucket := sample.Histogram.Buckets[0]
+						it.Row[fieldMap["bucket_boundaries"]] = cast.ToInt(bucket.Boundaries)
+						it.Row[fieldMap["bucket_count"]] = cast.ToFloat64(bucket.Count)
+						it.Row[fieldMap["bucket_lower"]] = cast.ToFloat64(bucket.Lower)
+						it.Row[fieldMap["bucket_upper"]] = cast.ToFloat64(bucket.Upper)
+					}
 				} else {
-					columns = append(columns, iop.Column{
-						Name:     "timestamp",
-						Type:     iop.BigIntType,
-						Position: len(columns) + 1,
-					})
-					columns = append(columns, iop.Column{
-						Name:     "value",
-						Type:     iop.DecimalType,
-						Position: len(columns) + 1,
-					})
+					it.Row[fieldMap["timestamp"]] = sample.Timestamp.Unix()
+					it.Row[fieldMap["value"]] = cast.ToFloat64(sample.Value)
 				}
 
-				data = iop.NewDataset(columns)
-				fieldMap = data.Columns.FieldMap(true)
+				matrixIndex++
+				return true
 			}
 
-			row := make([]any, len(data.Columns))
-			for k, v := range metricMap {
-				row[index(k)] = v
+			// No more data in vector
+			vector = nil
+		}
+
+		// Handle no data case - use fallback columns
+		if !columnsInitialized && opts["columns"] != nil {
+			switch cols := opts["columns"].(type) {
+			case iop.Columns:
+				ds.Columns = cols
+			default:
+				g.JSONConvert(opts["columns"], &ds.Columns)
 			}
-
-			if sample.Histogram != nil {
-				row[index("timestamp")] = sample.Timestamp.Unix()
-				row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
-				row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
-
-				for _, bucket := range sample.Histogram.Buckets {
-					row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-					row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-					row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-					row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
-				}
-			} else {
-				row[index("timestamp")] = sample.Timestamp.Unix()
-				row[index("value")] = cast.ToFloat64(sample.Value)
-			}
-
-			data.Append(row)
-			if Limit > 0 && len(data.Rows) >= Limit {
-				break
+			if len(ds.Columns) > 0 {
+				it.Row = make([]any, len(ds.Columns))
+				columnsInitialized = true
 			}
 		}
-	} else if scalar, ok := result.(*model.Scalar); ok {
-		data.Columns = iop.Columns{
-			{
-				Name:     "timestamp",
-				Type:     iop.BigIntType,
-				Position: 1,
-			},
-			{
-				Name:     "value",
-				Type:     iop.DecimalType,
-				Position: 2,
-			},
-		}
-		data.Append([]any{scalar.Timestamp.Unix(), cast.ToFloat64(scalar.Value)})
-	} else if str, ok := result.(*model.String); ok {
-		data.Columns = iop.Columns{
-			{
-				Name:     "timestamp",
-				Type:     iop.BigIntType,
-				Position: 1,
-			},
-			{
-				Name:     "value",
-				Type:     iop.StringType,
-				Position: 2,
-			},
-		}
-		data.Append([]any{str.Timestamp.Unix(), cast.ToFloat64(str.Value)})
-	} else {
-		return nil, g.Error("invalid result: %#v", result)
+
+		return false // No more data
 	}
 
-	// If no columns were detected (no data), use columns from options
-	if len(data.Columns) == 0 && opts["columns"] != nil {
-		switch cols := opts["columns"].(type) {
-		case iop.Columns:
-			data.Columns = cols
-		default:
-			// Try to convert from options
-			g.JSONConvert(opts["columns"], &data.Columns)
-		}
+	// Set the iterator
+	ds.SetIterator(ds.NewIterator(ds.Columns, nextFunc))
+
+	// Start the stream
+	err = ds.Start()
+	if err != nil {
+		return ds, g.Error(err, "could not start datastream")
 	}
 
-	ds = data.Stream(conn.Props())
-
-	return
+	return ds, nil
 }
 
 // GetSchemas returns schemas
@@ -727,171 +773,244 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 		return conn.StreamRowsContext(queryContext.Ctx, query, opts)
 	}
 
-	// Initialize columns and datastream
-	var columns iop.Columns
-	columnsInitialized := false
-
-	// Create the datastream
+	// Initialize datastream
 	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
 	ds.SetConfig(conn.Props())
 
-	// Process in chunks
-	go func() {
-		defer ds.Close()
+	// State variables for chunked iteration
+	chunkStart := start
+	chunkNum := 0
+	var currentChunkResult model.Value
+	var currentMatrix model.Matrix
+	var currentVector model.Vector
+	var matrixIndex, valueIndex, histogramIndex, bucketIndex int
+	var currentSample *model.SampleStream
+	var columnsInitialized bool
+	var fieldMap map[string]int
 
-		chunkStart := start
-		chunkNum := 0
-		for chunkStart.Before(end) {
-			chunkEnd := chunkStart.Add(chunkDuration)
-			if chunkEnd.After(end) {
-				chunkEnd = end
+	// Create the nextFunc closure for chunked streaming
+	nextFunc := func(it *iop.Iterator) bool {
+		// Check context cancellation
+		if it.Context.Err() != nil {
+			return false
+		}
+
+		// Main processing loop
+		for {
+			// Need to fetch a new chunk?
+			if currentChunkResult == nil && chunkStart.Before(end) {
+				chunkEnd := chunkStart.Add(chunkDuration)
+				if chunkEnd.After(end) {
+					chunkEnd = end
+				}
+
+				chunkNum++
+				g.Debug("Processing chunk %d: %s to %s", chunkNum, chunkStart.Format(time.RFC3339), chunkEnd.Format(time.RFC3339))
+
+				chunkRange := v1.Range{
+					Start: chunkStart,
+					End:   chunkEnd,
+					Step:  step,
+				}
+
+				result, warnings, err := conn.Client.QueryRange(queryContext.Ctx, query, chunkRange)
+				if err != nil {
+					it.Context.CaptureErr(g.Error(err, "Error querying Prometheus chunk: %s", query))
+					return false
+				}
+
+				for _, warning := range warnings {
+					g.Warn(warning)
+				}
+
+				// Initialize based on result type
+				switch v := result.(type) {
+				case model.Matrix:
+					currentMatrix = v
+					matrixIndex = 0
+					currentChunkResult = result
+				case model.Vector:
+					currentVector = v
+					matrixIndex = 0
+					currentChunkResult = result
+				default:
+					// For scalar/string types, handle immediately
+					it.Context.CaptureErr(g.Error("unexpected result type in chunk: %#v", result))
+					return false
+				}
+
+				// Move chunk window forward
+				chunkStart = chunkEnd
+
+				// Add small delay between chunks
+				time.Sleep(100 * time.Millisecond)
 			}
 
-			chunkNum++
-			g.Debug("Processing chunk %d: %s to %s", chunkNum, chunkStart.Format(time.RFC3339), chunkEnd.Format(time.RFC3339))
+			// Process current chunk's Matrix data
+			if currentMatrix != nil {
+				for matrixIndex < len(currentMatrix) {
+					if currentSample == nil {
+						currentSample = currentMatrix[matrixIndex]
+						valueIndex = 0
+						histogramIndex = 0
+						bucketIndex = 0
 
-			// Query this chunk
-			chunkRange := v1.Range{
-				Start: chunkStart,
-				End:   chunkEnd,
-				Step:  step,
-			}
+						// Initialize columns on first data
+						if !columnsInitialized {
+							metricMap := map[string]string{}
+							g.Unmarshal(g.Marshal(currentSample.Metric), &metricMap)
 
-			result, warnings, err := conn.Client.QueryRange(queryContext.Ctx, query, chunkRange)
-			if err != nil {
-				ds.Context.CaptureErr(g.Error(err, "Error querying Prometheus chunk: %s", query))
-				return
-			}
+							columns := createPrometheusColumns(metricMap, currentSample)
+							ds.Columns = columns
+							it.Row = make([]any, len(columns))
+							fieldMap = columns.FieldMap(true)
+							columnsInitialized = true
+						}
+					}
 
-			for _, warning := range warnings {
-				g.Warn(warning)
-			}
-
-			// Process chunk results
-			if matrix, ok := result.(model.Matrix); ok {
-				for _, sample := range matrix {
 					metricMap := map[string]string{}
-					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+					g.Unmarshal(g.Marshal(currentSample.Metric), &metricMap)
+
+					// Process values
+					if valueIndex < len(currentSample.Values) {
+						value := currentSample.Values[valueIndex]
+
+						// Fill row
+						for k, v := range metricMap {
+							if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+								it.Row[idx] = v
+							}
+						}
+						it.Row[fieldMap["timestamp"]] = value.Timestamp.Unix()
+						it.Row[fieldMap["value"]] = float64(value.Value)
+
+						valueIndex++
+						return true
+					}
+
+					// Process histograms
+					if histogramIndex < len(currentSample.Histograms) {
+						hist := currentSample.Histograms[histogramIndex]
+
+						if bucketIndex < len(hist.Histogram.Buckets) {
+							bucket := hist.Histogram.Buckets[bucketIndex]
+
+							// Fill row
+							for k, v := range metricMap {
+								if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+									it.Row[idx] = v
+								}
+							}
+							it.Row[fieldMap["timestamp"]] = hist.Timestamp.Unix()
+							it.Row[fieldMap["count"]] = hist.Histogram.Count
+							it.Row[fieldMap["sum"]] = hist.Histogram.Sum
+							it.Row[fieldMap["bucket_boundaries"]] = bucketIndex
+							it.Row[fieldMap["bucket_count"]] = bucket.Count
+							it.Row[fieldMap["bucket_lower"]] = bucket.Lower
+							it.Row[fieldMap["bucket_upper"]] = bucket.Upper
+
+							bucketIndex++
+							return true
+						}
+
+						bucketIndex = 0
+						histogramIndex++
+						continue // Process next histogram
+					}
+
+					// Move to next sample in matrix
+					currentSample = nil
+					matrixIndex++
+				}
+
+				// Finished current matrix chunk
+				currentMatrix = nil
+				currentChunkResult = nil
+				continue // Fetch next chunk
+			}
+
+			// Process current chunk's Vector data
+			if currentVector != nil {
+				if matrixIndex < len(currentVector) {
+					sample := currentVector[matrixIndex]
 
 					// Initialize columns on first data
 					if !columnsInitialized {
-						columns = createPrometheusColumns(metricMap, sample)
+						metricMap := map[string]string{}
+						g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
+
+						columns := createPrometheusColumnsFromVector(metricMap, sample)
 						ds.Columns = columns
+						it.Row = make([]any, len(columns))
+						fieldMap = columns.FieldMap(true)
 						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
 					}
 
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					// Stream values
-					for _, value := range sample.Values {
-						row := make([]any, len(columns))
-						for k, v := range metricMap {
-							row[index(k)] = v
-						}
-						row[index("timestamp")] = value.Timestamp.Unix()
-						row[index("value")] = value.Value
-
-						select {
-						case <-queryContext.Ctx.Done():
-							return
-						default:
-							ds.Push(row)
-						}
-					}
-
-					// Stream histogram data if present
-					for _, hist := range sample.Histograms {
-						for i, bucket := range hist.Histogram.Buckets {
-							row := make([]any, len(columns))
-							for k, v := range metricMap {
-								row[index(k)] = v
-							}
-							row[index("timestamp")] = hist.Timestamp.Unix()
-							row[index("count")] = hist.Histogram.Count
-							row[index("sum")] = hist.Histogram.Sum
-							row[index("bucket_boundaries")] = i
-							row[index("bucket_count")] = bucket.Count
-							row[index("bucket_lower")] = bucket.Lower
-							row[index("bucket_upper")] = bucket.Upper
-
-							select {
-							case <-queryContext.Ctx.Done():
-								return
-							default:
-								ds.Push(row)
-							}
-						}
-					}
-				}
-			} else if vector, ok := result.(model.Vector); ok {
-				// Handle vector results similarly
-				for _, sample := range vector {
 					metricMap := map[string]string{}
 					g.Unmarshal(g.Marshal(sample.Metric), &metricMap)
 
-					if !columnsInitialized {
-						columns = createPrometheusColumnsFromVector(metricMap, sample)
-						ds.Columns = columns
-						columnsInitialized = true
-						ds.SetReady() // Signal that datastream is ready
-					}
-
-					fieldMap := columns.FieldMap(true)
-					index := func(k string) int { return fieldMap[strings.ToLower(k)] }
-
-					row := make([]any, len(columns))
+					// Fill row
 					for k, v := range metricMap {
-						row[index(k)] = v
+						if idx, ok := fieldMap[strings.ToLower(k)]; ok {
+							it.Row[idx] = v
+						}
 					}
 
 					if sample.Histogram != nil {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("count")] = cast.ToFloat64(sample.Histogram.Count)
-						row[index("sum")] = cast.ToFloat64(sample.Histogram.Sum)
+						it.Row[fieldMap["timestamp"]] = sample.Timestamp.Unix()
+						it.Row[fieldMap["count"]] = cast.ToFloat64(sample.Histogram.Count)
+						it.Row[fieldMap["sum"]] = cast.ToFloat64(sample.Histogram.Sum)
 
-						for _, bucket := range sample.Histogram.Buckets {
-							row[index("bucket_boundaries")] = cast.ToInt(bucket.Boundaries)
-							row[index("bucket_count")] = cast.ToFloat64(bucket.Count)
-							row[index("bucket_lower")] = cast.ToFloat64(bucket.Lower)
-							row[index("bucket_upper")] = cast.ToFloat64(bucket.Upper)
+						if len(sample.Histogram.Buckets) > 0 {
+							bucket := sample.Histogram.Buckets[0]
+							it.Row[fieldMap["bucket_boundaries"]] = cast.ToInt(bucket.Boundaries)
+							it.Row[fieldMap["bucket_count"]] = cast.ToFloat64(bucket.Count)
+							it.Row[fieldMap["bucket_lower"]] = cast.ToFloat64(bucket.Lower)
+							it.Row[fieldMap["bucket_upper"]] = cast.ToFloat64(bucket.Upper)
 						}
 					} else {
-						row[index("timestamp")] = sample.Timestamp.Unix()
-						row[index("value")] = cast.ToFloat64(sample.Value)
+						it.Row[fieldMap["timestamp"]] = sample.Timestamp.Unix()
+						it.Row[fieldMap["value"]] = cast.ToFloat64(sample.Value)
 					}
 
-					select {
-					case <-queryContext.Ctx.Done():
-						return
+					matrixIndex++
+					return true
+				}
+
+				// Finished current vector chunk
+				currentVector = nil
+				currentChunkResult = nil
+				continue // Fetch next chunk
+			}
+
+			// No more chunks and no current data
+			if chunkStart.After(end) || chunkStart.Equal(end) {
+				// Handle empty result with fallback columns
+				if !columnsInitialized && opts["columns"] != nil {
+					switch cols := opts["columns"].(type) {
+					case iop.Columns:
+						ds.Columns = cols
 					default:
-						ds.Push(row)
+						g.JSONConvert(opts["columns"], &ds.Columns)
+					}
+					if len(ds.Columns) > 0 {
+						columnsInitialized = true
+						it.Row = make([]any, len(ds.Columns))
 					}
 				}
+				return false // No more data
 			}
-
-			// Move to next chunk
-			chunkStart = chunkEnd
-
-			// Add a small delay between chunks to avoid overwhelming the API
-			time.Sleep(100 * time.Millisecond)
 		}
+	}
 
-		// If no columns were initialized (no data), use columns from options if available
-		if !columnsInitialized {
-			if opts["columns"] != nil {
-				switch cols := opts["columns"].(type) {
-				case iop.Columns:
-					ds.Columns = cols
-				default:
-					// Try to convert from options
-					g.JSONConvert(opts["columns"], &ds.Columns)
-				}
-			}
-			ds.SetReady()
-		}
-	}()
+	// Set the iterator
+	ds.SetIterator(ds.NewIterator(ds.Columns, nextFunc))
+
+	// Start the stream
+	err = ds.Start()
+	if err != nil {
+		return ds, g.Error(err, "could not start datastream")
+	}
 
 	return ds, nil
 }

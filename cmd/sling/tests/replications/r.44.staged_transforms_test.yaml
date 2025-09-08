@@ -87,6 +87,7 @@ streams:
       - "*": cast(value, "string")
       - "*": remove_diacritics(value)
       - calculated_amount: 'cast(value, "decimal")'
+        event_date: date_format(now(), "%Y-%m-%d")
         
     hooks:
       post:
@@ -102,6 +103,7 @@ streams:
               full_name,
               email_hash,
               calculated_amount,
+              event_date,
               category,
               display_name,
               processed_status
@@ -128,6 +130,9 @@ streams:
 
         - type: check  
           check: length(store.result[0].email_hash) > 30
+
+        - type: check  
+          check: length(store.result[0].event_date) == 10
 
         - type: check
           check: store.result[0].full_name == "John Doe"  # record reference combining trimmed names
