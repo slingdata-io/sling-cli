@@ -194,6 +194,11 @@ func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 		options["columns"] = table.Columns
 	}
 
+	// Pass transforms configuration to datastream
+	if transformStr := conn.GetProp("transforms"); transformStr != "" {
+		options["transforms"] = transformStr
+	}
+
 	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.SQL, options)
 	if err != nil {
 		return df, g.Error(err, "could start datastream")
@@ -559,7 +564,28 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		}
 	}
 
-	ds = data.Stream(conn.Props())
+	// Create the datastream with connection properties
+	props := conn.Props()
+
+	// Pass transforms through to the datastream configuration
+	if transformsOpt := opts["transforms"]; transformsOpt != nil {
+		props["transforms"] = cast.ToString(transformsOpt)
+	}
+
+	// Create a temporary datastream to initialize transforms before streaming the data
+	tempDs := iop.NewDatastream(data.Columns)
+	tempDs.SetConfig(props)
+
+	// If transforms are configured, apply them manually to the existing data
+	// since Prometheus bypasses the normal iterator pattern
+	if transformsOpt := opts["transforms"]; transformsOpt != nil && len(data.Rows) > 0 {
+		err := conn.applyTransformsToData(tempDs, &data)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	ds = data.Stream(props)
 
 	return
 }
@@ -733,7 +759,13 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 	// Create the datastream
 	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
-	ds.SetConfig(conn.Props())
+
+	// Set connection properties and transforms
+	props := conn.Props()
+	if transformsOpt := opts["transforms"]; transformsOpt != nil {
+		props["transforms"] = cast.ToString(transformsOpt)
+	}
+	ds.SetConfig(props)
 
 	// Process in chunks
 	go func() {
@@ -1012,4 +1044,27 @@ func createPrometheusColumnsFromVector(metricMap map[string]string, sample *mode
 	}
 
 	return columns
+}
+
+// applyTransformsToData applies transforms to the collected Prometheus data
+func (conn *PrometheusConn) applyTransformsToData(ds *iop.Datastream, data *iop.Dataset) error {
+	if ds.Sp == nil {
+		return nil
+	}
+	if ds.Sp.Config.Transforms == nil {
+		return nil
+	}
+
+	transforms := ds.Sp.Config.Transforms
+
+	// Apply transforms to each row in the collected data
+	for i, row := range data.Rows {
+		newRow, err := transforms.Evaluate(row)
+		if err != nil {
+			return g.Error(err)
+		}
+		data.Rows[i] = newRow
+	}
+
+	return nil
 }

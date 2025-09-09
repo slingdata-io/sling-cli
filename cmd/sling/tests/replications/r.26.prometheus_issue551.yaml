@@ -24,10 +24,10 @@ hooks:
       connection: snowflake
       query: |
         select 
-          count(distinct __name__) as metric_count,
-          count(distinct instance) as instance_count,
-          min(timestamp) as min_timestamp,
-          max(timestamp) as max_timestamp
+          count(distinct "__name__") as metric_count,
+          count(distinct "instance") as instance_count,
+          min("timestamp") as min_timestamp,
+          max("timestamp") as max_timestamp
         from public.prom_data
       into: stats
     
