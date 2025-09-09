@@ -113,8 +113,8 @@ func (df *Dataflow) StreamConfig() (cfg StreamConfig) {
 // SetConfig set the Sp config
 func (df *Dataflow) SetConfig(cfg StreamConfig) {
 	// don't overwrite transforms if not provided
-	if cfg.transforms == nil {
-		cfg.transforms = df.StreamConfig().transforms
+	if cfg.Transforms == nil {
+		cfg.Transforms = df.StreamConfig().Transforms
 	}
 
 	df.mux.Lock()

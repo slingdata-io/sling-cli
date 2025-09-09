@@ -72,7 +72,7 @@ type StreamConfig struct {
 	DeleteFile     bool           `json:"delete"` // whether to delete before writing
 	BoolAsInt      bool           `json:"-"`
 	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms     Transform
+	Transforms     Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -281,7 +281,7 @@ func NewStreamProcessor() *StreamProcessor {
 func DefaultStreamConfig() StreamConfig {
 	return StreamConfig{
 		MaxDecimals: -1,
-		transforms:  nil,
+		Transforms:  nil,
 		Map:         map[string]string{"delimiter": "-1"},
 	}
 }
@@ -295,7 +295,7 @@ func LoaderStreamConfig(header bool) StreamConfig {
 		NullAs:         `\N`,
 		DatetimeFormat: "auto",
 		MaxDecimals:    -1,
-		transforms:     nil,
+		Transforms:     nil,
 	}
 }
 
@@ -431,7 +431,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	stageTransforms := []map[string]string{}
 	g.Unmarshal(transformsPayload, &stageTransforms)
-	sp.Config.transforms = NewTransform(stageTransforms, sp)
+	sp.Config.Transforms = NewTransform(stageTransforms, sp)
 }
 
 // CastVal  casts the type of an interface based on its value

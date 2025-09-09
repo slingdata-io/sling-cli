@@ -722,11 +722,11 @@ loop:
 
 			// evaluate transforms, only to determine if type change
 			// will be re-evaluated again below for storing result
-			if transforms := ds.Sp.Config.transforms; transforms != nil {
+			if transforms := ds.Sp.Config.Transforms; transforms != nil {
 				// make a copy of row so we don't reference the pointed values
 				rowCopy := make([]any, len(row))
 				copy(rowCopy, row)
-				newRow, err := ds.Sp.Config.transforms.Evaluate(rowCopy)
+				newRow, err := ds.Sp.Config.Transforms.Evaluate(rowCopy)
 				if ds.Context.CaptureErr(err) {
 					break loop
 				}
@@ -963,8 +963,8 @@ skipBuffer:
 					row = ds.it.Row
 				} else {
 					// evaluate transforms
-					if transforms := ds.Sp.Config.transforms; transforms != nil {
-						ds.it.Row, err = ds.Sp.Config.transforms.Evaluate(ds.it.Row)
+					if transforms := ds.Sp.Config.Transforms; transforms != nil {
+						ds.it.Row, err = ds.Sp.Config.Transforms.Evaluate(ds.it.Row)
 						if ds.Context.CaptureErr(err) {
 							break loop
 						}
