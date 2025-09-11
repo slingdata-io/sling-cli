@@ -593,6 +593,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps setting a higher 'SLING_SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` input, (see https://docs.slingdata.io/concepts/replication/columns) \nFurthermore, you can try the `target_options.adjust_column_type` setting to allow Sling to automatically alter the column type on the target side."
 		case contains("bcp import"):
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/concepts/replication/target-options"
+		case contains("pq: canceling statement due to statement timeout "):
+			helpString = "You could try specifying a `statement_timeout` for your Postgres connection. See https://docs.slingdata.io/connections/database-connections/postgres"
 		case contains("[AppendRow]: converting"):
 			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/concepts/replication/target-options"
 		case contains("mkdir", "permission denied"):

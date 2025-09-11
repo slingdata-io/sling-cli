@@ -559,6 +559,9 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["role"]; ok {
 			template = template + "&role={role}"
 		}
+		if _, ok := c.Data["statement_timeout"]; ok {
+			template = template + "&statement_timeout={statement_timeout}"
+		}
 	case dbio.TypeDbRedshift:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
