@@ -610,6 +610,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 			table, err = database.ParseTableName(stream.config.SQL, sourceConn.Connection.Type)
 			table.SQL = g.R(table.SQL, "incremental_where_cond", "1=1")
 			table.SQL = g.R(table.SQL, "incremental_value", "null")
+			table.SQL = g.R(table.SQL, "fields", "*")
 		}
 
 		if err != nil {

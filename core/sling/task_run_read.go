@@ -35,6 +35,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	st.SQL = g.R(st.SQL, "incremental_value", "null")
 	st.SQL = g.R(st.SQL, "start_value", "null")
 	st.SQL = g.R(st.SQL, "end_value", "null")
+	st.SQL = g.R(st.SQL, "fields", "*")
 
 	sTable.Columns, err = srcConn.GetSQLColumns(st)
 	if err != nil {
@@ -205,7 +206,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 	// construct select statement for selected fields or where condition
 	if len(selectFields) > 1 || selectFields[0] != "*" || cfg.Source.Where != "" || cfg.Source.Limit() > 0 {
-		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() {
+		if sTable.SQL != "" && !cfg.SrcConn.Type.IsNoSQL() && !strings.Contains(sTable.SQL, "{fields}") {
 			// If sTable.SQL is already a query (e.g. from incremental template or custom SQL),
 			// it means the field selection (cfg.Source.Select) is assumed to be handled by its construction.
 			selectFields = []string{"*"}

@@ -380,6 +380,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		"where_cond", opts.Where,
 		"where_clause", whereClause,
 		"where_and", whereAnd,
+		"fields", fieldsStr,
 	)
 
 	return
