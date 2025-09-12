@@ -954,3 +954,16 @@
 - id: 117
   name: JSON to Snowflake nested import test
   run: 'sling run -d -r cmd/sling/tests/replications/r.55.json_snowflake_nested.yaml'
+
+# Test SQL Server money type to StarRocks
+- id: 118
+  name: SQL Server money type to StarRocks
+  run: 'sling run -d -r cmd/sling/tests/replications/r.56.mssql_starrocks_money.yaml'
+  conns:
+    - mssql
+    - starrocks
+  streams: 1
+  rows: 10
+  output_contains:
+    - 'execution succeeded'
+    - 'Row-by-row comparison'
