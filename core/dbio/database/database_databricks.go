@@ -776,8 +776,13 @@ func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume str
 		}
 
 		// Create volume name similar to how Snowflake creates stages
-		volumeName := "sling_volume"
-		volumeFullName := fmt.Sprintf("%s.%s.%s", conn.Catalog, schema, volumeName)
+		defVolume := Table{
+			Database: conn.Catalog,
+			Schema:   schema,
+			Name:     "sling_volume",
+			Dialect:  dbio.TypeDbDatabricks,
+		}
+		volumeFullName := defVolume.FDQN()
 
 		sql := g.R(
 			conn.template.Core["create_volume"],
@@ -788,8 +793,8 @@ func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume str
 			return "", g.Error(err, "could not create volume: %s", volumeFullName)
 		}
 
-		volumePath := fmt.Sprintf("/Volumes/%s/%s/%s", conn.Catalog, schema, volumeName)
-		conn.SetProp("internal_volume", volumePath)
+		// volumePath := fmt.Sprintf("/Volumes/%s/%s/%s", conn.Catalog, schema, volumeName)
+		conn.SetProp("internal_volume", volumeFullName)
 		internalVolume = volumeFullName
 	}
 	return internalVolume, nil
