@@ -765,6 +765,7 @@ func (conn *DatabricksConn) GenerateMergeSQL(srcTable string, tgtTable string, p
 
 // getOrCreateVolume creates a volume if it doesn't exist, similar to Snowflake's getOrCreateStage
 func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume string, err error) {
+	var volume Table
 	internalVolume = conn.GetProp("internal_volume")
 
 	if internalVolume == "" {
@@ -776,28 +777,30 @@ func (conn *DatabricksConn) getOrCreateVolume(schema string) (internalVolume str
 		}
 
 		// Create volume name similar to how Snowflake creates stages
-		defVolume := Table{
+		volume = Table{
 			Database: conn.Catalog,
 			Schema:   schema,
 			Name:     "sling_volume",
 			Dialect:  dbio.TypeDbDatabricks,
 		}
-		volumeFullName := defVolume.FDQN()
 
-		sql := g.R(
-			conn.template.Core["create_volume"],
-			"volume_name", volumeFullName,
-		)
-		_, err := conn.Exec(sql + env.NoDebugKey)
-		if err != nil {
+		volumeFullName := volume.FDQN()
+		sql := g.R(conn.template.Core["create_volume"], "volume_name", volumeFullName)
+		if _, err = conn.Exec(sql + env.NoDebugKey); err != nil {
 			return "", g.Error(err, "could not create volume: %s", volumeFullName)
 		}
-
-		// volumePath := fmt.Sprintf("/Volumes/%s/%s/%s", conn.Catalog, schema, volumeName)
 		conn.SetProp("internal_volume", volumeFullName)
-		internalVolume = volumeFullName
+	} else {
+		volume, err = ParseTableName(internalVolume, dbio.TypeDbDatabricks)
+		if err != nil {
+			return "", g.Error(err, "invalid volume name, should be in format: `catalog_name`.`schema_name`.`volume_name`")
+		}
 	}
-	return internalVolume, nil
+
+	volumePath := fmt.Sprintf("/Volumes/%s/%s/%s", volume.Database, volume.Schema, volume.Name)
+	conn.SetProp("internal_volume_path", volumePath)
+
+	return volumePath, nil
 }
 
 // VolumePUT uploads a local file to a Databricks volume using SQL commands
@@ -984,7 +987,7 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 	}()
 
 	// Get volume path for upload - format: /Volumes/catalog/schema/volume/path
-	volumePrefix := conn.GetProp("internal_volume")
+	volumePrefix := conn.GetProp("internal_volume_path")
 	volumeFolderPath := fmt.Sprintf("%s/%s/%s",
 		volumePrefix, env.CleanTableName(tableFName), g.NowFileStr())
 
@@ -1010,7 +1013,7 @@ func (conn *DatabricksConn) CopyViaVolume(table Table, df *iop.Dataflow) (count 
 
 		err = conn.VolumePUT(folderPath, file.Node.Path(), volumeFilePath)
 		if err != nil {
-			df.Context.CaptureErr(g.Error(err, "Error copying to Databricks Volume: "+conn.GetProp("internal_volume")))
+			df.Context.CaptureErr(g.Error(err, "Error copying to Databricks Volume: "+conn.GetProp("internal_volume_path")))
 		}
 		return volumeFilePath
 	}
@@ -1059,7 +1062,7 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 	}
 
 	// Get volume path for export
-	volumePrefix := conn.GetProp("internal_volume")
+	volumePrefix := conn.GetProp("internal_volume_path")
 	volumeFolderPath := fmt.Sprintf("%s/%s/%s",
 		volumePrefix, tempCloudStorageFolder, g.NowFileStr())
 
