@@ -508,6 +508,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 			"timeout": "300",
 			"columns": strings.Join(colNames, ", "),
 
+			"strict":            "true",
 			"format":            "JSON",
 			"strip_outer_array": "true",
 		}
