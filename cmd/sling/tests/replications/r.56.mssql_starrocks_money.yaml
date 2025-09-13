@@ -18,7 +18,7 @@ hooks:
           description VARCHAR(100),
           money_col MONEY,
           smallmoney_col SMALLMONEY,
-          decimal_col DECIMAL(19,4),
+          decimal_col DECIMAL(24,6),
           decimal_high_precision DECIMAL(38,10)
         );
         
@@ -130,7 +130,8 @@ hooks:
         SELECT 
           id,
           description,
-          CAST(money_col AS DECIMAL(38,4)) as money_value
+          CAST(money_col AS DECIMAL(38,4)) as money_value,
+          CAST(decimal_col AS DECIMAL(38,4)) as decimal_value
         FROM dbo.money_test
         ORDER BY id
       into: source_rows
@@ -142,10 +143,22 @@ hooks:
         SELECT 
           id,
           description,
-          money_col as money_value
+          money_col as money_value,
+          decimal_col as decimal_value
         FROM public.money_test
         ORDER BY id
       into: target_rows
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          id,
+          description,
+          money_col as money_value,
+          decimal_col as decimal_value
+        FROM public.money_test_sql
+        ORDER BY id
+      into: target_rows_sql
 
     - type: log
       message: |
@@ -156,6 +169,9 @@ hooks:
         
         Target (StarRocks) rows:
         {pretty_table(store.target_rows)}
+        
+        Target (SQL) (StarRocks) rows:
+        {pretty_table(store.target_rows_sql)}
 
     # Check specific rows match
     - type: check
@@ -167,8 +183,16 @@ hooks:
       failure_message: Row 2 (4491.00) money value mismatch. Source {store.source_rows[1].money_value} != Target {store.target_rows[1].money_value}
 
     - type: check
+      check: float_parse(store.source_rows[1].money_value) == float_parse(store.target_rows_sql[1].money_value)
+      failure_message: Row 2 (4491.00) money value mismatch. Source {store.source_rows[1].money_value} != Target {store.target_rows_sql[1].money_value}
+
+    - type: check
       check: float_parse(store.source_rows[8].money_value) == float_parse(store.target_rows[8].money_value)
       failure_message: Row 9 (large value) money value mismatch. Source {store.source_rows[8].money_value} != Target {store.target_rows[8].money_value}
+
+    - type: check
+      check: float_parse(store.source_rows[8].decimal_value) == float_parse(store.target_rows_sql[8].decimal_value)
+      failure_message: Row 9 (large value) money value mismatch. Source {store.source_rows[8].decimal_value} != Target {store.target_rows_sql[8].decimal_value}
 
     # Cleanup
     - type: query
@@ -177,11 +201,19 @@ hooks:
 
     - type: query
       connection: '{target.name}'
-      query: DROP TABLE IF EXISTS public.money_test
+      query: |
+        DROP TABLE IF EXISTS public.money_test;
+        DROP TABLE IF EXISTS public.money_test_sql;
 
 streams:
   dbo.money_test:
     object: public.money_test
+    mode: full-refresh
+
+  dbo.money_test_sql:
+    sql: |
+      select * from dbo.money_test
+    object: public.money_test_sql
     mode: full-refresh
 
 env:
