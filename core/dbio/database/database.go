@@ -1483,7 +1483,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.DbScale = colType.Scale
 				col.Stats.MaxDecLen = colType.Scale
 			}
-			if col.DbPrecision > 0 {
+
+			// some instances where the precision is returned too small. Let's have a minimum precision of 15
+			if col.DbPrecision > 15 {
 				if g.In(conn.GetType(), dbio.TypeDbOracle) {
 					// only mark as sourced is scale is specified
 					// https://github.com/slingdata-io/sling-cli/issues/584
