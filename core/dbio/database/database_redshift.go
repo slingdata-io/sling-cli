@@ -114,6 +114,38 @@ func (conn *RedshiftConn) getS3Props() []string {
 	return s3Props
 }
 
+func (conn *RedshiftConn) makeCopyCredentialString() (cred string) {
+
+	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
+	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
+	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
+	AwsRole := conn.GetProp("AWS_ROLE_ARN")
+
+	template := ""
+
+	if AwsID != "" || AwsSessionToken != "" {
+		template = template + "\n" + `credentials 'aws_access_key_id={aws_access_key_id};aws_secret_access_key={aws_secret_access_key}`
+		if AwsSessionToken != "" {
+			template = template + ";token={aws_session_token}"
+		}
+		template += "'"
+	}
+
+	if AwsRole != "" {
+		template = template + "\n" + `iam_role '{aws_role_arn}'`
+	}
+
+	cred = g.R(
+		template,
+		"aws_access_key_id", AwsID,
+		"aws_secret_access_key", AwsAccessKey,
+		"aws_session_token", AwsSessionToken,
+		"aws_role_arn", AwsRole,
+	)
+
+	return strings.TrimSpace(cred)
+}
+
 // Unload unloads a query to S3
 func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, tables ...Table) (s3Path string, err error) {
 
@@ -123,19 +155,15 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 	AwsID := conn.GetProp("AWS_ACCESS_KEY_ID")
 	AwsAccessKey := conn.GetProp("AWS_SECRET_ACCESS_KEY")
-	AwsSessionToken := conn.GetProp("AWS_SESSION_TOKEN")
-
-	AwsSessionTokenExpr := ""
-	if AwsSessionToken != "" {
-		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
-	}
+	AwsRole := conn.GetProp("AWS_ROLE_ARN")
+	credentialExpr := conn.makeCopyCredentialString()
 
 	// set format options based on fileformat
 	formatOptions := ""
 	if fileFormat == dbio.FileTypeParquet {
 		formatOptions = g.F("PARQUET")
 	} else {
-		formatOptions = g.F("GZIP CSV NULL '\\N' HEADER DELIMITER ','")
+		formatOptions = g.F(`GZIP CSV NULL '\\N' HEADER DELIMITER ','`)
 	}
 
 	g.Info("unloading from redshift to s3")
@@ -158,9 +186,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 				conn.template.Core["copy_to_s3"],
 				"sql", g.F("select * from %s", tempTable.Name),
 				"s3_path", s3PathPart,
-				"aws_access_key_id", AwsID,
-				"aws_secret_access_key", AwsAccessKey,
-				"aws_session_token_expr", AwsSessionTokenExpr,
+				"credential_expr", credentialExpr,
 				"parallel", conn.GetProp("PARALLEL"),
 				"format_options", formatOptions,
 			)
@@ -182,9 +208,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 				conn.template.Core["copy_to_s3"],
 				"sql", sql,
 				"s3_path", s3PathPart,
-				"aws_access_key_id", AwsID,
-				"aws_secret_access_key", AwsAccessKey,
-				"aws_session_token_expr", AwsSessionTokenExpr,
+				"credential_expr", credentialExpr,
 				"parallel", conn.GetProp("PARALLEL"),
 				"format_options", formatOptions,
 			)
@@ -193,6 +217,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 			if err != nil {
 				cleanSQL := strings.ReplaceAll(unloadSQL, AwsID, "*****")
 				cleanSQL = strings.ReplaceAll(cleanSQL, AwsAccessKey, "*****")
+				cleanSQL = strings.ReplaceAll(cleanSQL, AwsRole, "*****")
 				err = g.Error(err, fmt.Sprintf("SQL Error for %s:\n%s", s3PathPart, cleanSQL))
 				queryContext.CaptureErr(err)
 			}
@@ -437,11 +462,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		err = g.Error("Need to set 'AWS_ACCESS_KEY_ID' and 'AWS_SECRET_ACCESS_KEY' or 'AWS_SESSION_TOKEN' to copy to redshift from S3")
 		return
 	}
-
-	AwsSessionTokenExpr := ""
-	if AwsSessionToken != "" {
-		AwsSessionTokenExpr = g.F(";token=%s", AwsSessionToken)
-	}
+	credentialExpr := conn.makeCopyCredentialString()
 
 	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
 
@@ -452,9 +473,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 		"tgt_table", tableFName,
 		"tgt_columns", strings.Join(tgtColumns, ", "),
 		"s3_path", s3Path,
-		"aws_access_key_id", AwsID,
-		"aws_secret_access_key", AwsAccessKey,
-		"aws_session_token_expr", AwsSessionTokenExpr,
+		"credential_expr", credentialExpr,
 	)
 	sql = conn.setEmptyAsNull(sql)
 
