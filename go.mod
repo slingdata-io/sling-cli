@@ -44,6 +44,7 @@ require (
 	github.com/integrii/flaggy v1.5.2
 	github.com/itchyny/timefmt-go v0.1.6
 	github.com/jedib0t/go-pretty v4.3.0+incompatible
+	github.com/jinzhu/copier v0.4.0
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/jmoiron/sqlx v1.2.0
@@ -216,7 +217,6 @@ require (
 	github.com/jcmturner/goidentity/v6 v6.0.1 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
-	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
