@@ -684,8 +684,6 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			val = sVal
 			isString = true
 		}
-	case fmt.Stringer: // has String()
-		sVal = v.String()
 	case chJSON: // Clickhouse JSON / Variant, has MarshalJSON()
 		sBytes, _ := v.MarshalJSON()
 		sVal = string(sBytes)
@@ -1096,8 +1094,12 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		valString = v.FloatString(decCount)
 	case map[string]string, map[string]any, map[any]any, []any, []string:
 		valString = g.Marshal(v)
-	case fmt.Stringer: // any with String()
-		valString = v.String()
+	case model.Sample:
+		val = val.(float64)
+		valString, err = cast.ToStringE(val)
+		if err != nil {
+			return "", g.Error(err, "could not cast to string: %#v", v)
+		}
 	case chJSON: // Clickhouse JSON / Variant or any with MarshalJSON()
 		var sBytes []byte
 		sBytes, err = v.MarshalJSON()
