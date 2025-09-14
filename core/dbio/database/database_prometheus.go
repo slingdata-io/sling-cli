@@ -578,7 +578,7 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 
 	// If transforms are configured, apply them manually to the existing data
 	// since Prometheus bypasses the normal iterator pattern
-	if transformsOpt := opts["transforms"]; transformsOpt != nil && len(data.Rows) > 0 {
+	if transformsOpt := opts["transforms"]; transformsOpt != nil && len(data.Rows) > 0 && !cast.ToBool(opts["get_columns"]) {
 		err := conn.applyTransformsToData(tempDs, &data)
 		if err != nil {
 			return nil, err
@@ -1064,6 +1064,15 @@ func (conn *PrometheusConn) applyTransformsToData(ds *iop.Datastream, data *iop.
 			return g.Error(err)
 		}
 		data.Rows[i] = newRow
+	}
+
+	// set columns
+	data.Columns = ds.Columns
+
+	// set inferred if casting
+	// so that the datastream doesn't re-infer
+	if transforms.Casted() {
+		data.Inferred = true
 	}
 
 	return nil

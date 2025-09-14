@@ -740,7 +740,7 @@ loop:
 					newType := ds.Sp.CheckType(newVal)
 					if oldType != newType && colType != newType {
 						switch {
-						case colType.IsDatetime() && TimestampzType.IsDatetime(): // leave as is on orig column
+						case colType.IsDatetime() && newType.IsDatetime(): // leave as is on orig column
 						case colType.IsDecimal() && newType.IsNumber(): // leave decimal on orig column
 						case colType.IsString() && newType.IsString(): // leave string as is
 						default:

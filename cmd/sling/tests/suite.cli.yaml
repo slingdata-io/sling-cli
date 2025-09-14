@@ -199,7 +199,8 @@
 
 - id: 34
   name: Run sling with Prometheus source and custom query
-  run: 'sling run --src-conn prometheus --src-stream ''sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}'' --stdout  -d'
+  run: >
+    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
   output_contains:
     - quantile
 
@@ -576,6 +577,9 @@
   min_rows: 1
   output_contains:
     - 'using range'
+    - "changing column type via transform for 'timestamp': bigint => string"
+    - "changing column type via transform for 'value': decimal => string"
+    - "'timestamp':'text', 'value':'text'" # the timestamp & value columns were successfully casted to string
 
 - id: 81
   name: Prometheus issue 551 (https://github.com/slingdata-io/sling-cli/issues/551)
