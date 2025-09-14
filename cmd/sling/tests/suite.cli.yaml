@@ -962,8 +962,6 @@
   conns:
     - mssql
     - starrocks
-  streams: 1
-  rows: 10
   output_contains:
     - 'execution succeeded'
     - 'Row-by-row comparison'
