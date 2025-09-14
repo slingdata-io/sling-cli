@@ -112,6 +112,7 @@ func (tl TransformLegacyList) HasTransform(t TransformLegacy) bool {
 
 type Transform interface {
 	Evaluate(row []any) (newRow []any, err error)
+	Casted() bool
 }
 
 var NewTransform = func(t []map[string]string, _ *StreamProcessor) Transform {

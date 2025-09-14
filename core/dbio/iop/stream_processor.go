@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flarco/g"
+	"github.com/prometheus/common/model"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -558,7 +559,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 		return BigIntType
 
 	// Float types
-	case float32, float64:
+	case float32, float64, model.Sample, *model.Sample:
 		return DecimalType
 
 	// Decimal types
@@ -683,7 +684,9 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			val = sVal
 			isString = true
 		}
-	case chJSON: // Clickhouse JSON / Variant
+	case fmt.Stringer: // has String()
+		sVal = v.String()
+	case chJSON: // Clickhouse JSON / Variant, has MarshalJSON()
 		sBytes, _ := v.MarshalJSON()
 		sVal = string(sBytes)
 	case string, *string:
@@ -1085,13 +1088,6 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		valString = string(v)
 	case *string:
 		valString = *v
-	case chJSON: // Clickhouse JSON / Variant
-		var sBytes []byte
-		sBytes, err = v.MarshalJSON()
-		if err != nil {
-			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
-		}
-		valString = string(sBytes)
 	case *big.Rat:
 		decCount := 12
 		if sp.Config.MaxDecimals > -1 {
@@ -1100,6 +1096,15 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		valString = v.FloatString(decCount)
 	case map[string]string, map[string]any, map[any]any, []any, []string:
 		valString = g.Marshal(v)
+	case fmt.Stringer: // any with String()
+		valString = v.String()
+	case chJSON: // Clickhouse JSON / Variant or any with MarshalJSON()
+		var sBytes []byte
+		sBytes, err = v.MarshalJSON()
+		if err != nil {
+			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
+		}
+		valString = string(sBytes)
 	default:
 		valString, err = cast.ToStringE(v)
 		if err != nil {
