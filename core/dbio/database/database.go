@@ -1493,6 +1493,8 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				} else {
 					col.Sourced = true
 				}
+			} else {
+				col.Sourced = false
 			}
 		}
 
