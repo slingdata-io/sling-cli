@@ -145,27 +145,27 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 	}
 	defer mapping.Body.Close()
 
-	var mappingResponse map[string]interface{}
+	var mappingResponse map[string]any
 	if err := json.NewDecoder(mapping.Body).Decode(&mappingResponse); err != nil {
 		return columns, g.Error(err, "could not decode mapping response")
 	}
 
 	// Navigate to properties
-	indexMapping, ok := mappingResponse[table.Name].(map[string]interface{})
+	indexMapping, ok := mappingResponse[table.Name].(map[string]any)
 	if !ok {
-		return columns, g.Error("unexpected mapping structure for index %s", table.Name)
+		return columns, g.Error("unexpected mapping structure for index %s: %s", table.Name, g.Marshal(mappingResponse[table.Name]))
 	}
 
-	mappings, ok := indexMapping["mappings"].(map[string]interface{})
+	mappings, ok := indexMapping["mappings"].(map[string]any)
 	if !ok {
 		return columns, g.Error("no mappings found for index %s", table.Name)
 	}
 
-	properties, ok := mappings["properties"].(map[string]interface{})
+	properties, ok := mappings["properties"].(map[string]any)
 	if !ok {
 		// Try ES7+ structure where type is implicit
-		if props, ok := mappings["_doc"].(map[string]interface{}); ok {
-			properties = props["properties"].(map[string]interface{})
+		if props, ok := mappings["_doc"].(map[string]any); ok {
+			properties = props["properties"].(map[string]any)
 		} else {
 			// If no properties found, return a single JSON column
 			columns = append(columns, iop.Column{
@@ -182,10 +182,10 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 	}
 
 	position := 1
-	var processProperties func(prefix string, props map[string]interface{})
-	processProperties = func(prefix string, props map[string]interface{}) {
+	var processProperties func(prefix string, props map[string]any)
+	processProperties = func(prefix string, props map[string]any) {
 		for fieldName, fieldDef := range props {
-			fieldDefMap, ok := fieldDef.(map[string]interface{})
+			fieldDefMap, ok := fieldDef.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -194,7 +194,7 @@ func (conn *ElasticsearchConn) GetTableColumns(table *Table, fields ...string) (
 
 			// Handle nested objects
 			if fieldType == "object" {
-				if nestedProps, ok := fieldDefMap["properties"].(map[string]interface{}); ok {
+				if nestedProps, ok := fieldDefMap["properties"].(map[string]any); ok {
 					newPrefix := prefix
 					if prefix != "" {
 						newPrefix = prefix + "."
@@ -284,7 +284,7 @@ func (conn *ElasticsearchConn) BulkExportFlow(table Table) (df *iop.Dataflow, er
 	return df, nil
 }
 
-func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName string, Opts ...map[string]interface{}) (ds *iop.Datastream, err error) {
+func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName string, Opts ...map[string]any) (ds *iop.Datastream, err error) {
 	opts := getQueryOptions(Opts)
 	Limit := int64(0) // infinite
 	if val := cast.ToInt64(opts["limit"]); val > 0 {
@@ -292,14 +292,14 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 	}
 
 	// Handle incremental and backfill options
-	var searchBody map[string]interface{}
+	var searchBody map[string]any
 	if updateKey := cast.ToString(opts["update_key"]); updateKey != "" {
 		if incrementalValue := cast.ToString(opts["value"]); incrementalValue != "" {
 			// Incremental mode
-			searchBody = map[string]interface{}{
-				"query": map[string]interface{}{
-					"range": map[string]interface{}{
-						updateKey: map[string]interface{}{
+			searchBody = map[string]any{
+				"query": map[string]any{
+					"range": map[string]any{
+						updateKey: map[string]any{
 							"gt": incrementalValue,
 						},
 					},
@@ -308,10 +308,10 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 		} else if startValue := cast.ToString(opts["start_value"]); startValue != "" {
 			if endValue := cast.ToString(opts["end_value"]); endValue != "" {
 				// Backfill mode
-				searchBody = map[string]interface{}{
-					"query": map[string]interface{}{
-						"range": map[string]interface{}{
-							updateKey: map[string]interface{}{
+				searchBody = map[string]any{
+					"query": map[string]any{
+						"range": map[string]any{
+							updateKey: map[string]any{
 								"gte": startValue,
 								"lte": endValue,
 							},
@@ -324,9 +324,9 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 
 	// If no specific query is provided, use match_all
 	if searchBody == nil {
-		searchBody = map[string]interface{}{
-			"query": map[string]interface{}{
-				"match_all": map[string]interface{}{},
+		searchBody = map[string]any{
+			"query": map[string]any{
+				"match_all": map[string]any{},
 			},
 		}
 	}
@@ -358,7 +358,7 @@ func (conn *ElasticsearchConn) StreamRowsContext(ctx context.Context, tableName 
 		return nil, g.Error("could not execute search (status %s) => %s", res.StatusCode, string(bytes))
 	}
 
-	var searchResponse map[string]interface{}
+	var searchResponse map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&searchResponse); err != nil {
 		return nil, g.Error(err, "could not decode search response")
 	}
@@ -419,7 +419,7 @@ type elasticDecoder struct {
 	conn           *ElasticsearchConn
 	ctx            context.Context
 	scrollID       string
-	searchResponse map[string]interface{}
+	searchResponse map[string]any
 	hits           []interface{}
 	currentHit     int
 	limit          uint64
@@ -464,7 +464,7 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 		}
 
 		// Get hits from response
-		hits, ok := d.searchResponse["hits"].(map[string]interface{})
+		hits, ok := d.searchResponse["hits"].(map[string]any)
 		if !ok {
 			return g.Error("hits not found in response")
 		}
@@ -484,20 +484,20 @@ func (d *elasticDecoder) Decode(obj interface{}) error {
 	}
 
 	// Get next hit
-	hit, ok := d.hits[d.currentHit].(map[string]interface{})
+	hit, ok := d.hits[d.currentHit].(map[string]any)
 	if !ok {
 		d.currentHit++
 		return d.Decode(obj) // skip invalid hit
 	}
 
-	source, ok := hit["_source"].(map[string]interface{})
+	source, ok := hit["_source"].(map[string]any)
 	if !ok {
 		d.currentHit++
 		return d.Decode(obj) // skip invalid source
 	}
 
 	// Set the source as the object to decode
-	objMap, ok := obj.(*map[string]interface{})
+	objMap, ok := obj.(*map[string]any)
 	if !ok {
 		return g.Error("invalid object type for decoding")
 	}
@@ -520,7 +520,7 @@ func (conn *ElasticsearchConn) GetSchemas() (data iop.Dataset, err error) {
 	}
 	defer indices.Body.Close()
 
-	var indicesResponse []map[string]interface{}
+	var indicesResponse []map[string]any
 	if err := json.NewDecoder(indices.Body).Decode(&indicesResponse); err != nil {
 		return data, g.Error(err, "could not decode indices response")
 	}
@@ -547,7 +547,7 @@ func (conn *ElasticsearchConn) GetTables(schema string) (data iop.Dataset, err e
 	}
 	defer mapping.Body.Close()
 
-	var mappingResponse map[string]interface{}
+	var mappingResponse map[string]any
 	if err := json.NewDecoder(mapping.Body).Decode(&mappingResponse); err != nil {
 		return data, g.Error(err, "could not decode mapping response")
 	}

@@ -1,0 +1,220 @@
+source: mssql
+target: starrocks
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop temp table if it exists
+        IF OBJECT_ID('dbo.money_test', 'U') IS NOT NULL DROP TABLE dbo.money_test;
+        
+        -- Create table with money and decimal columns
+        CREATE TABLE dbo.money_test (
+          id INT PRIMARY KEY,
+          description VARCHAR(100),
+          money_col MONEY,
+          smallmoney_col SMALLMONEY,
+          decimal_col DECIMAL(24,6),
+          decimal_high_precision DECIMAL(38,10)
+        );
+        
+        -- Insert test data
+        INSERT INTO dbo.money_test (id, description, money_col, smallmoney_col, decimal_col, decimal_high_precision) VALUES 
+        (1, 'Small positive', 4.00, 4.00, 4.0000, 4.0000000000),
+        (2, 'Problematic value', 4491.00, 4491.00, 4491.0000, 4491.0000000000),
+        (3, 'Large value', 99999.99, 99999.99, 99999.9900, 99999.9900000000),
+        (4, 'Negative value', -1234.56, -1234.56, -1234.5600, -1234.5600000000),
+        (5, 'Zero', 0.00, 0.00, 0.0000, 0.0000000000),
+        (6, 'Small decimal', 0.01, 0.01, 0.0100, 0.0100000000),
+        (7, 'NULL values', NULL, NULL, NULL, NULL),
+        (8, 'Max smallmoney', 214748.3647, 214748.3647, 214748.3647, 214748.3647000000),
+        (9, 'Large money', 922337203685.4775, NULL, 922337203685.4775, 922337203685.4775000000),
+        (10, 'Precision test', 123.4567, 123.4567, 123.4567, 123.4567890123);
+
+  end:
+    - type: check
+      check: runs.dbo_money_test.status == "success"
+      on_failure: break
+
+    # Get source aggregations
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT 
+          COUNT(*) as row_count,
+          SUM(CAST(money_col AS DECIMAL(38,4))) as money_sum,
+          SUM(CAST(smallmoney_col AS DECIMAL(38,4))) as smallmoney_sum,
+          SUM(decimal_col) as decimal_sum,
+          MIN(CAST(money_col AS DECIMAL(38,4))) as money_min,
+          MAX(CAST(money_col AS DECIMAL(38,4))) as money_max
+        FROM dbo.money_test
+      into: source_aggregations
+
+    # Get target aggregations
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          COUNT(*) as row_count,
+          SUM(money_col) as money_sum,
+          SUM(smallmoney_col) as smallmoney_sum,
+          SUM(decimal_col) as decimal_sum,
+          MIN(money_col) as money_min,
+          MAX(money_col) as money_max
+        FROM public.money_test
+      into: target_aggregations
+
+    - type: log
+      message: |
+        
+        Source (MSSQL) aggregations:
+        {pretty_table(store.source_aggregations)}
+        
+        Target (StarRocks) aggregations:
+        {pretty_table(store.target_aggregations)}
+
+    # Check row count
+    - type: check
+      check: int_parse(store.source_aggregations[0].row_count) == int_parse(store.target_aggregations[0].row_count)
+      failure_message: Row count mismatch. Source {store.source_aggregations[0].row_count} != Target {store.target_aggregations[0].row_count}
+
+    # Check money_col sum
+    - type: check
+      check: float_parse(store.source_aggregations[0].money_sum) == float_parse(store.target_aggregations[0].money_sum)
+      failure_message: Money column sum mismatch. Source {store.source_aggregations[0].money_sum} != Target {store.target_aggregations[0].money_sum}
+
+    # Check decimal_col sum
+    - type: check
+      check: float_parse(store.source_aggregations[0].decimal_sum) == float_parse(store.target_aggregations[0].decimal_sum)
+      failure_message: Decimal column sum mismatch. Source {store.source_aggregations[0].decimal_sum} != Target {store.target_aggregations[0].decimal_sum}
+
+    # Get individual rows to check specific values
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          id,
+          description,
+          money_col,
+          smallmoney_col,
+          decimal_col,
+          decimal_high_precision
+        FROM public.money_test
+        WHERE id IN (2, 9)
+        ORDER BY id
+      into: target_specific_rows
+
+    - type: log
+      message: |
+        Target specific rows (checking problematic value 4491.00):
+        {pretty_table(store.target_specific_rows)}
+
+    # Check the problematic value 4491.00
+    - type: check
+      check: float_parse(store.target_specific_rows[0].money_col) == 4491.00
+      failure_message: Problematic value 4491.00 not preserved correctly. Got {store.target_specific_rows[0].money_col}
+
+    # Check large money value
+    - type: check
+      check: float_parse(store.target_specific_rows[1].money_col) == 922337203685.4775
+      failure_message: Large money value not preserved correctly. Got {store.target_specific_rows[1].money_col}
+
+    # Get source rows for comparison
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT 
+          id,
+          description,
+          CAST(money_col AS DECIMAL(38,4)) as money_value,
+          CAST(decimal_col AS DECIMAL(38,4)) as decimal_value
+        FROM dbo.money_test
+        ORDER BY id
+      into: source_rows
+    
+    # Get target rows for comparison  
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          id,
+          description,
+          money_col as money_value,
+          decimal_col as decimal_value
+        FROM public.money_test
+        ORDER BY id
+      into: target_rows
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT 
+          id,
+          description,
+          money_col as money_value,
+          decimal_col as decimal_value
+        FROM public.money_test_sql
+        ORDER BY id
+      into: target_rows_sql
+
+    - type: log
+      message: |
+        Row-by-row comparison:
+          
+        Source (MSSQL) rows:
+        {pretty_table(store.source_rows)}
+        
+        Target (StarRocks) rows:
+        {pretty_table(store.target_rows)}
+        
+        Target (SQL) (StarRocks) rows:
+        {pretty_table(store.target_rows_sql)}
+
+    # Check specific rows match
+    - type: check
+      check: float_parse(store.source_rows[0].money_value) == float_parse(store.target_rows[0].money_value)
+      failure_message: Row 1 money value mismatch. Source {store.source_rows[0].money_value} != Target {store.target_rows[0].money_value}
+
+    - type: check
+      check: float_parse(store.source_rows[1].money_value) == float_parse(store.target_rows[1].money_value)
+      failure_message: Row 2 (4491.00) money value mismatch. Source {store.source_rows[1].money_value} != Target {store.target_rows[1].money_value}
+
+    - type: check
+      check: float_parse(store.source_rows[1].money_value) == float_parse(store.target_rows_sql[1].money_value)
+      failure_message: Row 2 (4491.00) money value mismatch. Source {store.source_rows[1].money_value} != Target {store.target_rows_sql[1].money_value}
+
+    - type: check
+      check: float_parse(store.source_rows[8].money_value) == float_parse(store.target_rows[8].money_value)
+      failure_message: Row 9 (large value) money value mismatch. Source {store.source_rows[8].money_value} != Target {store.target_rows[8].money_value}
+
+    - type: check
+      check: float_parse(store.source_rows[8].decimal_value) == float_parse(store.target_rows_sql[8].decimal_value)
+      failure_message: Row 9 (large value) money value mismatch. Source {store.source_rows[8].decimal_value} != Target {store.target_rows_sql[8].decimal_value}
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS dbo.money_test
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.money_test;
+        DROP TABLE IF EXISTS public.money_test_sql;
+
+streams:
+  dbo.money_test:
+    object: public.money_test
+    mode: full-refresh
+
+  dbo.money_test_sql:
+    sql: |
+      select * from dbo.money_test
+    object: public.money_test_sql
+    mode: full-refresh
+
+env:
+  SLING_SAMPLE_SIZE: 2

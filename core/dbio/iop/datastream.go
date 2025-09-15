@@ -722,11 +722,11 @@ loop:
 
 			// evaluate transforms, only to determine if type change
 			// will be re-evaluated again below for storing result
-			if transforms := ds.Sp.Config.transforms; transforms != nil {
+			if transforms := ds.Sp.Config.Transforms; transforms != nil {
 				// make a copy of row so we don't reference the pointed values
 				rowCopy := make([]any, len(row))
 				copy(rowCopy, row)
-				newRow, err := ds.Sp.Config.transforms.Evaluate(rowCopy)
+				newRow, err := ds.Sp.Config.Transforms.Evaluate(rowCopy)
 				if ds.Context.CaptureErr(err) {
 					break loop
 				}
@@ -740,7 +740,7 @@ loop:
 					newType := ds.Sp.CheckType(newVal)
 					if oldType != newType && colType != newType {
 						switch {
-						case colType.IsDatetime() && TimestampzType.IsDatetime(): // leave as is on orig column
+						case colType.IsDatetime() && newType.IsDatetime(): // leave as is on orig column
 						case colType.IsDecimal() && newType.IsNumber(): // leave decimal on orig column
 						case colType.IsString() && newType.IsString(): // leave string as is
 						default:
@@ -963,8 +963,8 @@ skipBuffer:
 					row = ds.it.Row
 				} else {
 					// evaluate transforms
-					if transforms := ds.Sp.Config.transforms; transforms != nil {
-						ds.it.Row, err = ds.Sp.Config.transforms.Evaluate(ds.it.Row)
+					if transforms := ds.Sp.Config.Transforms; transforms != nil {
+						ds.it.Row, err = ds.Sp.Config.Transforms.Evaluate(ds.it.Row)
 						if ds.Context.CaptureErr(err) {
 							break loop
 						}

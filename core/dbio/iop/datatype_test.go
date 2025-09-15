@@ -324,6 +324,224 @@ func TestParseDecimal(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestColumnTyping(t *testing.T) {
+	maxStringLength := 1000
+
+	type testCase struct {
+		name         string
+		column       Column
+		columnTyping ColumnTyping
+
+		expectedDecimalPrecision int
+		expectedDecimalScale     int
+		expectedStringLength     int
+	}
+
+	testCases := []testCase{
+		// Decimal column typing tests
+		{
+			name:                     "decimal_sourced_precision_scale",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 10, DbScale: 2, Sourced: true},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{}},
+			expectedDecimalPrecision: 10,
+			expectedDecimalScale:     2,
+		},
+		{
+			name:                     "decimal_sourced_precision_scale_2",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 10, DbScale: 2, Sourced: true},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{}},
+			expectedDecimalPrecision: 10,
+			expectedDecimalScale:     2,
+		},
+		{
+			name:                     "decimal_min_precision_scale",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 5, DbScale: 1, Sourced: false},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{MinPrecision: g.Ptr(10), MinScale: g.Ptr(3)}},
+			expectedDecimalPrecision: 24,
+			expectedDecimalScale:     3,
+		},
+		{
+			name:                     "decimal_max_precision_scale",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 50, DbScale: 15, Sourced: false},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{MaxPrecision: 20, MaxScale: 10}},
+			expectedDecimalPrecision: 20,
+			expectedDecimalScale:     10,
+		},
+		{
+			name:                     "decimal_with_stats",
+			column:                   Column{Name: "test", Type: DecimalType, Stats: ColumnStats{MaxLen: 8, MaxDecLen: 3}, Sourced: false},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{}},
+			expectedDecimalPrecision: 24,
+			expectedDecimalScale:     6,
+		},
+		{
+			name:                     "decimal_zero_precision_scale",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 0, DbScale: 0, Sourced: false},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{}},
+			expectedDecimalPrecision: 24,
+			expectedDecimalScale:     6,
+		},
+		{
+			name:                     "decimal_delta",
+			column:                   Column{Name: "test", Type: DecimalType, DbPrecision: 0, DbScale: 19, Sourced: false},
+			columnTyping:             ColumnTyping{Decimal: &DecimalColumnTyping{}},
+			expectedDecimalPrecision: 38,
+			expectedDecimalScale:     19,
+		},
+
+		// String column typing tests
+		{
+			name:                 "string_basic_length",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 50}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{}},
+			expectedStringLength: 50,
+		},
+		{
+			name:                 "string_length_factor",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 50}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{LengthFactor: 2}},
+			expectedStringLength: 100,
+		},
+		{
+			name:                 "string_length_factor_exceeds_max",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 600}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{LengthFactor: 2}},
+			expectedStringLength: 1000, // should cap at maxStringLength
+		},
+		{
+			name:                 "string_min_length",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 10}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{MinLength: 50}},
+			expectedStringLength: 50,
+		},
+		{
+			name:                 "string_max_length",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 200}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{MaxLength: 150}},
+			expectedStringLength: 200, // original length since MaxLength doesn't override max
+		},
+		{
+			name:                 "string_use_max",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 50}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{UseMax: true}},
+			expectedStringLength: 1000, // should use maxStringLength
+		},
+		{
+			name:                 "string_use_max_with_custom_max",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 50}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{UseMax: true, MaxLength: 2000}},
+			expectedStringLength: 2000, // should use custom MaxLength
+		},
+		{
+			name:                 "string_min_length_with_factor",
+			column:               Column{Name: "test", Type: StringType, Stats: ColumnStats{MaxLen: 10}},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{LengthFactor: 2, MinLength: 50}},
+			expectedStringLength: 50, // factor gives 20, but min is 50
+		},
+
+		// Sourced column precision tests
+		{
+			name:                 "string_sourced_precision",
+			column:               Column{Name: "test", Type: StringType, DbPrecision: 100, Sourced: true},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{}},
+			expectedStringLength: 100,
+		},
+		{
+			name:                 "string_sourced_precision_with_factor",
+			column:               Column{Name: "test", Type: StringType, DbPrecision: 50, Sourced: true},
+			columnTyping:         ColumnTyping{String: &StringColumnTyping{LengthFactor: 2}},
+			expectedStringLength: 100,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if sct := testCase.columnTyping.String; sct != nil {
+				var length int
+				if testCase.column.Sourced && testCase.column.DbPrecision > 0 {
+					length = sct.Apply(testCase.column.DbPrecision, maxStringLength)
+				} else {
+					length = sct.Apply(testCase.column.Stats.MaxLen, maxStringLength)
+				}
+				assert.Equal(t, testCase.expectedStringLength, length)
+
+			} else if dct := testCase.columnTyping.Decimal; dct != nil {
+				precision, scale := dct.Apply(&testCase.column)
+				assert.Equal(t, testCase.expectedDecimalPrecision, precision)
+				assert.Equal(t, testCase.expectedDecimalScale, scale)
+			}
+		})
+	}
+
+	// Keep the original hardcoded test for backward compatibility
+	col := Column{Name: "test", Type: DecimalType, DbPrecision: 10, DbScale: 0, Sourced: true}
+	ct := ColumnTyping{Decimal: &DecimalColumnTyping{}}
+	precision, scale := ct.Decimal.Apply(&col)
+	assert.Equal(t, 10, precision)
+	assert.Equal(t, 0, scale)
+}
+
+// Additional test for JSON column typing
+func TestColumnTypingJSON(t *testing.T) {
+	t.Run("json_as_text_false", func(t *testing.T) {
+		col := Column{Name: "test", Type: JsonType}
+		jct := JsonColumnTyping{AsText: false}
+		jct.Apply(&col)
+		assert.Equal(t, JsonType, col.Type)
+	})
+
+	t.Run("json_as_text_true", func(t *testing.T) {
+		col := Column{Name: "test", Type: JsonType}
+		jct := JsonColumnTyping{AsText: true}
+		jct.Apply(&col)
+		assert.Equal(t, TextType, col.Type)
+	})
+}
+
+// Test for MaxDecimals method
+func TestColumnTypingMaxDecimals(t *testing.T) {
+	t.Run("nil_column_typing", func(t *testing.T) {
+		var ct *ColumnTyping
+		assert.Equal(t, -1, ct.MaxDecimals())
+	})
+
+	t.Run("nil_decimal_typing", func(t *testing.T) {
+		ct := &ColumnTyping{}
+		assert.Equal(t, -1, ct.MaxDecimals())
+	})
+
+	t.Run("max_scale_set", func(t *testing.T) {
+		ct := &ColumnTyping{
+			Decimal: &DecimalColumnTyping{MaxScale: 5},
+		}
+		assert.Equal(t, 5, ct.MaxDecimals())
+	})
+
+	t.Run("min_scale_set_no_max", func(t *testing.T) {
+		ct := &ColumnTyping{
+			Decimal: &DecimalColumnTyping{MinScale: g.Ptr(3)},
+		}
+		assert.Equal(t, 3, ct.MaxDecimals())
+	})
+
+	t.Run("both_scales_set", func(t *testing.T) {
+		ct := &ColumnTyping{
+			Decimal: &DecimalColumnTyping{
+				MaxScale: 5,
+				MinScale: g.Ptr(3),
+			},
+		}
+		assert.Equal(t, 5, ct.MaxDecimals()) // MaxScale takes precedence
+	})
+
+	t.Run("no_scales_set", func(t *testing.T) {
+		ct := &ColumnTyping{
+			Decimal: &DecimalColumnTyping{},
+		}
+		assert.Equal(t, -1, ct.MaxDecimals())
+	})
+}
+
 func TestDatasetSort(t *testing.T) {
 	columns := NewColumnsFromFields("col1", "col2")
 	data := NewDataset(columns)

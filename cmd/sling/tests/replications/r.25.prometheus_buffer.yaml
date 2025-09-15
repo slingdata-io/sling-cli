@@ -4,11 +4,14 @@ target: local
 defaults:
   mode: full-refresh
   target_options:
-    format: csv
+    format: parquet
     file_max_rows: 10000
 
 streams:
   prometheus_metrics:
+    transforms:
+      - '*': cast(value, "string")
+      - event_date: date_format(now(), "%Y-%m-%d")
     sql: |
-      up#{"start": "now-30m", "end": "now", "step": "5m"}
-    object: '/tmp/prometheus_test_{run_timestamp}.csv'
+      sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}
+    object: '/tmp/output/prometheus_test.parquet'

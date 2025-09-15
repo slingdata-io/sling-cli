@@ -113,7 +113,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 		{Name: "timestamp", Type: iop.BigIntType, Position: 4},
 		{Name: "value", Type: iop.DecimalType, Position: 5},
 	}
-	
+
 	// Try to get actual columns by querying with a very small time range
 	if table.SQL != "" {
 		// Extract the base query without options
@@ -121,7 +121,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 		if idx := strings.Index(baseQuery, "#"); idx != -1 {
 			baseQuery = strings.TrimSpace(baseQuery[:idx])
 		}
-		
+
 		// Query with a minimal time range to get column structure
 		testOpts := g.M(
 			"start", "now-1m",
@@ -130,7 +130,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 			"limit", 1,
 			"get_columns", true,
 		)
-		
+
 		ds, err := conn.StreamRowsContext(conn.Context().Ctx, baseQuery, testOpts)
 		if err == nil && ds != nil {
 			// Wait for columns to be initialized
@@ -141,7 +141,7 @@ func (conn *PrometheusConn) GetSQLColumns(table Table) (columns iop.Columns, err
 			ds.Close()
 		}
 	}
-	
+
 	return columns, nil
 }
 
@@ -192,6 +192,11 @@ func (conn *PrometheusConn) BulkExportFlow(table Table) (df *iop.Dataflow, err e
 	// Pass table columns for fallback when no data is returned
 	if len(table.Columns) > 0 {
 		options["columns"] = table.Columns
+	}
+
+	// Pass transforms configuration to datastream
+	if transformStr := conn.GetProp("transforms"); transformStr != "" {
+		options["transforms"] = transformStr
 	}
 
 	ds, err := conn.StreamRowsContext(conn.Context().Ctx, table.SQL, options)
@@ -559,7 +564,28 @@ func (conn *PrometheusConn) StreamRowsContext(ctx context.Context, query string,
 		}
 	}
 
-	ds = data.Stream(conn.Props())
+	// Create the datastream with connection properties
+	props := conn.Props()
+
+	// Pass transforms through to the datastream configuration
+	if transformsOpt := opts["transforms"]; transformsOpt != nil {
+		props["transforms"] = cast.ToString(transformsOpt)
+	}
+
+	// Create a temporary datastream to initialize transforms before streaming the data
+	tempDs := iop.NewDatastream(data.Columns)
+	tempDs.SetConfig(props)
+
+	// If transforms are configured, apply them manually to the existing data
+	// since Prometheus bypasses the normal iterator pattern
+	if transformsOpt := opts["transforms"]; transformsOpt != nil && len(data.Rows) > 0 && !cast.ToBool(opts["get_columns"]) {
+		err := conn.applyTransformsToData(tempDs, &data)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	ds = data.Stream(props)
 
 	return
 }
@@ -733,7 +759,13 @@ func (conn *PrometheusConn) StreamRowsChunked(queryContext *g.Context, query str
 
 	// Create the datastream
 	ds = iop.NewDatastreamContext(queryContext.Ctx, iop.Columns{})
-	ds.SetConfig(conn.Props())
+
+	// Set connection properties and transforms
+	props := conn.Props()
+	if transformsOpt := opts["transforms"]; transformsOpt != nil {
+		props["transforms"] = cast.ToString(transformsOpt)
+	}
+	ds.SetConfig(props)
 
 	// Process in chunks
 	go func() {
@@ -1012,4 +1044,36 @@ func createPrometheusColumnsFromVector(metricMap map[string]string, sample *mode
 	}
 
 	return columns
+}
+
+// applyTransformsToData applies transforms to the collected Prometheus data
+func (conn *PrometheusConn) applyTransformsToData(ds *iop.Datastream, data *iop.Dataset) error {
+	if ds.Sp == nil {
+		return nil
+	}
+	if ds.Sp.Config.Transforms == nil {
+		return nil
+	}
+
+	transforms := ds.Sp.Config.Transforms
+
+	// Apply transforms to each row in the collected data
+	for i, row := range data.Rows {
+		newRow, err := transforms.Evaluate(row)
+		if err != nil {
+			return g.Error(err)
+		}
+		data.Rows[i] = newRow
+	}
+
+	// set columns
+	data.Columns = ds.Columns
+
+	// set inferred if casting
+	// so that the datastream doesn't re-infer
+	if transforms.Casted() {
+		data.Inferred = true
+	}
+
+	return nil
 }

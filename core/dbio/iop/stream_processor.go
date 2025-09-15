@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flarco/g"
+	"github.com/prometheus/common/model"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -72,7 +73,7 @@ type StreamConfig struct {
 	DeleteFile     bool           `json:"delete"` // whether to delete before writing
 	BoolAsInt      bool           `json:"-"`
 	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
-	transforms     Transform
+	Transforms     Transform
 
 	Map map[string]string `json:"-"`
 }
@@ -281,7 +282,7 @@ func NewStreamProcessor() *StreamProcessor {
 func DefaultStreamConfig() StreamConfig {
 	return StreamConfig{
 		MaxDecimals: -1,
-		transforms:  nil,
+		Transforms:  nil,
 		Map:         map[string]string{"delimiter": "-1"},
 	}
 }
@@ -295,7 +296,7 @@ func LoaderStreamConfig(header bool) StreamConfig {
 		NullAs:         `\N`,
 		DatetimeFormat: "auto",
 		MaxDecimals:    -1,
-		transforms:     nil,
+		Transforms:     nil,
 	}
 }
 
@@ -431,7 +432,7 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	stageTransforms := []map[string]string{}
 	g.Unmarshal(transformsPayload, &stageTransforms)
-	sp.Config.transforms = NewTransform(stageTransforms, sp)
+	sp.Config.Transforms = NewTransform(stageTransforms, sp)
 }
 
 // CastVal  casts the type of an interface based on its value
@@ -558,7 +559,7 @@ func (sp *StreamProcessor) CheckType(v any) (typ ColumnType) {
 		return BigIntType
 
 	// Float types
-	case float32, float64:
+	case float32, float64, model.Sample, *model.Sample:
 		return DecimalType
 
 	// Decimal types
@@ -683,7 +684,7 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			val = sVal
 			isString = true
 		}
-	case chJSON: // Clickhouse JSON / Variant
+	case chJSON: // Clickhouse JSON / Variant, has MarshalJSON()
 		sBytes, _ := v.MarshalJSON()
 		sVal = string(sBytes)
 	case string, *string:
@@ -1085,13 +1086,6 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		valString = string(v)
 	case *string:
 		valString = *v
-	case chJSON: // Clickhouse JSON / Variant
-		var sBytes []byte
-		sBytes, err = v.MarshalJSON()
-		if err != nil {
-			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
-		}
-		valString = string(sBytes)
 	case *big.Rat:
 		decCount := 12
 		if sp.Config.MaxDecimals > -1 {
@@ -1100,6 +1094,19 @@ func (sp *StreamProcessor) CastToStringE(val any) (valString string, err error) 
 		valString = v.FloatString(decCount)
 	case map[string]string, map[string]any, map[any]any, []any, []string:
 		valString = g.Marshal(v)
+	case model.Sample:
+		val = val.(float64)
+		valString, err = cast.ToStringE(val)
+		if err != nil {
+			return "", g.Error(err, "could not cast to string: %#v", v)
+		}
+	case chJSON: // Clickhouse JSON / Variant or any with MarshalJSON()
+		var sBytes []byte
+		sBytes, err = v.MarshalJSON()
+		if err != nil {
+			return "", g.Error(err, "could not marshal value to JSON: %#v", v)
+		}
+		valString = string(sBytes)
 	default:
 		valString, err = cast.ToStringE(v)
 		if err != nil {

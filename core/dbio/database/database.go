@@ -1483,7 +1483,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.DbScale = colType.Scale
 				col.Stats.MaxDecLen = colType.Scale
 			}
-			if col.DbPrecision > 0 {
+
+			// some instances where the precision is returned too small.
+			if col.DbPrecision > env.DdlMinDecLength {
 				if g.In(conn.GetType(), dbio.TypeDbOracle) {
 					// only mark as sourced is scale is specified
 					// https://github.com/slingdata-io/sling-cli/issues/584
@@ -1491,6 +1493,8 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				} else {
 					col.Sourced = true
 				}
+			} else {
+				col.Sourced = false
 			}
 		}
 
@@ -2577,7 +2581,7 @@ func (conn *BaseConn) Merge(srcTable string, tgtTable string, primKeys []string)
 		cnt, err = Merge(conn.Self(), nil, srcTable, tgtTable, primKeys)
 	}
 	if err != nil {
-		err = g.Error(err, "could not upsert")
+		err = g.Error(err, "could not merge")
 	}
 	return cast.ToInt64(cnt), err
 }
@@ -2702,6 +2706,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 
 	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
+	setFieldsAll := []string{}
 	insertFields := []string{}
 	placeholderFields := []string{}
 	for _, tgtColName := range tgtCols.Names() {
@@ -2721,12 +2726,19 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 
 		phExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("ph.%s", srcColNameQ))
 		placeholderFields = append(placeholderFields, phExpr)
+
+		setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
+		setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
+		setFieldsAll = append(setFieldsAll, setField)
 		if _, ok := pkFieldMap[tgtCol.Name]; !ok {
 			// is not a pk field
-			setSrcExpr := strings.ReplaceAll(colExpr, srcColNameQ, g.F("src.%s", srcColNameQ))
-			setField := g.F("%s = %s", tgtColNameQ, setSrcExpr)
 			setFields = append(setFields, setField)
 		}
+	}
+
+	// if PK is all the available columns
+	if len(setFields) == 0 && len(setFieldsAll) > 0 {
+		setFields = setFieldsAll
 	}
 
 	// cast into the correct type

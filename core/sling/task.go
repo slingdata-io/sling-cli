@@ -584,23 +584,25 @@ func ErrorHelper(err error) (helpString string) {
 
 		switch {
 		case contains("utf8") || contains("ascii"):
-			helpString = "Perhaps the 'transforms' source option could help with encodings? Also try `replace_non_printable`. See https://docs.slingdata.io/sling-cli/run/configuration#source"
+			helpString = "Perhaps the 'encodings' source option could help? See https://docs.slingdata.io/concepts/replication/source-options#supported-encodings. Also try the `replace_non_printable` transform. See https://docs.slingdata.io/concepts/replication/transforms"
 		case contains("failed to verify certificate"):
 			helpString = "Perhaps specifying `encrypt=true` and `TrustServerCertificate=true` properties could help? See https://docs.slingdata.io/connections/database-connections/sqlserver"
 		case contains("ssl is not enabled on the server"):
 			helpString = "Perhaps setting the 'sslmode' option could help? See https://docs.slingdata.io/connections/database-connections/postgres"
 		case contains("invalid input syntax for type") || (contains(" value ") && contains("is not recognized")) || contains("invalid character value") || contains(" exceeds ") || contains(`could not convert`) || contains("provided schema does not match") || contains("Number out of representable range") || contains("Numeric value", " is not recognized") || contains("out of range") || contains("value too long") || contains("converting", "to", "is unsupported") || contains("stl_load_errors"):
-			helpString = "Perhaps setting a higher 'SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` source option. See https://docs.slingdata.io/sling-cli/run/configuration#source\nFurthermore, you can try the `target_options.adjust_column_type` setting to allow Sling to automatically alter the column type on the target side."
+			helpString = "Perhaps setting a higher 'SLING_SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` input, (see https://docs.slingdata.io/concepts/replication/columns) \nFurthermore, you can try the `target_options.adjust_column_type` setting to allow Sling to automatically alter the column type on the target side."
 		case contains("bcp import"):
-			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/sling-cli/run/configuration#target"
+			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/concepts/replication/target-options"
+		case contains("pq: canceling statement due to statement timeout "):
+			helpString = "You could try specifying a `statement_timeout` for your Postgres connection. See https://docs.slingdata.io/connections/database-connections/postgres"
 		case contains("[AppendRow]: converting"):
-			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/sling-cli/run/configuration#target"
+			helpString = "Perhaps using the `adjust_column_type: true` target option could help? See https://docs.slingdata.io/concepts/replication/target-options"
 		case contains("mkdir", "permission denied"):
 			helpString = "Perhaps setting the SLING_TEMP_DIR environment variable to a writable folder will help."
 		case contains("canceling statement due to conflict with recovery"):
 			helpString = "Perhaps adjusting the `max_standby_archive_delay` and `max_standby_streaming_delay` settings in the source PG Database could help. See https://stackoverflow.com/questions/14592436/postgresql-error-canceling-statement-due-to-conflict-with-recovery"
 		case contains("wrong number of fields"):
-			helpString = "Perhaps setting the delimiter (source_options.delimiter) would help? See https://docs.slingdata.io/sling-cli/run/configuration#source"
+			helpString = "Perhaps setting the delimiter (source_options.delimiter) would help? See https://docs.slingdata.io/concepts/replication/source-options"
 		case contains("not implemented makeGoLangScanType"):
 			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		case contains("cannot create parquet value") && contains("from go value of type"):

@@ -1,6 +1,7 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  create_schema: create schema if not exists {schema}
   drop_index: "select 'indexes do not apply for databricks'"
   create_table: |
     create table {table} ({col_types})

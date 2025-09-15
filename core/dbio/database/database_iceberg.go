@@ -1138,7 +1138,10 @@ func (conn *IcebergConn) DropTable(tableNames ...string) (err error) {
 			// purge table
 			catalog, ok := conn.Catalog.(*rest.Catalog)
 			if ok {
-				err = catalog.PurgeTable(conn.context.Ctx, identifier)
+				if err = catalog.PurgeTable(conn.context.Ctx, identifier); err != nil {
+					// try just drop
+					err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
+				}
 			} else {
 				err = conn.Catalog.DropTable(conn.context.Ctx, identifier)
 			}
@@ -1606,8 +1609,8 @@ func (conn *IcebergConn) iopTypeToIcebergPrimitiveType(col iop.Column) iceberg.T
 	case iop.FloatType:
 		return iceberg.PrimitiveTypes.Float64
 	case iop.DecimalType:
-		precision := lo.Ternary(col.DbPrecision > 0, col.DbPrecision, env.DdlMinDecLength)
-		scale := lo.Ternary(col.DbScale > 0, col.DbScale, env.DdlMinDecScale)
+		precision := lo.Ternary(col.DbPrecision > env.DdlMinDecLength, col.DbPrecision, env.DdlMinDecLength)
+		scale := lo.Ternary(col.DbScale > env.DdlMinDecScale, col.DbScale, env.DdlMinDecScale)
 		return iceberg.DecimalTypeOf(precision, scale)
 	case iop.DateType:
 		return iceberg.PrimitiveTypes.Date

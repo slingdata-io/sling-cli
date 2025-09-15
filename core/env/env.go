@@ -194,6 +194,13 @@ func GreenString(text string) string {
 	return g.Colorize(g.ColorGreen, text)
 }
 
+func YellowString(text string) string {
+	if NoColor {
+		return text
+	}
+	return g.Colorize(g.ColorYellow, text)
+}
+
 func RedString(text string) string {
 	if NoColor {
 		return text

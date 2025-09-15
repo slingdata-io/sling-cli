@@ -559,6 +559,9 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["role"]; ok {
 			template = template + "&role={role}"
 		}
+		if _, ok := c.Data["statement_timeout"]; ok {
+			template = template + "&statement_timeout={statement_timeout}"
+		}
 	case dbio.TypeDbRedshift:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
@@ -1229,9 +1232,9 @@ func ParseLocation(location string) (conn Connection, objectExpr string, err err
 }
 
 // LoadAPISpec loads the spec from the spec location
-func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
+func LoadAPISpec(specIdentifier string) (spec api.Spec, err error) {
 
-	if specLocation == "" {
+	if specIdentifier == "" {
 		return spec, g.Error("invalid or missing spec")
 	}
 
@@ -1323,18 +1326,18 @@ func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
 	var specBody string
 	switch {
 	// load from location
-	case strings.HasPrefix(specLocation, "file://"):
-		specPath := strings.TrimPrefix(specLocation, "file://")
+	case strings.HasPrefix(specIdentifier, "file://"):
+		specPath := strings.TrimPrefix(specIdentifier, "file://")
 		bytes, err := os.ReadFile(specPath)
 		if err != nil {
 			return spec, g.Error(err, "could not read api spec from: %s", specPath)
 		}
 		specBody = string(bytes)
-	case strings.HasPrefix(specLocation, "https://"), strings.HasPrefix(specLocation, "http://"):
+	case strings.HasPrefix(specIdentifier, "https://"), strings.HasPrefix(specIdentifier, "http://"):
 		// download raw http
-		specURL, err := transformToRawGitURL(specLocation)
+		specURL, err := transformToRawGitURL(specIdentifier)
 		if err != nil {
-			return spec, g.Error(err, "could not make git spec URL for download: %s", specLocation)
+			return spec, g.Error(err, "could not make git spec URL for download: %s", specIdentifier)
 		}
 	redirect:
 		resp, respBytes, err := net.ClientDo("GET", specURL, nil, nil)
@@ -1348,15 +1351,15 @@ func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
 			}
 		}
 		specBody = string(respBytes)
-	default:
+	case strings.Contains(specIdentifier, "/"):
 		// connect to location and download
-		specConn, specPath, err := ParseLocation(specLocation)
+		specConn, specPath, err := ParseLocation(specIdentifier)
 		if err != nil {
-			return spec, g.Error(err, "could not read api spec from location: %s", specLocation)
+			return spec, g.Error(err, "could not read api spec from location: %s", specIdentifier)
 		}
 		fc, err := specConn.AsFile()
 		if err != nil {
-			return spec, g.Error(err, "could not connection to location: %s", specLocation)
+			return spec, g.Error(err, "could not connection to location: %s", specIdentifier)
 		}
 
 		reader, err := fc.GetReader(specPath)
@@ -1369,12 +1372,17 @@ func LoadAPISpec(specLocation string) (spec api.Spec, err error) {
 			return spec, g.Error(err, "could not read api spec from: %s", specPath)
 		}
 		specBody = string(bytes)
+	default:
+		specBody, err = api.FetchSpec(specIdentifier)
+		if err != nil {
+			return spec, g.Error(err, "could not fetch api spec: %s", specIdentifier)
+		}
 	}
 
 	// load spec
 	spec, err = api.LoadSpec(specBody)
 	if err != nil {
-		return spec, g.Error(err, "could not load spec from %s", specLocation)
+		return spec, g.Error(err, "could not load spec from %s", specIdentifier)
 	}
 
 	return

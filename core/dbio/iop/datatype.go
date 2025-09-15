@@ -140,6 +140,10 @@ func (cs *ColumnStats) DuplicatePercent() float64 {
 }
 
 func init() {
+	SetSampleSize()
+}
+
+func SetSampleSize() {
 	if val := os.Getenv("SAMPLE_SIZE"); val != "" {
 		SampleSize = cast.ToInt(val) // legacy
 	}
@@ -1566,6 +1570,10 @@ func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
 		dct.MaxScale = lo.Ternary(dct.MaxScale == 0, env.DdlMaxDecScale, dct.MaxScale)
 		dct.MinPrecision = lo.Ternary(dct.MinPrecision == nil, g.Ptr(env.DdlMinDecLength), dct.MinPrecision)
 		dct.MaxPrecision = lo.Ternary(dct.MaxPrecision == 0, env.DdlMaxDecLength, dct.MaxPrecision)
+
+		precisionDelta := lo.Ternary(precision > env.DdlMinDecLength, precision-env.DdlMinDecLength, 0)
+		scaleDelta := lo.Ternary(scale > env.DdlMinDecScale, scale-env.DdlMinDecScale, 0)
+		precision = env.DdlMinDecLength + precisionDelta + scaleDelta // safe if scale if present
 	}
 
 	if dct.MinPrecision != nil && precision < *dct.MinPrecision {

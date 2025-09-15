@@ -199,7 +199,8 @@
 
 - id: 34
   name: Run sling with Prometheus source and custom query
-  run: 'sling run --src-conn prometheus --src-stream ''sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}'' --stdout  -d'
+  run: >
+    sling run --src-conn prometheus --src-stream 'sum(go_gc_duration_seconds) by (job, instance, quantile) # {"start": "now-2M"}' --stdout  -d
   output_contains:
     - quantile
 
@@ -576,6 +577,9 @@
   min_rows: 1
   output_contains:
     - 'using range'
+    - "changing column type via transform for 'timestamp': bigint => string"
+    - "changing column type via transform for 'value': decimal => string"
+    - "'timestamp':'text', 'value':'text'" # the timestamp & value columns were successfully casted to string
 
 - id: 81
   name: Prometheus issue 551 (https://github.com/slingdata-io/sling-cli/issues/551)
@@ -945,3 +949,23 @@
   rows: 0
   output_contains:
     - 'execution succeeded'
+
+# Test MongoDB ObjectID filtering
+- id: 116
+  name: MongoDB ObjectID filter test
+  run: 'sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml'
+
+- id: 117
+  name: JSON to Snowflake nested import test
+  run: 'sling run -d -r cmd/sling/tests/replications/r.55.json_snowflake_nested.yaml'
+
+# Test SQL Server money type to StarRocks
+- id: 118
+  name: SQL Server money type to StarRocks
+  run: 'sling run -d -r cmd/sling/tests/replications/r.56.mssql_starrocks_money.yaml'
+  conns:
+    - mssql
+    - starrocks
+  output_contains:
+    - 'execution succeeded'
+    - 'Row-by-row comparison'
