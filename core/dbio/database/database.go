@@ -1495,9 +1495,6 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				}
 			} else {
 				col.Sourced = false
-				precisionDelta := lo.Ternary(col.DbPrecision > env.DdlMinDecLength, col.DbPrecision-env.DdlMinDecLength, 0)
-				scaleDelta := lo.Ternary(col.DbScale > env.DdlMinDecScale, col.DbScale-env.DdlMinDecScale, 0)
-				col.DbPrecision = env.DdlMinDecLength + precisionDelta + scaleDelta // safe if scale if present
 			}
 		}
 
