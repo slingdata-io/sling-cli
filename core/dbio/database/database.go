@@ -1484,7 +1484,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				col.Stats.MaxDecLen = colType.Scale
 			}
 
-			// some instances where the precision is returned too small. Let's have a minimum precision of 15
+			// some instances where the precision is returned too small.
 			if col.DbPrecision > env.DdlMinDecLength {
 				if g.In(conn.GetType(), dbio.TypeDbOracle) {
 					// only mark as sourced is scale is specified
@@ -1495,6 +1495,9 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 				}
 			} else {
 				col.Sourced = false
+				precisionDelta := lo.Ternary(col.DbPrecision > env.DdlMinDecLength, col.DbPrecision-env.DdlMinDecLength, 0)
+				scaleDelta := lo.Ternary(col.DbScale > env.DdlMinDecScale, col.DbScale-env.DdlMinDecScale, 0)
+				col.DbPrecision = env.DdlMinDecLength + precisionDelta + scaleDelta // safe if scale if present
 			}
 		}
 
