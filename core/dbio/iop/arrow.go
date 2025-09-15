@@ -194,6 +194,13 @@ func ArrowSchemaToColumns(schema *arrow.Schema) Columns {
 				col.DbScale = int(dt.Scale)
 			}
 			col.DbType = "DECIMAL"
+		case arrow.DECIMAL256:
+			col.Type = DecimalType
+			if dt, ok := field.Type.(*arrow.Decimal256Type); ok {
+				col.DbPrecision = int(dt.Precision)
+				col.DbScale = int(dt.Scale)
+			}
+			col.DbType = "DECIMAL"
 		case arrow.DATE32:
 			col.Type = DateType
 			col.DbType = "DATE"
@@ -390,6 +397,8 @@ func (a *ArrowWriter) createBuilder(dtype arrow.DataType) array.Builder {
 		return array.NewFloat64Builder(a.mem)
 	case arrow.DECIMAL128:
 		return array.NewDecimal128Builder(a.mem, dtype.(*arrow.Decimal128Type))
+	case arrow.DECIMAL256:
+		return array.NewDecimal256Builder(a.mem, dtype.(*arrow.Decimal256Type))
 	case arrow.DATE32:
 		return array.NewDate32Builder(a.mem)
 	case arrow.TIMESTAMP:
