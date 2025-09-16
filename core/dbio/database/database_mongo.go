@@ -120,7 +120,7 @@ func (conn *MongoDBConn) NewTransaction(ctx context.Context, options ...*sql.TxO
 func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
 	tables, err := conn.GetTables(table.Schema)
 	if err != nil {
-		return columns, g.Error("could not query to get tables")
+		return columns, g.Error(err, "could not query to get tables")
 	}
 
 	found := false
