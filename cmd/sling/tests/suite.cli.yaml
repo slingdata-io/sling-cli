@@ -818,14 +818,15 @@
 
 - id: 105
   name: Test MSSQL uniqueidentifier datatype preservation
-  run: sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
-  streams: 1
-  rows: 5
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
+    sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
   output_contains:
     - "guid_col should be 'uniqueidentifier' type in target"
     - "GUID value for record 1 should match"
     - "GUID value for record 5 should match"
     - "execution succeeded"
+    - "DROP TABLE public.unique_identifier_test2"
 
 - id: 106
   name: Test MSSQL to BigQuery BIGNUMERIC conversion for high precision/scale decimals
