@@ -952,8 +952,10 @@
 
 # Test MongoDB ObjectID filtering
 - id: 116
-  name: MongoDB ObjectID filter test
-  run: 'sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml'
+  name: MongoDB filter test
+  run: |
+    sling run -r cmd/sling/tests/replications/r.54.mongo_filter.yaml
+    sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml
 
 - id: 117
   name: JSON to Snowflake nested import test

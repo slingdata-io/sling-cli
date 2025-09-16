@@ -1,0 +1,30 @@
+source: mongo
+target: postgres
+
+defaults:
+  mode: full-refresh
+  source_options:
+    flatten: 1
+hooks:
+      
+  end:
+    # Verify records were inserted
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.mongo_test
+      into: result
+    
+    - type: check
+      check: int_parse(store.result[0].count) == 9
+      failure_message: Should have 9 rows
+    
+    # Clean up test table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.mongo_test;
+  
+streams:
+  # Test filtering on existing collection
+  default.test1k_mongodb:
+    object: public.mongo_test
+    where: '{ "code": {"$lte": 9}}'
