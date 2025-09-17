@@ -476,6 +476,7 @@ func (conn *MongoDBConn) GetSchemas() (data iop.Dataset, err error) {
 func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) {
 	queryContext := g.NewContext(conn.Context().Ctx)
 
+	g.Trace("listing collections from database: %s", schema)
 	names, err := conn.Client.Database(schema).ListCollectionNames(queryContext.Ctx, bson.D{})
 	if err != nil {
 		return data, g.Error(err, "could not list mongo collections in database %s", schema)
