@@ -333,14 +333,14 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 					// starrocks count can lag behind due to StarRocks’ async compaction/visibility.
 					// see https://github.com/slingdata-io/sling-cli/issues/644
 					// there is also a direct response check in database_starrocks.go, which would have errored, so we're good.
-					goto skipCountCompare
+					goto skipCountCompareError
 				}
-				fallthrough // if not bulk loaded, then do compare
+				fallthrough // if not bulk loaded, then do error
 			default:
 				err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 				return 0, err
 			}
-		skipCountCompare:
+		skipCountCompareError:
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 			err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 			return 0, err
@@ -522,14 +522,14 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 					// starrocks count can lag behind due to StarRocks’ async compaction/visibility.
 					// see https://github.com/slingdata-io/sling-cli/issues/644
 					// there is also a direct response check in database_starrocks.go, which would have errored, so we're good.
-					goto skipCountCompare
+					goto skipCountCompareError
 				}
-				fallthrough // if not bulk loaded, then do compare
+				fallthrough // if not bulk loaded, then do error
 			default:
 				err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
 				return 0, err
 			}
-		skipCountCompare:
+		skipCountCompareError:
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 			err = g.Error("loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 			return 0, err
