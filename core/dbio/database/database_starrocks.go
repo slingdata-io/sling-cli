@@ -446,15 +446,6 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	} else {
 		fs.SetProp("format", "csv")
 	}
-	fs.SetProp("header", "false") // no header needed for csv mode
-
-	fs.SetProp("file_max_rows", "250000")
-	if val := conn.GetProp("file_max_rows"); val != "" {
-		fs.SetProp("file_max_rows", val)
-	}
-	if val := conn.GetProp("file_max_bytes"); val != "" {
-		fs.SetProp("file_max_bytes", val)
-	}
 
 	localPath := path.Join(env.GetTempFolder(), g.NewTsID(g.F("starrocks.%s", env.CleanTableName(tableFName))))
 
@@ -469,6 +460,14 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	fileReadyChn := make(chan filesys.FileReady, 10)
 	go func() {
 		config := iop.LoaderStreamConfig(false)
+		config.FileMaxRows = 250000
+		if val := conn.GetProp("file_max_rows"); val != "" {
+			config.FileMaxRows = cast.ToInt64(val)
+		}
+		if val := conn.GetProp("file_max_bytes"); val != "" {
+			config.FileMaxBytes = cast.ToInt64(val)
+		}
+
 		if conn.version >= 327 && conn.GetProp("compression") != "" {
 			config.Compression = iop.CompressorType(conn.GetProp("compression"))
 		}
@@ -527,6 +526,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 
 	g.Debug("stream load headers => %s", g.Marshal(headers))
 
+	var loadedRows uint64
 	loadCtx := g.NewContext(conn.context.Ctx, 3)
 
 	loadFromLocal := func(localFile filesys.FileReady, tableFName string) {
@@ -571,6 +571,7 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 				df.Context.CaptureErr(g.Error("Failed loading from %s into %s\n%s", localFile.Node.Path(), tableFName, respString))
 				df.Context.Cancel()
 			}
+			loadedRows = loadedRows + cast.ToUint64(respMap["NumberLoadedRows"])
 		}
 	}
 
@@ -586,6 +587,10 @@ func (conn *StarRocksConn) StreamLoad(feURL, tableFName string, df *iop.Dataflow
 	loadCtx.Wg.Write.Wait()
 	if df.Err() != nil {
 		return df.Count(), g.Error(df.Err(), "Error importing to StarRocks")
+	}
+
+	if loadedRows != df.Count() {
+		return loadedRows, g.Error("loaded rows (%d) != stream count (%d). Records missing/mismatch. Aborting", loadedRows, df.Count())
 	}
 
 	return df.Count(), nil
