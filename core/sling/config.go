@@ -395,8 +395,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
-	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		Type = FileToFile
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
@@ -404,6 +402,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = ApiToFile
 	} else if srcApiProvided && srcStreamProvided && tgtDbProvided {
 		Type = ApiToDB
+	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
+		Type = FileToFile
 	}
 
 	if Type == "" {
