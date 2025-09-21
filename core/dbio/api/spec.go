@@ -201,6 +201,14 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 	ep.State[key] = val
 }
 
+func (eps Endpoints) Names() (names []string) {
+	eps.Sort()
+	for _, e := range eps {
+		names = append(names, e.Name)
+	}
+	return names
+}
+
 func (eps Endpoints) Sort() {
 	sort.Slice(eps, func(i, j int) bool {
 		return eps[i].Name < eps[j].Name

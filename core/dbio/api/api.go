@@ -104,6 +104,7 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 
 	if ac.Spec.IsDynamic() {
 		// TODO: generate/obtain list of dynamic endpoints
+		g.Debug("getting dynamic endpoints for %s", g.Marshal(patterns))
 		return nil, g.Error("dynamic endpoint not yet implemented")
 	}
 

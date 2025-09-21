@@ -277,7 +277,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 		if name == "*" && !conn.Connection.Type.IsAPI() {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
-		} else if hasWildcard(name) {
+		} else if hasWildcard(name) || conn.Connection.Type.IsAPI() {
 			// use a clone stream to apply defaults
 			s := ReplicationStreamConfig{}
 			if stream != nil {
@@ -377,6 +377,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						_, _, found := rd.GetStream(endpoint.Name)
 						if found {
 							// leave as is for order to be respected
+							matched = false
 							continue
 						}
 
@@ -387,7 +388,10 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 				}
 
 				// remove original pattern stream
-				rd.DeleteStream(wildcard.Pattern)
+				// api endpoint name won't have a pattern symbol
+				if hasWildcard(wildcard.Pattern) {
+					rd.DeleteStream(wildcard.Pattern)
+				}
 			}
 		}
 
@@ -772,7 +776,7 @@ func (rd *ReplicationConfig) DeleteStream(key string) {
 
 func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 
-	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing database wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
 	conn, err := c.AsDatabase(true)
 	if err != nil {
@@ -816,7 +820,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
-	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing api endpoints for %s: %s", rd.Source, g.Marshal(patterns))
 
 	ac, err := c.AsAPI(true)
 	if err != nil {
@@ -826,30 +830,38 @@ func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patter
 	}
 	defer c.Close() // close so we can re-initiate the queues on replication
 
+	endpoints, err := ac.ListEndpoints()
+	if err != nil {
+		return wildcards, g.Error(err, "could not get endpoints")
+	}
+
 	for _, pattern := range patterns {
 		wildcard := Wildcard{Pattern: pattern, EndpointMap: map[string]api.Endpoint{}}
 
-		g.Debug("getting endpoints for %s", pattern)
-		ok, _, _, endpoints, err := c.Discover(&connection.DiscoverOptions{Pattern: pattern})
+		patternEndpoints, err := ac.ListEndpoints(pattern)
 
 		if err != nil {
 			return wildcards, g.Error(err, "could not get endpoints for pattern: %s", pattern)
-		} else if !ok {
-			return wildcards, g.Error("could not get endpoints for for pattern: %s", pattern)
+		} else if len(patternEndpoints) == 0 {
+			return wildcards, g.Error("did not find endpoint(s) for: %s. Available endpoints: %s", pattern, g.Marshal(endpoints.Names()))
 		}
 
-		for _, endpoint := range endpoints {
+		for _, endpoint := range patternEndpoints {
 			wildcard.StreamNames = append(wildcard.StreamNames, endpoint.Name)
 			wildcard.EndpointMap[endpoint.Name] = endpoint
 		}
 		wildcards = append(wildcards, &wildcard)
 	}
 
+	if len(wildcards) == 0 {
+		g.Warn("no endpoints detected for stream names: %s. Available endpoints: %s", g.Marshal(patterns), g.Marshal(endpoints.Names()))
+	}
+
 	return
 }
 
 func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
-	g.Debug("processing wildcards for %s: %s", rd.Source, g.Marshal(patterns))
+	g.Debug("processing file wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
 	fs, err := c.AsFile(true)
 	if err != nil {
@@ -929,12 +941,12 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 
 	err = rd.ProcessWildcards()
 	if err != nil {
-		return g.Error(err, "could not process streams using wildcard")
+		return g.Error(err, "could not compile streams")
 	}
 
 	err = rd.ProcessChunks()
 	if err != nil {
-		return g.Error(err, "could not process chunks")
+		return g.Error(err, "could not process chunks when compiling")
 	}
 
 	// clean up selectStreams
