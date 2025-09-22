@@ -16,3 +16,4 @@ streams:
 env:
   SLING_STATE: postgres/sling_state.stripe # one state table per replication
   SLING_LOADED_AT_COLUMN: timestamp
+  SLING_THREADS: 2
