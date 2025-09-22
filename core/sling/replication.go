@@ -374,14 +374,16 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						endpoint := wildcard.EndpointMap[wsn]
 
 						// check if endpoint exists
-						_, _, found := rd.GetStream(endpoint.Name)
+						_, stream, found := rd.GetStream(endpoint.Name)
 						if found {
 							// leave as is for order to be respected
+							stream.dependsOn = endpoint.DependsOn
 							matched = false
 							continue
 						}
 
 						cfg := rd.Streams[wildcard.Pattern]
+						cfg.dependsOn = endpoint.DependsOn
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
 					}
@@ -1127,6 +1129,7 @@ type ReplicationStreamConfig struct {
 	Hooks         HookMap        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 
 	replication *ReplicationConfig `json:"-" yaml:"-"`
+	dependsOn   []string           `json:"-" yaml:"-"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -1171,6 +1174,7 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		Transforms:        stream.Transforms,
 		StreamName:        name,
 		ReplicationStream: stream,
+		DependsOn:         stream.dependsOn,
 	}
 
 	// so that the next stream does not retain previous pointer values

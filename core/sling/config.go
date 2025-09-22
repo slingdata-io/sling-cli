@@ -1114,6 +1114,7 @@ type Config struct {
 
 	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
+	DependsOn         []string                 `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
 
 	SrcConn  connection.Connection `json:"-" yaml:"-"`
 	TgtConn  connection.Connection `json:"-" yaml:"-"`

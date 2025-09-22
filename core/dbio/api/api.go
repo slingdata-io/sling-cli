@@ -108,6 +108,12 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 		return nil, g.Error("dynamic endpoint not yet implemented")
 	}
 
+	// fill DependsOn
+	for i, ep := range endpoints {
+		ep.DependsOn = endpoints.HasUpstreams(ep.Name)
+		endpoints[i] = ep
+	}
+
 	if len(patterns) > 0 && patterns[0] != "" {
 		pattern := patterns[0]
 		filterEndpoints := Endpoints{}

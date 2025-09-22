@@ -177,6 +177,7 @@ type Endpoint struct {
 	Iterate     Iterate    `yaml:"iterate" json:"iterate,omitempty"` // state expression to use to loop
 	Setup       Sequence   `yaml:"setup" json:"setup,omitempty"`
 	Teardown    Sequence   `yaml:"teardown" json:"teardown,omitempty"`
+	DependsOn   []string   `yaml:"-" json:"-"` // upstream endpoints
 
 	stop         bool // whether we should stop the endpoint process
 	conn         *APIConnection
@@ -201,6 +202,7 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 	ep.State[key] = val
 }
 
+// Names returns names in alphabetical order
 func (eps Endpoints) Names() (names []string) {
 	for _, e := range eps {
 		names = append(names, e.Name)
@@ -213,10 +215,220 @@ func (eps Endpoints) Names() (names []string) {
 	return names
 }
 
+// HasUpstreams returns all upstream endpoint names that the specified endpoint depends on.
+// Returns empty slice if the endpoint doesn't exist or has no dependencies.
+func (eps Endpoints) HasUpstreams(endpointName string) (upstreams []string) {
+	upstreams = make([]string, 0)
+
+	// Find the target endpoint
+	var targetEndpoint *Endpoint
+	for _, ep := range eps {
+		if ep.Name == endpointName {
+			targetEndpoint = &ep
+			break
+		}
+	}
+
+	if targetEndpoint == nil {
+		return upstreams // Return empty slice if endpoint not found
+	}
+
+	// Check if endpoint iterates over a queue
+	if iterateOver, ok := targetEndpoint.Iterate.Over.(string); ok {
+		if strings.HasPrefix(iterateOver, "queue.") {
+			queueName := strings.TrimPrefix(iterateOver, "queue.")
+
+			// Find endpoints that produce to this queue
+			var producers []string
+			for _, otherEp := range eps {
+				for _, processor := range otherEp.Response.Processors {
+					if strings.HasPrefix(processor.Output, "queue.") {
+						producerQueueName := strings.TrimPrefix(processor.Output, "queue.")
+						if producerQueueName == queueName && otherEp.Name != targetEndpoint.Name {
+							producers = append(producers, otherEp.Name)
+						}
+					}
+				}
+			}
+
+			if len(producers) > 0 {
+				// Remove duplicates and sort
+				sort.Strings(producers)
+				// Remove duplicates after sorting
+				uniqueProducers := make([]string, 0, len(producers))
+				for i, producer := range producers {
+					if i == 0 || producer != producers[i-1] {
+						uniqueProducers = append(uniqueProducers, producer)
+					}
+				}
+				upstreams = append(upstreams, uniqueProducers...)
+			}
+		}
+	}
+
+	return upstreams
+}
+
 func (eps Endpoints) Sort() {
+	// First sort alphabetically
 	sort.Slice(eps, func(i, j int) bool {
 		return eps[i].Name < eps[j].Name
 	})
+
+	// Then reorder based on dependencies
+	deps := eps.buildDependencyMap()
+	sorted := eps.topologicalSort(deps)
+
+	// Reorder the slice based on topological sort
+	sortedMap := make(map[string]int)
+	for i, name := range sorted {
+		sortedMap[name] = i
+	}
+
+	sort.Slice(eps, func(i, j int) bool {
+		return sortedMap[eps[i].Name] < sortedMap[eps[j].Name]
+	})
+}
+
+// buildDependencyMap creates a map of endpoint dependencies based on queue usage
+func (eps Endpoints) buildDependencyMap() map[string][]string {
+	dependencies := make(map[string][]string)
+
+	// For each endpoint, get its upstream dependencies
+	for _, ep := range eps {
+		dependencies[ep.Name] = eps.HasUpstreams(ep.Name)
+	}
+
+	return dependencies
+}
+
+// topologicalSort performs a topological sort on endpoints based on dependencies
+func (eps Endpoints) topologicalSort(dependencies map[string][]string) []string {
+	// Build reverse dependency graph (what depends on me)
+	reverseDeps := make(map[string][]string)
+	inDegree := make(map[string]int)
+
+	// Initialize all endpoints
+	for _, ep := range eps {
+		inDegree[ep.Name] = 0
+		reverseDeps[ep.Name] = []string{}
+	}
+
+	// Build reverse dependencies and count in-degrees
+	for endpoint, deps := range dependencies {
+		inDegree[endpoint] = len(deps)
+		for _, dep := range deps {
+			reverseDeps[dep] = append(reverseDeps[dep], endpoint)
+		}
+	}
+
+	// Queue for endpoints with no dependencies
+	var queue []string
+	for name, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, name)
+		}
+	}
+
+	// Sort the initial queue alphabetically for consistent ordering
+	sort.Strings(queue)
+
+	var result []string
+
+	for len(queue) > 0 {
+		// Process the first endpoint in queue
+		current := queue[0]
+		queue = queue[1:]
+
+		result = append(result, current)
+
+		// Reduce in-degree for endpoints that depend on current
+		var newReady []string
+		for _, dependent := range reverseDeps[current] {
+			inDegree[dependent]--
+			if inDegree[dependent] == 0 {
+				newReady = append(newReady, dependent)
+			}
+		}
+
+		// Sort new ready endpoints alphabetically before adding to queue
+		sort.Strings(newReady)
+		queue = append(queue, newReady...)
+	}
+
+	// Check for cycles (if we haven't processed all endpoints)
+	if len(result) != len(eps) {
+		// Add any remaining endpoints (shouldn't happen with valid DAG)
+		processed := make(map[string]bool)
+		for _, name := range result {
+			processed[name] = true
+		}
+		for _, ep := range eps {
+			if !processed[ep.Name] {
+				result = append(result, ep.Name)
+			}
+		}
+	}
+
+	return result
+}
+
+// DAG returns groups of interdependent endpoints
+func (eps Endpoints) DAG() [][]string {
+	dependencies := eps.buildDependencyMap()
+
+	// Build reverse dependencies (who depends on me)
+	reverseDeps := make(map[string][]string)
+	for endpoint, deps := range dependencies {
+		for _, dep := range deps {
+			reverseDeps[dep] = append(reverseDeps[dep], endpoint)
+		}
+	}
+
+	// Find connected components
+	visited := make(map[string]bool)
+	var groups [][]string
+
+	var dfs func(endpoint string, group *[]string)
+	dfs = func(endpoint string, group *[]string) {
+		if visited[endpoint] {
+			return
+		}
+		visited[endpoint] = true
+		*group = append(*group, endpoint)
+
+		// Visit upstream dependencies
+		for _, dep := range dependencies[endpoint] {
+			dfs(dep, group)
+		}
+
+		// Visit downstream dependencies
+		for _, dep := range reverseDeps[endpoint] {
+			dfs(dep, group)
+		}
+	}
+
+	// Process each endpoint
+	for _, ep := range eps {
+		if !visited[ep.Name] {
+			var group []string
+			dfs(ep.Name, &group)
+
+			// Sort group for consistent output
+			sort.Strings(group)
+			groups = append(groups, group)
+		}
+	}
+
+	// Sort groups by their first element for consistent ordering
+	sort.Slice(groups, func(i, j int) bool {
+		if len(groups[i]) == 0 || len(groups[j]) == 0 {
+			return len(groups[i]) > len(groups[j])
+		}
+		return groups[i][0] < groups[j][0]
+	})
+
+	return groups
 }
 
 // setup executes the setup sequence for an endpoint
