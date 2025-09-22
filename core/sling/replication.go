@@ -383,6 +383,9 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						}
 
 						cfg := rd.Streams[wildcard.Pattern]
+						if cfg == nil {
+							cfg = &ReplicationStreamConfig{}
+						}
 						cfg.dependsOn = endpoint.DependsOn
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
@@ -759,6 +762,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
+	newCfg.dependsOn = cfg.dependsOn     // set dependsOn since not marshalled
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 

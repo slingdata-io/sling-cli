@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
-	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 type APIConnection struct {
@@ -56,9 +55,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 
 	// register queues
 	for _, queueName := range ac.Spec.Queues {
-		if env.IsThreadChild {
-			g.Warn("API queues may not work correctly for multiple threads.")
-		}
 		_, err = ac.RegisterQueue(queueName)
 		if err != nil {
 			return ac, g.Error(err)
@@ -124,6 +120,8 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 		}
 		endpoints = filterEndpoints
 	}
+
+	endpoints.Sort()
 
 	return endpoints, nil
 }
