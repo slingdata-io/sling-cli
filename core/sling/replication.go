@@ -761,8 +761,8 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 
 func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig) {
 	newCfg := ReplicationStreamConfig{}
-	g.Unmarshal(g.Marshal(cfg), &newCfg) // copy config over
-	newCfg.dependsOn = cfg.dependsOn     // set dependsOn since not marshalled
+	g.Unmarshal(g.Marshal(cfg), &newCfg)       // copy config over
+	newCfg.dependsOn = g.PtrVal(cfg).dependsOn // set dependsOn since not marshalled
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 
