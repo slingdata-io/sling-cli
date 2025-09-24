@@ -10,10 +10,19 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Dev Build
-        uses: peter-evans/repository-dispatch@v2
+      # - name: Trigger Dev Build
+      #   uses: peter-evans/repository-dispatch@v2
+      #   with:
+      #     token: ${{ secrets.REPO_ACCESS_TOKEN }}
+      #     repository: slingdata-io/sling
+      #     event-type: build-dev
+      #     client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+        
+      - name: Trigger Dev Build on Specific Branch
+        uses: benc-uk/workflow-dispatch@v1
         with:
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
-          repository: slingdata-io/sling
-          event-type: build-dev
-          client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+          repo: slingdata-io/sling
+          workflow: build-dev.yaml 
+          ref: ${{ github.ref }}
+          inputs: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
