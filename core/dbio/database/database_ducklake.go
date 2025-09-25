@@ -103,33 +103,31 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	// Add storage-specific extensions based on data path
 	var secret iop.DuckDbSecret
 
-	if conn.DataPath != "" {
-		switch {
-		case strings.HasPrefix(conn.DataPath, "s3://"), strings.HasPrefix(conn.DataPath, "r2://"):
-			secretType := iop.DuckDbSecretTypeS3
-			if strings.HasPrefix(conn.DataPath, "r2://") {
-				secretType = iop.DuckDbSecretTypeR2
-			}
-			secretProps := MakeDuckDbSecretProps(conn, secretType)
-			secret = iop.NewDuckDbSecret("s3_secret", secretType, secretProps)
-			conn.duck.AddSecret(secret)
-
-		case strings.HasPrefix(conn.DataPath, "az://"), strings.HasPrefix(conn.DataPath, "abfss://"):
-			secretType := iop.DuckDbSecretTypeAzure
-			secretProps := MakeDuckDbSecretProps(conn, secretType)
-			secret = iop.NewDuckDbSecret("azure_secret", secretType, secretProps)
-			conn.duck.AddSecret(secret)
-
-		case strings.HasPrefix(conn.DataPath, "gs://"), strings.HasPrefix(conn.DataPath, "gcs://"):
-			secretType := iop.DuckDbSecretTypeGCS
-			secretProps := MakeDuckDbSecretProps(conn, secretType)
-			secret = iop.NewDuckDbSecret("gcs_secret", secretType, secretProps)
-			conn.duck.AddSecret(secret)
-
-		default:
-			// ensure dir is created
-			os.MkdirAll(conn.DataPath, 0775)
+	switch {
+	case strings.HasPrefix(conn.DataPath, "s3://"), strings.HasPrefix(conn.DataPath, "r2://"), conn.GetProp("s3_region") != "", conn.GetProp("s3_endpoint") != "":
+		secretType := iop.DuckDbSecretTypeS3
+		if strings.HasPrefix(conn.DataPath, "r2://") {
+			secretType = iop.DuckDbSecretTypeR2
 		}
+		secretProps := MakeDuckDbSecretProps(conn, secretType)
+		secret = iop.NewDuckDbSecret("s3_secret", secretType, secretProps)
+		conn.duck.AddSecret(secret)
+
+	case strings.HasPrefix(conn.DataPath, "az://"), strings.HasPrefix(conn.DataPath, "abfss://"), conn.GetProp("azure_account_name") != "", conn.GetProp("azure_account_key") != "", conn.GetProp("azure_sas_token") != "", conn.GetProp("azure_connection_string") != "":
+		secretType := iop.DuckDbSecretTypeAzure
+		secretProps := MakeDuckDbSecretProps(conn, secretType)
+		secret = iop.NewDuckDbSecret("azure_secret", secretType, secretProps)
+		conn.duck.AddSecret(secret)
+
+	case strings.HasPrefix(conn.DataPath, "gs://"), strings.HasPrefix(conn.DataPath, "gcs://"), conn.GetProp("gcs_access_key_id") != "", conn.GetProp("gcs_secret_access_key") != "":
+		secretType := iop.DuckDbSecretTypeGCS
+		secretProps := MakeDuckDbSecretProps(conn, secretType)
+		secret = iop.NewDuckDbSecret("gcs_secret", secretType, secretProps)
+		conn.duck.AddSecret(secret)
+
+	case conn.DataPath != "":
+		// ensure dir is created
+		os.MkdirAll(conn.DataPath, 0775)
 	}
 
 	// Attach the DuckLake database
