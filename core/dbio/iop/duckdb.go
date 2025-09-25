@@ -26,7 +26,8 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.3.2"
+	DuckDbVersion      = "1.4.0"
+	DuckDbVersionMD    = "1.3.2"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -371,7 +372,7 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return nil
 	}
 
-	bin, err := EnsureBinDuckDB(duck.GetProp("duckdb_version"))
+	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
 		return g.Error(err, "could not get duckdb binary")
 	}
@@ -1001,11 +1002,13 @@ func (duck *DuckDb) Quote(col string) (qName string) {
 
 // EnsureBinDuckDB ensures duckdb binary exists
 // if missing, downloads and uses
-func EnsureBinDuckDB(version string) (binPath string, err error) {
+func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) {
 
 	if version == "" {
 		if val := os.Getenv("DUCKDB_VERSION"); val != "" {
 			version = val
+		} else if duck.GetProp("motherduck_token") != "" {
+			version = DuckDbVersionMD
 		} else {
 			version = DuckDbVersion
 		}
