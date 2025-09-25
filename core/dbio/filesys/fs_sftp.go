@@ -338,6 +338,7 @@ func (fs *SftpFileSysClient) GetReader(urlStr string) (reader io.Reader, err err
 	pipeR, pipeW := io.Pipe()
 
 	go func() {
+		defer file.Close()
 		defer pipeW.Close()
 
 		reader = bufio.NewReader(file)
