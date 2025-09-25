@@ -5,7 +5,6 @@ core:
   create_index: create index {index} on {table} ({cols})
   create_unique_index: create unique index {index} on {table} ({cols})
   create_table: create table if not exists {table} ({col_types})
-  create_temporary_table: create temp table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
   insert_option: ""
