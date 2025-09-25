@@ -18,3 +18,4 @@ jobs:
           repo: slingdata-io/sling
           workflow: .github/workflows/build-dev.yml
           ref: ${{ github.ref }}
+          inputs: '{"backend": "true"}'
