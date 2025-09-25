@@ -134,6 +134,10 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	attachSQL := conn.buildAttachSQL()
 	_, err = conn.Exec(attachSQL + noDebugKey)
 	if err != nil {
+		// hide sensitive strings (password)
+		if strings.Contains(err.Error(), conn.CatalogConnStr) {
+			return g.Error(strings.ReplaceAll(err.Error(), conn.CatalogConnStr, "<REDACTED CONNECTION STRING>"))
+		}
 		return g.Error(err, "could not attach ducklake database")
 	}
 
