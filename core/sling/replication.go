@@ -278,6 +278,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 		if name == "*" && !conn.Connection.Type.IsAPI() {
 			return g.Error("Must specify schema or path when using wildcard: 'my_schema.*', 'file://./my_folder/*', not '*'")
 		} else if hasWildcard(name) || conn.Connection.Type.IsAPI() {
+			// Always treat API endpoints as patterns to forms the upstream endpoints
 			// use a clone stream to apply defaults
 			s := ReplicationStreamConfig{}
 			if stream != nil {
@@ -395,6 +396,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 				// remove original pattern stream
 				// api endpoint name won't have a pattern symbol
 				if hasWildcard(wildcard.Pattern) {
+					matched = true // so it doesn't get added back
 					rd.DeleteStream(wildcard.Pattern)
 				}
 			}
