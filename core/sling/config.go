@@ -395,8 +395,6 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		}
 	} else if srcDbProvided && srcStreamProvided && !tgtDbProvided && tgtFileProvided {
 		Type = DbToFile
-	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
-		Type = FileToFile
 	} else if tgtDbProvided && cfg.Target.Options != nil && cfg.Target.Options.PostSQL != nil {
 		cfg.Target.Object = *cfg.Target.Options.PostSQL
 		Type = DbSQL
@@ -404,6 +402,8 @@ func (cfg *Config) DetermineType() (Type JobType, err error) {
 		Type = ApiToFile
 	} else if srcApiProvided && srcStreamProvided && tgtDbProvided {
 		Type = ApiToDB
+	} else if srcFileProvided && !srcDbProvided && !tgtDbProvided && tgtFileProvided {
+		Type = FileToFile
 	}
 
 	if Type == "" {
@@ -1114,6 +1114,7 @@ type Config struct {
 
 	StreamName        string                   `json:"stream_name,omitempty" yaml:"stream_name,omitempty"`
 	ReplicationStream *ReplicationStreamConfig `json:"replication_stream,omitempty" yaml:"replication_stream,omitempty"`
+	DependsOn         []string                 `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
 
 	SrcConn  connection.Connection `json:"-" yaml:"-"`
 	TgtConn  connection.Connection `json:"-" yaml:"-"`

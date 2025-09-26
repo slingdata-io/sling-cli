@@ -27,6 +27,7 @@ import (
 
 var (
 	DuckDbVersion      = "1.3.2"
+	DuckDbVersionMD    = "1.3.2"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -347,7 +348,7 @@ func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
 		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
-			sql += fmt.Sprintf("LOAD %s;", extension)
+			sql += fmt.Sprintf("LOAD %s;", strings.TrimSuffix(extension, "from community"))
 		} else {
 			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
 		}
@@ -371,7 +372,7 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		return nil
 	}
 
-	bin, err := EnsureBinDuckDB(duck.GetProp("duckdb_version"))
+	bin, err := duck.EnsureBinDuckDB(duck.GetProp("duckdb_version"))
 	if err != nil {
 		return g.Error(err, "could not get duckdb binary")
 	}
@@ -1001,11 +1002,13 @@ func (duck *DuckDb) Quote(col string) (qName string) {
 
 // EnsureBinDuckDB ensures duckdb binary exists
 // if missing, downloads and uses
-func EnsureBinDuckDB(version string) (binPath string, err error) {
+func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) {
 
 	if version == "" {
 		if val := os.Getenv("DUCKDB_VERSION"); val != "" {
 			version = val
+		} else if duck.GetProp("motherduck_token") != "" {
+			version = DuckDbVersionMD
 		} else {
 			version = DuckDbVersion
 		}

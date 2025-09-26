@@ -453,6 +453,7 @@ func (fs *FtpFileSysClient) GetReader(urlStr string) (reader io.Reader, err erro
 
 	go func() {
 		defer fs.readerMux.Unlock()
+		defer file.Close()
 		defer pipeW.Close()
 
 		reader = bufio.NewReader(file)

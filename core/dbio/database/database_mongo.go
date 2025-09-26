@@ -120,7 +120,7 @@ func (conn *MongoDBConn) NewTransaction(ctx context.Context, options ...*sql.TxO
 func (conn *MongoDBConn) GetTableColumns(table *Table, fields ...string) (columns iop.Columns, err error) {
 	tables, err := conn.GetTables(table.Schema)
 	if err != nil {
-		return columns, g.Error("could not query to get tables")
+		return columns, g.Error(err, "could not query to get tables")
 	}
 
 	found := false
@@ -476,6 +476,7 @@ func (conn *MongoDBConn) GetSchemas() (data iop.Dataset, err error) {
 func (conn *MongoDBConn) GetTables(schema string) (data iop.Dataset, err error) {
 	queryContext := g.NewContext(conn.Context().Ctx)
 
+	g.Trace("listing collections from database: %s", schema)
 	names, err := conn.Client.Database(schema).ListCollectionNames(queryContext.Ctx, bson.D{})
 	if err != nil {
 		return data, g.Error(err, "could not list mongo collections in database %s", schema)

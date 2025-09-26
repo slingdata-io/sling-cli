@@ -1,15 +1,14 @@
 core:
   drop_table: drop table if exists {table}
   drop_view: drop view if exists {view}
+  drop_index: drop index if exists {index}
+  create_index: create index {index} on {table} ({cols})
+  create_unique_index: create unique index {index} on {table} ({cols})
   create_table: create table if not exists {table} ({col_types})
   replace: replace into {table} ({names}) values({values})
   truncate_table: delete from {table}
   insert_option: ""
   modify_column: 'alter {column} type {type}'
-
-  iceberg_scan: select {fields} from iceberg_scan('{uri}', allow_moved_paths = true) {where}
-  delta_scan: select {fields} from delta_scan('{uri}') {where}
-  parquet_scan: select {fields} from parquet_scan('{uri}') {where}
 
 
 metadata:
@@ -18,7 +17,7 @@ metadata:
   current_database: PRAGMA database_list
 
   schemas: |
-    select schema_name
+    select distinct schema_name
     from information_schema.schemata
     order by schema_name
 
@@ -40,7 +39,8 @@ metadata:
   columns: |
     select column_name, data_type, coalesce(numeric_precision, character_maximum_length) as precision, numeric_scale as scale
     from information_schema.columns
-    where table_name = '{table}'
+    where table_schema = '{schema}'
+      and table_name = '{table}'
     order by ordinal_position
 
   primary_keys: |
@@ -48,14 +48,16 @@ metadata:
            constraint_index as position,
            replace(replace(constraint_text, 'PRIMARY KEY(', ''), ')', '') as column_name
     from duckdb_constraints()
-    where table_name = '{table}'
+    where table_schema = '{schema}'
+      and table_name = '{table}'
       and constraint_type = 'PRIMARY KEY'
   
   indexes: |
     select index_name as index_name,
            sql as column_name
     from duckdb_indexes()
-    where table_name = '{table}'
+    where table_schema = '{schema}'
+      and table_name = '{table}'
 
   columns_full: |
     with tables_cte as (
@@ -69,7 +71,8 @@ metadata:
           else false
         end as is_view
       from information_schema.tables
-      where table_name = '{table}'
+      where table_schema = '{schema}'
+        and table_name = '{table}'
     )
     select
       cols.table_schema as schema_name,
@@ -95,6 +98,7 @@ metadata:
         end as is_view
       from information_schema.tables
       where 1=1
+        {{if .schema -}} and table_schema = '{schema}' {{- end}}
         {{if .tables -}} and table_name in ({tables}) {{- end}}
     )
     select
@@ -111,10 +115,10 @@ metadata:
     order by cols.table_catalog, cols.table_schema, cols.table_name, cols.ordinal_position
   
   ddl_table: |
-    PRAGMA table_info('{table}')
+    PRAGMA table_info('{schema}.{table}')
   
   ddl_view: |
-    PRAGMA table_info('{table}')
+    PRAGMA table_info('{schema}.{table}')
 
 analysis:
   chars: |
@@ -142,6 +146,7 @@ function:
   checksum_datetime: CAST((epoch({field}) || substr(strftime({field}, '%f'),4) ) as bigint)
   checksum_decimal: 'abs(cast({field} as bigint))'
   checksum_boolean: 'length({field}::string)'
+  cast_to_text: 'cast({field} as text)'
 
 variable:
   bool_as: integer

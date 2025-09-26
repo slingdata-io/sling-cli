@@ -14,6 +14,8 @@ assignees: ''
 
 - Operating System (`linux`, `mac`, `windows`): 
 
+- Do you have a CLI Pro/Platform subscription (`yes` / `no`): 
+
 - Replication Configuration: 
 
 ```yaml

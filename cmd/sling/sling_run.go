@@ -16,6 +16,7 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/slingdata-io/sling-cli/core/sling"
 
@@ -562,6 +563,8 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		if err = replication.ExecuteReplicationHook(sling.HookStageEnd); err != nil {
 			eG.Capture(err, "end-hooks")
 		}
+	} else {
+		iop.CloseQueues() // close queues to clean up if needed in child for next dependent
 	}
 
 	println()

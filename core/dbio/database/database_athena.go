@@ -637,11 +637,19 @@ func (conn *AthenaConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, 
 	}
 
 	table := tables[0]
-	s3Path = fmt.Sprintf("%s/%s/%s/%s",
-		conn.StagingLocation,
-		tempCloudStorageFolder,
-		table.Schema+"."+table.Name,
-		time.Now().Format("20060102_150405"))
+	if table.IsQuery() {
+		s3Path = fmt.Sprintf("%s/%s/%s/%s",
+			conn.StagingLocation,
+			tempCloudStorageFolder,
+			g.NewTsID("query"),
+			time.Now().Format("20060102_150405"))
+	} else {
+		s3Path = fmt.Sprintf("%s/%s/%s/%s",
+			conn.StagingLocation,
+			tempCloudStorageFolder,
+			table.Schema+"."+table.Name,
+			time.Now().Format("20060102_150405"))
+	}
 
 	// Build custom SELECT statement to handle timestamp precision
 	var selectFields []string
@@ -658,6 +666,9 @@ func (conn *AthenaConn) Unload(ctx *g.Context, tables ...Table) (s3Path string, 
 	}
 
 	sql := fmt.Sprintf("select %s from %s", strings.Join(selectFields, ", "), table.FullName())
+	if table.IsQuery() {
+		sql = table.Raw
+	}
 
 	// Build the SQL query for UNLOAD
 	tempTable := table.Clone()
@@ -700,6 +711,9 @@ func (conn *AthenaConn) BulkExportStream(table Table) (ds *iop.Datastream, err e
 func (conn *AthenaConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	if conn.StagingLocation == "" {
 		g.Warn("using cursor to export. Please set staging_location for Sling to use the Athena UNLOAD function (for bigger datasets).")
+		return conn.BaseConn.BulkExportFlow(table)
+	} else if conn.GetProp("use_bulk") == "false" {
+		g.Warn("use_bulk is set to false, using cursor to export.")
 		return conn.BaseConn.BulkExportFlow(table)
 	}
 

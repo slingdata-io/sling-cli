@@ -1,0 +1,30 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+project_name: sling
+
+before:
+  hooks:
+    - go mod edit -dropreplace='github.com/flarco/g' go.mod
+    - go mod edit -dropreplace='github.com/slingdata-io/sling' go.mod
+    - go mod tidy
+
+builds:
+  - main: ./cmd/sling
+    
+    env:
+      - CGO_ENABLED=1
+    
+    tags:
+      - fts5
+
+    goarch:
+      - amd64
+    
+    goos:
+      - windows
+    
+    ldflags:
+      - "-X 'github.com/slingdata-io/sling-cli/core.Version={{.Env.VERSION}}' -X 'github.com/slingdata-io/sling-cli/core/env.PlausibleURL={{.Env.PLAUSIBLE_URL}}' -X 'github.com/slingdata-io/sling-cli/core/env.SentryDsn={{.Env.SENTRY_DSN}}' -X 'github.com/slingdata-io/sling/agent.Version={{.Env.AGENT_VERSION}}'"
+
+archives:
+  - name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'

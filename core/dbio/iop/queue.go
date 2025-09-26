@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"io"
 	"os"
-	"runtime"
+	"path"
 	"strings"
 	"sync"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/json"
+	cmap "github.com/orcaman/concurrent-map/v2"
 )
 
 type Queue struct {
@@ -18,33 +19,54 @@ type Queue struct {
 	Reader  *bufio.Reader `json:"-"`
 	Writer  *bufio.Writer `json:"-"`
 	mu      sync.Mutex    // protect concurrent access
-	reading bool          // whether queue is in reading mode
-	writing bool          // whether queue is in writing mode
+	count   int
+	reading bool // whether queue is in reading mode
+	writing bool // whether queue is in writing mode
+	keep    bool
 }
 
+var queues = cmap.New[*Queue]()
+
 // NewQueue creates a new queue with a temporary file
-func NewQueue(prefix string) (*Queue, error) {
-	tmpFile, err := os.CreateTemp("", prefix+"_*.queue")
-	if err != nil {
-		return nil, g.Error(err, "failed to create temp file for queue")
+func NewQueue(name string) (q *Queue, err error) {
+	// make temp folder
+	var tmpFile *os.File
+	var keep bool
+	if folder := os.Getenv("SLING_QUEUE_FOLDER"); folder != "" {
+		keep = true // keep file, will be deleted by parent process
+		if err := os.MkdirAll(folder, 0755); err != nil {
+			return nil, g.Error(err, "could not create queue folder")
+		}
+		tmpFilePath := path.Join(folder, name+".queue")
+		if g.PathExists(tmpFilePath) {
+			if tmpFile, err = os.OpenFile(tmpFilePath, os.O_RDWR, 0755); err != nil {
+				return nil, g.Error(err, "could not open queue file: %s", tmpFilePath)
+			}
+		} else {
+			if tmpFile, err = os.OpenFile(tmpFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0755); err != nil {
+				return nil, g.Error(err, "could not create queue file: %s", tmpFilePath)
+			}
+		}
+	} else {
+		tmpFile, err = os.CreateTemp("", name+"_*.queue")
+		if err != nil {
+			return nil, g.Error(err, "failed to create temp file for queue")
+		}
 	}
 
-	q := &Queue{
+	q = &Queue{
 		Path:    tmpFile.Name(),
 		File:    tmpFile,
 		writing: true, // start in writing mode
 		reading: false,
+		keep:    keep,
 	}
 
 	q.Writer = bufio.NewWriter(tmpFile)
 
-	// Register cleanup when program exits
-	runtime.SetFinalizer(q, func(q *Queue) {
-		q.Close()
-	})
+	g.Trace("using queue `%s` at %s", name, q.Path)
 
-	g.Trace("registered queue `%s` at %s", prefix, q.Path)
-
+	queues.Set(name, q)
 	return q, nil
 }
 
@@ -77,6 +99,7 @@ func (q *Queue) Append(data any) error {
 	if err != nil {
 		return g.Error(err, "failed to write to queue")
 	}
+	q.count++
 
 	// Flush after each write to ensure data is written to disk immediately
 	return q.Writer.Flush()
@@ -264,19 +287,28 @@ func (q *Queue) Close() error {
 		path := q.File.Name()
 
 		// Close the file
-		err := q.File.Close()
+		if err := q.File.Close(); err != nil {
+			return err
+		}
 		q.File = nil
 
 		// Remove the file
-		if err2 := os.Remove(path); err == nil {
-			err = err2
+		if !q.keep {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
 		}
 
 		q.reading = false
 		q.writing = false
 
-		return err
 	}
 
 	return nil
+}
+
+func CloseQueues() {
+	for _, q := range queues.Items() {
+		q.Close()
+	}
 }

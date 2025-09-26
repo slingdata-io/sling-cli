@@ -1773,7 +1773,11 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 	g.Debug("writing partitions to %s", remotePath)
 	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
 		copyContext.Wg.Write.Add()
-		go copyFile(path, info, err)
+		go func() {
+			if err = copyFile(path, info, err); err != nil {
+				copyContext.CaptureErr(err)
+			}
+		}()
 		return err
 	})
 

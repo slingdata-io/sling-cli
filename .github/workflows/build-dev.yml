@@ -1,158 +1,23 @@
-name: Build Dev
+name: Build Dev (Trigger)
 
 on:
   workflow_dispatch:
   push:
     branches-ignore:
       - main
-
-env:
-  GOPRIVATE: github.com/slingdata-io/*
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    paths-ignore:
+      - '.github/**'
 
 jobs:
-  build:
-    runs-on: [self-hosted, linux, ubuntu-16]
-    timeout-minutes: 15
-
-    outputs:
-      VERSION: ${{ steps.get_version.outputs.VERSION }}
-
+  trigger:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up GoLang
-        uses: actions/setup-go@v3
-        with:
-          go-version: "1.24"
-          cache: false
         
-      - name: Get the version
-        id: get_version
-        run: |
-          VERSION="${GITHUB_REF##*/}.dev"
-          echo "VERSION -> $VERSION"
-          DATE=$(date +%F)
-          VERSION=$(echo $VERSION | sed 's/^v//')
-          echo "VERSION -> $VERSION"
-          VERSION="$VERSION/$DATE"
-          echo "VERSION -> $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
-      - id: step1
-        name: Build
-        env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: |
-          bash scripts/build.sh
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-  
-  release:
-    if: "! (contains(github.event.inputs.build_only, 'true'))"
-    needs: [build]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
-
-    strategy:
-      fail-fast: false
-      matrix:
-        # runner: [self-hosted-mac, self-hosted-linux, self-hosted-windows]
-        runner: [self-hosted-mac, ubuntu-16, windows-latest]
-        # runner: [self-hosted-mac, ubuntu-16, self-hosted-windows]
-        # runner: [self-hosted-mac, ubuntu-16]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - name: Trigger Dev Build on Specific Branch
+        uses: benc-uk/workflow-dispatch@v1
         with:
-          fetch-depth: 0
-
-      - name: Dump context
-        env:
-          JOB_CONTEXT: ${{ toJson(job) }}
-          MATRIX_CONTEXT: ${{ toJson(matrix) }}
-          RUNNER_CONTEXT: ${{ toJson(runner) }}
-        run: |
-          echo "JOB_CONTEXT -> $JOB_CONTEXT"
-          echo "MATRIX_CONTEXT -> $MATRIX_CONTEXT"
-          echo "RUNNER_CONTEXT -> $RUNNER_CONTEXT"
-          echo "VERSION -> ${{ needs.build.outputs.VERSION }}"
-
-      - name: Set up GoLang
-        uses: actions/setup-go@v3
-        with:
-          go-version: "1.24"
-          cache: false
-        
-      - name: Load Secrets
-        uses: flarco/infisical-action@v3
-        with:
-          version: 0.28.1
-          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          use_system_python: true
-      
-      - name: Build Sling (Linux)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'linux'
-        run: |
-          # Prep
-          bash scripts/ci/prep.linux.sh
-
-          # build
-          bash scripts/ci/build.linux.sh $VERSION
-
-      - name: Build Sling (Mac)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'macOS'
-        run: |
-          # Prep
-          bash scripts/ci/prep.mac.sh
-
-          # build
-          bash scripts/ci/build.mac.sh $VERSION
-
-
-      - name: Configure Pagefile (Windows)
-        if: runner.os == 'windows'
-        uses: al-cheb/configure-pagefile-action@v1.2
-        with:
-            minimum-size: 16GB
-            maximum-size: 16GB
-            disk-root: "C:"
-
-      - name: Build Sling (Windows)
-        env:
-          VERSION: ${{ needs.build.outputs.VERSION }}
-        if: runner.os == 'windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          
-          # Prep
-          .\scripts\ci\prep.win.ps1
-
-          # Build
-          .\scripts\ci\build.win.ps1 $env:VERSION
-
-      - name: Upload to R2 (Windows)
-        if: runner.os == 'windows'
-        shell: pwsh
-        run: .\mc.exe cp sling_windows_amd64.tar.gz R2/sling-public/dev/latest/  
-
-      - name: Upload to R2 (Unix)
-        if: runner.os != 'windows'
-        run: mc cp *.tar.gz R2/sling-public/dev/latest/ 
-
-      - name: Purge Cache
-        if: runner.os == 'linux'
-        run: |
-          curl 'https://api.cloudflare.com/client/v4/zones/c4605fd9cf8ddcd00671858bbd16ffac/purge_cache' \
-          -H "X-Auth-Key: $CF_AUTH_KEY" \
-          -H "X-Auth-Email: $CF_AUTH_EMAIL" \
-          --data-raw '{"files":["https://f.slingdata.io/dev/latest/sling_linux_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_linux_arm64.tar.gz","https://f.slingdata.io/dev/latest/sling_darwin_amd64.tar.gz","https://f.slingdata.io/dev/latest/sling_darwin_arm64.tar.gz","https://f.slingdata.io/dev/latest/sling_windows_amd64.tar.gz"]}'
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          repo: slingdata-io/sling
+          workflow: .github/workflows/build-dev.yml
+          ref: ${{ github.ref }}
+          inputs: '{"backend": "true", "deploy": "false"}'

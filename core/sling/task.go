@@ -606,7 +606,8 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("not implemented makeGoLangScanType"):
 			helpString = "This is related to the Microsoft go-mssqldb driver, which willingly calls a panic for certain column types (such as geometry columns). See https://github.com/microsoft/go-mssqldb/issues/79 and https://github.com/microsoft/go-mssqldb/pull/32. The workaround is to use Custom SQL, and convert the problematic column type into a varchar."
 		case contains("cannot create parquet value") && contains("from go value of type"):
-			helpString = "This is happening when the column type changes mid-stream. Try casting the problematic column to a proper type with the `columns` property."
+		case contains("Not implemented Error: Only DuckLake versions"):
+			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
 		}
 	}
 	return

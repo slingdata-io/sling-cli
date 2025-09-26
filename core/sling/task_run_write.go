@@ -327,8 +327,20 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	} else if tCnt >= 0 {
 		if cnt != cast.ToUint64(tCnt) {
-			err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
-			return 0, err
+			switch tgtConn.GetType() {
+			case dbio.TypeDbStarRocks:
+				if cast.ToBool(tgtConn.GetProp("use_bulk")) {
+					// starrocks count can lag behind due to StarRocks’ async compaction/visibility.
+					// see https://github.com/slingdata-io/sling-cli/issues/644
+					// there is also a direct response check in database_starrocks.go, which would have errored, so we're good.
+					goto skipCountCompareError
+				}
+				fallthrough // if not bulk loaded, then do error
+			default:
+				err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+				return 0, err
+			}
+		skipCountCompareError:
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 			err = g.Error("Loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 			return 0, err
@@ -504,8 +516,20 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 			return 0, err
 		}
 		if tCnt >= 0 && cnt != cast.ToUint64(tCnt) {
-			err = g.Error("inserted into final table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
-			return 0, err
+			switch tgtConn.GetType() {
+			case dbio.TypeDbStarRocks:
+				if cast.ToBool(tgtConn.GetProp("use_bulk")) {
+					// starrocks count can lag behind due to StarRocks’ async compaction/visibility.
+					// see https://github.com/slingdata-io/sling-cli/issues/644
+					// there is also a direct response check in database_starrocks.go, which would have errored, so we're good.
+					goto skipCountCompareError
+				}
+				fallthrough // if not bulk loaded, then do error
+			default:
+				err = g.Error("inserted in temp table but table count (%d) != stream count (%d). Records missing/mismatch. Aborting", tCnt, cnt)
+				return 0, err
+			}
+		skipCountCompareError:
 		} else if tCnt == 0 && len(sampleData.Rows) > 0 {
 			err = g.Error("loaded 0 records while sample data has %d records. Exiting.", len(sampleData.Rows))
 			return 0, err

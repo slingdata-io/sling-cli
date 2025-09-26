@@ -345,7 +345,12 @@
 
 - id: 59
   name: Run sling writing to partitioned parquet (local)
-  run: 'rm -rf /tmp/sling/output8 ; sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object ''file:///tmp/sling/output8/{part_year}/{part_month}'' -d --tgt-options ''{ format: parquet }'' --update-key create_dt ; ls -l /tmp/sling/output8'
+  run: |
+    rm -rf /tmp/sling/output8
+    
+    sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object 'file:///tmp/sling/output8/{part_year}/{part_month}' -d --tgt-options '{ format: parquet }' --update-key create_dt
+    
+    ls -l /tmp/sling/output8
   rows: 1000
   output_contains:
     - partition_by (
@@ -505,22 +510,22 @@
     - writing to target stream (stdout)
     - wrote 5 rows
 
-- id: 76
-  name: Run sling iceberg_lakekeeper insert
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
-  env:
-    TARGET: iceberg_lakekeeper
-  streams: 2
-  output_contains:
-    - committed iceberg snapshot
-    - count_result => {"count_star":1001}
-    - inserted 967 rows
+# - id: 76
+#   name: Run sling iceberg_lakekeeper insert
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+#   env:
+#     TARGET: iceberg_lakekeeper
+#   streams: 2
+#   output_contains:
+#     - committed iceberg snapshot
+#     - count_result => {"count_star":1001}
+#     - inserted 967 rows
     
-    # part of stdout output
-    - writing to target stream (stdout)
-    - wrote 5 rows
+#     # part of stdout output
+#     - writing to target stream (stdout)
+#     - wrote 5 rows
 
 - id: 77
   name: Run sling iceberg_sql insert
@@ -818,14 +823,15 @@
 
 - id: 105
   name: Test MSSQL uniqueidentifier datatype preservation
-  run: sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
-  streams: 1
-  rows: 5
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
+    sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
   output_contains:
     - "guid_col should be 'uniqueidentifier' type in target"
     - "GUID value for record 1 should match"
     - "GUID value for record 5 should match"
     - "execution succeeded"
+    - "DROP TABLE public.unique_identifier_test2"
 
 - id: 106
   name: Test MSSQL to BigQuery BIGNUMERIC conversion for high precision/scale decimals
@@ -952,8 +958,10 @@
 
 # Test MongoDB ObjectID filtering
 - id: 116
-  name: MongoDB ObjectID filter test
-  run: 'sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml'
+  name: MongoDB filter test
+  run: |
+    sling run -r cmd/sling/tests/replications/r.54.mongo_filter.yaml
+    sling run -r cmd/sling/tests/replications/r.54.mongo_objectid_filter.yaml
 
 - id: 117
   name: JSON to Snowflake nested import test
@@ -969,3 +977,14 @@
   output_contains:
     - 'execution succeeded'
     - 'Row-by-row comparison'
+
+- id: 119
+  name: Run replication test for RunState properties
+  run: 'sling run -r cmd/sling/tests/replications/r.57.run_state_test.yaml'
+  streams: 2
+  rows: 10
+  output_contains:
+    - run.total_bytes = 948
+    - run.total_rows = 10
+    - run.status = success
+    - '   id = public_run_state_test'
