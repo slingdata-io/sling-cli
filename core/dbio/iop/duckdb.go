@@ -348,7 +348,7 @@ func (duck *DuckDb) AddSecret(secret DuckDbSecret) {
 func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 	for _, extension := range duck.extensions {
 		if cast.ToBool(os.Getenv("DUCKDB_USE_INSTALLED_EXTENSIONS")) {
-			sql += fmt.Sprintf("LOAD %s;", extension)
+			sql += fmt.Sprintf("LOAD %s;", strings.TrimSuffix(extension, "from community"))
 		} else {
 			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
 		}
