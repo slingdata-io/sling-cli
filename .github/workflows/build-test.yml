@@ -8,6 +8,10 @@ on:
 env:
   GITHUB_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
   GOPRIVATE: github.com/slingdata-io/*
+  GOCACHE: /tmp/runner/go/cache
+  GOMODCACHE: /tmp/runner/go/mod-cache
+  GOPATH: /tmp/runner/go
+  HOME: /tmp/runner
 
 jobs:
 
