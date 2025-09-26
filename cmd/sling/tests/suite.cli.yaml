@@ -345,7 +345,12 @@
 
 - id: 59
   name: Run sling writing to partitioned parquet (local)
-  run: 'rm -rf /tmp/sling/output8 ; sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object ''file:///tmp/sling/output8/{part_year}/{part_month}'' -d --tgt-options ''{ format: parquet }'' --update-key create_dt ; ls -l /tmp/sling/output8'
+  run: |
+    rm -rf /tmp/sling/output8
+    
+    sling run --src-stream file://cmd/sling/tests/files/test1.csv --tgt-object 'file:///tmp/sling/output8/{part_year}/{part_month}' -d --tgt-options '{ format: parquet }' --update-key create_dt
+    
+    ls -l /tmp/sling/output8
   rows: 1000
   output_contains:
     - partition_by (
