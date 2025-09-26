@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -240,7 +241,9 @@ endpoints:
 			endpoints.Sort()
 
 			// Get names
-			actual := endpoints.Names()
+			actual := lo.Map(endpoints, func(ep Endpoint, i int) string {
+				return ep.Name
+			})
 
 			assert.Equal(t, tt.expected, actual, "Expected endpoints to be sorted as %v, got %v", tt.expected, actual)
 		})
@@ -1085,14 +1088,13 @@ endpoints:
 
 	// After sorting, both producers should come before consumer
 	endpoints.Sort()
-	names := endpoints.Names()
 
 	consumerIdx := -1
 	producerAIdx := -1
 	producerBIdx := -1
 
-	for i, name := range names {
-		switch name {
+	for i, endpoint := range endpoints {
+		switch endpoint.Name {
 		case "consumer":
 			consumerIdx = i
 		case "producer_a":
