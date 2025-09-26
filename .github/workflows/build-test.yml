@@ -18,7 +18,7 @@ jobs:
   build-test-sling:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
 
-    runs-on: [self-hosted, linux, ubuntu-20]
+    runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 60
 
     steps:
@@ -73,7 +73,7 @@ jobs:
   build-test-sling-cli:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
 
-    runs-on: [self-hosted, linux, ubuntu-20]
+    runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 40
 
     steps:
@@ -128,7 +128,7 @@ jobs:
   build-test-dbio:
     if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
 
-    runs-on: [self-hosted, linux, ubuntu-20]
+    runs-on: [self-hosted, linux, mpc]
     timeout-minutes: 40
 
     steps:
@@ -173,7 +173,7 @@ jobs:
 
   build-test-success:
 
-    runs-on: [self-hosted, linux, ubuntu-20]
+    runs-on: ubuntu-latest
     needs: [ build-test-sling, build-test-dbio, build-test-sling-cli ]
 
     steps:
