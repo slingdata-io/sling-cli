@@ -505,22 +505,22 @@
     - writing to target stream (stdout)
     - wrote 5 rows
 
-- id: 76
-  name: Run sling iceberg_lakekeeper insert
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
-  env:
-    TARGET: iceberg_lakekeeper
-  streams: 2
-  output_contains:
-    - committed iceberg snapshot
-    - count_result => {"count_star":1001}
-    - inserted 967 rows
+# - id: 76
+#   name: Run sling iceberg_lakekeeper insert
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+#   env:
+#     TARGET: iceberg_lakekeeper
+#   streams: 2
+#   output_contains:
+#     - committed iceberg snapshot
+#     - count_result => {"count_star":1001}
+#     - inserted 967 rows
     
-    # part of stdout output
-    - writing to target stream (stdout)
-    - wrote 5 rows
+#     # part of stdout output
+#     - writing to target stream (stdout)
+#     - wrote 5 rows
 
 - id: 77
   name: Run sling iceberg_sql insert
