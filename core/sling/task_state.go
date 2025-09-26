@@ -93,15 +93,15 @@ func (dts *DateTimeState) Update() {
 }
 
 type ExecutionState struct {
-	ID         string     `json:"id,omitempty"`
-	FilePath   string     `json:"string,omitempty"`
-	TotalBytes uint64     `json:"total_bytes,omitempty"`
-	TotalRows  uint64     `json:"total_rows,omitempty"`
-	Status     StatusMap  `json:"status,omitempty"`
-	StartTime  *time.Time `json:"start_time,omitempty"`
-	EndTime    *time.Time `json:"end_time,omitempty"`
-	Duration   int64      `json:"duration,omitempty"`
-	Error      *string    `json:"error,omitempty"`
+	ID         string     `json:"id"`
+	FilePath   string     `json:"string"`
+	TotalBytes uint64     `json:"total_bytes"`
+	TotalRows  uint64     `json:"total_rows"`
+	Status     StatusMap  `json:"status"`
+	StartTime  *time.Time `json:"start_time"`
+	EndTime    *time.Time `json:"end_time"`
+	Duration   int64      `json:"duration"`
+	Error      *string    `json:"error"`
 }
 
 type StatusMap struct {
@@ -116,16 +116,16 @@ type StatusMap struct {
 
 type RunState struct {
 	ID         string                  `json:"id,omitempty"`
-	Stream     *StreamState            `json:"stream,omitempty"`
-	Object     *ObjectState            `json:"object,omitempty"`
-	TotalBytes uint64                  `json:"total_bytes,omitempty"`
-	TotalRows  uint64                  `json:"total_rows,omitempty"`
-	Status     ExecStatus              `json:"status,omitempty"`
-	StartTime  *time.Time              `json:"start_time,omitempty"`
-	EndTime    *time.Time              `json:"end_time,omitempty"`
-	Duration   int64                   `json:"duration,omitempty"`
-	Error      *string                 `json:"error,omitempty"`
-	Config     ReplicationStreamConfig `json:"config,omitempty"`
+	Stream     *StreamState            `json:"stream"`
+	Object     *ObjectState            `json:"object"`
+	TotalBytes uint64                  `json:"total_bytes"`
+	TotalRows  uint64                  `json:"total_rows"`
+	Status     ExecStatus              `json:"status"`
+	StartTime  *time.Time              `json:"start_time"`
+	EndTime    *time.Time              `json:"end_time"`
+	Duration   int64                   `json:"duration"`
+	Error      *string                 `json:"error"`
+	Config     ReplicationStreamConfig `json:"config"`
 	Task       *TaskExecution          `json:"-"`
 }
 

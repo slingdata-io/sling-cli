@@ -972,3 +972,14 @@
   output_contains:
     - 'execution succeeded'
     - 'Row-by-row comparison'
+
+- id: 119
+  name: Run replication test for RunState properties
+  run: 'sling run -r cmd/sling/tests/replications/r.57.run_state_test.yaml'
+  streams: 2
+  rows: 10
+  output_contains:
+    - run.total_bytes = 948
+    - run.total_rows = 10
+    - run.status = success
+    - '   id = public_run_state_test'

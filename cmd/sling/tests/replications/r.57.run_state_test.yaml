@@ -1,0 +1,182 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.run_state_test;
+        CREATE TABLE public.run_state_test (
+          id INTEGER PRIMARY KEY,
+          name VARCHAR(100),
+          value DECIMAL(10,2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          description TEXT
+        );
+
+        INSERT INTO public.run_state_test (id, name, value, description) VALUES
+        (1, 'Test Item 1', 100.50, 'First test item for RunState verification'),
+        (2, 'Test Item 2', 200.75, 'Second test item for RunState verification'),
+        (3, 'Test Item 3', 300.00, 'Third test item for RunState verification'),
+        (4, 'Test Item 4', 450.25, 'Fourth test item for RunState verification'),
+        (5, 'Test Item 5', 550.50, 'Fifth test item for RunState verification'),
+        (6, 'Test Item 6', 600.75, 'Sixth test item for RunState verification'),
+        (7, 'Test Item 7', 750.00, 'Seventh test item for RunState verification'),
+        (8, 'Test Item 8', 825.25, 'Eighth test item for RunState verification'),
+        (9, 'Test Item 9', 900.50, 'Ninth test item for RunState verification'),
+        (10, 'Test Item 10', 1000.00, 'Tenth test item for RunState verification');
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.run_state_test2;
+
+  end:
+    # - type: log
+    #   message: |
+    #     Dump of runtime_state: {runtime_state}
+
+    - type: log
+      message: |
+        Dump of runs["public_run_state_test"]:
+              id = {runs["public_run_state_test"].id}
+              stream = {runs["public_run_state_test"].stream}
+              object = {runs["public_run_state_test"].object}
+              total_bytes = {runs["public_run_state_test"].total_bytes}
+              total_rows = {runs["public_run_state_test"].total_rows}
+              status = {runs["public_run_state_test"].status}
+              start_time = {runs["public_run_state_test"].start_time}
+              end_time = {runs["public_run_state_test"].end_time}
+              duration = {runs["public_run_state_test"].duration}
+              error = {runs["public_run_state_test"].error}
+              config = {runs["public_run_state_test"].config}
+
+    - type: check
+      name: "Check run.id is not empty"
+      check: length(runs["public_run_state_test"].id) > 0
+      failure_message: "run.id should not be empty"
+
+    - type: check
+      name: "Check run.total_rows equals 10"
+      check: runs["public_run_state_test"].total_rows == 10
+      failure_message: 'run.total_rows should equal 10, got: {runs["public_run_state_test"].total_rows}'
+
+    - type: check
+      name: "Check run.total_bytes is greater than 0"
+      check: runs["public_run_state_test"].total_bytes > 0
+      failure_message: 'run.total_bytes should be greater than 0, got: {runs["public_run_state_test"].total_bytes}'
+
+    - type: check
+      name: "Check run.status is success"
+      check: runs["public_run_state_test"].status == "success"
+      failure_message: 'run.status should be "success", got: {runs["public_run_state_test"].status}'
+
+    - type: check
+      name: "Check run.start_time exists"
+      check: runs["public_run_state_test"].start_time != nil && length(cast(runs["public_run_state_test"].start_time, "string")) > 0
+      failure_message: "run.start_time should exist and not be empty"
+
+    - type: check
+      name: "Check run.end_time exists"
+      check: runs["public_run_state_test"].end_time != nil && length(cast(runs["public_run_state_test"].end_time, "string")) > 0
+      failure_message: "run.end_time should exist and not be empty"
+
+    - type: check
+      name: "Check run.duration is greater than 0"
+      check: runs["public_run_state_test"].duration >= 0
+      failure_message: 'run.duration should be greater than 0, got: {runs["public_run_state_test"].duration}'
+
+    - type: check
+      name: "Check run.error is null or empty for successful run"
+      check: runs["public_run_state_test"].error == nil || runs["public_run_state_test"].error == ""
+      failure_message: 'run.error should be null or empty for successful run, got: {runs["public_run_state_test"].error}'
+
+    - type: check
+      name: "Check run.stream exists"
+      check: runs["public_run_state_test"].stream != nil
+      failure_message: "run.stream should exist"
+
+    - type: check
+      name: "Check run.stream.name is correct"
+      check: runs["public_run_state_test"].stream.name == "public.run_state_test"
+      failure_message: 'run.stream.name should be "public.run_state_test", got: {runs["public_run_state_test"].stream.name}'
+
+    - type: check
+      name: "Check run.stream.schema is correct"
+      check: runs["public_run_state_test"].stream.schema == "public"
+      failure_message: 'run.stream.schema should be "public", got: {runs["public_run_state_test"].stream.schema}'
+
+    - type: check
+      name: "Check run.object exists"
+      check: runs["public_run_state_test"].object != nil
+      failure_message: "run.object should exist"
+
+    - type: check
+      name: "Check run.object.full_name is correct"
+      check: runs["public_run_state_test"].object.full_name == "\"public\".\"run_state_test2\""
+      failure_message: 'run.object.full_name should be "public.run_state_test2", got: {runs["public_run_state_test"].object.full_name}'
+
+    - type: check
+      name: "Check run.object.table is correct"
+      check: runs["public_run_state_test"].object.table == "run_state_test2"
+      failure_message: 'run.object.table should be "run_state_test2", got: {runs["public_run_state_test"].object.name}'
+
+    - type: check
+      name: "Check run.object.schema is correct"
+      check: runs["public_run_state_test"].object.schema == "public"
+      failure_message: 'run.object.schema should be "public", got: {runs["public_run_state_test"].object.schema}'
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as row_count FROM public.run_state_test2
+      into: target_count
+
+    - type: check
+      name: "Verify target table has 10 rows"
+      check: store.target_count[0].row_count == 10
+      failure_message: "Target table should have 10 rows, got: {store.target_count[0].row_count}"
+
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.run_state_test
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.run_state_test2
+
+streams:
+  public.run_state_test:
+    object: public.run_state_test2
+    hooks:
+      post:
+        - type: log
+          message: |
+            Dump of run:
+              run.id = {run.id}
+              run.stream = {run.stream}
+              run.object = {run.object}
+              run.total_bytes = {run.total_bytes}
+              run.total_rows = {run.total_rows}
+              run.status = {run.status}
+              run.start_time = {run.start_time}
+              run.end_time = {run.end_time}
+              run.duration = {run.duration}
+              run.error = {run.error}
+              run.config = {run.config}
+  
+  public.run_state_test_incremental:
+    sql: public.run_state_test
+    object: public.run_state_test2
+    primary_key: id
+    update_key: id
+    mode: incremental
+    hooks:
+      post:
+        - type: check
+          name: "Check run.total_rows is 0"
+          check: run.total_rows == 0
+          failure_message: 'run.total_rows should be 0, got: {run.total_rows}'
