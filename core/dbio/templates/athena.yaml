@@ -18,6 +18,10 @@ core:
     )
     stored as parquet
     location '{location}'
+  limit_sql: |
+    select * from (
+      {sql}
+    ) as t limit {limit}
   drop_table: drop table if exists {table} purge
   drop_view: drop view if exists {view}
   drop_index: "select 'indexes do not apply for Athena'"
