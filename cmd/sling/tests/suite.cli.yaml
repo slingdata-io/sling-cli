@@ -1009,3 +1009,9 @@
   rows: 5
   output_contains:
     - 'execution succeeded'
+
+- id: 123
+  name: Test MSSQL identity columns with incremental mode (Issue #657)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.61.mssql_identity_incremental.yaml'
+  output_contains:
+    - 'execution succeeded'

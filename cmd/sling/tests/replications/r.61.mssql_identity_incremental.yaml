@@ -1,0 +1,125 @@
+source: mssql
+target: mssql2022
+
+defaults:
+  mode: incremental
+  primary_key: [id]
+  update_key: modified_at
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop source table if it exists
+        IF OBJECT_ID('dbo.identity_test_source', 'U') IS NOT NULL DROP TABLE dbo.identity_test_source;
+
+        -- Create source table with identity column
+        CREATE TABLE dbo.identity_test_source (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          name VARCHAR(100),
+          value DECIMAL(10,2),
+          created_at DATETIME DEFAULT GETDATE(),
+          modified_at DATETIME DEFAULT GETDATE()
+        );
+
+        -- Insert initial test data (letting identity generate values)
+        INSERT INTO dbo.identity_test_source (name, value, created_at, modified_at) VALUES
+        ('Record One', 100.00, DATEADD(DAY, -5, GETDATE()), DATEADD(DAY, -5, GETDATE())),
+        ('Record Two', 200.00, DATEADD(DAY, -4, GETDATE()), DATEADD(DAY, -4, GETDATE())),
+        ('Record Three', 300.00, DATEADD(DAY, -3, GETDATE()), DATEADD(DAY, -3, GETDATE())),
+        ('Record Four', 400.00, DATEADD(DAY, -2, GETDATE()), DATEADD(DAY, -2, GETDATE())),
+        ('Record Five', 500.00, DATEADD(DAY, -1, GETDATE()), DATEADD(DAY, -1, GETDATE()));
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Drop target table if it exists
+        IF OBJECT_ID('dbo.identity_test_target', 'U') IS NOT NULL DROP TABLE dbo.identity_test_target;
+
+        -- Create target table with identity column (same structure as source)
+        CREATE TABLE dbo.identity_test_target (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          name VARCHAR(100),
+          value DECIMAL(10,2),
+          created_at DATETIME,
+          modified_at DATETIME
+        );
+
+  end:
+    - type: check
+      check: runs.dbo_identity_test_source.status == "success"
+      on_failure: break
+
+    # Get source data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT
+          COUNT(*) as row_count,
+          MIN(id) as min_id,
+          MAX(id) as max_id,
+          SUM(value) as value_sum
+        FROM dbo.identity_test_source
+      into: source_stats
+
+    # Get target data (first run)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          COUNT(*) as row_count,
+          MIN(id) as min_id,
+          MAX(id) as max_id,
+          SUM(value) as value_sum
+        FROM dbo.identity_test_target
+      into: target_stats_1
+
+    - type: log
+      message: |
+
+        After first incremental run:
+        Source stats: {pretty_table(store.source_stats)}
+        Target stats: {pretty_table(store.target_stats_1)}
+
+    # Check initial replication
+    - type: check
+      check: int_parse(store.source_stats[0].row_count) == int_parse(store.target_stats_1[0].row_count)
+      failure_message: Row count mismatch after first run. Source {store.source_stats[0].row_count} != Target {store.target_stats_1[0].row_count}
+
+    # Check identity values preserved
+    - type: check
+      check: int_parse(store.source_stats[0].min_id) == int_parse(store.target_stats_1[0].min_id)
+      failure_message: Min ID mismatch. Source {store.source_stats[0].min_id} != Target {store.target_stats_1[0].min_id}
+
+    - type: check
+      check: int_parse(store.source_stats[0].max_id) == int_parse(store.target_stats_1[0].max_id)
+      failure_message: Max ID mismatch. Source {store.source_stats[0].max_id} != Target {store.target_stats_1[0].max_id}
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS dbo.identity_test_source
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS dbo.identity_test_target
+
+streams:
+  dbo.identity_test_source:
+    object: dbo.identity_test_target
+
+    hooks:
+      pre_merge:
+        - type: query
+          connection: '{target.name}'
+          query: "SET IDENTITY_INSERT dbo.identity_test_target ON"
+
+      post_merge:
+        - type: query
+          connection: '{target.name}'
+          query: "SET IDENTITY_INSERT dbo.identity_test_target OFF"
+      
+
+env:
+  SLING_ALLOW_EMPTY: true
