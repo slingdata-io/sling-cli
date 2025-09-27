@@ -1,0 +1,297 @@
+source: MSSQL
+target: POSTGRES
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop tables if they exist
+        IF OBJECT_ID('dbo.test_invalid_char', 'U') IS NOT NULL DROP TABLE dbo.test_invalid_char;
+
+        -- Create source table with various character columns
+        CREATE TABLE dbo.test_invalid_char (
+          id INT PRIMARY KEY,
+          description NVARCHAR(100),
+          varchar_data VARCHAR(200),
+          nvarchar_data NVARCHAR(200),
+          notes NVARCHAR(500)
+        );
+
+        -- Test 1: Windows-1252 special characters in VARCHAR
+        -- These characters exist in Windows-1252 but may cause issues
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (1, N'Windows-1252 chars',
+                CHAR(150) + ' en-dash ' + CHAR(151) + ' em-dash',  -- en-dash and em-dash
+                N'Normal Unicode text',
+                N'Windows-1252 special chars in VARCHAR column');
+
+        -- Test 2: Smart quotes from Word/Excel (common issue)
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (2, N'Smart quotes',
+                CHAR(145) + 'single' + CHAR(146) + ' ' + CHAR(147) + 'double' + CHAR(148),  -- smart quotes
+                N'''single'' "double" quotes',
+                N'Smart quotes that often cause encoding issues');
+
+        -- Test 3: Euro symbol and other Windows-1252 extended chars
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (3, N'Euro and symbols',
+                CHAR(128) + '100 ' + CHAR(149) + ' bullet',  -- Euro symbol (0x80) and bullet (0x95)
+                N'€100 • bullet point',
+                N'Euro symbol and bullet from Windows-1252');
+
+        -- Test 4: Latin-1 accented characters
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (4, N'Latin accents',
+                'Caf' + CHAR(233) + ' r' + CHAR(233) + 'sum' + CHAR(233),  -- é (e-acute)
+                N'Café résumé',
+                N'Latin-1 accented characters');
+
+        -- Test 5: Trademark and copyright symbols
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (5, N'TM and copyright',
+                'Product' + CHAR(153) + ' ' + CHAR(169) + '2024',  -- TM symbol and copyright
+                N'Product™ ©2024',
+                N'Trademark and copyright symbols');
+
+        -- Test 6: Ellipsis and other punctuation
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (6, N'Special punctuation',
+                'Wait' + CHAR(133) + ' done' + CHAR(134) + CHAR(135),  -- ellipsis and daggers
+                N'Wait… done†‡',
+                N'Ellipsis and dagger symbols');
+
+        -- Test 7: Mixed high-byte characters
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (7, N'Mixed high-bytes',
+                CHAR(152) + CHAR(158) + CHAR(159) + ' chars',  -- Various Windows-1252 chars
+                N'Various special chars',
+                N'Multiple high-byte characters that may not map to UTF-8');
+
+        -- Test 8: Emoji and 4-byte UTF-8 (only in NVARCHAR)
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (8, N'Emoji test',
+                'No emoji in VARCHAR',
+                N'Emoji: 😀 🎉 ✨ 🚀',
+                N'4-byte UTF-8 characters (emoji)');
+
+        -- Test 9: Control characters
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (9, N'Control chars',
+                'Tab' + CHAR(9) + 'CR' + CHAR(13) + 'LF' + CHAR(10),
+                N'Tab	CR' + NCHAR(13) + N'LF' + NCHAR(10),
+                N'Various control characters');
+
+        -- Test 10: Normal UTF-8 text for comparison
+        INSERT INTO dbo.test_invalid_char (id, description, varchar_data, nvarchar_data, notes)
+        VALUES (10, N'Normal UTF-8',
+                'Standard ASCII text',
+                N'Español: ñáéíóú, Français: àèùçœ',
+                N'Properly encoded international text');
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.test_invalid_char
+      into: source_count
+
+    - type: log
+      message: |
+        Created MSSQL source table with {store.source_count[0].count} rows containing various encoding scenarios
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as count FROM public.test_invalid_char
+      into: target_count
+      continue_on_error: true
+
+    - type: log
+      message: |
+        Target table row count: {store.target_count[0].count}
+
+    # Display target data
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, description,
+               LENGTH(varchar_data) as varchar_len,
+               LENGTH(nvarchar_data) as nvarchar_len,
+               LENGTH(notes) as notes_len
+        FROM public.test_invalid_char
+        ORDER BY id
+      into: target_data
+      continue_on_error: true
+
+    - type: log
+      message: |
+        Target table data summary:
+        { pretty_table(store.target_data) }
+
+    # Display detailed data from target table
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          SUBSTRING(varchar_data, 1, 30) as varchar_preview,
+          SUBSTRING(nvarchar_data, 1, 30) as nvarchar_preview
+        FROM public.test_invalid_char
+        ORDER BY id
+      into: data_preview
+
+    - type: log
+      message: |
+        Data preview in target:
+        { pretty_table(store.data_preview) }
+
+    # Check specific encoding preservation
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Check if special characters were preserved
+        SELECT
+          id,
+          description,
+          encode(varchar_data::bytea, 'hex') as varchar_hex,
+          encode(nvarchar_data::bytea, 'hex') as nvarchar_hex
+        FROM public.test_invalid_char
+        WHERE id IN (1, 2, 3, 8)
+        ORDER BY id
+      into: encoding_check
+
+    - type: log
+      message: |
+        Encoding verification (hex representation of special rows):
+        { pretty_table(store.encoding_check) }
+
+    # Verify row count matches
+    - type: check
+      check: store.source_count[0].count == store.target_count[0].count
+      message: "Row count mismatch: source has {store.source_count[0].count} rows, target has {store.target_count[0].count} rows"
+
+    # EQUALITY TEST: Get data from source (MSSQL)
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          varchar_data,
+          nvarchar_data,
+          notes
+        FROM dbo.test_invalid_char
+        ORDER BY id
+      into: source_data
+
+    # Get data from target (PostgreSQL)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          varchar_data,
+          nvarchar_data,
+          notes
+        FROM public.test_invalid_char
+        ORDER BY id
+      into: target_data
+
+    # Log comparison details for debugging
+    - type: log
+      message: |
+        Data Equality Check:
+        Source rows: {length(store.source_data)}
+        Target rows: {length(store.target_data)}
+
+        Sample comparison (first 3 rows):
+        Source row 1: ID={store.source_data[0].id}, Desc={store.source_data[0].description}
+        Target row 1: ID={store.target_data[0].id}, Desc={store.target_data[0].description}
+
+        Source row 2: ID={store.source_data[1].id}, Desc={store.source_data[1].description}
+        Target row 2: ID={store.target_data[1].id}, Desc={store.target_data[1].description}
+
+        Source row 3: ID={store.source_data[2].id}, Desc={store.source_data[2].description}
+        Target row 3: ID={store.target_data[2].id}, Desc={store.target_data[2].description}
+
+    # Check data equality for specific rows
+    - type: check
+      check: store.source_data[0].id == store.target_data[0].id
+      message: "Row 1 ID mismatch: source={store.source_data[0].id}, target={store.target_data[0].id}"
+
+    - type: check
+      check: store.source_data[0].description == store.target_data[0].description
+      message: "Row 1 description mismatch: source={store.source_data[0].description}, target={store.target_data[0].description}"
+
+    - type: check
+      check: store.source_data[0].varchar_data == store.target_data[0].varchar_data
+      message: "Row 1 varchar_data mismatch: source={store.source_data[0].varchar_data}, target={store.target_data[0].varchar_data}"
+
+    - type: check
+      check: store.source_data[0].nvarchar_data == store.target_data[0].nvarchar_data
+      message: "Row 1 nvarchar_data mismatch: source={store.source_data[0].nvarchar_data}, target={store.target_data[0].nvarchar_data}"
+
+    # Check a few more critical rows
+    - type: check
+      check: store.source_data[7].nvarchar_data == store.target_data[7].nvarchar_data
+      message: "Row 8 (Emoji) nvarchar_data mismatch - emojis not preserved"
+
+    - type: check
+      check: store.source_data[3].varchar_data == store.target_data[3].varchar_data
+      message: "Row 4 (Latin accents) varchar_data mismatch - accents not preserved"
+
+    # Detailed mismatch detection
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Create a detailed comparison by joining the datasets
+        WITH source_cte AS (
+          SELECT 1 as id, 'Windows-1252 chars' as description UNION ALL
+          SELECT 2, 'Smart quotes' UNION ALL
+          SELECT 3, 'Euro and symbols' UNION ALL
+          SELECT 4, 'Latin accents' UNION ALL
+          SELECT 5, 'TM and copyright' UNION ALL
+          SELECT 6, 'Special punctuation' UNION ALL
+          SELECT 7, 'Mixed high-bytes' UNION ALL
+          SELECT 8, 'Emoji test' UNION ALL
+          SELECT 9, 'Control chars' UNION ALL
+          SELECT 10, 'Normal UTF-8'
+        )
+        SELECT
+          s.id,
+          CASE WHEN t.id IS NULL THEN 'Missing in target'
+               WHEN s.description != t.description THEN 'Description mismatch'
+               ELSE 'OK'
+          END as status
+        FROM source_cte s
+        LEFT JOIN public.test_invalid_char t ON s.id = t.id
+        WHERE t.id IS NULL OR s.description != t.description
+        ORDER BY s.id
+      into: mismatches
+
+    - type: log
+      message: |
+        Mismatch check: {length(store.mismatches)} mismatches found
+        { pretty_table(store.mismatches) }
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: IF OBJECT_ID('dbo.test_invalid_char', 'U') IS NOT NULL DROP TABLE dbo.test_invalid_char
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_invalid_char CASCADE
+
+streams:
+  dbo.test_invalid_char:
+    object: public.test_invalid_char
+    mode: full-refresh
+
+env:
+  SLING_ALLOW_EMPTY: "false"

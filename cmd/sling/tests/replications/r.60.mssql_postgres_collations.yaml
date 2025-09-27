@@ -1,0 +1,253 @@
+source: MSSQL2022
+target: POSTGRES
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop table if exists
+        IF OBJECT_ID('dbo.test_collations', 'U') IS NOT NULL DROP TABLE dbo.test_collations;
+
+        -- Create table with various collations for different languages
+        CREATE TABLE dbo.test_collations (
+          id INT PRIMARY KEY,
+          description NVARCHAR(100),
+          french_text VARCHAR(200) COLLATE French_CI_AS,
+          german_text VARCHAR(200) COLLATE German_PhoneBook_CI_AS,
+          italian_text VARCHAR(200) COLLATE Latin1_General_CI_AS,
+          spanish_text VARCHAR(200) COLLATE Modern_Spanish_CI_AS,
+          russian_text NVARCHAR(200) COLLATE Cyrillic_General_CI_AS,
+          chinese_text NVARCHAR(200) COLLATE Chinese_PRC_CI_AS,
+          japanese_text NVARCHAR(200) COLLATE Japanese_CI_AS,
+          hindi_text NVARCHAR(200) COLLATE Indic_General_90_CI_AS
+        );
+
+        -- Row 1: Common greetings in each language
+        INSERT INTO dbo.test_collations VALUES (
+          1,
+          N'Greetings',
+          'Bonjour, comment allez-vous? Très bien!',  -- French
+          'Guten Tag, wie geht es Ihnen? Schön!',      -- German
+          'Buongiorno, come sta? Benissimo!',          -- Italian
+          'Hola, ¿cómo está? ¡Muy bien!',              -- Spanish
+          N'Привет, как дела? Отлично!',               -- Russian
+          N'你好，你好吗？很好！',                       -- Chinese
+          N'こんにちは、お元気ですか？元気です！',         -- Japanese
+          N'नमस्ते, आप कैसे हैं? बहुत अच्छा!'           -- Hindi
+        );
+
+        -- Row 2: Numbers, dates and special characters
+        INSERT INTO dbo.test_collations VALUES (
+          2,
+          N'Numbers and Dates',
+          'Le 14 juillet 2024, à 15h30',               -- French
+          'Am 24. Dezember 2024, um 20:15 Uhr',        -- German
+          'Il 25 dicembre 2024, alle ore 18:45',       -- Italian
+          'El 31 de diciembre de 2024, a las 23:59',   -- Spanish
+          N'31 декабря 2024 года, в 23:59',            -- Russian
+          N'2024年12月31日，晚上11:59',                  -- Chinese
+          N'2024年12月31日、午後11時59分',               -- Japanese
+          N'31 दिसंबर 2024, रात 11:59 बजे'             -- Hindi
+        );
+
+        -- Row 3: Special characters and accents
+        INSERT INTO dbo.test_collations VALUES (
+          3,
+          N'Special Characters',
+          'Café, naïve, château, œuvre, façade',       -- French accents
+          'Größe, schön, über, Äpfel, Öl',             -- German umlauts
+          'Città, perché, così, più, già',             -- Italian accents
+          'Niño, mañana, señor, español, corazón',     -- Spanish tildes
+          N'Ёж, щука, объект, подъезд, съел',          -- Russian special
+          N'汉字，繁體字，简体字，標點符號',              -- Chinese characters
+          N'ひらがな、カタカナ、漢字、記号',              -- Japanese scripts
+          N'अ, आ, इ, ई, उ, ऊ, ऋ, ॠ'                    -- Hindi vowels
+        );
+
+        -- Row 4: Common phrases and idioms
+        INSERT INTO dbo.test_collations VALUES (
+          4,
+          N'Common Phrases',
+          'C''est la vie! Ça va? D''accord.',          -- French
+          'Auf Wiedersehen! Das ist gut.',             -- German
+          'Arrivederci! Come si dice?',                -- Italian
+          '¿Qué tal? ¡Hasta luego! Por favor.',        -- Spanish
+          N'Спасибо! До свидания! Пожалуйста.',        -- Russian
+          N'谢谢！再见！请问。',                         -- Chinese
+          N'ありがとう！さようなら！すみません。',          -- Japanese
+          N'धन्यवाद! अलविदा! कृपया।'                    -- Hindi
+        );
+
+        -- Row 5: Mixed case and sorting test
+        INSERT INTO dbo.test_collations VALUES (
+          5,
+          N'Case and Sorting',
+          'ÀBCDÉ àbcdé Élève École',                   -- French
+          'ÄÖÜ äöü ß Straße STRASSE',                  -- German
+          'ÀÈÌÒÙ àèìòù Lunedì MARTEDÌ',                -- Italian
+          'ÁÉÍÑÓÚ áéíñóú Mañana MAÑANA',               -- Spanish
+          N'АБВ абв ЯЮЭ яюэ МОСКВА москва',            -- Russian
+          N'一二三四五 上中下 大小',                      -- Chinese
+          N'あいうえお アイウエオ 大小',                   -- Japanese
+          N'क ख ग घ ङ च छ ज झ ञ'                       -- Hindi
+        );
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.test_collations
+      into: source_count
+
+    - type: log
+      message: |
+        Created MSSQL source table with {store.source_count[0].count} rows containing various language collations
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.test_collations
+      into: target_count
+
+    - type: log
+      message: |
+        Target table row count: {store.target_count[0].count}
+
+    # Verify row count matches
+    - type: check
+      check: store.source_count[0].count == store.target_count[0].count
+      message: "Row count mismatch: source={store.source_count[0].count}, target={store.target_count[0].count}"
+
+    # Get source data
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          french_text,
+          german_text,
+          italian_text,
+          spanish_text,
+          russian_text,
+          chinese_text,
+          japanese_text,
+          hindi_text
+        FROM dbo.test_collations
+        ORDER BY id
+      into: source_data
+
+    # Get target data
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          french_text,
+          german_text,
+          italian_text,
+          spanish_text,
+          russian_text,
+          chinese_text,
+          japanese_text,
+          hindi_text
+        FROM public.test_collations
+        ORDER BY id
+      into: target_data
+
+    # Display sample data
+    - type: log
+      message: |
+        Sample data comparison (Row 1):
+        Source French: {store.source_data[0].french_text}
+        Target French: {store.target_data[0].french_text}
+
+        Source Russian: {store.source_data[0].russian_text}
+        Target Russian: {store.target_data[0].russian_text}
+
+        Source Chinese: {store.source_data[0].chinese_text}
+        Target Chinese: {store.target_data[0].chinese_text}
+
+    # Check equality for each row
+    - type: check
+      check: store.source_data[0].id == store.target_data[0].id
+      message: "Row 1 ID mismatch"
+
+    - type: check
+      check: store.source_data[0].french_text == store.target_data[0].french_text
+      message: "Row 1 French text mismatch: '{store.source_data[0].french_text}' != '{store.target_data[0].french_text}'"
+
+    - type: check
+      check: store.source_data[0].german_text == store.target_data[0].german_text
+      message: "Row 1 German text mismatch"
+
+    - type: check
+      check: store.source_data[0].russian_text == store.target_data[0].russian_text
+      message: "Row 1 Russian text mismatch"
+
+    - type: check
+      check: store.source_data[0].chinese_text == store.target_data[0].chinese_text
+      message: "Row 1 Chinese text mismatch"
+
+    - type: check
+      check: store.source_data[0].japanese_text == store.target_data[0].japanese_text
+      message: "Row 1 Japanese text mismatch"
+
+    # Check special characters row (Row 3)
+    - type: check
+      check: store.source_data[2].french_text == store.target_data[2].french_text
+      message: "Row 3 French accents not preserved: '{store.source_data[2].french_text}' != '{store.target_data[2].french_text}'"
+
+    - type: check
+      check: store.source_data[2].german_text == store.target_data[2].german_text
+      message: "Row 3 German umlauts not preserved"
+
+    - type: check
+      check: store.source_data[2].spanish_text == store.target_data[2].spanish_text
+      message: "Row 3 Spanish tildes not preserved"
+
+    # Check all 5 rows match completely
+    - type: check
+      check: store.source_data[0].description == store.target_data[0].description && store.source_data[1].description == store.target_data[1].description && store.source_data[2].description == store.target_data[2].description && store.source_data[3].description == store.target_data[3].description && store.source_data[4].description == store.target_data[4].description
+      message: "Description fields do not match across all rows"
+
+    # Display character length comparison for validation
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          id,
+          description,
+          LENGTH(french_text) as french_len,
+          LENGTH(german_text) as german_len,
+          LENGTH(russian_text) as russian_len,
+          LENGTH(chinese_text) as chinese_len,
+          LENGTH(japanese_text) as japanese_len
+        FROM public.test_collations
+        ORDER BY id
+      into: length_check
+
+    - type: log
+      message: |
+        Character length verification:
+        { pretty_table(store.length_check) }
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: IF OBJECT_ID('dbo.test_collations', 'U') IS NOT NULL DROP TABLE dbo.test_collations
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_collations CASCADE
+
+streams:
+  dbo.test_collations:
+    object: public.test_collations
+    mode: full-refresh
+
+env:
+  SLING_ALLOW_EMPTY: "false"

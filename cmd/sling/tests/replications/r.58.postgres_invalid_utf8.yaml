@@ -1,0 +1,217 @@
+source: POSTGRES
+target: POSTGRES
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_invalid_char CASCADE;
+        DROP TABLE IF EXISTS public.test_invalid_char2 CASCADE;
+
+        -- Create table with text columns that will contain problematic encoding
+        CREATE TABLE public.test_invalid_char (
+          id INTEGER PRIMARY KEY,
+          description TEXT,
+          data TEXT,
+          notes TEXT
+        );
+
+        -- Method 1: Use bytea intermediary to insert Windows-1252/Latin-1 encoded data
+        -- This simulates data that was incorrectly imported from another encoding
+
+        -- Test 1: Windows-1252 character (0x98) - tilde operator in Windows-1252
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 1, 'Windows-1252 char 0x98',
+               'Some text with ' || convert_from(E'\\x98'::bytea, 'WIN1252') || ' character',
+               'Common Excel/Windows encoding issue';
+
+        -- Test 2: Windows smart quotes (0x91-0x94 in Windows-1252)
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 2, 'Windows smart quotes',
+               'Text with ' || convert_from(E'\\x91'::bytea, 'WIN1252') || 'smart' ||
+               convert_from(E'\\x92'::bytea, 'WIN1252') || ' quotes',
+               'Windows smart quotes 0x91-0x92';
+
+        -- Test 3: Latin-1 non-breaking space and special chars
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 3, 'Latin-1 special chars',
+               'Latin-1: ' || convert_from(E'\\xA0'::bytea, 'LATIN1') || ' (nbsp) ' ||
+               convert_from(E'\\xA9'::bytea, 'LATIN1') || ' (copyright)',
+               'Latin-1 special characters';
+
+        -- Test 4: Mix valid UTF-8 with Latin-1 encoded accents
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 4, 'Mixed UTF-8 and Latin-1',
+               'Café written as: Caf' || convert_from(E'\\xE9'::bytea, 'LATIN1'),
+               'Mixed encoding in same field';
+
+        -- Test 5: Windows-1252 Euro symbol and other extended chars
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 5, 'Windows-1252 Euro',
+               'Price: ' || convert_from(E'\\x80'::bytea, 'WIN1252') || '100',
+               'Euro symbol from Windows-1252';
+
+        -- Test 6: Bullet point and em-dash from Windows-1252
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 6, 'Windows bullets',
+               convert_from(E'\\x95'::bytea, 'WIN1252') || ' Item 1' || E'\n' ||
+               convert_from(E'\\x95'::bytea, 'WIN1252') || ' Item 2',
+               'Bullet points from Windows';
+
+        -- Test 7: Form with various Windows-1252 encoded characters
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        SELECT 7, 'Form template example',
+               'Form' || convert_from(E'\\x97'::bytea, 'WIN1252') || 'data' ||
+               convert_from(E'\\x98'::bytea, 'WIN1252') || 'test',
+               'Simulates template_forms issue';
+
+        -- Test 8: Null character alternative (using Unicode replacement)
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        VALUES (8, 'Unicode replacement char',
+                'Text with ' || E'\uFFFD' || ' replacement character',
+                'Unicode replacement character U+FFFD');
+
+        -- Test 9: Control characters that are valid but problematic
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        VALUES (9, 'Control characters',
+                E'Text with \t tab \r carriage return \f form feed',
+                'Various control characters');
+
+        -- Test 10: Real Spanish/French text with proper UTF-8 encoding for comparison
+        INSERT INTO public.test_invalid_char (id, description, data, notes)
+        VALUES (10, 'Proper UTF-8 encoding',
+                'Español: ñ, áéíóú. Français: àèùç, œ, €',
+                'Correctly encoded UTF-8 text');
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM public.test_invalid_char
+      into: source_count
+
+    - type: log
+      message: |
+        Created source table with {store.source_count[0].count} rows containing various invalid UTF-8 sequences
+
+  end:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as count FROM public.test_invalid_char2
+      into: target_count
+      continue_on_error: true
+
+    - type: log
+      message: |
+        Target table row count: {store.target_count[0].count}
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, description,
+               LENGTH(data) as data_length,
+               LENGTH(notes) as notes_length
+        FROM public.test_invalid_char2
+        ORDER BY id
+      into: target_data
+      continue_on_error: true
+
+    - type: log
+      message: |
+        Target table data (if successfully loaded):
+        { pretty_table(store.target_data) }
+
+    # Verify data equality between source and target
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Join source and target to check for exact data match
+        SELECT
+          s.id,
+          s.description as src_description,
+          t.description as tgt_description,
+          s.data = t.data as data_match,
+          s.notes = t.notes as notes_match,
+          LENGTH(s.data) as src_data_len,
+          LENGTH(t.data) as tgt_data_len,
+          CASE WHEN s.data != t.data THEN 'DATA MISMATCH' ELSE 'OK' END as data_status,
+          CASE WHEN s.notes != t.notes THEN 'NOTES MISMATCH' ELSE 'OK' END as notes_status
+        FROM public.test_invalid_char s
+        FULL OUTER JOIN public.test_invalid_char2 t ON s.id = t.id
+        WHERE s.data IS DISTINCT FROM t.data
+           OR s.notes IS DISTINCT FROM t.notes
+           OR s.description IS DISTINCT FROM t.description
+        ORDER BY s.id
+      into: mismatches
+      continue_on_error: true
+
+    - type: log
+      message: |
+        Data comparison - mismatches:
+        { store.mismatches }
+
+    # Check if all rows match
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Count exact matches
+        SELECT
+          COUNT(*) as total_rows,
+          COUNT(CASE WHEN s.data = t.data AND s.notes = t.notes AND s.description = t.description THEN 1 END) as matching_rows,
+          COUNT(CASE WHEN s.data != t.data OR s.notes != t.notes OR s.description != t.description THEN 1 END) as mismatched_rows
+        FROM public.test_invalid_char s
+        JOIN public.test_invalid_char2 t ON s.id = t.id
+      into: match_summary
+
+    - type: log
+      message: |
+        Match Summary:
+        - Total rows: {store.match_summary[0].total_rows}
+        - Matching rows: {store.match_summary[0].matching_rows}
+        - Mismatched rows: {store.match_summary[0].mismatched_rows}
+
+    # Verify all data matches exactly
+    - type: check
+      check: store.match_summary[0].matching_rows == store.match_summary[0].total_rows
+      message: "Data integrity check failed: {store.match_summary[0].mismatched_rows} rows have mismatched data"
+
+    # Also check specific problematic characters preserved
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Check if Windows-1252 and Latin-1 characters were preserved
+        SELECT
+          id,
+          data,
+          encode(data::bytea, 'hex') as hex_data
+        FROM public.test_invalid_char2
+        WHERE id IN (1, 2, 7)
+        ORDER BY id
+      into: char_check
+
+    - type: log
+      message: |
+        Character encoding verification (hex representation):
+        { pretty_table(store.char_check) }
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_invalid_char CASCADE
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_invalid_char2 CASCADE
+
+streams:
+  # First attempt with default bulk mode
+  public.test_invalid_char:
+    object: public.test_invalid_char2
+    mode: full-refresh
+
+env:
+  # Set to allow the replication to continue even if it encounters errors
+  SLING_ALLOW_EMPTY: "false"

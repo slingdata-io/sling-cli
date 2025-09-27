@@ -988,3 +988,24 @@
     - run.total_rows = 10
     - run.status = success
     - '   id = public_run_state_test'
+
+- id: 120
+  name: Test PostgreSQL mixed encoding character handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.58.postgres_invalid_utf8.yaml'
+  rows: 10
+  output_contains:
+    - 'execution succeeded'
+
+- id: 121
+  name: Test MSSQL to PostgreSQL encoding handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.59.mssql_postgres_encoding.yaml'
+  rows: 10
+  output_contains:
+    - 'execution succeeded'
+
+- id: 122
+  name: Test MSSQL to PostgreSQL collations handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.60.mssql_postgres_collations.yaml'
+  rows: 5
+  output_contains:
+    - 'execution succeeded'
