@@ -529,6 +529,10 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 		hooksRaw = rs.Hooks.Pre
 	case HookStagePost:
 		hooksRaw = rs.Hooks.Post
+	case HookStagePreMerge:
+		hooksRaw = rs.Hooks.PreMerge
+	case HookStagePostMerge:
+		hooksRaw = rs.Hooks.PostMerge
 	default:
 		return nil, g.Error("invalid stream hook stage: %s", stage)
 	}

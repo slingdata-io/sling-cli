@@ -347,7 +347,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		}
 	}
 
-	// Execute pre-SQL
+	// Execute pre-SQL (legacy)
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
 		err = g.Error(err, "Error executing %s-sql", "pre")
 		return 0, err
@@ -384,6 +384,12 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 
 	defer tgtConn.Rollback() // rollback in case of error
 
+	// pre-merge-hooks
+	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+		err = g.Error(err, "error executing pre-merge hooks")
+		return 0, err
+	}
+
 	setStage("5 - prepare-final")
 
 	// Prepare final table operations
@@ -403,15 +409,21 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 		return 0, err
 	}
 
-	// Execute post-SQL
-	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
-		err = g.Error(err, "error executing %s-sql", "post")
+	// post-merge-hooks
+	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+		err = g.Error(err, "error executing post-merge hooks")
 		return 0, err
 	}
 
 	// Commit transaction
 	if err := tgtConn.Commit(); err != nil {
 		err = g.Error(err, "could not commit final transaction")
+		return 0, err
+	}
+
+	// Execute post-SQL (legacy)
+	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
+		err = g.Error(err, "error executing %s-sql", "post")
 		return 0, err
 	}
 
@@ -463,7 +475,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		return 0, err
 	}
 
-	// Execute pre-SQL
+	// Execute pre-SQL (legacy)
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PreSQL, "pre"); err != nil {
 		return cnt, err
 	}
@@ -484,6 +496,12 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	defer tgtConn.Rollback()
+
+	// pre-merge-hooks
+	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+		err = g.Error(err, "error executing pre-merge hooks")
+		return 0, err
+	}
 
 	// Prepare final table operations & handlers
 	if err = prepareFinal(t, cfg, tgtConn, targetTable, df); err != nil {
@@ -546,6 +564,12 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		}
 	}
 
+	// post-merge-hooks
+	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+		err = g.Error(err, "error executing post-merge hooks")
+		return 0, err
+	}
+
 	// Commit final transaction
 	if err := tgtConn.Commit(); err != nil {
 		err = g.Error(err, "could not commit final transaction")
@@ -557,7 +581,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 		g.Warn("no data or records found in stream. Nothing to insert.")
 	}
 
-	// Execute post-SQL
+	// Execute post-SQL (legacy)
 	if err := executeSQL(t, tgtConn, cfg.Target.Options.PostSQL, "post"); err != nil {
 		return cnt, err
 	}
