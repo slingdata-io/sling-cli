@@ -31,10 +31,12 @@ type Hook interface {
 type Hooks []Hook
 
 type HookMap struct {
-	Start []any `json:"start,omitempty" yaml:"start,omitempty"`
-	End   []any `json:"end,omitempty" yaml:"end,omitempty"`
-	Pre   []any `json:"pre,omitempty" yaml:"pre,omitempty"`
-	Post  []any `json:"post,omitempty" yaml:"post,omitempty"`
+	Start     []any `json:"start,omitempty" yaml:"start,omitempty"`
+	End       []any `json:"end,omitempty" yaml:"end,omitempty"`
+	Pre       []any `json:"pre,omitempty" yaml:"pre,omitempty"`
+	Post      []any `json:"post,omitempty" yaml:"post,omitempty"`
+	PreMerge  []any `json:"pre_merge,omitempty" yaml:"pre,omitempty"`
+	PostMerge []any `json:"post_merge,omitempty" yaml:"post,omitempty"`
 }
 
 type ParseOptions struct {
@@ -48,10 +50,12 @@ type ParseOptions struct {
 type HookStage string
 
 const (
-	HookStagePre   HookStage = "pre"
-	HookStagePost  HookStage = "post"
-	HookStageStart HookStage = "start"
-	HookStageEnd   HookStage = "end"
+	HookStagePre       HookStage = "pre"
+	HookStagePost      HookStage = "post"
+	HookStagePreMerge  HookStage = "pre_merge"
+	HookStagePostMerge HookStage = "post_merge"
+	HookStageStart     HookStage = "start"
+	HookStageEnd       HookStage = "end"
 )
 
 var ParseHook = func(any, ParseOptions) (Hook, error) {

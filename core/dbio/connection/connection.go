@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path"
@@ -204,7 +205,7 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 	if len(lowerCase) > 0 {
 		lc = lowerCase[0]
 	}
-	data := map[string]string{}
+	data := map[string]string{"name": strings.ToLower(c.Name)}
 	for k, v := range c.Data {
 		val, err := cast.ToStringE(v)
 		if err != nil {
@@ -216,6 +217,18 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 		} else {
 			data[k] = val
 		}
+	}
+	return data
+}
+
+func (c *Connection) DataSWithExtra(extra map[string]any) map[string]string {
+	data := c.DataS()
+	for k, v := range extra {
+		val, err := cast.ToStringE(v)
+		if err != nil {
+			val = g.Marshal(v) // in case it's an array or object
+		}
+		data[k] = val
 	}
 	return data
 }
@@ -278,81 +291,86 @@ func (c *Connection) Close() error {
 
 var connCache = cmap.New[*Connection]()
 
-func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
-	return c.AsDatabaseContext(c.Context().Ctx, cache...)
+type AsConnOptions struct {
+	UseCache bool
+	Extra    map[string]any
 }
 
-func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc database.Connection, err error) {
+func (c *Connection) AsDatabase(options ...AsConnOptions) (dc database.Connection, err error) {
+	return c.AsDatabaseContext(c.Context().Ctx, options...)
+}
+
+func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOptions) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
 
 	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.Database != nil {
-				return cc.Database, nil
-			}
-		}
-
-		if c.Database == nil {
-			c.Database, err = database.NewConnContext(
-				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.Database, nil
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
 	}
 
-	return database.NewConnContext(
-		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+	// build input data
+
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.Database != nil {
+			return cc.Database, nil
+		}
+	}
+
+	data := c.DataSWithExtra(opt.Extra)
+	c.Database, err = database.NewConnContext(
+		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.Database, nil
 }
 
-func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error) {
-	return c.AsFileContext(c.Context().Ctx, cache...)
+func (c *Connection) AsFile(options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
+	return c.AsFileContext(c.Context().Ctx, options...)
 }
 
-func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc filesys.FileSysClient, err error) {
+func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
 
 	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.File != nil {
-				return cc.File, nil
-			}
-		}
-
-		if c.File == nil {
-			c.File, err = filesys.NewFileSysClientFromURLContext(
-				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.File, nil
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
 	}
 
-	return filesys.NewFileSysClientFromURLContext(
-		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+	// default cache to true
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.File != nil {
+			return cc.File, nil
+		}
+	}
+
+	// build input data
+	data := c.DataSWithExtra(opt.Extra)
+	c.File, err = filesys.NewFileSysClientFromURLContext(
+		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.File, nil
 }
 
-func (c *Connection) AsAPI(cache ...bool) (ac *api.APIConnection, err error) {
-	return c.AsAPIContext(c.Context().Ctx, cache...)
+func (c *Connection) AsAPI(options ...AsConnOptions) (ac *api.APIConnection, err error) {
+	return c.AsAPIContext(c.Context().Ctx, options...)
 }
 
-func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.APIConnection, err error) {
+func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions) (ac *api.APIConnection, err error) {
 	if !c.Type.IsAPI() {
 		return nil, g.Error("not a api connection type: %s", c.Type)
 	}
@@ -364,25 +382,32 @@ func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.A
 	}
 
 	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.API != nil {
-				return cc.API, nil
-			}
-		}
-
-		if c.API == nil {
-			c.API, err = api.NewAPIConnection(ctx, spec, c.Data)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.API, nil
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
 	}
 
-	return api.NewAPIConnection(ctx, spec, c.Data)
+	// add connection name
+	data := maps.Clone(c.Data)
+	data["name"] = strings.ToLower(c.Name)
+	for k, v := range opt.Extra {
+		data[k] = v
+	}
+
+	// default cache to true
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.API != nil {
+			return cc.API, nil
+		}
+	}
+
+	c.API, err = api.NewAPIConnection(ctx, spec, data)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.API, nil
 }
 
 func (c *Connection) setFromEnv() {
@@ -1176,6 +1201,10 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 
 					conn, err := NewConnectionFromMap(g.M("name", name, "data", data, "type", data["type"]))
 					if err != nil {
+						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						continue
+					}
+					if err = conn.setURL(); err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
 						continue
 					}

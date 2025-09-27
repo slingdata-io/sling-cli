@@ -547,7 +547,7 @@ func (cfg *Config) Prepare() (err error) {
 		}
 	} else {
 		if cfg.TgtConn.Type.IsFile() && cfg.Target.Object != "" {
-			fc, err := cfg.TgtConn.AsFile(true)
+			fc, err := cfg.TgtConn.AsFile(connection.AsConnOptions{UseCache: true})
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -608,7 +608,7 @@ func (cfg *Config) Prepare() (err error) {
 	} else {
 		if cfg.SrcConn.Type.IsFile() && cfg.Source.Stream != "" {
 			// stream is not url, but relative path
-			fc, err := cfg.SrcConn.AsFile(true)
+			fc, err := cfg.SrcConn.AsFile(connection.AsConnOptions{UseCache: true})
 			if err != nil {
 				return g.Error(err, "could not init file connection")
 			}
@@ -647,11 +647,6 @@ func (cfg *Config) Prepare() (err error) {
 			cfg.ReplicationStream.Object = cfg.Target.Object
 		}
 	}
-
-	// add md5 of options, so that wee reconnect for various options
-	// see variable `connPool`
-	cfg.SrcConn.Data["_source_options_md5"] = g.MD5(g.Marshal(cfg.Source.Options))
-	cfg.TgtConn.Data["_target_options_md5"] = g.MD5(g.Marshal(cfg.Target.Options))
 
 	// set conn types
 	cfg.Source.Type = cfg.SrcConn.Type
@@ -947,7 +942,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	if cfg.SrcConn.Type.IsFile() {
 		m["stream_name"] = strings.ToLower(cfg.StreamName)
 
-		fc, err := cfg.SrcConn.AsFile(true)
+		fc, err := cfg.SrcConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
 			return m, g.Error(err, "could not init source conn as file")
 		}
@@ -1022,7 +1017,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	if t := cfg.TgtConn.Type; t.IsFile() {
 
-		fc, err := cfg.TgtConn.AsFile(true)
+		fc, err := cfg.TgtConn.AsFile(connection.AsConnOptions{UseCache: true})
 		if err != nil {
 			return m, g.Error(err, "could not init target conn as file")
 		}

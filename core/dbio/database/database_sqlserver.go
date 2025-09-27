@@ -32,9 +32,11 @@ import (
 // MsSQLServerConn is a Microsoft SQL Server connection
 type MsSQLServerConn struct {
 	BaseConn
-	URL        string
-	isAzureSQL bool
-	isAzureDWH bool
+	URL         string
+	versionNum  int
+	versionYear int
+	isAzureSQL  bool
+	isAzureDWH  bool
 }
 
 // Init initiates the object
@@ -43,6 +45,7 @@ func (conn *MsSQLServerConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbSQLServer
 	conn.BaseConn.defaultPort = 1433
+	conn.versionYear = 2017 // default version
 
 	conn.SetProp("use_bcp_map_parallel", "false")
 
@@ -64,6 +67,36 @@ func (conn *MsSQLServerConn) Init() error {
 	}
 
 	return conn.BaseConn.Init()
+}
+
+// parseVersion extracts the version information from SQL Server
+func (conn *MsSQLServerConn) parseVersion(versionStr string) {
+	conn.versionYear = 2017 // default version
+
+	// Look for pattern " - XX.X.XXXX.X" and extract the major version
+	versionNums := strings.Split(versionStr, ".")
+	if len(versionNums) >= 2 {
+		conn.versionNum = cast.ToInt(versionNums[0])
+		// Map major version numbers to SQL Server years
+		switch conn.versionNum {
+		case 17:
+			conn.versionYear = 2025
+		case 16:
+			conn.versionYear = 2022
+		case 15:
+			conn.versionYear = 2019
+		case 14:
+			conn.versionYear = 2017
+		case 13:
+			conn.versionYear = 2016
+		case 12:
+			conn.versionYear = 2014
+		case 11:
+			conn.versionYear = 2012
+		case 10:
+			conn.versionYear = 2008
+		}
+	}
 }
 
 // GetURL returns the processed URL
@@ -223,13 +256,17 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// get version
-	data, _ := conn.Query(`select @@version v` + noDebugKey)
+	data, _ := conn.Query(`select SERVERPROPERTY('productversion') as short_version, @@version as long_version ` + noDebugKey)
 	if len(data.Rows) > 0 {
-		version := cast.ToString(data.Rows[0][0])
-		if strings.Contains(strings.ToLower(version), "sql azure") {
+		versionShortStr := cast.ToString(data.Rows[0][0])
+		versionLongStr := cast.ToString(data.Rows[0][1])
+		conn.parseVersion(versionShortStr)
+		g.Trace("%s version is %s => %d", conn.GetProp("sling_conn_id"), versionShortStr, conn.versionYear)
+
+		if strings.Contains(strings.ToLower(versionLongStr), "sql azure") {
 			conn.isAzureSQL = true
 			conn.Type = dbio.TypeDbAzure
-		} else if strings.Contains(strings.ToLower(version), "azure sql data warehouse") {
+		} else if strings.Contains(strings.ToLower(versionLongStr), "azure sql data warehouse") {
 			conn.isAzureDWH = true
 			conn.Type = dbio.TypeDbAzureDWH
 		}
