@@ -346,7 +346,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	err = conn.Init()
 
 	// set sling_conn_id
-	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
+	prefix := g.F("conn-%s-%s-", conn.GetType(), conn.GetProp("name"))
+	conn.SetProp("sling_conn_id", g.RandSuffix(prefix, 3))
 
 	return conn, err
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path"
@@ -204,7 +205,7 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 	if len(lowerCase) > 0 {
 		lc = lowerCase[0]
 	}
-	data := map[string]string{}
+	data := map[string]string{"name": strings.ToLower(c.Name)}
 	for k, v := range c.Data {
 		val, err := cast.ToStringE(v)
 		if err != nil {
@@ -363,6 +364,10 @@ func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.A
 		return nil, g.Error(err, "could not load spec")
 	}
 
+	// add connection name
+	data := maps.Clone(c.Data)
+	data["name"] = strings.ToLower(c.Name)
+
 	// default cache to true
 	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
 		if cc, ok := connCache.Get(c.Hash()); ok {
@@ -372,7 +377,7 @@ func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.A
 		}
 
 		if c.API == nil {
-			c.API, err = api.NewAPIConnection(ctx, spec, c.Data)
+			c.API, err = api.NewAPIConnection(ctx, spec, data)
 			if err != nil {
 				return
 			}
@@ -382,7 +387,7 @@ func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.A
 		return c.API, nil
 	}
 
-	return api.NewAPIConnection(ctx, spec, c.Data)
+	return api.NewAPIConnection(ctx, spec, data)
 }
 
 func (c *Connection) setFromEnv() {
