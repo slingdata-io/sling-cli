@@ -333,7 +333,7 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	}
 
 	// merge options
-	opt := connection.AsConnOptions{UseCache: t.isUsingPool(), Extra: nil}
+	opt := connection.AsConnOptions{UseCache: t.isUsingPool(), Extra: options}
 	conn, err = t.Config.TgtConn.AsDatabaseContext(ctx, opt)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")

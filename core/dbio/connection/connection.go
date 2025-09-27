@@ -312,31 +312,23 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 	}
 
 	// build input data
-	data := c.DataSWithExtra(opt.Extra)
 
-	if opt.UseCache {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.Database != nil {
-				return cc.Database, nil
-			}
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.Database != nil {
+			return cc.Database, nil
 		}
-
-		if c.Database == nil {
-			c.Database, err = database.NewConnContext(
-				ctx, c.URL(), g.MapToKVArr(data)...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.Database, nil
 	}
 
-	return database.NewConnContext(
+	data := c.DataSWithExtra(opt.Extra)
+	c.Database, err = database.NewConnContext(
 		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.Database, nil
 }
 
 func (c *Connection) AsFile(options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
@@ -354,33 +346,24 @@ func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions
 		opt = options[0]
 	}
 
-	// build input data
-	data := c.DataSWithExtra(opt.Extra)
-
 	// default cache to true
-	if opt.UseCache {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.File != nil {
-				return cc.File, nil
-			}
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.File != nil {
+			return cc.File, nil
 		}
-
-		if c.File == nil {
-			c.File, err = filesys.NewFileSysClientFromURLContext(
-				ctx, c.URL(), g.MapToKVArr(data)...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.File, nil
 	}
 
-	return filesys.NewFileSysClientFromURLContext(
+	// build input data
+	data := c.DataSWithExtra(opt.Extra)
+	c.File, err = filesys.NewFileSysClientFromURLContext(
 		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.File, nil
 }
 
 func (c *Connection) AsAPI(options ...AsConnOptions) (ac *api.APIConnection, err error) {
@@ -412,25 +395,19 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 	}
 
 	// default cache to true
-	if opt.UseCache {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.API != nil {
-				return cc.API, nil
-			}
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.API != nil {
+			return cc.API, nil
 		}
-
-		if c.API == nil {
-			c.API, err = api.NewAPIConnection(ctx, spec, data)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.API, nil
 	}
 
-	return api.NewAPIConnection(ctx, spec, data)
+	c.API, err = api.NewAPIConnection(ctx, spec, data)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.API, nil
 }
 
 func (c *Connection) setFromEnv() {

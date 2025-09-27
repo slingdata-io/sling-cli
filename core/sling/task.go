@@ -369,7 +369,7 @@ func (t *TaskExecution) isUsingPool() bool {
 	if val := os.Getenv("SLING_POOL"); val != "" {
 		return cast.ToBool(val)
 	}
-	return true
+	return false
 }
 
 func (t *TaskExecution) getTargetObjectValue() string {
