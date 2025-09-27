@@ -786,7 +786,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 
 	g.Debug("processing database wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
-	conn, err := c.AsDatabase(true)
+	conn, err := c.AsDatabase(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = conn.Connect(); err != nil {
@@ -830,7 +830,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 	g.Debug("processing api endpoints for %s: %s", rd.Source, g.Marshal(patterns))
 
-	ac, err := c.AsAPI(true)
+	ac, err := c.AsAPI(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = ac.Authenticate(); err != nil {
@@ -871,7 +871,7 @@ func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patter
 func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 	g.Debug("processing file wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
-	fs, err := c.AsFile(true)
+	fs, err := c.AsFile(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = fs.Init(context.Background()); err != nil {

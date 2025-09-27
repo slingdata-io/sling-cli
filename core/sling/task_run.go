@@ -18,6 +18,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
+	"github.com/slingdata-io/sling-cli/core/dbio/connection"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -272,7 +273,7 @@ func (t *TaskExecution) GetStateMap() map[string]any {
 func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnection, err error) {
 
 	// use cached connection so that we re-use the queues
-	conn, err = t.Config.SrcConn.AsAPIContext(ctx, true)
+	conn, err = t.Config.SrcConn.AsAPIContext(ctx, connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -302,11 +303,8 @@ func (t *TaskExecution) getSrcDBConn(ctx context.Context) (conn database.Connect
 	options["METADATA"] = g.Marshal(metadata)
 
 	// merge options
-	for k, v := range options {
-		t.Config.SrcConn.Data[k] = v
-	}
-
-	conn, err = t.Config.SrcConn.AsDatabaseContext(ctx, t.isUsingPool())
+	opt := connection.AsConnOptions{UseCache: t.isUsingPool(), Extra: options}
+	conn, err = t.Config.SrcConn.AsDatabaseContext(ctx, opt)
 	if err != nil {
 		err = g.Error(err, "Could not initialize source connection")
 		return
@@ -335,11 +333,8 @@ func (t *TaskExecution) getTgtDBConn(ctx context.Context) (conn database.Connect
 	}
 
 	// merge options
-	for k, v := range options {
-		t.Config.TgtConn.Data[k] = v
-	}
-
-	conn, err = t.Config.TgtConn.AsDatabaseContext(ctx, t.isUsingPool())
+	opt := connection.AsConnOptions{UseCache: t.isUsingPool(), Extra: nil}
+	conn, err = t.Config.TgtConn.AsDatabaseContext(ctx, opt)
 	if err != nil {
 		err = g.Error(err, "Could not initialize target connection")
 		return
