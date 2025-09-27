@@ -348,7 +348,7 @@ func LogSQL(props map[string]string, query string, args ...any) {
 			query = CyanString(Clean(props, query))
 		}
 		if !cast.ToBool(props["silent"]) {
-			g.Debug(query)
+			g.Debug(query, contextArgs)
 		}
 	}
 }
