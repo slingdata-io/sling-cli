@@ -35,8 +35,8 @@ type HookMap struct {
 	End       []any `json:"end,omitempty" yaml:"end,omitempty"`
 	Pre       []any `json:"pre,omitempty" yaml:"pre,omitempty"`
 	Post      []any `json:"post,omitempty" yaml:"post,omitempty"`
-	PreMerge  []any `json:"pre_merge,omitempty" yaml:"pre,omitempty"`
-	PostMerge []any `json:"post_merge,omitempty" yaml:"post,omitempty"`
+	PreMerge  []any `json:"pre_merge,omitempty" yaml:"pre_merge,omitempty"`
+	PostMerge []any `json:"post_merge,omitempty" yaml:"post_merge,omitempty"`
 }
 
 type ParseOptions struct {
