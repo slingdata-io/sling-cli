@@ -3627,3 +3627,37 @@ func TruncateTable(conn Connection, tableName string) error {
 
 	return nil
 }
+
+func PrintSessionID(conn Connection) {
+	var sql string
+	switch conn.GetType() {
+	case dbio.TypeDbPostgres:
+		sql = "SELECT pg_backend_pid()"
+	case dbio.TypeDbRedshift:
+		sql = "SELECT pg_backend_pid()"
+	case dbio.TypeDbStarRocks, dbio.TypeDbMySQL, dbio.TypeDbMariaDB:
+		sql = "SELECT CONNECTION_ID()"
+	case dbio.TypeDbOracle:
+		sql = "SELECT SYS_CONTEXT('USERENV', 'SESSIONID') FROM DUAL"
+	case dbio.TypeDbBigQuery:
+		sql = "SELECT SESSION_USER()"
+	case dbio.TypeDbSnowflake:
+		sql = "SELECT CURRENT_SESSION()"
+	case dbio.TypeDbDatabricks:
+		sql = "SELECT SESSION_USER()"
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbAzureTable:
+		sql = "SELECT @@SPID"
+	case dbio.TypeDbExasol:
+		sql = "SELECT SESSION_ID FROM EXA_ALL_SESSIONS WHERE SESSION_ID = CURRENT_SESSION"
+	}
+
+	if sql != "" {
+		sql = sql + "/* sling-session-id */ " + env.NoDebugKey
+		data, err := conn.Query(sql)
+		if err == nil && len(data.Rows) > 0 {
+			g.Debug("%s session ID => %s", conn.GetProp("sling_conn_id"), cast.ToString(data.Rows[0][0]))
+		} else {
+			g.Warn("could not get session ID for %s: %s", conn.GetProp("sling_conn_id"), err.Error())
+		}
+	}
+}
