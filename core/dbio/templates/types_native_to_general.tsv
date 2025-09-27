@@ -16,6 +16,7 @@ azuredwh	money	decimal	col_money money	TRUE	TRUE
 azuredwh	nchar	text	col_nchar nchar	TRUE	TRUE	
 azuredwh	ntext	text	col_ntext ntext	TRUE	TRUE	
 azuredwh	numeric	decimal	col_numeric numeric	TRUE	TRUE	
+azuredwh	sql_variant	text	col_sql_variant sql_variant	TRUE	TRUE	
 azuredwh	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
 azuredwh	real	float	col_real real	TRUE	TRUE	
 azuredwh	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
@@ -43,6 +44,7 @@ azuresql	int	integer	col_int int	TRUE	TRUE
 azuresql	money	decimal	col_money money	TRUE	TRUE	
 azuresql	nchar	text	col_nchar nchar	TRUE	TRUE	
 azuresql	ntext	text	col_ntext ntext	TRUE	TRUE	
+azuresql	sql_variant	text	col_sql_variant sql_variant	TRUE	TRUE	
 azuresql	numeric	decimal	col_numeric numeric	TRUE	TRUE	
 azuresql	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
 azuresql	real	float	col_real real	TRUE	TRUE	
@@ -568,6 +570,7 @@ sqlserver	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE
 sqlserver	smallint	smallint	col_smallint smallint	TRUE	TRUE	
 sqlserver	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
 sqlserver	text	text	col_text text	TRUE	TRUE	
+sqlserver	sql_variant	text	col_sql_variant sql_variant	TRUE	TRUE	
 sqlserver	time	time	col_time time	TRUE	TRUE	
 sqlserver	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
 sqlserver	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
