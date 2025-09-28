@@ -332,8 +332,12 @@ func LogSQL(props map[string]string, query string, args ...any) {
 
 	// wrap args
 	contextArgs := g.M()
+	connIdSuffix := ""
 	if connID := props["sling_conn_id"]; connID != "" {
 		contextArgs["conn"] = connID
+		// make connection short-id
+		connArr := strings.Split(connID, "-")
+		connIdSuffix = DarkGrayString(" /* conn-" + connArr[len(connArr)-1] + " */")
 	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
@@ -348,7 +352,7 @@ func LogSQL(props map[string]string, query string, args ...any) {
 			query = CyanString(Clean(props, query))
 		}
 		if !cast.ToBool(props["silent"]) {
-			g.Debug(query, contextArgs)
+			g.Debug(query + connIdSuffix)
 		}
 	}
 }
