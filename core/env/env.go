@@ -337,7 +337,7 @@ func LogSQL(props map[string]string, query string, args ...any) {
 		contextArgs["conn"] = connID
 		// make connection short-id
 		connArr := strings.Split(connID, "-")
-		connIdSuffix = DarkGrayString(" -- conn-" + connArr[len(connArr)-1])
+		connIdSuffix = DarkGrayString(" [conn-" + connArr[len(connArr)-1] + "]")
 	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
