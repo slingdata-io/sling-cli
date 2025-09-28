@@ -38,12 +38,16 @@ func NewQueue(name string) (q *Queue, err error) {
 			return nil, g.Error(err, "could not create queue folder")
 		}
 		tmpFilePath := path.Join(folder, name+".queue")
+	retry:
 		if g.PathExists(tmpFilePath) {
 			if tmpFile, err = os.OpenFile(tmpFilePath, os.O_RDWR, 0755); err != nil {
 				return nil, g.Error(err, "could not open queue file: %s", tmpFilePath)
 			}
 		} else {
 			if tmpFile, err = os.OpenFile(tmpFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0755); err != nil {
+				if strings.Contains(err.Error(), "file exists") {
+					goto retry // race condition when using SLING_THREADS
+				}
 				return nil, g.Error(err, "could not create queue file: %s", tmpFilePath)
 			}
 		}
