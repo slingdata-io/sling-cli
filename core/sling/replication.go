@@ -375,10 +375,16 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						endpoint := wildcard.EndpointMap[wsn]
 
 						// check if endpoint exists
-						_, stream, found := rd.GetStream(endpoint.Name)
+						key, stream, found := rd.GetStream(endpoint.Name)
 						if found {
 							// leave as is for order to be respected
-							stream.dependsOn = endpoint.DependsOn
+							if len(endpoint.DependsOn) > 0 {
+								if stream == nil {
+									stream = &ReplicationStreamConfig{}
+								}
+								stream.dependsOn = endpoint.DependsOn
+								rd.AddStream(key, stream)
+							}
 							matched = false
 							continue
 						}
