@@ -11,6 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 type APIConnection struct {
@@ -51,14 +52,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	for key, endpoint := range ac.Spec.EndpointMap {
 		endpoint.context = g.NewContext(ac.Context.Ctx)
 		ac.Spec.EndpointMap[key] = endpoint
-	}
-
-	// register queues
-	for _, queueName := range ac.Spec.Queues {
-		_, err = ac.RegisterQueue(queueName)
-		if err != nil {
-			return ac, g.Error(err)
-		}
 	}
 
 	return ac, nil
@@ -168,6 +161,37 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	// setup if specified
 	if err = endpoint.setup(); err != nil {
 		return nil, g.Error(err, "could not setup for main request")
+	}
+
+	// register queues being used by endpoint
+	{
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "queue.") {
+				queueName := strings.TrimPrefix(processor.Output, "queue.")
+
+				if !g.In(queueName, ac.Spec.Queues...) {
+					return nil, g.Error("did not declare queue %s in queues list", queueName)
+				}
+
+				_, err = ac.RegisterQueue(queueName)
+				if err != nil {
+					return nil, g.Error(err, "could not register processor output queue: %s", queueName)
+				}
+			}
+		}
+
+		if overStr := cast.ToString(endpoint.Iterate.Over); strings.HasPrefix(overStr, "queue.") {
+			queueName := strings.TrimPrefix(overStr, "queue.")
+
+			if !g.In(queueName, ac.Spec.Queues...) {
+				return nil, g.Error("did not declare queue %s in queues list", queueName)
+			}
+
+			_, err = ac.RegisterQueue(queueName)
+			if err != nil {
+				return nil, g.Error(err, "could not register iterate over queue: %s", queueName)
+			}
+		}
 	}
 
 	// start request process
