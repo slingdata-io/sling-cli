@@ -335,9 +335,11 @@ func LogSQL(props map[string]string, query string, args ...any) {
 	connIdSuffix := ""
 	if connID := props["sling_conn_id"]; connID != "" {
 		contextArgs["conn"] = connID
-		// make connection short-id
+		// use connection name
 		connArr := strings.Split(connID, "-")
-		connIdSuffix = DarkGrayString(" [conn-" + connArr[len(connArr)-1] + "]")
+		connIdSuffix = strings.TrimPrefix(connID, connArr[0]+"-")
+		connIdSuffix = strings.TrimPrefix(connIdSuffix, connArr[1]+"-")
+		connIdSuffix = DarkGrayString(" [" + connIdSuffix + "]")
 	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
