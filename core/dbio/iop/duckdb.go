@@ -400,7 +400,14 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
 		duck.Proc.Env["motherduck_token"] = motherduckToken
-		args = append(args, "md:"+duck.GetProp("database"))
+		dsn := "md:" + duck.GetProp("database")
+
+		// add attach mode
+		if motherduckAttachMode := duck.GetProp("motherduck_attach_mode"); motherduckAttachMode != "" {
+			dsn = g.F("%s?attach_mode=%s", dsn, motherduckAttachMode)
+		}
+
+		args = append(args, dsn)
 	}
 
 	// default extensions
