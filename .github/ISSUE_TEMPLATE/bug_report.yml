@@ -1,0 +1,51 @@
+name: Report a problem
+description: Create a report to help us improve
+
+body:
+
+  - type: input
+    attributes:
+      label: "Sling version:"
+      description: You can obtain the Sling version by running `sling --version`
+    validations:
+      required: true  
+
+  - type: dropdown
+    attributes:
+      label: What is the Operating System?
+      options:
+        - Linux
+        - Mac
+        - Windows
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Do you have a CLI Pro/Platform subscription?
+      options:
+        - Yes
+        - No
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Description of the issue
+      description: A short, clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Replication Configuration
+      description: Please provide the YAML configuration, Python code or CLI command/flags you are using.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Log Output
+      description: Please run with flag `-d` or environment variable `DEBUG=true`
+    validations:
+      required: true
