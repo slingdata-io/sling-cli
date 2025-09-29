@@ -113,12 +113,12 @@ streams:
       pre_merge:
         - type: query
           connection: '{target.name}'
-          query: "SET IDENTITY_INSERT dbo.identity_test_target ON"
+          query: "SET IDENTITY_INSERT {run.object.full_name} ON"
 
       post_merge:
         - type: query
           connection: '{target.name}'
-          query: "SET IDENTITY_INSERT dbo.identity_test_target OFF"
+          query: "SET IDENTITY_INSERT {run.object.full_name} OFF"
       
 
 env:
