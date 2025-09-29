@@ -24,8 +24,8 @@ body:
     attributes:
       label: Do you have a CLI Pro/Platform subscription?
       options:
-        - Yes
-        - No
+        - 'Yes'
+        - 'No'
     validations:
       required: true
 
