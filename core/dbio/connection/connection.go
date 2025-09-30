@@ -504,7 +504,7 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("schema", "main")
 				setIfMissing("host", U.Hostname())
 				setIfMissing("password", U.Password())
-			case dbio.TypeDbSQLServer:
+			case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
 			case dbio.TypeDbOracle:
@@ -783,7 +783,7 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)
 		template = "motherduck://{database}?interactive={interactive}&motherduck_token={motherduck_token}"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
 		setIfMissing("app_name", "sling")

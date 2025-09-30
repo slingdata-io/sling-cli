@@ -262,7 +262,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		return t.SQL
 	}
 
-	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
+	isSQLServer := t.Dialect.IsSQLServer()
 	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(t.SQL)), "with")
 	whereClause := lo.Ternary(opts.Where != "", g.F(" where (%s)", opts.Where), "")
 	whereAnd := lo.Ternary(opts.Where != "", g.F(" and (%s)", opts.Where), "")
@@ -1236,7 +1236,7 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 			statement := strings.TrimSpace(currStatement.String())
 			if statement != "" && statement != ";" {
 				// Remove trailing semicolon for certain databases
-				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+				if !dialect.IsSQLServer() {
 					statement = strings.TrimSuffix(statement, ";")
 				}
 				sqls = append(sqls, statement)
@@ -1250,7 +1250,7 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	// Handle any remaining statement
 	if remaining := strings.TrimSpace(currStatement.String()); remaining != "" {
 		// Remove trailing semicolon for certain databases
-		if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+		if !dialect.IsSQLServer() {
 			remaining = strings.TrimSuffix(remaining, ";")
 		}
 		sqls = append(sqls, remaining)

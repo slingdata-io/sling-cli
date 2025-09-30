@@ -371,7 +371,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "sqlite3"
 	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
 		driverName = "duckdb"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH:
 		driverName = "sqlserver"
 	case dbio.TypeDbTrino:
 		driverName = "trino"
@@ -996,7 +996,7 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 		key := strings.ToLower(col.Name)
 		vals := colTransforms[key]
 		switch conn.Type {
-		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH:
+		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 				if !lo.Contains(vals, "parse_uuid") {
 					g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
@@ -1460,7 +1460,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		}
 
 		if colType.IsSourced() || col.Sourced {
-			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
+			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
 				if colType.Length > 0 {
 					col.DbPrecision = colType.Length
@@ -3011,7 +3011,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+		if conn.GetType().IsSQLServer() {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
@@ -3164,7 +3164,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		} else if checksum1 != checksum2 {
 			if refCol.Type != col.Type {
 				// don't compare
-			} else if refCol.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) && checksum2 >= checksum1 {
+			} else if refCol.IsString() && conn.GetType().IsSQLServer() && checksum2 >= checksum1 {
 				// datalength can return higher counts since it counts bytes
 			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbSQLite && checksum1/1000 == checksum2 {
 				// sqlite can only handle timestamps up to milliseconds
@@ -3650,7 +3650,7 @@ func PrintSessionID(conn Connection) {
 		sql = "SELECT CURRENT_SESSION()"
 	case dbio.TypeDbDatabricks:
 		sql = "SELECT SESSION_USER()"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbAzureTable:
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbAzureTable, dbio.TypeDbFabric:
 		sql = "SELECT @@SPID"
 	case dbio.TypeDbExasol:
 		sql = "SELECT SESSION_ID FROM EXA_ALL_SESSIONS WHERE SESSION_ID = CURRENT_SESSION"
