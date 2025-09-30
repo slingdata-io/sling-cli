@@ -486,27 +486,28 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("role", U.PopParam("role"))
 			}
 
-			if c.Type == dbio.TypeDbSnowflake {
+			switch c.Type {
+			case dbio.TypeDbSnowflake:
 				setIfMissing("warehouse", U.PopParam("warehouse"))
-			} else if c.Type == dbio.TypeDbBigQuery {
+			case dbio.TypeDbBigQuery:
 				setIfMissing("location", U.PopParam("location"))
 				setIfMissing("project", U.Hostname())
-			} else if c.Type == dbio.TypeDbBigTable {
+			case dbio.TypeDbBigTable:
 				setIfMissing("project", U.Hostname())
 				setIfMissing("instance", pathValue)
-			} else if c.Type == dbio.TypeDbSQLite || c.Type == dbio.TypeDbDuckDb {
+			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
 				setIfMissing("instance", U.Path())
 				setIfMissing("schema", "main")
-			} else if c.Type == dbio.TypeDbMotherDuck {
+			case dbio.TypeDbMotherDuck:
 				setIfMissing("schema", "main")
-			} else if c.Type == dbio.TypeDbD1 {
+			case dbio.TypeDbD1:
 				setIfMissing("schema", "main")
 				setIfMissing("host", U.Hostname())
 				setIfMissing("password", U.Password())
-			} else if c.Type == dbio.TypeDbSQLServer {
+			case dbio.TypeDbSQLServer:
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
-			} else if c.Type == dbio.TypeDbOracle {
+			case dbio.TypeDbOracle:
 				setIfMissing("sid", pathValue)
 			}
 
