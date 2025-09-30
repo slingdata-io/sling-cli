@@ -901,9 +901,9 @@ func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTabl
 	}
 
 	if cfg.Mode == IncrementalMode || cfg.Mode == BackfillMode {
-		// execute upsert
-		if err := performUpsert(tgtConn, tableTmp, targetTable, cfg); err != nil {
-			err = g.Error(err, "could not perform upsert from temp")
+		// execute merge
+		if err := performMerge(tgtConn, tableTmp, targetTable, cfg); err != nil {
+			err = g.Error(err, "could not merge from temp into final")
 			return err
 		}
 		return nil
@@ -1032,18 +1032,18 @@ func writeDataflowViaTempDuckDB(t *TaskExecution, df *iop.Dataflow, fs filesys.F
 	return bw, err
 }
 
-func performUpsert(tgtConn database.Connection, tableTmp, targetTable database.Table, cfg *Config) error {
+func performMerge(tgtConn database.Connection, tableTmp, targetTable database.Table, cfg *Config) error {
 	tgtPrimaryKey := cfg.Source.PrimaryKey()
 	if casing := cfg.Target.Options.ColumnCasing; casing != nil {
 		for i, pk := range tgtPrimaryKey {
 			tgtPrimaryKey[i] = casing.Apply(pk, tgtConn.GetType())
 		}
 	}
-	g.Debug("performing upsert from temporary table %s to target table %s with primary keys %v",
+	g.Debug("merging from temporary table %s to final table %s with primary keys %v",
 		tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	rowAffCnt, err := tgtConn.Merge(tableTmp.FullName(), targetTable.FullName(), tgtPrimaryKey)
 	if err != nil {
-		err = g.Error(err, "could not perform upsert from temp")
+		err = g.Error(err, "could not merge from temp into final")
 		return err
 	}
 	if rowAffCnt > 0 {
