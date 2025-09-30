@@ -269,7 +269,8 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// detect Fabric
-	if strings.Contains(conn.GetProp("host"), ".fabric.microsoft.com") {
+	if strings.Contains(conn.GetProp("host"), ".fabric.microsoft.com") ||
+		strings.Contains(conn.GetProp("url"), ".fabric.microsoft.com") {
 		conn.Type = dbio.TypeDbFabric
 	}
 
