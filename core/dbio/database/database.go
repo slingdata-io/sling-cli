@@ -24,6 +24,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
