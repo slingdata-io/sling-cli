@@ -35,8 +35,6 @@ type MsSQLServerConn struct {
 	URL         string
 	versionNum  int
 	versionYear int
-	isAzureSQL  bool
-	isAzureDWH  bool
 }
 
 // Init initiates the object
@@ -264,10 +262,8 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 		g.Trace("%s version is %s => %d", conn.GetProp("sling_conn_id"), versionShortStr, conn.versionYear)
 
 		if strings.Contains(strings.ToLower(versionLongStr), "sql azure") {
-			conn.isAzureSQL = true
 			conn.Type = dbio.TypeDbAzure
 		} else if strings.Contains(strings.ToLower(versionLongStr), "azure sql data warehouse") {
-			conn.isAzureDWH = true
 			conn.Type = dbio.TypeDbAzureDWH
 		}
 	}
@@ -299,7 +295,7 @@ func (conn *MsSQLServerConn) GenerateDDL(table Table, data iop.Dataset, temporar
 func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
-	if conn.isAzureDWH {
+	if conn.Type == dbio.TypeDbAzureDWH {
 		return conn.CopyViaAzure(tableFName, df)
 	}
 
