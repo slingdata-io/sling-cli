@@ -1015,3 +1015,10 @@
   run: 'sling run -d -r cmd/sling/tests/replications/r.61.mssql_identity_incremental.yaml'
   output_contains:
     - 'execution succeeded'
+
+# with add_new_columns=false, we should WARN instead of erroring
+- id: 124
+  name: Test MSSQL to PostgreSQL with add_new_columns=false
+  run: 'sling run -d -r cmd/sling/tests/replications/r.62.mssql_postgres_add_columns_false.yaml'
+  output_contains:
+    - source field 'age' is missing in target table

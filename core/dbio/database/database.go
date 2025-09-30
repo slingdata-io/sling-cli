@@ -2209,7 +2209,12 @@ func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string
 	}
 
 	if len(mismatches) > 0 {
-		err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
+		if val := conn.GetProp("add_new_columns"); val != "" && !cast.ToBool(val) {
+			// if we've explicitly configured to not columns, don't error, just warn
+			g.Warn("column names mismatch: %s. Current target columns are: %s", strings.Join(mismatches, "\n"), g.Marshal(newCols.Names()))
+		} else {
+			err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
+		}
 	}
 
 	g.Trace("insert target fields: " + strings.Join(newCols.Names(), ", "))
