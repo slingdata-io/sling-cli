@@ -95,7 +95,7 @@ defaults:
 
   # Default pagination settings
   pagination:
-    stop_condition: "!response.json.has_more" # Common for cursor/offset
+    stop_condition: "response.json.has_more == false" # Common for cursor/offset
 
   # Default response settings
   response:
@@ -187,7 +187,7 @@ endpoints:
       next_state:
         page: "{state.page + 1}"
       # Overrides default stop_condition
-      stop_condition: "response.json.page >= response.json.total_pages"
+      stop_condition: 'response.json.page >= response.json.total_pages'
 
     # Response processing configuration
     response:
@@ -375,7 +375,7 @@ authentication:
           password: "{secrets.password}"
       response:
         processors:
-          - expression: "response.json.token"
+          - expression: 'response.json.token'
             output: "state.access_token"
     - request:
         url: "https://api.example.com/auth/validate"
@@ -542,9 +542,9 @@ pagination:
 
   # Expression evaluated *after* a response is received to check if pagination should stop for the current iteration.
   # If true, no more requests are made for this iteration/endpoint.
-  stop_condition: "!response.json.has_more || length(response.records) == 0"
+  stop_condition: jmespath(response.json, "has_more") == false || length(response.records) == 0
   # Example: Page-based stop
-  # stop_condition: "response.json.page >= response.json.total_pages"
+  # stop_condition: 'response.json.page >= response.json.total_pages'
   # Example: Stop if next page URL is missing in header
   # stop_condition: "!contains(jmespath(response.headers, \"link\"), \"rel=\\\"next\\\"\")"
 ```
@@ -691,7 +691,7 @@ dynamic_endpoints:
         url: "{state.base_url}/api/endpoints"
       response:
         processors:
-          - expression: "response.json.endpoints"
+          - expression: 'jmespath(response.json, "endpoints")'
             output: "state.objects" # array of objects
 
     iterate: state.objects
@@ -774,7 +774,7 @@ endpoints:
       next_state:
         starting_after: "{response.records[-1].id}"
       # Stop when the API indicates no more pages or returns an empty list
-      stop_condition: "!response.json.has_more || length(response.records) == 0"
+      stop_condition: 'jmespath(response.json, "has_more") || length(response.records) == 0'
 
     response:
       records:
