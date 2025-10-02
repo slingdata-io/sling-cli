@@ -231,7 +231,7 @@ func (conn *MsSQLServerConn) ConnString() string {
 		azuread.ActiveDirectoryDeviceCode,
 		azuread.ActiveDirectoryApplication,
 	}
-	if fedAuth := conn.GetProp("fedauth"); g.In(fedAuth, AdAuthStrings...) {
+	if fedAuth := conn.GetProp("fedauth", "fed_auth"); g.In(fedAuth, AdAuthStrings...) {
 		conn.SetProp("driver", "azuresql")
 	}
 
