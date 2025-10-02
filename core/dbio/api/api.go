@@ -99,7 +99,9 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 
 	// fill DependsOn
 	for i, ep := range endpoints {
-		ep.DependsOn = endpoints.HasUpstreams(ep.Name)
+		if len(ep.DependsOn) == 0 {
+			ep.DependsOn = endpoints.HasUpstreams(ep.Name)
+		}
 		endpoints[i] = ep
 	}
 

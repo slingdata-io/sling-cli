@@ -374,6 +374,43 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 					if conn.Connection.Type.IsAPI() {
 						endpoint := wildcard.EndpointMap[wsn]
 
+						// convert overrides
+						var overrides ReplicationStreamConfig
+						if endpoint.Overrides != nil {
+							if err = g.JSONConvert(endpoint.Overrides, &overrides); err != nil {
+								return g.Error(err, "could not parse endpoint overrides for %s", wsn)
+							}
+						}
+
+						setEndpointProps := func(s *ReplicationStreamConfig) {
+							s.dependsOn = endpoint.DependsOn
+							if s.PrimaryKeyI == nil {
+								s.PrimaryKeyI = endpoint.Response.Records.PrimaryKey
+							}
+
+							// set overrides
+							if endpoint.Overrides != nil {
+								if overrides.Mode != "" {
+									s.Mode = overrides.Mode
+								}
+								if overrides.PrimaryKeyI != nil {
+									s.PrimaryKeyI = overrides.PrimaryKeyI
+								}
+								if overrides.UpdateKey != "" {
+									s.UpdateKey = overrides.UpdateKey
+								}
+								if overrides.Transforms != nil {
+									s.Transforms = overrides.Transforms
+								}
+
+								// append override hooks at end
+								s.Hooks.Pre = append(s.Hooks.Pre, overrides.Hooks.Pre...)
+								s.Hooks.Post = append(s.Hooks.Post, overrides.Hooks.Post...)
+								s.Hooks.PreMerge = append(s.Hooks.PreMerge, overrides.Hooks.PreMerge...)
+								s.Hooks.PostMerge = append(s.Hooks.PostMerge, overrides.Hooks.PostMerge...)
+							}
+						}
+
 						// check if endpoint exists
 						key, stream, found := rd.GetStream(endpoint.Name)
 						if found {
@@ -382,7 +419,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 								if stream == nil {
 									stream = &ReplicationStreamConfig{}
 								}
-								stream.dependsOn = endpoint.DependsOn
+								setEndpointProps(stream) // set overrides
 								rd.AddStream(key, stream)
 							}
 							matched = false
@@ -393,7 +430,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						if cfg == nil {
 							cfg = &ReplicationStreamConfig{}
 						}
-						cfg.dependsOn = endpoint.DependsOn
+						setEndpointProps(cfg) // set overrides
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
 					}

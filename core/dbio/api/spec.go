@@ -177,7 +177,8 @@ type Endpoint struct {
 	Iterate     Iterate    `yaml:"iterate" json:"iterate,omitempty"` // state expression to use to loop
 	Setup       Sequence   `yaml:"setup" json:"setup,omitempty"`
 	Teardown    Sequence   `yaml:"teardown" json:"teardown,omitempty"`
-	DependsOn   []string   `yaml:"-" json:"-"` // upstream endpoints
+	DependsOn   []string   `yaml:"depends_on" json:"depends_on"` // upstream endpoints
+	Overrides   any        `yaml:"overrides" json:"overrides"`   // stream overrides
 
 	stop         bool // whether we should stop the endpoint process
 	conn         *APIConnection
@@ -575,7 +576,6 @@ func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
 type Iterate struct {
 	Over        any    `yaml:"over" json:"iterate,omitempty"` // expression
 	Into        string `yaml:"into" json:"into,omitempty"`    // state variable
-	If          string `yaml:"id" json:"id,omitempty"`        // if we should iterate
 	Concurrency int    `yaml:"concurrency" json:"concurrency,omitempty"`
 	iterations  chan *Iteration
 }
@@ -676,6 +676,7 @@ type Processor struct {
 	Aggregation AggregationType `yaml:"aggregation" json:"aggregation"`
 	Expression  string          `yaml:"expression" json:"expression"`
 	Output      string          `yaml:"output" json:"output"`
+	If          string          `yaml:"if" json:"if,omitempty"` // if we should evaluate processor
 }
 
 type RuleType string
