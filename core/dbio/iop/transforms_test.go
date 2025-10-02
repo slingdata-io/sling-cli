@@ -1414,6 +1414,70 @@ func TestEvaluatorCheckExpression(t *testing.T) {
 		})
 	}
 }
+func TestEvaluatorLiterals(t *testing.T) {
+	// t.Skip()
+
+	variables := g.M(
+		"object", g.M(
+			"a", 1,
+			"b", 1,
+			"echo", func(a any) (any, error) {
+				return a, nil
+			},
+		),
+		"array", []any{g.M("id", 1), g.M("id", 2)},
+		"array_empty", []any{},
+	)
+
+	tests := []struct {
+		name        string
+		expression  string
+		expectValue any
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "one_level_existent",
+			expression:  `object.a`,
+			expectError: false,
+			expectValue: 1,
+		},
+		{
+			name:        "array_jmespath",
+			expression:  `jmespath(array, "[-1].id")`,
+			expectError: false,
+			expectValue: 2,
+		},
+		{
+			name:        "array_empty_jmespath",
+			expression:  `jmespath(array_empty, "[-1].id")`,
+			expectError: false,
+			expectValue: nil,
+		},
+		{
+			name:        "array_empty_error",
+			expression:  `array_empty[-1].id`,
+			expectError: true,
+			expectValue: nil,
+		},
+	}
+
+	eval := NewEvaluator(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, err := eval.Eval.Evaluate(tt.expression, variables, GlobalFunctionMap)
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" && err != nil {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectValue, value)
+			}
+		})
+	}
+}
 
 // go test -benchmem -run='^$ github.com/slingdata-io/sling-cli/core/dbio/iop' -bench '^BenchmarkPtEvaluatorRenderPayload'
 func BenchmarkPtEvaluatorRenderPayload(b *testing.B) {
