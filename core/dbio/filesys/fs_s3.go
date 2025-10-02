@@ -31,6 +31,20 @@ import (
 	"github.com/spf13/cast"
 )
 
+func init() {
+	// see https://github.com/slingdata-io/sling-cli/issues/640
+	// let's set those for long-term fix
+	defaults := map[string]string{
+		"AWS_RESPONSE_CHECKSUM_VALIDATION": "WHEN_REQUIRED",
+		"AWS_REQUEST_CHECKSUM_CALCULATION": "WHEN_REQUIRED",
+	}
+	for key, value := range defaults {
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+}
+
 // S3FileSysClient is a file system client to write file to Amazon's S3 file sys.
 type S3FileSysClient struct {
 	BaseFileSysClient
