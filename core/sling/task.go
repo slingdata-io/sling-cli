@@ -601,6 +601,8 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
+		case contains("CSV table encountered too many errors"):
+			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
 		}
 	}
 	return

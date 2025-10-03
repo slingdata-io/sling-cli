@@ -608,10 +608,18 @@ func (conn *BigQueryConn) importStreamConfig(columns iop.Columns) (config iop.St
 	config.Compression = iop.GzipCompressorType
 	config.TargetType = conn.GetType()
 
+	// detect file format
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+	}
+	config.Format = fileFormat
+
 	// set max decimal for only numeric
 	{
 		hasNumeric := false
 		hasBigNumeric := false
+		haJSON := false
 
 		for _, col := range columns {
 			if strings.EqualFold(col.DbType, "numeric") {
@@ -619,6 +627,9 @@ func (conn *BigQueryConn) importStreamConfig(columns iop.Columns) (config iop.St
 			}
 			if strings.EqualFold(col.DbType, "bignumeric") {
 				hasBigNumeric = true
+			}
+			if strings.EqualFold(col.DbType, "json") {
+				haJSON = true
 			}
 		}
 
@@ -632,6 +643,9 @@ func (conn *BigQueryConn) importStreamConfig(columns iop.Columns) (config iop.St
 			}
 		} else if hasNumeric {
 			config.MaxDecimals = 9
+		}
+		if haJSON && config.Format == dbio.FileTypeParquet {
+			g.Warn("stream has JSON columns - when importing into BigQuery with Parquet, this may cause issues.")
 		}
 	}
 
@@ -668,10 +682,10 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 	g.Info("importing into bigquery via local storage")
 
+	config := conn.importStreamConfig(table.Columns)
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		config := conn.importStreamConfig(table.Columns)
 		_, err = fs.WriteDataflowReady(df, localPath, fileReadyChn, config)
 
 		if err != nil {
@@ -687,7 +701,7 @@ func (conn *BigQueryConn) importViaLocalStorage(tableFName string, df *iop.Dataf
 
 		g.Debug("Loading %s [%s]", localFile.Node.Path(), humanize.Bytes(cast.ToUint64(localFile.BytesW)))
 
-		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns)
+		err := conn.CopyFromLocal(localFile.Node.Path(), table, localFile.Columns, config.Format)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", localFile.Node.Path(), tableFName))
 		}
@@ -760,10 +774,10 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 
 	g.Info("importing into bigquery via google storage")
 
+	config := conn.importStreamConfig(table.Columns)
 	fileReadyChn := make(chan filesys.FileReady, 10)
 
 	go func() {
-		config := conn.importStreamConfig(table.Columns)
 		_, err = fs.WriteDataflowReady(df, gcsPath, fileReadyChn, config)
 
 		if err != nil {
@@ -778,7 +792,7 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 		defer conn.Context().Wg.Write.Done()
 		g.Debug("Loading %s [%s]", gcsFile.Node.URI, humanize.Bytes(cast.ToUint64(gcsFile.BytesW)))
 
-		err := conn.CopyFromGCS(gcsFile.Node.URI, table, gcsFile.Columns)
+		err := conn.CopyFromGCS(gcsFile.Node.URI, table, gcsFile.Columns, config.Format)
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error copying from %s into %s", gcsFile.Node.URI, tableFName))
 		}
@@ -805,18 +819,18 @@ func (conn *BigQueryConn) importViaGoogleStorage(tableFName string, df *iop.Data
 }
 
 // CopyFromGCS into bigquery from google storage
-func (conn *BigQueryConn) CopyFromLocal(localURI string, table Table, dsColumns iop.Columns) error {
+func (conn *BigQueryConn) CopyFromLocal(localURI string, table Table, dsColumns iop.Columns, format dbio.FileType) error {
 
 	file, err := os.Open(localURI)
 	if err != nil {
 		return g.Error(err, "Failed to open temp file")
 	}
-	return conn.LoadCSVFromReader(table, file, dsColumns)
+	return conn.LoadFromReader(table, file, dsColumns, format)
 }
 
-// LoadCSVFromReader demonstrates loading data into a BigQuery table using a file on the local filesystem.
+// LoadFromReader demonstrates loading data into a BigQuery table using a file on the local filesystem.
 // https://cloud.google.com/bigquery/docs/batch-loading-data#loading_data_from_local_files
-func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) LoadFromReader(table Table, reader io.Reader, dsColumns []iop.Column, format dbio.FileType) error {
 	client, err := conn.getNewClient()
 	if err != nil {
 		return g.Error(err, "Failed to connect to client")
@@ -824,13 +838,21 @@ func (conn *BigQueryConn) LoadCSVFromReader(table Table, reader io.Reader, dsCol
 	defer client.Close()
 
 	source := bigquery.NewReaderSource(reader)
-	source.FieldDelimiter = ","
-	source.AllowQuotedNewlines = true
-	source.Quote = `"`
-	source.NullMarker = `\N`
-	source.SkipLeadingRows = 1
+
+	// Set format-specific options
+	switch format {
+	case dbio.FileTypeCsv:
+		source.FieldDelimiter = ","
+		source.AllowQuotedNewlines = true
+		source.Quote = `"`
+		source.NullMarker = `\N`
+		source.SkipLeadingRows = 1
+		source.SourceFormat = bigquery.CSV
+	case dbio.FileTypeParquet:
+		source.SourceFormat = bigquery.Parquet
+	}
+
 	source.Schema = getBqSchema(dsColumns, table.Columns)
-	source.SourceFormat = bigquery.CSV
 
 	loader := client.Dataset(table.Schema).Table(table.Name).LoaderFrom(source)
 	loader.WriteDisposition = bigquery.WriteAppend
@@ -863,7 +885,7 @@ func (conn *BigQueryConn) BulkImportStream(tableFName string, ds *iop.Datastream
 	return conn.BulkImportFlow(tableFName, df)
 }
 
-func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []iop.Column) error {
+func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []iop.Column, format dbio.FileType) error {
 	client, err := conn.getNewClient()
 	if err != nil {
 		return g.Error(err, "Failed to connect to client")
@@ -871,11 +893,20 @@ func (conn *BigQueryConn) CopyFromGCS(gcsURI string, table Table, dsColumns []io
 	defer client.Close()
 
 	gcsRef := bigquery.NewGCSReference(gcsURI)
-	gcsRef.FieldDelimiter = ","
-	gcsRef.AllowQuotedNewlines = true
-	gcsRef.Quote = `"`
-	gcsRef.NullMarker = `\N`
-	gcsRef.SkipLeadingRows = 1
+
+	// Set format-specific options
+	switch format {
+	case dbio.FileTypeCsv:
+		gcsRef.FieldDelimiter = ","
+		gcsRef.AllowQuotedNewlines = true
+		gcsRef.Quote = `"`
+		gcsRef.NullMarker = `\N`
+		gcsRef.SkipLeadingRows = 1
+		gcsRef.SourceFormat = bigquery.CSV
+	case dbio.FileTypeParquet:
+		gcsRef.SourceFormat = bigquery.Parquet
+	}
+
 	gcsRef.Schema = getBqSchema(dsColumns, table.Columns)
 	if strings.HasSuffix(strings.ToLower(gcsURI), ".gz") {
 		gcsRef.Compression = bigquery.Gzip
@@ -934,16 +965,25 @@ func (conn *BigQueryConn) BulkExportFlow(table Table) (df *iop.Dataflow, err err
 		columns.Coerce(coerceCols, true, cc, tgtType)
 	}
 
-	fs.SetProp("header", "true")
-	fs.SetProp("format", "csv")
-	fs.SetProp("null_if", `\N`)
+	// detect file format
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+	}
+
+	fs.SetProp("format", string(fileFormat))
 	fs.SetProp("columns", g.Marshal(columns))
 	fs.SetProp("metadata", conn.GetProp("metadata"))
 
-	// setting empty_as_null=true. no way to export with proper null_marker.
-	// gcsRef.NullMarker = `\N` does not work, not way to do so in EXPORT DATA OPTIONS
-	// Also, Parquet export doesn't support JSON types
-	fs.SetProp("empty_as_null", "true")
+	// CSV-specific properties
+	if fileFormat == dbio.FileTypeCsv {
+		fs.SetProp("header", "true")
+		fs.SetProp("null_if", `\N`)
+		// setting empty_as_null=true. no way to export with proper null_marker.
+		// gcsRef.NullMarker = `\N` does not work, not way to do so in EXPORT DATA OPTIONS
+		fs.SetProp("empty_as_null", "true")
+	}
+	// Note: Parquet export doesn't support JSON types
 
 	df, err = fs.ReadDataflow(gsURL)
 	if err != nil {
@@ -968,6 +1008,12 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
+	// detect file format
+	fileFormat := dbio.FileType(conn.GetProp("format"))
+	if !g.In(fileFormat, dbio.FileTypeCsv, dbio.FileTypeParquet) {
+		fileFormat = dbio.FileTypeCsv
+	}
+
 	unloadCtx := g.NewContext(conn.Context().Ctx)
 
 	doExport := func(table Table, gsPartURL string) {
@@ -979,7 +1025,7 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 			return
 		}
 
-		err = conn.CopyToGCS(table, gsPartURL)
+		err = conn.CopyToGCS(table, gsPartURL, fileFormat)
 		if err != nil {
 			unloadCtx.CaptureErr(g.Error(err, "Could not Copy to GS"))
 		}
@@ -991,7 +1037,12 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 		return
 	}
 
-	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.csv", gcBucket, tempCloudStorageFolder, cast.ToString(g.Now()))
+	// use appropriate extension based on format
+	fileExt := "csv"
+	if fileFormat == dbio.FileTypeParquet {
+		fileExt = "parquet"
+	}
+	gsPath = fmt.Sprintf("gs://%s/%s/stream/%s.%s", gcBucket, tempCloudStorageFolder, cast.ToString(g.Now()), fileExt)
 
 	filesys.Delete(gsFs, gsPath)
 
@@ -1012,10 +1063,14 @@ func (conn *BigQueryConn) Unload(tables ...Table) (gsPath string, err error) {
 }
 
 // CopyToGCS Copy table to gc storage
-func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
+func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string, format dbio.FileType) error {
+	templateKey := "copy_to_gcs"
+	if format == dbio.FileTypeParquet {
+		templateKey = "copy_to_gcs_parquet"
+	}
 
 	unloadSQL := g.R(
-		conn.template.Core["copy_to_gcs"],
+		conn.template.Core[templateKey],
 		"sql", sql,
 		"gcs_path", gcsURI,
 	)
@@ -1026,9 +1081,9 @@ func (conn *BigQueryConn) ExportToGCS(sql string, gcsURI string) error {
 	return err
 }
 
-func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
+func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string, format dbio.FileType) error {
 	if table.IsQuery() || table.IsView {
-		return conn.ExportToGCS(table.Select(), gcsURI)
+		return conn.ExportToGCS(table.Select(), gcsURI, format)
 	}
 
 	client, err := conn.getNewClient()
@@ -1038,10 +1093,19 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	defer client.Close()
 
 	gcsRef := bigquery.NewGCSReference(gcsURI)
-	gcsRef.FieldDelimiter = ","
-	gcsRef.AllowQuotedNewlines = true
-	gcsRef.Quote = `"`
-	// gcsRef.NullMarker = `\N` // does not work for export, only importing
+
+	// Set format-specific options
+	switch format {
+	case dbio.FileTypeCsv:
+		gcsRef.FieldDelimiter = ","
+		gcsRef.AllowQuotedNewlines = true
+		gcsRef.Quote = `"`
+		// gcsRef.NullMarker = `\N` // does not work for export, only importing
+		gcsRef.DestinationFormat = bigquery.CSV
+	case dbio.FileTypeParquet:
+		gcsRef.DestinationFormat = bigquery.Parquet
+	}
+
 	gcsRef.Compression = bigquery.Gzip
 	gcsRef.MaxBadRecords = 0
 
@@ -1060,7 +1124,7 @@ func (conn *BigQueryConn) CopyToGCS(table Table, gcsURI string) error {
 	if err := status.Err(); err != nil {
 		if strings.Contains(err.Error(), "it is currently a VIEW") || strings.Contains(err.Error(), "it currently has type VIEW") {
 			table.IsView = true
-			return conn.CopyToGCS(table, gcsURI)
+			return conn.CopyToGCS(table, gcsURI, format)
 		}
 		return g.Error(err, "Error in Export Task")
 	}

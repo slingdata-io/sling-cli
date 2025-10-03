@@ -27,6 +27,16 @@ core:
         {sql}
       )
 
+  copy_to_gcs_parquet: |
+      EXPORT DATA OPTIONS(
+        uri = '{gcs_path}',
+        format = 'PARQUET',
+        overwrite = true,
+        compression = 'GZIP'
+      ) AS (
+        {sql}
+      )
+
 metadata:
 
   current_database:

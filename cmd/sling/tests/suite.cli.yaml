@@ -1022,3 +1022,8 @@
   run: 'sling run -d -r cmd/sling/tests/replications/r.62.mssql_postgres_add_columns_false.yaml'
   output_contains:
     - source field 'age' is missing in target table
+
+# Test PostgreSQL to BigQuery with all data types using CSV and Parquet format
+- id: 125
+  name: Test PostgreSQL to BigQuery with all data types
+  run: 'sling run -d -r cmd/sling/tests/replications/r.63.postgres_bigquery_all_types.yaml'
