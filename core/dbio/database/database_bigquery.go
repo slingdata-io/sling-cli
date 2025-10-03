@@ -576,6 +576,25 @@ func (conn *BigQueryConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 		}
 	}
 
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if val := conn.GetProp("column_typing"); val != "" {
+		var ct iop.ColumnTyping
+		if err = g.Unmarshal(val, &ct); err != nil {
+			return 0, g.Error(err, "invalid column_typing")
+		}
+
+		if dct := ct.Decimal; dct != nil {
+			for i, col := range df.Columns {
+				if g.In(col.Type, iop.DecimalType, iop.FloatType) {
+					col.DbPrecision, col.DbScale = dct.Apply(col)
+					df.Columns[i] = col //set back
+					df.PropagateColum(i)
+				}
+			}
+		}
+	}
+
 	if gcBucket := conn.GetProp("GC_BUCKET"); gcBucket == "" {
 		return conn.importViaLocalStorage(tableFName, df)
 	}

@@ -410,6 +410,29 @@ func (df *Dataflow) MakeStreamCh(forceMerge bool) (streamCh chan *Datastream) {
 	return
 }
 
+// PropagateColum propagates the dataflow column properties to underlying datastreams
+func (df *Dataflow) PropagateColum(colIndex int) {
+	df.mux.Lock()
+	defer df.mux.Unlock()
+	dfCol := df.Columns[colIndex]
+	for _, ds := range df.Streams {
+		dsCol := ds.Columns.GetColumn(dfCol.Name)
+		if dsCol != nil {
+			dsCol.Type = dfCol.Type
+			dsCol.DbType = dfCol.DbType
+			dsCol.DbPrecision = dfCol.DbPrecision
+			dsCol.DbScale = dfCol.DbScale
+			dsCol.Table = dfCol.Table
+			dsCol.Schema = dfCol.Schema
+			dsCol.Database = dfCol.Database
+			dsCol.Description = dfCol.Description
+			dsCol.FileURI = dfCol.FileURI
+			dsCol.Constraint = dfCol.Constraint
+			dsCol.Metadata = dfCol.Metadata
+		}
+	}
+}
+
 // SyncColumns a workaround to synch the ds.Columns to the df.Columns
 func (df *Dataflow) SyncColumns() {
 	df.mux.Lock()

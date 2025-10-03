@@ -1306,7 +1306,7 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 			if ct.Decimal == nil {
 				ct.Decimal = &DecimalColumnTyping{}
 			}
-			precision, scale = ct.Decimal.Apply(col)
+			precision, scale = ct.Decimal.Apply(*col)
 		}
 
 		nativeType = strings.ReplaceAll(
@@ -1548,7 +1548,7 @@ type DecimalColumnTyping struct {
 	MaxScale     int  `json:"max_scale,omitempty" yaml:"max_scale,omitempty"`         // Number of digits after decimal point
 }
 
-func (dct *DecimalColumnTyping) Apply(col *Column) (precision, scale int) {
+func (dct *DecimalColumnTyping) Apply(col Column) (precision, scale int) {
 
 	minPrecision := col.Stats.MaxLen
 	precision = col.DbPrecision

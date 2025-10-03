@@ -2609,6 +2609,9 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 					ds.Context.CaptureErr(err)
 					return
 				}
+				if batch.IsFirst() {
+					g.Debug("arrow parquet %s", pw.arrowSchema.String())
+				}
 			}
 
 			for row := range batch.Rows {
