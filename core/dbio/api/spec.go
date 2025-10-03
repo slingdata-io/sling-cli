@@ -66,6 +66,11 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	// so that JMESPath works
 	g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap)
 
+	// validate that all queues used by endpoints are declared
+	if err = spec.validateQueues(); err != nil {
+		return spec, g.Error(err, "queue validation failed")
+	}
+
 	return
 }
 
@@ -85,6 +90,51 @@ type Spec struct {
 
 func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
+}
+
+// validateQueues checks that all queues used by endpoints are declared at the Spec level
+func (s *Spec) validateQueues() error {
+	// Create a set of declared queues for fast lookup
+	declaredQueues := make(map[string]bool)
+	for _, queue := range s.Queues {
+		declaredQueues[queue] = true
+	}
+
+	usedQueues := make(map[string][]string) // map[queueName][]endpointNames
+
+	// Check all endpoints for queue usage
+	for endpointName, endpoint := range s.EndpointMap {
+		// Check if endpoint iterates over a queue
+		if iterateOver, ok := endpoint.Iterate.Over.(string); ok {
+			if strings.HasPrefix(iterateOver, "queue.") {
+				queueName := strings.TrimPrefix(iterateOver, "queue.")
+				usedQueues[queueName] = append(usedQueues[queueName], endpointName)
+			}
+		}
+
+		// Check if endpoint produces to a queue via processors
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "queue.") {
+				queueName := strings.TrimPrefix(processor.Output, "queue.")
+				usedQueues[queueName] = append(usedQueues[queueName], endpointName)
+			}
+		}
+	}
+
+	// Validate that all used queues are declared
+	var undeclaredQueues []string
+	for queueName, endpointNames := range usedQueues {
+		if !declaredQueues[queueName] {
+			undeclaredQueues = append(undeclaredQueues, g.F("queue '%s' used by endpoint(s): %s", queueName, strings.Join(endpointNames, ", ")))
+		}
+	}
+
+	if len(undeclaredQueues) > 0 {
+		sort.Strings(undeclaredQueues)
+		return g.Error("undeclared queue(s) found:\n  - %s\n\nPlease declare them in the 'queues' section at the spec level", strings.Join(undeclaredQueues, "\n  - "))
+	}
+
+	return nil
 }
 
 type DynamicEndpoints []DynamicEndpoint
