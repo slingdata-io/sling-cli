@@ -4,9 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/flarco/g"
+	"github.com/google/uuid"
+	"github.com/jaswdr/faker"
 	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -621,4 +625,199 @@ func (il IsolationLevel) AsSqlIsolationLevel() sql.IsolationLevel {
 		return sql.LevelLinearizable
 	}
 	return sql.LevelDefault
+}
+
+type Operation string
+
+const (
+	OperationMerge        Operation = "merge"
+	OperationDropTable    Operation = "drop_table"
+	OperationCreateIndex  Operation = "create_index"
+	OperationGenerateData Operation = "generate_data"
+)
+
+// QueryOperation uses the operation input to render/generate a query
+// based on a template. This should be connection agnostic.
+func QueryOperation(conn Connection, operation Operation, params map[string]any) (query string, err error) {
+
+	switch operation {
+	case OperationMerge:
+	case OperationDropTable:
+		table, err := ParseTableName(cast.ToString(params["table"]), conn.GetType())
+		if err != nil {
+			return "", g.Error(err, "invalid table name: %s", params["table"])
+		}
+		query = g.R(conn.GetTemplateValue("core.drop_table"), "table", table.FullName())
+
+	case OperationCreateIndex:
+		table, err := ParseTableName(cast.ToString(params["table"]), conn.GetType())
+		if err != nil {
+			return "", g.Error(err, "invalid table name: %s", params["table"])
+		}
+		index := cast.ToString(params["index"])
+		if index == "" {
+			return "", g.Error(err, "missing index input")
+		}
+		columns := cast.ToStringSlice(params["columns"])
+		if len(columns) == 0 {
+			return "", g.Error(err, "missing columns input")
+		}
+		inputs := g.M("index", params["index"], "table", table.FullName(), "cols", strings.Join(columns, ", "))
+		query = g.Rm(conn.GetTemplateValue("core.create_index"), inputs)
+
+	case OperationGenerateData:
+		query, err = generateDataOperation(conn, params)
+	}
+	return
+}
+
+// generateDataOperation generates a table with fake data based on provided columns and types
+func generateDataOperation(conn Connection, params map[string]any) (query string, err error) {
+
+	// generateFakeValue generates a fake value based on the column type
+	generateFakeValue := func(fake faker.Faker, colType iop.ColumnType) any {
+		switch colType {
+		case iop.BigIntType:
+			return fake.IntBetween(1000000, 9999999999)
+		case iop.IntegerType:
+			return fake.IntBetween(1, 1000000)
+		case iop.SmallIntType:
+			return fake.IntBetween(1, 32767)
+		case iop.DecimalType, iop.FloatType:
+			return cast.ToFloat64(fake.Float64(2, 0, 10000))
+		case iop.BoolType:
+			return fake.Bool()
+		case iop.DateType:
+			return fake.Time().Time(time.Now()).Format("2006-01-02")
+		case iop.DatetimeType, iop.TimestampType:
+			return fake.Time().Time(time.Now()).Format("2006-01-02 15:04:05")
+		case iop.TimestampzType:
+			return fake.Time().Time(time.Now()).Format("2006-01-02 15:04:05-07:00")
+		case iop.TimeType:
+			return fake.Time().Time(time.Now()).Format("15:04:05")
+		case iop.TimezType:
+			return fake.Time().Time(time.Now()).Format("15:04:05-07:00")
+		case iop.UUIDType:
+			return uuid.New().String()
+		case iop.JsonType:
+			return g.Marshal(g.M("id", fake.Int(), "name", fake.Person().Name(), "active", fake.Bool()))
+		case iop.StringType:
+			return fake.Lorem().Sentence(g.RandInt(20))
+		case iop.TextType:
+			whiteSpace := g.RandString("\t\n,.", 2)
+			return fake.Lorem().Sentence(g.RandInt(50)) + whiteSpace + fake.Lorem().Sentence(g.RandInt(50))
+		case iop.BinaryType:
+			return []byte(fake.Lorem().Text(20))
+
+		// custom types
+		case iop.ColumnType("email"):
+			return fake.Internet().Email()
+		case iop.ColumnType("city"):
+			return fake.Address().City()
+		case iop.ColumnType("address"):
+			return fake.Address().Address()
+		case iop.ColumnType("country"):
+			return fake.Address().Country()
+		case iop.ColumnType("first_name"):
+			return fake.Person().FirstName()
+		case iop.ColumnType("last_name"):
+			return fake.Person().LastName()
+		case iop.ColumnType("name"):
+			return fake.Person().Name()
+
+		default:
+			// Default to string for unknown types
+			return fake.Person().Name()
+		}
+	}
+
+	// Extract parameters
+	fullTableName, _ := params["table"].(string)
+	numRows := cast.ToInt(params["rows"])
+
+	var columnsMap map[string]iop.ColumnType
+	if err = g.JSONConvert(params["columns"], &columnsMap); err != nil {
+		return "", g.Error(err, "invalid columns map provided")
+	}
+
+	if fullTableName == "" {
+		return "", g.Error("table is required")
+	}
+	if len(columnsMap) == 0 {
+		return "", g.Error("columns map is required")
+	}
+	if numRows <= 0 {
+		numRows = 100 // default to 100 rows
+	}
+
+	// Sort column names alphabetically
+	columnNames := lo.Keys(columnsMap)
+	sort.Strings(columnNames)
+
+	// Create iop.Columns with sorted names and general types
+	columns := make(iop.Columns, len(columnNames))
+	for i, colName := range columnNames {
+		col := iop.Column{
+			Name:     colName,
+			Type:     columnsMap[colName],
+			Position: i + 1,
+		}
+		if g.In(col.Type, iop.DecimalType, iop.FloatType) {
+			col.DbPrecision = env.DdlMinDecLength
+			col.DbScale = env.DdlMinDecScale
+		}
+		columns[i] = col
+	}
+
+	// Generate fake data based on column types
+	fake := faker.New()
+	rows := make([][]any, numRows)
+
+	for i := 0; i < numRows; i++ {
+		row := make([]any, len(columns))
+		for j, col := range columns {
+			row[j] = generateFakeValue(fake, col.Type)
+		}
+		rows[i] = row
+	}
+
+	// Create dataset
+	dataset := iop.NewDataset(columns)
+	dataset.Rows = rows
+
+	// Generate DDL for table creation
+	table, err := ParseTableName(fullTableName, conn.GetType())
+	if err != nil {
+		return "", g.Error(err, "invalid table name: %s", fullTableName)
+	}
+
+	// Generate DROP TABLE statement
+	dropSQL := g.R(conn.GetTemplateValue("core.drop_table"), "table", fullTableName)
+
+	_, err = conn.Self().Exec(dropSQL)
+	if err != nil {
+		return "", g.Error(err, "failed to drop existing table %s", table.FullName())
+	}
+
+	// Generate CREATE TABLE DDL
+	createSQL, err := conn.Self().GenerateDDL(table, dataset, false)
+	if err != nil {
+		return "", g.Error(err, "failed to generate DDL")
+	}
+
+	_, err = conn.Self().Exec(createSQL)
+	if err != nil {
+		return "", g.Error(err, "failed to create table %s", table.FullName())
+	}
+
+	// Insert data using InsertBatchStream
+	_, err = conn.Self().InsertBatchStream(fullTableName, dataset.Stream())
+	if err != nil {
+		return "", g.Error(err, "failed to insert fake data")
+	}
+
+	// Return dummy query
+	query = g.F("select 'created table %s with %d columns, and inserted %d rows' as result", table.FullName(), len(columnsMap), numRows)
+
+	return query, nil
 }
