@@ -10,6 +10,7 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/flarco/g"
+	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -25,6 +26,11 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	if err != nil {
 		err = g.Error(err, "Error parsing yaml content")
 		return
+	}
+
+	// so that JMESPath works
+	if err = g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap); err != nil {
+		return spec, g.Error(err, "error loading API spec into map")
 	}
 
 	// load spec from body
@@ -57,14 +63,20 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	for _, endpointName := range spec.endpointsOrdered {
 		endpoint := spec.EndpointMap[endpointName]
 		endpoint.Name = endpointName
+
+		// get original map for endpoint
+		originalMap, err := jmespath.Search("endpoints."+endpointName, spec.originalMap)
+		if err != nil {
+			return spec, g.Error(err, "error getting endpoint spec map value: %s", endpointName)
+		} else if err = g.Unmarshal(g.Marshal(originalMap), &endpoint.originalMap); err != nil {
+			return spec, g.Error(err, "error loading endpoint spec into map: %s", endpointName)
+		}
+
 		if endpoint.State == nil {
 			endpoint.State = g.M() // set default state
 		}
 		spec.EndpointMap[endpointName] = endpoint
 	}
-
-	// so that JMESPath works
-	g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap)
 
 	// validate that all queues used by endpoints are declared
 	if err = spec.validateQueues(); err != nil {
@@ -242,6 +254,7 @@ type Endpoint struct {
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
 	bloomFilter  *bloom.BloomFilter
 	aggregate    AggregateState
+	originalMap  map[string]any
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
