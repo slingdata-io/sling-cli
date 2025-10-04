@@ -408,8 +408,8 @@ func TestAuthenticationExpiry(t *testing.T) {
 			// Create API connection
 			spec := Spec{
 				Authentication: Authentication{
-					Type:    AuthTypeBasic,
-					Expires: tt.expiresSeconds,
+					Type:     AuthTypeBasic,
+					Expires:  tt.expiresSeconds,
 					Username: "test_user",
 					Password: "test_pass",
 				},
@@ -507,7 +507,7 @@ func TestEnsureAuthenticatedConcurrency(t *testing.T) {
 	// Run multiple concurrent EnsureAuthenticated calls
 	var wg sync.WaitGroup
 	errors := make([]error, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(idx int) {
