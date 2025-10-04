@@ -1199,6 +1199,9 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 
 	// use overrides if specified
 	if overrides := stream.overrides; overrides != nil {
+		if overrides.ID != "" {
+			stream.ID = overrides.ID
+		}
 		if overrides.Mode != "" {
 			stream.Mode = overrides.Mode
 		}
@@ -1208,8 +1211,20 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		if overrides.UpdateKey != "" {
 			stream.UpdateKey = overrides.UpdateKey
 		}
-		if overrides.Transforms != nil {
-			stream.Transforms = overrides.Transforms
+		if overrides.SQL != "" {
+			stream.SQL = overrides.SQL
+		}
+		if overrides.Disabled {
+			stream.Disabled = overrides.Disabled
+		}
+		if len(overrides.Select) > 0 {
+			stream.Select = overrides.Select
+		}
+		if overrides.Where != "" {
+			stream.Where = overrides.Where
+		}
+		if overrides.Columns != nil {
+			stream.Columns = overrides.Columns
 		}
 
 		// append override hooks at end
