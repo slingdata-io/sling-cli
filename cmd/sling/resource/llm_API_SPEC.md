@@ -53,6 +53,8 @@ name: "Example API"
 description: "This API provides access to example data"
 
 # Declares queues for passing data between endpoints
+# Queues are file-backed temporary storage that operate in write-then-read mode
+# Once a queue transitions to reading mode, no more writes are allowed
 queues:
   - user_ids
 
@@ -72,8 +74,10 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
   scopes: ["read:data", "write:data"]
-  
+
   # Expiration time in seconds (for re-authentication)
+  # When set, Sling automatically re-authenticates before each request if auth has expired
+  # This is thread-safe and ensures concurrent requests don't trigger multiple auth attempts
   expires: 3600
 
 
@@ -112,12 +116,22 @@ endpoints:
   users:
     # Description of what this endpoint does
     description: "Retrieve a list of users with incremental sync"
-    
+
     # Documentation URL for this endpoint (optional)
     docs: "https://api.example.com/docs/users"
-    
+
     # Disable this endpoint (optional)
     disabled: false
+
+    # Declare dependencies on other endpoints (optional)
+    # This is automatically inferred from queue usage, but can be explicitly set
+    # Ensures execution order: dependencies run first
+    depends_on: []
+
+    # Stream-level overrides for replication configuration (optional)
+    # Used to further configure the corresponding stream in a replication
+    # Can see keys such as `mode`, `hooks`, etc.
+    overrides: {}
 
     # Initial state variables for this endpoint (merged with defaults.state)
     state:
@@ -284,7 +298,7 @@ endpoints:
       over: "queue.product_ids"
       into: "state.current_product_id"
       concurrency: 10 # Process 10 products concurrently
-    
+
     request:
       url: '{state.base_url}/products/{state.current_product_id}/inventory'
       # ... other request config ...
@@ -292,7 +306,39 @@ endpoints:
       # ... response config ...
 ```
 
-Queues are backed by temporary files and operate in a write-then-read manner within a single Sling run. An endpoint producing data writes to the queue (`output: queue.<name>`), and another endpoint consumes it (`iterate.over: queue.<name>`).
+### Queue Implementation Details
+
+Queues are backed by temporary files and operate in a **write-then-read** manner within a single Sling run:
+
+1. **Writing Phase**: An endpoint producing data writes to the queue using `output: queue.<name>` in processors
+2. **Transition**: When an endpoint starts iterating over a queue, it automatically transitions from writing to reading mode
+3. **Reading Phase**: Once in reading mode, **no more writes are allowed** to prevent data inconsistency
+4. **Cleanup**: Queue files are automatically cleaned up when the connection closes
+
+**Important Notes**:
+- All queues must be declared in the top-level `queues` array
+- Sling automatically determines execution order based on queue dependencies (producers run before consumers)
+- Attempting to write to a queue that's already in reading mode will result in an error
+
+### Special Queue Syntax
+
+You can pipe a queue directly into an endpoint's records without making HTTP requests:
+
+```yaml
+transform_queue_data:
+  description: "Process queue data without making API calls"
+  iterate:
+    over: "queue.user_ids"
+    into: "response.records"  # Special syntax: pipe directly to records
+
+  response:
+    processors:
+      # Transform the queued data
+      - expression: "upper(record)"
+        output: "record.user_id_upper"
+```
+
+When `iterate.into` is set to `"response.records"`, the queue items become the response records directly without any HTTP request being made.
 
 ## Authentication
 
@@ -406,13 +452,13 @@ Available variable scopes:
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
 - `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `{coalesce(sync.var, state.var, default_value)}`.
 - `auth`: Authentication data after successful authentication (e.g., `{auth.token}` for OAuth2 access tokens, refresh tokens stored here).
-- `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts`.
+- `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts` (number of retry attempts).
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
 - `record`: The current data record being processed by a processor (available only within `response.processors`).
-- `queue`: Access queues declared at the top level (e.g., `iterate.over: queue.my_queue`).
+- `queue`: Access queues declared at the top level (e.g., `iterate.over: queue.my_queue`). Queues must be registered in the top-level `queues` list.
 - `null`: Represents a null value (e.g., `coalesce(state.value, null)`).
 
-State variables (`state.`) within an endpoint have a defined render order. If `state.b` depends on `state.a` (`state.b: "{state.a + 1}"`), `state.a` will be evaluated first. Circular dependencies are detected and cause an error.
+State variables (`state.`) within an endpoint have a defined render order determined by a topological sort based on dependencies. If `state.b` depends on `state.a` (`state.b: "{state.a + 1}"`), `state.a` will be evaluated first. Circular dependencies are detected and cause an error at validation time. This ensures that all variable references are properly resolved before making any requests.
 
 ## Endpoints
 
@@ -578,16 +624,18 @@ response:
       # Target output location:
       # - 'record.<new_field>': Adds/updates a field in the current record.
       # - 'queue.<queue_name>': Appends the result to the named queue.
+      # - 'state.<variable>': Updates state variable (requires aggregation if processing multiple records)
       output: "record.created_at_dt"
 
     - # Example using aggregation
       expression: "record.amount"
-      # Control whether processor is evaluated with IF condition
+      # Optional: Control whether processor is evaluated with IF condition
+      # If the condition evaluates to false, this processor is skipped for the current record
       if: record.amount != nil
       # Target output for aggregation must be 'state.<variable>'
       output: "state.total_amount"
       # Aggregation type: maximum, minimum, flatten, first, last (default: none)
-      aggregation: "sum" # Note: 'sum' is not explicitly listed but implied by common need. Check functions.go
+      aggregation: "maximum"
 
   rules:
     # Define actions based on response conditions (status code, headers, body).
@@ -618,15 +666,21 @@ response:
     #   condition: "response.status == 404" # Ignore 404s
 ```
 
-**Deduplication:** If `primary_key` is defined, Sling automatically tracks seen keys within the current run and skips duplicate records. For very large datasets where storing all keys in memory is infeasible, specifying `duplicate_tolerance` activates a Bloom filter for probabilistic deduplication.
+**Deduplication:** If `primary_key` is defined, Sling automatically tracks seen keys within the current run and skips duplicate records:
+- **Default behavior**: Uses an in-memory map to track all unique keys (guarantees 100% accuracy)
+- **Large datasets**: When `duplicate_tolerance` is specified (format: `"estimated_items,false_positive_rate"`), Sling uses a Bloom filter for probabilistic deduplication. This uses significantly less memory but has a small chance of false positives (incorrectly marking unique records as duplicates)
+- **When to use Bloom filter**: Use when expecting millions of records and memory is a constraint. Example: `duplicate_tolerance: "10000000,0.001"` for ~10M records with 0.1% false positive rate
 
-**Rules & Retries:** Sling automatically handles rate limiting:
-- When `response.status == 429` and the action is `retry`, it checks for standard rate limit headers:
-  - `RateLimit-Reset`: Direct seconds to wait before retrying
-  - `Retry-After`: HTTP standard header for retry delays
-  - `RateLimit-Policy` with `RateLimit-Remaining`: IETF draft format for complex rate limiting
-- If rate limit headers are present, they override the configured backoff strategy
-- Otherwise, it falls back to the configured `backoff` strategy (constant, linear, exponential, jitter)
+**Rules & Retries:** Sling automatically handles rate limiting with intelligent header parsing:
+
+When `response.status == 429` and the action is `retry`, Sling checks for standard rate limit headers in this priority order:
+1. **`RateLimit-Reset`**: Seconds to wait before retrying (most direct)
+2. **`Retry-After`**: Standard HTTP header for retry delays (seconds or HTTP date)
+3. **`RateLimit-Policy`** with **`RateLimit-Remaining`**: IETF draft format for complex rate limiting
+   - Parses policy windows and calculates proportional wait time based on remaining quota
+   - Example: `RateLimit-Policy: 100;w=60` with `RateLimit-Remaining: 10` → wait ~54 seconds
+
+If any rate limit headers are found, they **override** the configured backoff strategy. Otherwise, Sling falls back to the configured `backoff` strategy (constant, linear, exponential, jitter).
 
 ## Sync State for Incremental Loads
 
@@ -673,7 +727,20 @@ endpoints:
 
 ## Dynamic Endpoints
 
-For APIs where endpoints need to be generated dynamically (e.g., based on API discovery), you can use dynamic endpoints:
+**Status**: This feature is partially implemented and not yet fully available.
+
+For APIs where endpoints need to be generated dynamically (e.g., based on API discovery), you can use dynamic endpoints. This is useful when:
+- The API provides a catalog/discovery endpoint that lists available data sources
+- Endpoints are tenant-specific or user-specific
+- The list of available endpoints changes frequently
+
+**Planned workflow**:
+1. Authentication occurs first
+2. Setup sequence runs to discover available endpoints
+3. For each discovered endpoint, a new endpoint is created with the specified configuration
+4. All generated endpoints are added to the spec and executed
+
+**Example structure** (when fully implemented):
 
 ```yaml
 name: "Dynamic API"
@@ -706,16 +773,18 @@ dynamic_endpoints:
 
       state:
         endpoint_path: "{state.object.path}"
-      
+
       request:
         url: "{state.base_url}{state.endpoint_path}"
         method: "GET"
-      
+
       response:
         records:
           jmespath: "data[]"
           primary_key: ["id"]
 ```
+
+**Current workaround**: Use static endpoint definitions with `iterate` over a discovery queue to achieve similar functionality.
 
 ## Template for New API Specs
 
