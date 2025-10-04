@@ -223,8 +223,9 @@ endpoints:
           output: "state.last_updated" # Target: state.<variable_name>
           aggregation: "maximum"
 
-        # Example 3: Send user IDs to a queue for another endpoint to process
+        # Example 3: Send user IDs to a queue for another endpoint to process, only when IF condition is met
         - expression: "record.id"
+          if: record.country == "United States"  # optional if condition
           output: "queue.user_ids" # Target: queue.<queue_name>
 
       # Endpoint-specific rules (merged with defaults.response.rules)
@@ -573,7 +574,7 @@ response:
   processors:
     # Applied to each record extracted by jmespath.
     - # Expression to evaluate. Can access 'record', 'state', 'response', etc.
-      expression: "date_parse(record.created_ts, 'auto')"
+      expression: date_parse(record.created_ts, "auto")
       # Target output location:
       # - 'record.<new_field>': Adds/updates a field in the current record.
       # - 'queue.<queue_name>': Appends the result to the named queue.
@@ -581,6 +582,8 @@ response:
 
     - # Example using aggregation
       expression: "record.amount"
+      # Control whether processor is evaluated with IF condition
+      if: record.amount != nil
       # Target output for aggregation must be 'state.<variable>'
       output: "state.total_amount"
       # Aggregation type: maximum, minimum, flatten, first, last (default: none)
