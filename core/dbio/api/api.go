@@ -362,6 +362,8 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]an
 		for _, syncKey := range endpoint.Sync {
 			if val, ok := endpoint.State[syncKey]; ok {
 				data[syncKey] = val
+			} else {
+				ac.Context.Warn("did not find an endpoint state value to sync for key: %s", syncKey)
 			}
 		}
 		endpoint.context.Unlock()
