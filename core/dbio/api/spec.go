@@ -62,7 +62,6 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	// set endpoint index
 	for _, endpointName := range spec.endpointsOrdered {
 		endpoint := spec.EndpointMap[endpointName]
-		endpoint.Name = endpointName
 
 		// get original map for endpoint
 		originalMap, err := jmespath.Search("endpoints."+endpointName, spec.originalMap)
@@ -72,15 +71,32 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 			return spec, g.Error(err, "error loading endpoint spec into map: %s", endpointName)
 		}
 
+		endpoint.Name = endpointName
+		endpoint.originalMap["name"] = endpointName
+
 		if endpoint.State == nil {
 			endpoint.State = g.M() // set default state
 		}
 		spec.EndpointMap[endpointName] = endpoint
 	}
 
+	// compile and validate endpoints
+	compiledEndpointMap := EndpointMap{}
+	for name, endpoint := range spec.EndpointMap {
+		if err = validateAndSetDefaults(&endpoint, spec); err != nil {
+			return spec, g.Error(err, "endpoint validation failed")
+		}
+		compiledEndpointMap[name] = endpoint
+	}
+
 	// validate that all queues used by endpoints are declared
-	if err = spec.validateQueues(); err != nil {
+	if err = spec.validateQueues(compiledEndpointMap); err != nil {
 		return spec, g.Error(err, "queue validation failed")
+	}
+
+	// validate that all sync keys have corresponding processors
+	if err = spec.validateSync(compiledEndpointMap); err != nil {
+		return spec, g.Error(err, "sync validation failed")
 	}
 
 	return
@@ -105,7 +121,7 @@ func (s *Spec) IsDynamic() bool {
 }
 
 // validateQueues checks that all queues used by endpoints are declared at the Spec level
-func (s *Spec) validateQueues() error {
+func (s *Spec) validateQueues(endpointMap EndpointMap) error {
 	// Create a set of declared queues for fast lookup
 	declaredQueues := make(map[string]bool)
 	for _, queue := range s.Queues {
@@ -115,7 +131,7 @@ func (s *Spec) validateQueues() error {
 	usedQueues := make(map[string][]string) // map[queueName][]endpointNames
 
 	// Check all endpoints for queue usage
-	for endpointName, endpoint := range s.EndpointMap {
+	for endpointName, endpoint := range endpointMap {
 		// Check if endpoint iterates over a queue
 		if iterateOver, ok := endpoint.Iterate.Over.(string); ok {
 			if strings.HasPrefix(iterateOver, "queue.") {
@@ -144,6 +160,51 @@ func (s *Spec) validateQueues() error {
 	if len(undeclaredQueues) > 0 {
 		sort.Strings(undeclaredQueues)
 		return g.Error("undeclared queue(s) found:\n  - %s\n\nPlease declare them in the 'queues' section at the spec level", strings.Join(undeclaredQueues, "\n  - "))
+	}
+
+	return nil
+}
+
+// validateSync checks that all sync keys have corresponding processors that write to state
+func (s *Spec) validateSync(endpointMap EndpointMap) error {
+	var validationErrors []string
+
+	// Check all endpoints for sync usage
+	for endpointName, endpoint := range endpointMap {
+		if len(endpoint.Sync) == 0 {
+			continue
+		}
+
+		// Build a set of state keys written by processors
+		stateKeysWritten := make(map[string]bool)
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "state.") {
+				stateKey := strings.TrimPrefix(processor.Output, "state.")
+				stateKeysWritten[stateKey] = true
+			}
+		}
+
+		// Check that each sync key has a corresponding processor
+		var missingSyncKeys []string
+		for _, syncKey := range endpoint.Sync {
+			if !stateKeysWritten[syncKey] {
+				missingSyncKeys = append(missingSyncKeys, syncKey)
+			}
+		}
+
+		if len(missingSyncKeys) > 0 {
+			sort.Strings(missingSyncKeys)
+			validationErrors = append(validationErrors,
+				g.F("endpoint '%s' declares sync key(s) [%s] but has no processor writing to state.%s",
+					endpointName,
+					strings.Join(missingSyncKeys, ", "),
+					strings.Join(missingSyncKeys, ", state.")))
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		sort.Strings(validationErrors)
+		return g.Error("sync validation failed:\n  - %s", strings.Join(validationErrors, "\n  - "))
 	}
 
 	return nil
