@@ -388,26 +388,13 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 								s.PrimaryKeyI = endpoint.Response.Records.PrimaryKey
 							}
 
+							if s.Description == "" {
+								s.Description = endpoint.Description
+							}
+
 							// set overrides
 							if endpoint.Overrides != nil {
-								if overrides.Mode != "" {
-									s.Mode = overrides.Mode
-								}
-								if overrides.PrimaryKeyI != nil {
-									s.PrimaryKeyI = overrides.PrimaryKeyI
-								}
-								if overrides.UpdateKey != "" {
-									s.UpdateKey = overrides.UpdateKey
-								}
-								if overrides.Transforms != nil {
-									s.Transforms = overrides.Transforms
-								}
-
-								// append override hooks at end
-								s.Hooks.Pre = append(s.Hooks.Pre, overrides.Hooks.Pre...)
-								s.Hooks.Post = append(s.Hooks.Post, overrides.Hooks.Post...)
-								s.Hooks.PreMerge = append(s.Hooks.PreMerge, overrides.Hooks.PreMerge...)
-								s.Hooks.PostMerge = append(s.Hooks.PostMerge, overrides.Hooks.PostMerge...)
+								s.overrides = &overrides
 							}
 						}
 
@@ -812,6 +799,7 @@ func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig)
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg)       // copy config over
 	newCfg.dependsOn = g.PtrVal(cfg).dependsOn // set dependsOn since not marshalled
+	newCfg.overrides = g.PtrVal(cfg).overrides // set overrides since not marshalled
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 
@@ -1181,8 +1169,9 @@ type ReplicationStreamConfig struct {
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Hooks         HookMap        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 
-	replication *ReplicationConfig `json:"-" yaml:"-"`
-	dependsOn   []string           `json:"-" yaml:"-"`
+	overrides   *ReplicationStreamConfig `json:"-" yaml:"-"`
+	replication *ReplicationConfig       `json:"-" yaml:"-"`
+	dependsOn   []string                 `json:"-" yaml:"-"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -1207,6 +1196,29 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 }
 
 func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string) (cfg Config, err error) {
+
+	// use overrides if specified
+	if overrides := stream.overrides; overrides != nil {
+		if overrides.Mode != "" {
+			stream.Mode = overrides.Mode
+		}
+		if overrides.PrimaryKeyI != nil {
+			stream.PrimaryKeyI = overrides.PrimaryKeyI
+		}
+		if overrides.UpdateKey != "" {
+			stream.UpdateKey = overrides.UpdateKey
+		}
+		if overrides.Transforms != nil {
+			stream.Transforms = overrides.Transforms
+		}
+
+		// append override hooks at end
+		stream.Hooks.Pre = append(stream.Hooks.Pre, overrides.Hooks.Pre...)
+		stream.Hooks.Post = append(stream.Hooks.Post, overrides.Hooks.Post...)
+		stream.Hooks.PreMerge = append(stream.Hooks.PreMerge, overrides.Hooks.PreMerge...)
+		stream.Hooks.PostMerge = append(stream.Hooks.PostMerge, overrides.Hooks.PostMerge...)
+	}
+
 	cfg = Config{
 		Source: Source{
 			Conn:        rd.Source,
