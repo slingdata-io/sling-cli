@@ -536,11 +536,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Debug("skipping stream %s since it is disabled", cfg.StreamName)
 			continue
 		} else if streamCnt == 1 {
-			g.Info("Sling Replication | %s -> %s | %s", replication.Source, replication.Target, cfg.StreamName)
+			g.Info("Sling Replication | %s -> %s | %s", replication.Source, replication.Target, env.BlueString(cfg.StreamName))
 		} else {
 			println()
 			counter++
-			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
+			g.Info("[%d / %d] running stream %s", counter, streamCnt, env.BlueString(cfg.StreamName))
 		}
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
