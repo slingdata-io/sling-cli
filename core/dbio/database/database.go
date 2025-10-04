@@ -2571,11 +2571,12 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 type MergeStrategy string
 
 const (
-	MergeStrategyNone         MergeStrategy = ""
-	MergeStrategyInsert       MergeStrategy = "insert"
-	MergeStrategyUpdate       MergeStrategy = "update"
-	MergeStrategyUpdateInsert MergeStrategy = "update_insert"
-	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
+	MergeStrategyNone          MergeStrategy = ""
+	MergeStrategyInsert        MergeStrategy = "insert"
+	MergeStrategyUpdate        MergeStrategy = "update"
+	MergeStrategyUpdateInsert  MergeStrategy = "update_insert"
+	MergeStrategyDeleteInsert  MergeStrategy = "delete_insert"
+	MergeStrategyHistoryInsert MergeStrategy = "history_insert"
 )
 
 // Merge inserts / updates from a srcTable into a target table.

@@ -469,7 +469,7 @@ func Merge(conn Connection, tx Transaction, sourceTable, targetTable string, pkF
 
 	q, err := conn.Self().GenerateMergeSQL(srcTable.FullName(), tgtTable.FullName(), pkFields)
 	if err != nil {
-		err = g.Error(err, "could not generate upsert sql")
+		err = g.Error(err, "could not generate merge sql")
 		return
 	}
 
@@ -640,8 +640,41 @@ const (
 // based on a template. This should be connection agnostic.
 func QueryOperation(conn Connection, operation Operation, params map[string]any) (query string, err error) {
 
+	var eG g.ErrorGroup
+
+	getStringOrErr := func(key string) string {
+		value := cast.ToString(params[key])
+		if value == "" {
+			eG.Add(g.Error("missing %s input", key))
+		}
+		return value
+	}
+
+	getStringSliceOrErr := func(key string) []string {
+		value := cast.ToStringSlice(params[key])
+		if len(value) == 0 {
+			eG.Add(g.Error("missing %s input", key))
+		}
+		return value
+	}
+
 	switch operation {
 	case OperationMerge:
+		srcTable := getStringOrErr("source_table")
+		tgtTable := getStringOrErr("target_table")
+		// strategy := getStringOrErr("strategy") // TODO: add strategy
+		primaryKey := getStringSliceOrErr("primary_key")
+
+		if err = eG.Err(); err != nil {
+			return
+		}
+
+		query, err = conn.Self().GenerateMergeSQL(srcTable, tgtTable, primaryKey)
+		if err != nil {
+			err = g.Error(err, "could not generate merge sql")
+			return
+		}
+
 	case OperationDropTable:
 		table, err := ParseTableName(cast.ToString(params["table"]), conn.GetType())
 		if err != nil {
@@ -654,20 +687,20 @@ func QueryOperation(conn Connection, operation Operation, params map[string]any)
 		if err != nil {
 			return "", g.Error(err, "invalid table name: %s", params["table"])
 		}
-		index := cast.ToString(params["index"])
-		if index == "" {
-			return "", g.Error(err, "missing index input")
+		index := getStringOrErr("index")
+		columns := getStringSliceOrErr("columns")
+
+		if err = eG.Err(); err != nil {
+			return "", err
 		}
-		columns := cast.ToStringSlice(params["columns"])
-		if len(columns) == 0 {
-			return "", g.Error(err, "missing columns input")
-		}
-		inputs := g.M("index", params["index"], "table", table.FullName(), "cols", strings.Join(columns, ", "))
+
+		inputs := g.M("index", index, "table", table.FullName(), "cols", strings.Join(columns, ", "))
 		query = g.Rm(conn.GetTemplateValue("core.create_index"), inputs)
 
 	case OperationGenerateData:
 		query, err = generateDataOperation(conn, params)
 	}
+
 	return
 }
 
