@@ -258,6 +258,25 @@ func (c *Connection) URL() string {
 			url = "gdrive://"
 		case dbio.TypeFileAzure:
 			url = g.F("https://%s.blob.core.windows.net/%s", c.Data["account"], c.Data["container"])
+		case dbio.TypeFileAzureABFS:
+			filesystem := c.Data["filesystem"]
+			parent := c.Data["parent"]
+			if filesystem == "" {
+				filesystem = c.Data["container"] // fallback for compatibility
+			}
+			// Check if custom endpoint is provided or if account contains full domain
+			if endpoint := c.Data["endpoint"]; endpoint != "" {
+				url = g.F("https://%s/%s", endpoint, filesystem)
+			} else if account := cast.ToString(c.Data["account"]); strings.Contains(account, ".") {
+				// Account already contains full domain (e.g., onelake.dfs.fabric.microsoft.com)
+				url = g.F("https://%s/%s", account, filesystem)
+			} else {
+				// Standard Azure Storage account
+				url = g.F("https://%s.dfs.core.windows.net/%s", c.Data["account"], filesystem)
+			}
+			if parent != "" {
+				url = g.F("%s/%s", url, parent)
+			}
 		}
 	}
 
@@ -536,6 +555,41 @@ func (c *Connection) setURL() (err error) {
 			account = strings.ReplaceAll(account, ".dfs.core.windows.net", "")
 			setIfMissing("account", account)
 			setIfMissing("container", strings.ReplaceAll(U.U.Path, "/", ""))
+		}
+		if c.Type == dbio.TypeFileAzureABFS {
+			switch {
+			case strings.HasPrefix(c.URL(), "http"):
+				account := strings.ReplaceAll(U.U.Host, ".dfs.core.windows.net", "")
+				account = strings.ReplaceAll(account, ".dfs.fabric.microsoft.com", "")
+				setIfMissing("account", account)
+				// Store the full endpoint if it's not standard Azure
+				if strings.Contains(U.U.Host, ".dfs.fabric.microsoft.com") {
+					setIfMissing("endpoint", U.U.Host)
+				}
+				// Extract filesystem (first path segment only)
+				pathParts := strings.Split(strings.TrimPrefix(U.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					setIfMissing("filesystem", pathParts[0])
+				}
+				if len(pathParts) > 1 {
+					setIfMissing("parent", pathParts[1])
+				}
+			case strings.HasPrefix(c.URL(), "abfs"):
+				account := strings.ReplaceAll(U.U.Host, ".dfs.core.windows.net", "")
+				account = strings.ReplaceAll(account, ".dfs.fabric.microsoft.com", "")
+				setIfMissing("account", account)
+
+				// Store the full endpoint if it's not standard Azure
+				if strings.Contains(U.U.Host, ".dfs.fabric.microsoft.com") {
+					setIfMissing("endpoint", U.U.Host)
+				}
+
+				setIfMissing("filesystem", U.Username())
+				pathParts := strings.Split(strings.TrimPrefix(U.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					setIfMissing("parent", pathParts[0])
+				}
+			}
 		}
 	}
 
@@ -898,7 +952,7 @@ func (c *Connection) setURL() (err error) {
 		if path := cast.ToString(c.Data["path"]); path != "" {
 			template = template + path
 		}
-	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure,
+	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure, dbio.TypeFileAzureABFS,
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
@@ -994,7 +1048,7 @@ func CopyDirect(conn database.Connection, tableFName string, srcFile Connection)
 		if err != nil {
 			err = g.Error(err, "could not load into database from S3")
 		}
-	case dbio.TypeFileAzure:
+	case dbio.TypeFileAzure, dbio.TypeFileAzureABFS:
 		ok = true
 		err = database.CopyFromAzure(conn, tableFName, srcFile.URL())
 		if err != nil {

@@ -51,6 +51,7 @@ type connTest struct {
 
 var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbAzure:             {name: "azuresql"},
+	dbio.TypeDbFabric:            {name: "fabric"},
 	dbio.TypeDbAzureDWH:          {name: "azuredwh"},
 	dbio.TypeDbBigQuery:          {name: "bigquery"},
 	dbio.TypeDbBigTable:          {name: "bigtable"},
@@ -92,6 +93,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeFileGoogle:      {name: "google_storage"},
 	dbio.TypeFileGoogleDrive: {name: "google_drive"},
 	dbio.TypeFileFtp:         {name: "ftp_test_url"},
+	dbio.TypeFileAzureABFS:   {name: "fabric_lake"},
 }
 
 func init() {
@@ -1566,4 +1568,10 @@ func TestSuiteFileSftp(t *testing.T) {
 func TestSuiteFileFtp(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileFtp)
+}
+
+func TestSuiteFileAzureABFS(t *testing.T) {
+	t.Skip()
+	t.Parallel()
+	testSuite(t, dbio.TypeFileAzureABFS)
 }

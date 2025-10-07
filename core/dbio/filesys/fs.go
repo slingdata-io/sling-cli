@@ -95,6 +95,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 	// 	fsClient = fsClient
 	case dbio.TypeFileAzure:
 		fsClient = &AzureFileSysClient{}
+	case dbio.TypeFileAzureABFS:
+		fsClient = &ABFSFileSysClient{}
 	case dbio.TypeFileGoogle:
 		fsClient = &GoogleFileSysClient{}
 	case dbio.TypeFileGoogleDrive:
@@ -164,7 +166,11 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "gdrive://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileGoogleDrive, props...)
-	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
+	case strings.HasPrefix(url, "abfs://") || strings.HasPrefix(url, "abfss://"):
+		return NewFileSysClientContext(ctx, dbio.TypeFileAzureABFS, props...)
+	case strings.Contains(url, ".dfs.core.windows.net"), strings.Contains(url, ".dfs.fabric.microsoft.com"):
+		return NewFileSysClientContext(ctx, dbio.TypeFileAzureABFS, props...)
+	case strings.Contains(url, ".blob.core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
@@ -245,8 +251,30 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
-	// case dbio.TypeFileGoogleDrive:
-	// 	return fs.Prefix() + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	case dbio.TypeFileAzureABFS, dbio.Type("abfss"):
+		if strings.HasPrefix(uri, "abfs") {
+			path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
+			u, err := net.NewURL(uri)
+			if err == nil {
+				path = strings.TrimPrefix(uri, u.U.Scheme+"://")
+				path = strings.TrimPrefix(path, u.U.User.Username())
+				path = strings.TrimPrefix(path, ":")
+				password, _ := u.U.User.Password()
+				path = strings.TrimPrefix(path, url.QueryEscape(password))
+				path = strings.TrimPrefix(path, "@")
+				path = strings.TrimPrefix(path, u.U.Host)
+				path = strings.TrimPrefix(path, "/")
+
+				// remove parent (lakehouse GUID)
+				pathParts := strings.Split(strings.TrimPrefix(u.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					path = strings.TrimPrefix(path, pathParts[0])
+					path = strings.TrimPrefix(path, "/")
+				}
+			}
+			return fs.Prefix("/") + path
+		}
+		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}
@@ -267,6 +295,12 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
+	case dbio.TypeFileAzureABFS:
+		pathArr := strings.Split(path, "/")
+		pathWorkspace := pathArr[0]
+		pathParent := pathArr[1] + "/Files"
+		path = strings.TrimPrefix(path, pathWorkspace+"/") // remove workspace
+		path = strings.TrimPrefix(path, pathParent+"/")    // remove parent
 	}
 
 	gc, err := glob.Compile(path)
