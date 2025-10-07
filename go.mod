@@ -81,6 +81,7 @@ require (
 	github.com/timeplus-io/proton-go-driver/v2 v2.0.19
 	github.com/trinodb/trino-go-client v0.328.0
 	github.com/xo/dburl v0.3.0
+	github.com/xuri/excelize/v2 v2.9.1
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	go.mongodb.org/mongo-driver v1.14.0
 	golang.org/x/crypto v0.39.0

@@ -9,13 +9,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/360EntSecGroup-Skylar/excelize"
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
+	"github.com/xuri/excelize/v2"
 )
 
 func NewExcelDataset(reader io.Reader, props map[string]string) (data Dataset, err error) {
-	xls, err := NewExcelFromReader(reader)
+	options := excelize.Options{
+		Password:         props["password"],
+		ShortDatePattern: props["short_date_pattern"],
+		LongDatePattern:  props["long_date_pattern"],
+		LongTimePattern:  props["long_time_pattern"],
+	}
+	xls, err := NewExcelFromReader(reader, options)
 	if err != nil {
 		err = g.Error(err, "Unable to open Excel File from reader")
 		return data, err
@@ -87,8 +93,8 @@ func NewExcelFromFile(path string) (xls *Excel, err error) {
 }
 
 // NewExcelFromReader return a new Excel instance from a reader
-func NewExcelFromReader(reader io.Reader) (xls *Excel, err error) {
-	f, err := excelize.OpenReader(reader)
+func NewExcelFromReader(reader io.Reader, opts ...excelize.Options) (xls *Excel, err error) {
+	f, err := excelize.OpenReader(reader, opts...)
 	if err != nil {
 		err = g.Error(err, "Unable to open reader")
 		return
@@ -128,7 +134,8 @@ func (xls *Excel) RefreshSheets() (err error) {
 
 // GetDataset returns a dataset of the provided sheet
 func (xls *Excel) GetDataset(sheet string) (data Dataset) {
-	return xls.makeDatasetAuto(xls.File.GetRows(sheet))
+	rows, _ := xls.File.GetRows(sheet)
+	return xls.makeDatasetAuto(rows)
 }
 
 // GetDatasetFromRange returns a dataset of the provided sheet / range
@@ -147,12 +154,15 @@ func (xls *Excel) GetDatasetFromRange(sheet, cellRange string) (data Dataset, er
 
 	RangeStartCol := regexAlpha.ReplaceAllString(rangeArr[0], "")
 	RangeEndCol := regexAlpha.ReplaceAllString(rangeArr[1], "")
-	colStart := excelize.TitleToNumber(RangeStartCol)
-	colEnd := excelize.TitleToNumber(RangeEndCol)
+	colStart := xls.TitleToNumber(RangeStartCol)
+	colEnd := xls.TitleToNumber(RangeEndCol)
 	rowStart := cast.ToInt(regexNum.ReplaceAllString(rangeArr[0], "")) - 1
 	rowEnd := cast.ToInt(regexNum.ReplaceAllString(rangeArr[1], "")) - 1
 
-	allRows := xls.File.GetRows(sheet)
+	allRows, err := xls.File.GetRows(sheet)
+	if err != nil {
+		return data, g.Error(err, "could not get rows")
+	}
 
 	if rowStart == -1 {
 		rowStart = 0
@@ -235,6 +245,26 @@ func (xls *Excel) createSheet(shtName string) (newShtName string) {
 	return
 }
 
+// TitleToNumber provides a function to convert Excel sheet column title to
+// int (this function doesn't do value check currently). For example convert
+// AK and ak to column title 36:
+//
+//	excelize.TitleToNumber("AK")
+//	excelize.TitleToNumber("ak")
+func (xls *Excel) TitleToNumber(s string) int {
+	weight := 0.0
+	sum := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		ch := int(s[i])
+		if int(s[i]) >= int('a') && int(s[i]) <= int('z') {
+			ch = int(s[i]) - 32
+		}
+		sum = sum + (ch-int('A')+1)*int(math.Pow(26, weight))
+		weight++
+	}
+	return sum - 1
+}
+
 // WriteSheet write a datastream into a sheet
 // mode can be: `new`, `append` or `overwrite`. Default is `new`
 func (xls *Excel) WriteSheet(shtName string, ds *Datastream, mode string) (err error) {
@@ -247,7 +277,10 @@ func (xls *Excel) WriteSheet(shtName string, ds *Datastream, mode string) (err e
 	rows := [][]string{}
 	_, shtExists := xls.sheetIndex[shtName]
 	if shtExists {
-		rows = xls.File.GetRows(shtName)
+		rows, err = xls.File.GetRows(shtName)
+		if err != nil {
+			return g.Error(err, "could not get rows")
+		}
 	} else {
 		shtName = xls.createSheet(shtName)
 	}
