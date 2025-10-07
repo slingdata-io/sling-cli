@@ -153,6 +153,11 @@ func NewDuckDbSecret(name string, secretType DuckDbSecretType, props map[string]
 		secret.Props[strings.ToLower(k)] = cast.ToString(v)
 	}
 
+	// add VALIDATION=none for S3 secrets to not validate
+	if secretType == DuckDbSecretTypeS3 {
+		secret.Props["validation"] = "none"
+	}
+
 	return secret
 }
 
