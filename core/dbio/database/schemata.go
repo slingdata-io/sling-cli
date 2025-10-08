@@ -30,7 +30,8 @@ type Table struct {
 
 	Raw string `json:"raw"`
 
-	limit, offset int
+	limit  *int
+	offset int
 }
 
 type Chunk struct {
@@ -212,7 +213,7 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 type SelectOptions struct {
 	Fields []string
 	Offset int
-	Limit  int
+	Limit  *int
 	Where  string
 }
 
@@ -222,7 +223,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		opts = Opts[0]
 	}
 	// set to internal value if not specified
-	limit := lo.Ternary(opts.Limit == 0, t.limit, opts.Limit)
+	limit := lo.Ternary(opts.Limit == nil, t.limit, opts.Limit)
 	offset := lo.Ternary(opts.Offset == 0, t.offset, opts.Offset)
 	fields := opts.Fields
 
@@ -252,7 +253,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			})
 		}
 
-		if opts.Limit > 0 {
+		if opts.Limit != nil {
 			m["limit"] = opts.Limit
 		}
 
@@ -345,7 +346,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		}
 	}
 
-	if limit > 0 && !strings.Contains(sql, "{limit}") {
+	if limit != nil && !strings.Contains(sql, "{limit}") {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {

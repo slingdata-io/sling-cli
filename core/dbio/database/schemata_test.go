@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/stretchr/testify/assert"
 )
@@ -102,7 +103,7 @@ func TestRegexMatch(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	sql := table.Select(SelectOptions{Limit: 10})
+	sql := table.Select(SelectOptions{Limit: g.Ptr(10)})
 	assert.True(t, strings.HasPrefix(sql, `with () select id`), sql)
 }
 

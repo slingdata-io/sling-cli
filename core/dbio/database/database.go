@@ -1523,7 +1523,14 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(SelectOptions{Limit: 1})
+	limit := 1
+
+	// we can use limit=0 for certain databases
+	if g.In(conn.GetType(), dbio.TypeDbPostgres, dbio.TypeDbRedshift, dbio.TypeDbClickhouse, dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbBigQuery, dbio.TypeDbStarRocks, dbio.TypeDbSnowflake, dbio.TypeDbOracle) || conn.GetType().IsSQLServer() {
+		limit = 0
+	}
+
+	limitSQL := table.Select(SelectOptions{Limit: g.Ptr(limit)})
 	if table.IsProcedural() {
 		limitSQL = table.Raw // don't wrap in limit
 	}
@@ -1531,7 +1538,7 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
-	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", 1))
+	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", limit))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}

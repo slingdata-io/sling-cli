@@ -174,7 +174,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 		// if it is limited, create temp table first, unload and drop
 		matched, _ := regexp.MatchString(`limit\s+\d+`, strings.ToLower(table.Select()))
-		if matched || table.limit > 0 {
+		if matched || table.limit != nil {
 			// create temp table
 			tempTable := table.Clone()
 			tempTable.Name = fmt.Sprintf("temp_unload_%d", time.Now().UnixNano())

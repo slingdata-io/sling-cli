@@ -215,7 +215,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 		sTable.SQL = sTable.Select(database.SelectOptions{
 			Fields: selectFields,
 			Where:  cfg.Source.Where,
-			Limit:  cfg.Source.Limit(),
+			Limit:  lo.Ternary(cfg.Source.Limit() > 0, g.Ptr(cfg.Source.Limit()), nil),
 			Offset: cfg.Source.Offset(),
 		})
 	}
