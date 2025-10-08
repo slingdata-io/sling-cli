@@ -209,9 +209,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		return
 	}
 
-	templateFilePath := "tests/suite.db.template.tsv"
+	templateFilePath := "tests/suite.db.template.yaml"
 	if connType.IsFile() {
-		templateFilePath = "tests/suite.file.template.tsv"
+		templateFilePath = "tests/suite.file.template.yaml"
 	}
 
 	tempFilePath := g.F("/tmp/tests.%s.tsv", connType.String())
@@ -246,22 +246,18 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	err = os.WriteFile(tempFilePath, []byte(fileContent), 0777)
 	g.LogFatal(err)
 
-	data, err := iop.ReadCsv(tempFilePath)
+	// Read YAML and unmarshal into slice of maps
+	var data []map[string]any
+	fileBytes, err := os.ReadFile(tempFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+	err = yaml.Unmarshal(fileBytes, &data)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	// rewrite correctly for displaying in Github
-	testMux.Lock()
-	dataT, err := iop.ReadCsv(templateFilePath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-	c := iop.CSV{Path: templateFilePath, Delimiter: "\t"}
-	c.WriteStream(dataT.Stream())
-	testMux.Unlock()
-
-	for i, rec := range data.Records() {
+	for i, rec := range data {
 		testName := cast.ToString(rec["test_name"])
 		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))

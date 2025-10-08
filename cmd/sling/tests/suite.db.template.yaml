@@ -1,0 +1,349 @@
+- n: "1"
+  test_name: csv_full_refresh
+  source_conn: local
+  source_stream: file://tests/files/test1.csv
+  source_options: '{"columns": {"first_name": "string(100)", "update_dt": "timestampz", "email": "string(150)"}, "transforms": [{"update_dt":"date_timezone(value, \"America/New_York\")"}]}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]"
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true, "pre_sql" : "{drop_view}", "table_keys": { "unique": [ "id" ], "index": [ "code" ] }}'
+  env: '{"validation_row_count": "1000", "validation_types": {"code":"decimal","create_dt":"timestamp","date":"date","rating":"decimal","target":"bool","update_dt":"timestampz"}}'
+
+- n: "2"
+  test_name: csv_full_refresh_delimiter
+  source_conn: local
+  source_stream: file://tests/files/test5.csv
+  source_options: '{"delimiter": ";"}'
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_2"
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"post_sql" : "{drop_view}"}'
+  env: '{"validation_row_count": ">0"}'
+
+- n: "3"
+  test_name: discover_table
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].[table]"
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"validation_contains": "create_dt", "validation_row_count": "11", "level": "column"}'
+
+- n: "4"
+  test_name: parquet_snapshot
+  source_conn: local
+  source_stream: file://tests/files/test1.parquet
+  source_options: '{"columns": {"date": "date"}}'
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_snapshot"
+  mode: snapshot
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"post_sql" : "drop table [schema].[table]_2"}'
+  env: '{"validation_row_count": ">999", "validation_types": {"code":"decimal","create_dt":"timestampz","date":"date","rating":"decimal","target":"bool"}}'
+
+- n: "5"
+  test_name: parquet_truncate
+  source_conn: local
+  source_stream: file://tests/files/test1.parquet
+  source_options: '{"columns": {"rating": "float"}}'
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_truncate"
+  mode: truncate
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"pre_sql": "drop table [schema].[table]_snapshot ", "post_sql" : "drop table [schema].[table]_truncate"}'
+  env: ""
+
+- n: "6"
+  test_name: csv_wide_full_refresh
+  source_conn: local
+  source_stream: file://tests/files/test.wide.csv
+  source_options: '{"limit": 90}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_wide"
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": false, "table_keys": { "unique": [ "id" ] }}'
+  env: '{"validation_row_count": "90"}'
+
+- n: "7"
+  test_name: table_full_refresh_into_postgres
+  source_conn: "[conn]"
+  source_stream: "[schema].[table]"
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_row_count": ">900", "validation_types": {"code":"decimal","create_dt":"timestamp","date":"date","rating":"decimal","target":"bool","update_dt":"timestampz"}}'
+
+- n: "8"
+  test_name: table_full_refresh_into_postgres_orig
+  source_conn: "[conn]"
+  source_stream: "[schema].[table]"
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg_orig
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: ""
+
+- n: "9"
+  test_name: csv_incremental
+  source_conn: local
+  source_stream: file://tests/files/test1.upsert.csv
+  source_options: '{"columns": {"first_name": "string(100)", "email": "string(150)"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true, "table_keys": { "primary": [ "id" ] }, "post_sql" : "create view [schema].[table]_vw as select * from [schema].[table]"}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", "validation_row_count": ">0", "validation_stream_row_count": 14, "validation_types": {"code":"decimal","create_dt":"timestamp","date":"date","rating":"decimal","target":"bool","update_dt":"timestampz", "json_data":"json"}}'
+
+- n: "10"
+  test_name: discover_schema
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].*"
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"validation_contains": "[table],[table]_wide,[table]_vw", "level": "table"}'
+
+- n: "11"
+  test_name: discover_filter
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_v*"
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"validation_contains": "[table]_vw", "validation_row_count": ">0", "level": "table"}'
+
+- n: "12"
+  test_name: table_incremental_into_postgres
+  source_conn: "[conn]"
+  source_stream: "[schema].[table]"
+  source_options: '{"limit": 10000, "where": "id > -1"}'
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg
+  mode: incremental
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", "validation_stream_row_count": ">0", "validation_types": {"code":"decimal","create_dt":"timestamp","date":"date","rating":"decimal","target":"bool","update_dt":"timestampz", "json_data":"json"}}'
+
+- n: "13"
+  test_name: view_full_refresh_into_postgres
+  source_conn: "[conn]"
+  source_stream: "[schema].[table]_vw"
+  source_options: '{"limit": 100, "offset": 50}'
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg_vw
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_row_count": "100"}'
+
+- n: "14"
+  test_name: sql_full_refresh_into_postgres
+  source_conn: "[conn]"
+  source_stream: "select t1.*, {seq_num} as seq_num from [schema].[table] t1 where 1=1"
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", "seq_num": 123}'
+
+- n: "15"
+  test_name: sql_incremental_into_postgres
+  source_conn: "[conn]"
+  source_stream: "select * from [schema].[table] where {incremental_where_cond}"
+  source_options: '{"limit": 10000}'
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg
+  mode: incremental
+  source_primary_key: id
+  source_update_key: update_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", , "validation_stream_row_count": ">0"}'
+
+- n: "16"
+  test_name: table_backfill_into_postgres
+  source_conn: "[conn]"
+  source_stream: "[schema].[table]"
+  source_options: '{"range":"2020-01-01,2021-01-01"}'
+  stream_config: "{}"
+  target_conn: postgres
+  target_object: public.[table]_pg
+  mode: backfill
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: "{}"
+  env: ""
+
+- n: "17"
+  test_name: table_full_refresh_from_postgres
+  source_conn: postgres
+  source_stream: public.[table]_pg_orig
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_pg"
+  mode: full-refresh
+  source_primary_key: id
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_row_count": ">999", "validation_types": {"code":"decimal","create_dt":"timestamp","date":"date","rating":"decimal","target":"bool","update_dt":"timestampz"}}'
+
+- n: "18"
+  test_name: table_incremental_from_postgres
+  source_conn: postgres
+  source_stream: public.[table]_pg
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_pg"
+  mode: incremental
+  source_primary_key: id,email
+  source_update_key: create_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": false, "delete_missing": "soft"}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", "validation_stream_row_count": ">0"}'
+
+- n: "19"
+  test_name: view_full_refresh_from_postgres
+  source_conn: postgres
+  source_stream: public.[table]_pg_vw
+  source_options: '{"columns": {"first_name": "string(100)"}}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_vw_pg"
+  mode: full-refresh
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_row_count": ">0"}'
+
+- n: "20"
+  test_name: sql_full_refresh_from_postgres
+  source_conn: postgres
+  source_stream: "select * from public.[table]_pg_orig where 1=1"
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_pg"
+  mode: full-refresh
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": true}'
+  env: '{"validation_row_count": ">900"}'
+
+- n: "21"
+  test_name: sql_incremental_from_postgres
+  source_conn: postgres
+  source_stream: "select * from public.[table]_pg where {incremental_where_cond}"
+  source_options: "{}"
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_pg"
+  mode: incremental
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: '{"adjust_column_type":true, "add_new_columns":true, "use_bulk": false, "post_sql": "{drop_view}", "delete_missing": "hard"}'
+  env: '{"validation_file": "file://tests/files/test1.result.csv", "validation_cols": "0,1,2,3,4,6", "validation_row_count": ">0", "validation_stream_row_count": ">0"}'
+
+- n: "22"
+  test_name: table_backfill_from_postgres
+  source_conn: postgres
+  source_stream: public.[table]_pg
+  source_options: '{"range":"2020-01-01,2021-01-01"}'
+  stream_config: "{}"
+  target_conn: "[conn]"
+  target_object: "[schema].[table]_pg"
+  mode: backfill
+  source_primary_key: id
+  source_update_key: create_dt
+  target_options: '{"post_sql": "drop table [schema].[table] ; drop table [schema].[table]_pg; drop table [schema].[table]_vw_pg"}'
+  env: '{"validation_stream_row_count": ">0"}'
+
+- n: "23"
+  test_name: discover_schemas
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: ""
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"level": "schema", "validation_row_count": ">0"}'
+
+- n: "24"
+  test_name: discover_tables
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].*"
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"level": "table", "validation_row_count": ">0"}'
+
+- n: "25"
+  test_name: discover_columns
+  source_conn: ""
+  source_stream: ""
+  source_options: ""
+  stream_config: ""
+  target_conn: "[conn]"
+  target_object: "[schema].*"
+  mode: discover
+  source_primary_key: ""
+  source_update_key: ""
+  target_options: ""
+  env: '{"level": "column", "validation_row_count": ">0"}'
