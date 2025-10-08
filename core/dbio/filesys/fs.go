@@ -658,7 +658,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 		Cfg.Format = nodes.InferFormat()
 	}
 
-	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
+	if g.In(Cfg.Format, dbio.FileTypeParquet) && env.UseDuckDbCompute() {
 		// if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
 		// azure read gives issues...
 		if g.In(fs.FsType(), dbio.TypeFileLocal) {

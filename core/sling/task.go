@@ -416,7 +416,7 @@ func (t *TaskExecution) Cleanup() {
 // at the moment, use duckdb only for parquet or partitioned
 // target parquet or csv files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
-	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" && !cast.ToBool(val) {
+	if !env.UseDuckDbCompute() {
 		return false
 	}
 

@@ -276,6 +276,13 @@ func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string
 	return
 }
 
+func UseDuckDbCompute() bool {
+	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" && !cast.ToBool(val) {
+		return false
+	}
+	return true
+}
+
 func GetTempFolder() string {
 	tempDir := os.TempDir()
 	if val := os.Getenv("SLING_TEMP_DIR"); val != "" {
