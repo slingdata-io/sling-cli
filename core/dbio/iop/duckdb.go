@@ -43,6 +43,7 @@ type DuckDb struct {
 	secrets     []DuckDbSecret
 	initialized bool
 	query       *duckDbQuery // only one active query at a time
+	version     int
 }
 
 type duckDbQuery struct {
@@ -151,11 +152,6 @@ func NewDuckDbSecret(name string, secretType DuckDbSecretType, props map[string]
 	// lowercase keys
 	for k, v := range props {
 		secret.Props[strings.ToLower(k)] = cast.ToString(v)
-	}
-
-	// add VALIDATION=none for S3 secrets to not validate
-	if secretType == DuckDbSecretTypeS3 {
-		secret.Props["validation"] = "none"
 	}
 
 	return secret
@@ -364,6 +360,12 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 // getCreateSecretSQL generates SQL statements to create secrets
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 	for _, s := range duck.secrets {
+
+		// add VALIDATION=none for S3 secrets to not validate (starting in 1.4.1)
+		if s.Type == DuckDbSecretTypeS3 && duck.version >= 10401 {
+			s.Props["validation"] = "none"
+		}
+
 		secret := s.Render()
 		env.LogSQL(nil, secret+env.NoDebugKey)
 		sql += fmt.Sprintf("%s;", secret)
@@ -1024,6 +1026,10 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 		} else {
 			version = DuckDbVersion
 		}
+	}
+
+	if duck.version, err = g.VersionNumber(version); err != nil {
+		g.Warn("unable to parse duckdb version (%s): %s", version, err.Error())
 	}
 
 	// use specified path to duckdb binary
