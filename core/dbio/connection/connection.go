@@ -843,6 +843,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("app_name", "sling")
 
 		template = "sqlserver://{username}:{password}@{host}"
+		if c.Type == dbio.TypeDbFabric {
+			template = "fabric://{username}:{password}@{host}"
+		}
 
 		_, port_ok := c.Data["port"]
 		_, instance_ok := c.Data["instance"]

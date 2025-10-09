@@ -17,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	"gopkg.in/yaml.v3"
 	"syreclabs.com/go/faker"
 
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -51,7 +52,7 @@ type connTest struct {
 
 var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbAzure:             {name: "azuresql"},
-	dbio.TypeDbFabric:            {name: "fabric"},
+	dbio.TypeDbFabric:            {name: "ms_fabric", adjustCol: g.Bool(false)},
 	dbio.TypeDbAzureDWH:          {name: "azuredwh"},
 	dbio.TypeDbBigQuery:          {name: "bigquery"},
 	dbio.TypeDbBigTable:          {name: "bigtable"},
@@ -810,11 +811,25 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in exasol
 				}
+			case tgtType == dbio.TypeDbFabric:
+				if correctType == iop.TimestampzType || correctType == iop.TimestampType {
+					correctType = iop.DatetimeType // fabric uses datetime
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using string for json in fabric
+				}
+			case srcType == dbio.TypeDbFabric && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // fabric uses datetime
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in fabric
+				}
 			}
 
 			col := columns.GetColumn(colName)
 			if assert.NotEmpty(t, col, "missing column: %s", colName) {
-				if !assert.Equal(t, correctType, col.Type, "column type must match for %s", col.Name) {
+				if !assert.Equal(t, correctType, col.Type, "column type must match for %s (src-db-type = %s ,  tgt-db-type=%s)", col.Name, srcType, tgtType) {
 					failed = true
 				}
 			}
@@ -938,6 +953,12 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 		g.Warn("BCP not found in PATH, failing")
 		t.Fail()
 	}
+}
+
+func TestSuiteDatabaseFabric(t *testing.T) {
+	// t.Skip()
+	t.Parallel()
+	testSuite(t, dbio.TypeDbFabric)
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
@@ -1567,7 +1588,7 @@ func TestSuiteFileFtp(t *testing.T) {
 }
 
 func TestSuiteFileAzureABFS(t *testing.T) {
-	t.Skip()
+	// t.Skip()
 	t.Parallel()
 	testSuite(t, dbio.TypeFileAzureABFS)
 }

@@ -55,6 +55,34 @@ azuresql	time	time	col_time time	TRUE	TRUE
 azuresql	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
 azuresql	varbinary	binary	col_varbinary varbinary(100)	TRUE	TRUE	
 azuresql	varchar	text	col_varchar varchar	TRUE	TRUE	
+fabric	bigint	bigint	col_bigint bigint	TRUE	TRUE	
+fabric	binary	binary	col_binary binary(100)	TRUE	TRUE	
+fabric	timestamp	binary	col_timestamp timestamp	TRUE	TRUE	
+fabric	uniqueidentifier	uuid	col_uniqueidentifier uniqueidentifier	TRUE	FALSE	
+fabric	bit	bool	col_bit bit	TRUE	TRUE	
+fabric	char	string	col_char char	TRUE	TRUE	
+fabric	date	date	col_date date	TRUE	TRUE	
+fabric	datetime	datetime	col_datetime datetime	TRUE	TRUE	
+fabric	datetime2	datetime	col_datetime2 datetime2	TRUE	TRUE	
+fabric	datetimeoffset	timestampz	col_datetimeoffset datetimeoffset	TRUE	TRUE	
+fabric	decimal	decimal	col_decimal decimal	TRUE	TRUE	
+fabric	float	float	col_float float	TRUE	TRUE	
+fabric	image	binary	col_image image	TRUE	TRUE	
+fabric	int	integer	col_int int	TRUE	TRUE	
+fabric	money	decimal	col_money money	TRUE	TRUE	
+fabric	nchar	text	col_nchar nchar	TRUE	TRUE	
+fabric	ntext	text	col_ntext ntext	TRUE	TRUE	
+fabric	sql_variant	text	col_sql_variant sql_variant	TRUE	TRUE	
+fabric	numeric	decimal	col_numeric numeric	TRUE	TRUE	
+fabric	nvarchar	text	col_nvarchar nvarchar	TRUE	TRUE	
+fabric	real	float	col_real real	TRUE	TRUE	
+fabric	smalldatetime	datetime	col_smalldatetime smalldatetime	TRUE	TRUE	
+fabric	smallint	smallint	col_smallint smallint	TRUE	TRUE	
+fabric	smallmoney	decimal	col_smallmoney smallmoney	TRUE	TRUE	
+fabric	time	time	col_time time	TRUE	TRUE	
+fabric	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	
+fabric	varbinary	binary	col_varbinary varbinary(100)	TRUE	TRUE	
+fabric	varchar	text	col_varchar varchar	TRUE	TRUE	
 athena	bigint	bigint	col_bigint bigint	TRUE	TRUE	8-byte signed integer
 athena	binary	binary	col_binary binary	TRUE	TRUE	Binary data
 athena	boolean	bool	col_boolean boolean	TRUE	TRUE	TRUE/FALSE value

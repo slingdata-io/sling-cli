@@ -51,6 +51,10 @@ func (conn *MsSQLServerConn) Init() error {
 		conn.BaseConn.SetProp("allow_bulk_import", "true")
 	}
 
+	if strings.HasPrefix(conn.URL, "fabric:") {
+		conn.Type = dbio.TypeDbFabric
+	}
+
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
@@ -231,8 +235,25 @@ func (conn *MsSQLServerConn) ConnString() string {
 		azuread.ActiveDirectoryDeviceCode,
 		azuread.ActiveDirectoryApplication,
 	}
-	if fedAuth := conn.GetProp("fedauth", "fed_auth"); g.In(fedAuth, AdAuthStrings...) {
+	if g.In(conn.FedAuth(), AdAuthStrings...) {
 		conn.SetProp("driver", "azuresql")
+
+		// // Create a credential for Microsoft Entra ID authentication.
+		// // DefaultAzureCredential tries several methods, including using the Azure CLI login.
+		// cred, err := azidentity.NewDefaultAzureCredential(nil)
+		// if err != nil {
+		// 	g.Warn("failed to create default Azure credential: %v", err)
+		// } else {
+		// 	// Get an access token for the SQL database.
+		// 	// The resource scope for Azure SQL is "https://database.windows.net/.default".
+		// 	token, err := cred.GetToken(context.Background(), policy.TokenRequestOptions{})
+		// 	if err != nil {
+		// 		g.Warn("failed to get access token: %v", err)
+		// 	} else {
+		// 		accessToken := token.Token
+		// 		g.Warn("accessToken => %s", accessToken)
+		// 	}
+		// }
 	}
 
 	if certPath := os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"); certPath != "" {
@@ -245,6 +266,10 @@ func (conn *MsSQLServerConn) ConnString() string {
 	}
 
 	return U.String()
+}
+
+func (conn *MsSQLServerConn) FedAuth() string {
+	return conn.GetProp("fedauth", "fed_auth")
 }
 
 func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
@@ -701,6 +726,24 @@ retry:
 
 	return
 }
+
+// GenerateInsertStatement for transaction insert. Does not work with Fabric
+// func (conn *MsSQLServerConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+
+// 	fields := cols.Names()
+// 	// qFields := conn.Type.QuoteNames(fields...) // quoted fields
+
+// 	statement := mssql.CopyIn(tableName, mssql.BulkOptions{
+// 		Tablock:      true, // For performance
+// 		RowsPerBatch: 50000,
+// 		KeepNulls:    true,
+// 		// CheckConstraints: true,
+// 		// FireTriggers:     true,
+// 	}, fields...)
+
+// 	g.Trace("insert statement: %s", statement)
+// 	return statement
+// }
 
 // BcpExport exports data to datastream
 func (conn *MsSQLServerConn) BcpExport() (err error) {

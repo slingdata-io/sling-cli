@@ -370,13 +370,43 @@ func (fs *ABFSFileSysClient) delete(uri string) (err error) {
 		return g.Error(err, "Error Parsing url: "+uri)
 	}
 
+	// Get properties to determine if it's a file or directory
 	fileClient := fs.client.NewFileSystemClient(fs.filesystem).NewFileClient(path)
-	_, err = fileClient.Delete(fs.Context().Ctx, nil)
+	props, err := fileClient.GetProperties(fs.Context().Ctx, nil)
+
 	if err != nil {
-		return g.Error(err, "Could not delete: "+uri)
+		if datalakeerror.HasCode(err, datalakeerror.PathNotFound) {
+			return nil
+		}
+		return g.Error(err, "Could not get properties for: "+uri)
 	}
 
-	return nil
+	// Check if it's a directory by looking for the Hdi_isfolder metadata
+	isDirectory := false
+	if props.Metadata != nil {
+		if _, exists := props.Metadata["Hdi_isfolder"]; exists {
+			isDirectory = true
+		}
+	}
+
+	if isDirectory {
+		// Delete as directory
+		dirClient := fs.client.NewFileSystemClient(fs.filesystem).NewDirectoryClient(path)
+		if _, err = dirClient.Delete(fs.Context().Ctx, nil); err != nil {
+			err = g.Error(err, "Could not delete directory: "+uri)
+		}
+	} else {
+		// Delete as file
+		if _, err = fileClient.Delete(fs.Context().Ctx, nil); err != nil {
+			err = g.Error(err, "Could not delete file: "+uri)
+		}
+	}
+
+	if err != nil && strings.Contains(err.Error(), "Path not found") {
+		err = nil
+	}
+
+	return err
 }
 
 // Write writes a stream to a file

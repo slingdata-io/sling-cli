@@ -271,6 +271,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &AthenaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "trino") {
 		conn = &TrinoConn{URL: URL}
+	} else if strings.HasPrefix(URL, "fabric:") {
+		conn = &MsFabricConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
 		conn = &MsSQLServerConn{URL: URL}
 	} else if strings.HasPrefix(URL, "starrocks:") {
@@ -372,8 +374,10 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "sqlite3"
 	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
 		driverName = "duckdb"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH:
+	case dbio.TypeDbSQLServer:
 		driverName = "sqlserver"
+	case dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH:
+		driverName = "azuresql"
 	case dbio.TypeDbTrino:
 		driverName = "trino"
 	case dbio.TypeDbProton:
