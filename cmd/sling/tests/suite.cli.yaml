@@ -826,6 +826,7 @@
   run: |
     sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
     sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
+    sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
   output_contains:
     - "guid_col should be 'uniqueidentifier' type in target"
     - "GUID value for record 1 should match"
