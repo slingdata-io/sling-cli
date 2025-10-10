@@ -640,8 +640,6 @@ func (fs *S3FileSysClient) doList(svc *s3.Client, input *s3.ListObjectsV2Input, 
 		return nodes, err
 	}
 
-	g.Trace("%#v", result)
-
 	ts := fs.GetRefTs().Unix()
 
 	for {
