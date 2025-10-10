@@ -289,7 +289,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		if strings.Contains(uri, ".blob.core.windows.net/") {
 			uri = strings.ReplaceAll(uri, "https://", "az://")
 		}
-		if strings.Contains(uri, ".dfs.core.windows.net/") {
+		if strings.Contains(uri, ".dfs.core.windows.net") || strings.Contains(uri, ".dfs.fabric.microsoft.com") {
 			uri = strings.ReplaceAll(uri, "https://", "abfss://")
 		}
 
