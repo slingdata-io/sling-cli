@@ -3679,3 +3679,25 @@ func PrintSessionID(conn Connection) {
 		}
 	}
 }
+
+func applyColumnTypingToDf(conn Connection, df *iop.Dataflow) (err error) {
+
+	if val := conn.GetProp("column_typing"); val != "" {
+		var ct iop.ColumnTyping
+		if err = g.Unmarshal(val, &ct); err != nil {
+			return g.Error(err, "invalid column_typing")
+		}
+
+		if dct := ct.Decimal; dct != nil {
+			for i, col := range df.Columns {
+				if g.In(col.Type, iop.DecimalType, iop.FloatType) {
+					col.DbPrecision, col.DbScale = dct.Apply(col)
+					df.Columns[i] = col //set back
+					df.PropagateColum(i)
+				}
+			}
+		}
+	}
+
+	return nil
+}

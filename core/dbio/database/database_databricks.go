@@ -155,6 +155,12 @@ func (conn *DatabricksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) 
 
 	settingMppBulkImportFlow(conn, iop.ZStandardCompressorType)
 
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if err = applyColumnTypingToDf(conn, df); err != nil {
+		return 0, g.Error(err, "invalid column_typing")
+	}
+
 	if conn.GetProp("use_bulk") == "false" {
 		// Fall back to base implementation which does batch inserts
 		return conn.BaseConn.BulkImportFlow(tableFName, df)

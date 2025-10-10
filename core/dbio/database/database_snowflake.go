@@ -469,6 +469,12 @@ func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 		}
 	}
 
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if err = applyColumnTypingToDf(conn, df); err != nil {
+		return 0, g.Error(err, "invalid column_typing")
+	}
+
 	settingMppBulkImportFlow(conn, iop.ZStandardCompressorType)
 
 	if conn.GetProp("use_bulk") != "false" {
