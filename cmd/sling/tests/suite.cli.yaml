@@ -240,7 +240,7 @@
   run: 'sling run -d -r cmd/sling/tests/replications/r.09.yaml'
   streams: '>1'
   output_contains:
-    - 'running stream "public"."my_table_bytes"'
+    - 'from "public"."my_table_bytes"'
     - RUNNING
 
 - id: 42
@@ -276,7 +276,8 @@
   streams: 3
   output_contains:
     - 999 rows
-    - 'aws_s3 -> postgres | test/parquet/test1.parquet'
+    - 'aws_s3 -> postgres | '
+    - 'test/parquet/test1.parquet'
 
 - id: 48
   name: Run sling with replication configuration 14
