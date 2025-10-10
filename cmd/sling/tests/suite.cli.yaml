@@ -1029,3 +1029,18 @@
 - id: 125
   name: Test PostgreSQL to BigQuery with all data types
   run: 'sling run -d -r cmd/sling/tests/replications/r.63.postgres_bigquery_all_types.yaml'
+
+# Test SQL Server time(7) to Oracle varchar conversion (Issue #662)
+- id: 126
+  name: Test MSSQL time(7) to Oracle conversion (Issue #662)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.64.mssql_oracle_time.yaml'
+  env:
+    SCHEMA: ORACLE
+  conns:
+    - mssql
+    - oracle
+  streams: 1
+  rows: 4
+  output_contains:
+    - 'execution succeeded'
+    - 'Row count: 4'

@@ -1296,6 +1296,14 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 				"()",
 				fmt.Sprintf("(%d)", length),
 			)
+		} else if col.Type.IsTime() {
+			// For time types, use a default varchar length of 100 to accommodate various time formats
+			// (e.g., "HH:MM:SS.ffffff" from SQL Server)
+			nativeType = strings.ReplaceAll(
+				nativeType,
+				"()",
+				"(100)",
+			)
 		}
 	} else if strings.Contains(nativeType, "(,)") || g.In(nativeType, "numeric") {
 

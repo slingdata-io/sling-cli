@@ -1,0 +1,100 @@
+## Test SQL Server time(7) data type to Oracle (Issue #662)
+## This test ensures that time columns from SQL Server are properly
+## converted to varchar in Oracle without manual column specification
+
+source: mssql
+target: oracle
+
+defaults:
+  mode: full-refresh
+  target_options:
+    column_typing:
+      string:
+        length_factor: 2
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.test_time_type', 'U') IS NOT NULL DROP TABLE dbo.test_time_type;
+
+        CREATE TABLE dbo.test_time_type (
+          id INT PRIMARY KEY,
+          time_value TIME(7),
+          description VARCHAR(100)
+        );
+
+        INSERT INTO dbo.test_time_type (id, time_value, description) VALUES
+        (1, '08:30:45.1234567', 'Morning time'),
+        (2, '12:15:30.5000000', 'Noon time'),
+        (3, '23:59:59.9999999', 'Almost midnight'),
+        (4, NULL, 'Null time value');
+
+  end:
+    # Check if errored, do not proceed if so
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row count
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as cnt FROM {env.schema}.test_time_type
+      into: count_result
+
+    - type: log
+      message: |
+        Row count: {store.count_result[0].cnt}
+
+    - type: check
+      check: int_parse(store.count_result[0].cnt) == 4
+
+    # Verify data integrity - check that time values were transferred
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, time_value, description
+        FROM {env.schema}.test_time_type
+        ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Oracle results:
+        {store.result}
+
+    # Verify specific values
+    - type: check
+      check: store.result[0].time_value != nil
+      message: First time value should not be null
+
+    - type: check
+      check: store.result[1].time_value != nil
+      message: Second time value should not be null
+
+    - type: check
+      check: store.result[2].time_value != nil
+      message: Third time value should not be null
+
+    - type: check
+      check: store.result[3].time_value == nil
+      message: Fourth time value should be null
+
+    # Clean up source table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS dbo.test_time_type
+
+    # Clean up target table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE {env.schema}.test_time_type
+
+streams:
+  dbo.test_time_type:
+    object: 'ORACLE.test_time_type'
+    mode: full-refresh
+
+env:
+  schema: ORACLE
