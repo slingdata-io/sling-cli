@@ -129,8 +129,8 @@ endpoints:
     depends_on: []
 
     # Stream-level overrides for replication configuration (optional)
-    # Used to further configure the corresponding stream in a replication
-    # Can see keys such as `mode`, `hooks`, etc.
+    # Used in special circumstances to further configure the corresponding 
+    # replication stream. Can set keys such as `mode`, `hooks`, etc.
     overrides: {}
 
     # Initial state variables for this endpoint (merged with defaults.state)
