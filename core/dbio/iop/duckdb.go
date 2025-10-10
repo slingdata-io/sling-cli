@@ -62,6 +62,9 @@ func NewDuckDb(ctx context.Context, props ...string) *DuckDb {
 
 	m := g.KVArrToMap(props...)
 	for k, v := range m {
+		if g.In(k, "connected") {
+			continue
+		}
 		duck.SetProp(k, v)
 	}
 
@@ -525,12 +528,16 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	extensionSecretSQL := ""
 	if !duck.initialized {
-		extensionsSQL := duck.getLoadExtensionSQL()
-		secretSQL := duck.getCreateSecretSQL()
-		extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
-		extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
+		if extensionsSQL := duck.getLoadExtensionSQL(); extensionsSQL != "" {
+			extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
+		}
+		if secretSQL := duck.getCreateSecretSQL(); secretSQL != "" {
+			extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
+		}
 		duck.initialized = true // commented out for now
-		env.LogSQL(propsCombined, extensionSecretSQL+env.NoDebugKey)
+		if extensionSecretSQL != "" {
+			env.LogSQL(propsCombined, extensionSecretSQL+env.NoDebugKey)
+		}
 	}
 
 	queryID := g.RandSuffix("", 3) // for debugging
@@ -560,6 +567,13 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	sqls := strings.Join(sqlLines, "\n")
 	// g.Warn(sqls)
+
+	// if this happens, there may be an issue with the sql, maybe an empty statement
+	if duck.Proc == nil {
+		return g.Error("Failed to write to stdin, Proc is nil")
+	} else if duck.Proc.StdinWriter == nil {
+		return g.Error("Failed to write to stdin, StdinWriter is nil")
+	}
 
 	_, err = duck.Proc.StdinWriter.Write([]byte(sqls))
 	if err != nil {

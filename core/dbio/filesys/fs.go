@@ -1292,8 +1292,27 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 	return df, nil
 }
 
-// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
 func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw int64, err error) {
+
+	fileReadyChn := make(chan FileReady, 10000)
+
+	g.Trace("writing dataflow via duckdb to %s", uri)
+	go func() {
+		for range fileReadyChn {
+			// do nothing, wait for completion
+		}
+	}()
+
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+
+	return WriteDataflowReadyViaDuckDB(fs, df, uri, fileReadyChn, sp.Config)
+}
+
+// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
+func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string, fileReadyChn chan FileReady, sc iop.StreamConfig) (bw int64, err error) {
+	defer close(fileReadyChn)
+
 	folder := path.Join(env.GetTempFolder(), g.RandSuffix("duckdb", 3))
 	df.Defer(func() { env.RemoveAllLocalTempFile(folder) })
 
@@ -1306,10 +1325,6 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	props := g.MapToKVArr(fs.Props())
 	duck := iop.NewDuckDb(context.Background(), props...)
 	duckURI := duck.PrepareFsSecretAndURI(uri)
-
-	sp := iop.NewStreamProcessor()
-	sp.SetConfig(fs.Client().Props())
-	sc := sp.Config
 
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))
@@ -1394,13 +1409,9 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			}
 
 			// get bytes written
-			if fs.FsType() == dbio.TypeFileLocal {
-				bw, _ = g.PathSize(duckURI)
-			} else {
-				path, _ := fs.GetPath(uri)
-				nodes, _ := fs.ListRecursive(path)
-				bw = cast.ToInt64(nodes.TotalSize())
-			}
+			bw, _ = g.PathSize(localPath)
+			node := FileNode{URI: g.F("file://%s", localPath), Size: cast.ToUint64(bw)}
+			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
 		default:
 			// copy to temp file locally, then upload
 			localRoot := env.CleanWindowsPath(path.Join(folder, "output")) // could be file or dir
@@ -1434,6 +1445,11 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				err = g.Error(err, "Could not write to file")
 				return bw, err
 			}
+
+			// push to channel
+			bw, _ = g.PathSize(localPath)
+			node := FileNode{URI: uri, Size: cast.ToUint64(bw)}
+			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
 
 			// if single file, delete so we don't copy again
 			if localPath != localRoot {
@@ -1804,7 +1820,7 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 	}
 
 	// For directories, walk through and copy each file
-	g.Debug("writing partitions to %s", remotePath)
+	g.Debug("copying files to remote path => %s", remotePath)
 	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
 		copyContext.Wg.Write.Add()
 		go func() {

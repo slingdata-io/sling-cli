@@ -807,11 +807,14 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		case dbio.FileTypeCsv:
 			config.Header = true
 			config.Delimiter = ","
+			_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 		case dbio.FileTypeParquet:
+			if env.UseDuckDbCompute() {
+				_, err = filesys.WriteDataflowReadyViaDuckDB(fs, df, folderPath, fileReadyChn, config)
+			} else {
+				_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
+			}
 		}
-
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
-
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))
 			return
