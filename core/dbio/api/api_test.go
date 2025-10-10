@@ -645,6 +645,13 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			tc.Spec.EndpointMap["test_endpoint"] = endpoint
 			tc.Spec.endpointsOrdered = []string{"test_endpoint"}
 
+			// convert to proper spec
+			specBody, _ := yaml.Marshal(tc.Spec)
+			tc.Spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
 			// Create API connection
 			ac, err := NewAPIConnection(context.Background(), tc.Spec, map[string]any{
 				"state": map[string]any{},
@@ -819,6 +826,448 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 							assert.Equal(t, expectedValue, actualValue)
 						}
 					}
+				}
+			}
+		})
+	}
+}
+
+func TestDynamicEndpointsIntegration(t *testing.T) {
+	tests := []struct {
+		name                  string
+		specYAML              string                    // YAML spec body with {base_url} placeholder
+		dataResponses         map[string]map[string]any // endpoint path -> response
+		expectedEndpointNames []string
+		expectedRecordCounts  map[string]int   // endpoint name -> record count
+		expectedRecordValues  map[string][]any // endpoint name -> expected record values
+	}{
+		{
+			name: "simple_static_array_iteration",
+			specYAML: `
+name: "Test Dynamic API"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - iterate: '["users", "orders", "products"]'
+    into: "state.resource"
+    endpoint:
+      name: "{state.resource}"
+      request:
+        url: "{state.base_url}/{state.resource}"
+      response:
+        records:
+          jmespath: "data[]"
+`,
+			expectedEndpointNames: []string{
+				"users",
+				"orders",
+				"products",
+			},
+			dataResponses: map[string]map[string]any{
+				"/users": {
+					"data": []map[string]any{
+						{"id": 1, "name": "Alice"},
+						{"id": 2, "name": "Bob"},
+					},
+				},
+				"/orders": {
+					"data": []map[string]any{
+						{"id": 101, "total": 150.00},
+						{"id": 102, "total": 225.50},
+					},
+				},
+				"/products": {
+					"data": []map[string]any{
+						{"id": 501, "name": "Widget"},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				"users":    2,
+				"orders":   2,
+				"products": 1,
+			},
+			expectedRecordValues: map[string][]any{
+				"users": {
+					map[string]any{"id": float64(1), "name": "Alice"},
+					map[string]any{"id": float64(2), "name": "Bob"},
+				},
+				"orders": {
+					map[string]any{"id": float64(101), "total": float64(150.00)},
+					map[string]any{"id": float64(102), "total": float64(225.50)},
+				},
+				"products": {
+					map[string]any{"id": float64(501), "name": "Widget"},
+				},
+			},
+		},
+		{
+			name: "setup_sequence_with_iteration",
+			specYAML: `
+name: "Test Dynamic API with Setup"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - setup:
+      - request:
+          url: "{state.base_url}/metadata/tables"
+        response:
+          processors:
+            - expression: "response.json.tables"
+              output: "state.table_list"
+              aggregation: last
+
+    iterate: "state.table_list"
+    into: "state.table_name"
+
+    endpoint:
+      name: "table_{state.table_name.name}"
+      request:
+        url: "{state.base_url}/tables/{state.table_name.name}"
+      response:
+        records:
+          jmespath: "rows[]"
+`,
+			expectedEndpointNames: []string{
+				"table_customers",
+				"table_invoices",
+			},
+			dataResponses: map[string]map[string]any{
+				"/metadata/tables": {
+					"tables": []map[string]any{
+						{"name": "customers"},
+						{"name": "invoices"},
+					},
+				},
+				"/tables/customers": {
+					"rows": []map[string]any{
+						{"id": 1, "company": "Acme Corp"},
+						{"id": 2, "company": "Globex Inc"},
+					},
+				},
+				"/tables/invoices": {
+					"rows": []map[string]any{
+						{"id": 1001, "amount": 5000.00},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				"table_customers": 2,
+				"table_invoices":  1,
+			},
+			expectedRecordValues: map[string][]any{
+				"table_customers": {
+					map[string]any{"id": float64(1), "company": "Acme Corp"},
+					map[string]any{"id": float64(2), "company": "Globex Inc"},
+				},
+				"table_invoices": {
+					map[string]any{"id": float64(1001), "amount": float64(5000.00)},
+				},
+			},
+		},
+		{
+			name: "complex_object_iteration",
+			specYAML: `
+name: "Test Dynamic API with Complex Objects"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - iterate: '[{"id": "us-east", "name": "US East"}, {"id": "us-west", "name": "US West"}]'
+    into: "state.region"
+    endpoint:
+      name: "sales_{state.region.id}"
+      description: "Sales for {state.region.name}"
+      request:
+        url: "{state.base_url}/regions/{state.region.id}/sales"
+      response:
+        records:
+          jmespath: "sales[]"
+`,
+			expectedEndpointNames: []string{
+				"sales_us-east",
+				"sales_us-west",
+			},
+			dataResponses: map[string]map[string]any{
+				"/regions/us-east/sales": {
+					"sales": []map[string]any{
+						{"date": "2024-01-01", "amount": 1000.00},
+						{"date": "2024-01-02", "amount": 1500.00},
+					},
+				},
+				"/regions/us-west/sales": {
+					"sales": []map[string]any{
+						{"date": "2024-01-01", "amount": 2000.00},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				// NOTE: There's a JmesPath/streaming issue where arrays are returned as single records
+				// This is not a dynamic endpoints issue - the endpoints are generated correctly
+				"sales_us-east": 2,
+				"sales_us-west": 1,
+			},
+			expectedRecordValues: map[string][]any{
+				"sales_us-east": {
+					map[string]any{"date": "2024-01-01", "amount": float64(1000.00)},
+					map[string]any{"date": "2024-01-02", "amount": float64(1500.00)},
+				},
+				"sales_us-west": {
+					map[string]any{"date": "2024-01-01", "amount": float64(2000.00)},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test HTTP server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+
+				// Handle data endpoints
+				if response, ok := tt.dataResponses[r.URL.Path]; ok {
+					json.NewEncoder(w).Encode(response)
+					return
+				}
+
+				// Default empty response
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			// Replace {base_url} placeholder in spec YAML
+			specYAML := strings.ReplaceAll(tt.specYAML, "{base_url}", server.URL)
+
+			// Parse the spec from YAML
+			spec, err := LoadSpec(specYAML)
+			if !assert.NoError(t, err, "Failed to parse spec YAML") {
+				return
+			}
+
+			// Create API connection
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Bypass authentication for testing
+			ac.State.Auth.Authenticated = true
+
+			// List endpoints - this triggers RenderDynamicEndpoints
+			endpoints, err := ac.ListEndpoints()
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Assert correct number of endpoints generated
+			assert.Equal(t, len(tt.expectedEndpointNames), len(endpoints),
+				"Expected %d endpoints, got %d", len(tt.expectedEndpointNames), len(endpoints))
+
+			// Assert endpoint names match expected
+			actualNames := []string{}
+			for _, ep := range endpoints {
+				actualNames = append(actualNames, ep.Name)
+			}
+			assert.ElementsMatch(t, tt.expectedEndpointNames, actualNames,
+				"Endpoint names don't match. Expected: %v, Got: %v", tt.expectedEndpointNames, actualNames)
+
+			// Test each generated endpoint
+			for _, ep := range endpoints {
+				t.Run("endpoint_"+ep.Name, func(t *testing.T) {
+					// Read dataflow from endpoint
+					df, err := ac.ReadDataflow(ep.Name, APIStreamConfig{
+						Limit: 100,
+					})
+					if !assert.NoError(t, err, "Failed to read dataflow for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Collect data
+					data, err := df.Collect()
+					if !assert.NoError(t, err, "Failed to collect data for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Assert record count
+					expectedCount, ok := tt.expectedRecordCounts[ep.Name]
+					if !assert.True(t, ok, "No expected record count defined for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Debug: print actual data
+					if len(data.Rows) != expectedCount {
+						t.Logf("Endpoint %s: Expected %d rows, got %d. Data: %s", ep.Name, expectedCount, len(data.Rows), g.Marshal(data.Rows))
+					}
+
+					assert.Equal(t, expectedCount, len(data.Rows),
+						"Expected %d records for endpoint %s, got %d",
+						expectedCount, ep.Name, len(data.Rows))
+
+					// Verify data is not empty (if expected count > 0)
+					if expectedCount > 0 {
+						assert.Greater(t, len(data.Columns), 0,
+							"Expected columns for endpoint %s", ep.Name)
+						assert.Greater(t, len(data.Rows), 0,
+							"Expected rows for endpoint %s", ep.Name)
+
+						// Assert that response record values are correct
+						expectedRecords, ok := tt.expectedRecordValues[ep.Name]
+						if assert.True(t, ok) {
+							// Convert data.Rows to []any for comparison
+							actualRecords := make([]any, len(data.Rows))
+							for i, row := range data.Rows {
+								record := make(map[string]any)
+								for j, col := range data.Columns {
+									if j < len(row) {
+										record[col.Name] = row[j]
+									}
+								}
+								actualRecords[i] = record
+							}
+
+							// Compare each expected record with actual
+							for i, expectedRecord := range expectedRecords {
+								if i >= len(actualRecords) {
+									t.Errorf("Missing record at index %d for endpoint %s", i, ep.Name)
+									continue
+								}
+
+								actualRecord := actualRecords[i].(map[string]any)
+								expectedMap := expectedRecord.(map[string]any)
+								t.Logf("\nexpectedMap: %s\nactualRecord: %s", g.Marshal(expectedMap), g.Marshal(actualRecord))
+
+								// Compare each field
+								for key, expectedValue := range expectedMap {
+									actualValue, exists := actualRecord[key]
+									if !assert.True(t, exists, "Field %s missing in record %d for endpoint %s", key, i, ep.Name) {
+										continue
+									}
+
+									expectedValue = cast.ToString(expectedValue)
+									actualValue = strings.ReplaceAll(
+										cast.ToString(actualValue), " 00:00:00 +0000 UTC", "")
+
+									assert.EqualValues(t, expectedValue, actualValue,
+										"Field %s mismatch in record %d for endpoint %s. Expected: %v, Got: %v",
+										key, i, ep.Name, expectedValue, actualValue)
+								}
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDynamicEndpointsErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		spec          Spec
+		expectedError string
+	}{
+		{
+			name: "duplicate_endpoint_names",
+			spec: Spec{
+				Name: "Duplicate Names API",
+				Defaults: Endpoint{
+					State: StateMap{
+						"base_url": "https://api.example.com",
+					},
+				},
+				EndpointMap: EndpointMap{
+					"users": Endpoint{
+						Name: "users",
+						Request: Request{
+							URL: "https://api.example.com/users",
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data[]"},
+						},
+					},
+				},
+				DynamicEndpoints: []DynamicEndpoint{
+					{
+						Iterate: `["users"]`, // Will conflict with static endpoint
+						Into:    "state.resource",
+						Endpoint: Endpoint{
+							Name: "{state.resource}",
+							Request: Request{
+								URL: "{state.base_url}/{state.resource}",
+							},
+							Response: Response{
+								Records: Records{JmesPath: "data[]"},
+							},
+						},
+					},
+				},
+			},
+			expectedError: "duplicate endpoint name",
+		},
+		{
+			name: "empty_iteration_list",
+			spec: Spec{
+				Name: "Empty List API",
+				Defaults: Endpoint{
+					State: StateMap{
+						"base_url": "https://api.example.com",
+					},
+				},
+				EndpointMap: make(EndpointMap),
+				DynamicEndpoints: []DynamicEndpoint{
+					{
+						Iterate: `[]`, // Empty array
+						Into:    "state.resource",
+						Endpoint: Endpoint{
+							Name: "{state.resource}",
+							Request: Request{
+								URL: "{state.base_url}/{state.resource}",
+							},
+							Response: Response{
+								Records: Records{JmesPath: "data[]"},
+							},
+						},
+					},
+				},
+			},
+			expectedError: "", // Should succeed but generate no endpoints
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ac, err := NewAPIConnection(context.Background(), tt.spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			ac.State.Auth.Authenticated = true
+
+			endpoints, err := ac.ListEndpoints()
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				if !assert.NoError(t, err) {
+					return
+				}
+				// For empty list case, should have 0 endpoints
+				if strings.Contains(tt.name, "empty") {
+					assert.Equal(t, 0, len(endpoints))
 				}
 			}
 		})

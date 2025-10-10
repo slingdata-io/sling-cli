@@ -83,7 +83,7 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	// compile and validate endpoints
 	compiledEndpointMap := EndpointMap{}
 	for name, endpoint := range spec.EndpointMap {
-		if err = validateAndSetDefaults(&endpoint, spec); err != nil {
+		if err = compileSpecEndpoint(&endpoint, spec); err != nil {
 			return spec, g.Error(err, "endpoint validation failed")
 		}
 		compiledEndpointMap[name] = endpoint
@@ -908,8 +908,4 @@ type ResponseState struct {
 type AggregateState struct {
 	value any
 	array []any
-}
-
-func escapeErrVal(val string) string {
-	return strings.ReplaceAll(val, `%`, `%`+`%`)
 }
