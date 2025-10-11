@@ -1412,6 +1412,8 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			bw, _ = g.PathSize(localPath)
 			node := FileNode{URI: g.F("file://%s", localPath), Size: cast.ToUint64(bw)}
 			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
+			g.Trace("wrote file: %s", g.Marshal(node))
+
 		default:
 			// copy to temp file locally, then upload
 			localRoot := env.CleanWindowsPath(path.Join(folder, "output")) // could be file or dir
@@ -1450,6 +1452,8 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			bw, _ = g.PathSize(localPath)
 			node := FileNode{URI: uri, Size: cast.ToUint64(bw)}
 			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
+
+			g.Trace("wrote file: %s", g.Marshal(node))
 
 			// if single file, delete so we don't copy again
 			if localPath != localRoot {
