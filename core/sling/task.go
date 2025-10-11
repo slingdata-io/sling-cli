@@ -403,6 +403,11 @@ func (t *TaskExecution) Cleanup() {
 	t.Context.Mux.Lock()
 	defer t.Context.Mux.Unlock()
 
+	if t.cleanedUp {
+		return
+	}
+
+	g.Trace("task-execution cleanup")
 	for i, f := range t.cleanupFuncs {
 		f()
 		t.cleanupFuncs[i] = func() {} // in case it gets called again
@@ -410,6 +415,7 @@ func (t *TaskExecution) Cleanup() {
 	if t.df != nil {
 		t.df.CleanUp()
 	}
+	t.cleanedUp = true
 }
 
 // shouldWriteViaDuckDB determines whether we should use duckdb
