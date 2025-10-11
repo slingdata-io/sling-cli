@@ -46,6 +46,7 @@ type TaskExecution struct {
 	PBar           *ProgressBar       `json:"-"`
 	ProcStatsStart g.ProcStats        `json:"-"` // process stats at beginning
 	cleanupFuncs   []func()
+	cleanedUp      bool
 }
 
 // ExecutionStatus is an execution status object

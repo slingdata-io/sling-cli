@@ -1409,10 +1409,11 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			}
 
 			// get bytes written
-			bw, _ = g.PathSize(localPath)
-			node := FileNode{URI: g.F("file://%s", localPath), Size: cast.ToUint64(bw)}
+			bw0, _ := g.PathSize(localPath)
+			node := FileNode{URI: g.F("file://%s", localPath), Size: cast.ToUint64(bw0)}
 			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
 			g.Trace("wrote file: %s", g.Marshal(node))
+			bw = bw + bw0
 
 		default:
 			// copy to temp file locally, then upload
@@ -1449,9 +1450,9 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 			}
 
 			// push to channel
-			bw, _ = g.PathSize(localPath)
-			node := FileNode{URI: uri, Size: cast.ToUint64(bw)}
-			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
+			bw0, _ := g.PathSize(localPath)
+			node := FileNode{URI: uri, Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{streamPart.Columns, node, bw0, cast.ToString(streamPart.Index)}
 
 			g.Trace("wrote file: %s", g.Marshal(node))
 
