@@ -28,6 +28,7 @@ core/dbio/filesys/test/dataset1M.csv
 core/dbio/filesys/test/dataset100k.csv
 cmd/sling/tests/suite/
 cmd/sling/tests/replications/r.test.yaml
+cmd/sling/tests/replications/r.test.2.yaml
 cmd/sling/tests/pipelines/p.test.yaml
 
 *..go
