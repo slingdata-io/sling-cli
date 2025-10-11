@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -280,7 +281,7 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 
 	// get version
 	data, _ := conn.Query(`select SERVERPROPERTY('productversion') as short_version, @@version as long_version ` + noDebugKey)
-	if len(data.Rows) > 0 {
+	if conn.Type == dbio.TypeDbSQLServer && len(data.Rows) > 0 {
 		versionShortStr := cast.ToString(data.Rows[0][0])
 		versionLongStr := cast.ToString(data.Rows[0][1])
 		conn.parseVersion(versionShortStr)
@@ -293,9 +294,12 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 		}
 	}
 
-	// detect Fabric
-	if strings.Contains(conn.GetProp("host"), ".fabric.microsoft.com") ||
-		strings.Contains(conn.GetProp("url"), ".fabric.microsoft.com") {
+	// detect Fabric Database (Azure SQL)
+	if conn.Type == dbio.TypeDbSQLServer && strings.Contains(conn.GetProp("host"), ".database.fabric.microsoft.com") {
+		conn.Type = dbio.TypeDbAzure
+	}
+	// detect Fabric Warehouse
+	if conn.Type == dbio.TypeDbSQLServer && strings.Contains(conn.GetProp("host"), ".datawarehouse.fabric.microsoft.com") {
 		conn.Type = dbio.TypeDbFabric
 	}
 
@@ -381,6 +385,15 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	} else if conn.GetProp("allow_bulk_import") != "true" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
+	}
+
+	if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+		// need to az cli tool
+		_, err = exec.LookPath(conn.azCliPath())
+		if err != nil {
+			g.Warn("unable to use bcp since the Azure CLI tool is not found in path. bcp needs an Access Token obtained via the Azure CLI tool for fed_auth=%s. Using cursor...", fedAuth)
+			return conn.BaseConn.InsertBatchStream(tableFName, ds)
+		}
 	}
 
 	// needs to get columns to shape stream
@@ -567,6 +580,13 @@ func (conn *MsSQLServerConn) bcpPath() string {
 	return "bcp"
 }
 
+func (conn *MsSQLServerConn) azCliPath() string {
+	if val := conn.GetProp("az_path"); val != "" {
+		return val
+	}
+	return "az"
+}
+
 // BcpImportFile Import using bcp tool
 // https://docs.microsoft.com/en-us/sql/tools/bcp-utility?view=sql-server-ver15
 // bcp dbo.test1 in '/tmp/LargeDataset.csv' -S tcp:sqlserver.host,51433 -d master -U sa -P 'password' -c -t ',' -b 5000
@@ -643,6 +663,46 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 			return
 		}
 		bcpArgs = append(bcpArgs, bcpAuthParts...)
+	} else if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+		azCliTokenResource := conn.GetProp("bcp_azure_token_resource")
+		if azCliTokenResource == "" {
+			azCliTokenResource = "https://database.windows.net"
+		}
+		azCliArgs := []string{"account", "get-access-token", "--resource", azCliTokenResource, "--query", "accessToken", "--output", "tsv"}
+
+		// need to run
+		// az account get-access-token --resource https://database.windows.net --query accessToken --output tsv
+		azCmd := exec.Command(conn.azCliPath(), azCliArgs...)
+		if err != nil {
+			return 0, g.Error(err, "could not create az cli command")
+		}
+
+		g.Debug(conn.azCliPath() + " " + strings.Join(azCliArgs, ` `))
+		output, err := azCmd.Output()
+		if err != nil {
+			g.Warn("could not obtain access token with the Azure CLI tool...")
+			return 0, g.Error(err, output)
+		}
+
+		token := strings.TrimSpace(string(output))
+
+		// convert token to UTF-16LE bytes
+		utf16Token := utf16.Encode([]rune(token))
+		var leBytes []byte
+		for _, u := range utf16Token {
+			leBytes = append(leBytes, byte(u), byte(u>>8))
+		}
+
+		// now write the UTF-16LE token bytes to a temp file
+		tokenFilePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver.token")+".txt")
+		err = os.WriteFile(tokenFilePath, leBytes, 0600)
+		if err != nil {
+			return 0, g.Error(err, "could not write token to temp file")
+		}
+		defer os.Remove(tokenFilePath)
+
+		// add BCP authentication args for Azure AD with token file
+		bcpArgs = append(bcpArgs, "-G", "-P", tokenFilePath)
 	} else {
 		if g.In(conn.GetProp("authenticator"), "winsspi") || conn.isTrusted() {
 			bcpArgs = append(bcpArgs, "-T")
