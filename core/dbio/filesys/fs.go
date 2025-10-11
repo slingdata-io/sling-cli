@@ -1342,7 +1342,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 	duckSc := duck.DefaultCsvConfig()
 	duckSc.FileMaxRows = sc.FileMaxRows
 
-	switch fs.GetProp("copy_method") {
+	switch fs.GetProp("duckdb_copy_method", "copy_method") {
 	case "csv_http":
 		duckSc.Format = dbio.FileTypeCsv
 	case "arrow_http":
