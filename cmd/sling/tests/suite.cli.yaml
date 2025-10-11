@@ -1044,3 +1044,17 @@
   output_contains:
     - 'execution succeeded'
     - 'Row count: 4'
+
+# Test large CSV to Postgres to Parquet (WriteDataflowReadyViaDuckDB hang test)
+- id: 127
+  name: Test large CSV import to Postgres (1M rows)
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.65.large_csv_postgres_parquet.part1.yaml
+    sling run -d -r cmd/sling/tests/replications/r.65.large_csv_postgres_parquet.part2.yaml
+  conns:
+    - postgres
+  output_contains:
+    - 'CSV file created with 1,000,000'
+    - 'execution succeeded'
+    - '✓ All 1,000,000 CSV records imported successfully into Postgres'
+

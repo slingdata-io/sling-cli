@@ -1,0 +1,31 @@
+source: LOCAL
+target: POSTGRES
+
+hooks:
+  start:
+    - type: command
+      id: generate_csv
+      command: bash cmd/sling/tests/replications/r.65.large_csv_postgres_parquet.yaml.prep.sh
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.stock_movement;
+
+  end:
+    # Verify total records were imported
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.stock_movement
+      into: result
+
+    - type: check
+      check: int_parse(store.result[0].count) == 1000000
+      success_message: "✓ All 1,000,000 CSV records imported successfully into Postgres"
+
+streams:
+  file:///tmp/sling-test-large-data/stock_movement.csv:
+    object: public.stock_movement
+    mode: full-refresh
+    target_options:
+      column_casing: snake
+      direct_insert: true
