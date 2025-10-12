@@ -394,12 +394,6 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 		return nil, g.Error("not a api connection type: %s", c.Type)
 	}
 
-	// load spec
-	spec, err := LoadAPISpec(cast.ToString(c.Data["spec"]))
-	if err != nil {
-		return nil, g.Error(err, "could not load spec")
-	}
-
 	// default cache to true
 	opt := AsConnOptions{UseCache: true, Extra: g.M()}
 	if len(options) > 0 {
@@ -418,6 +412,12 @@ func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions)
 		if cc.API != nil {
 			return cc.API, nil
 		}
+	}
+
+	// load spec
+	spec, err := LoadAPISpec(cast.ToString(c.Data["spec"]))
+	if err != nil {
+		return nil, g.Error(err, "could not load spec")
 	}
 
 	c.API, err = api.NewAPIConnection(ctx, spec, data)
