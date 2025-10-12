@@ -534,18 +534,27 @@ setTimeout(function() {
 	params.Set("state", fmt.Sprintf("sling-%d", time.Now().Unix()))
 
 	// Determine the authorization endpoint (different from token endpoint)
-	// Most OAuth2 providers have /authorize for auth and /token for token exchange
-	authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
-	if authorizeURL == authURL {
-		// If no replacement happened, try common patterns
-		if strings.HasSuffix(authURL, "/oauth/token") {
-			authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
-		} else if strings.HasSuffix(authURL, "/token") {
-			authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
-		} else {
-			// Fallback: append /authorize to the base URL
-			baseURL := strings.TrimSuffix(authURL, "/")
-			authorizeURL = baseURL + "/authorize"
+	// First check if authorization_url is explicitly provided
+	authorizeURL, err := ac.renderString(auth.AuthorizationURL)
+	if err != nil {
+		return "", g.Error(err, "could not render authorization_url")
+	}
+
+	// If not provided, derive from token endpoint URL
+	if authorizeURL == "" {
+		// Most OAuth2 providers have /authorize for auth and /token for token exchange
+		authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+		if authorizeURL == authURL {
+			// If no replacement happened, try common patterns
+			if strings.HasSuffix(authURL, "/oauth/token") {
+				authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
+			} else if strings.HasSuffix(authURL, "/token") {
+				authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+			} else {
+				// Fallback: append /authorize to the base URL
+				baseURL := strings.TrimSuffix(authURL, "/")
+				authorizeURL = baseURL + "/authorize"
+			}
 		}
 	}
 

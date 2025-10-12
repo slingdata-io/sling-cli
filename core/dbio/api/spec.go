@@ -235,7 +235,8 @@ type Authentication struct {
 
 	// OAuth
 	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
-	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"`
+	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`  // Authorization endpoint (for auth code flow)
 	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
 	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`

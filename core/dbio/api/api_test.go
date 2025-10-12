@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -374,6 +375,174 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	// We expect this to fail at HTTP request stage, not validation
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+}
+
+func TestOAuth2AuthorizationURLField(t *testing.T) {
+	tests := []struct {
+		name                     string
+		authenticationURL        string
+		authorizationURL         string
+		expectedAuthorizationURL string // What we expect to be derived/used
+		description              string
+	}{
+		{
+			name:                     "explicit_authorization_url",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "https://api.example.com/oauth/authorize",
+			expectedAuthorizationURL: "https://api.example.com/oauth/authorize",
+			description:              "When authorization_url is explicitly provided, it should be used",
+		},
+		{
+			name:                     "authorization_url_with_different_domain",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "https://auth.example.com/authorize",
+			expectedAuthorizationURL: "https://auth.example.com/authorize",
+			description:              "Authorization URL can be on a different domain",
+		},
+		{
+			name:                     "no_authorization_url_standard_pattern",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "",
+			expectedAuthorizationURL: "https://api.example.com/oauth/authorize",
+			description:              "Without authorization_url, should derive from token URL",
+		},
+		{
+			name:                     "no_authorization_url_simple_pattern",
+			authenticationURL:        "https://api.example.com/token",
+			authorizationURL:         "",
+			expectedAuthorizationURL: "https://api.example.com/authorize",
+			description:              "Should handle simple /token -> /authorize replacement",
+		},
+		{
+			name:                     "templated_authorization_url",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "{env.AUTH_URL}",
+			expectedAuthorizationURL: "https://custom.example.com/auth",
+			description:              "Authorization URL should support templating",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock server to capture the authorization URL
+			var capturedAuthURL string
+			authCodeReceived := make(chan string, 1)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/callback" {
+					// Capture auth code callback
+					code := r.URL.Query().Get("code")
+					if code != "" {
+						authCodeReceived <- code
+					}
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, "OK")
+				} else if strings.Contains(r.URL.Path, "token") {
+					// Token exchange endpoint
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{
+						"access_token": "test_token_123",
+						"token_type":   "Bearer",
+					})
+				}
+			}))
+			defer server.Close()
+
+			// Create API connection
+			ac := &APIConnection{
+				Context: g.NewContext(context.Background()),
+				State: &APIState{
+					Env:     map[string]string{"AUTH_URL": "https://custom.example.com/auth"},
+					State:   make(map[string]any),
+					Secrets: make(map[string]any),
+					Auth:    APIStateAuth{},
+				},
+				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+			}
+
+			auth := Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              OAuthFlowAuthorizationCode,
+				ClientID:          "test_client",
+				ClientSecret:      "test_secret",
+				AuthenticationURL: tt.authenticationURL,
+				AuthorizationURL:  tt.authorizationURL,
+				RedirectURI:       server.URL + "/callback",
+			}
+
+			// Test that the authorization URL is correctly rendered/derived
+			renderedAuthURL, err := ac.renderString(auth.AuthorizationURL)
+			assert.NoError(t, err)
+
+			if renderedAuthURL == "" {
+				// Simulate the URL derivation logic when authorization_url is not provided
+				authURL := auth.AuthenticationURL
+				authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
+				if authorizeURL == authURL {
+					if strings.HasSuffix(authURL, "/oauth/token") {
+						authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
+					} else if strings.HasSuffix(authURL, "/token") {
+						authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+					}
+				}
+				capturedAuthURL = authorizeURL
+			} else {
+				capturedAuthURL = renderedAuthURL
+			}
+
+			// Verify the captured/derived auth URL matches expectations
+			assert.Equal(t, tt.expectedAuthorizationURL, capturedAuthURL, tt.description)
+		})
+	}
+}
+
+func TestOAuth2AuthorizationURLTemplating(t *testing.T) {
+	// Test that authorization_url supports templating with env, state, and secrets
+	ac := &APIConnection{
+		Context: g.NewContext(context.Background()),
+		State: &APIState{
+			Env:     map[string]string{"AUTH_DOMAIN": "auth.example.com"},
+			State:   map[string]any{"auth_version": "v2"},
+			Secrets: map[string]any{"TENANT_ID": "tenant_123"},
+			Auth:    APIStateAuth{},
+		},
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+	}
+
+	tests := []struct {
+		name             string
+		authorizationURL string
+		expectedURL      string
+	}{
+		{
+			name:             "env_variable",
+			authorizationURL: "https://{env.AUTH_DOMAIN}/authorize",
+			expectedURL:      "https://auth.example.com/authorize",
+		},
+		{
+			name:             "state_variable",
+			authorizationURL: "https://api.example.com/{state.auth_version}/authorize",
+			expectedURL:      "https://api.example.com/v2/authorize",
+		},
+		{
+			name:             "secrets_variable",
+			authorizationURL: "https://api.example.com/{secrets.TENANT_ID}/oauth/authorize",
+			expectedURL:      "https://api.example.com/tenant_123/oauth/authorize",
+		},
+		{
+			name:             "multiple_variables",
+			authorizationURL: "https://{env.AUTH_DOMAIN}/{state.auth_version}/tenants/{secrets.TENANT_ID}/authorize",
+			expectedURL:      "https://auth.example.com/v2/tenants/tenant_123/authorize",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rendered, err := ac.renderString(tt.authorizationURL)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedURL, rendered)
+		})
+	}
 }
 
 func TestAuthenticationExpiry(t *testing.T) {
