@@ -1303,7 +1303,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		if format == dbio.FileTypeArrow {
 			// Use Arrow format
 			for batchR := range ds.NewArrowReaderChnl(sc) {
-				g.Trace("processing duckdb arrow batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex, "max_rows", sc.FileMaxRows))
+				g.Trace("processing duckdb arrow batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
 
 				// Stream data directly without buffering all in memory
 				// Create a pipe to stream data through
@@ -1335,7 +1335,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		} else {
 			// Default to CSV format
 			for batchR := range ds.NewCsvReaderChnl(sc) {
-				g.Trace("processing duckdb csv batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex, "max_rows", sc.FileMaxRows))
+				g.Trace("processing duckdb csv batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
 
 				// Stream data directly without buffering all in memory
 				// Create a pipe to stream data through
