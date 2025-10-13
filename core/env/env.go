@@ -96,7 +96,8 @@ func SetTelVal(key string, value any) {
 
 func SetLogger() {
 	g.SetZeroLogLevel(zerolog.InfoLevel)
-	g.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
+	NoColor = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+	g.DisableColor = NoColor
 
 	if os.Getenv("_DEBUG_CALLER_LEVEL") != "" {
 		g.CallerLevel = cast.ToInt(os.Getenv("_DEBUG_CALLER_LEVEL"))
