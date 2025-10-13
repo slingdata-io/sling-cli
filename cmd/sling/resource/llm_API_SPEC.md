@@ -1008,7 +1008,7 @@ response:
       # - If false, this processor is COMPLETELY SKIPPED for the current record
       # - Has access to full state map: record, state, response, env, secrets
       # - Common use: Filter records, skip nulls, conditional logic
-      if: record.amount != nil && record.amount > 0
+      if: '!is_null(record.amount) && record.amount > 0'
       # Target output for aggregation must be 'state.<variable>'
       output: "state.total_amount"
       # Aggregation type: maximum, minimum, flatten, first, last (default: none)
