@@ -649,9 +649,10 @@ func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) 
 		// Store refresh token if provided
 		if refreshToken, ok := resp["refresh_token"].(string); ok {
 			// TODO: need to be stored in home folder
-			g.Debug("refreshToken = %s", refreshToken)
+			g.Debug("OAuth refreshToken = %s", refreshToken)
 			ac.State.Auth.Token = refreshToken
 		}
+		g.Trace("OAuth accessToken = %s", accessToken)
 		return accessToken, nil
 	}
 
