@@ -152,7 +152,7 @@ endpoints:
           variables:
             first: '{state.limit}'
             cursor: '{state.cursor}'
-            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
+            query: '{ if(is_null(state.updated_at_min), null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
@@ -224,7 +224,7 @@ endpoints:
           variables:
             first: '{state.limit}'
             cursor: '{state.cursor}'
-            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
+            query: '{ if(is_null(state.updated_at_min), null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
@@ -661,7 +661,7 @@ endpoints:
           variables:
             first: '{state.limit}'
             cursor: '{state.cursor}'
-            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
+            query: '{ if(is_null(state.updated_at_min), null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:
@@ -997,7 +997,7 @@ endpoints:
           variables:
             first: '{state.limit}'
             cursor: '{state.cursor}'
-            query: '{ if(state.updated_at_min == null, null, "updated_at:>=" + state.updated_at_min) }'
+            query: '{ if(is_null(state.updated_at_min), null, "updated_at:>=" + state.updated_at_min) }'
       
       pagination:
         next_state:

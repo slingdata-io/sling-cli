@@ -31,7 +31,7 @@ defaults:
       url: >
          { 
             if(
-              response.headers.link == null,
+              is_null(response.headers.link),
               state.url,
               if(
                 length(split(response.headers["link"], " ")) == 2,
