@@ -395,6 +395,10 @@ func (t *TaskExecution) runDbToFile() (err error) {
 		return
 	}
 
+	if !t.isUsingPool() {
+		t.AddCleanupTaskLast(func() { srcConn.Close() })
+	}
+
 	if t.isIncrementalStateWithUpdateKey() {
 		if err = getIncrementalValueViaState(t); err != nil {
 			err = g.Error(err, "Could not get incremental value")
