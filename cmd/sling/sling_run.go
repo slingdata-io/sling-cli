@@ -735,7 +735,7 @@ func setTimeout(values ...string) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
+		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT = %s mins reached!", timeout) })
 
 		// set deadline for status setting later
 		g.Debug("setting timeout for %s minutes", timeout)
