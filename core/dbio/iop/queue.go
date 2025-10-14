@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -91,6 +92,22 @@ func (q *Queue) Append(data any) error {
 		}
 	}
 
+	if items, ok := explodeItems(data); ok {
+		if len(items) == 0 {
+			return nil
+		}
+		for _, item := range items {
+			if err := q.writeItem(item); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	return q.writeItem(data)
+}
+
+func (q *Queue) writeItem(data any) error {
 	// Always JSON encode the data to handle special characters and complex types properly
 	encoded := g.Marshal(data)
 
@@ -107,6 +124,45 @@ func (q *Queue) Append(data any) error {
 
 	// Flush after each write to ensure data is written to disk immediately
 	return q.Writer.Flush()
+}
+
+func explodeItems(data any) ([]any, bool) {
+	if data == nil {
+		return nil, false
+	}
+
+	switch data.(type) {
+	case []byte:
+		return nil, false
+	}
+
+	val := reflect.ValueOf(data)
+	if !val.IsValid() {
+		return nil, false
+	}
+
+	for val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return nil, false
+		}
+		val = val.Elem()
+	}
+
+	kind := val.Kind()
+	if kind != reflect.Slice && kind != reflect.Array {
+		return nil, false
+	}
+
+	if kind == reflect.Slice && val.Type().Elem().Kind() == reflect.Uint8 {
+		return nil, false
+	}
+
+	length := val.Len()
+	items := make([]any, length)
+	for i := 0; i < length; i++ {
+		items[i] = val.Index(i).Interface()
+	}
+	return items, true
 }
 
 // startWriting prepares the queue for writing
