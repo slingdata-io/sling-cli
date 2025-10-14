@@ -724,7 +724,7 @@ func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	return nil
 }
 
-func setTimeout(values ...string) {
+func setTimeout(values ...string) (deadline time.Time) {
 	for _, timeout := range values {
 		if timeout == "" {
 			continue
@@ -739,8 +739,9 @@ func setTimeout(values ...string) {
 
 		// set deadline for status setting later
 		g.Debug("setting timeout for %s minutes", timeout)
-		deadline := time.Now().Add(duration)
+		deadline = time.Now().Add(duration)
 		ctx.Map.Set("timeout-deadline", deadline.Unix())
 		break
 	}
+	return deadline
 }
