@@ -1175,3 +1175,13 @@ func (conn *DatabricksConn) UnloadViaVolume(tables ...Table) (filePath string, u
 
 	return localFolderPath, unloadedFiles, unloadContext.Err()
 }
+
+func (conn *DatabricksConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
+
+	// table names need to be lower case for information schema lookup
+	for i, tableName := range tableNames {
+		tableNames[i] = strings.ToLower(tableName)
+	}
+
+	return conn.BaseConn.GetSchemata(level, schemaName, tableNames...)
+}

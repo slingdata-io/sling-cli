@@ -1058,3 +1058,10 @@
     - 'execution succeeded'
     - '✓ All 1,000,000 CSV records imported successfully into Postgres'
 
+# Test MSSQL to Databricks with uppercase table name (Issue #664)
+- id: 128
+  name: Test MSSQL to Databricks with uppercase table name (Issue #664)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
+  output_contains:
+    - 'execution succeeded'
+

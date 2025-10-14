@@ -164,7 +164,7 @@ metadata:
     from information_schema.tables
     where table_type not in ('VIEW', 'MATERIALIZED_VIEW')
       and table_catalog = ( select current_catalog() )
-      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .schema -}} and table_schema = lower('{schema}') {{- end}}
     order by table_name
 
   views: |
@@ -172,7 +172,7 @@ metadata:
     from information_schema.tables
     where table_type in ('VIEW', 'MATERIALIZED_VIEW')
       and table_catalog = ( select current_catalog() )
-      {{if .schema -}} and table_schema = '{schema}' {{- end}}
+      {{if .schema -}} and table_schema = lower('{schema}') {{- end}}
     order by table_name
 
   columns: |
@@ -183,8 +183,8 @@ metadata:
       numeric_precision as precision, 
       numeric_scale as scale
     from information_schema.columns
-    where table_schema = '{schema}'
-      and table_name = '{table}'
+    where table_schema = lower('{schema}')
+      and table_name = lower('{table}')
     order by ordinal_position
 
   primary_keys: |
@@ -192,8 +192,8 @@ metadata:
            ordinal_position as position,
            column_name
     from information_schema.constraint_column_usage
-    where table_schema = '{schema}'
-      and table_name = '{table}'
+    where table_schema = lower('{schema}')
+      and table_name = lower('{table}')
       and constraint_type = 'PRIMARY KEY'
     order by ordinal_position
 
@@ -211,7 +211,7 @@ metadata:
         end as is_view
       from information_schema.tables
       where 1=1
-        {{if .schema -}} and table_schema = '{schema}' {{- end}}
+        {{if .schema -}} and table_schema = lower('{schema}') {{- end}}
         {{if .tables -}} and table_name in ({tables}) {{- end}}
     )
     select
