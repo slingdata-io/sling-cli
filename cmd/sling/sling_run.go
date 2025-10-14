@@ -726,7 +726,7 @@ func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 
 func setTimeout(values ...string) (deadline time.Time) {
 	for _, timeout := range values {
-		if timeout == "" {
+		if timeout == "" && timeout != "0" {
 			continue
 		}
 		// only process first non-empty value
