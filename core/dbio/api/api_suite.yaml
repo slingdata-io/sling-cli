@@ -130,8 +130,10 @@
     results:
       - id: rec1
         value: 100
+        year: 2025
       - id: rec2
         value: 200
+        year: 2025
   spec:
     name: test_api
     authentication:
@@ -150,6 +152,13 @@
             - expression: response.json.meta.page_size
               output: state.page_size
               aggregation: last
+            - expression: >
+                object(
+                  "id", record.id,
+                  "value", record.value,
+                  "year", 2025
+                )
+              output: record
           records:
             jmespath: results
         pagination:

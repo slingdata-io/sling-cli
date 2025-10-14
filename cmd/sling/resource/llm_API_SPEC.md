@@ -996,6 +996,7 @@ response:
       expression: date_parse(record.created_ts, "auto")
       # Target output location:
       # - 'record.<new_field>': Adds/updates a field in the current record.
+      # - 'record': Replaces the entire record (useful for field selection/renaming)
       # - 'queue.<queue_name>': Appends the result to the named queue.
       # - 'state.<variable>': Updates state variable (requires aggregation if processing multiple records)
       output: "record.created_at_dt"
@@ -1013,6 +1014,51 @@ response:
       output: "state.total_amount"
       # Aggregation type: maximum, minimum, flatten, first, last (default: none)
       aggregation: "maximum"
+
+**Overwriting Records with `output: "record"`**:
+
+You can completely replace a record by setting `output: "record"`. This is useful for:
+- Selecting a subset of fields
+- Renaming fields
+- Reshaping the record structure
+- Flattening nested data
+
+```yaml
+# Example 1: Select specific fields using object()
+processors:
+  - expression: 'object("id", record.id, "name", record.name, "email", record.email)'
+    output: "record"
+# Before: {"id": 123, "name": "John", "email": "john@example.com", "internal_id": "abc", "metadata": {...}}
+# After:  {"id": 123, "name": "John", "email": "john@example.com"}
+
+# Example 2: Rename fields
+processors:
+  - expression: 'object("user_id", record.id, "full_name", record.name, "contact_email", record.email)'
+    output: "record"
+# Before: {"id": 123, "name": "John Doe", "email": "john@example.com"}
+# After:  {"user_id": 123, "full_name": "John Doe", "contact_email": "john@example.com"}
+
+# Example 3: Flatten nested data using jmespath()
+processors:
+  - expression: 'jmespath(record, "{id: id, name: user.profile.name, country: user.address.country}")'
+    output: "record"
+# Before: {"id": 123, "user": {"profile": {"name": "John"}, "address": {"country": "USA"}}}
+# After:  {"id": 123, "name": "John", "country": "USA"}
+
+# Example 4: Create array fields
+processors:
+  - expression: 'object("id", record.id, "tags", array(record.tag1, record.tag2, record.tag3))'
+    output: "record"
+# Before: {"id": 123, "tag1": "urgent", "tag2": "customer", "tag3": "priority"}
+# After:  {"id": 123, "tags": ["urgent", "customer", "priority"]}
+```
+
+**Important Notes**:
+- When using `output: "record"`, the ENTIRE record is replaced
+- All previous fields are discarded unless explicitly included in the expression
+- Use `object()` to build records field-by-field
+- Use `jmespath()` for complex transformations with projection syntax
+- Use `array()` to create array fields from multiple values
 
 **Processor IF Condition Examples**:
 
@@ -1694,6 +1740,8 @@ request:
 
 | Function                       | Description                     | Parameters                                | Returns           | Example                                                        |
 | ------------------------------ | ------------------------------- | ----------------------------------------- | ----------------- | -------------------------------------------------------------- |
+| `array(val1, val2, ...)`       | Creates array from values       | Multiple values                           | Array             | `array(1, 2, 3)` → `[1, 2, 3]`                                 |
+| `object(k1, v1, k2, v2, ...)`  | Creates object from key/value pairs | Even number of arguments (key, value pairs) | Map/object        | `object("name", "John", "age", 30)` → `{"name": "John", "age": 30}` |
 | `keys(map)`                    | Gets keys from map              | `map` object                              | Array of keys     | `keys({"a": 1, "b": 2})` → `["a", "b"]`                       |
 | `values(map)`                  | Gets values from map            | `map` object                              | Array of values   | `values({"a": 1, "b": 2})` → `[1, 2]`                         |
 | `jmespath(object, expression)` | Evaluates JMESPath expression   | `object`, `expression` (string)           | Query result      | `jmespath(response.json, "data.items[?age > 30]")`            |
