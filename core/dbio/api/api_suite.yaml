@@ -458,3 +458,96 @@
   expected_state:
     request_count: 1
   expected_next_state: {}
+
+- id: 9
+  name: test_csv_format_response
+  mock_response: |
+    id,name,email,age
+    1,John Doe,john@example.com,30
+    2,Jane Smith,jane@example.com,25
+    3,Bob Johnson,bob@example.com,35
+  spec:
+    name: csv_test_api
+    description: "Test CSV format response parsing"
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        description: "Endpoint that returns CSV data"
+        request:
+          url: "/users"
+          method: GET
+        response:
+          format: csv
+          records:
+            jmespath: "@"
+  expected_records:
+    - id: "1"
+      name: "John Doe"
+      email: "john@example.com"
+      age: "30"
+    - id: "2"
+      name: "Jane Smith"
+      email: "jane@example.com"
+      age: "25"
+    - id: "3"
+      name: "Bob Johnson"
+      email: "bob@example.com"
+      age: "35"
+  expected_state: {}
+  expected_next_state: {}
+
+# - id: 10
+#   name: test_xml_format_response
+#   mock_response: |
+#     <?xml version="1.0" encoding="UTF-8"?>
+#     <users>
+#       <user>
+#         <id>1</id>
+#         <name>Alice Brown</name>
+#         <email>alice@example.com</email>
+#         <active>true</active>
+#       </user>
+#       <user>
+#         <id>2</id>
+#         <name>Charlie Davis</name>
+#         <email>charlie@example.com</email>
+#         <active>false</active>
+#       </user>
+#       <user>
+#         <id>3</id>
+#         <name>Diana Evans</name>
+#         <email>diana@example.com</email>
+#         <active>true</active>
+#       </user>
+#     </users>
+#   spec:
+#     name: xml_test_api
+#     description: "Test XML format response parsing"
+#     authentication:
+#       type: none
+#     endpoints:
+#       test_endpoint:
+#         description: "Endpoint that returns XML data"
+#         request:
+#           url: "/users"
+#           method: GET
+#         response:
+#           format: xml
+#           records:
+#             jmespath: "@"
+#   expected_records:
+#     - id: "1"
+#       name: "Alice Brown"
+#       email: "alice@example.com"
+#       active: "true"
+#     - id: "2"
+#       name: "Charlie Davis"
+#       email: "charlie@example.com"
+#       active: "false"
+#     - id: "3"
+#       name: "Diana Evans"
+#       email: "diana@example.com"
+#       active: "true"
+#   expected_state: {}
+#   expected_next_state: {}

@@ -707,7 +707,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		Env  map[string]string `yaml:"env"`
 		Err  bool              `yaml:"err"`
 
-		MockResponse      map[string]any   `yaml:"mock_response"`
+		MockResponse      any              `yaml:"mock_response"`  // can be map or string (for CSV)
 		ExpectedRecords   []map[string]any `yaml:"expected_records"`
 		ExpectedState     map[string]any   `yaml:"expected_state"`
 		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
@@ -725,6 +725,25 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			// Create a test HTTP server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Check if MockResponse is a string (for CSV or XML format)
+				if mockStr, ok := tc.MockResponse.(string); ok {
+					// Detect format based on content
+					if strings.HasPrefix(strings.TrimSpace(mockStr), "<?xml") || strings.Contains(mockStr, "<users>") {
+						w.Header().Set("Content-Type", "application/xml")
+					} else {
+						w.Header().Set("Content-Type", "text/csv")
+					}
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, mockStr)
+					return
+				}
+
+				// Handle as JSON map
+				mockMap, ok := tc.MockResponse.(map[string]any)
+				if !ok {
+					mockMap = make(map[string]any)
+				}
+
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
@@ -738,27 +757,27 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					json.NewEncoder(w).Encode(loginResponse)
 				case "/config":
 					// Return config for setup test
-					if config, ok := tc.MockResponse["config"]; ok {
+					if config, ok := mockMap["config"]; ok {
 						configResponse := map[string]any{
 							"config": config,
 						}
 						json.NewEncoder(w).Encode(configResponse)
 					} else {
-						json.NewEncoder(w).Encode(tc.MockResponse)
+						json.NewEncoder(w).Encode(mockMap)
 					}
 				case "/cleanup":
 					// Return cleanup response for teardown test
-					if cleanup, ok := tc.MockResponse["cleanup"]; ok {
+					if cleanup, ok := mockMap["cleanup"]; ok {
 						cleanupResponse := map[string]any{
 							"cleanup": cleanup,
 						}
 						json.NewEncoder(w).Encode(cleanupResponse)
 					} else {
-						json.NewEncoder(w).Encode(tc.MockResponse)
+						json.NewEncoder(w).Encode(mockMap)
 					}
 				default:
 					// Return the main mock response for other endpoints
-					json.NewEncoder(w).Encode(tc.MockResponse)
+					json.NewEncoder(w).Encode(mockMap)
 				}
 			}))
 			defer server.Close()
@@ -958,10 +977,19 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					}
 
 					req := NewSingleRequest(iter)
-					req.Response = &ResponseState{
-						Status:  200,
-						Headers: g.M("content-type", "application/json"),
-						JSON:    tc.MockResponse,
+
+					// Only set JSON if MockResponse is a map (not for CSV strings)
+					if mockMap, ok := tc.MockResponse.(map[string]any); ok {
+						req.Response = &ResponseState{
+							Status:  200,
+							Headers: g.M("content-type", "application/json"),
+							JSON:    mockMap,
+						}
+					} else {
+						req.Response = &ResponseState{
+							Status:  200,
+							Headers: g.M("content-type", "text/csv"),
+						}
 					}
 
 					// Render the NextState values
