@@ -1649,10 +1649,18 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	columns = SQLColumns(colTypes, conn)
 
 	// add table info
-	for i := range columns {
+	for i, col := range columns {
 		columns[i].Database = table.Database
 		columns[i].Schema = table.Schema
 		columns[i].Table = table.Name
+
+		// set extra columns as metadata
+		for key, val := range colMap[strings.ToLower(col.Name)] {
+			key = strings.ToLower(key)
+			if !g.In(key, "column_name", "data_type", "maximum_length", "precision", "scale") {
+				columns[i].SetMetadata(key, cast.ToString(val))
+			}
+		}
 	}
 
 	table.Columns = columns
