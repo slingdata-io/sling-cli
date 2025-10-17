@@ -513,6 +513,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
 			}
 		}
+		conn.Close()
 	} else if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
 		g.Debug("getting count for test validation")
 		conn, err := taskCfg.TgtConn.AsDatabase()
@@ -542,7 +543,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
-		conn.Close()
+
+		g.LogError(conn.Close())
+
 		valCols := strings.Split(cast.ToString(env["validation_cols"]), ",")
 
 		if g.AssertNoError(t, err) {
