@@ -19,6 +19,11 @@ steps:
         message: 'value: {loop.value} ({loop.index})'
       
 
+  - type: copy
+    id: s3_sftp_copy
+    from: aws_s3/sling_test/files/test1k_s3.csv
+    to: sftp//tmp/test1k_s3.csv
+
   - type: list
     id: s3_list
     location: aws_s3/sling_test/files/

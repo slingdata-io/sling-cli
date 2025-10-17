@@ -1,0 +1,109 @@
+source: ms_fabric
+target: ms_fabric
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop temp tables if they exist
+        IF OBJECT_ID('dbo.unique_identifier_test', 'U') IS NOT NULL DROP TABLE dbo.unique_identifier_test;
+        IF OBJECT_ID('dbo.unique_identifier_test2', 'U') IS NOT NULL DROP TABLE dbo.unique_identifier_test2;
+        
+        -- Create source table with uniqueidentifier column
+        CREATE TABLE dbo.unique_identifier_test (
+          id INT,
+          guid_col UNIQUEIDENTIFIER,
+          name VARCHAR(100)
+        );
+        
+        -- Insert test data with specific GUIDs
+        INSERT INTO dbo.unique_identifier_test (id, guid_col, name) VALUES 
+        (1, '6F9619FF-8B86-D011-B42D-00C04FC964FF', 'Test Record 1'),
+        (2, 'A0E44FF6-8B86-D011-B42D-00C04FC964FF', 'Test Record 2'),
+        (3, NEWID(), 'Test Record 3'),
+        (4, NULL, 'Test Record 4 with NULL GUID'),
+        (5, '12345678-1234-5678-1234-567812345678', 'Test Record 5');
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Verify target table structure
+        SELECT 
+          c.COLUMN_NAME,
+          c.DATA_TYPE,
+          c.CHARACTER_MAXIMUM_LENGTH,
+          c.IS_NULLABLE
+        FROM INFORMATION_SCHEMA.COLUMNS c
+        WHERE c.TABLE_SCHEMA = 'dbo' 
+          AND c.TABLE_NAME = 'unique_identifier_test2'
+          AND c.COLUMN_NAME = 'guid_col'
+      into: column_info
+
+    - type: log
+      message: |
+        Target column info:
+        {store.column_info}
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Compare source and target data
+        SELECT 
+          s.id,
+          s.guid_col as source_guid,
+          t.guid_col as target_guid,
+          s.name,
+          CASE 
+            WHEN s.guid_col IS NULL AND t.guid_col IS NULL THEN 'MATCH'
+            WHEN CAST(s.guid_col AS VARCHAR(50)) = CAST(t.guid_col AS VARCHAR(50)) THEN 'MATCH'
+            ELSE 'MISMATCH'
+          END as guid_match
+        FROM dbo.unique_identifier_test s
+        INNER JOIN dbo.unique_identifier_test2 t ON s.id = t.id
+        ORDER BY s.id
+      into: comparison_result
+
+    - type: log
+      message: |
+        Data comparison:
+        {store.comparison_result}
+
+    - type: check
+      check: store.comparison_result[0].guid_match == "MATCH"
+      failure_message: "GUID value for record 1 should match"
+
+    - type: check
+      check: store.comparison_result[1].guid_match == "MATCH"
+
+    - type: check
+      check: store.comparison_result[2].guid_match == "MATCH"
+
+    - type: check
+      check: store.comparison_result[3].guid_match == "MATCH"
+
+    - type: check
+      check: store.comparison_result[4].guid_match == "MATCH"
+      failure_message: "GUID value for record 5 should match"
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Cleanup
+        DROP TABLE dbo.unique_identifier_test;
+        DROP TABLE dbo.unique_identifier_test2;
+
+streams:
+  dbo.unique_identifier_test:
+    object: dbo.unique_identifier_test2
+    # target_options:
+    #   use_bulk: false

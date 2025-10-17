@@ -69,7 +69,9 @@ metadata:
       data_type,
       character_maximum_length as maximum_length,
       numeric_precision as precision, 
-      numeric_scale as scale
+      numeric_scale as scale,
+      collation_name,
+      collationProperty(collation_name, 'CodePage') as collation_code
     from INFORMATION_SCHEMA.COLUMNS
     where table_schema = '{schema}'
       and table_name = '{table}'
@@ -128,7 +130,9 @@ metadata:
       cols.table_name as table_name,
       cols.column_name as column_name,
       cols.data_type as data_type,
-      cols.ordinal_position as position
+      cols.ordinal_position as position,
+      cols.collation_name,
+      collationProperty(collation_name, 'CodePage') as collation_code
     from INFORMATION_SCHEMA.COLUMNS cols
     join tables
       on tables.table_catalog = cols.table_catalog

@@ -22,7 +22,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 	switch {
 	case c.Type.IsDb():
-		dbConn, err := c.AsDatabase()
+		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -31,7 +31,7 @@ func (c *Connection) Test() (ok bool, err error) {
 			return ok, g.Error(err, "could not connect to %s", c.Name)
 		}
 	case c.Type.IsFile():
-		fileClient, err := c.AsFile()
+		fileClient, err := c.AsFile(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -55,7 +55,7 @@ func (c *Connection) Test() (ok bool, err error) {
 			g.Debug(g.Marshal(nodes.Paths()))
 		}
 	case c.Type.IsAPI():
-		apiClient, err := c.AsAPI()
+		apiClient, err := c.AsAPI(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -173,7 +173,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 
 	switch {
 	case c.Type.IsDb():
-		dbConn, err := c.AsDatabase()
+		dbConn, err := c.AsDatabase(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -224,7 +224,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		}
 
 	case c.Type.IsFile():
-		fileClient, err := c.AsFile()
+		fileClient, err := c.AsFile(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}
@@ -318,7 +318,7 @@ func (c *Connection) Discover(opt *DiscoverOptions) (ok bool, nodes filesys.File
 		}
 
 	case c.Type.IsAPI():
-		apiConn, err := c.AsAPI()
+		apiConn, err := c.AsAPI(AsConnOptions{UseCache: false})
 		if err != nil {
 			return ok, nodes, schemata, endpoints, g.Error(err, "could not initiate %s", c.Name)
 		}

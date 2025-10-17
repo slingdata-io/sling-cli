@@ -96,7 +96,8 @@ func SetTelVal(key string, value any) {
 
 func SetLogger() {
 	g.SetZeroLogLevel(zerolog.InfoLevel)
-	g.DisableColor = !cast.ToBool(os.Getenv("SLING_LOGGING_COLOR"))
+	NoColor = g.In(os.Getenv("SLING_LOGGING"), "NO_COLOR", "JSON")
+	g.DisableColor = NoColor
 
 	if os.Getenv("_DEBUG_CALLER_LEVEL") != "" {
 		g.CallerLevel = cast.ToInt(os.Getenv("_DEBUG_CALLER_LEVEL"))
@@ -276,6 +277,13 @@ func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string
 	return
 }
 
+func UseDuckDbCompute() bool {
+	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" && !cast.ToBool(val) {
+		return false
+	}
+	return true
+}
+
 func GetTempFolder() string {
 	tempDir := os.TempDir()
 	if val := os.Getenv("SLING_TEMP_DIR"); val != "" {
@@ -332,8 +340,14 @@ func LogSQL(props map[string]string, query string, args ...any) {
 
 	// wrap args
 	contextArgs := g.M()
+	connIdSuffix := ""
 	if connID := props["sling_conn_id"]; connID != "" {
 		contextArgs["conn"] = connID
+		// use connection name
+		connArr := strings.Split(connID, "-")
+		connIdSuffix = strings.TrimPrefix(connID, connArr[0]+"-")
+		connIdSuffix = strings.TrimPrefix(connIdSuffix, connArr[1]+"-")
+		connIdSuffix = DarkGrayString(" [" + connIdSuffix + "]")
 	}
 	if len(args) > 0 {
 		contextArgs["query_args"] = args
@@ -348,7 +362,7 @@ func LogSQL(props map[string]string, query string, args ...any) {
 			query = CyanString(Clean(props, query))
 		}
 		if !cast.ToBool(props["silent"]) {
-			g.Debug(query)
+			g.Debug(query + connIdSuffix)
 		}
 	}
 }

@@ -374,6 +374,12 @@ func (conn *StarRocksConn) GenerateDDL(table Table, data iop.Dataset, temporary 
 func (conn *StarRocksConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if err = applyColumnTypingToDf(conn, df); err != nil {
+		return 0, g.Error(err, "invalid column_typing")
+	}
+
 	useBulk := cast.ToBool(conn.GetProp("use_bulk"))
 	if feURL := conn.GetProp("fe_url"); feURL != "" && useBulk {
 		return conn.StreamLoad(feURL, tableFName, df)

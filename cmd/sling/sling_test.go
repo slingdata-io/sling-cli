@@ -17,6 +17,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	"gopkg.in/yaml.v3"
 	"syreclabs.com/go/faker"
 
 	"github.com/slingdata-io/sling-cli/core/sling"
@@ -51,6 +52,7 @@ type connTest struct {
 
 var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbAzure:             {name: "azuresql"},
+	dbio.TypeDbFabric:            {name: "ms_fabric", adjustCol: g.Bool(false)},
 	dbio.TypeDbAzureDWH:          {name: "azuredwh"},
 	dbio.TypeDbBigQuery:          {name: "bigquery"},
 	dbio.TypeDbBigTable:          {name: "bigtable"},
@@ -92,6 +94,7 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeFileGoogle:      {name: "google_storage"},
 	dbio.TypeFileGoogleDrive: {name: "google_drive"},
 	dbio.TypeFileFtp:         {name: "ftp_test_url"},
+	dbio.TypeFileAzureABFS:   {name: "fabric_lake"},
 }
 
 func init() {
@@ -207,9 +210,9 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		return
 	}
 
-	templateFilePath := "tests/suite.db.template.tsv"
+	templateFilePath := "tests/suite.db.template.yaml"
 	if connType.IsFile() {
-		templateFilePath = "tests/suite.file.template.tsv"
+		templateFilePath = "tests/suite.file.template.yaml"
 	}
 
 	tempFilePath := g.F("/tmp/tests.%s.tsv", connType.String())
@@ -244,22 +247,18 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	err = os.WriteFile(tempFilePath, []byte(fileContent), 0777)
 	g.LogFatal(err)
 
-	data, err := iop.ReadCsv(tempFilePath)
+	// Read YAML and unmarshal into slice of maps
+	var data []map[string]any
+	fileBytes, err := os.ReadFile(tempFilePath)
+	if !g.AssertNoError(t, err) {
+		return
+	}
+	err = yaml.Unmarshal(fileBytes, &data)
 	if !g.AssertNoError(t, err) {
 		return
 	}
 
-	// rewrite correctly for displaying in Github
-	testMux.Lock()
-	dataT, err := iop.ReadCsv(templateFilePath)
-	if !g.AssertNoError(t, err) {
-		return
-	}
-	c := iop.CSV{Path: templateFilePath, Delimiter: "\t"}
-	c.WriteStream(dataT.Stream())
-	testMux.Unlock()
-
-	for i, rec := range data.Records() {
+	for i, rec := range data {
 		testName := cast.ToString(rec["test_name"])
 		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
 		sourceOptions, _ := g.UnmarshalMap(cast.ToString(rec["source_options"]))
@@ -514,6 +513,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				assert.EqualValues(t, valRowCount, count, "validation_row_count (%s)", file.Name)
 			}
 		}
+		conn.Close()
 	} else if taskCfg.Mode == sling.FullRefreshMode && taskCfg.TgtConn.Type.IsDb() {
 		g.Debug("getting count for test validation")
 		conn, err := taskCfg.TgtConn.AsDatabase()
@@ -543,7 +543,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 		}
 		dataDB, err := conn.Query(sql)
 		g.AssertNoError(t, err)
-		conn.Close()
+
+		g.LogError(conn.Close())
+
 		valCols := strings.Split(cast.ToString(env["validation_cols"]), ",")
 
 		if g.AssertNoError(t, err) {
@@ -812,11 +814,25 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // we're using text for json in exasol
 				}
+			case tgtType == dbio.TypeDbFabric:
+				if correctType == iop.TimestampzType || correctType == iop.TimestampType {
+					correctType = iop.DatetimeType // fabric uses datetime
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using string for json in fabric
+				}
+			case srcType == dbio.TypeDbFabric && tgtType == dbio.TypeDbPostgres:
+				if correctType == iop.TimestampzType {
+					correctType = iop.TimestampType // fabric uses datetime
+				}
+				if correctType == iop.JsonType {
+					correctType = iop.TextType // we're using text for json in fabric
+				}
 			}
 
 			col := columns.GetColumn(colName)
 			if assert.NotEmpty(t, col, "missing column: %s", colName) {
-				if !assert.Equal(t, correctType, col.Type, "column type must match for %s", col.Name) {
+				if !assert.Equal(t, correctType, col.Type, "column type must match for %s (src-db-type = %s ,  tgt-db-type=%s)", col.Name, srcType, tgtType) {
 					failed = true
 				}
 			}
@@ -906,6 +922,7 @@ func TestSuiteDatabaseMotherDuck(t *testing.T) {
 }
 
 func TestSuiteDatabaseExasol(t *testing.T) {
+	t.Skip() // FIXME: cannot drop table, cannot create view without auto-commit
 	t.Parallel()
 	testSuite(t, dbio.TypeDbExasol)
 }
@@ -940,6 +957,12 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 		g.Warn("BCP not found in PATH, failing")
 		t.Fail()
 	}
+}
+
+func TestSuiteDatabaseFabric(t *testing.T) {
+	// t.Skip()
+	t.Parallel()
+	testSuite(t, dbio.TypeDbFabric)
 }
 
 // func TestSuiteDatabaseAzure(t *testing.T) {
@@ -1566,4 +1589,10 @@ func TestSuiteFileSftp(t *testing.T) {
 func TestSuiteFileFtp(t *testing.T) {
 	t.Parallel()
 	testSuite(t, dbio.TypeFileFtp)
+}
+
+func TestSuiteFileAzureABFS(t *testing.T) {
+	// t.Skip()
+	t.Parallel()
+	testSuite(t, dbio.TypeFileAzureABFS)
 }

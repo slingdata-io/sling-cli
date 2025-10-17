@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path"
@@ -204,7 +205,7 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 	if len(lowerCase) > 0 {
 		lc = lowerCase[0]
 	}
-	data := map[string]string{}
+	data := map[string]string{"name": strings.ToLower(c.Name)}
 	for k, v := range c.Data {
 		val, err := cast.ToStringE(v)
 		if err != nil {
@@ -216,6 +217,18 @@ func (c *Connection) DataS(lowerCase ...bool) map[string]string {
 		} else {
 			data[k] = val
 		}
+	}
+	return data
+}
+
+func (c *Connection) DataSWithExtra(extra map[string]any) map[string]string {
+	data := c.DataS()
+	for k, v := range extra {
+		val, err := cast.ToStringE(v)
+		if err != nil {
+			val = g.Marshal(v) // in case it's an array or object
+		}
+		data[k] = val
 	}
 	return data
 }
@@ -245,6 +258,25 @@ func (c *Connection) URL() string {
 			url = "gdrive://"
 		case dbio.TypeFileAzure:
 			url = g.F("https://%s.blob.core.windows.net/%s", c.Data["account"], c.Data["container"])
+		case dbio.TypeFileAzureABFS:
+			filesystem := c.Data["filesystem"]
+			parent := c.Data["parent"]
+			if filesystem == "" {
+				filesystem = c.Data["container"] // fallback for compatibility
+			}
+			// Check if custom endpoint is provided or if account contains full domain
+			if endpoint := c.Data["endpoint"]; endpoint != "" {
+				url = g.F("https://%s/%s", endpoint, filesystem)
+			} else if account := cast.ToString(c.Data["account"]); strings.Contains(account, ".") {
+				// Account already contains full domain (e.g., onelake.dfs.fabric.microsoft.com)
+				url = g.F("https://%s/%s", account, filesystem)
+			} else {
+				// Standard Azure Storage account
+				url = g.F("https://%s.dfs.core.windows.net/%s", c.Data["account"], filesystem)
+			}
+			if parent != "" {
+				url = g.F("%s/%s", url, parent)
+			}
 		}
 	}
 
@@ -278,83 +310,108 @@ func (c *Connection) Close() error {
 
 var connCache = cmap.New[*Connection]()
 
-func (c *Connection) AsDatabase(cache ...bool) (dc database.Connection, err error) {
-	return c.AsDatabaseContext(c.Context().Ctx, cache...)
+type AsConnOptions struct {
+	UseCache bool
+	Extra    map[string]any
 }
 
-func (c *Connection) AsDatabaseContext(ctx context.Context, cache ...bool) (dc database.Connection, err error) {
+func (c *Connection) AsDatabase(options ...AsConnOptions) (dc database.Connection, err error) {
+	return c.AsDatabaseContext(c.Context().Ctx, options...)
+}
+
+func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOptions) (dc database.Connection, err error) {
 	if !c.Type.IsDb() {
 		return nil, g.Error("not a database type: %s", c.Type)
 	}
 
 	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.Database != nil {
-				return cc.Database, nil
-			}
-		}
-
-		if c.Database == nil {
-			c.Database, err = database.NewConnContext(
-				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.Database, nil
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
 	}
 
-	return database.NewConnContext(
-		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+	// build input data
+
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.Database != nil {
+			return cc.Database, nil
+		}
+	}
+
+	data := c.DataSWithExtra(opt.Extra)
+	c.Database, err = database.NewConnContext(
+		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.Database, nil
 }
 
-func (c *Connection) AsFile(cache ...bool) (fc filesys.FileSysClient, err error) {
-	return c.AsFileContext(c.Context().Ctx, cache...)
+func (c *Connection) AsFile(options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
+	return c.AsFileContext(c.Context().Ctx, options...)
 }
 
-func (c *Connection) AsFileContext(ctx context.Context, cache ...bool) (fc filesys.FileSysClient, err error) {
+func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions) (fc filesys.FileSysClient, err error) {
 	if !c.Type.IsFile() {
 		return nil, g.Error("not a file system type: %s", c.Type)
 	}
 
 	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.File != nil {
-				return cc.File, nil
-			}
-		}
-
-		if c.File == nil {
-			c.File, err = filesys.NewFileSysClientFromURLContext(
-				ctx, c.URL(), g.MapToKVArr(c.DataS())...,
-			)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.File, nil
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
 	}
 
-	return filesys.NewFileSysClientFromURLContext(
-		ctx, c.URL(), g.MapToKVArr(c.DataS())...,
+	// default cache to true
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.File != nil {
+			return cc.File, nil
+		}
+	}
+
+	// build input data
+	data := c.DataSWithExtra(opt.Extra)
+	c.File, err = filesys.NewFileSysClientFromURLContext(
+		ctx, c.URL(), g.MapToKVArr(data)...,
 	)
+	if err != nil {
+		return
+	}
+	connCache.Set(c.Hash(), c) // cache
+
+	return c.File, nil
 }
 
-func (c *Connection) AsAPI(cache ...bool) (ac *api.APIConnection, err error) {
-	return c.AsAPIContext(c.Context().Ctx, cache...)
+func (c *Connection) AsAPI(options ...AsConnOptions) (ac *api.APIConnection, err error) {
+	return c.AsAPIContext(c.Context().Ctx, options...)
 }
 
-func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.APIConnection, err error) {
+func (c *Connection) AsAPIContext(ctx context.Context, options ...AsConnOptions) (ac *api.APIConnection, err error) {
 	if !c.Type.IsAPI() {
 		return nil, g.Error("not a api connection type: %s", c.Type)
+	}
+
+	// default cache to true
+	opt := AsConnOptions{UseCache: true, Extra: g.M()}
+	if len(options) > 0 {
+		opt = options[0]
+	}
+
+	// add connection name
+	data := maps.Clone(c.Data)
+	data["name"] = strings.ToLower(c.Name)
+	for k, v := range opt.Extra {
+		data[k] = v
+	}
+
+	// default cache to true
+	if cc, ok := connCache.Get(c.Hash()); ok && opt.UseCache {
+		if cc.API != nil {
+			return cc.API, nil
+		}
 	}
 
 	// load spec
@@ -363,26 +420,13 @@ func (c *Connection) AsAPIContext(ctx context.Context, cache ...bool) (ac *api.A
 		return nil, g.Error(err, "could not load spec")
 	}
 
-	// default cache to true
-	if len(cache) == 0 || (len(cache) > 0 && cache[0]) {
-		if cc, ok := connCache.Get(c.Hash()); ok {
-			if cc.API != nil {
-				return cc.API, nil
-			}
-		}
-
-		if c.API == nil {
-			c.API, err = api.NewAPIConnection(ctx, spec, c.Data)
-			if err != nil {
-				return
-			}
-			connCache.Set(c.Hash(), c) // cache
-		}
-
-		return c.API, nil
+	c.API, err = api.NewAPIConnection(ctx, spec, data)
+	if err != nil {
+		return
 	}
+	connCache.Set(c.Hash(), c) // cache
 
-	return api.NewAPIConnection(ctx, spec, c.Data)
+	return c.API, nil
 }
 
 func (c *Connection) setFromEnv() {
@@ -461,27 +505,28 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("role", U.PopParam("role"))
 			}
 
-			if c.Type == dbio.TypeDbSnowflake {
+			switch c.Type {
+			case dbio.TypeDbSnowflake:
 				setIfMissing("warehouse", U.PopParam("warehouse"))
-			} else if c.Type == dbio.TypeDbBigQuery {
+			case dbio.TypeDbBigQuery:
 				setIfMissing("location", U.PopParam("location"))
 				setIfMissing("project", U.Hostname())
-			} else if c.Type == dbio.TypeDbBigTable {
+			case dbio.TypeDbBigTable:
 				setIfMissing("project", U.Hostname())
 				setIfMissing("instance", pathValue)
-			} else if c.Type == dbio.TypeDbSQLite || c.Type == dbio.TypeDbDuckDb {
+			case dbio.TypeDbSQLite, dbio.TypeDbDuckDb:
 				setIfMissing("instance", U.Path())
 				setIfMissing("schema", "main")
-			} else if c.Type == dbio.TypeDbMotherDuck {
+			case dbio.TypeDbMotherDuck:
 				setIfMissing("schema", "main")
-			} else if c.Type == dbio.TypeDbD1 {
+			case dbio.TypeDbD1:
 				setIfMissing("schema", "main")
 				setIfMissing("host", U.Hostname())
 				setIfMissing("password", U.Password())
-			} else if c.Type == dbio.TypeDbSQLServer {
+			case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 				setIfMissing("instance", pathValue)
 				setIfMissing("database", U.PopParam("database"))
-			} else if c.Type == dbio.TypeDbOracle {
+			case dbio.TypeDbOracle:
 				setIfMissing("sid", pathValue)
 			}
 
@@ -510,6 +555,41 @@ func (c *Connection) setURL() (err error) {
 			account = strings.ReplaceAll(account, ".dfs.core.windows.net", "")
 			setIfMissing("account", account)
 			setIfMissing("container", strings.ReplaceAll(U.U.Path, "/", ""))
+		}
+		if c.Type == dbio.TypeFileAzureABFS {
+			switch {
+			case strings.HasPrefix(c.URL(), "http"):
+				account := strings.ReplaceAll(U.U.Host, ".dfs.core.windows.net", "")
+				account = strings.ReplaceAll(account, ".dfs.fabric.microsoft.com", "")
+				setIfMissing("account", account)
+				// Store the full endpoint if it's not standard Azure
+				if strings.Contains(U.U.Host, ".dfs.fabric.microsoft.com") {
+					setIfMissing("endpoint", U.U.Host)
+				}
+				// Extract filesystem (first path segment only)
+				pathParts := strings.Split(strings.TrimPrefix(U.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					setIfMissing("filesystem", pathParts[0])
+				}
+				if len(pathParts) > 1 {
+					setIfMissing("parent", pathParts[1])
+				}
+			case strings.HasPrefix(c.URL(), "abfs"):
+				account := strings.ReplaceAll(U.U.Host, ".dfs.core.windows.net", "")
+				account = strings.ReplaceAll(account, ".dfs.fabric.microsoft.com", "")
+				setIfMissing("account", account)
+
+				// Store the full endpoint if it's not standard Azure
+				if strings.Contains(U.U.Host, ".dfs.fabric.microsoft.com") {
+					setIfMissing("endpoint", U.U.Host)
+				}
+
+				setIfMissing("filesystem", U.Username())
+				pathParts := strings.Split(strings.TrimPrefix(U.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					setIfMissing("parent", pathParts[0])
+				}
+			}
 		}
 	}
 
@@ -757,12 +837,15 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("schema", "main")
 		setIfMissing("interactive", true)
 		template = "motherduck://{database}?interactive={interactive}&motherduck_token={motherduck_token}"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH:
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
 		setIfMissing("app_name", "sling")
 
 		template = "sqlserver://{username}:{password}@{host}"
+		if c.Type == dbio.TypeDbFabric {
+			template = "fabric://{username}:{password}@{host}"
+		}
 
 		_, port_ok := c.Data["port"]
 		_, instance_ok := c.Data["instance"]
@@ -872,7 +955,7 @@ func (c *Connection) setURL() (err error) {
 		if path := cast.ToString(c.Data["path"]); path != "" {
 			template = template + path
 		}
-	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure,
+	case dbio.TypeFileS3, dbio.TypeFileGoogle, dbio.TypeFileGoogleDrive, dbio.TypeFileAzure, dbio.TypeFileAzureABFS,
 		dbio.TypeFileLocal:
 		return nil
 	case dbio.TypeDbIceberg:
@@ -968,7 +1051,7 @@ func CopyDirect(conn database.Connection, tableFName string, srcFile Connection)
 		if err != nil {
 			err = g.Error(err, "could not load into database from S3")
 		}
-	case dbio.TypeFileAzure:
+	case dbio.TypeFileAzure, dbio.TypeFileAzureABFS:
 		ok = true
 		err = database.CopyFromAzure(conn, tableFName, srcFile.URL())
 		if err != nil {
@@ -1176,6 +1259,10 @@ func ReadConnections(env map[string]interface{}) (conns map[string]Connection, e
 
 					conn, err := NewConnectionFromMap(g.M("name", name, "data", data, "type", data["type"]))
 					if err != nil {
+						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
+						continue
+					}
+					if err = conn.setURL(); err != nil {
 						g.Warn("could not load connection %s: %s", name, g.ErrMsgSimple(err))
 						continue
 					}

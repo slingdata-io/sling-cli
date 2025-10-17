@@ -18,6 +18,7 @@ core:
     )
     stored as parquet
     location '{location}'
+  limit: select {fields} from {table}{where_clause} limit {limit}
   limit_sql: |
     select * from (
       {sql}

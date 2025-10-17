@@ -10,6 +10,7 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/flarco/g"
+	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -25,6 +26,11 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	if err != nil {
 		err = g.Error(err, "Error parsing yaml content")
 		return
+	}
+
+	// so that JMESPath works
+	if err = g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap); err != nil {
+		return spec, g.Error(err, "error loading API spec into map")
 	}
 
 	// load spec from body
@@ -56,15 +62,42 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 	// set endpoint index
 	for _, endpointName := range spec.endpointsOrdered {
 		endpoint := spec.EndpointMap[endpointName]
+
+		// get original map for endpoint
+		originalMap, err := jmespath.Search("endpoints."+endpointName, spec.originalMap)
+		if err != nil {
+			return spec, g.Error(err, "error getting endpoint spec map value: %s", endpointName)
+		} else if err = g.Unmarshal(g.Marshal(originalMap), &endpoint.originalMap); err != nil {
+			return spec, g.Error(err, "error loading endpoint spec into map: %s", endpointName)
+		}
+
 		endpoint.Name = endpointName
+		endpoint.originalMap["name"] = endpointName
+
 		if endpoint.State == nil {
 			endpoint.State = g.M() // set default state
 		}
 		spec.EndpointMap[endpointName] = endpoint
 	}
 
-	// so that JMESPath works
-	g.Unmarshal(g.Marshal(spec.originalMap), &spec.originalMap)
+	// compile and validate endpoints
+	compiledEndpointMap := EndpointMap{}
+	for name, endpoint := range spec.EndpointMap {
+		if err = compileSpecEndpoint(&endpoint, spec); err != nil {
+			return spec, g.Error(err, "endpoint validation failed")
+		}
+		compiledEndpointMap[name] = endpoint
+	}
+
+	// validate that all queues used by endpoints are declared
+	if err = spec.validateQueues(compiledEndpointMap); err != nil {
+		return spec, g.Error(err, "queue validation failed")
+	}
+
+	// validate that all sync keys have corresponding processors
+	if err = spec.validateSync(compiledEndpointMap); err != nil {
+		return spec, g.Error(err, "sync validation failed")
+	}
 
 	return
 }
@@ -85,6 +118,96 @@ type Spec struct {
 
 func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
+}
+
+// validateQueues checks that all queues used by endpoints are declared at the Spec level
+func (s *Spec) validateQueues(endpointMap EndpointMap) error {
+	// Create a set of declared queues for fast lookup
+	declaredQueues := make(map[string]bool)
+	for _, queue := range s.Queues {
+		declaredQueues[queue] = true
+	}
+
+	usedQueues := make(map[string][]string) // map[queueName][]endpointNames
+
+	// Check all endpoints for queue usage
+	for endpointName, endpoint := range endpointMap {
+		// Check if endpoint iterates over a queue
+		if iterateOver, ok := endpoint.Iterate.Over.(string); ok {
+			if strings.HasPrefix(iterateOver, "queue.") {
+				queueName := strings.TrimPrefix(iterateOver, "queue.")
+				usedQueues[queueName] = append(usedQueues[queueName], endpointName)
+			}
+		}
+
+		// Check if endpoint produces to a queue via processors
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "queue.") {
+				queueName := strings.TrimPrefix(processor.Output, "queue.")
+				usedQueues[queueName] = append(usedQueues[queueName], endpointName)
+			}
+		}
+	}
+
+	// Validate that all used queues are declared
+	var undeclaredQueues []string
+	for queueName, endpointNames := range usedQueues {
+		if !declaredQueues[queueName] {
+			undeclaredQueues = append(undeclaredQueues, g.F("queue '%s' used by endpoint(s): %s", queueName, strings.Join(endpointNames, ", ")))
+		}
+	}
+
+	if len(undeclaredQueues) > 0 {
+		sort.Strings(undeclaredQueues)
+		return g.Error("undeclared queue(s) found:\n  - %s\n\nPlease declare them in the 'queues' section at the spec level", strings.Join(undeclaredQueues, "\n  - "))
+	}
+
+	return nil
+}
+
+// validateSync checks that all sync keys have corresponding processors that write to state
+func (s *Spec) validateSync(endpointMap EndpointMap) error {
+	var validationErrors []string
+
+	// Check all endpoints for sync usage
+	for endpointName, endpoint := range endpointMap {
+		if len(endpoint.Sync) == 0 {
+			continue
+		}
+
+		// Build a set of state keys written by processors
+		stateKeysWritten := make(map[string]bool)
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "state.") {
+				stateKey := strings.TrimPrefix(processor.Output, "state.")
+				stateKeysWritten[stateKey] = true
+			}
+		}
+
+		// Check that each sync key has a corresponding processor
+		var missingSyncKeys []string
+		for _, syncKey := range endpoint.Sync {
+			if !stateKeysWritten[syncKey] {
+				missingSyncKeys = append(missingSyncKeys, syncKey)
+			}
+		}
+
+		if len(missingSyncKeys) > 0 {
+			sort.Strings(missingSyncKeys)
+			validationErrors = append(validationErrors,
+				g.F("endpoint '%s' declares sync key(s) [%s] but has no processor writing to state.%s",
+					endpointName,
+					strings.Join(missingSyncKeys, ", "),
+					strings.Join(missingSyncKeys, ", state.")))
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		sort.Strings(validationErrors)
+		return g.Error("sync validation failed:\n  - %s", strings.Join(validationErrors, "\n  - "))
+	}
+
+	return nil
 }
 
 type DynamicEndpoints []DynamicEndpoint
@@ -112,7 +235,8 @@ type Authentication struct {
 
 	// OAuth
 	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
-	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"`
+	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`  // Authorization endpoint (for auth code flow)
 	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
 	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
@@ -177,7 +301,8 @@ type Endpoint struct {
 	Iterate     Iterate    `yaml:"iterate" json:"iterate,omitempty"` // state expression to use to loop
 	Setup       Sequence   `yaml:"setup" json:"setup,omitempty"`
 	Teardown    Sequence   `yaml:"teardown" json:"teardown,omitempty"`
-	DependsOn   []string   `yaml:"-" json:"-"` // upstream endpoints
+	DependsOn   []string   `yaml:"depends_on" json:"depends_on"` // upstream endpoints
+	Overrides   any        `yaml:"overrides" json:"overrides"`   // stream overrides
 
 	stop         bool // whether we should stop the endpoint process
 	conn         *APIConnection
@@ -191,6 +316,7 @@ type Endpoint struct {
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
 	bloomFilter  *bloom.BloomFilter
 	aggregate    AggregateState
+	originalMap  map[string]any
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -575,7 +701,6 @@ func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
 type Iterate struct {
 	Over        any    `yaml:"over" json:"iterate,omitempty"` // expression
 	Into        string `yaml:"into" json:"into,omitempty"`    // state variable
-	If          string `yaml:"id" json:"id,omitempty"`        // if we should iterate
 	Concurrency int    `yaml:"concurrency" json:"concurrency,omitempty"`
 	iterations  chan *Iteration
 }
@@ -676,6 +801,7 @@ type Processor struct {
 	Aggregation AggregationType `yaml:"aggregation" json:"aggregation"`
 	Expression  string          `yaml:"expression" json:"expression"`
 	Output      string          `yaml:"output" json:"output"`
+	If          string          `yaml:"if" json:"if,omitempty"` // if we should evaluate processor
 }
 
 type RuleType string
@@ -783,8 +909,4 @@ type ResponseState struct {
 type AggregateState struct {
 	value any
 	array []any
-}
-
-func escapeErrVal(val string) string {
-	return strings.ReplaceAll(val, `%`, `%`+`%`)
 }

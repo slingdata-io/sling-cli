@@ -35,7 +35,7 @@ hooks:
     - type: query
       connection: duckdb
       query: |
-        SELECT column_name 
+        SELECT * 
         FROM (
           DESCRIBE SELECT * FROM '/tmp/test_exclude_column_607.parquet'
         )
@@ -44,7 +44,8 @@ hooks:
 
     - type: log
       message: |
-        Columns in the generated parquet file: {store.parquet_columns}
+        Columns in the generated parquet:
+        { pretty_table(store.parquet_columns) }
         
     # Check if extra_col column is present (it should NOT be present)
     - type: query
@@ -64,7 +65,6 @@ hooks:
         Actual: {store.extra_col_check[0].extra_col_count}
 
     # This check should pass when the bug is fixed
-    # For now, it will likely fail since the bug exists
     - type: check
       check: store.extra_col_check[0].extra_col_count == 0
       on_error: "ERROR: Issue #607 reproduced - extra_col column was NOT excluded as expected!"

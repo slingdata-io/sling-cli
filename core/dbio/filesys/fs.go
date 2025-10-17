@@ -95,6 +95,8 @@ func NewFileSysClientContext(ctx context.Context, fst dbio.Type, props ...string
 	// 	fsClient = fsClient
 	case dbio.TypeFileAzure:
 		fsClient = &AzureFileSysClient{}
+	case dbio.TypeFileAzureABFS:
+		fsClient = &ABFSFileSysClient{}
 	case dbio.TypeFileGoogle:
 		fsClient = &GoogleFileSysClient{}
 	case dbio.TypeFileGoogleDrive:
@@ -164,7 +166,11 @@ func NewFileSysClientFromURLContext(ctx context.Context, url string, props ...st
 	case strings.HasPrefix(url, "gdrive://"):
 		props = append(props, "URL="+url)
 		return NewFileSysClientContext(ctx, dbio.TypeFileGoogleDrive, props...)
-	case strings.Contains(url, ".core.windows.net") || strings.HasPrefix(url, "azure://"):
+	case strings.HasPrefix(url, "abfs://") || strings.HasPrefix(url, "abfss://"):
+		return NewFileSysClientContext(ctx, dbio.TypeFileAzureABFS, props...)
+	case strings.Contains(url, ".dfs.core.windows.net"), strings.Contains(url, ".dfs.fabric.microsoft.com"):
+		return NewFileSysClientContext(ctx, dbio.TypeFileAzureABFS, props...)
+	case strings.Contains(url, ".blob.core.windows.net") || strings.HasPrefix(url, "azure://"):
 		return NewFileSysClientContext(ctx, dbio.TypeFileAzure, props...)
 	case strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://"):
 		props = append(props, "URL="+url)
@@ -245,8 +251,30 @@ func NormalizeURI(fs FileSysClient, uri string) string {
 			path = strings.TrimPrefix(path, "/")
 		}
 		return fs.Prefix("/") + path
-	// case dbio.TypeFileGoogleDrive:
-	// 	return fs.Prefix() + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
+	case dbio.TypeFileAzureABFS, dbio.Type("abfss"):
+		if strings.HasPrefix(uri, "abfs") {
+			path := strings.TrimPrefix(uri, fs.FsType().String()+"://")
+			u, err := net.NewURL(uri)
+			if err == nil {
+				path = strings.TrimPrefix(uri, u.U.Scheme+"://")
+				path = strings.TrimPrefix(path, u.U.User.Username())
+				path = strings.TrimPrefix(path, ":")
+				password, _ := u.U.User.Password()
+				path = strings.TrimPrefix(path, url.QueryEscape(password))
+				path = strings.TrimPrefix(path, "@")
+				path = strings.TrimPrefix(path, u.U.Host)
+				path = strings.TrimPrefix(path, "/")
+
+				// remove parent (lakehouse GUID)
+				pathParts := strings.Split(strings.TrimPrefix(u.U.Path, "/"), "/")
+				if len(pathParts) > 0 {
+					path = strings.TrimPrefix(path, pathParts[0])
+					path = strings.TrimPrefix(path, "/")
+				}
+			}
+			return fs.Prefix("/") + path
+		}
+		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	default:
 		return fs.Prefix("/") + strings.TrimLeft(strings.TrimPrefix(uri, fs.Prefix()), "/")
 	}
@@ -267,6 +295,12 @@ func makeGlob(uri string) (*glob.Glob, error) {
 	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 		path = strings.TrimPrefix(path, pathContainer+"/") // remove container
+	case dbio.TypeFileAzureABFS:
+		pathArr := strings.Split(path, "/")
+		pathWorkspace := pathArr[0]
+		pathParent := pathArr[1] + "/Files"
+		path = strings.TrimPrefix(path, pathWorkspace+"/") // remove workspace
+		path = strings.TrimPrefix(path, pathParent+"/")    // remove parent
 	}
 
 	gc, err := glob.Compile(path)
@@ -624,7 +658,7 @@ func (fs *BaseFileSysClient) ReadDataflow(url string, cfg ...iop.FileStreamConfi
 		Cfg.Format = nodes.InferFormat()
 	}
 
-	if g.In(Cfg.Format, dbio.FileTypeParquet) && Cfg.ComputeWithDuckDB() {
+	if g.In(Cfg.Format, dbio.FileTypeParquet) && env.UseDuckDbCompute() {
 		// if g.In(fs.FsType(), dbio.TypeFileLocal, dbio.TypeFileS3, dbio.TypeFileAzure) {
 		// azure read gives issues...
 		if g.In(fs.FsType(), dbio.TypeFileLocal) {
@@ -1258,8 +1292,27 @@ func GetDataflowViaDuckDB(fs FileSysClient, uri string, nodes FileNodes, cfg iop
 	return df, nil
 }
 
-// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
 func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw int64, err error) {
+
+	fileReadyChn := make(chan FileReady, 10000)
+
+	g.Trace("writing dataflow via duckdb to %s", uri)
+	go func() {
+		for range fileReadyChn {
+			// do nothing, wait for completion
+		}
+	}()
+
+	sp := iop.NewStreamProcessor()
+	sp.SetConfig(fs.Client().Props())
+
+	return WriteDataflowReadyViaDuckDB(fs, df, uri, fileReadyChn, sp.Config)
+}
+
+// WriteDataflowViaDuckDB writes to parquet / csv via duckdb
+func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string, fileReadyChn chan FileReady, sc iop.StreamConfig) (bw int64, err error) {
+	defer close(fileReadyChn)
+
 	folder := path.Join(env.GetTempFolder(), g.RandSuffix("duckdb", 3))
 	df.Defer(func() { env.RemoveAllLocalTempFile(folder) })
 
@@ -1272,10 +1325,6 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	props := g.MapToKVArr(fs.Props())
 	duck := iop.NewDuckDb(context.Background(), props...)
 	duckURI := duck.PrepareFsSecretAndURI(uri)
-
-	sp := iop.NewStreamProcessor()
-	sp.SetConfig(fs.Client().Props())
-	sc := sp.Config
 
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))
@@ -1292,7 +1341,15 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 	// merge into single stream to push into duckdb
 	duckSc := duck.DefaultCsvConfig()
 	duckSc.FileMaxRows = sc.FileMaxRows
-	// duckSc.Format = dbio.FileTypeArrow
+
+	switch fs.GetProp("duckdb_copy_method", "copy_method") {
+	case "csv_http":
+		duckSc.Format = dbio.FileTypeCsv
+	case "arrow_http":
+		duckSc.Format = dbio.FileTypeArrow
+		duck.AddExtension("arrow from community")
+	}
+
 	streamPartChn, err := duck.DataflowToHttpStream(df, duckSc)
 	if err != nil {
 		return bw, g.Error(err)
@@ -1360,13 +1417,12 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 			}
 
 			// get bytes written
-			if fs.FsType() == dbio.TypeFileLocal {
-				bw, _ = g.PathSize(duckURI)
-			} else {
-				path, _ := fs.GetPath(uri)
-				nodes, _ := fs.ListRecursive(path)
-				bw = cast.ToInt64(nodes.TotalSize())
-			}
+			bw0, _ := g.PathSize(localPath)
+			node := FileNode{URI: g.F("file://%s", localPath), Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{streamPart.Columns, node, bw, cast.ToString(streamPart.Index)}
+			g.Trace("wrote file: %s", g.Marshal(node))
+			bw = bw + bw0
+
 		default:
 			// copy to temp file locally, then upload
 			localRoot := env.CleanWindowsPath(path.Join(folder, "output")) // could be file or dir
@@ -1400,6 +1456,13 @@ func WriteDataflowViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string) (bw 
 				err = g.Error(err, "Could not write to file")
 				return bw, err
 			}
+
+			// push to channel
+			bw0, _ := g.PathSize(localPath)
+			node := FileNode{URI: uri, Size: cast.ToUint64(bw0)}
+			fileReadyChn <- FileReady{streamPart.Columns, node, bw0, cast.ToString(streamPart.Index)}
+
+			g.Trace("wrote file: %s", g.Marshal(node))
 
 			// if single file, delete so we don't copy again
 			if localPath != localRoot {
@@ -1770,7 +1833,7 @@ func CopyFromLocalRecursive(fs FileSysClient, localPath string, remotePath strin
 	}
 
 	// For directories, walk through and copy each file
-	g.Debug("writing partitions to %s", remotePath)
+	g.Debug("copying files to remote path => %s", remotePath)
 	err = filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
 		copyContext.Wg.Write.Add()
 		go func() {

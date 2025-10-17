@@ -466,7 +466,7 @@ func TestColumnTyping(t *testing.T) {
 				assert.Equal(t, testCase.expectedStringLength, length)
 
 			} else if dct := testCase.columnTyping.Decimal; dct != nil {
-				precision, scale := dct.Apply(&testCase.column)
+				precision, scale := dct.Apply(testCase.column)
 				assert.Equal(t, testCase.expectedDecimalPrecision, precision)
 				assert.Equal(t, testCase.expectedDecimalScale, scale)
 			}
@@ -476,7 +476,7 @@ func TestColumnTyping(t *testing.T) {
 	// Keep the original hardcoded test for backward compatibility
 	col := Column{Name: "test", Type: DecimalType, DbPrecision: 10, DbScale: 0, Sourced: true}
 	ct := ColumnTyping{Decimal: &DecimalColumnTyping{}}
-	precision, scale := ct.Decimal.Apply(&col)
+	precision, scale := ct.Decimal.Apply(col)
 	assert.Equal(t, 10, precision)
 	assert.Equal(t, 0, scale)
 }

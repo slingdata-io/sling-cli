@@ -46,6 +46,7 @@ type TaskExecution struct {
 	PBar           *ProgressBar       `json:"-"`
 	ProcStatsStart g.ProcStats        `json:"-"` // process stats at beginning
 	cleanupFuncs   []func()
+	cleanedUp      bool
 }
 
 // ExecutionStatus is an execution status object
@@ -369,13 +370,6 @@ func (t *TaskExecution) isUsingPool() bool {
 	if val := os.Getenv("SLING_POOL"); val != "" {
 		return cast.ToBool(val)
 	}
-	// return cast.ToBool(os.Getenv("SLING_CLI")) && t.Config.ReplicationMode()
-
-	// disabling pool by default connections are opened based on
-	// source/target options, causing opening new connections anyways
-	// this builds up the open connections for each stream.
-	// TODO: refactor the way source/target options and metadata are passed
-	// which is a big refactor.
 	return false
 }
 
@@ -410,6 +404,11 @@ func (t *TaskExecution) Cleanup() {
 	t.Context.Mux.Lock()
 	defer t.Context.Mux.Unlock()
 
+	if t.cleanedUp {
+		return
+	}
+
+	g.Trace("task-execution cleanup")
 	for i, f := range t.cleanupFuncs {
 		f()
 		t.cleanupFuncs[i] = func() {} // in case it gets called again
@@ -417,13 +416,14 @@ func (t *TaskExecution) Cleanup() {
 	if t.df != nil {
 		t.df.CleanUp()
 	}
+	t.cleanedUp = true
 }
 
 // shouldWriteViaDuckDB determines whether we should use duckdb
 // at the moment, use duckdb only for parquet or partitioned
 // target parquet or csv files
 func (t *TaskExecution) shouldWriteViaDuckDB(uri string) bool {
-	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" && !cast.ToBool(val) {
+	if !env.UseDuckDbCompute() {
 		return false
 	}
 
@@ -608,6 +608,8 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
+		case contains("CSV table encountered too many errors"):
+			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
 		}
 	}
 	return

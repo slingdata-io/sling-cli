@@ -24,6 +24,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/env"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/apache/arrow-go/v18/arrow/flight/flightsql"
 	_ "github.com/databricks/databricks-sql-go"
 	_ "github.com/exasol/exasol-driver-go"
@@ -270,6 +271,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &AthenaConn{URL: URL}
 	} else if strings.HasPrefix(URL, "trino") {
 		conn = &TrinoConn{URL: URL}
+	} else if strings.HasPrefix(URL, "fabric:") {
+		conn = &MsFabricConn{URL: URL}
 	} else if strings.HasPrefix(URL, "sqlserver:") {
 		conn = &MsSQLServerConn{URL: URL}
 	} else if strings.HasPrefix(URL, "starrocks:") {
@@ -346,7 +349,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 	err = conn.Init()
 
 	// set sling_conn_id
-	conn.SetProp("sling_conn_id", g.RandSuffix(g.F("conn-%s-", conn.GetType()), 3))
+	prefix := g.F("conn-%s-%s-", conn.GetType(), conn.GetProp("name"))
+	conn.SetProp("sling_conn_id", g.RandSuffix(prefix, 3))
 
 	return conn, err
 }
@@ -370,8 +374,10 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "sqlite3"
 	case dbio.TypeDbDuckDb, dbio.TypeDbMotherDuck, dbio.TypeDbDuckLake:
 		driverName = "duckdb"
-	case dbio.TypeDbSQLServer, dbio.TypeDbAzure:
+	case dbio.TypeDbSQLServer:
 		driverName = "sqlserver"
+	case dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH:
+		driverName = "azuresql"
 	case dbio.TypeDbTrino:
 		driverName = "trino"
 	case dbio.TypeDbProton:
@@ -995,7 +1001,7 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 		key := strings.ToLower(col.Name)
 		vals := colTransforms[key]
 		switch conn.Type {
-		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH:
+		case dbio.TypeDbAzure, dbio.TypeDbSQLServer, dbio.TypeDbAzureDWH, dbio.TypeDbFabric:
 			if strings.ToLower(col.DbType) == "uniqueidentifier" {
 				if !lo.Contains(vals, "parse_uuid") {
 					g.Debug(`setting transform "parse_ms_uuid" for column "%s"`, col.Name)
@@ -1014,7 +1020,10 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	}
 
 	if len(colTransforms) > 0 {
-		transforms, _ := iop.ParseStageTransforms(colTransforms)
+		transforms, err := iop.ParseStageTransforms(colTransforms)
+		if err != nil {
+			g.Warn("could not parse column transforms for database stream: %s", err.Error())
+		}
 		conn.SetProp("transforms", g.Marshal(transforms))
 	}
 }
@@ -1459,7 +1468,7 @@ func SQLColumns(colTypes []ColumnType, conn Connection) (columns iop.Columns) {
 		}
 
 		if colType.IsSourced() || col.Sourced {
-			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
+			if col.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbFabric, dbio.TypeDbAzureDWH, dbio.TypeDbSnowflake, dbio.TypeDbOracle, dbio.TypeDbPostgres, dbio.TypeDbRedshift) {
 				col.Sourced = true
 				if colType.Length > 0 {
 					col.DbPrecision = colType.Length
@@ -1521,7 +1530,14 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 		return conn.GetColumns(table.FullName())
 	}
 
-	limitSQL := table.Select(SelectOptions{Limit: 1})
+	limit := 1
+
+	// we can use limit=0 for certain databases
+	if g.In(conn.GetType(), dbio.TypeDbPostgres, dbio.TypeDbRedshift, dbio.TypeDbClickhouse, dbio.TypeDbMySQL, dbio.TypeDbMariaDB, dbio.TypeDbBigQuery, dbio.TypeDbStarRocks, dbio.TypeDbSnowflake, dbio.TypeDbOracle) || conn.GetType().IsSQLServer() {
+		limit = 0
+	}
+
+	limitSQL := table.Select(SelectOptions{Limit: g.Ptr(limit)})
 	if table.IsProcedural() {
 		limitSQL = table.Raw // don't wrap in limit
 	}
@@ -1529,7 +1545,7 @@ func (conn *BaseConn) GetSQLColumns(table Table) (columns iop.Columns, err error
 	// get column types
 	g.Trace("GetSQLColumns: %s", limitSQL)
 	limitSQL = limitSQL + " /* GetSQLColumns */ " + noDebugKey
-	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", 1))
+	ds, err := conn.Self().StreamRows(limitSQL, g.M("limit", limit))
 	if err != nil {
 		return columns, g.Error(err, "GetSQLColumns Error")
 	}
@@ -1636,10 +1652,18 @@ func (conn *BaseConn) GetTableColumns(table *Table, fields ...string) (columns i
 	columns = SQLColumns(colTypes, conn)
 
 	// add table info
-	for i := range columns {
+	for i, col := range columns {
 		columns[i].Database = table.Database
 		columns[i].Schema = table.Schema
 		columns[i].Table = table.Name
+
+		// set extra columns as metadata
+		for key, val := range colMap[strings.ToLower(col.Name)] {
+			key = strings.ToLower(key)
+			if !g.In(key, "column_name", "data_type", "maximum_length", "precision", "scale") {
+				columns[i].SetMetadata(key, cast.ToString(val))
+			}
+		}
 	}
 
 	table.Columns = columns
@@ -2208,7 +2232,12 @@ func (conn *BaseConn) ValidateColumnNames(tgtCols iop.Columns, colNames []string
 	}
 
 	if len(mismatches) > 0 {
-		err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
+		if val := conn.GetProp("add_new_columns"); val != "" && !cast.ToBool(val) {
+			// if we've explicitly configured to not columns, don't error, just warn
+			g.Warn("column names mismatch: %s. Current target columns are: %s", strings.Join(mismatches, "\n"), g.Marshal(newCols.Names()))
+		} else {
+			err = g.Error("column names mismatch: %s", strings.Join(mismatches, "\n"))
+		}
 	}
 
 	g.Trace("insert target fields: " + strings.Join(newCols.Names(), ", "))
@@ -2564,11 +2593,12 @@ func (conn *BaseConn) BulkExportFlowCSV(table Table) (df *iop.Dataflow, err erro
 type MergeStrategy string
 
 const (
-	MergeStrategyNone         MergeStrategy = ""
-	MergeStrategyInsert       MergeStrategy = "insert"
-	MergeStrategyUpdate       MergeStrategy = "update"
-	MergeStrategyUpdateInsert MergeStrategy = "update_insert"
-	MergeStrategyDeleteInsert MergeStrategy = "delete_insert"
+	MergeStrategyNone          MergeStrategy = ""
+	MergeStrategyInsert        MergeStrategy = "insert"
+	MergeStrategyUpdate        MergeStrategy = "update"
+	MergeStrategyUpdateInsert  MergeStrategy = "update_insert"
+	MergeStrategyDeleteInsert  MergeStrategy = "delete_insert"
+	MergeStrategyHistoryInsert MergeStrategy = "history_insert"
 )
 
 // Merge inserts / updates from a srcTable into a target table.
@@ -3005,7 +3035,7 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 		oldColName := conn.Self().Quote(colNameTemp)
 		newColName := conn.Self().Quote(col.Name)
 
-		if g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+		if conn.GetType().IsSQLServer() {
 			tableName = conn.Unquote(table.FullName())
 			oldColName = colNameTemp
 			newColName = col.Name
@@ -3158,7 +3188,7 @@ func (conn *BaseConn) CompareChecksums(tableName string, columns iop.Columns) (e
 		} else if checksum1 != checksum2 {
 			if refCol.Type != col.Type {
 				// don't compare
-			} else if refCol.IsString() && g.In(conn.GetType(), dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) && checksum2 >= checksum1 {
+			} else if refCol.IsString() && conn.GetType().IsSQLServer() && checksum2 >= checksum1 {
 				// datalength can return higher counts since it counts bytes
 			} else if refCol.IsDatetime() && conn.GetType() == dbio.TypeDbSQLite && checksum1/1000 == checksum2 {
 				// sqlite can only handle timestamps up to milliseconds
@@ -3622,6 +3652,62 @@ func TruncateTable(conn Connection, tableName string) error {
 	if _, err := conn.Exec(truncSQL); err != nil {
 		err = g.Error(err, "could not truncate table ", tableName)
 		return err
+	}
+
+	return nil
+}
+
+func PrintSessionID(conn Connection) {
+	var sql string
+	switch conn.GetType() {
+	case dbio.TypeDbPostgres:
+		sql = "SELECT pg_backend_pid()"
+	case dbio.TypeDbRedshift:
+		sql = "SELECT pg_backend_pid()"
+	case dbio.TypeDbStarRocks, dbio.TypeDbMySQL, dbio.TypeDbMariaDB:
+		sql = "SELECT CONNECTION_ID()"
+	case dbio.TypeDbOracle:
+		sql = "SELECT SYS_CONTEXT('USERENV', 'SESSIONID') FROM DUAL"
+	case dbio.TypeDbBigQuery:
+		sql = "SELECT SESSION_USER()"
+	case dbio.TypeDbSnowflake:
+		sql = "SELECT CURRENT_SESSION()"
+	case dbio.TypeDbDatabricks:
+		sql = "SELECT SESSION_USER()"
+	case dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH, dbio.TypeDbAzureTable, dbio.TypeDbFabric:
+		sql = "SELECT @@SPID"
+	case dbio.TypeDbExasol:
+		sql = "SELECT SESSION_ID FROM EXA_ALL_SESSIONS WHERE SESSION_ID = CURRENT_SESSION"
+	}
+
+	if sql != "" {
+		sql = sql + "/* sling-session-id */ " + env.NoDebugKey
+		data, err := conn.Query(sql)
+		if err == nil && len(data.Rows) > 0 {
+			g.Debug("%s session ID => %s", conn.GetProp("sling_conn_id"), cast.ToString(data.Rows[0][0]))
+		} else {
+			g.Warn("could not get session ID for %s: %s", conn.GetProp("sling_conn_id"), err.Error())
+		}
+	}
+}
+
+func applyColumnTypingToDf(conn Connection, df *iop.Dataflow) (err error) {
+
+	if val := conn.GetProp("column_typing"); val != "" {
+		var ct iop.ColumnTyping
+		if err = g.Unmarshal(val, &ct); err != nil {
+			return g.Error(err, "invalid column_typing")
+		}
+
+		if dct := ct.Decimal; dct != nil {
+			for i, col := range df.Columns {
+				if g.In(col.Type, iop.DecimalType, iop.FloatType) {
+					col.DbPrecision, col.DbScale = dct.Apply(col)
+					df.Columns[i] = col //set back
+					df.PropagateColum(i)
+				}
+			}
+		}
 	}
 
 	return nil

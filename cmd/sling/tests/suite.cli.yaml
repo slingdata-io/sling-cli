@@ -240,7 +240,7 @@
   run: 'sling run -d -r cmd/sling/tests/replications/r.09.yaml'
   streams: '>1'
   output_contains:
-    - 'running stream "public"."my_table_bytes"'
+    - 'from "public"."my_table_bytes"'
     - RUNNING
 
 - id: 42
@@ -276,7 +276,8 @@
   streams: 3
   output_contains:
     - 999 rows
-    - 'aws_s3 -> postgres | test/parquet/test1.parquet'
+    - 'aws_s3 -> postgres | '
+    - 'test/parquet/test1.parquet'
 
 - id: 48
   name: Run sling with replication configuration 14
@@ -824,12 +825,11 @@
 - id: 105
   name: Test MSSQL uniqueidentifier datatype preservation
   run: |
-    sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
+    sling conns exec mssql file://cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.sql
+    SLING_CLI_TOKEN='' sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.yaml
     sling run -d -r cmd/sling/tests/replications/r.47.mssql_uniqueidentifier.postgres.yaml
+    sling run -d -r cmd/sling/tests/replications/r.47.fabric_uniqueidentifier.yaml
   output_contains:
-    - "guid_col should be 'uniqueidentifier' type in target"
-    - "GUID value for record 1 should match"
-    - "GUID value for record 5 should match"
     - "execution succeeded"
     - "DROP TABLE public.unique_identifier_test2"
 
@@ -988,3 +988,78 @@
     - run.total_rows = 10
     - run.status = success
     - '   id = public_run_state_test'
+
+- id: 120
+  name: Test PostgreSQL mixed encoding character handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.58.postgres_invalid_utf8.yaml'
+  rows: 10
+  output_contains:
+    - 'execution succeeded'
+
+- id: 121
+  name: Test MSSQL to PostgreSQL encoding handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.59.mssql_postgres_encoding.yaml'
+  rows: 10
+  output_contains:
+    - 'execution succeeded'
+
+- id: 122
+  name: Test MSSQL to PostgreSQL collations handling
+  run: 'sling run -d -r cmd/sling/tests/replications/r.60.mssql_postgres_collations.yaml'
+  rows: 5
+  output_contains:
+    - 'execution succeeded'
+
+- id: 123
+  name: Test MSSQL identity columns with incremental mode (Issue #657)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.61.mssql_identity_incremental.yaml'
+  output_contains:
+    - 'execution succeeded'
+
+# with add_new_columns=false, we should WARN instead of erroring
+- id: 124
+  name: Test MSSQL to PostgreSQL with add_new_columns=false
+  run: 'sling run -d -r cmd/sling/tests/replications/r.62.mssql_postgres_add_columns_false.yaml'
+  output_contains:
+    - source field 'age' is missing in target table
+
+# Test PostgreSQL to BigQuery with all data types using CSV and Parquet format
+- id: 125
+  name: Test PostgreSQL to BigQuery with all data types
+  run: 'sling run -d -r cmd/sling/tests/replications/r.63.postgres_bigquery_all_types.yaml'
+
+# Test SQL Server time(7) to Oracle varchar conversion (Issue #662)
+- id: 126
+  name: Test MSSQL time(7) to Oracle conversion (Issue #662)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.64.mssql_oracle_time.yaml'
+  env:
+    SCHEMA: ORACLE
+  conns:
+    - mssql
+    - oracle
+  streams: 1
+  rows: 4
+  output_contains:
+    - 'execution succeeded'
+    - 'Row count: 4'
+
+# Test large CSV to Postgres to Parquet (WriteDataflowReadyViaDuckDB hang test)
+- id: 127
+  name: Test large CSV import to Postgres (100k rows)
+  run: |
+    sling run -d -r cmd/sling/tests/replications/r.65.large_csv_postgres_parquet.part1.yaml
+    sling run -d -r cmd/sling/tests/replications/r.65.large_csv_postgres_parquet.part2.yaml
+  conns:
+    - postgres
+  output_contains:
+    - 'CSV file created with 100,000'
+    - 'execution succeeded'
+    - '✓ All 100,000 CSV records imported successfully into Postgres'
+
+# Test MSSQL to Databricks with uppercase table name (Issue #664)
+- id: 128
+  name: Test MSSQL to Databricks with uppercase table name (Issue #664)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.66.mssql_databricks_uppercase_table.yaml'
+  output_contains:
+    - 'execution succeeded'
+

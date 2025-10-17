@@ -30,7 +30,8 @@ type Table struct {
 
 	Raw string `json:"raw"`
 
-	limit, offset int
+	limit  *int
+	offset int
 }
 
 type Chunk struct {
@@ -212,7 +213,7 @@ func (t *Table) ColumnsMap() map[string]iop.Column {
 type SelectOptions struct {
 	Fields []string
 	Offset int
-	Limit  int
+	Limit  *int
 	Where  string
 }
 
@@ -222,7 +223,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		opts = Opts[0]
 	}
 	// set to internal value if not specified
-	limit := lo.Ternary(opts.Limit == 0, t.limit, opts.Limit)
+	limit := lo.Ternary(opts.Limit == nil, t.limit, opts.Limit)
 	offset := lo.Ternary(opts.Offset == 0, t.offset, opts.Offset)
 	fields := opts.Fields
 
@@ -252,7 +253,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 			})
 		}
 
-		if opts.Limit > 0 {
+		if opts.Limit != nil {
 			m["limit"] = opts.Limit
 		}
 
@@ -262,7 +263,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		return t.SQL
 	}
 
-	isSQLServer := g.In(t.Dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH)
+	isSQLServer := t.Dialect.IsSQLServer()
 	startsWith := strings.HasPrefix(strings.TrimSpace(strings.ToLower(t.SQL)), "with")
 	whereClause := lo.Ternary(opts.Where != "", g.F(" where (%s)", opts.Where), "")
 	whereAnd := lo.Ternary(opts.Where != "", g.F(" and (%s)", opts.Where), "")
@@ -345,7 +346,7 @@ func (t *Table) Select(Opts ...SelectOptions) (sql string) {
 		}
 	}
 
-	if limit > 0 && !strings.Contains(sql, "{limit}") {
+	if limit != nil && !strings.Contains(sql, "{limit}") {
 		if isSQLServer && startsWith {
 			// leave it alone since it starts with WITH
 		} else if t.IsQuery() {
@@ -1236,7 +1237,7 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 			statement := strings.TrimSpace(currStatement.String())
 			if statement != "" && statement != ";" {
 				// Remove trailing semicolon for certain databases
-				if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+				if !dialect.IsSQLServer() {
 					statement = strings.TrimSuffix(statement, ";")
 				}
 				sqls = append(sqls, statement)
@@ -1250,7 +1251,7 @@ func ParseSQLMultiStatements(sql string, Dialect ...dbio.Type) (sqls []string) {
 	// Handle any remaining statement
 	if remaining := strings.TrimSpace(currStatement.String()); remaining != "" {
 		// Remove trailing semicolon for certain databases
-		if !g.In(dialect, dbio.TypeDbSQLServer, dbio.TypeDbAzure, dbio.TypeDbAzureDWH) {
+		if !dialect.IsSQLServer() {
 			remaining = strings.TrimSuffix(remaining, ";")
 		}
 		sqls = append(sqls, remaining)

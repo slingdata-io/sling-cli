@@ -376,6 +376,11 @@ func (ac *APIConnection) performPasswordFlow(auth Authentication) (token string,
 
 // performAuthorizationCodeFlow implements the OAuth2 Authorization Code flow
 func (ac *APIConnection) performAuthorizationCodeFlow(auth Authentication) (token string, err error) {
+	// we already have refresh token
+	if auth.RefreshToken != "" {
+		return ac.performRefreshTokenFlow(auth)
+	}
+
 	// Check if we should use the interactive server flow
 	if auth.RedirectURI == "" || strings.Contains(auth.RedirectURI, "localhost") || strings.Contains(auth.RedirectURI, "127.0.0.1") {
 		return ac.performAuthorizationCodeFlowWithServer(auth)
@@ -431,7 +436,7 @@ func (ac *APIConnection) performAuthorizationCodeFlowWithServer(auth Authenticat
 	listener.Close()
 
 	// Set up the redirect URI
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+	auth.RedirectURI = fmt.Sprintf("http://localhost:%d/callback", port)
 
 	// Create channels for communication
 	codeChan := make(chan string, 1)
@@ -526,7 +531,7 @@ setTimeout(function() {
 	params := url.Values{}
 	params.Set("response_type", "code")
 	params.Set("client_id", clientID)
-	params.Set("redirect_uri", redirectURI)
+	params.Set("redirect_uri", auth.RedirectURI)
 	if len(auth.Scopes) > 0 {
 		params.Set("scope", strings.Join(auth.Scopes, " "))
 	}
@@ -534,18 +539,27 @@ setTimeout(function() {
 	params.Set("state", fmt.Sprintf("sling-%d", time.Now().Unix()))
 
 	// Determine the authorization endpoint (different from token endpoint)
-	// Most OAuth2 providers have /authorize for auth and /token for token exchange
-	authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
-	if authorizeURL == authURL {
-		// If no replacement happened, try common patterns
-		if strings.HasSuffix(authURL, "/oauth/token") {
-			authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
-		} else if strings.HasSuffix(authURL, "/token") {
-			authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
-		} else {
-			// Fallback: append /authorize to the base URL
-			baseURL := strings.TrimSuffix(authURL, "/")
-			authorizeURL = baseURL + "/authorize"
+	// First check if authorization_url is explicitly provided
+	authorizeURL, err := ac.renderString(auth.AuthorizationURL)
+	if err != nil {
+		return "", g.Error(err, "could not render authorization_url")
+	}
+
+	// If not provided, derive from token endpoint URL
+	if authorizeURL == "" {
+		// Most OAuth2 providers have /authorize for auth and /token for token exchange
+		authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+		if authorizeURL == authURL {
+			// If no replacement happened, try common patterns
+			if strings.HasSuffix(authURL, "/oauth/token") {
+				authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
+			} else if strings.HasSuffix(authURL, "/token") {
+				authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+			} else {
+				// Fallback: append /authorize to the base URL
+				baseURL := strings.TrimSuffix(authURL, "/")
+				authorizeURL = baseURL + "/authorize"
+			}
 		}
 	}
 
@@ -634,8 +648,11 @@ func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) 
 	if accessToken, ok := resp["access_token"].(string); ok {
 		// Store refresh token if provided
 		if refreshToken, ok := resp["refresh_token"].(string); ok {
+			// TODO: need to be stored in home folder
+			g.Debug("OAuth refreshToken = %s", refreshToken)
 			ac.State.Auth.Token = refreshToken
 		}
+		g.Trace("OAuth accessToken = %s", accessToken)
 		return accessToken, nil
 	}
 
@@ -676,6 +693,9 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 	}
 
 	// Create HTTP request
+	ac.Context.Debug("oauth POST request to %s", url)
+	ac.Context.Trace("oauth POST request payload: %s", g.Marshal(payload))
+	ac.Context.Trace("oauth POST request form data: %s", formData.String())
 	req, err := http.NewRequestWithContext(ac.Context.Ctx, "POST", url, strings.NewReader(formData.String()))
 	if err != nil {
 		return nil, g.Error(err, "failed to create OAuth2 request")
@@ -694,6 +714,9 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 	if err != nil {
 		return nil, g.Error(err, "failed to execute OAuth2 request")
 	}
+
+	ac.Context.Debug("oauth POST response status code: %d", resp.StatusCode)
+
 	defer resp.Body.Close()
 
 	// Read response body
@@ -701,6 +724,8 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 	if err != nil {
 		return nil, g.Error(err, "failed to read OAuth2 response body")
 	}
+
+	ac.Context.Trace("oauth POST response body: %s", string(body))
 
 	// Check for HTTP errors
 	if resp.StatusCode >= 400 {

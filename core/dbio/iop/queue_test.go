@@ -80,6 +80,80 @@ func TestQueue_WriteAndRead(t *testing.T) {
 	assert.False(t, hasMore)
 }
 
+func TestQueue_AppendExplodesSlices(t *testing.T) {
+	t.Run("IntSlice", func(t *testing.T) {
+		q, err := NewQueue("test-queue-slice-int")
+		assert.NoError(t, err)
+		defer q.Close()
+
+		err = q.Append([]int{1, 2, 3})
+		assert.NoError(t, err)
+
+		err = q.Reset()
+		assert.NoError(t, err)
+
+		for expected := 1; expected <= 3; expected++ {
+			item, hasMore, err := q.Next()
+			assert.NoError(t, err)
+			assert.True(t, hasMore)
+			assert.Equal(t, float64(expected), item)
+		}
+
+		_, hasMore, err := q.Next()
+		assert.NoError(t, err)
+		assert.False(t, hasMore)
+	})
+
+	t.Run("PointerToSlice", func(t *testing.T) {
+		q, err := NewQueue("test-queue-slice-pointer")
+		assert.NoError(t, err)
+		defer q.Close()
+
+		values := []string{"first", "second"}
+		err = q.Append(&values)
+		assert.NoError(t, err)
+
+		err = q.Reset()
+		assert.NoError(t, err)
+
+		item, hasMore, err := q.Next()
+		assert.NoError(t, err)
+		assert.True(t, hasMore)
+		assert.Equal(t, "first", item)
+
+		item, hasMore, err = q.Next()
+		assert.NoError(t, err)
+		assert.True(t, hasMore)
+		assert.Equal(t, "second", item)
+
+		_, hasMore, err = q.Next()
+		assert.NoError(t, err)
+		assert.False(t, hasMore)
+	})
+
+	t.Run("ByteSliceNotExploded", func(t *testing.T) {
+		q, err := NewQueue("test-queue-byteslice")
+		assert.NoError(t, err)
+		defer q.Close()
+
+		payload := []byte("hello")
+		err = q.Append(payload)
+		assert.NoError(t, err)
+
+		err = q.Reset()
+		assert.NoError(t, err)
+
+		item, hasMore, err := q.Next()
+		assert.NoError(t, err)
+		assert.True(t, hasMore)
+		assert.Equal(t, "aGVsbG8=", item)
+
+		_, hasMore, err = q.Next()
+		assert.NoError(t, err)
+		assert.False(t, hasMore)
+	})
+}
+
 func TestQueue_Reset(t *testing.T) {
 	// Create a new queue
 	q, err := NewQueue("test-queue")

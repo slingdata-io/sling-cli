@@ -81,11 +81,23 @@ func (fn *FileNode) Path() string {
 		return ""
 	}
 
-	if fType == dbio.TypeFileAzure {
+	switch fType {
+	case dbio.TypeFileAzure:
 		pathContainer := strings.Split(path, "/")[0]
 
 		// remove container
 		path = strings.TrimPrefix(path, pathContainer+"/")
+	case dbio.TypeFileAzureABFS:
+		pathArr := strings.Split(path, "/")
+
+		// remove workspace and parent
+		var workspace, parent string
+		if len(pathArr) > 2 {
+			workspace = pathArr[0]
+			parent = pathArr[1]
+			path = strings.TrimPrefix(path, workspace+"/")
+			path = strings.TrimPrefix(path, parent+"/Files/")
+		}
 	}
 
 	fn.path = path
@@ -295,6 +307,10 @@ func ParseURLType(uri string) (uType dbio.Type, host string, path string, err er
 	// handle azure blob
 	if scheme == "https" && strings.HasSuffix(host, ".core.windows.net") {
 		return dbio.TypeFileAzure, host, path, nil
+	} else if scheme == "https" && strings.HasSuffix(host, ".dfs.fabric.microsoft.com") {
+		return dbio.TypeFileAzureABFS, host, path, nil
+	} else if scheme == "https" && strings.HasSuffix(host, ".dfs.core.windows.net") {
+		return dbio.TypeFileAzureABFS, host, path, nil
 	} else if scheme == "https" && strings.Contains(uri, "docs.google.com/spreadsheets") {
 		return dbio.TypeFileHTTP, host, path, nil
 	} else if scheme == "gdrive" {

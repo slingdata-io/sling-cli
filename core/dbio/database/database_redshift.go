@@ -174,7 +174,7 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 		// if it is limited, create temp table first, unload and drop
 		matched, _ := regexp.MatchString(`limit\s+\d+`, strings.ToLower(table.Select()))
-		if matched || table.limit > 0 {
+		if matched || table.limit != nil {
 			// create temp table
 			tempTable := table.Clone()
 			tempTable.Name = fmt.Sprintf("temp_unload_%d", time.Now().UnixNano())
@@ -345,6 +345,13 @@ func (conn *RedshiftConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (c
 	defer df.CleanUp()
 
 	settingMppBulkImportFlow(conn, iop.GzipCompressorType)
+
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if err = applyColumnTypingToDf(conn, df); err != nil {
+		return 0, g.Error(err, "invalid column_typing")
+	}
+
 	if conn.GetProp("AWS_BUCKET") == "" {
 		return count, g.Error("Need to set 'AWS_BUCKET' to copy to redshift")
 	}

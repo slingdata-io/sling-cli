@@ -536,11 +536,11 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			g.Debug("skipping stream %s since it is disabled", cfg.StreamName)
 			continue
 		} else if streamCnt == 1 {
-			g.Info("Sling Replication | %s -> %s | %s", replication.Source, replication.Target, cfg.StreamName)
+			g.Info("Sling Replication | %s -> %s | %s", replication.Source, replication.Target, env.BlueString(cfg.StreamName))
 		} else {
 			println()
 			counter++
-			g.Info("[%d / %d] running stream %s", counter, streamCnt, cfg.StreamName)
+			g.Info("[%d / %d] running stream %s", counter, streamCnt, env.BlueString(cfg.StreamName))
 		}
 
 		env.TelMap = g.M("begin_time", time.Now().UnixMicro(), "run_mode", "replication") // reset map
@@ -724,9 +724,9 @@ func testOutput(rowCnt int64, totalBytes, constraintFails uint64) error {
 	return nil
 }
 
-func setTimeout(values ...string) {
+func setTimeout(values ...string) (deadline time.Time) {
 	for _, timeout := range values {
-		if timeout == "" {
+		if timeout == "" && timeout != "0" {
 			continue
 		}
 		// only process first non-empty value
@@ -735,12 +735,13 @@ func setTimeout(values ...string) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT=%s reached!", timeout) })
+		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT = %s mins reached!", timeout) })
 
 		// set deadline for status setting later
 		g.Debug("setting timeout for %s minutes", timeout)
-		deadline := time.Now().Add(duration)
+		deadline = time.Now().Add(duration)
 		ctx.Map.Set("timeout-deadline", deadline.Unix())
 		break
 	}
+	return deadline
 }

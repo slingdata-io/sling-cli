@@ -36,6 +36,9 @@ streams:
     mode: full-refresh
     source_options:
       flatten: 1
+    target_options:
+      format: parquet
 
 env:
   SLING_SAMPLE_SIZE: 100
+  SLING_DUCKDB_COMPUTE: true

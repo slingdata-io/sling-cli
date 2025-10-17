@@ -1,0 +1,147 @@
+source: postgres
+target: bigquery
+
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      operation: generate_data
+      params:
+        table: public.bigquery_table1
+        rows: 200
+        columns:
+          col_bigint: bigint
+          col_binary: binary
+          col_bool: bool
+          col_date: date
+          col_datetime: datetime
+          col_decimal: decimal
+          col_integer: integer
+          col_json: json
+          col_smallint: smallint
+          col_string: string
+          col_uuid: uuid
+          col_text: text
+          col_timestamp: timestamp
+          col_timestampz: timestampz
+          col_float: float
+          col_time: time
+          col_timez: timez
+
+    - type: query
+      connection: '{source.name}'
+      operation: generate_data
+      params:
+        table: public.bigquery_table2
+        rows: 200
+        columns:
+          col_bigint: bigint
+          col_binary: binary
+          col_bool: bool
+          col_date: date
+          col_datetime: datetime
+          col_decimal: decimal
+          col_integer: integer
+          col_json: json
+          col_smallint: smallint
+          col_string: string
+          col_uuid: uuid
+          col_text: text
+          col_timestamp: timestamp
+          col_timestampz: timestampz
+          col_float: float
+          col_time: time
+          col_timez: timez
+
+    - type: query
+      connection: '{source.name}'
+      operation: generate_data
+      params:
+        table: public.bigquery_table3
+        rows: 200
+        columns:
+          col_bigint: bigint
+          col_binary: binary
+          col_bool: bool
+          col_date: date
+          col_datetime: datetime
+          col_decimal: decimal
+          col_integer: integer
+          # col_json: json
+          col_smallint: smallint
+          col_string: string
+          col_uuid: uuid
+          col_text: text
+          col_timestamp: timestamp
+          col_timestampz: timestampz
+          col_float: float
+          col_time: time
+          col_timez: timez
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT count(*) as cnt FROM `public.bigquery_table1`
+      into: result1
+
+    - type: check
+      check: store.result1[0].cnt == 200
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT count(*) as cnt FROM `public.bigquery_table2`
+      into: result2
+
+    - type: check
+      check: store.result2[0].cnt == 200
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT count(*) as cnt FROM `public.bigquery_table3`
+      into: result3
+
+    - type: check
+      check: store.result3[0].cnt == 200
+
+    # Cleanup source tables
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.bigquery_table1;
+        DROP TABLE IF EXISTS public.bigquery_table2;
+        DROP TABLE IF EXISTS public.bigquery_table3;
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS `public.bigquery_table1`;
+        DROP TABLE IF EXISTS `public.bigquery_table2`;
+        DROP TABLE IF EXISTS `public.bigquery_table3`;
+
+defaults:
+  object: public.{stream_table}
+  mode: full-refresh
+  target_options:
+    format: csv
+
+streams:
+  public.bigquery_table1:
+  public.bigquery_table2:
+  public.bigquery_table3:
+    target_options:
+      format: parquet
+      column_typing:
+        decimal:
+          min_precision: 30
+          min_scale: 15
+      
+
+env:
+  SLING_CHECKSUM_ROWS: 1000

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -32,9 +33,9 @@ import (
 // MsSQLServerConn is a Microsoft SQL Server connection
 type MsSQLServerConn struct {
 	BaseConn
-	URL        string
-	isAzureSQL bool
-	isAzureDWH bool
+	URL         string
+	versionNum  int
+	versionYear int
 }
 
 // Init initiates the object
@@ -43,11 +44,16 @@ func (conn *MsSQLServerConn) Init() error {
 	conn.BaseConn.URL = conn.URL
 	conn.BaseConn.Type = dbio.TypeDbSQLServer
 	conn.BaseConn.defaultPort = 1433
+	conn.versionYear = 2017 // default version
 
 	conn.SetProp("use_bcp_map_parallel", "false")
 
 	if conn.BaseConn.GetProp("allow_bulk_import") == "" {
 		conn.BaseConn.SetProp("allow_bulk_import", "true")
+	}
+
+	if strings.HasPrefix(conn.URL, "fabric:") {
+		conn.Type = dbio.TypeDbFabric
 	}
 
 	instance := Connection(conn)
@@ -64,6 +70,36 @@ func (conn *MsSQLServerConn) Init() error {
 	}
 
 	return conn.BaseConn.Init()
+}
+
+// parseVersion extracts the version information from SQL Server
+func (conn *MsSQLServerConn) parseVersion(versionStr string) {
+	conn.versionYear = 2017 // default version
+
+	// Look for pattern " - XX.X.XXXX.X" and extract the major version
+	versionNums := strings.Split(versionStr, ".")
+	if len(versionNums) >= 2 {
+		conn.versionNum = cast.ToInt(versionNums[0])
+		// Map major version numbers to SQL Server years
+		switch conn.versionNum {
+		case 17:
+			conn.versionYear = 2025
+		case 16:
+			conn.versionYear = 2022
+		case 15:
+			conn.versionYear = 2019
+		case 14:
+			conn.versionYear = 2017
+		case 13:
+			conn.versionYear = 2016
+		case 12:
+			conn.versionYear = 2014
+		case 11:
+			conn.versionYear = 2012
+		case 10:
+			conn.versionYear = 2008
+		}
+	}
 }
 
 // GetURL returns the processed URL
@@ -200,8 +236,25 @@ func (conn *MsSQLServerConn) ConnString() string {
 		azuread.ActiveDirectoryDeviceCode,
 		azuread.ActiveDirectoryApplication,
 	}
-	if fedAuth := conn.GetProp("fedauth"); g.In(fedAuth, AdAuthStrings...) {
+	if g.In(conn.FedAuth(), AdAuthStrings...) {
 		conn.SetProp("driver", "azuresql")
+
+		// // Create a credential for Microsoft Entra ID authentication.
+		// // DefaultAzureCredential tries several methods, including using the Azure CLI login.
+		// cred, err := azidentity.NewDefaultAzureCredential(nil)
+		// if err != nil {
+		// 	g.Warn("failed to create default Azure credential: %v", err)
+		// } else {
+		// 	// Get an access token for the SQL database.
+		// 	// The resource scope for Azure SQL is "https://database.windows.net/.default".
+		// 	token, err := cred.GetToken(context.Background(), policy.TokenRequestOptions{})
+		// 	if err != nil {
+		// 		g.Warn("failed to get access token: %v", err)
+		// 	} else {
+		// 		accessToken := token.Token
+		// 		g.Warn("accessToken => %s", accessToken)
+		// 	}
+		// }
 	}
 
 	if certPath := os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH"); certPath != "" {
@@ -216,6 +269,10 @@ func (conn *MsSQLServerConn) ConnString() string {
 	return U.String()
 }
 
+func (conn *MsSQLServerConn) FedAuth() string {
+	return conn.GetProp("fedauth", "fed_auth")
+}
+
 func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	err = conn.BaseConn.Connect(timeOut...)
 	if err != nil {
@@ -223,16 +280,27 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	}
 
 	// get version
-	data, _ := conn.Query(`select @@version v` + noDebugKey)
-	if len(data.Rows) > 0 {
-		version := cast.ToString(data.Rows[0][0])
-		if strings.Contains(strings.ToLower(version), "sql azure") {
-			conn.isAzureSQL = true
+	data, _ := conn.Query(`select SERVERPROPERTY('productversion') as short_version, @@version as long_version ` + noDebugKey)
+	if conn.Type == dbio.TypeDbSQLServer && len(data.Rows) > 0 {
+		versionShortStr := cast.ToString(data.Rows[0][0])
+		versionLongStr := cast.ToString(data.Rows[0][1])
+		conn.parseVersion(versionShortStr)
+		g.Trace("%s version is %s => %d", conn.GetProp("sling_conn_id"), versionShortStr, conn.versionYear)
+
+		if strings.Contains(strings.ToLower(versionLongStr), "sql azure") {
 			conn.Type = dbio.TypeDbAzure
-		} else if strings.Contains(strings.ToLower(version), "azure sql data warehouse") {
-			conn.isAzureDWH = true
+		} else if strings.Contains(strings.ToLower(versionLongStr), "azure sql data warehouse") {
 			conn.Type = dbio.TypeDbAzureDWH
 		}
+	}
+
+	// detect Fabric Database (Azure SQL)
+	if conn.Type == dbio.TypeDbSQLServer && strings.Contains(conn.GetProp("host"), ".database.fabric.microsoft.com") {
+		conn.Type = dbio.TypeDbAzure
+	}
+	// detect Fabric Warehouse
+	if conn.Type == dbio.TypeDbSQLServer && strings.Contains(conn.GetProp("host"), ".datawarehouse.fabric.microsoft.com") {
+		conn.Type = dbio.TypeDbFabric
 	}
 
 	return nil
@@ -262,7 +330,7 @@ func (conn *MsSQLServerConn) GenerateDDL(table Table, data iop.Dataset, temporar
 func (conn *MsSQLServerConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
 	defer df.CleanUp()
 
-	if conn.isAzureDWH {
+	if conn.Type == dbio.TypeDbAzureDWH {
 		return conn.CopyViaAzure(tableFName, df)
 	}
 
@@ -317,6 +385,15 @@ func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastr
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	} else if conn.GetProp("allow_bulk_import") != "true" {
 		return conn.BaseConn.InsertBatchStream(tableFName, ds)
+	}
+
+	if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+		// need to az cli tool
+		_, err = exec.LookPath(conn.azCliPath())
+		if err != nil {
+			g.Warn("unable to use bcp since the Azure CLI tool is not found in path. bcp needs an Access Token obtained via the Azure CLI tool for fed_auth=%s. Using cursor...", fedAuth)
+			return conn.BaseConn.InsertBatchStream(tableFName, ds)
+		}
 	}
 
 	// needs to get columns to shape stream
@@ -503,6 +580,13 @@ func (conn *MsSQLServerConn) bcpPath() string {
 	return "bcp"
 }
 
+func (conn *MsSQLServerConn) azCliPath() string {
+	if val := conn.GetProp("az_path"); val != "" {
+		return val
+	}
+	return "az"
+}
+
 // BcpImportFile Import using bcp tool
 // https://docs.microsoft.com/en-us/sql/tools/bcp-utility?view=sql-server-ver15
 // bcp dbo.test1 in '/tmp/LargeDataset.csv' -S tcp:sqlserver.host,51433 -d master -U sa -P 'password' -c -t ',' -b 5000
@@ -579,6 +663,46 @@ func (conn *MsSQLServerConn) BcpImportFile(tableFName, filePath string) (count u
 			return
 		}
 		bcpArgs = append(bcpArgs, bcpAuthParts...)
+	} else if fedAuth := conn.GetProp("fed_auth"); g.In(fedAuth, azuread.ActiveDirectoryAzCli) {
+		azCliTokenResource := conn.GetProp("bcp_azure_token_resource")
+		if azCliTokenResource == "" {
+			azCliTokenResource = "https://database.windows.net"
+		}
+		azCliArgs := []string{"account", "get-access-token", "--resource", azCliTokenResource, "--query", "accessToken", "--output", "tsv"}
+
+		// need to run
+		// az account get-access-token --resource https://database.windows.net --query accessToken --output tsv
+		azCmd := exec.Command(conn.azCliPath(), azCliArgs...)
+		if err != nil {
+			return 0, g.Error(err, "could not create az cli command")
+		}
+
+		g.Debug(conn.azCliPath() + " " + strings.Join(azCliArgs, ` `))
+		output, err := azCmd.Output()
+		if err != nil {
+			g.Warn("could not obtain access token with the Azure CLI tool...")
+			return 0, g.Error(err, output)
+		}
+
+		token := strings.TrimSpace(string(output))
+
+		// convert token to UTF-16LE bytes
+		utf16Token := utf16.Encode([]rune(token))
+		var leBytes []byte
+		for _, u := range utf16Token {
+			leBytes = append(leBytes, byte(u), byte(u>>8))
+		}
+
+		// now write the UTF-16LE token bytes to a temp file
+		tokenFilePath := path.Join(env.GetTempFolder(), g.NewTsID("sqlserver.token")+".txt")
+		err = os.WriteFile(tokenFilePath, leBytes, 0600)
+		if err != nil {
+			return 0, g.Error(err, "could not write token to temp file")
+		}
+		defer os.Remove(tokenFilePath)
+
+		// add BCP authentication args for Azure AD with token file
+		bcpArgs = append(bcpArgs, "-G", "-P", tokenFilePath)
 	} else {
 		if g.In(conn.GetProp("authenticator"), "winsspi") || conn.isTrusted() {
 			bcpArgs = append(bcpArgs, "-T")
@@ -662,6 +786,24 @@ retry:
 
 	return
 }
+
+// GenerateInsertStatement for transaction insert. Does not work with Fabric
+// func (conn *MsSQLServerConn) GenerateInsertStatement(tableName string, cols iop.Columns, numRows int) string {
+
+// 	fields := cols.Names()
+// 	// qFields := conn.Type.QuoteNames(fields...) // quoted fields
+
+// 	statement := mssql.CopyIn(tableName, mssql.BulkOptions{
+// 		Tablock:      true, // For performance
+// 		RowsPerBatch: 50000,
+// 		KeepNulls:    true,
+// 		// CheckConstraints: true,
+// 		// FireTriggers:     true,
+// 	}, fields...)
+
+// 	g.Trace("insert statement: %s", statement)
+// 	return statement
+// }
 
 // BcpExport exports data to datastream
 func (conn *MsSQLServerConn) BcpExport() (err error) {

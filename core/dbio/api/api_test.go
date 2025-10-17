@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -376,6 +377,174 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
 }
 
+func TestOAuth2AuthorizationURLField(t *testing.T) {
+	tests := []struct {
+		name                     string
+		authenticationURL        string
+		authorizationURL         string
+		expectedAuthorizationURL string // What we expect to be derived/used
+		description              string
+	}{
+		{
+			name:                     "explicit_authorization_url",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "https://api.example.com/oauth/authorize",
+			expectedAuthorizationURL: "https://api.example.com/oauth/authorize",
+			description:              "When authorization_url is explicitly provided, it should be used",
+		},
+		{
+			name:                     "authorization_url_with_different_domain",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "https://auth.example.com/authorize",
+			expectedAuthorizationURL: "https://auth.example.com/authorize",
+			description:              "Authorization URL can be on a different domain",
+		},
+		{
+			name:                     "no_authorization_url_standard_pattern",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "",
+			expectedAuthorizationURL: "https://api.example.com/oauth/authorize",
+			description:              "Without authorization_url, should derive from token URL",
+		},
+		{
+			name:                     "no_authorization_url_simple_pattern",
+			authenticationURL:        "https://api.example.com/token",
+			authorizationURL:         "",
+			expectedAuthorizationURL: "https://api.example.com/authorize",
+			description:              "Should handle simple /token -> /authorize replacement",
+		},
+		{
+			name:                     "templated_authorization_url",
+			authenticationURL:        "https://api.example.com/oauth/token",
+			authorizationURL:         "{env.AUTH_URL}",
+			expectedAuthorizationURL: "https://custom.example.com/auth",
+			description:              "Authorization URL should support templating",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock server to capture the authorization URL
+			var capturedAuthURL string
+			authCodeReceived := make(chan string, 1)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/callback" {
+					// Capture auth code callback
+					code := r.URL.Query().Get("code")
+					if code != "" {
+						authCodeReceived <- code
+					}
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, "OK")
+				} else if strings.Contains(r.URL.Path, "token") {
+					// Token exchange endpoint
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{
+						"access_token": "test_token_123",
+						"token_type":   "Bearer",
+					})
+				}
+			}))
+			defer server.Close()
+
+			// Create API connection
+			ac := &APIConnection{
+				Context: g.NewContext(context.Background()),
+				State: &APIState{
+					Env:     map[string]string{"AUTH_URL": "https://custom.example.com/auth"},
+					State:   make(map[string]any),
+					Secrets: make(map[string]any),
+					Auth:    APIStateAuth{},
+				},
+				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+			}
+
+			auth := Authentication{
+				Type:              AuthTypeOAuth2,
+				Flow:              OAuthFlowAuthorizationCode,
+				ClientID:          "test_client",
+				ClientSecret:      "test_secret",
+				AuthenticationURL: tt.authenticationURL,
+				AuthorizationURL:  tt.authorizationURL,
+				RedirectURI:       server.URL + "/callback",
+			}
+
+			// Test that the authorization URL is correctly rendered/derived
+			renderedAuthURL, err := ac.renderString(auth.AuthorizationURL)
+			assert.NoError(t, err)
+
+			if renderedAuthURL == "" {
+				// Simulate the URL derivation logic when authorization_url is not provided
+				authURL := auth.AuthenticationURL
+				authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
+				if authorizeURL == authURL {
+					if strings.HasSuffix(authURL, "/oauth/token") {
+						authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
+					} else if strings.HasSuffix(authURL, "/token") {
+						authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
+					}
+				}
+				capturedAuthURL = authorizeURL
+			} else {
+				capturedAuthURL = renderedAuthURL
+			}
+
+			// Verify the captured/derived auth URL matches expectations
+			assert.Equal(t, tt.expectedAuthorizationURL, capturedAuthURL, tt.description)
+		})
+	}
+}
+
+func TestOAuth2AuthorizationURLTemplating(t *testing.T) {
+	// Test that authorization_url supports templating with env, state, and secrets
+	ac := &APIConnection{
+		Context: g.NewContext(context.Background()),
+		State: &APIState{
+			Env:     map[string]string{"AUTH_DOMAIN": "auth.example.com"},
+			State:   map[string]any{"auth_version": "v2"},
+			Secrets: map[string]any{"TENANT_ID": "tenant_123"},
+			Auth:    APIStateAuth{},
+		},
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+	}
+
+	tests := []struct {
+		name             string
+		authorizationURL string
+		expectedURL      string
+	}{
+		{
+			name:             "env_variable",
+			authorizationURL: "https://{env.AUTH_DOMAIN}/authorize",
+			expectedURL:      "https://auth.example.com/authorize",
+		},
+		{
+			name:             "state_variable",
+			authorizationURL: "https://api.example.com/{state.auth_version}/authorize",
+			expectedURL:      "https://api.example.com/v2/authorize",
+		},
+		{
+			name:             "secrets_variable",
+			authorizationURL: "https://api.example.com/{secrets.TENANT_ID}/oauth/authorize",
+			expectedURL:      "https://api.example.com/tenant_123/oauth/authorize",
+		},
+		{
+			name:             "multiple_variables",
+			authorizationURL: "https://{env.AUTH_DOMAIN}/{state.auth_version}/tenants/{secrets.TENANT_ID}/authorize",
+			expectedURL:      "https://auth.example.com/v2/tenants/tenant_123/authorize",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rendered, err := ac.renderString(tt.authorizationURL)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedURL, rendered)
+		})
+	}
+}
+
 func TestAuthenticationExpiry(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -408,8 +577,8 @@ func TestAuthenticationExpiry(t *testing.T) {
 			// Create API connection
 			spec := Spec{
 				Authentication: Authentication{
-					Type:    AuthTypeBasic,
-					Expires: tt.expiresSeconds,
+					Type:     AuthTypeBasic,
+					Expires:  tt.expiresSeconds,
 					Username: "test_user",
 					Password: "test_pass",
 				},
@@ -507,7 +676,7 @@ func TestEnsureAuthenticatedConcurrency(t *testing.T) {
 	// Run multiple concurrent EnsureAuthenticated calls
 	var wg sync.WaitGroup
 	errors := make([]error, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(idx int) {
@@ -538,7 +707,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		Env  map[string]string `yaml:"env"`
 		Err  bool              `yaml:"err"`
 
-		MockResponse      map[string]any   `yaml:"mock_response"`
+		MockResponse      any              `yaml:"mock_response"`  // can be map or string (for CSV)
 		ExpectedRecords   []map[string]any `yaml:"expected_records"`
 		ExpectedState     map[string]any   `yaml:"expected_state"`
 		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
@@ -556,6 +725,25 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			// Create a test HTTP server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Check if MockResponse is a string (for CSV or XML format)
+				if mockStr, ok := tc.MockResponse.(string); ok {
+					// Detect format based on content
+					if strings.HasPrefix(strings.TrimSpace(mockStr), "<?xml") || strings.Contains(mockStr, "<users>") {
+						w.Header().Set("Content-Type", "application/xml")
+					} else {
+						w.Header().Set("Content-Type", "text/csv")
+					}
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprint(w, mockStr)
+					return
+				}
+
+				// Handle as JSON map
+				mockMap, ok := tc.MockResponse.(map[string]any)
+				if !ok {
+					mockMap = make(map[string]any)
+				}
+
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 
@@ -569,27 +757,27 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					json.NewEncoder(w).Encode(loginResponse)
 				case "/config":
 					// Return config for setup test
-					if config, ok := tc.MockResponse["config"]; ok {
+					if config, ok := mockMap["config"]; ok {
 						configResponse := map[string]any{
 							"config": config,
 						}
 						json.NewEncoder(w).Encode(configResponse)
 					} else {
-						json.NewEncoder(w).Encode(tc.MockResponse)
+						json.NewEncoder(w).Encode(mockMap)
 					}
 				case "/cleanup":
 					// Return cleanup response for teardown test
-					if cleanup, ok := tc.MockResponse["cleanup"]; ok {
+					if cleanup, ok := mockMap["cleanup"]; ok {
 						cleanupResponse := map[string]any{
 							"cleanup": cleanup,
 						}
 						json.NewEncoder(w).Encode(cleanupResponse)
 					} else {
-						json.NewEncoder(w).Encode(tc.MockResponse)
+						json.NewEncoder(w).Encode(mockMap)
 					}
 				default:
 					// Return the main mock response for other endpoints
-					json.NewEncoder(w).Encode(tc.MockResponse)
+					json.NewEncoder(w).Encode(mockMap)
 				}
 			}))
 			defer server.Close()
@@ -644,6 +832,13 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			// Update the spec with the modified endpoint
 			tc.Spec.EndpointMap["test_endpoint"] = endpoint
 			tc.Spec.endpointsOrdered = []string{"test_endpoint"}
+
+			// convert to proper spec
+			specBody, _ := yaml.Marshal(tc.Spec)
+			tc.Spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
 
 			// Create API connection
 			ac, err := NewAPIConnection(context.Background(), tc.Spec, map[string]any{
@@ -782,10 +977,19 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					}
 
 					req := NewSingleRequest(iter)
-					req.Response = &ResponseState{
-						Status:  200,
-						Headers: g.M("content-type", "application/json"),
-						JSON:    tc.MockResponse,
+
+					// Only set JSON if MockResponse is a map (not for CSV strings)
+					if mockMap, ok := tc.MockResponse.(map[string]any); ok {
+						req.Response = &ResponseState{
+							Status:  200,
+							Headers: g.M("content-type", "application/json"),
+							JSON:    mockMap,
+						}
+					} else {
+						req.Response = &ResponseState{
+							Status:  200,
+							Headers: g.M("content-type", "text/csv"),
+						}
 					}
 
 					// Render the NextState values
@@ -819,6 +1023,448 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 							assert.Equal(t, expectedValue, actualValue)
 						}
 					}
+				}
+			}
+		})
+	}
+}
+
+func TestDynamicEndpointsIntegration(t *testing.T) {
+	tests := []struct {
+		name                  string
+		specYAML              string                    // YAML spec body with {base_url} placeholder
+		dataResponses         map[string]map[string]any // endpoint path -> response
+		expectedEndpointNames []string
+		expectedRecordCounts  map[string]int   // endpoint name -> record count
+		expectedRecordValues  map[string][]any // endpoint name -> expected record values
+	}{
+		{
+			name: "simple_static_array_iteration",
+			specYAML: `
+name: "Test Dynamic API"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - iterate: '["users", "orders", "products"]'
+    into: "state.resource"
+    endpoint:
+      name: "{state.resource}"
+      request:
+        url: "{state.base_url}/{state.resource}"
+      response:
+        records:
+          jmespath: "data[]"
+`,
+			expectedEndpointNames: []string{
+				"users",
+				"orders",
+				"products",
+			},
+			dataResponses: map[string]map[string]any{
+				"/users": {
+					"data": []map[string]any{
+						{"id": 1, "name": "Alice"},
+						{"id": 2, "name": "Bob"},
+					},
+				},
+				"/orders": {
+					"data": []map[string]any{
+						{"id": 101, "total": 150.00},
+						{"id": 102, "total": 225.50},
+					},
+				},
+				"/products": {
+					"data": []map[string]any{
+						{"id": 501, "name": "Widget"},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				"users":    2,
+				"orders":   2,
+				"products": 1,
+			},
+			expectedRecordValues: map[string][]any{
+				"users": {
+					map[string]any{"id": float64(1), "name": "Alice"},
+					map[string]any{"id": float64(2), "name": "Bob"},
+				},
+				"orders": {
+					map[string]any{"id": float64(101), "total": float64(150.00)},
+					map[string]any{"id": float64(102), "total": float64(225.50)},
+				},
+				"products": {
+					map[string]any{"id": float64(501), "name": "Widget"},
+				},
+			},
+		},
+		{
+			name: "setup_sequence_with_iteration",
+			specYAML: `
+name: "Test Dynamic API with Setup"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - setup:
+      - request:
+          url: "{state.base_url}/metadata/tables"
+        response:
+          processors:
+            - expression: "response.json.tables"
+              output: "state.table_list"
+              aggregation: last
+
+    iterate: "state.table_list"
+    into: "state.table_name"
+
+    endpoint:
+      name: "table_{state.table_name.name}"
+      request:
+        url: "{state.base_url}/tables/{state.table_name.name}"
+      response:
+        records:
+          jmespath: "rows[]"
+`,
+			expectedEndpointNames: []string{
+				"table_customers",
+				"table_invoices",
+			},
+			dataResponses: map[string]map[string]any{
+				"/metadata/tables": {
+					"tables": []map[string]any{
+						{"name": "customers"},
+						{"name": "invoices"},
+					},
+				},
+				"/tables/customers": {
+					"rows": []map[string]any{
+						{"id": 1, "company": "Acme Corp"},
+						{"id": 2, "company": "Globex Inc"},
+					},
+				},
+				"/tables/invoices": {
+					"rows": []map[string]any{
+						{"id": 1001, "amount": 5000.00},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				"table_customers": 2,
+				"table_invoices":  1,
+			},
+			expectedRecordValues: map[string][]any{
+				"table_customers": {
+					map[string]any{"id": float64(1), "company": "Acme Corp"},
+					map[string]any{"id": float64(2), "company": "Globex Inc"},
+				},
+				"table_invoices": {
+					map[string]any{"id": float64(1001), "amount": float64(5000.00)},
+				},
+			},
+		},
+		{
+			name: "complex_object_iteration",
+			specYAML: `
+name: "Test Dynamic API with Complex Objects"
+defaults:
+  state:
+    base_url: "{base_url}"
+
+dynamic_endpoints:
+  - iterate: '[{"id": "us-east", "name": "US East"}, {"id": "us-west", "name": "US West"}]'
+    into: "state.region"
+    endpoint:
+      name: "sales_{state.region.id}"
+      description: "Sales for {state.region.name}"
+      request:
+        url: "{state.base_url}/regions/{state.region.id}/sales"
+      response:
+        records:
+          jmespath: "sales[]"
+`,
+			expectedEndpointNames: []string{
+				"sales_us-east",
+				"sales_us-west",
+			},
+			dataResponses: map[string]map[string]any{
+				"/regions/us-east/sales": {
+					"sales": []map[string]any{
+						{"date": "2024-01-01", "amount": 1000.00},
+						{"date": "2024-01-02", "amount": 1500.00},
+					},
+				},
+				"/regions/us-west/sales": {
+					"sales": []map[string]any{
+						{"date": "2024-01-01", "amount": 2000.00},
+					},
+				},
+			},
+			expectedRecordCounts: map[string]int{
+				// NOTE: There's a JmesPath/streaming issue where arrays are returned as single records
+				// This is not a dynamic endpoints issue - the endpoints are generated correctly
+				"sales_us-east": 2,
+				"sales_us-west": 1,
+			},
+			expectedRecordValues: map[string][]any{
+				"sales_us-east": {
+					map[string]any{"date": "2024-01-01", "amount": float64(1000.00)},
+					map[string]any{"date": "2024-01-02", "amount": float64(1500.00)},
+				},
+				"sales_us-west": {
+					map[string]any{"date": "2024-01-01", "amount": float64(2000.00)},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test HTTP server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+
+				// Handle data endpoints
+				if response, ok := tt.dataResponses[r.URL.Path]; ok {
+					json.NewEncoder(w).Encode(response)
+					return
+				}
+
+				// Default empty response
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			// Replace {base_url} placeholder in spec YAML
+			specYAML := strings.ReplaceAll(tt.specYAML, "{base_url}", server.URL)
+
+			// Parse the spec from YAML
+			spec, err := LoadSpec(specYAML)
+			if !assert.NoError(t, err, "Failed to parse spec YAML") {
+				return
+			}
+
+			// Create API connection
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Bypass authentication for testing
+			ac.State.Auth.Authenticated = true
+
+			// List endpoints - this triggers RenderDynamicEndpoints
+			endpoints, err := ac.ListEndpoints()
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Assert correct number of endpoints generated
+			assert.Equal(t, len(tt.expectedEndpointNames), len(endpoints),
+				"Expected %d endpoints, got %d", len(tt.expectedEndpointNames), len(endpoints))
+
+			// Assert endpoint names match expected
+			actualNames := []string{}
+			for _, ep := range endpoints {
+				actualNames = append(actualNames, ep.Name)
+			}
+			assert.ElementsMatch(t, tt.expectedEndpointNames, actualNames,
+				"Endpoint names don't match. Expected: %v, Got: %v", tt.expectedEndpointNames, actualNames)
+
+			// Test each generated endpoint
+			for _, ep := range endpoints {
+				t.Run("endpoint_"+ep.Name, func(t *testing.T) {
+					// Read dataflow from endpoint
+					df, err := ac.ReadDataflow(ep.Name, APIStreamConfig{
+						Limit: 100,
+					})
+					if !assert.NoError(t, err, "Failed to read dataflow for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Collect data
+					data, err := df.Collect()
+					if !assert.NoError(t, err, "Failed to collect data for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Assert record count
+					expectedCount, ok := tt.expectedRecordCounts[ep.Name]
+					if !assert.True(t, ok, "No expected record count defined for endpoint %s", ep.Name) {
+						return
+					}
+
+					// Debug: print actual data
+					if len(data.Rows) != expectedCount {
+						t.Logf("Endpoint %s: Expected %d rows, got %d. Data: %s", ep.Name, expectedCount, len(data.Rows), g.Marshal(data.Rows))
+					}
+
+					assert.Equal(t, expectedCount, len(data.Rows),
+						"Expected %d records for endpoint %s, got %d",
+						expectedCount, ep.Name, len(data.Rows))
+
+					// Verify data is not empty (if expected count > 0)
+					if expectedCount > 0 {
+						assert.Greater(t, len(data.Columns), 0,
+							"Expected columns for endpoint %s", ep.Name)
+						assert.Greater(t, len(data.Rows), 0,
+							"Expected rows for endpoint %s", ep.Name)
+
+						// Assert that response record values are correct
+						expectedRecords, ok := tt.expectedRecordValues[ep.Name]
+						if assert.True(t, ok) {
+							// Convert data.Rows to []any for comparison
+							actualRecords := make([]any, len(data.Rows))
+							for i, row := range data.Rows {
+								record := make(map[string]any)
+								for j, col := range data.Columns {
+									if j < len(row) {
+										record[col.Name] = row[j]
+									}
+								}
+								actualRecords[i] = record
+							}
+
+							// Compare each expected record with actual
+							for i, expectedRecord := range expectedRecords {
+								if i >= len(actualRecords) {
+									t.Errorf("Missing record at index %d for endpoint %s", i, ep.Name)
+									continue
+								}
+
+								actualRecord := actualRecords[i].(map[string]any)
+								expectedMap := expectedRecord.(map[string]any)
+								t.Logf("\nexpectedMap: %s\nactualRecord: %s", g.Marshal(expectedMap), g.Marshal(actualRecord))
+
+								// Compare each field
+								for key, expectedValue := range expectedMap {
+									actualValue, exists := actualRecord[key]
+									if !assert.True(t, exists, "Field %s missing in record %d for endpoint %s", key, i, ep.Name) {
+										continue
+									}
+
+									expectedValue = cast.ToString(expectedValue)
+									actualValue = strings.ReplaceAll(
+										cast.ToString(actualValue), " 00:00:00 +0000 UTC", "")
+
+									assert.EqualValues(t, expectedValue, actualValue,
+										"Field %s mismatch in record %d for endpoint %s. Expected: %v, Got: %v",
+										key, i, ep.Name, expectedValue, actualValue)
+								}
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDynamicEndpointsErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		spec          Spec
+		expectedError string
+	}{
+		{
+			name: "duplicate_endpoint_names",
+			spec: Spec{
+				Name: "Duplicate Names API",
+				Defaults: Endpoint{
+					State: StateMap{
+						"base_url": "https://api.example.com",
+					},
+				},
+				EndpointMap: EndpointMap{
+					"users": Endpoint{
+						Name: "users",
+						Request: Request{
+							URL: "https://api.example.com/users",
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data[]"},
+						},
+					},
+				},
+				DynamicEndpoints: []DynamicEndpoint{
+					{
+						Iterate: `["users"]`, // Will conflict with static endpoint
+						Into:    "state.resource",
+						Endpoint: Endpoint{
+							Name: "{state.resource}",
+							Request: Request{
+								URL: "{state.base_url}/{state.resource}",
+							},
+							Response: Response{
+								Records: Records{JmesPath: "data[]"},
+							},
+						},
+					},
+				},
+			},
+			expectedError: "duplicate endpoint name",
+		},
+		{
+			name: "empty_iteration_list",
+			spec: Spec{
+				Name: "Empty List API",
+				Defaults: Endpoint{
+					State: StateMap{
+						"base_url": "https://api.example.com",
+					},
+				},
+				EndpointMap: make(EndpointMap),
+				DynamicEndpoints: []DynamicEndpoint{
+					{
+						Iterate: `[]`, // Empty array
+						Into:    "state.resource",
+						Endpoint: Endpoint{
+							Name: "{state.resource}",
+							Request: Request{
+								URL: "{state.base_url}/{state.resource}",
+							},
+							Response: Response{
+								Records: Records{JmesPath: "data[]"},
+							},
+						},
+					},
+				},
+			},
+			expectedError: "", // Should succeed but generate no endpoints
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ac, err := NewAPIConnection(context.Background(), tt.spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			ac.State.Auth.Authenticated = true
+
+			endpoints, err := ac.ListEndpoints()
+
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				if !assert.NoError(t, err) {
+					return
+				}
+				// For empty list case, should have 0 endpoints
+				if strings.Contains(tt.name, "empty") {
+					assert.Equal(t, 0, len(endpoints))
 				}
 			}
 		})

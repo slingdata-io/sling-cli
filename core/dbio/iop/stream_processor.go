@@ -431,7 +431,9 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 func (sp *StreamProcessor) applyTransforms(transformsPayload string) {
 	stageTransforms := []map[string]string{}
-	g.Unmarshal(transformsPayload, &stageTransforms)
+	if err := g.Unmarshal(transformsPayload, &stageTransforms); err != nil {
+		g.Warn("could not apply transforms to stream_processor: %s", err.Error())
+	}
 	sp.Config.Transforms = NewTransform(stageTransforms, sp)
 }
 

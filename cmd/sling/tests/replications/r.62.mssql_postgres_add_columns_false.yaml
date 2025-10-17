@@ -1,0 +1,78 @@
+source: MSSQL
+target: POSTGRES
+
+defaults:
+  mode: truncate
+  target_options:
+    add_new_columns: false
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop table if exists
+        IF OBJECT_ID('dbo.test_table', 'U') IS NOT NULL DROP TABLE dbo.test_table;
+
+        -- Create source table with 4 columns
+        CREATE TABLE dbo.test_table (
+          id INT PRIMARY KEY,
+          name VARCHAR(100),
+          age INT,
+          create_date DATETIME
+        );
+
+        -- Insert 10 rows
+        INSERT INTO dbo.test_table (id, name, age, create_date) VALUES
+        (1, 'Alice Johnson', 28, '2024-01-15 10:30:00'),
+        (2, 'Bob Smith', 35, '2024-02-20 14:45:00'),
+        (3, 'Charlie Brown', 42, '2024-03-10 09:15:00'),
+        (4, 'Diana Prince', 31, '2024-04-05 16:20:00'),
+        (5, 'Eve Anderson', 26, '2024-05-12 11:00:00'),
+        (6, 'Frank Miller', 39, '2024-06-18 13:30:00'),
+        (7, 'Grace Lee', 33, '2024-07-22 15:45:00'),
+        (8, 'Henry Davis', 45, '2024-08-30 08:00:00'),
+        (9, 'Iris Wilson', 29, '2024-09-14 12:15:00'),
+        (10, 'Jack Taylor', 37, '2024-10-25 17:30:00');
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        -- Drop table if exists
+        DROP TABLE IF EXISTS public.test_table CASCADE;
+
+        -- Create target table with only 3 columns (missing 'age')
+        CREATE TABLE public.test_table (
+          id INT PRIMARY KEY,
+          name VARCHAR(100),
+          create_date TIMESTAMP
+        );
+
+        -- Insert 5 rows
+        INSERT INTO public.test_table (id, name, create_date) VALUES
+        (1, 'Alice Johnson', '2024-01-15 10:30:00'),
+        (2, 'Bob Smith', '2024-02-20 14:45:00'),
+        (3, 'Charlie Brown', '2024-03-10 09:15:00'),
+        (4, 'Diana Prince', '2024-04-05 16:20:00'),
+        (5, 'Eve Anderson', '2024-05-12 11:00:00');
+
+  end:
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: IF OBJECT_ID('dbo.test_table', 'U') IS NOT NULL DROP TABLE dbo.test_table
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_table CASCADE
+
+streams:
+  dbo.test_table:
+    object: public.test_table
+    mode: incremental
+    update_key: create_date
+    target_options:
+      add_new_columns: false
+
+env:
+  SLING_ALLOW_EMPTY: "false"

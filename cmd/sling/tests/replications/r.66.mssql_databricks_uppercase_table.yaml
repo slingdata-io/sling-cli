@@ -1,0 +1,87 @@
+source: mssql
+target: databricks
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop table if it exists (case-sensitive check)
+        IF OBJECT_ID('dbo.Test_Table', 'U') IS NOT NULL DROP TABLE dbo.Test_Table;
+
+        -- Create table with uppercase letters in name (Test_Table)
+        CREATE TABLE dbo.Test_Table (
+          id INT PRIMARY KEY,
+          First_Name VARCHAR(50),
+          Last_Name VARCHAR(50),
+          Email VARCHAR(100),
+          Create_Date DATETIME DEFAULT GETDATE()
+        );
+
+        -- Insert 10 rows of test data
+        INSERT INTO dbo.Test_Table (id, First_Name, Last_Name, Email, Create_Date) VALUES
+        (1, 'John', 'Smith', 'john.smith@example.com', GETDATE()),
+        (2, 'Jane', 'Doe', 'jane.doe@example.com', GETDATE()),
+        (3, 'Robert', 'Johnson', 'robert.johnson@example.com', GETDATE()),
+        (4, 'Emily', 'Williams', 'emily.williams@example.com', GETDATE()),
+        (5, 'Michael', 'Brown', 'michael.brown@example.com', GETDATE()),
+        (6, 'Sarah', 'Davis', 'sarah.davis@example.com', GETDATE()),
+        (7, 'David', 'Miller', 'david.miller@example.com', GETDATE()),
+        (8, 'Lisa', 'Wilson', 'lisa.wilson@example.com', GETDATE()),
+        (9, 'James', 'Moore', 'james.moore@example.com', GETDATE()),
+        (10, 'Jennifer', 'Taylor', 'jennifer.taylor@example.com', GETDATE());
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: runs.dbo_Test_Table.status == "success"
+      on_failure: break
+
+    # Verify row count in target
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as row_count
+        FROM default.dbo_Test_Table
+      into: target_stats
+
+    - type: log
+      message: |
+
+        MSSQL to Databricks uppercase table test results:
+        Target row count: {store.target_stats[0].row_count}
+
+    # Verify all 10 rows were loaded
+    - type: check
+      check: int_parse(store.target_stats[0].row_count) == 10
+      failure_message: Expected 10 rows but got {store.target_stats[0].row_count}
+
+    # Verify data integrity - check a sample record
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, First_Name, Last_Name, Email
+        FROM default.dbo_Test_Table
+        WHERE id = 1
+      into: sample_record
+
+    - type: check
+      check: store.sample_record[0].First_Name == "John"
+      failure_message: Expected First_Name to be 'John' but got {store.sample_record[0].First_Name}
+
+    # Cleanup source table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS dbo.Test_Table
+
+    # Cleanup target table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS default.dbo_Test_Table
+
+streams:
+  dbo.Test_Table:
+    object: default.dbo_Test_Table

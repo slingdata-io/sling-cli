@@ -51,7 +51,7 @@ hooks:
 
     - type: check
       check: store.column_info[0].data_type == "uuid"
-      success_message: "guid_col should be 'uuid' type in target PostgreSQL"
+      failure_message: "guid_col should be 'uuid' type in target PostgreSQL"
 
     - type: query
       connection: '{target.name}'

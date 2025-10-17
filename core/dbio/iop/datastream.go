@@ -86,16 +86,9 @@ type FileStreamConfig struct {
 	Props            map[string]string `json:"props"`
 }
 
-func (sc *FileStreamConfig) ComputeWithDuckDB() bool {
-	if val := os.Getenv("SLING_DUCKDB_COMPUTE"); val != "" {
-		return cast.ToBool(val)
-	}
-	return true
-}
-
 func (sc *FileStreamConfig) ShouldUseDuckDB() bool {
-	if val := sc.ComputeWithDuckDB(); !val {
-		return val
+	if !env.UseDuckDbCompute() {
+		return false
 	}
 	return g.In(sc.Format, dbio.FileTypeIceberg, dbio.FileTypeDelta) || sc.SQL != ""
 }
@@ -1476,7 +1469,7 @@ func (ds *Datastream) ConsumeCsvReader(reader io.Reader) (err error) {
 		return err
 	}
 
-	if c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) {
+	if len(row0) > 0 && (c.FieldsPerRecord == 0 || len(ds.Columns) != len(row0) || len(ds.Columns) == 0) {
 		ds.SetFields(CleanHeaderRow(row0))
 	}
 
@@ -2608,6 +2601,9 @@ func (ds *Datastream) NewParquetArrowReaderChnl(sc StreamConfig) (readerChn chan
 				if err != nil {
 					ds.Context.CaptureErr(err)
 					return
+				}
+				if batch.IsFirst() {
+					g.Debug("arrow parquet %s", pw.arrowSchema.String())
 				}
 			}
 

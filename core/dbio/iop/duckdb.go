@@ -43,6 +43,7 @@ type DuckDb struct {
 	secrets     []DuckDbSecret
 	initialized bool
 	query       *duckDbQuery // only one active query at a time
+	version     int
 }
 
 type duckDbQuery struct {
@@ -61,6 +62,9 @@ func NewDuckDb(ctx context.Context, props ...string) *DuckDb {
 
 	m := g.KVArrToMap(props...)
 	for k, v := range m {
+		if g.In(k, "connected") {
+			continue
+		}
 		duck.SetProp(k, v)
 	}
 
@@ -285,7 +289,7 @@ func (duck *DuckDb) PrepareFsSecretAndURI(uri string) string {
 		if strings.Contains(uri, ".blob.core.windows.net/") {
 			uri = strings.ReplaceAll(uri, "https://", "az://")
 		}
-		if strings.Contains(uri, ".dfs.core.windows.net/") {
+		if strings.Contains(uri, ".dfs.core.windows.net") || strings.Contains(uri, ".dfs.fabric.microsoft.com") {
 			uri = strings.ReplaceAll(uri, "https://", "abfss://")
 		}
 
@@ -352,6 +356,11 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 		} else {
 			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
 		}
+
+		// set timeout for httpfs extension
+		if extension == "httpfs" {
+			sql += "SET http_timeout = 9999;"
+		}
 	}
 	return
 }
@@ -359,6 +368,12 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 // getCreateSecretSQL generates SQL statements to create secrets
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 	for _, s := range duck.secrets {
+
+		// add VALIDATION=none for S3 secrets to not validate (starting in 1.4.1)
+		if s.Type == DuckDbSecretTypeS3 && duck.version >= 10401 {
+			s.Props["validation"] = "none"
+		}
+
 		secret := s.Render()
 		env.LogSQL(nil, secret+env.NoDebugKey)
 		sql += fmt.Sprintf("%s;", secret)
@@ -400,7 +415,14 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 	if motherduckToken := duck.GetProp("motherduck_token"); motherduckToken != "" {
 		duck.Proc.Env["motherduck_token"] = motherduckToken
-		args = append(args, "md:"+duck.GetProp("database"))
+		dsn := "md:" + duck.GetProp("database")
+
+		// add attach mode
+		if motherduckAttachMode := duck.GetProp("motherduck_attach_mode"); motherduckAttachMode != "" {
+			dsn = g.F("%s?attach_mode=%s", dsn, motherduckAttachMode)
+		}
+
+		args = append(args, dsn)
 	}
 
 	// default extensions
@@ -511,12 +533,16 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	extensionSecretSQL := ""
 	if !duck.initialized {
-		extensionsSQL := duck.getLoadExtensionSQL()
-		secretSQL := duck.getCreateSecretSQL()
-		extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
-		extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
+		if extensionsSQL := duck.getLoadExtensionSQL(); extensionsSQL != "" {
+			extensionSecretSQL = extensionSecretSQL + strings.Trim(extensionsSQL, ";") + ";"
+		}
+		if secretSQL := duck.getCreateSecretSQL(); secretSQL != "" {
+			extensionSecretSQL = extensionSecretSQL + strings.Trim(secretSQL, ";") + ";"
+		}
 		duck.initialized = true // commented out for now
-		env.LogSQL(propsCombined, extensionSecretSQL+env.NoDebugKey)
+		if extensionSecretSQL != "" {
+			env.LogSQL(propsCombined, extensionSecretSQL+env.NoDebugKey)
+		}
 	}
 
 	queryID := g.RandSuffix("", 3) // for debugging
@@ -546,6 +572,13 @@ func (duck *DuckDb) SubmitSQL(sql string, showChanges bool) (err error) {
 
 	sqls := strings.Join(sqlLines, "\n")
 	// g.Warn(sqls)
+
+	// if this happens, there may be an issue with the sql, maybe an empty statement
+	if duck.Proc == nil {
+		return g.Error("Failed to write to stdin, Proc is nil")
+	} else if duck.Proc.StdinWriter == nil {
+		return g.Error("Failed to write to stdin, StdinWriter is nil")
+	}
 
 	_, err = duck.Proc.StdinWriter.Write([]byte(sqls))
 	if err != nil {
@@ -758,22 +791,14 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		return nil, g.Error(err, "Failed to submit SQL")
 	}
 
-	// so that lists are treated as TEXT and not JSON
-	// lists / arrays do not conform to JSON spec and can error out
-	transforms := map[string][]string{"*": {TransformDuckdbListToText.Name}}
-
 	// add any specified transforms
+	transforms := []map[string]string{}
 	fsProps := map[string]string{}
 	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
 	if transformsPayload, ok := fsProps["transforms"]; ok {
-		columnTransforms := map[string][]string{}
-		g.Unmarshal(transformsPayload, &columnTransforms)
-		if val, ok := columnTransforms["*"]; ok {
-			columnTransforms["*"] = append(val, transforms["*"]...)
-		} else {
-			columnTransforms["*"] = transforms["*"]
+		if err := g.Unmarshal(transformsPayload, &transforms); err != nil {
+			g.Warn("could not unmarshal transform payload: %s", err.Error())
 		}
-		transforms = columnTransforms
 	}
 
 	if cds, ok := opts["datastream"]; ok {
@@ -1014,6 +1039,10 @@ func (duck *DuckDb) EnsureBinDuckDB(version string) (binPath string, err error) 
 		}
 	}
 
+	if duck.version, err = g.VersionNumber(version); err != nil {
+		g.Warn("unable to parse duckdb version (%s): %s", version, err.Error())
+	}
+
 	// use specified path to duckdb binary
 	if envPath := os.Getenv("DUCKDB_PATH"); envPath != "" {
 		if !g.PathExists(envPath) {
@@ -1230,6 +1259,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	{
 		server.HidePort = true
 		server.HideBanner = true
+
+		// Configure server timeouts to handle long pauses
+		server.Server.ReadTimeout = 0  // no timeout for reading request
+		server.Server.WriteTimeout = 0 // no timeout for writing response
+		server.Server.IdleTimeout = 0  // no idle timeout
+
 		// server.Use(middleware.Logger())
 		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
 			reader := <-readerCh
@@ -1248,7 +1283,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		// start server in background, wait for it to start
 		importContext.Wg.Read.Add()
 		go func() {
-			g.Debug("started %s for duckdb direct %s stream", httpURL, sc.Format)
+			g.Debug("started %s for duckdb direct %s stream", httpURL, format, g.M("batch_limit", sc.BatchLimit))
 			importContext.Wg.Read.Done()
 			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
 				g.Error(err, "duckdb import http server error")
@@ -1271,7 +1306,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		if format == dbio.FileTypeArrow {
 			// Use Arrow format
 			for batchR := range ds.NewArrowReaderChnl(sc) {
-				g.Trace("processing duckdb arrow batch %s", batchR.Batch.ID())
+				g.Trace("processing duckdb arrow batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
 
 				// Stream data directly without buffering all in memory
 				// Create a pipe to stream data through
@@ -1303,7 +1338,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		} else {
 			// Default to CSV format
 			for batchR := range ds.NewCsvReaderChnl(sc) {
-				g.Trace("processing duckdb batch %s", batchR.Batch.ID())
+				g.Trace("processing duckdb csv batch", g.M("id", batchR.Batch.ID(), "part_index", partIndex+1, "max_rows", sc.FileMaxRows))
 
 				// Stream data directly without buffering all in memory
 				// Create a pipe to stream data through

@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	"github.com/jmespath/go-jmespath"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/spf13/cast"
 )
 
 type APIConnection struct {
@@ -35,10 +37,22 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 	}
 
-	// load state / secrets
+	// Merge spec defaults state into ac.State.State first
+	if len(spec.Defaults.State) > 0 {
+		for k, v := range spec.Defaults.State {
+			ac.State.State[k] = v
+		}
+	}
+
+	// load state / secrets from data (these override defaults)
 	if state, ok := data["state"]; ok {
-		if err = g.JSONConvert(state, &ac.State.State); err != nil {
+		var stateMap map[string]any
+		if err = g.JSONConvert(state, &stateMap); err != nil {
 			return ac, g.Error(err)
+		}
+		// Merge into existing state (overriding defaults)
+		for k, v := range stateMap {
+			ac.State.State[k] = v
 		}
 	}
 	if secrets, ok := data["secrets"]; ok {
@@ -51,14 +65,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 	for key, endpoint := range ac.Spec.EndpointMap {
 		endpoint.context = g.NewContext(ac.Context.Ctx)
 		ac.Spec.EndpointMap[key] = endpoint
-	}
-
-	// register queues
-	for _, queueName := range ac.Spec.Queues {
-		_, err = ac.RegisterQueue(queueName)
-		if err != nil {
-			return ac, g.Error(err)
-		}
 	}
 
 	return ac, nil
@@ -91,6 +97,20 @@ func (ac *APIConnection) Close() error {
 
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
+	// Render dynamic endpoints if needed
+	if ac.Spec.IsDynamic() {
+		// Ensure authentication before rendering dynamic endpoints
+		if err := ac.EnsureAuthenticated(); err != nil {
+			return nil, g.Error(err, "authentication required for dynamic endpoints")
+		}
+
+		// Render dynamic endpoints (this will populate ac.Spec.EndpointMap)
+		if err := ac.RenderDynamicEndpoints(); err != nil {
+			return nil, g.Error(err, "failed to render dynamic endpoints")
+		}
+	}
+
+	// Collect all endpoints (static + dynamically generated)
 	for _, endpointName := range ac.Spec.endpointsOrdered {
 		endpoint := ac.Spec.EndpointMap[endpointName]
 		if !endpoint.Disabled {
@@ -98,18 +118,15 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 		}
 	}
 
-	if ac.Spec.IsDynamic() {
-		// TODO: generate/obtain list of dynamic endpoints
-		g.Debug("getting dynamic endpoints for %s", g.Marshal(patterns))
-		return nil, g.Error("dynamic endpoint not yet implemented")
-	}
-
 	// fill DependsOn
 	for i, ep := range endpoints {
-		ep.DependsOn = endpoints.HasUpstreams(ep.Name)
+		if len(ep.DependsOn) == 0 {
+			ep.DependsOn = endpoints.HasUpstreams(ep.Name)
+		}
 		endpoints[i] = ep
 	}
 
+	// Filter by pattern if provided
 	if len(patterns) > 0 && patterns[0] != "" {
 		pattern := patterns[0]
 		filterEndpoints := Endpoints{}
@@ -156,9 +173,11 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		// set endpoint conn
 		endpoint.conn = ac
 
-		if err = validateAndSetDefaults(endpoint, ac.Spec); err != nil {
+		if err = compileSpecEndpoint(endpoint, ac.Spec); err != nil {
 			return nil, g.Error(err, "endpoint validation failed")
 		}
+
+		g.Trace(`Compiled Spec for Endpoint "%s": %s`, endpoint.Name, g.Marshal(endpoint))
 	}
 
 	if endpoint.Disabled {
@@ -168,6 +187,37 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	// setup if specified
 	if err = endpoint.setup(); err != nil {
 		return nil, g.Error(err, "could not setup for main request")
+	}
+
+	// register queues being used by endpoint
+	{
+		for _, processor := range endpoint.Response.Processors {
+			if strings.HasPrefix(processor.Output, "queue.") {
+				queueName := strings.TrimPrefix(processor.Output, "queue.")
+
+				if !g.In(queueName, ac.Spec.Queues...) {
+					return nil, g.Error("did not declare queue %s in queues list", queueName)
+				}
+
+				_, err = ac.RegisterQueue(queueName)
+				if err != nil {
+					return nil, g.Error(err, "could not register processor output queue: %s", queueName)
+				}
+			}
+		}
+
+		if overStr := cast.ToString(endpoint.Iterate.Over); strings.HasPrefix(overStr, "queue.") {
+			queueName := strings.TrimPrefix(overStr, "queue.")
+
+			if !g.In(queueName, ac.Spec.Queues...) {
+				return nil, g.Error("did not declare queue %s in queues list", queueName)
+			}
+
+			_, err = ac.RegisterQueue(queueName)
+			if err != nil {
+				return nil, g.Error(err, "could not register iterate over queue: %s", queueName)
+			}
+		}
 	}
 
 	// start request process
@@ -380,10 +430,6 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any
 	return nil
 }
 
-func (ac *APIConnection) MakeDynamicEndpointIterator(iter *Iterate) (err error) {
-	return
-}
-
 func hasBrackets(expr string) bool {
 	matches := bracketRegex.FindAllStringSubmatch(expr, -1)
 	return len(matches) > 0
@@ -393,7 +439,7 @@ var (
 	streamRequests = func(ep *Endpoint, sCfg APIStreamConfig) (ds *iop.Datastream, err error) {
 		return nil, g.Error("please use the official sling-cli release for reading APIs")
 	}
-	validateAndSetDefaults = func(ep *Endpoint, spec Spec) (err error) {
+	compileSpecEndpoint = func(ep *Endpoint, spec Spec) (err error) {
 		return g.Error("please use the official sling-cli release for reading APIs")
 	}
 	runSequence = func(s Sequence, ep *Endpoint) (err error) {
@@ -463,12 +509,267 @@ func (ac *APIConnection) CloseAllQueues() {
 	}
 }
 
+// renderEndpointTemplate renders an endpoint template with the given state variables
+func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, iterValue any, extraState map[string]any) (*Endpoint, error) {
+	// Deep copy the endpoint template
+	endpointJSON := g.Marshal(dynEndpoint.Endpoint)
+	if endpointJSON == "" {
+		return nil, g.Error("could not marshal endpoint template")
+	}
+
+	var renderedEndpoint Endpoint
+	if err := g.Unmarshal(endpointJSON, &renderedEndpoint); err != nil {
+		return nil, g.Error(err, "could not unmarshal endpoint template")
+	}
+
+	// Set originalMap so validateAndSetDefaults knows which fields were explicitly set
+	// This prevents defaults from overwriting our rendered values
+	var originalMap map[string]any
+	if err := g.Unmarshal(endpointJSON, &originalMap); err != nil {
+		return nil, g.Error(err, "could not unmarshal endpoint template to map")
+	}
+	renderedEndpoint.originalMap = originalMap
+
+	// Build state map for rendering with the iteration value
+	stateMap := g.M()
+
+	// Copy any extra state values
+	for k, v := range extraState {
+		stateMap[k] = v
+	}
+
+	// Set the iteration value in state (into variable)
+	if dynEndpoint.Into != "" {
+		// Parse the into path (e.g., "state.table_name")
+		parts := strings.Split(dynEndpoint.Into, ".")
+		if len(parts) == 2 && parts[0] == "state" {
+			stateMap[parts[1]] = iterValue
+		} else {
+			return nil, g.Error("invalid 'into' variable: %s (must be in format 'state.variable_name')", dynEndpoint.Into)
+		}
+	}
+
+	// Create extra maps for rendering - this will be merged with ac.State.State
+	extraMaps := g.M("state", stateMap)
+
+	// Render the endpoint name
+	if renderedEndpoint.Name != "" {
+		renderedName, err := ac.renderString(renderedEndpoint.Name, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render endpoint name")
+		}
+		renderedEndpoint.Name = renderedName
+	}
+
+	// Render description if present
+	if renderedEndpoint.Description != "" {
+		renderedDesc, err := ac.renderString(renderedEndpoint.Description, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render endpoint description")
+		}
+		renderedEndpoint.Description = renderedDesc
+	}
+
+	// Render docs URL if present
+	if renderedEndpoint.Docs != "" {
+		renderedDocs, err := ac.renderString(renderedEndpoint.Docs, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render endpoint docs")
+		}
+		renderedEndpoint.Docs = renderedDocs
+	}
+
+	// Render the request URL
+	if renderedEndpoint.Request.URL != "" {
+		renderedURL, err := ac.renderString(renderedEndpoint.Request.URL, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render request URL")
+		}
+		renderedEndpoint.Request.URL = renderedURL
+	}
+
+	// Render request headers
+	if len(renderedEndpoint.Request.Headers) > 0 {
+		renderedHeaders, err := ac.renderAny(renderedEndpoint.Request.Headers, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render request headers")
+		}
+		if headers, ok := renderedHeaders.(map[string]any); ok {
+			renderedEndpoint.Request.Headers = headers
+		}
+	}
+
+	// Render request parameters
+	if len(renderedEndpoint.Request.Parameters) > 0 {
+		renderedParams, err := ac.renderAny(renderedEndpoint.Request.Parameters, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render request parameters")
+		}
+		if params, ok := renderedParams.(map[string]any); ok {
+			renderedEndpoint.Request.Parameters = params
+		}
+	}
+
+	// Render request payload if present
+	if renderedEndpoint.Request.Payload != nil {
+		renderedPayload, err := ac.renderAny(renderedEndpoint.Request.Payload, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render request payload")
+		}
+		renderedEndpoint.Request.Payload = renderedPayload
+	}
+
+	// Render state values
+	if len(renderedEndpoint.State) > 0 {
+		renderedState, err := ac.renderAny(renderedEndpoint.State, extraMaps)
+		if err != nil {
+			return nil, g.Error(err, "could not render endpoint state")
+		}
+		if state, ok := renderedState.(map[string]any); ok {
+			renderedEndpoint.State = state
+		}
+	}
+
+	// Initialize context for the endpoint
+	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
+
+	return &renderedEndpoint, nil
+}
+
 // RenderDynamicEndpoints will render the dynamic objects
 // basically mutating the spec endpoints.
 // Needs to authenticate first
 func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
-	_ = ac.Spec // will need to be modified
-	return
+	if !ac.Spec.IsDynamic() {
+		return nil // No dynamic endpoints to render
+	}
+
+	// Initialize EndpointMap if nil
+	if ac.Spec.EndpointMap == nil {
+		ac.Spec.EndpointMap = make(EndpointMap)
+	}
+
+	g.Debug("rendering %d dynamic endpoint definition(s)", len(ac.Spec.DynamicEndpoints))
+
+	// Process each dynamic endpoint definition
+	for dynIdx, dynEndpoint := range ac.Spec.DynamicEndpoints {
+		g.Debug("processing dynamic endpoint definition %d", dynIdx+1)
+
+		// Create ephemeral state for setup sequence
+		setupState := g.M()
+
+		// Copy current state
+		ac.Context.Lock()
+		for k, v := range ac.State.State {
+			setupState[k] = v
+		}
+		ac.Context.Unlock()
+
+		// Execute setup sequence if defined
+		if len(dynEndpoint.Setup) > 0 {
+			g.Debug("running setup sequence (%d calls)", len(dynEndpoint.Setup))
+
+			baseEndpoint := &Endpoint{
+				context: g.NewContext(ac.Context.Ctx),
+				conn:    ac,
+				State:   setupState,
+			}
+
+			if err := runSequence(dynEndpoint.Setup, baseEndpoint); err != nil {
+				return g.Error(err, "dynamic endpoint setup failed for definition %d", dynIdx+1)
+			}
+
+			// Sync state back
+			setupState = baseEndpoint.State
+		}
+
+		// Evaluate the iterate expression to get the list of items
+		var iterList []any
+
+		// Check if it's a JSON literal (starts with [ or {) before rendering
+		// JSON literals should not be rendered as templates
+		trimmed := strings.TrimSpace(dynEndpoint.Iterate)
+		var iterExpr string
+
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			// Don't render JSON literals - they might contain { } that aren't templates
+			iterExpr = dynEndpoint.Iterate
+		} else {
+			// Render the iterate expression (for state variables like "state.table_list")
+			var err error
+			iterExpr, err = ac.renderString(dynEndpoint.Iterate, g.M("state", setupState))
+			if err != nil {
+				return g.Error(err, "could not render iterate expression: %s", dynEndpoint.Iterate)
+			}
+		}
+
+		// Try to parse as JSON literal first (for arrays like '["a", "b", "c"]' or objects)
+		trimmed = strings.TrimSpace(iterExpr)
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			if err := g.Unmarshal(iterExpr, &iterList); err == nil {
+				// Successfully parsed as JSON literal
+				g.Debug("parsed iterate expression as JSON literal")
+			} else {
+				return g.Error(err, "could not parse iterate expression as JSON: %s", iterExpr)
+			}
+		} else {
+			// Evaluate as JMESPath expression
+			stateMap := ac.getStateMap(g.M("state", setupState))
+			result, err := jmespath.Search(iterExpr, stateMap)
+			if err != nil {
+				return g.Error(err, "could not evaluate iterate expression: %s", iterExpr)
+			}
+
+			// Convert result to array
+			switch v := result.(type) {
+			case []any:
+				iterList = v
+			default:
+				// Try to convert to array
+				if err := g.JSONConvert(result, &iterList); err != nil {
+					return g.Error(err, "iterate expression did not return an array: %s (got type %T)", iterExpr, result)
+				}
+			}
+		}
+
+		if len(iterList) == 0 {
+			g.Warn("dynamic endpoint definition %d: iterate expression returned empty list", dynIdx+1)
+			continue
+		}
+
+		g.Debug("iterating over %d items to generate endpoints", len(iterList))
+
+		// Generate endpoints for each item in the iteration list
+		generatedCount := 0
+		for itemIdx, iterValue := range iterList {
+			// Render the endpoint template with the current iteration value
+			renderedEndpoint, err := ac.renderEndpointTemplate(dynEndpoint, iterValue, setupState)
+			if err != nil {
+				return g.Error(err, "failed to render endpoint template for item %d", itemIdx+1)
+			}
+
+			// Check for duplicate endpoint names
+			if _, exists := ac.Spec.EndpointMap[renderedEndpoint.Name]; exists {
+				return g.Error("duplicate endpoint name generated: %s (check your dynamic endpoint template)", renderedEndpoint.Name)
+			}
+
+			// Validate and set defaults for the rendered endpoint
+			if err := compileSpecEndpoint(renderedEndpoint, ac.Spec); err != nil {
+				return g.Error(err, "validation failed for generated endpoint: %s", renderedEndpoint.Name)
+			}
+
+			// Add to endpoint map
+			ac.Spec.EndpointMap[renderedEndpoint.Name] = *renderedEndpoint
+			ac.Spec.endpointsOrdered = append(ac.Spec.endpointsOrdered, renderedEndpoint.Name)
+
+			generatedCount++
+		}
+
+		g.Debug("generated %d endpoints from dynamic endpoint definition %d", generatedCount, dynIdx+1)
+	}
+
+	g.Debug("dynamic endpoint rendering complete, total endpoints: %d", len(ac.Spec.EndpointMap))
+	return nil
 }
 
 // IsAuthExpired checks if the authentication has expired

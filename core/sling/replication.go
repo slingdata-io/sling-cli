@@ -374,11 +374,41 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 					if conn.Connection.Type.IsAPI() {
 						endpoint := wildcard.EndpointMap[wsn]
 
+						// convert overrides
+						var overrides ReplicationStreamConfig
+						if endpoint.Overrides != nil {
+							if err = g.JSONConvert(endpoint.Overrides, &overrides); err != nil {
+								return g.Error(err, "could not parse endpoint overrides for %s", wsn)
+							}
+						}
+
+						setEndpointProps := func(s *ReplicationStreamConfig) {
+							s.dependsOn = endpoint.DependsOn
+							if s.PrimaryKeyI == nil {
+								s.PrimaryKeyI = endpoint.Response.Records.PrimaryKey
+							}
+
+							if s.Description == "" {
+								s.Description = endpoint.Description
+							}
+
+							// set overrides
+							if endpoint.Overrides != nil {
+								s.overrides = &overrides
+							}
+						}
+
 						// check if endpoint exists
-						_, stream, found := rd.GetStream(endpoint.Name)
+						key, stream, found := rd.GetStream(endpoint.Name)
 						if found {
 							// leave as is for order to be respected
-							stream.dependsOn = endpoint.DependsOn
+							if len(endpoint.DependsOn) > 0 {
+								if stream == nil {
+									stream = &ReplicationStreamConfig{}
+								}
+								setEndpointProps(stream) // set overrides
+								rd.AddStream(key, stream)
+							}
 							matched = false
 							continue
 						}
@@ -387,7 +417,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						if cfg == nil {
 							cfg = &ReplicationStreamConfig{}
 						}
-						cfg.dependsOn = endpoint.DependsOn
+						setEndpointProps(cfg) // set overrides
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
 					}
@@ -529,6 +559,10 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 		hooksRaw = rs.Hooks.Pre
 	case HookStagePost:
 		hooksRaw = rs.Hooks.Post
+	case HookStagePreMerge:
+		hooksRaw = rs.Hooks.PreMerge
+	case HookStagePostMerge:
+		hooksRaw = rs.Hooks.PostMerge
 	default:
 		return nil, g.Error("invalid stream hook stage: %s", stage)
 	}
@@ -765,6 +799,7 @@ func (rd *ReplicationConfig) AddStream(key string, cfg *ReplicationStreamConfig)
 	newCfg := ReplicationStreamConfig{}
 	g.Unmarshal(g.Marshal(cfg), &newCfg)       // copy config over
 	newCfg.dependsOn = g.PtrVal(cfg).dependsOn // set dependsOn since not marshalled
+	newCfg.overrides = g.PtrVal(cfg).overrides // set overrides since not marshalled
 	rd.Streams[key] = &newCfg
 	rd.streamsOrdered = append(rd.streamsOrdered, key)
 
@@ -786,7 +821,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 
 	g.Debug("processing database wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
-	conn, err := c.AsDatabase(true)
+	conn, err := c.AsDatabase(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = conn.Connect(); err != nil {
@@ -830,7 +865,7 @@ func (rd *ReplicationConfig) ProcessWildcardsDatabase(c connection.Connection, p
 func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 	g.Debug("processing api endpoints for %s: %s", rd.Source, g.Marshal(patterns))
 
-	ac, err := c.AsAPI(true)
+	ac, err := c.AsAPI(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = ac.Authenticate(); err != nil {
@@ -871,7 +906,7 @@ func (rd *ReplicationConfig) ProcessWildcardsAPI(c connection.Connection, patter
 func (rd *ReplicationConfig) ProcessWildcardsFile(c connection.Connection, patterns []string) (wildcards Wildcards, err error) {
 	g.Debug("processing file wildcards for %s: %s", rd.Source, g.Marshal(patterns))
 
-	fs, err := c.AsFile(true)
+	fs, err := c.AsFile(connection.AsConnOptions{UseCache: true})
 	if err != nil {
 		return wildcards, g.Error(err, "could not init connection for wildcard processing: %s", rd.Source)
 	} else if err = fs.Init(context.Background()); err != nil {
@@ -1134,8 +1169,9 @@ type ReplicationStreamConfig struct {
 	Columns       any            `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Hooks         HookMap        `json:"hooks,omitempty" yaml:"hooks,omitempty"`
 
-	replication *ReplicationConfig `json:"-" yaml:"-"`
-	dependsOn   []string           `json:"-" yaml:"-"`
+	overrides   *ReplicationStreamConfig `json:"-" yaml:"-"`
+	replication *ReplicationConfig       `json:"-" yaml:"-"`
+	dependsOn   []string                 `json:"-" yaml:"-"`
 }
 
 func (s *ReplicationStreamConfig) PrimaryKey() []string {
@@ -1160,6 +1196,44 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 }
 
 func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string) (cfg Config, err error) {
+
+	// use overrides if specified
+	if overrides := stream.overrides; overrides != nil {
+		if overrides.ID != "" {
+			stream.ID = overrides.ID
+		}
+		if overrides.Mode != "" {
+			stream.Mode = overrides.Mode
+		}
+		if overrides.PrimaryKeyI != nil {
+			stream.PrimaryKeyI = overrides.PrimaryKeyI
+		}
+		if overrides.UpdateKey != "" {
+			stream.UpdateKey = overrides.UpdateKey
+		}
+		if overrides.SQL != "" {
+			stream.SQL = overrides.SQL
+		}
+		if overrides.Disabled {
+			stream.Disabled = overrides.Disabled
+		}
+		if len(overrides.Select) > 0 {
+			stream.Select = overrides.Select
+		}
+		if overrides.Where != "" {
+			stream.Where = overrides.Where
+		}
+		if overrides.Columns != nil {
+			stream.Columns = overrides.Columns
+		}
+
+		// append override hooks at end
+		stream.Hooks.Pre = append(stream.Hooks.Pre, overrides.Hooks.Pre...)
+		stream.Hooks.Post = append(stream.Hooks.Post, overrides.Hooks.Post...)
+		stream.Hooks.PreMerge = append(stream.Hooks.PreMerge, overrides.Hooks.PreMerge...)
+		stream.Hooks.PostMerge = append(stream.Hooks.PostMerge, overrides.Hooks.PostMerge...)
+	}
+
 	cfg = Config{
 		Source: Source{
 			Conn:        rd.Source,

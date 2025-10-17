@@ -1354,3 +1354,460 @@ endpoints:
 		_ = endpoints.DAG()
 	}
 }
+
+// Dynamic Endpoints Tests
+
+func TestDynamicEndpointsBasic(t *testing.T) {
+	spec := `
+name: "Test Dynamic API"
+description: "API with dynamic endpoints"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+
+dynamic_endpoints:
+  - iterate: '["users", "orders", "products"]'
+    into: "state.resource_type"
+
+    endpoint:
+      name: "{state.resource_type}"
+      description: "Endpoint for {state.resource_type}"
+      request:
+        url: "{state.base_url}/{state.resource_type}"
+      response:
+        records:
+          jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	assert.Equal(t, 1, len(s.DynamicEndpoints))
+
+	dynEndpoint := s.DynamicEndpoints[0]
+	assert.Equal(t, `["users", "orders", "products"]`, dynEndpoint.Iterate)
+	assert.Equal(t, "state.resource_type", dynEndpoint.Into)
+	assert.Equal(t, "{state.resource_type}", dynEndpoint.Endpoint.Name)
+}
+
+func TestDynamicEndpointsWithSetup(t *testing.T) {
+	spec := `
+name: "Test Dynamic API with Setup"
+description: "API with setup sequence"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+
+dynamic_endpoints:
+  - setup:
+      - request:
+          url: "{state.base_url}/metadata/tables"
+        response:
+          processors:
+            - expression: "response.json.tables[].name"
+              output: "state.available_tables"
+              aggregation: flatten
+
+    iterate: "state.available_tables"
+    into: "state.table_name"
+
+    endpoint:
+      name: "table_{state.table_name}"
+      description: "Data from {state.table_name} table"
+      request:
+        url: "{state.base_url}/tables/{state.table_name}"
+        parameters:
+          limit: 1000
+      response:
+        records:
+          jmespath: "rows[]"
+          primary_key: ["id"]
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	assert.Equal(t, 1, len(s.DynamicEndpoints))
+
+	dynEndpoint := s.DynamicEndpoints[0]
+	assert.Equal(t, 1, len(dynEndpoint.Setup))
+	assert.Equal(t, "state.available_tables", dynEndpoint.Iterate)
+	assert.Equal(t, "state.table_name", dynEndpoint.Into)
+	assert.Equal(t, "table_{state.table_name}", dynEndpoint.Endpoint.Name)
+}
+
+func TestDynamicEndpointsMultipleDefinitions(t *testing.T) {
+	spec := `
+name: "Test Multiple Dynamic Endpoints"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+
+dynamic_endpoints:
+  - iterate: '["us-east", "us-west", "eu-west"]'
+    into: "state.region"
+    endpoint:
+      name: "sales_{state.region}"
+      request:
+        url: "{state.base_url}/regions/{state.region}/sales"
+      response:
+        records:
+          jmespath: "sales[]"
+
+  - iterate: '["daily", "weekly", "monthly"]'
+    into: "state.period"
+    endpoint:
+      name: "report_{state.period}"
+      request:
+        url: "{state.base_url}/reports/{state.period}"
+      response:
+        records:
+          jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	assert.Equal(t, 2, len(s.DynamicEndpoints))
+
+	assert.Equal(t, "state.region", s.DynamicEndpoints[0].Into)
+	assert.Equal(t, "state.period", s.DynamicEndpoints[1].Into)
+}
+
+func TestDynamicEndpointsWithStaticEndpoints(t *testing.T) {
+	spec := `
+name: "Hybrid API"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+
+endpoints:
+  health_check:
+    request:
+      url: "{state.base_url}/health"
+    response:
+      records:
+        jmespath: "status"
+
+  metadata:
+    request:
+      url: "{state.base_url}/metadata"
+    response:
+      records:
+        jmespath: "data[]"
+
+dynamic_endpoints:
+  - iterate: '["users", "posts", "comments"]'
+    into: "state.entity"
+    endpoint:
+      name: "{state.entity}"
+      request:
+        url: "{state.base_url}/{state.entity}"
+      response:
+        records:
+          jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	assert.Equal(t, 2, len(s.EndpointMap)) // Static endpoints
+	assert.Equal(t, 1, len(s.DynamicEndpoints))
+
+	// Static endpoints should exist
+	_, hasHealthCheck := s.EndpointMap["health_check"]
+	_, hasMetadata := s.EndpointMap["metadata"]
+	assert.True(t, hasHealthCheck)
+	assert.True(t, hasMetadata)
+}
+
+func TestDynamicEndpointsWithComplexTemplates(t *testing.T) {
+	spec := `
+name: "Complex Template API"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+    api_version: "v2"
+
+dynamic_endpoints:
+  - iterate: |
+      [
+        {"id": "123", "name": "acme"},
+        {"id": "456", "name": "globex"}
+      ]
+    into: "state.current_org"
+
+    endpoint:
+      name: "org_{state.current_org.id}_events"
+      description: "Events for organization: {state.current_org.name}"
+      request:
+        url: "{state.base_url}/{state.api_version}/organizations/{state.current_org.id}/events"
+        parameters:
+          from_date: "{state.start_date}"
+          to_date: "{state.end_date}"
+      response:
+        records:
+          jmespath: "events[]"
+          primary_key: ["event_id"]
+        processors:
+          - expression: "state.current_org.id"
+            output: "record.organization_id"
+          - expression: "state.current_org.name"
+            output: "record.organization_name"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	dynEndpoint := s.DynamicEndpoints[0]
+
+	assert.Equal(t, "state.current_org", dynEndpoint.Into)
+	assert.Equal(t, "org_{state.current_org.id}_events", dynEndpoint.Endpoint.Name)
+	assert.Equal(t, "{state.base_url}/{state.api_version}/organizations/{state.current_org.id}/events", dynEndpoint.Endpoint.Request.URL)
+	assert.Equal(t, 2, len(dynEndpoint.Endpoint.Response.Processors))
+}
+
+func TestDynamicEndpointsEmptySpec(t *testing.T) {
+	spec := `
+name: "No Dynamic API"
+
+endpoints:
+  test:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.False(t, s.IsDynamic())
+	assert.Equal(t, 0, len(s.DynamicEndpoints))
+}
+
+func TestDynamicEndpointsWithStateVariables(t *testing.T) {
+	spec := `
+name: "State Variables API"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+    regions:
+      - code: "us-east"
+        name: "US East Coast"
+      - code: "us-west"
+        name: "US West Coast"
+      - code: "eu-west"
+        name: "Europe West"
+
+dynamic_endpoints:
+  - iterate: "state.regions"
+    into: "state.region"
+
+    endpoint:
+      name: "sales_{state.region.code}"
+      description: "Sales data for {state.region.name}"
+      request:
+        url: "{state.base_url}/regions/{state.region.code}/sales"
+      response:
+        records:
+          jmespath: "sales[]"
+      processors:
+        - expression: "state.region.code"
+          output: "record.region_code"
+        - expression: "state.region.name"
+          output: "record.region_name"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	dynEndpoint := s.DynamicEndpoints[0]
+
+	assert.Equal(t, "state.regions", dynEndpoint.Iterate)
+	assert.Equal(t, "state.region", dynEndpoint.Into)
+	assert.Equal(t, "sales_{state.region.code}", dynEndpoint.Endpoint.Name)
+}
+
+func TestDynamicEndpointsJMESPathIterate(t *testing.T) {
+	spec := `
+name: "JMESPath Iterate API"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+    config:
+      resources:
+        - name: "users"
+          path: "/v1/users"
+        - name: "orders"
+          path: "/v1/orders"
+
+dynamic_endpoints:
+  - iterate: "state.config.resources[].name"
+    into: "state.resource_name"
+
+    endpoint:
+      name: "{state.resource_name}"
+      request:
+        url: "{state.base_url}{state.resource_name}"
+      response:
+        records:
+          jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	dynEndpoint := s.DynamicEndpoints[0]
+
+	assert.Equal(t, "state.config.resources[].name", dynEndpoint.Iterate)
+	assert.Equal(t, "state.resource_name", dynEndpoint.Into)
+}
+
+func TestDynamicEndpointsWithPagination(t *testing.T) {
+	spec := `
+name: "Dynamic Pagination API"
+
+defaults:
+  state:
+    base_url: "https://api.example.com"
+
+dynamic_endpoints:
+  - iterate: '["customers", "invoices"]'
+    into: "state.entity_type"
+
+    endpoint:
+      name: "{state.entity_type}"
+      request:
+        url: "{state.base_url}/{state.entity_type}"
+        parameters:
+          page: 1
+      pagination:
+        next_state:
+          page: "{state.page + 1}"
+        stop_condition: "response.json.has_more == false"
+      response:
+        records:
+          jmespath: "data[]"
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	dynEndpoint := s.DynamicEndpoints[0]
+
+	assert.NotNil(t, dynEndpoint.Endpoint.Pagination.NextState)
+	assert.Equal(t, "response.json.has_more == false", dynEndpoint.Endpoint.Pagination.StopCondition)
+}
+
+func TestDynamicEndpointsWithSync(t *testing.T) {
+	spec := `
+name: "Dynamic Sync API"
+
+dynamic_endpoints:
+  - iterate: '["table_a", "table_b"]'
+    into: "state.table_name"
+
+    endpoint:
+      name: "{state.table_name}"
+      sync:
+        - last_updated_at
+      request:
+        url: "https://api.example.com/tables/{state.table_name}"
+      response:
+        records:
+          jmespath: "rows[]"
+        processors:
+          - expression: "max(records[].updated_at)"
+            output: "state.last_updated_at"
+            aggregation: last
+`
+
+	s, err := LoadSpec(spec)
+	require.NoError(t, err)
+
+	assert.True(t, s.IsDynamic())
+	dynEndpoint := s.DynamicEndpoints[0]
+
+	assert.Equal(t, 1, len(dynEndpoint.Endpoint.Sync))
+	assert.Equal(t, "last_updated_at", dynEndpoint.Endpoint.Sync[0])
+}
+
+func TestIsDynamicMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		spec     string
+		expected bool
+	}{
+		{
+			name: "has dynamic endpoints",
+			spec: `
+name: "Dynamic API"
+dynamic_endpoints:
+  - iterate: '["a", "b"]'
+    into: "state.item"
+    endpoint:
+      name: "{state.item}"
+      request:
+        url: "https://api.example.com/{state.item}"
+      response:
+        records:
+          jmespath: "data[]"
+`,
+			expected: true,
+		},
+		{
+			name: "no dynamic endpoints",
+			spec: `
+name: "Static API"
+endpoints:
+  test:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+`,
+			expected: false,
+		},
+		{
+			name: "empty dynamic endpoints array",
+			spec: `
+name: "Empty Dynamic API"
+dynamic_endpoints: []
+endpoints:
+  test:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := LoadSpec(tt.spec)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, s.IsDynamic())
+		})
+	}
+}

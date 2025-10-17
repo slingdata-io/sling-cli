@@ -469,6 +469,12 @@ func (conn *SnowflakeConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (
 		}
 	}
 
+	// update decimal columns precision/scale based on column_typing
+	// this is needed especially for inferring the correct arrow parquet schema
+	if err = applyColumnTypingToDf(conn, df); err != nil {
+		return 0, g.Error(err, "invalid column_typing")
+	}
+
 	settingMppBulkImportFlow(conn, iop.ZStandardCompressorType)
 
 	if conn.GetProp("use_bulk") != "false" {
@@ -801,11 +807,14 @@ func (conn *SnowflakeConn) CopyViaStage(table Table, df *iop.Dataflow) (count ui
 		case dbio.FileTypeCsv:
 			config.Header = true
 			config.Delimiter = ","
+			_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
 		case dbio.FileTypeParquet:
+			if env.UseDuckDbCompute() {
+				_, err = filesys.WriteDataflowReadyViaDuckDB(fs, df, folderPath, fileReadyChn, config)
+			} else {
+				_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
+			}
 		}
-
-		_, err = fs.WriteDataflowReady(df, folderPath, fileReadyChn, config)
-
 		if err != nil {
 			df.Context.CaptureErr(g.Error(err, "Error writing dataflow to disk: "+folderPath))
 			return
