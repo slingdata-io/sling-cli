@@ -1020,7 +1020,10 @@ func (conn *BaseConn) setTransforms(columns iop.Columns) {
 	}
 
 	if len(colTransforms) > 0 {
-		transforms, _ := iop.ParseStageTransforms(colTransforms)
+		transforms, err := iop.ParseStageTransforms(colTransforms)
+		if err != nil {
+			g.Warn("could not parse column transforms for database stream: %s", err.Error())
+		}
 		conn.SetProp("transforms", g.Marshal(transforms))
 	}
 }
