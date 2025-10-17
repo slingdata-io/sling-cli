@@ -34,10 +34,21 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout
+      - name: Checkout Sling CLI
         uses: actions/checkout@v1
         with:
-          fetch-depth: 0
+          repository: slingdata-io/sling-cli
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling-cli
+          
+      - name: Checkout Sling Platform
+        uses: actions/checkout@v1
+        with:
+          repository: slingdata-io/sling
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling
       
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -60,11 +71,13 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
+          workdir: ../sling-cli
           version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.mac.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         run: |
+          cd ../sling-cli
           dist/sling_darwin_arm64/sling conns discover local -p '.'
 
   release-scoop:
@@ -73,10 +86,22 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+
+      - name: Checkout Sling CLI
+        uses: actions/checkout@v1
         with:
-          fetch-depth: 0
+          repository: slingdata-io/sling-cli
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling-cli
+          
+      - name: Checkout Sling Platform
+        uses: actions/checkout@v1
+        with:
+          repository: slingdata-io/sling
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling
       
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -110,12 +135,14 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
+          workdir: ../sling-cli
           version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.windows.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         shell: pwsh
         run: |
+          cd ..\sling-cli
           .\dist\sling_windows_amd64_v1\sling.exe conns discover local -p '.'
 
   release-linux-arm64:
@@ -123,10 +150,21 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout Sling CLI
+        uses: actions/checkout@v1
         with:
-          fetch-depth: 0
+          repository: slingdata-io/sling-cli
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling-cli
+          
+      - name: Checkout Sling Platform
+        uses: actions/checkout@v1
+        with:
+          repository: slingdata-io/sling
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling
       
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -153,6 +191,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
+          workdir: ../sling-cli
           version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.arm64.yaml --release-notes=.goreleaser.notes.md
 
@@ -164,6 +203,7 @@ jobs:
       # could not figure out how to make arm64 work in goreleaser
       - name: Push to Docker Manually
         run: |
+          cd ../sling-cli
           rm -f sling && cp dist/sling_linux_arm64/sling .
           export SLING_VERSION=$( ./sling --version | sed 's/Version: //')
           docker build -f cmd/sling/Dockerfile.arm64 -t slingdata/sling:$SLING_VERSION-arm64 . 
@@ -178,10 +218,21 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout Sling CLI
+        uses: actions/checkout@v1
         with:
-          fetch-depth: 0
+          repository: slingdata-io/sling-cli
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling-cli
+          
+      - name: Checkout Sling Platform
+        uses: actions/checkout@v1
+        with:
+          repository: slingdata-io/sling
+          ref: ${{ github.ref }}
+          fetch-depth: 0   # This fetches all history for all branches and tags
+          path: sling
       
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -208,11 +259,13 @@ jobs:
         uses: goreleaser/goreleaser-action@v3
         with:
           distribution: goreleaser
+          workdir: ../sling-cli
           version: 'v1.26.2'
           args: release --clean --skip=validate -f .goreleaser.linux.amd64.yaml --release-notes=.goreleaser.notes.md
 
       - name: Post Tests
         run: |
+          cd ../sling-cli
           dist/sling_linux_amd64_v1/sling conns discover local -p '.'
 
       - name: Dispatch test-sling-action
