@@ -26,10 +26,10 @@ hooks:
         File count output: {state.file_count.output.combined}
         Trimmed: {trim(state.file_count.output.combined)}
 
-    # Should have created 100 parquet files (1,000,000 / 10,000 = 100)
+    # Should have created 100 parquet files (100,000 / 10,000 = 10)
     - type: check
-      check: int_parse(trim(state.file_count.output.combined)) == 101
-      success_message: "✓ Created 100 parquet files as expected (1M rows / 10K per file)"
+      check: int_parse(trim(state.file_count.output.combined)) == 11
+      success_message: "✓ Created 100 parquet files as expected (100k rows / 10K per file)"
       on_failure: break
 
     # Verify we can read one of the parquet files

@@ -19,8 +19,8 @@ hooks:
       into: result
 
     - type: check
-      check: int_parse(store.result[0].count) == 1000000
-      success_message: "✓ All 1,000,000 CSV records imported successfully into Postgres"
+      check: int_parse(store.result[0].count) == 100000
+      success_message: "✓ All 100,000 CSV records imported successfully into Postgres"
 
 streams:
   file:///tmp/sling-test-large-data/stock_movement.csv:

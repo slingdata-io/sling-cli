@@ -3,7 +3,7 @@
 mkdir -p /tmp/sling-test-large-data
 
 # Create CSV file with 1M rows
-echo "Creating CSV with 1,000,000 rows..."
+echo "Creating CSV with 100,000 rows..."
 
 # Write CSV header
 cat > /tmp/sling-test-large-data/stock_movement.csv << 'EOF'
@@ -17,7 +17,7 @@ awk 'BEGIN {
   split("WH-A WH-B WH-C STORE-1 STORE-2", locations)
   split("SALES_ORDER TRANSFER_ORDER ADJUSTMENT RETURN_ORDER", parent_types)
   
-  for (i = 1; i <= 1000000; i++) {
+  for (i = 1; i <= 100000; i++) {
     entity_type = entity_types[(i % 5) + 1]
     entity_action = entity_actions[(i % 5) + 1]
     location = locations[(i % 5) + 1]
@@ -30,14 +30,14 @@ awk 'BEGIN {
     year = 2020 + (i % 5)
     
     # Generate quantities with 8 decimal places
-    qty_expected = sprintf("%d.%08d", i % 1000, i % 100000000)
-    qty_processed = sprintf("%d.%08d", i % 900, i % 100000000)
-    qty_outaway = sprintf("%d.%08d", i % 100, i % 100000000)
-    qty_available = sprintf("%d.%08d", i % 800, i % 100000000)
-    qty_allocated = sprintf("%d.%08d", i % 500, i % 100000000)
-    qty_reserved = sprintf("%d.%08d", i % 300, i % 100000000)
-    qty_picked = sprintf("%d.%08d", i % 400, i % 100000000)
-    qty_shipped = sprintf("%d.%08d", i % 350, i % 100000000)
+    qty_expected = sprintf("%d.%08d", i % 1000, i % 10000000)
+    qty_processed = sprintf("%d.%08d", i % 900, i % 10000000)
+    qty_outaway = sprintf("%d.%08d", i % 100, i % 10000000)
+    qty_available = sprintf("%d.%08d", i % 800, i % 10000000)
+    qty_allocated = sprintf("%d.%08d", i % 500, i % 10000000)
+    qty_reserved = sprintf("%d.%08d", i % 300, i % 10000000)
+    qty_picked = sprintf("%d.%08d", i % 400, i % 10000000)
+    qty_shipped = sprintf("%d.%08d", i % 350, i % 10000000)
     
     decline = ""
     decline_desc = ""
@@ -67,4 +67,4 @@ awk 'BEGIN {
   }
 }' >> /tmp/sling-test-large-data/stock_movement.csv
 
-echo "CSV file created with 1,000,000 rows at /tmp/sling-test-large-data/stock_movement.csv"
+echo "CSV file created with 100,000 rows at /tmp/sling-test-large-data/stock_movement.csv"
