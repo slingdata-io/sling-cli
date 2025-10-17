@@ -80,7 +80,7 @@ hooks:
 
     - type: check
       check: store.comparison_result[0].guid_match == "MATCH"
-      success_message: "GUID value for record 1 should match"
+      failure_message: "GUID value for record 1 should match"
 
     - type: check
       check: store.comparison_result[1].guid_match == "MATCH"
@@ -93,7 +93,7 @@ hooks:
 
     - type: check
       check: store.comparison_result[4].guid_match == "MATCH"
-      success_message: "GUID value for record 5 should match"
+      failure_message: "GUID value for record 5 should match"
 
     - type: query
       connection: '{target.name}'
