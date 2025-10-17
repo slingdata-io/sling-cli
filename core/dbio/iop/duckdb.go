@@ -356,6 +356,11 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 		} else {
 			sql += fmt.Sprintf("INSTALL %s; LOAD %s;", extension, strings.TrimSuffix(extension, "from community"))
 		}
+
+		// set timeout for httpfs extension
+		if extension == "httpfs" {
+			sql += "SET http_timeout = 9999;"
+		}
 	}
 	return
 }
@@ -1262,6 +1267,12 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 	{
 		server.HidePort = true
 		server.HideBanner = true
+
+		// Configure server timeouts to handle long pauses
+		server.Server.ReadTimeout = 0  // no timeout for reading request
+		server.Server.WriteTimeout = 0 // no timeout for writing response
+		server.Server.IdleTimeout = 0  // no idle timeout
+
 		// server.Use(middleware.Logger())
 		server.Add(http.MethodGet, "/data", func(c echo.Context) (err error) {
 			reader := <-readerCh
