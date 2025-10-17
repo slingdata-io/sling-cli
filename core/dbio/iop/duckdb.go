@@ -791,22 +791,14 @@ func (duck *DuckDb) StreamContext(ctx context.Context, sql string, options ...ma
 		return nil, g.Error(err, "Failed to submit SQL")
 	}
 
-	// so that lists are treated as TEXT and not JSON
-	// lists / arrays do not conform to JSON spec and can error out
-	transforms := map[string][]string{"*": {TransformDuckdbListToText.Name}}
-
 	// add any specified transforms
+	transforms := []map[string]string{}
 	fsProps := map[string]string{}
 	g.Unmarshal(duck.GetProp("fs_props"), &fsProps)
 	if transformsPayload, ok := fsProps["transforms"]; ok {
-		columnTransforms := map[string][]string{}
-		g.Unmarshal(transformsPayload, &columnTransforms)
-		if val, ok := columnTransforms["*"]; ok {
-			columnTransforms["*"] = append(val, transforms["*"]...)
-		} else {
-			columnTransforms["*"] = transforms["*"]
+		if err := g.Unmarshal(transformsPayload, &transforms); err != nil {
+			g.Warn("could not unmarshal transform payload: %s", err.Error())
 		}
-		transforms = columnTransforms
 	}
 
 	if cds, ok := opts["datastream"]; ok {
