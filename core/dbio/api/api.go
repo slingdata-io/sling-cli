@@ -150,6 +150,7 @@ type APIStreamConfig struct {
 	Limit       int
 	Metadata    iop.Metadata
 	Mode        string
+	Range       string
 	DsConfigMap map[string]any // stream processor options
 }
 
