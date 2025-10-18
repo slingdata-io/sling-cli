@@ -811,6 +811,36 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 
 }
 
+func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []string) map[string]any {
+	if stateMap == nil {
+		stateMap = g.M()
+	}
+
+	for _, varToCheck := range varsToCheck {
+		varToCheck = strings.TrimSpace(varToCheck)
+		parts := strings.Split(varToCheck, ".")
+		if len(parts) != 2 {
+			// continue
+		}
+		section := parts[0]
+		key := parts[1]
+		if g.In(section, e.VarPrefixes...) {
+			_, ok := stateMap[section]
+			if !ok {
+				stateMap[section] = g.M()
+			}
+
+			nested := cast.ToStringMap(stateMap[section])
+			if _, ok := nested[key]; !ok {
+				nested[key] = nil
+			}
+			stateMap[section] = nested // set back
+		}
+	}
+
+	return stateMap
+}
+
 func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal string, err error) {
 	output, err := e.RenderAny(val, extras...)
 	if err != nil {
@@ -908,27 +938,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		}
 
 		// ensure vars exist. if it doesn't, set at nil
-		for _, varToCheck := range varsToCheck {
-			varToCheck = strings.TrimSpace(varToCheck)
-			parts := strings.Split(varToCheck, ".")
-			if len(parts) != 2 {
-				// continue
-			}
-			section := parts[0]
-			key := parts[1]
-			if g.In(section, e.VarPrefixes...) {
-				_, ok := stateMap[section]
-				if !ok {
-					stateMap[section] = g.M()
-				}
-
-				nested := cast.ToStringMap(stateMap[section])
-				if _, ok := nested[key]; !ok {
-					nested[key] = nil
-				}
-				stateMap[section] = nested // set back
-			}
-		}
+		stateMap = e.FillMissingKeys(stateMap, varsToCheck)
 
 		// Check for operators that indicate evaluation/computation is needed
 		// Based on goval documentation: https://github.com/maja42/goval

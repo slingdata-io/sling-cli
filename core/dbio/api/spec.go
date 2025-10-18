@@ -14,6 +14,7 @@ import (
 	"github.com/maja42/goval"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -236,7 +237,7 @@ type Authentication struct {
 	// OAuth
 	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
 	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
-	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`  // Authorization endpoint (for auth code flow)
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
 	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
 	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
@@ -326,6 +327,17 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 		ep.State = make(StateMap)
 	}
 	ep.State[key] = val
+}
+
+func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
+	if state == nil {
+		state = g.M()
+	}
+
+	// fill in state for missing vars
+	state = ep.conn.evaluator.FillMissingKeys(state, ep.conn.evaluator.ExtractVars(expr))
+
+	return ep.eval.Evaluate(expr, state, iop.GlobalFunctionMap)
 }
 
 // Names returns names in alphabetical order
