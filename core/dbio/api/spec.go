@@ -305,7 +305,9 @@ type Endpoint struct {
 	DependsOn   []string   `yaml:"depends_on" json:"depends_on"` // upstream endpoints
 	Overrides   any        `yaml:"overrides" json:"overrides"`   // stream overrides
 
-	stop         bool // whether we should stop the endpoint process
+	// whether we should stop the endpoint process.
+	// inflight iterations will continue, no new iterations created
+	stopIters    bool
 	conn         *APIConnection
 	client       http.Client
 	eval         *goval.Evaluator
