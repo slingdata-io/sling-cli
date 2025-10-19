@@ -581,6 +581,7 @@ func (ep *Endpoint) setup() (err error) {
 	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
 
 	baseEndpoint := &Endpoint{
+		Name:    g.F("%s.setup", ep.Name),
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
 		State:   g.M(),
@@ -618,6 +619,7 @@ func (ep *Endpoint) teardown() (err error) {
 	g.Debug("running endpoint teardown sequence (%d calls)", len(ep.Teardown))
 
 	baseEndpoint := &Endpoint{
+		Name:    g.F("%s.teardown", ep.Name),
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
 		State:   g.M(),
@@ -721,20 +723,20 @@ type Iterate struct {
 }
 
 type Iteration struct {
-	state    StateMap // each iteration has its own state
-	id       int      // iteration ID
-	sequence int      // paginated request number
-	field    string   // state field
-	value    any      // state value
-	stop     bool     // whether to stop the iteration
-	context  *g.Context
-	endpoint *Endpoint
+	state     StateMap // each iteration has its own state
+	id        string   // iteration ID
+	sequence  int      // paginated request number
+	field     string   // state field
+	value     any      // state value
+	stop      bool     // whether to stop the iteration
+	context   *g.Context
+	endpoint  *Endpoint
+	requestWg sync.WaitGroup // request wait group
 }
 
 func (iter *Iteration) Debug(text string, args ...any) {
-	if iter.field != "" {
-		id := g.F("i%02d", iter.id)
-		text = env.DarkGrayString(id) + " " + text
+	if iter.id != "" {
+		text = env.DarkGrayString(iter.id) + " " + text
 	}
 	g.Debug(text, args...)
 }
@@ -866,7 +868,7 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 
 	id := g.F("r.%04d.%s", iter.endpoint.totalReqs, g.RandString(g.AlphaRunesLower, 3))
 	if iter.field != "" {
-		id = g.F("i%02d.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
+		id = g.F("%s.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
 	}
 
 	return &SingleRequest{

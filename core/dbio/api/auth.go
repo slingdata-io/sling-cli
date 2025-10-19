@@ -68,6 +68,7 @@ func (ac *APIConnection) Authenticate() (err error) {
 	case AuthTypeSequence:
 		// create ephemeral endpoint
 		baseEndpoint := &Endpoint{
+			Name:    "api.auth",
 			State:   g.M(),
 			context: g.NewContext(ac.Context.Ctx),
 			conn:    ac,

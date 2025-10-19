@@ -672,6 +672,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 			g.Debug("running setup sequence (%d calls)", len(dynEndpoint.Setup))
 
 			baseEndpoint := &Endpoint{
+				Name:    "dynamic.setup",
 				context: g.NewContext(ac.Context.Ctx),
 				conn:    ac,
 				State:   setupState,

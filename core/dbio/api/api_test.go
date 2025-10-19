@@ -707,7 +707,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		Env  map[string]string `yaml:"env"`
 		Err  bool              `yaml:"err"`
 
-		MockResponse      any              `yaml:"mock_response"`  // can be map or string (for CSV)
+		MockResponse      any              `yaml:"mock_response"` // can be map or string (for CSV)
 		ExpectedRecords   []map[string]any `yaml:"expected_records"`
 		ExpectedState     map[string]any   `yaml:"expected_state"`
 		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
@@ -970,7 +970,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 
 					// Create a mock single request with our response data
 					iter := &Iteration{
-						id:       1,
+						id:       g.F("i%02d", 1),
 						state:    endpoint.State,
 						endpoint: endpoint,
 						context:  g.NewContext(context.Background()),
