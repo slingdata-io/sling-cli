@@ -34,7 +34,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
-		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
 	}
 
 	// Merge spec defaults state into ac.State.State first
@@ -71,9 +71,9 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 }
 
 func (ac *APIConnection) GetReplicationStore() (store map[string]any) {
-	err := g.JSONConvert(ac.State.State["replication_store"], &store)
+	err := g.JSONConvert(ac.State.Store, &store)
 	if err != nil {
-		g.Warn("could not unmarshal from API state replication_store: " + err.Error())
+		g.Warn("could not unmarshal from API state replication store: " + err.Error())
 	}
 
 	if store == nil {
@@ -86,7 +86,7 @@ func (ac *APIConnection) SetReplicationStore(store map[string]any) {
 	if store == nil {
 		store = g.M()
 	}
-	ac.State.State["replication_store"] = store
+	ac.State.Store = store
 }
 
 // Close performs cleanup of all resources
@@ -253,6 +253,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 type APIState struct {
 	Env     map[string]string     `json:"env,omitempty"`
 	State   map[string]any        `json:"state,omitempty"`
+	Store   map[string]any        `json:"store,omitempty"`
 	Secrets map[string]any        `json:"secrets,omitempty"`
 	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
 	Auth    APIStateAuth          `json:"auth,omitempty"`

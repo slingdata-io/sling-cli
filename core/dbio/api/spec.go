@@ -312,6 +312,7 @@ type Endpoint struct {
 	backoffTimer *time.Timer
 	totalRecords int
 	totalReqs    int
+	contextMap   StateMap // extra contextual properties
 	syncMap      StateMap // values to sync
 	context      *g.Context
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
