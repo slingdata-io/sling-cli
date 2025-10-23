@@ -74,6 +74,7 @@ func (ac *APIConnection) Authenticate() (err error) {
 			conn:    ac,
 		}
 
+		g.Debug("running authentication sequence")
 		err = runSequence(auth.Sequence, baseEndpoint)
 		if err != nil {
 			return g.Error(err, "could not auth via sequence")
@@ -169,6 +170,7 @@ func (ac *APIConnection) Authenticate() (err error) {
 
 // performOAuth2Flow handles different OAuth2 flows
 func (ac *APIConnection) performOAuth2Flow(auth Authentication) (token string, err error) {
+	g.Debug("running OAuth2 flow (type=%#v)", auth.Flow)
 	switch auth.Flow {
 	case OAuthFlowClientCredentials:
 		return ac.performClientCredentialsFlow(auth)

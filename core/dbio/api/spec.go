@@ -115,6 +115,7 @@ type Spec struct {
 
 	originalMap      map[string]any
 	endpointsOrdered []string
+	rendered         bool
 }
 
 func (s *Spec) IsDynamic() bool {

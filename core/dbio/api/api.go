@@ -11,6 +11,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -98,16 +99,8 @@ func (ac *APIConnection) Close() error {
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
 	// Render dynamic endpoints if needed
-	if ac.Spec.IsDynamic() {
-		// Ensure authentication before rendering dynamic endpoints
-		if err := ac.EnsureAuthenticated(); err != nil {
-			return nil, g.Error(err, "authentication required for dynamic endpoints")
-		}
-
-		// Render dynamic endpoints (this will populate ac.Spec.EndpointMap)
-		if err := ac.RenderDynamicEndpoints(); err != nil {
-			return nil, g.Error(err, "failed to render dynamic endpoints")
-		}
+	if err := ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "failed to render dynamic endpoints")
 	}
 
 	// Collect all endpoints (static + dynamically generated)
@@ -157,6 +150,11 @@ type APIStreamConfig struct {
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
 	if !ac.State.Auth.Authenticated {
 		return nil, g.Error("not authenticated")
+	}
+
+	// render dynamic endpoint if needed
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints")
 	}
 
 	// get endpoint, match to name
@@ -554,6 +552,8 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 	// Create extra maps for rendering - this will be merged with ac.State.State
 	extraMaps := g.M("state", stateMap)
 
+	g.Trace("rendering dynamic endpoint %s with extra state map: %s", dynEndpoint.Endpoint.Name, g.Marshal(extraMaps))
+
 	// Render the endpoint name
 	if renderedEndpoint.Name != "" {
 		renderedName, err := ac.renderString(renderedEndpoint.Name, extraMaps)
@@ -644,6 +644,13 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	if !ac.Spec.IsDynamic() {
 		return nil // No dynamic endpoints to render
+	} else if ac.Spec.rendered {
+		return nil
+	}
+
+	// Ensure authentication before rendering dynamic endpoints
+	if err := ac.EnsureAuthenticated(); err != nil {
+		return g.Error(err, "authentication required for dynamic endpoints")
 	}
 
 	// Initialize EndpointMap if nil
@@ -756,10 +763,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 				return g.Error("duplicate endpoint name generated: %s (check your dynamic endpoint template)", renderedEndpoint.Name)
 			}
 
-			// Validate and set defaults for the rendered endpoint
-			if err := compileSpecEndpoint(renderedEndpoint, ac.Spec); err != nil {
-				return g.Error(err, "validation failed for generated endpoint: %s", renderedEndpoint.Name)
-			}
+			g.Trace("Rendered Dynamic Endpoint: %s => %s", renderedEndpoint.Name, g.Marshal(renderedEndpoint))
 
 			// Add to endpoint map
 			ac.Spec.EndpointMap[renderedEndpoint.Name] = *renderedEndpoint
@@ -767,11 +771,10 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 
 			generatedCount++
 		}
-
-		g.Debug("generated %d endpoints from dynamic endpoint definition %d", generatedCount, dynIdx+1)
 	}
 
-	g.Debug("dynamic endpoint rendering complete, total endpoints: %d", len(ac.Spec.EndpointMap))
+	ac.Spec.rendered = true
+	g.Debug("dynamic endpoint rendering complete, generated %d total endpoints: %s", len(ac.Spec.EndpointMap), g.Marshal(lo.Keys(ac.Spec.EndpointMap)))
 	return nil
 }
 
@@ -791,7 +794,7 @@ func (ac *APIConnection) EnsureAuthenticated() error {
 
 	// Check if authentication has expired or not authenticated
 	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
-		g.Debug("Authentication expired or not authenticated, re-authenticating...")
+		g.Trace("authentication expired or not authenticated, re-authenticating...")
 		if err := ac.Authenticate(); err != nil {
 			return g.Error(err, "failed to authenticate")
 		}
