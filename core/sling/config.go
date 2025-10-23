@@ -911,6 +911,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if cfg.StreamName != "" {
 			m["stream_name"] = strings.ToLower(cfg.StreamName)
 		}
+		if cfg.Source.UpdateKey != "" {
+			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
+		}
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
@@ -1011,6 +1014,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 				duck := iop.NewDuckDb(context.Background())
 				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
 				m["stream_scanner"] = g.R(streamScanner, "uri", strings.TrimPrefix(uri, "file://"))
+			}
+			if cfg.Source.UpdateKey != "" {
+				m["update_key"] = dbio.TypeDbDuckDb.Quote(cfg.Source.UpdateKey)
 			}
 		}
 	}
