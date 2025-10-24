@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
-	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 )
@@ -661,6 +660,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	g.Debug("rendering %d dynamic endpoint definition(s)", len(ac.Spec.DynamicEndpoints))
 
 	// Process each dynamic endpoint definition
+	generatedNames := []string{}
 	for dynIdx, dynEndpoint := range ac.Spec.DynamicEndpoints {
 		g.Debug("processing dynamic endpoint definition %d", dynIdx+1)
 
@@ -750,7 +750,6 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 		g.Debug("iterating over %d items to generate endpoints", len(iterList))
 
 		// Generate endpoints for each item in the iteration list
-		generatedCount := 0
 		for itemIdx, iterValue := range iterList {
 			// Render the endpoint template with the current iteration value
 			renderedEndpoint, err := ac.renderEndpointTemplate(dynEndpoint, iterValue, setupState)
@@ -769,12 +768,12 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 			ac.Spec.EndpointMap[renderedEndpoint.Name] = *renderedEndpoint
 			ac.Spec.endpointsOrdered = append(ac.Spec.endpointsOrdered, renderedEndpoint.Name)
 
-			generatedCount++
+			generatedNames = append(generatedNames, renderedEndpoint.Name)
 		}
 	}
 
 	ac.Spec.rendered = true
-	g.Debug("dynamic endpoint rendering complete, generated %d total endpoints: %s", len(ac.Spec.EndpointMap), g.Marshal(lo.Keys(ac.Spec.EndpointMap)))
+	g.Debug("dynamic endpoint rendering complete, generated %d total endpoints: %s", len(generatedNames), g.Marshal(generatedNames))
 	return nil
 }
 
