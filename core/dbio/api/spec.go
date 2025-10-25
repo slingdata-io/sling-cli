@@ -860,6 +860,7 @@ type SingleRequest struct {
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
 	iter       *Iteration     `yaml:"-" json:"-"` // the iteration that the req belongs to
+	state      StateMap       `yaml:"-" json:"-"` // copy of iteration state for request (prevents mutation)
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
 }
 
@@ -872,11 +873,16 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 		id = g.F("%s.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
 	}
 
+	// set state to prevent mutation by next_state
+	state := StateMap{}
+	maps.Copy(state, iter.state)
+
 	return &SingleRequest{
 		id:        id,
 		timestamp: time.Now().UnixMilli(),
 		endpoint:  iter.endpoint,
 		iter:      iter,
+		state:     state,
 	}
 }
 

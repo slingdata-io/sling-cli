@@ -552,9 +552,21 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	g.Trace("rendering dynamic endpoint %s with extra state map: %s", dynEndpoint.Endpoint.Name, g.Marshal(extraMaps))
 
+	// we only want to render the "into" state, leave the rest so that they are render at compilation
+	evaluator := iop.NewEvaluator([]string{"state"})
+	evaluator.KeepMissingExpr = true // this tells evaluator to leave expression if missing
+
+	renderString := func(input string) (string, error) {
+		return evaluator.RenderString(input, extraMaps)
+	}
+
+	renderAny := func(input any) (any, error) {
+		return evaluator.RenderAny(input, extraMaps)
+	}
+
 	// Render the endpoint name
 	if renderedEndpoint.Name != "" {
-		renderedName, err := ac.renderString(renderedEndpoint.Name, extraMaps)
+		renderedName, err := renderString(renderedEndpoint.Name)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint name")
 		}
@@ -563,7 +575,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render description if present
 	if renderedEndpoint.Description != "" {
-		renderedDesc, err := ac.renderString(renderedEndpoint.Description, extraMaps)
+		renderedDesc, err := renderString(renderedEndpoint.Description)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint description")
 		}
@@ -572,7 +584,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render docs URL if present
 	if renderedEndpoint.Docs != "" {
-		renderedDocs, err := ac.renderString(renderedEndpoint.Docs, extraMaps)
+		renderedDocs, err := renderString(renderedEndpoint.Docs)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint docs")
 		}
@@ -581,7 +593,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render the request URL
 	if renderedEndpoint.Request.URL != "" {
-		renderedURL, err := ac.renderString(renderedEndpoint.Request.URL, extraMaps)
+		renderedURL, err := renderString(renderedEndpoint.Request.URL)
 		if err != nil {
 			return nil, g.Error(err, "could not render request URL")
 		}
@@ -590,7 +602,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render request headers
 	if len(renderedEndpoint.Request.Headers) > 0 {
-		renderedHeaders, err := ac.renderAny(renderedEndpoint.Request.Headers, extraMaps)
+		renderedHeaders, err := renderAny(renderedEndpoint.Request.Headers)
 		if err != nil {
 			return nil, g.Error(err, "could not render request headers")
 		}
@@ -601,7 +613,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render request parameters
 	if len(renderedEndpoint.Request.Parameters) > 0 {
-		renderedParams, err := ac.renderAny(renderedEndpoint.Request.Parameters, extraMaps)
+		renderedParams, err := renderAny(renderedEndpoint.Request.Parameters)
 		if err != nil {
 			return nil, g.Error(err, "could not render request parameters")
 		}
@@ -612,7 +624,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render request payload if present
 	if renderedEndpoint.Request.Payload != nil {
-		renderedPayload, err := ac.renderAny(renderedEndpoint.Request.Payload, extraMaps)
+		renderedPayload, err := renderAny(renderedEndpoint.Request.Payload)
 		if err != nil {
 			return nil, g.Error(err, "could not render request payload")
 		}

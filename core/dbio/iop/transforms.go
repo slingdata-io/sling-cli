@@ -719,10 +719,11 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 }
 
 type Evaluator struct {
-	Eval         *goval.Evaluator
-	State        map[string]any
-	NoComputeKey string
-	VarPrefixes  []string
+	Eval            *goval.Evaluator
+	State           map[string]any
+	NoComputeKey    string
+	VarPrefixes     []string
+	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
 
 	bracketRegex *regexp.Regexp
 }
@@ -944,7 +945,9 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		}
 
 		// ensure vars exist. if it doesn't, set at nil
-		stateMap = e.FillMissingKeys(stateMap, varsToCheck)
+		if !e.KeepMissingExpr {
+			stateMap = e.FillMissingKeys(stateMap, varsToCheck)
+		}
 
 		// Check for operators that indicate evaluation/computation is needed
 		// Based on goval documentation: https://github.com/maja42/goval
@@ -1018,14 +1021,18 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		var jpValue any
 		jpValue, err = jmespath.Search(expr, stateMap)
 
+		key := "{" + expr + "}"
 		// If jmespath failed or if we detected evaluation operators/functions, use goval
-		if callsFuncOrEvals || err != nil {
+		if callsFuncOrEvals || err != nil || e.KeepMissingExpr {
 			value, err = e.Eval.Evaluate(expr, stateMap, GlobalFunctionMap)
 			if err != nil {
 				// check if jmespath rendered
 				if jpValue != nil && validJmesPath {
 					value = jpValue
 					err = nil // use jmespath result
+				} else if e.KeepMissingExpr && strings.Contains(err.Error(), "no member") {
+					// keeps the expression untouched
+					value = key
 				} else {
 					return "", g.Error(err, "could not render expression: %s", expr)
 				}
@@ -1034,7 +1041,6 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 			value = jpValue
 		}
 
-		key := "{" + expr + "}"
 		if strings.TrimSpace(inputStr) == key {
 			output = value
 		} else {
