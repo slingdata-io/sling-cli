@@ -81,8 +81,6 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 		return g.Error(err, "could not connect to DuckDB for DuckLake")
 	}
 
-	g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
-
 	conn.SetProp("connected", "true")
 	conn.SetProp("connect_time", cast.ToString(time.Now()))
 
