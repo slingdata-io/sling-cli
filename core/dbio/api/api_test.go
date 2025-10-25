@@ -1472,6 +1472,85 @@ func TestDynamicEndpointsErrors(t *testing.T) {
 	}
 }
 
+func TestHeadersWithHyphens(t *testing.T) {
+	// Test extracting response headers that contain hyphens
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set headers with hyphens
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-RateLimit-Remaining", "99")
+		w.Header().Set("X-Custom-Header", "test-value")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": 1, "name": "Item 1"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_headers_api
+authentication:
+  type: none
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/test
+      method: GET
+    response:
+      processors:
+        - expression: response.headers["content-type"]
+          output: state.content_type
+          aggregation: last
+        - expression: jmespath(response.headers, "\"x-ratelimit-remaining\"")
+          output: state.rate_limit
+          aggregation: last
+        - expression: response.headers["x-custom-header"]
+          output: state.custom_header
+          aggregation: last
+      records:
+        jmespath: data
+`, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	ac.State.Auth.Authenticated = true
+
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.NotNil(t, df)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify headers were extracted correctly
+	endpoint := ac.Spec.EndpointMap["test_endpoint"]
+
+	contentType, exists := endpoint.State["content_type"]
+	assert.True(t, exists, "content_type should be extracted from header")
+	assert.Contains(t, contentType, "application/json", "content_type should contain application/json")
+
+	rateLimit, exists := endpoint.State["rate_limit"]
+	assert.True(t, exists, "rate_limit should be extracted from header")
+	assert.Equal(t, "99", cast.ToString(rateLimit), "rate_limit should be 99")
+
+	customHeader, exists := endpoint.State["custom_header"]
+	assert.True(t, exists, "custom_header should be extracted from header")
+	assert.Equal(t, "test-value", cast.ToString(customHeader), "custom_header should be test-value")
+}
+
 func TestBasicAuthentication(t *testing.T) {
 	tests := []struct {
 		name           string

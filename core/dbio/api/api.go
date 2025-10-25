@@ -762,7 +762,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 				return g.Error("duplicate endpoint name generated: %s (check your dynamic endpoint template)", renderedEndpoint.Name)
 			}
 
-			g.Trace("Rendered Dynamic Endpoint: %s => %s", renderedEndpoint.Name, g.Marshal(renderedEndpoint))
+			g.Trace("rendered dynamic endpoint: %s => %s", renderedEndpoint.Name, g.Marshal(renderedEndpoint))
 
 			// Add to endpoint map
 			ac.Spec.EndpointMap[renderedEndpoint.Name] = *renderedEndpoint
