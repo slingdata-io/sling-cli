@@ -302,7 +302,6 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 		"state", stateMapCopy,
 		"secrets", secretsCopy,
 		"auth", ac.State.Auth,
-		"null", nil,
 	)
 
 	// Add queues to the state map
