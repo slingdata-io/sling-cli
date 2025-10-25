@@ -419,6 +419,7 @@ func MakeDuckDbSecretProps(conn Connection, secretType iop.DuckDbSecretType) (se
 			"assume_role_arn":      "ASSUME_ROLE_ARN",
 			"chain":                "CHAIN",
 			"provider":             "PROVIDER",
+			"validation":           "VALIDATION",
 		})
 		// If user supplied CHAIN but no PROVIDER, default to credential_chain
 		if _, hasChain := secretProps["CHAIN"]; hasChain {

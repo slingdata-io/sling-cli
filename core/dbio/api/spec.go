@@ -14,6 +14,7 @@ import (
 	"github.com/maja42/goval"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -114,6 +115,7 @@ type Spec struct {
 
 	originalMap      map[string]any
 	endpointsOrdered []string
+	rendered         bool
 }
 
 func (s *Spec) IsDynamic() bool {
@@ -236,7 +238,7 @@ type Authentication struct {
 	// OAuth
 	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
 	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
-	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`  // Authorization endpoint (for auth code flow)
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
 	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
 	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
@@ -304,13 +306,16 @@ type Endpoint struct {
 	DependsOn   []string   `yaml:"depends_on" json:"depends_on"` // upstream endpoints
 	Overrides   any        `yaml:"overrides" json:"overrides"`   // stream overrides
 
-	stop         bool // whether we should stop the endpoint process
+	// whether we should stop the endpoint process.
+	// inflight iterations will continue, no new iterations created
+	stopIters    bool
 	conn         *APIConnection
 	client       http.Client
 	eval         *goval.Evaluator
 	backoffTimer *time.Timer
 	totalRecords int
 	totalReqs    int
+	contextMap   StateMap // extra contextual properties
 	syncMap      StateMap // values to sync
 	context      *g.Context
 	uniqueKeys   map[string]struct{} // for PrimaryKey deduplication
@@ -326,6 +331,17 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 		ep.State = make(StateMap)
 	}
 	ep.State[key] = val
+}
+
+func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
+	if state == nil {
+		state = g.M()
+	}
+
+	// fill in state for missing vars
+	state = ep.conn.evaluator.FillMissingKeys(state, ep.conn.evaluator.ExtractVars(expr))
+
+	return ep.eval.Evaluate(expr, state, iop.GlobalFunctionMap)
 }
 
 // Names returns names in alphabetical order
@@ -566,6 +582,7 @@ func (ep *Endpoint) setup() (err error) {
 	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
 
 	baseEndpoint := &Endpoint{
+		Name:    g.F("%s.setup", ep.Name),
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
 		State:   g.M(),
@@ -603,6 +620,7 @@ func (ep *Endpoint) teardown() (err error) {
 	g.Debug("running endpoint teardown sequence (%d calls)", len(ep.Teardown))
 
 	baseEndpoint := &Endpoint{
+		Name:    g.F("%s.teardown", ep.Name),
 		context: g.NewContext(ep.context.Ctx),
 		conn:    ep.conn,
 		State:   g.M(),
@@ -706,20 +724,20 @@ type Iterate struct {
 }
 
 type Iteration struct {
-	state    StateMap // each iteration has its own state
-	id       int      // iteration ID
-	sequence int      // paginated request number
-	field    string   // state field
-	value    any      // state value
-	stop     bool     // whether to stop the iteration
-	context  *g.Context
-	endpoint *Endpoint
+	state     StateMap // each iteration has its own state
+	id        string   // iteration ID
+	sequence  int      // paginated request number
+	field     string   // state field
+	value     any      // state value
+	stop      bool     // whether to stop the iteration
+	context   *g.Context
+	endpoint  *Endpoint
+	requestWg sync.WaitGroup // request wait group
 }
 
 func (iter *Iteration) Debug(text string, args ...any) {
-	if iter.field != "" {
-		id := g.F("i%02d", iter.id)
-		text = env.DarkGrayString(id) + " " + text
+	if iter.id != "" {
+		text = env.DarkGrayString(iter.id) + " " + text
 	}
 	g.Debug(text, args...)
 }
@@ -842,6 +860,7 @@ type SingleRequest struct {
 	id         string         `yaml:"-" json:"-"`
 	timestamp  int64          `yaml:"-" json:"-"`
 	iter       *Iteration     `yaml:"-" json:"-"` // the iteration that the req belongs to
+	state      StateMap       `yaml:"-" json:"-"` // copy of iteration state for request (prevents mutation)
 	endpoint   *Endpoint      `yaml:"-" json:"-"`
 }
 
@@ -851,14 +870,19 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 
 	id := g.F("r.%04d.%s", iter.endpoint.totalReqs, g.RandString(g.AlphaRunesLower, 3))
 	if iter.field != "" {
-		id = g.F("i%02d.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
+		id = g.F("%s.r%03d.%s", iter.id, iter.sequence, g.RandString(g.AlphaRunesLower, 3))
 	}
+
+	// set state to prevent mutation by next_state
+	state := StateMap{}
+	maps.Copy(state, iter.state)
 
 	return &SingleRequest{
 		id:        id,
 		timestamp: time.Now().UnixMilli(),
 		endpoint:  iter.endpoint,
 		iter:      iter,
+		state:     state,
 	}
 }
 

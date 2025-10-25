@@ -369,11 +369,6 @@ func (duck *DuckDb) getLoadExtensionSQL() (sql string) {
 func (duck *DuckDb) getCreateSecretSQL() (sql string) {
 	for _, s := range duck.secrets {
 
-		// add VALIDATION=none for S3 secrets to not validate (starting in 1.4.1)
-		if s.Type == DuckDbSecretTypeS3 && duck.version >= 10401 {
-			s.Props["validation"] = "none"
-		}
-
 		secret := s.Render()
 		env.LogSQL(nil, secret+env.NoDebugKey)
 		sql += fmt.Sprintf("%s;", secret)

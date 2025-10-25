@@ -282,7 +282,7 @@ func (t *TaskExecution) getSrcApiConn(ctx context.Context) (conn *api.APIConnect
 	// set replication store
 	state, err := t.Replication.RuntimeState()
 	if err != nil {
-		g.Warn("could not get replication store to put into API state: " + err.Error())
+		g.Warn("could not get replication store to put into API context: " + err.Error())
 	} else {
 		conn.SetReplicationStore(state.Store)
 	}
