@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1466,6 +1467,253 @@ func TestDynamicEndpointsErrors(t *testing.T) {
 				if strings.Contains(tt.name, "empty") {
 					assert.Equal(t, 0, len(endpoints))
 				}
+			}
+		})
+	}
+}
+
+func TestBasicAuthentication(t *testing.T) {
+	tests := []struct {
+		name           string
+		username       string
+		password       string
+		serverUsername string // what server expects
+		serverPassword string // what server expects
+		expectSuccess  bool
+		useTemplating  bool
+		description    string
+	}{
+		{
+			name:           "valid_credentials",
+			username:       "testuser",
+			password:       "testpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  true,
+			description:    "Valid credentials should authenticate successfully",
+		},
+		{
+			name:           "invalid_username",
+			username:       "wronguser",
+			password:       "testpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Invalid username should fail authentication",
+		},
+		{
+			name:           "invalid_password",
+			username:       "testuser",
+			password:       "wrongpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Invalid password should fail authentication",
+		},
+		{
+			name:           "templated_credentials",
+			username:       "{secrets.username}",
+			password:       "{secrets.password}",
+			serverUsername: "secret_user",
+			serverPassword: "secret_pass",
+			expectSuccess:  true,
+			useTemplating:  true,
+			description:    "Templated credentials should be rendered and work",
+		},
+		{
+			name:           "empty_credentials",
+			username:       "",
+			password:       "",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Empty credentials should fail authentication",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track authentication attempts
+			var authHeaderReceived string
+			var requestsReceived int
+			var authValidationPerformed bool
+
+			// Create mock HTTP server that validates basic auth
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestsReceived++
+				authHeaderReceived = r.Header.Get("Authorization")
+
+				// Validate Authorization header
+				if authHeaderReceived == "" {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Missing Authorization header",
+					})
+					return
+				}
+
+				// Check for "Basic " prefix
+				if !strings.HasPrefix(authHeaderReceived, "Basic ") {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid Authorization header format",
+					})
+					return
+				}
+
+				// Decode base64 credentials
+				encodedCreds := strings.TrimPrefix(authHeaderReceived, "Basic ")
+				decodedBytes, err := base64.StdEncoding.DecodeString(encodedCreds)
+				if err != nil {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid base64 encoding",
+					})
+					return
+				}
+
+				// Split username:password
+				credentials := string(decodedBytes)
+				parts := strings.SplitN(credentials, ":", 2)
+				if len(parts) != 2 {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid credentials format",
+					})
+					return
+				}
+
+				username := parts[0]
+				password := parts[1]
+
+				// Validate credentials against expected values
+				authValidationPerformed = true
+				if username != tt.serverUsername || password != tt.serverPassword {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid credentials",
+					})
+					return
+				}
+
+				// Success - return test data
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "name": "Test Item 1"},
+						{"id": 2, "name": "Test Item 2"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			// Create API spec YAML with basic authentication
+			// Quote username and password if they contain template syntax
+			username := tt.username
+			password := tt.password
+			if strings.Contains(username, "{") || strings.Contains(password, "{") {
+				username = fmt.Sprintf(`"%s"`, tt.username)
+				password = fmt.Sprintf(`"%s"`, tt.password)
+			}
+
+			specYAML := fmt.Sprintf(`
+name: test_basic_auth_api
+authentication:
+  type: basic
+  username: %s
+  password: %s
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, username, password, server.URL)
+
+			// Load spec to properly compile and validate
+			spec, err := LoadSpec(specYAML)
+			assert.NoError(t, err, "Should load spec successfully")
+
+			// Create API connection with optional templated secrets
+			secrets := map[string]any{}
+			if tt.useTemplating {
+				secrets["username"] = tt.serverUsername
+				secrets["password"] = tt.serverPassword
+			}
+
+			ac, err2 := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": secrets,
+			})
+			assert.NoError(t, err2)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err, "Authenticate() should not return error for basic auth setup")
+			assert.True(t, ac.State.Auth.Authenticated, "Should be marked as authenticated")
+
+			// Verify auth headers were set
+			assert.NotNil(t, ac.State.Auth.Headers, "Auth headers should be set")
+			authHeader, exists := ac.State.Auth.Headers["Authorization"]
+			assert.True(t, exists, "Authorization header should exist")
+			assert.True(t, strings.HasPrefix(authHeader, "Basic "), "Authorization header should start with 'Basic '")
+
+			// Verify the header value is correctly base64 encoded
+			encodedCreds := strings.TrimPrefix(authHeader, "Basic ")
+			decodedBytes, err := base64.StdEncoding.DecodeString(encodedCreds)
+			assert.NoError(t, err, "Should be valid base64")
+
+			expectedUsername := tt.username
+			expectedPassword := tt.password
+			if tt.useTemplating {
+				expectedUsername = tt.serverUsername
+				expectedPassword = tt.serverPassword
+			}
+
+			// Only validate content if credentials are non-empty
+			if expectedUsername != "" || expectedPassword != "" {
+				expectedCreds := fmt.Sprintf("%s:%s", expectedUsername, expectedPassword)
+				assert.Equal(t, expectedCreds, string(decodedBytes), "Decoded credentials should match")
+			}
+
+			// Make actual request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectSuccess {
+				// Should succeed
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, df, "Dataflow should not be nil")
+
+				// Collect data
+				data, err := df.Collect()
+				assert.NoError(t, err, "Should collect data successfully")
+				assert.Equal(t, 2, len(data.Rows), "Should receive 2 records")
+
+				// Verify auth header was received by server
+				assert.True(t, authValidationPerformed, "Server should have validated auth")
+				assert.Greater(t, requestsReceived, 0, "Server should have received requests")
+
+			} else {
+				// Should fail - either during request or authentication
+				// The error might occur during ReadDataflow or during data collection
+				if err == nil && df != nil {
+					_, err = df.Collect()
+				}
+
+				// We expect an error at some point for invalid credentials
+				// Note: The error might be captured in the dataflow context
+				if err == nil && df != nil {
+					err = df.Context.Err()
+				}
+
+				// For invalid/empty credentials, we should get an error
+				// The mock server returns 401, which should be captured as an error
+				assert.Error(t, err, tt.description)
 			}
 		})
 	}
