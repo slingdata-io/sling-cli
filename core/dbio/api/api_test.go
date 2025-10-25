@@ -866,7 +866,9 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
 				Limit: 10,
 			})
-			assert.NoError(t, err)
+			if !assert.NoError(t, err) {
+				return
+			}
 
 			// Collect data from dataflow
 			data, err := df.Collect()
