@@ -620,17 +620,6 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 		renderedEndpoint.Request.Payload = renderedPayload
 	}
 
-	// Render state values
-	if len(renderedEndpoint.State) > 0 {
-		renderedState, err := ac.renderAny(renderedEndpoint.State, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render endpoint state")
-		}
-		if state, ok := renderedState.(map[string]any); ok {
-			renderedEndpoint.State = state
-		}
-	}
-
 	// Initialize context for the endpoint
 	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
 
