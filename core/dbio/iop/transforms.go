@@ -899,7 +899,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	output = input
 
 	noCompute := false // especially in SQL queries
-	stateMap := g.M()
+	stateMap := g.M("null", nil)
 	err = copier.CopyWithOption(&stateMap, &e.State, copier.Option{DeepCopy: true})
 	if err != nil {
 		return nil, g.Error(err, "could not deep copy for evaluation")
