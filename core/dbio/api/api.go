@@ -556,17 +556,9 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 	evaluator := iop.NewEvaluator([]string{"state"})
 	evaluator.KeepMissingExpr = true // this tells evaluator to leave expression if missing
 
-	renderString := func(input string) (string, error) {
-		return evaluator.RenderString(input, extraMaps)
-	}
-
-	renderAny := func(input any) (any, error) {
-		return evaluator.RenderAny(input, extraMaps)
-	}
-
 	// Render the endpoint name
 	if renderedEndpoint.Name != "" {
-		renderedName, err := renderString(renderedEndpoint.Name)
+		renderedName, err := evaluator.RenderString(renderedEndpoint.Name, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint name")
 		}
@@ -575,7 +567,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render description if present
 	if renderedEndpoint.Description != "" {
-		renderedDesc, err := renderString(renderedEndpoint.Description)
+		renderedDesc, err := evaluator.RenderString(renderedEndpoint.Description, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint description")
 		}
@@ -584,55 +576,16 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render docs URL if present
 	if renderedEndpoint.Docs != "" {
-		renderedDocs, err := renderString(renderedEndpoint.Docs)
+		renderedDocs, err := evaluator.RenderString(renderedEndpoint.Docs, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint docs")
 		}
 		renderedEndpoint.Docs = renderedDocs
 	}
 
-	// Render the request URL
-	if renderedEndpoint.Request.URL != "" {
-		renderedURL, err := renderString(renderedEndpoint.Request.URL)
-		if err != nil {
-			return nil, g.Error(err, "could not render request URL")
-		}
-		renderedEndpoint.Request.URL = renderedURL
-	}
-
-	// Render request headers
-	if len(renderedEndpoint.Request.Headers) > 0 {
-		renderedHeaders, err := renderAny(renderedEndpoint.Request.Headers)
-		if err != nil {
-			return nil, g.Error(err, "could not render request headers")
-		}
-		if headers, ok := renderedHeaders.(map[string]any); ok {
-			renderedEndpoint.Request.Headers = headers
-		}
-	}
-
-	// Render request parameters
-	if len(renderedEndpoint.Request.Parameters) > 0 {
-		renderedParams, err := renderAny(renderedEndpoint.Request.Parameters)
-		if err != nil {
-			return nil, g.Error(err, "could not render request parameters")
-		}
-		if params, ok := renderedParams.(map[string]any); ok {
-			renderedEndpoint.Request.Parameters = params
-		}
-	}
-
-	// Render request payload if present
-	if renderedEndpoint.Request.Payload != nil {
-		renderedPayload, err := renderAny(renderedEndpoint.Request.Payload)
-		if err != nil {
-			return nil, g.Error(err, "could not render request payload")
-		}
-		renderedEndpoint.Request.Payload = renderedPayload
-	}
-
-	// Initialize context for the endpoint
+	// Initialize state and context for the endpoint
 	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
+	renderedEndpoint.State = stateMap
 
 	return &renderedEndpoint, nil
 }
