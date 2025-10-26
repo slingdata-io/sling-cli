@@ -172,7 +172,7 @@ endpoints:
     # Execution:
     # - Runs ONCE before any pagination or iteration
     # - State changes are preserved for main request
-    # - Shares same endpoint context and state
+    # - Shares same endpoint state
     # - Can use same Call structure as sequence authentication
     setup:
       # Call 1: Create async export job
@@ -674,6 +674,7 @@ Available variable scopes:
 - `secrets`: Sensitive credentials passed to Sling (e.g., `{secrets.api_key}`).
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
 - `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `{coalesce(sync.var, state.var, default_value)}`.
+- `context`: **Runtime values** passed from replication configuration (read-only). Includes `context.mode` (replication mode), `context.store` (state storage location), `context.limit` (max records), `context.range_start`, `context.range_end` (for backfill ranges from `source_options.range`). See the Context Variables section below for details.
 - `auth`: Authentication data after successful authentication (e.g., `{auth.token}` for OAuth2 access tokens, refresh tokens stored here).
 - `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts` (number of retry attempts).
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
@@ -1381,6 +1382,91 @@ response:
 - Test incremental loading by running endpoint multiple times
 - Check that sync values are actually being persisted between runs
 - Use `coalesce(sync.key, default_value)` to handle first run
+
+## Context Variables
+
+Context variables are **read-only runtime values** passed from the replication configuration to the API spec. They allow endpoints to support both backfill and incremental modes with a single configuration.
+
+**Available Context Variables**:
+
+| Variable | Type | Description | Set From |
+|----------|------|-------------|----------|
+| `context.mode` | string | Replication mode | Replication config `mode` field |
+| `context.store` | string | State storage location | Environment variable `SLING_STATE` |
+| `context.limit` | integer | Max records to fetch | Replication config `source_options.limit` |
+| `context.range_start` | string | Backfill range start | Replication config `source_options.range` (first value) |
+| `context.range_end` | string | Backfill range end | Replication config `source_options.range` (second value) |
+
+**Common Pattern: Backfill with Incremental Fallback**
+
+This pattern supports three scenarios: backfill (with range), incremental (with sync state), and first run (with default).
+
+```yaml
+endpoints:
+  events:
+    sync: [last_date]  # Persist for incremental runs
+
+    iterate:
+      # Priority: context.range_start → sync.last_date → default
+      over: >
+        range(
+          coalesce(context.range_start, sync.last_date, date_format(date_add(now(), -7, "day"), "%Y-%m-%d")),
+          coalesce(context.range_end, date_format(now(), "%Y-%m-%d")),
+          "1d"
+        )
+      into: "state.current_date"
+
+    request:
+      url: "{state.base_url}/events/daily/{state.current_date}"
+
+    response:
+      records:
+        jmespath: "events[]"
+        primary_key: ["event_id"]
+      processors:
+        - expression: "state.current_date"
+          output: "state.last_date"
+          aggregation: "maximum"
+```
+
+**Replication Configs**:
+
+```yaml
+# Backfill mode: Process specific date range
+source_options:
+  range: '2024-01-01,2024-01-31'  # Sets context.range_start and context.range_end
+
+# Incremental mode: Use sync state (no range specified)
+# Uses sync.last_date from previous run
+
+# Testing mode: Limit records
+source_options:
+  limit: 100  # Sets context.limit
+```
+
+**Other Uses**:
+
+```yaml
+# Mode-specific behavior
+state:
+  batch_size: '{if(context.mode == "backfill", 1000, 100)}'
+
+# Limit for testing
+response:
+  records:
+    limit: '{coalesce(context.limit, null)}'
+
+# Numeric ID ranges
+iterate:
+  over: >
+    range(
+      coalesce(context.range_start, sync.last_id, "1"),
+      coalesce(context.range_end, "999999"),
+      "1000"
+    )
+```
+
+**Important**: Always use `coalesce()` with context variables to provide fallback values. Context variables are read-only and cannot be written to.
 
 ## Dynamic Endpoints
 
