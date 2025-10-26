@@ -92,6 +92,13 @@ authentication:
   # - Any auth mechanism with known expiration
   expires: 3600
 
+  # Automatically refresh OAuth2 tokens on expiry (optional, default: false)
+  # When true, Sling will automatically use the refresh token to get a new access token
+  # Only applicable for OAuth2 flows that provide refresh tokens (authorization_code, password)
+  # Requires a valid refresh_token to be available from initial authentication
+  # Works in conjunction with the 'expires' field
+  refresh_on_expire: true
+
 
 # Default settings applied to all endpoints
 defaults:
@@ -141,8 +148,27 @@ endpoints:
     depends_on: []
 
     # Stream-level overrides for replication configuration (optional)
-    # Used in special circumstances to further configure the corresponding 
-    # replication stream. Can set keys such as `mode`, `hooks`, etc.
+    # Used to customize the behavior of the replication stream for this specific endpoint
+    # These overrides are passed to the stream processor and can modify replication behavior
+    #
+    # Common override keys:
+    # - mode: Replication mode (e.g., "full-refresh", "incremental", "snapshot")
+    # - hooks: Custom hooks for pre/post processing
+    # - object: Target object/table name override
+    # - primary_key: Override primary key detection
+    # - update_key: Override update key for incremental loads
+    #
+    # Example use cases:
+    # - Force a specific endpoint to always use full-refresh mode
+    # - Set a custom table name for a specific endpoint
+    # - Apply endpoint-specific transformations via hooks
+    # - Override column mappings or data types
+    #
+    # Example:
+    # overrides:
+    #   mode: "full-refresh"
+    #   object: "custom_table_name"
+    #   primary_key: ["custom_id"]
     overrides: {}
 
     # Initial state variables for this endpoint (merged with defaults.state)
@@ -624,7 +650,18 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}" # Optional for some providers
   refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
-  
+
+  # OAuth2 - Automatic Token Refresh on Expiry
+  # For flows that provide refresh tokens (authorization_code, password)
+  type: "oauth2"
+  flow: "authorization_code"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  expires: 3600  # Token expires in 1 hour
+  refresh_on_expire: true  # Automatically refresh when expired
+  refresh_token: "{secrets.refresh_token}"  # Initial refresh token
+
   # AWS Signature v4 Authentication
   type: "aws-sigv4"
   aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
@@ -857,7 +894,7 @@ Endpoints define specific API operations. They inherit settings from `defaults` 
 
 ```yaml
 request:
-  # Request full URL, can includ state variables
+  # Request full URL, can include state variables
   url: "{state.base_url}/users/{state.user_id}?active=true"
   # Method: GET, POST, PUT, PATCH, DELETE, etc.
   method: "POST"
