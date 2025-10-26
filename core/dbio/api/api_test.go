@@ -234,10 +234,10 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "client_credentials_missing_client_id",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "client_credentials",
-				ClientSecret:      "secret123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "client_credentials",
+				"client_secret":      "secret123",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "client_id is required",
@@ -245,10 +245,10 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "client_credentials_missing_client_secret",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "client_credentials",
-				ClientID:          "client123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "client_credentials",
+				"client_id":          "client123",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "client_secret is required",
@@ -256,10 +256,10 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "client_credentials_missing_auth_url",
 			auth: Authentication{
-				Type:         AuthTypeOAuth2,
-				Flow:         "client_credentials",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
+				"type":          AuthTypeOAuth2,
+				"flow":          "client_credentials",
+				"client_id":     "client123",
+				"client_secret": "secret123",
 			},
 			expectError: true,
 			errorMsg:    "authentication_url is required",
@@ -267,9 +267,9 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "refresh_token_missing_token",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "refresh_token",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "refresh_token",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "refresh_token is required",
@@ -277,10 +277,10 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "password_missing_username",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "password",
-				Password:          "pass123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "password",
+				"password":           "pass123",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "username is required",
@@ -288,10 +288,10 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "password_missing_password",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "password",
-				Username:          "user123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "password",
+				"username":           "user123",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "password is required",
@@ -299,12 +299,12 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "authorization_code_missing_code",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "authorization_code",
-				ClientID:          "client123",
-				ClientSecret:      "secret123",
-				RedirectURI:       "https://app.example.com/callback",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               "authorization_code",
+				"client_id":          "client123",
+				"client_secret":      "secret123",
+				"redirect_uri":       "https://app.example.com/callback",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "authorization code is required",
@@ -312,8 +312,8 @@ func TestOAuth2Authentication(t *testing.T) {
 		{
 			name: "unsupported_flow",
 			auth: Authentication{
-				Type: AuthTypeOAuth2,
-				Flow: "unsupported_flow",
+				"type": AuthTypeOAuth2,
+				"flow": "unsupported_flow",
 			},
 			expectError: true,
 			errorMsg:    "unsupported OAuth2 flow",
@@ -334,13 +334,22 @@ func TestOAuth2Authentication(t *testing.T) {
 				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 			}
 
-			_, err := ac.performOAuth2Flow(tt.auth)
+			authenticator, err := ac.MakeAuthenticator()
+			assert.NoError(t, err)
+			authOAuth, ok := authenticator.(*AuthenticatorOAuth2)
+			if assert.True(t, ok) {
+				_, err := authOAuth.performOAuth2Flow()
 
-			if tt.expectError {
+				// We expect this to fail at HTTP request stage, not validation
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else {
-				assert.NoError(t, err)
+
+				if tt.expectError {
+					assert.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				} else {
+					assert.NoError(t, err)
+				}
 			}
 		})
 	}
@@ -362,20 +371,25 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	ac.State.Secrets["CLIENT_ID"] = "secret_client_123"
 	ac.State.Secrets["CLIENT_SECRET"] = "secret_value_456"
 
-	auth := Authentication{
-		Type:              AuthTypeOAuth2,
-		Flow:              "client_credentials",
-		ClientID:          "{secrets.CLIENT_ID}",
-		ClientSecret:      "{secrets.CLIENT_SECRET}",
-		AuthenticationURL: "https://api.example.com/oauth/token",
+	ac.Spec.Authentication = Authentication{
+		"type":               AuthTypeOAuth2,
+		"flow":               "client_credentials",
+		"client_id":          "{secrets.CLIENT_ID}",
+		"client_secret":      "{secrets.CLIENT_SECRET}",
+		"authentication_url": "https://api.example.com/oauth/token",
 	}
 
 	// This should not error during validation (only during actual HTTP request)
-	_, err := ac.performOAuth2Flow(auth)
 
-	// We expect this to fail at HTTP request stage, not validation
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+	authenticator, _ := ac.MakeAuthenticator()
+	authOAuth, ok := authenticator.(*AuthenticatorOAuth2)
+	if assert.True(t, ok) {
+		_, err := authOAuth.performOAuth2Flow()
+
+		// We expect this to fail at HTTP request stage, not validation
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+	}
 }
 
 func TestOAuth2AuthorizationURLField(t *testing.T) {
@@ -462,22 +476,22 @@ func TestOAuth2AuthorizationURLField(t *testing.T) {
 			}
 
 			auth := Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              OAuthFlowAuthorizationCode,
-				ClientID:          "test_client",
-				ClientSecret:      "test_secret",
-				AuthenticationURL: tt.authenticationURL,
-				AuthorizationURL:  tt.authorizationURL,
-				RedirectURI:       server.URL + "/callback",
+				"type":               AuthTypeOAuth2,
+				"flow":               OAuthFlowAuthorizationCode,
+				"client_id":          "test_client",
+				"client_secret":      "test_secret",
+				"authentication_url": tt.authenticationURL,
+				"authorization_url":  tt.authorizationURL,
+				"redirect_uri":       server.URL + "/callback",
 			}
 
 			// Test that the authorization URL is correctly rendered/derived
-			renderedAuthURL, err := ac.renderString(auth.AuthorizationURL)
+			renderedAuthURL, err := ac.renderString(auth["authorization_url"])
 			assert.NoError(t, err)
 
 			if renderedAuthURL == "" {
 				// Simulate the URL derivation logic when authorization_url is not provided
-				authURL := auth.AuthenticationURL
+				authURL := cast.ToString(auth["authentication_url"])
 				authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
 				if authorizeURL == authURL {
 					if strings.HasSuffix(authURL, "/oauth/token") {
@@ -578,10 +592,10 @@ func TestAuthenticationExpiry(t *testing.T) {
 			// Create API connection
 			spec := Spec{
 				Authentication: Authentication{
-					Type:     AuthTypeBasic,
-					Expires:  tt.expiresSeconds,
-					Username: "test_user",
-					Password: "test_pass",
+					"type":     AuthTypeBasic,
+					"expires":  tt.expiresSeconds,
+					"username": "test_user",
+					"password": "test_pass",
 				},
 				EndpointMap: make(EndpointMap),
 			}
@@ -619,10 +633,10 @@ func TestEnsureAuthenticated(t *testing.T) {
 	// Test the expiry mechanism with a simple auth type
 	spec := Spec{
 		Authentication: Authentication{
-			Type:     AuthTypeBasic,
-			Expires:  2, // Expires after 2 seconds
-			Username: "test_user",
-			Password: "test_pass",
+			"type":     AuthTypeBasic,
+			"expires":  2, // Expires after 2 seconds
+			"username": "test_user",
+			"password": "test_pass",
 		},
 		EndpointMap: make(EndpointMap),
 	}
@@ -663,10 +677,10 @@ func TestEnsureAuthenticatedConcurrency(t *testing.T) {
 	// Test that concurrent calls to EnsureAuthenticated don't cause multiple authentications
 	spec := Spec{
 		Authentication: Authentication{
-			Type:     AuthTypeBasic,
-			Expires:  10,
-			Username: "test_user",
-			Password: "test_pass",
+			"type":     AuthTypeBasic,
+			"expires":  10,
+			"username": "test_user",
+			"password": "test_pass",
 		},
 		EndpointMap: make(EndpointMap),
 	}
@@ -805,11 +819,18 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			}
 
 			// Update authentication sequence URLs if present
-			if tc.Spec.Authentication.Type == AuthTypeSequence {
-				for i, call := range tc.Spec.Authentication.Sequence {
-					if call.Request.URL != "" {
-						tc.Spec.Authentication.Sequence[i].Request.URL = server.URL + call.Request.URL
+			if auth := tc.Spec.Authentication; auth.Type() == AuthTypeSequence {
+				authSeq := AuthenticatorSequence{}
+				err = g.JSONConvert(auth, &authSeq)
+				if assert.NoError(t, err) && assert.True(t, len(authSeq.Sequence) > 0) {
+					for i, call := range authSeq.Sequence {
+						if call.Request.URL != "" {
+							authSeq.Sequence[i].Request.URL = server.URL + call.Request.URL
+						}
 					}
+
+					// set back
+					tc.Spec.Authentication["sequence"] = authSeq.Sequence
 				}
 			}
 
@@ -853,7 +874,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Handle authentication based on type
-			if tc.Spec.Authentication.Type == AuthTypeSequence {
+			if tc.Spec.Authentication.Type() == AuthTypeSequence {
 				// For sequence authentication, actually run the authentication
 				err = ac.Authenticate()
 				assert.NoError(t, err)
@@ -942,7 +963,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					actualValue, exists := actualEndpoint.State[key]
 
 					// For authentication sequence tests, also check API connection state and auth state
-					if !exists && tc.Spec.Authentication.Type == AuthTypeSequence {
+					if !exists && tc.Spec.Authentication.Type() == AuthTypeSequence {
 						actualValue, exists = ac.State.State[key]
 						if !exists && key == "token" {
 							// Check auth token

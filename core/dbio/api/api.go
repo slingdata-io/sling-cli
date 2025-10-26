@@ -730,6 +730,33 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	return nil
 }
 
+func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err error) {
+
+	baseAuth := AuthenticatorBase{Type: ac.Spec.Authentication.Type(), conn: ac}
+
+	switch baseAuth.Type {
+	case AuthTypeNone:
+		authenticator = &baseAuth
+	case AuthTypeBasic:
+		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
+	case AuthTypeSequence:
+		authenticator = &AuthenticatorSequence{AuthenticatorBase: baseAuth}
+	case AuthTypeOAuth2:
+		authenticator = &AuthenticatorOAuth2{AuthenticatorBase: baseAuth}
+	case AuthTypeAWSSigV4:
+		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
+	case AuthTypeHMAC:
+		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
+	}
+
+	// so we write all the properties
+	if err = g.JSONConvert(ac.Spec.Authentication, authenticator); err != nil {
+		return nil, g.Error(err, "could not make authenticator for: %s", baseAuth.Type)
+	}
+
+	return
+}
+
 // IsAuthExpired checks if the authentication has expired
 func (ac *APIConnection) IsAuthExpired() bool {
 	if ac.State.Auth.ExpiresAt == 0 {
@@ -743,6 +770,11 @@ func (ac *APIConnection) IsAuthExpired() bool {
 func (ac *APIConnection) EnsureAuthenticated() error {
 	ac.State.Auth.Mutex.Lock()
 	defer ac.State.Auth.Mutex.Unlock()
+
+	if ac.Spec.Authentication == nil {
+		ac.State.Auth.Authenticated = true
+		return nil
+	}
 
 	// Check if authentication has expired or not authenticated
 	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {

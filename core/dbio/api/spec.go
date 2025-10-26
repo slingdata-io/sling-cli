@@ -221,8 +221,24 @@ type DynamicEndpoint struct {
 	Endpoint Endpoint `yaml:"endpoint" json:"endpoint"`
 }
 
+type Authentication map[string]any
+
+func (a Authentication) Type() AuthType {
+	if a == nil {
+		return AuthTypeNone
+	}
+	return AuthType(cast.ToString(a["type"]))
+}
+
+func (a Authentication) Expires() int {
+	if a == nil {
+		return 0
+	}
+	return cast.ToInt(a["expires"])
+}
+
 // Authentication defines how to authenticate with the API
-type Authentication struct {
+type Authentication0 struct {
 	Type AuthType `yaml:"type" json:"type"`
 
 	// when set, re-auth after number of seconds
@@ -264,7 +280,13 @@ const (
 	AuthTypeBasic    AuthType = "basic"
 	AuthTypeOAuth2   AuthType = "oauth2"
 	AuthTypeAWSSigV4 AuthType = "aws-sigv4"
+	AuthTypeHMAC     AuthType = "hmac"
+	AuthTypeMTls     AuthType = "mtls"
 )
+
+func (at AuthType) String() string {
+	return string(at)
+}
 
 type OAuthFlow string
 

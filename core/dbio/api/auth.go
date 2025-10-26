@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,180 +27,187 @@ import (
 // Header based auths (such as Basic, or Bearer) don't need this step
 // save payload in APIState.Auth
 func (ac *APIConnection) Authenticate() (err error) {
-	auth := ac.Spec.Authentication
 
-	// set auth data
-	setAuthenticated := func() {
+	if len(ac.Spec.Authentication) == 0 {
 		ac.State.Auth.Authenticated = true
-
-		// Setup auth expiry timer
-		if ac.Spec.Authentication.Expires > 0 {
-			// Calculate expiry time
-			expiryDuration := time.Duration(ac.Spec.Authentication.Expires) * time.Second
-			ac.State.Auth.ExpiresAt = time.Now().Add(expiryDuration).Unix()
-			g.Debug("authentication will expire at %s", time.Unix(ac.State.Auth.ExpiresAt, 0).Format(time.RFC3339))
-		}
-
-		for key, endpoint := range ac.Spec.EndpointMap {
-			for k, v := range ac.State.Auth.Headers {
-				if len(endpoint.Request.Headers) == 0 {
-					endpoint.Request.Headers = g.M()
-				}
-				endpoint.Request.Headers[k] = v
-			}
-			ac.Spec.EndpointMap[key] = endpoint
-		}
+		return nil
 	}
 
-	switch auth.Type {
-	case AuthTypeNone:
-		ac.State.Auth.Authenticated = true
-		return nil
+	authenticator, err := ac.MakeAuthenticator()
+	if err != nil {
+		return g.Error(err, "could not make authenticator for: %s", authenticator.AuthType())
+	}
 
-	case AuthTypeBasic:
-		userPass, err := ac.renderString(g.F("%s:%s", auth.Username, auth.Password))
-		if err != nil {
-			return g.Error(err, "could not render user-password")
-		}
-		credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
-		setAuthenticated()
-		return nil
+	if err = authenticator.Authenticate(ac.Context.Ctx, &ac.State.Auth); err != nil {
+		return g.Error(err, "could not authenticate for: %s", authenticator.AuthType())
+	}
 
-	case AuthTypeSequence:
-		// create ephemeral endpoint
-		baseEndpoint := &Endpoint{
-			Name:    "api.auth",
-			State:   g.M(),
-			context: g.NewContext(ac.Context.Ctx),
-			conn:    ac,
-		}
+	// set authenticated
 
-		g.Debug("running authentication sequence")
-		err = runSequence(auth.Sequence, baseEndpoint)
-		if err != nil {
-			return g.Error(err, "could not auth via sequence")
-		}
+	ac.State.Auth.Authenticated = true
 
-		// sync state back to APIConnection
-		ac.Context.Lock()
+	// Setup auth expiry timer
+	if ac.Spec.Authentication.Expires() > 0 {
+		// Calculate expiry time
+		expiryDuration := time.Duration(ac.Spec.Authentication.Expires()) * time.Second
+		ac.State.Auth.ExpiresAt = time.Now().Add(expiryDuration).Unix()
+		g.Debug("authentication will expire at %s", time.Unix(ac.State.Auth.ExpiresAt, 0).Format(time.RFC3339))
+	}
 
-		// sync the state section back to ac.State.State
-		if stateMap := baseEndpoint.State; len(stateMap) > 0 {
-			for k, v := range stateMap {
-				ac.State.State[k] = v
+	for key, endpoint := range ac.Spec.EndpointMap {
+		for k, v := range ac.State.Auth.Headers {
+			if len(endpoint.Request.Headers) == 0 {
+				endpoint.Request.Headers = g.M()
 			}
+			endpoint.Request.Headers[k] = v
 		}
-
-		ac.Context.Unlock()
-		setAuthenticated()
-		return nil
-
-	case AuthTypeOAuth2:
-		token, err := ac.performOAuth2Flow(auth)
-		if err != nil {
-			return g.Error(err, "OAuth2 authentication failed")
-		}
-		ac.State.Auth.Headers = map[string]string{"Authorization": g.F("Bearer %s", token)}
-		ac.State.Auth.Token = token
-		setAuthenticated()
-		return nil
-
-	case AuthTypeAWSSigV4:
-
-		props := map[string]string{
-			"aws_service":           ac.Spec.Authentication.AwsService,
-			"aws_access_key_id":     ac.Spec.Authentication.AwsAccessKeyID,
-			"aws_secret_access_key": ac.Spec.Authentication.AwsSecretAccessKey,
-			"aws_session_token":     ac.Spec.Authentication.AwsSessionToken,
-			"aws_region":            ac.Spec.Authentication.AwsRegion,
-			"aws_profile":           ac.Spec.Authentication.AwsProfile,
-		}
-
-		// render prop values
-		for key, val := range props {
-			props[key], err = ac.renderString(val)
-			if err != nil {
-				return g.Error(err, "could not render %s", key)
-			}
-		}
-
-		// get aws service and region
-		awsService := cast.ToString(props["aws_service"])
-		awsRegion := cast.ToString(props["aws_region"])
-
-		if awsRegion == "" {
-			return g.Error(err, "did not provide aws_region")
-		}
-		if awsService == "" {
-			return g.Error(err, "did not provide aws_service")
-		}
-
-		// load AWS creds
-		cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
-		if err != nil {
-			return g.Error(err, "could not make AWS config for authentication")
-		}
-
-		ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
-			// Calculate the SHA256 hash of the request body.
-			hasher := sha256.New()
-			hasher.Write(bodyBytes)
-			payloadHash := hex.EncodeToString(hasher.Sum(nil))
-
-			// Create a new signer.
-			signer := v4.NewSigner()
-
-			creds, err := cfg.Credentials.Retrieve(ctx)
-			if err != nil {
-				return g.Error(err, "could not retrieve AWS creds signing request")
-			}
-
-			// Sign the request, which adds the 'Authorization' and other necessary headers.
-			return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
-		}
-
-		setAuthenticated()
-
-	default:
-		setAuthenticated()
-		return nil
+		ac.Spec.EndpointMap[key] = endpoint
 	}
 
 	return
 }
 
+type Authenticator interface {
+	AuthType() AuthType
+	Authenticate(ctx context.Context, state *APIStateAuth) error
+	Refresh(ctx context.Context, state *APIStateAuth) error
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorBase
+type AuthenticatorBase struct {
+	Type    AuthType `yaml:"type" json:"type"`
+	Expires int      `yaml:"expires" json:"expires,omitempty"` // when set, re-auth after number of seconds
+
+	conn *APIConnection `yaml:"-" json:"-"`
+}
+
+func (a *AuthenticatorBase) AuthType() AuthType {
+	return a.Type
+}
+
+func (a *AuthenticatorBase) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	return
+}
+
+func (a *AuthenticatorBase) Refresh(ctx context.Context, state *APIStateAuth) (err error) {
+	return
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorBasic
+type AuthenticatorBasic struct {
+	AuthenticatorBase
+	Username string `yaml:"username,omitempty" json:"username,omitempty"`
+	Password string `yaml:"password,omitempty" json:"password,omitempty"`
+}
+
+func (a *AuthenticatorBasic) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	userPass, err := a.conn.renderString(g.F("%s:%s", a.Username, a.Password))
+	if err != nil {
+		return g.Error(err, "could not render user-password")
+	}
+
+	credentialsB64 := base64.StdEncoding.EncodeToString([]byte(userPass))
+	state.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
+
+	return
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorSequence
+type AuthenticatorSequence struct {
+	AuthenticatorBase
+	Sequence Sequence `yaml:"sequence" json:"sequence,omitempty"`
+}
+
+func (a *AuthenticatorSequence) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+
+	baseEndpoint := &Endpoint{
+		Name:    "api.auth",
+		State:   g.M(),
+		context: g.NewContext(a.conn.Context.Ctx),
+		conn:    a.conn,
+	}
+
+	g.Debug("running authentication sequence")
+	err = runSequence(a.Sequence, baseEndpoint)
+	if err != nil {
+		return g.Error(err, "could not auth via sequence")
+	}
+
+	// sync state back to APIConnection
+	a.conn.Context.Lock()
+	defer a.conn.Context.Unlock()
+
+	// sync the state section back to ac.State.State
+	if stateMap := baseEndpoint.State; len(stateMap) > 0 {
+		for k, v := range stateMap {
+			a.conn.State.State[k] = v
+		}
+	}
+
+	return
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorOAuth2
+type AuthenticatorOAuth2 struct {
+	AuthenticatorBase
+	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
+	Username          string    `yaml:"username,omitempty" json:"username,omitempty"`
+	Password          string    `yaml:"password,omitempty" json:"password,omitempty"`
+	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
+	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
+	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
+	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
+	RedirectURI       string    `yaml:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
+	RefreshToken      string    `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
+	RefreshOnExpire   bool      `yaml:"refresh_on_expire,omitempty" json:"refresh_on_expire,omitempty"`
+}
+
+func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	return
+}
+
+func (a *AuthenticatorOAuth2) Refresh(ctx context.Context, state *APIStateAuth) (err error) {
+	return
+}
+
 // performOAuth2Flow handles different OAuth2 flows
-func (ac *APIConnection) performOAuth2Flow(auth Authentication) (token string, err error) {
-	g.Debug("running OAuth2 flow (type=%#v)", auth.Flow)
-	switch auth.Flow {
+func (a *AuthenticatorOAuth2) performOAuth2Flow() (token string, err error) {
+	g.Debug("running OAuth2 flow (type=%#v)", a.Flow)
+	switch a.Flow {
 	case OAuthFlowClientCredentials:
-		return ac.performClientCredentialsFlow(auth)
+		return a.performClientCredentialsFlow()
 	case OAuthFlowRefreshToken:
-		return ac.performRefreshTokenFlow(auth)
+		return a.performRefreshTokenFlow()
 	case OAuthFlowPassword:
-		return ac.performPasswordFlow(auth)
+		return a.performPasswordFlow()
 	case OAuthFlowAuthorizationCode:
-		return ac.performAuthorizationCodeFlow(auth)
+		return a.performAuthorizationCodeFlow()
 	default:
-		return "", g.Error("unsupported OAuth2 flow: %s", auth.Flow)
+		return "", g.Error("unsupported OAuth2 flow: %s", a.Flow)
 	}
 }
 
 // performClientCredentialsFlow implements the OAuth2 Client Credentials flow
-func (ac *APIConnection) performClientCredentialsFlow(auth Authentication) (token string, err error) {
+func (a *AuthenticatorOAuth2) performClientCredentialsFlow() (token string, err error) {
+
 	// Render template values
-	clientID, err := ac.renderString(auth.ClientID)
+	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
 		return "", g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := ac.renderString(auth.ClientSecret)
+	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
 		return "", g.Error(err, "could not render client_secret")
 	}
 
-	authURL, err := ac.renderString(auth.AuthenticationURL)
+	authURL, err := a.conn.renderString(a.AuthenticationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authentication_url")
 	}
@@ -221,12 +230,12 @@ func (ac *APIConnection) performClientCredentialsFlow(auth Authentication) (toke
 	}
 
 	// Add scopes if provided
-	if len(auth.Scopes) > 0 {
-		payload["scope"] = strings.Join(auth.Scopes, " ")
+	if len(a.Scopes) > 0 {
+		payload["scope"] = strings.Join(a.Scopes, " ")
 	}
 
 	// Make request
-	resp, err := ac.makeOAuthRequest(authURL, payload)
+	resp, err := a.makeOAuthRequest(authURL, payload)
 	if err != nil {
 		return "", g.Error(err, "failed to make OAuth2 request")
 	}
@@ -240,24 +249,25 @@ func (ac *APIConnection) performClientCredentialsFlow(auth Authentication) (toke
 }
 
 // performRefreshTokenFlow implements the OAuth2 Refresh Token flow
-func (ac *APIConnection) performRefreshTokenFlow(auth Authentication) (token string, err error) {
+func (a *AuthenticatorOAuth2) performRefreshTokenFlow() (token string, err error) {
+
 	// Render template values
-	clientID, err := ac.renderString(auth.ClientID)
+	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
 		return "", g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := ac.renderString(auth.ClientSecret)
+	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
 		return "", g.Error(err, "could not render client_secret")
 	}
 
-	refreshToken, err := ac.renderString(auth.RefreshToken)
+	refreshToken, err := a.conn.renderString(a.RefreshToken)
 	if err != nil {
 		return "", g.Error(err, "could not render refresh_token")
 	}
 
-	authURL, err := ac.renderString(auth.AuthenticationURL)
+	authURL, err := a.conn.renderString(a.AuthenticationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authentication_url")
 	}
@@ -284,7 +294,7 @@ func (ac *APIConnection) performRefreshTokenFlow(auth Authentication) (token str
 	}
 
 	// Make request
-	resp, err := ac.makeOAuthRequest(authURL, payload)
+	resp, err := a.makeOAuthRequest(authURL, payload)
 	if err != nil {
 		return "", g.Error(err, "failed to make OAuth2 refresh request")
 	}
@@ -293,7 +303,7 @@ func (ac *APIConnection) performRefreshTokenFlow(auth Authentication) (token str
 	if accessToken, ok := resp["access_token"].(string); ok {
 		// Update refresh token if a new one was provided
 		if newRefreshToken, ok := resp["refresh_token"].(string); ok {
-			ac.State.Auth.Token = newRefreshToken
+			a.conn.State.Auth.Token = newRefreshToken
 		}
 		return accessToken, nil
 	}
@@ -302,29 +312,29 @@ func (ac *APIConnection) performRefreshTokenFlow(auth Authentication) (token str
 }
 
 // performPasswordFlow implements the OAuth2 Resource Owner Password Credentials flow
-func (ac *APIConnection) performPasswordFlow(auth Authentication) (token string, err error) {
+func (a *AuthenticatorOAuth2) performPasswordFlow() (token string, err error) {
 	// Render template values
-	clientID, err := ac.renderString(auth.ClientID)
+	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
 		return "", g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := ac.renderString(auth.ClientSecret)
+	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
 		return "", g.Error(err, "could not render client_secret")
 	}
 
-	username, err := ac.renderString(auth.Username)
+	username, err := a.conn.renderString(a.Username)
 	if err != nil {
 		return "", g.Error(err, "could not render username")
 	}
 
-	password, err := ac.renderString(auth.Password)
+	password, err := a.conn.renderString(a.Password)
 	if err != nil {
 		return "", g.Error(err, "could not render password")
 	}
 
-	authURL, err := ac.renderString(auth.AuthenticationURL)
+	authURL, err := a.conn.renderString(a.AuthenticationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authentication_url")
 	}
@@ -355,12 +365,12 @@ func (ac *APIConnection) performPasswordFlow(auth Authentication) (token string,
 	}
 
 	// Add scopes if provided
-	if len(auth.Scopes) > 0 {
-		payload["scope"] = strings.Join(auth.Scopes, " ")
+	if len(a.Scopes) > 0 {
+		payload["scope"] = strings.Join(a.Scopes, " ")
 	}
 
 	// Make request
-	resp, err := ac.makeOAuthRequest(authURL, payload)
+	resp, err := a.makeOAuthRequest(authURL, payload)
 	if err != nil {
 		return "", g.Error(err, "failed to make OAuth2 password request")
 	}
@@ -369,7 +379,7 @@ func (ac *APIConnection) performPasswordFlow(auth Authentication) (token string,
 	if accessToken, ok := resp["access_token"].(string); ok {
 		// Store refresh token if provided
 		if refreshToken, ok := resp["refresh_token"].(string); ok {
-			ac.State.Auth.Token = refreshToken
+			a.conn.State.Auth.Token = refreshToken
 		}
 		return accessToken, nil
 	}
@@ -378,19 +388,19 @@ func (ac *APIConnection) performPasswordFlow(auth Authentication) (token string,
 }
 
 // performAuthorizationCodeFlow implements the OAuth2 Authorization Code flow
-func (ac *APIConnection) performAuthorizationCodeFlow(auth Authentication) (token string, err error) {
+func (a *AuthenticatorOAuth2) performAuthorizationCodeFlow() (token string, err error) {
 	// we already have refresh token
-	if auth.RefreshToken != "" {
-		return ac.performRefreshTokenFlow(auth)
+	if a.RefreshToken != "" {
+		return a.performRefreshTokenFlow()
 	}
 
 	// Check if we should use the interactive server flow
-	if auth.RedirectURI == "" || strings.Contains(auth.RedirectURI, "localhost") || strings.Contains(auth.RedirectURI, "127.0.0.1") {
-		return ac.performAuthorizationCodeFlowWithServer(auth)
+	if a.RedirectURI == "" || strings.Contains(a.RedirectURI, "localhost") || strings.Contains(a.RedirectURI, "127.0.0.1") {
+		return a.performAuthorizationCodeFlowWithServer()
 	}
 
 	// This flow assumes the authorization code is already provided in the Token field
-	authCode, err := ac.renderString(auth.Token)
+	authCode, err := a.conn.renderString(a.Token)
 	if err != nil {
 		return "", g.Error(err, "could not render authorization code")
 	}
@@ -399,23 +409,23 @@ func (ac *APIConnection) performAuthorizationCodeFlow(auth Authentication) (toke
 		return "", g.Error("authorization code is required for authorization_code flow (provide in token field)")
 	}
 
-	return ac.exchangeCodeForToken(auth, authCode)
+	return a.exchangeCodeForToken(authCode)
 }
 
 // performAuthorizationCodeFlowWithServer implements the OAuth2 Authorization Code flow with a local server
-func (ac *APIConnection) performAuthorizationCodeFlowWithServer(auth Authentication) (token string, err error) {
+func (a *AuthenticatorOAuth2) performAuthorizationCodeFlowWithServer() (token string, err error) {
 	// Render template values
-	clientID, err := ac.renderString(auth.ClientID)
+	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
 		return "", g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := ac.renderString(auth.ClientSecret)
+	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
 		return "", g.Error(err, "could not render client_secret")
 	}
 
-	authURL, err := ac.renderString(auth.AuthenticationURL)
+	authURL, err := a.conn.renderString(a.AuthenticationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authentication_url")
 	}
@@ -439,7 +449,7 @@ func (ac *APIConnection) performAuthorizationCodeFlowWithServer(auth Authenticat
 	listener.Close()
 
 	// Set up the redirect URI
-	auth.RedirectURI = fmt.Sprintf("http://localhost:%d/callback", port)
+	a.RedirectURI = fmt.Sprintf("http://localhost:%d/callback", port)
 
 	// Create channels for communication
 	codeChan := make(chan string, 1)
@@ -534,16 +544,16 @@ setTimeout(function() {
 	params := url.Values{}
 	params.Set("response_type", "code")
 	params.Set("client_id", clientID)
-	params.Set("redirect_uri", auth.RedirectURI)
-	if len(auth.Scopes) > 0 {
-		params.Set("scope", strings.Join(auth.Scopes, " "))
+	params.Set("redirect_uri", a.RedirectURI)
+	if len(a.Scopes) > 0 {
+		params.Set("scope", strings.Join(a.Scopes, " "))
 	}
 	// Add a state parameter for security (optional but recommended)
 	params.Set("state", fmt.Sprintf("sling-%d", time.Now().Unix()))
 
 	// Determine the authorization endpoint (different from token endpoint)
 	// First check if authorization_url is explicitly provided
-	authorizeURL, err := ac.renderString(auth.AuthorizationURL)
+	authorizeURL, err := a.conn.renderString(a.AuthorizationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authorization_url")
 	}
@@ -572,7 +582,7 @@ setTimeout(function() {
 	g.Info("Opening browser for OAuth2 authorization...")
 	g.Info("If the browser doesn't open automatically, please visit: %s", fullAuthURL)
 
-	if err := openBrowser(fullAuthURL); err != nil {
+	if err := a.openBrowser(fullAuthURL); err != nil {
 		g.Warn("Failed to open browser automatically: %v", err)
 		g.Info("Please manually open the following URL in your browser:")
 		g.Info("%s", fullAuthURL)
@@ -582,37 +592,37 @@ setTimeout(function() {
 	select {
 	case code := <-codeChan:
 		g.Info("Authorization code received, exchanging for access token...")
-		return ac.exchangeCodeForToken(auth, code)
+		return a.exchangeCodeForToken(code)
 	case err := <-errorChan:
 		return "", err
 	case <-time.After(5 * time.Minute):
 		server.Shutdown(context.Background())
 		return "", g.Error("authorization timeout after 5 minutes")
-	case <-ac.Context.Ctx.Done():
+	case <-a.conn.Context.Ctx.Done():
 		server.Shutdown(context.Background())
 		return "", g.Error("authorization cancelled")
 	}
 }
 
 // exchangeCodeForToken exchanges an authorization code for an access token
-func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) (token string, err error) {
+func (a *AuthenticatorOAuth2) exchangeCodeForToken(code string) (token string, err error) {
 	// Render template values
-	clientID, err := ac.renderString(auth.ClientID)
+	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
 		return "", g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := ac.renderString(auth.ClientSecret)
+	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
 		return "", g.Error(err, "could not render client_secret")
 	}
 
-	redirectURI, err := ac.renderString(auth.RedirectURI)
+	redirectURI, err := a.conn.renderString(a.RedirectURI)
 	if err != nil {
 		return "", g.Error(err, "could not render redirect_uri")
 	}
 
-	authURL, err := ac.renderString(auth.AuthenticationURL)
+	authURL, err := a.conn.renderString(a.AuthenticationURL)
 	if err != nil {
 		return "", g.Error(err, "could not render authentication_url")
 	}
@@ -642,7 +652,7 @@ func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) 
 	}
 
 	// Make request
-	resp, err := ac.makeOAuthRequest(authURL, payload)
+	resp, err := a.makeOAuthRequest(authURL, payload)
 	if err != nil {
 		return "", g.Error(err, "failed to make OAuth2 authorization code request")
 	}
@@ -653,7 +663,7 @@ func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) 
 		if refreshToken, ok := resp["refresh_token"].(string); ok {
 			// TODO: need to be stored in home folder
 			g.Debug("OAuth refreshToken = %s", refreshToken)
-			ac.State.Auth.Token = refreshToken
+			a.conn.State.Auth.Token = refreshToken
 		}
 		g.Trace("OAuth accessToken = %s", accessToken)
 		return accessToken, nil
@@ -662,26 +672,8 @@ func (ac *APIConnection) exchangeCodeForToken(auth Authentication, code string) 
 	return "", g.Error("no access_token found in OAuth2 authorization code response")
 }
 
-// openBrowser opens the default browser to the given URL
-func openBrowser(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start"}
-	case "darwin":
-		cmd = "open"
-	default: // "linux", "freebsd", "openbsd", "netbsd"
-		cmd = "xdg-open"
-	}
-	args = append(args, url)
-	return exec.Command(cmd, args...).Start()
-}
-
 // makeOAuthRequest makes an HTTP request for OAuth2 token exchange
-func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string) (response map[string]any, err error) {
+func (a *AuthenticatorOAuth2) makeOAuthRequest(url string, payload map[string]string) (response map[string]any, err error) {
 	// Convert payload to form data
 	formData := strings.Builder{}
 	first := true
@@ -696,10 +688,10 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 	}
 
 	// Create HTTP request
-	ac.Context.Debug("oauth POST request to %s", url)
-	ac.Context.Trace("oauth POST request payload: %s", g.Marshal(payload))
-	ac.Context.Trace("oauth POST request form data: %s", formData.String())
-	req, err := http.NewRequestWithContext(ac.Context.Ctx, "POST", url, strings.NewReader(formData.String()))
+	a.conn.Context.Debug("oauth POST request to %s", url)
+	a.conn.Context.Trace("oauth POST request payload: %s", g.Marshal(payload))
+	a.conn.Context.Trace("oauth POST request form data: %s", formData.String())
+	req, err := http.NewRequestWithContext(a.conn.Context.Ctx, "POST", url, strings.NewReader(formData.String()))
 	if err != nil {
 		return nil, g.Error(err, "failed to create OAuth2 request")
 	}
@@ -718,7 +710,7 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 		return nil, g.Error(err, "failed to execute OAuth2 request")
 	}
 
-	ac.Context.Debug("oauth POST response status code: %d", resp.StatusCode)
+	a.conn.Context.Debug("oauth POST response status code: %d", resp.StatusCode)
 
 	defer resp.Body.Close()
 
@@ -728,7 +720,7 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 		return nil, g.Error(err, "failed to read OAuth2 response body")
 	}
 
-	ac.Context.Trace("oauth POST response body: %s", string(body))
+	a.conn.Context.Trace("oauth POST response body: %s", string(body))
 
 	// Check for HTTP errors
 	if resp.StatusCode >= 400 {
@@ -751,4 +743,149 @@ func (ac *APIConnection) makeOAuthRequest(url string, payload map[string]string)
 	}
 
 	return result, nil
+}
+
+// openBrowser opens the default browser to the given URL
+func (a *AuthenticatorOAuth2) openBrowser(url string) error {
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start"}
+	case "darwin":
+		cmd = "open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
+	}
+	args = append(args, url)
+	return exec.Command(cmd, args...).Start()
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorAWSSigV4
+type AuthenticatorAWSSigV4 struct {
+	AuthenticatorBase
+	AwsService         string `yaml:"aws_service,omitempty" json:"aws_service,omitempty"`
+	AwsAccessKeyID     string `yaml:"aws_access_key_id,omitempty" json:"aws_access_key_id,omitempty"`
+	AwsSecretAccessKey string `yaml:"aws_secret_access_key,omitempty" json:"aws_secret_access_key,omitempty"`
+	AwsSessionToken    string `yaml:"aws_session_token,omitempty" json:"aws_session_token,omitempty"`
+	AwsRegion          string `yaml:"aws_region,omitempty" json:"aws_region,omitempty"`
+	AwsProfile         string `yaml:"aws_profile,omitempty" json:"aws_profile,omitempty"`
+}
+
+func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	ac := a.conn
+
+	props := map[string]string{
+		"aws_service":           a.AwsService,
+		"aws_access_key_id":     a.AwsAccessKeyID,
+		"aws_secret_access_key": a.AwsSecretAccessKey,
+		"aws_session_token":     a.AwsSessionToken,
+		"aws_region":            a.AwsRegion,
+		"aws_profile":           a.AwsProfile,
+	}
+
+	// render prop values
+	for key, val := range props {
+		props[key], err = ac.renderString(val)
+		if err != nil {
+			return g.Error(err, "could not render %s", key)
+		}
+	}
+
+	// get aws service and region
+	awsService := cast.ToString(props["aws_service"])
+	awsRegion := cast.ToString(props["aws_region"])
+
+	if awsRegion == "" {
+		return g.Error(err, "did not provide aws_region")
+	}
+	if awsService == "" {
+		return g.Error(err, "did not provide aws_service")
+	}
+
+	// load AWS creds
+	cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
+	if err != nil {
+		return g.Error(err, "could not make AWS config for authentication")
+	}
+
+	ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+		// Calculate the SHA256 hash of the request body.
+		hasher := sha256.New()
+		hasher.Write(bodyBytes)
+		payloadHash := hex.EncodeToString(hasher.Sum(nil))
+
+		// Create a new signer.
+		signer := v4.NewSigner()
+
+		creds, err := cfg.Credentials.Retrieve(ctx)
+		if err != nil {
+			return g.Error(err, "could not retrieve AWS creds signing request")
+		}
+
+		// Sign the request, which adds the 'Authorization' and other necessary headers.
+		return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
+	}
+
+	return
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorHMAC
+type AuthenticatorHMAC struct {
+	AuthenticatorBase
+	AccessKey string `yaml:"access_key" json:"access_key"`
+	Secret    string `yaml:"secret" json:"secret"`
+	Algorithm string `yaml:"algorithm" json:"algorithm"` // e.g., "sha256" (only sha256 supported for now)
+}
+
+func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	if a.Algorithm == "" {
+		a.Algorithm = "sha256"
+	}
+
+	state.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+		var signature string
+
+		// Generate timestamp (milliseconds since Unix epoch)
+		timestamp := time.Now().UTC().UnixMilli()
+
+		switch a.Algorithm {
+		case "sha256":
+			// Compute body hash
+			bodyHash := sha256.Sum256(bodyBytes)
+			bodyHashHex := hex.EncodeToString(bodyHash[:])
+
+			// Path includes query params
+			path := req.URL.RequestURI()
+
+			// String to sign: method + path + bodyHash + accessKey + timestamp
+			stringToSign := fmt.Sprintf("%s %s %s %s %d",
+				req.Method,
+				path,
+				bodyHashHex,
+				a.AccessKey,
+				timestamp,
+			)
+
+			// Compute HMAC-SHA256
+			mac := hmac.New(sha256.New, []byte(a.Secret))
+			mac.Write([]byte(stringToSign))
+			signature = hex.EncodeToString(mac.Sum(nil))
+		default:
+			return g.Error("invalid algorithm: %s", a.Algorithm)
+		}
+
+		// Add headers
+		req.Header.Set("Authorization", a.AccessKey)
+		req.Header.Set("X-Authorization-Timestamp", strconv.FormatInt(timestamp, 10))
+		req.Header.Set("X-Authorization-Signature-SHA256", signature)
+
+		return nil
+	}
+
+	return
 }
