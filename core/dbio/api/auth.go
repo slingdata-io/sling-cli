@@ -816,7 +816,7 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 		return g.Error(err, "could not make AWS config for authentication")
 	}
 
-	ac.State.Auth.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+	ac.State.Auth.Sign = func(iter *Iteration, req *http.Request, bodyBytes []byte) error {
 		// Calculate the SHA256 hash of the request body.
 		hasher := sha256.New()
 		hasher.Write(bodyBytes)
@@ -825,13 +825,13 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 		// Create a new signer.
 		signer := v4.NewSigner()
 
-		creds, err := cfg.Credentials.Retrieve(ctx)
+		creds, err := cfg.Credentials.Retrieve(iter.context.Ctx)
 		if err != nil {
 			return g.Error(err, "could not retrieve AWS creds signing request")
 		}
 
 		// Sign the request, which adds the 'Authorization' and other necessary headers.
-		return signer.SignHTTP(ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
+		return signer.SignHTTP(iter.context.Ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
 	}
 
 	return
@@ -853,7 +853,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		a.Algorithm = "sha256"
 	}
 
-	state.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
+	state.Sign = func(iter *Iteration, req *http.Request, bodyBytes []byte) error {
 		var signature string
 
 		// Fixed timestamp for consistency
@@ -945,7 +945,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		case "sha256":
 			stringToSign := g.Rm(a.SigningString, templateMap)
 
-			stringToSign, err = a.conn.renderString(stringToSign)
+			stringToSign, err = iter.renderString(stringToSign)
 			if err != nil {
 				return g.Error(err, "could not render string for HMAC signer")
 			}
@@ -957,7 +957,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		case "sha512":
 			stringToSign := g.Rm(a.SigningString, templateMap)
 
-			stringToSign, err = a.conn.renderString(stringToSign)
+			stringToSign, err = iter.renderString(stringToSign)
 			if err != nil {
 				return g.Error(err, "could not render string for HMAC signer")
 			}
@@ -976,7 +976,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		// Add headers
 		for key, value := range a.ReqHeaders {
 			value = g.Rm(value, templateMap)
-			value, err = a.conn.renderString(value)
+			value, err = iter.renderString(value)
 			if err != nil {
 				return g.Error(err, "could not render string for HMAC header: %s", key)
 			}

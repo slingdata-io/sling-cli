@@ -262,8 +262,8 @@ type APIStateAuth struct {
 	Headers       map[string]string `json:"-"`                    // to inject
 	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
-	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
-	Mutex *sync.Mutex                                        `json:"-" yaml:"-"` // Mutex for auth operations
+	Sign  func(*Iteration, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4, HMAC
+	Mutex *sync.Mutex                                   `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
