@@ -763,6 +763,89 @@ func (iter *Iteration) Debug(text string, args ...any) {
 	g.Debug(text, args...)
 }
 
+func (iter *Iteration) renderString(val any, req ...*SingleRequest) (newVal string, err error) {
+
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	iter.context.Lock()
+	// Create a copy of the state to avoid concurrent access issues
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+
+	// Create a copy of syncMap to avoid concurrent access issues
+	syncCopy := make(map[string]any)
+	if iter.endpoint.syncMap != nil {
+		iter.endpoint.context.Lock()
+		for k, v := range iter.endpoint.syncMap {
+			syncCopy[k] = v
+		}
+		iter.endpoint.context.Unlock()
+	}
+
+	// Create a copy of configMap to avoid concurrent access issues
+	contextCopy := make(map[string]any)
+	if iter.endpoint.contextMap != nil {
+		iter.endpoint.context.Lock()
+		for k, v := range iter.endpoint.contextMap {
+			contextCopy[k] = v
+		}
+		iter.endpoint.context.Unlock()
+	}
+
+	extra["state"] = stateCopy
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+	iter.context.Unlock()
+
+	return iter.endpoint.conn.renderString(val, extra)
+}
+
+func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, err error) {
+	extra := g.M()
+	if len(req) > 0 {
+		extra = req[0].Map()
+	}
+
+	iter.context.Lock()
+	// Create a copy of the state to avoid concurrent access issues
+	stateCopy := make(map[string]any)
+	for k, v := range iter.state {
+		stateCopy[k] = v
+	}
+
+	// Create a copy of syncMap to avoid concurrent access issues
+	syncCopy := make(map[string]any)
+	if iter.endpoint.syncMap != nil {
+		iter.endpoint.context.Lock()
+		for k, v := range iter.endpoint.syncMap {
+			syncCopy[k] = v
+		}
+		iter.endpoint.context.Unlock()
+	}
+
+	// Create a copy of configMap to avoid concurrent access issues
+	contextCopy := make(map[string]any)
+	if iter.endpoint.contextMap != nil {
+		iter.endpoint.context.Lock()
+		for k, v := range iter.endpoint.contextMap {
+			contextCopy[k] = v
+		}
+		iter.endpoint.context.Unlock()
+	}
+
+	extra["state"] = stateCopy
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+	iter.context.Unlock()
+
+	return iter.endpoint.conn.renderAny(val, extra)
+}
+
 // StateMap stores the current state of an endpoint's execution
 type StateMap map[string]any
 
