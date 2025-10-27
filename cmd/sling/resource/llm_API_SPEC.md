@@ -670,7 +670,18 @@ authentication:
   aws_secret_access_key: "{secrets.aws_secret_access_key}"
   aws_session_token: "{secrets.aws_session_token}"  # Optional for temporary credentials
   aws_profile: "{secrets.aws_profile}"  # Optional, use AWS profile instead of keys
-  
+
+  # HMAC Authentication (e.g., Kraken, Binance, custom APIs)
+  type: "hmac"
+  algorithm: "sha256"  # sha256 or sha512
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+  request_headers:
+    X-Signature: "{signature}"
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"
+  nonce_length: 16  # Optional: generates random nonce (in bytes, hex-encoded)
+
   # Custom Authentication Sequence
   type: "sequence"
   sequence:
@@ -701,6 +712,106 @@ authentication:
 **Password Flow**: For trusted applications with user credentials (deprecated by OAuth2 spec).
 
 **Refresh Token Flow**: For refreshing expired access tokens using a previously obtained refresh token.
+
+### HMAC Authentication Details
+
+HMAC (Hash-based Message Authentication Code) is used by many APIs for request signing, particularly cryptocurrency exchanges (Kraken, Binance) and custom enterprise APIs.
+
+**How It Works**:
+1. A string is constructed from request components (method, path, timestamp, body hash, etc.)
+2. The string is signed using HMAC-SHA256 or HMAC-SHA512 with a secret key
+3. The signature and related headers are added to each request
+
+**Configuration**:
+
+```yaml
+authentication:
+  type: "hmac"
+  algorithm: "sha256"  # Required: "sha256" or "sha512"
+  secret: "{secrets.api_secret}"  # Required: Secret key for signing
+
+  # Required: Template string to sign
+  # Available variables: http_method, http_path, http_query, http_headers,
+  # http_body_raw, http_body_md5, http_body_sha1, http_body_sha256, http_body_sha512,
+  # unix_time, unix_time_ms, date_iso, date_rfc1123, nonce
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+
+  # Required: Headers to add to each request
+  # {signature} is the computed HMAC signature (hex-encoded)
+  # All template variables from signing_string are available
+  request_headers:
+    X-Signature: "{signature}"
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"  # Optional: Many APIs also need an API key
+
+  # Optional: Length of random nonce in bytes (generates hex string of 2x length)
+  # If set, generates a random nonce for each request
+  # Available as {nonce} in signing_string and request_headers
+  nonce_length: 16  # Generates 32-character hex string
+```
+
+**Available Template Variables**:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `http_method` | HTTP method | "GET", "POST" |
+| `http_path` | Request path with query params | "/api/users?limit=10" |
+| `http_query` | Canonical query string (sorted) | "foo=bar&limit=10" |
+| `http_headers` | Canonical headers (sorted) | "content-type:application/json\n" |
+| `http_body_raw` | Raw request body | '{"key":"value"}' |
+| `http_body_md5` | MD5 hash of body (hex) | "5d41402abc4b..." |
+| `http_body_sha1` | SHA1 hash of body (hex) | "aaf4c61ddcc5..." |
+| `http_body_sha256` | SHA256 hash of body (hex) | "2c26b46b68ff..." |
+| `http_body_sha512` | SHA512 hash of body (hex) | "e718483d0ce7..." |
+| `unix_time` | Unix timestamp (seconds) | "1698765432" |
+| `unix_time_ms` | Unix timestamp (milliseconds) | "1698765432123" |
+| `date_iso` | ISO 8601 date | "2023-10-31T15:30:32Z" |
+| `date_rfc1123` | RFC 1123 date | "Tue, 31 Oct 2023 15:30:32 GMT" |
+| `nonce` | Random hex string | "a3f2c8d9..." (if nonce_length set) |
+| `signature` | Computed HMAC signature | "e4d909c290d0..." (only in request_headers) |
+
+**Common Patterns**:
+
+```yaml
+# Kraken-style: Method + Path + Nonce + Body Hash
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{http_path}{nonce}{http_body_sha256}"
+  request_headers:
+    API-Key: "{secrets.api_key}"
+    API-Sign: "{signature}"
+    API-Nonce: "{nonce}"
+  nonce_length: 16
+
+# Simple: Method + Timestamp + Body
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{unix_time}{http_body_raw}"
+  request_headers:
+    Authorization: "HMAC {signature}"
+    X-Timestamp: "{unix_time}"
+
+# AWS-style: Query String + Headers
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}\n{http_path}\n{http_query}\n{http_headers}"
+  request_headers:
+    Authorization: "SignatureMethod=HmacSHA256, Signature={signature}"
+    X-Amz-Date: "{date_iso}"
+```
+
+**Important Notes**:
+- All template variables in `signing_string` and `request_headers` support state/env/secrets templating
+- The `{signature}` variable is only available in `request_headers` (computed after signing)
+- Canonical query string (`http_query`) is sorted alphabetically by key
+- Canonical headers (`http_headers`) are lowercase, sorted, with joined values
+- Nonce is generated fresh for each request when `nonce_length` is set
 
 ## Variable Scopes and Expressions
 
