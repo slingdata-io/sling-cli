@@ -293,8 +293,7 @@ type OAuthFlow string
 const (
 	OAuthFlowClientCredentials OAuthFlow = "client_credentials"
 	OAuthFlowAuthorizationCode OAuthFlow = "authorization_code"
-	OAuthFlowPassword          OAuthFlow = "password"
-	OAuthFlowRefreshToken      OAuthFlow = "refresh_token"
+	OAuthFlowDeviceCode        OAuthFlow = "device_code"
 )
 
 // Sequence is many calls (perfect for async jobs, custom auth)

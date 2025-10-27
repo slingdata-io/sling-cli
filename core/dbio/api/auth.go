@@ -10,12 +10,14 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -24,7 +26,10 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // Authenticate performs the auth workflow if needed. Like a Connect step.
@@ -158,598 +163,279 @@ func (a *AuthenticatorSequence) Authenticate(ctx context.Context, state *APIStat
 // AuthenticatorOAuth2
 type AuthenticatorOAuth2 struct {
 	AuthenticatorBase
-	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
-	Username          string    `yaml:"username,omitempty" json:"username,omitempty"`
-	Password          string    `yaml:"password,omitempty" json:"password,omitempty"`
-	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
-	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
 	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
-	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
-	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
 	RedirectURI       string    `yaml:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
-	RefreshToken      string    `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
-	RefreshOnExpire   bool      `yaml:"refresh_on_expire,omitempty" json:"refresh_on_expire,omitempty"`
+	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
+	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Auth endpoint
+	DeviceAuthURL     string    `yaml:"device_auth_url,omitempty" json:"device_auth_url,omitempty"`       // Device auth endpoint (optional)
+	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
+	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"` // e.g., "authorization_code", "client_credentials", "device_code"
 }
 
+// Authenticate performs OAuth2 authentication based on the configured flow.
 func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
-	return
-}
-
-func (a *AuthenticatorOAuth2) Refresh(ctx context.Context, state *APIStateAuth) (err error) {
-	return
-}
-
-// performOAuth2Flow handles different OAuth2 flows
-func (a *AuthenticatorOAuth2) performOAuth2Flow() (token string, err error) {
-	g.Debug("running OAuth2 flow (type=%#v)", a.Flow)
-	switch a.Flow {
-	case OAuthFlowClientCredentials:
-		return a.performClientCredentialsFlow()
-	case OAuthFlowRefreshToken:
-		return a.performRefreshTokenFlow()
-	case OAuthFlowPassword:
-		return a.performPasswordFlow()
-	case OAuthFlowAuthorizationCode:
-		return a.performAuthorizationCodeFlow()
-	default:
-		return "", g.Error("unsupported OAuth2 flow: %s", a.Flow)
-	}
-}
-
-// performClientCredentialsFlow implements the OAuth2 Client Credentials flow
-func (a *AuthenticatorOAuth2) performClientCredentialsFlow() (token string, err error) {
-
 	// Render template values
 	clientID, err := a.conn.renderString(a.ClientID)
 	if err != nil {
-		return "", g.Error(err, "could not render client_id")
+		return g.Error(err, "could not render client_id")
 	}
 
 	clientSecret, err := a.conn.renderString(a.ClientSecret)
 	if err != nil {
-		return "", g.Error(err, "could not render client_secret")
+		return g.Error(err, "could not render client_secret")
 	}
 
-	authURL, err := a.conn.renderString(a.AuthenticationURL)
+	redirectURI, err := a.conn.renderString(a.RedirectURI)
 	if err != nil {
-		return "", g.Error(err, "could not render authentication_url")
+		return g.Error(err, "could not render redirect_uri")
 	}
 
-	if clientID == "" {
-		return "", g.Error("client_id is required for client_credentials flow")
-	}
-	if clientSecret == "" {
-		return "", g.Error("client_secret is required for client_credentials flow")
-	}
-	if authURL == "" {
-		return "", g.Error("authentication_url is required for client_credentials flow")
-	}
-
-	// Prepare request payload
-	payload := map[string]string{
-		"grant_type":    "client_credentials",
-		"client_id":     clientID,
-		"client_secret": clientSecret,
-	}
-
-	// Add scopes if provided
-	if len(a.Scopes) > 0 {
-		payload["scope"] = strings.Join(a.Scopes, " ")
-	}
-
-	// Make request
-	resp, err := a.makeOAuthRequest(authURL, payload)
+	authURL, err := a.conn.renderString(a.AuthenticationURL) // Token URL
 	if err != nil {
-		return "", g.Error(err, "failed to make OAuth2 request")
+		return g.Error(err, "could not render authentication_url")
 	}
 
-	// Extract token from response
-	if accessToken, ok := resp["access_token"].(string); ok {
-		return accessToken, nil
-	}
-
-	return "", g.Error("no access_token found in OAuth2 response")
-}
-
-// performRefreshTokenFlow implements the OAuth2 Refresh Token flow
-func (a *AuthenticatorOAuth2) performRefreshTokenFlow() (token string, err error) {
-
-	// Render template values
-	clientID, err := a.conn.renderString(a.ClientID)
-	if err != nil {
-		return "", g.Error(err, "could not render client_id")
-	}
-
-	clientSecret, err := a.conn.renderString(a.ClientSecret)
-	if err != nil {
-		return "", g.Error(err, "could not render client_secret")
-	}
-
-	refreshToken, err := a.conn.renderString(a.RefreshToken)
-	if err != nil {
-		return "", g.Error(err, "could not render refresh_token")
-	}
-
-	authURL, err := a.conn.renderString(a.AuthenticationURL)
-	if err != nil {
-		return "", g.Error(err, "could not render authentication_url")
-	}
-
-	if refreshToken == "" {
-		return "", g.Error("refresh_token is required for refresh_token flow")
-	}
-	if authURL == "" {
-		return "", g.Error("authentication_url is required for refresh_token flow")
-	}
-
-	// Prepare request payload
-	payload := map[string]string{
-		"grant_type":    "refresh_token",
-		"refresh_token": refreshToken,
-	}
-
-	// Add client credentials if provided
-	if clientID != "" {
-		payload["client_id"] = clientID
-	}
-	if clientSecret != "" {
-		payload["client_secret"] = clientSecret
-	}
-
-	// Make request
-	resp, err := a.makeOAuthRequest(authURL, payload)
-	if err != nil {
-		return "", g.Error(err, "failed to make OAuth2 refresh request")
-	}
-
-	// Extract token from response
-	if accessToken, ok := resp["access_token"].(string); ok {
-		// Update refresh token if a new one was provided
-		if newRefreshToken, ok := resp["refresh_token"].(string); ok {
-			a.conn.State.Auth.Token = newRefreshToken
-		}
-		return accessToken, nil
-	}
-
-	return "", g.Error("no access_token found in OAuth2 refresh response")
-}
-
-// performPasswordFlow implements the OAuth2 Resource Owner Password Credentials flow
-func (a *AuthenticatorOAuth2) performPasswordFlow() (token string, err error) {
-	// Render template values
-	clientID, err := a.conn.renderString(a.ClientID)
-	if err != nil {
-		return "", g.Error(err, "could not render client_id")
-	}
-
-	clientSecret, err := a.conn.renderString(a.ClientSecret)
-	if err != nil {
-		return "", g.Error(err, "could not render client_secret")
-	}
-
-	username, err := a.conn.renderString(a.Username)
-	if err != nil {
-		return "", g.Error(err, "could not render username")
-	}
-
-	password, err := a.conn.renderString(a.Password)
-	if err != nil {
-		return "", g.Error(err, "could not render password")
-	}
-
-	authURL, err := a.conn.renderString(a.AuthenticationURL)
-	if err != nil {
-		return "", g.Error(err, "could not render authentication_url")
-	}
-
-	if username == "" {
-		return "", g.Error("username is required for password flow")
-	}
-	if password == "" {
-		return "", g.Error("password is required for password flow")
-	}
-	if authURL == "" {
-		return "", g.Error("authentication_url is required for password flow")
-	}
-
-	// Prepare request payload
-	payload := map[string]string{
-		"grant_type": "password",
-		"username":   username,
-		"password":   password,
-	}
-
-	// Add client credentials if provided
-	if clientID != "" {
-		payload["client_id"] = clientID
-	}
-	if clientSecret != "" {
-		payload["client_secret"] = clientSecret
-	}
-
-	// Add scopes if provided
-	if len(a.Scopes) > 0 {
-		payload["scope"] = strings.Join(a.Scopes, " ")
-	}
-
-	// Make request
-	resp, err := a.makeOAuthRequest(authURL, payload)
-	if err != nil {
-		return "", g.Error(err, "failed to make OAuth2 password request")
-	}
-
-	// Extract token from response
-	if accessToken, ok := resp["access_token"].(string); ok {
-		// Store refresh token if provided
-		if refreshToken, ok := resp["refresh_token"].(string); ok {
-			a.conn.State.Auth.Token = refreshToken
-		}
-		return accessToken, nil
-	}
-
-	return "", g.Error("no access_token found in OAuth2 password response")
-}
-
-// performAuthorizationCodeFlow implements the OAuth2 Authorization Code flow
-func (a *AuthenticatorOAuth2) performAuthorizationCodeFlow() (token string, err error) {
-	// we already have refresh token
-	if a.RefreshToken != "" {
-		return a.performRefreshTokenFlow()
-	}
-
-	// Check if we should use the interactive server flow
-	if a.RedirectURI == "" || strings.Contains(a.RedirectURI, "localhost") || strings.Contains(a.RedirectURI, "127.0.0.1") {
-		return a.performAuthorizationCodeFlowWithServer()
-	}
-
-	// This flow assumes the authorization code is already provided in the Token field
-	authCode, err := a.conn.renderString(a.Token)
-	if err != nil {
-		return "", g.Error(err, "could not render authorization code")
-	}
-
-	if authCode == "" {
-		return "", g.Error("authorization code is required for authorization_code flow (provide in token field)")
-	}
-
-	return a.exchangeCodeForToken(authCode)
-}
-
-// performAuthorizationCodeFlowWithServer implements the OAuth2 Authorization Code flow with a local server
-func (a *AuthenticatorOAuth2) performAuthorizationCodeFlowWithServer() (token string, err error) {
-	// Render template values
-	clientID, err := a.conn.renderString(a.ClientID)
-	if err != nil {
-		return "", g.Error(err, "could not render client_id")
-	}
-
-	clientSecret, err := a.conn.renderString(a.ClientSecret)
-	if err != nil {
-		return "", g.Error(err, "could not render client_secret")
-	}
-
-	authURL, err := a.conn.renderString(a.AuthenticationURL)
-	if err != nil {
-		return "", g.Error(err, "could not render authentication_url")
-	}
-
-	if clientID == "" {
-		return "", g.Error("client_id is required for authorization_code flow")
-	}
-	if clientSecret == "" {
-		return "", g.Error("client_secret is required for authorization_code flow")
-	}
-	if authURL == "" {
-		return "", g.Error("authentication_url is required for authorization_code flow")
-	}
-
-	// Find an available port
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		return "", g.Error(err, "failed to find available port")
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-
-	// Set up the redirect URI
-	a.RedirectURI = fmt.Sprintf("http://localhost:%d/callback", port)
-
-	// Create channels for communication
-	codeChan := make(chan string, 1)
-	errorChan := make(chan error, 1)
-
-	// Set up HTTP server
-	mux := http.NewServeMux()
-	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
-	}
-
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			// Shutdown server after handling callback
-			go func() {
-				time.Sleep(1 * time.Second) // Give time for response to be sent
-				server.Shutdown(context.Background())
-			}()
-		}()
-
-		// Check for error in callback
-		if errorCode := r.URL.Query().Get("error"); errorCode != "" {
-			errorDesc := r.URL.Query().Get("error_description")
-			if errorDesc == "" {
-				errorDesc = errorCode
-			}
-
-			fmt.Fprintf(w, `
-<!DOCTYPE html>
-<html>
-<head><title>Authorization Failed</title></head>
-<body>
-<h1>Authorization Failed</h1>
-<p>Error: %s</p>
-<p>You can close this window.</p>
-</body>
-</html>`, errorDesc)
-
-			errorChan <- g.Error("OAuth2 authorization failed: %s", errorDesc)
-			return
-		}
-
-		// Get authorization code
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			fmt.Fprintf(w, `
-<!DOCTYPE html>
-<html>
-<head><title>Authorization Failed</title></head>
-<body>
-<h1>Authorization Failed</h1>
-<p>No authorization code received.</p>
-<p>You can close this window.</p>
-</body>
-</html>`)
-			errorChan <- g.Error("no authorization code received")
-			return
-		}
-
-		// Success response
-		fmt.Fprintf(w, `
-<!DOCTYPE html>
-<html>
-<head><title>Authorization Successful</title></head>
-<body>
-<h1>Authorization Successful!</h1>
-<p>You can close this window and return to the application.</p>
-<script>
-// Auto-close after 3 seconds
-setTimeout(function() {
-    window.close();
-}, 3000);
-</script>
-</body>
-</html>`)
-
-		codeChan <- code
-	})
-
-	// Start the server
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errorChan <- g.Error(err, "failed to start callback server")
-		}
-	}()
-
-	// Give the server a moment to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Build authorization URL
-	params := url.Values{}
-	params.Set("response_type", "code")
-	params.Set("client_id", clientID)
-	params.Set("redirect_uri", a.RedirectURI)
-	if len(a.Scopes) > 0 {
-		params.Set("scope", strings.Join(a.Scopes, " "))
-	}
-	// Add a state parameter for security (optional but recommended)
-	params.Set("state", fmt.Sprintf("sling-%d", time.Now().Unix()))
-
-	// Determine the authorization endpoint (different from token endpoint)
-	// First check if authorization_url is explicitly provided
 	authorizeURL, err := a.conn.renderString(a.AuthorizationURL)
 	if err != nil {
-		return "", g.Error(err, "could not render authorization_url")
+		return g.Error(err, "could not render authorization_url")
 	}
 
-	// If not provided, derive from token endpoint URL
-	if authorizeURL == "" {
-		// Most OAuth2 providers have /authorize for auth and /token for token exchange
+	deviceAuthURL, err := a.conn.renderString(a.DeviceAuthURL)
+	if err != nil {
+		return g.Error(err, "could not render device_auth_url")
+	}
+
+	// Derive authorization URL if not provided
+	if authorizeURL == "" && authURL != "" {
 		authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
 		if authorizeURL == authURL {
-			// If no replacement happened, try common patterns
 			if strings.HasSuffix(authURL, "/oauth/token") {
 				authorizeURL = strings.Replace(authURL, "/oauth/token", "/oauth/authorize", 1)
-			} else if strings.HasSuffix(authURL, "/token") {
-				authorizeURL = strings.Replace(authURL, "/token", "/authorize", 1)
 			} else {
-				// Fallback: append /authorize to the base URL
-				baseURL := strings.TrimSuffix(authURL, "/")
+				baseURL := strings.TrimSuffix(authURL, "/token")
 				authorizeURL = baseURL + "/authorize"
 			}
 		}
 	}
 
-	fullAuthURL := fmt.Sprintf("%s?%s", authorizeURL, params.Encode())
+	// Derive device auth URL if not provided
+	if deviceAuthURL == "" && authURL != "" {
+		deviceAuthURL = strings.Replace(authURL, "/token", "/device/code", 1)
+	}
+
+	// Create OAuth2 config
+	conf := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Scopes:       a.Scopes,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:       authorizeURL,
+			TokenURL:      authURL,
+			DeviceAuthURL: deviceAuthURL,
+		},
+		RedirectURL: redirectURI,
+	}
+
+	// set headers on return
+	defer func() {
+		if state.Token != "" {
+			state.Headers = map[string]string{"Authorization": g.F("Bearer %s", state.Token)}
+		}
+	}()
+
+	// load refresh token if found
+	storedTok, err := a.LoadToken()
+	if err == nil {
+		ts := oauth2.ReuseTokenSource(storedTok, conf.TokenSource(ctx, storedTok))
+		newTok, err := ts.Token()
+		if err == nil {
+			state.Token = newTok.AccessToken
+			state.Headers = map[string]string{"Authorization": g.F("Bearer %s", newTok.AccessToken)}
+			if newTok.RefreshToken != storedTok.RefreshToken {
+				a.SaveToken(newTok) // Save if rotated
+			}
+			g.Debug("Used refreshed token from storage")
+			return nil
+		}
+		g.Warn("Stored refresh token invalid, falling back to authentication")
+	}
+
+	if a.Flow == "" {
+		a.Flow = OAuthFlowAuthorizationCode
+	}
+
+	switch a.Flow {
+	case OAuthFlowClientCredentials:
+		return a.clientCredentialsFlow(ctx, conf, state)
+	case OAuthFlowDeviceCode:
+		return a.deviceCodeFlow(ctx, conf, state)
+	case OAuthFlowAuthorizationCode:
+		return a.authorizationCodeFlow(ctx, conf, state)
+	default:
+		return g.Error("unsupported OAuth2 flow: %s", a.Flow)
+	}
+}
+
+// clientCredentialsFlow handles machine-to-machine authentication.
+func (a *AuthenticatorOAuth2) clientCredentialsFlow(ctx context.Context, conf *oauth2.Config, state *APIStateAuth) error {
+	if conf.ClientSecret == "" {
+		return g.Error("client_secret is required for client_credentials flow")
+	}
+	cc := clientcredentials.Config{
+		ClientID:     conf.ClientID,
+		ClientSecret: conf.ClientSecret,
+		TokenURL:     conf.Endpoint.TokenURL,
+		Scopes:       conf.Scopes,
+	}
+
+	tok, err := cc.Token(ctx)
+	if err != nil {
+		return g.Error(err, "failed to get token in client_credentials flow")
+	}
+	state.Token = tok.AccessToken
+	if tok.RefreshToken != "" {
+		g.Debug("OAuth refreshToken = %s", tok.RefreshToken)
+		a.SaveToken(tok)
+	}
+	g.Trace("OAuth accessToken = %s", tok.AccessToken)
+	return nil
+}
+
+// deviceCodeFlow handles authentication for headless environments.
+func (a *AuthenticatorOAuth2) deviceCodeFlow(ctx context.Context, conf *oauth2.Config, state *APIStateAuth) error {
+	if conf.Endpoint.DeviceAuthURL == "" {
+		return g.Error("device_auth_url or derived URL is required for device_code flow")
+	}
+	dar, err := conf.DeviceAuth(ctx)
+	if err != nil {
+		return g.Error(err, "failed to get device auth response")
+	}
+	g.Info("Please visit %s and enter code %s", dar.VerificationURI, dar.UserCode)
+	g.Info("If the URL doesn't open, copy and paste it into your browser.")
+	tok, err := conf.DeviceAccessToken(ctx, dar)
+	if err != nil {
+		return g.Error(err, "failed to get token in device_code flow")
+	}
+	state.Token = tok.AccessToken
+	if tok.RefreshToken != "" {
+		g.Debug("OAuth refreshToken = %s", tok.RefreshToken)
+		a.SaveToken(tok)
+	}
+	g.Trace("OAuth accessToken = %s", tok.AccessToken)
+	return nil
+}
+
+// authorizationCodeFlow handles interactive user authentication with browser.
+func (a *AuthenticatorOAuth2) authorizationCodeFlow(ctx context.Context, conf *oauth2.Config, state *APIStateAuth) error {
+	if conf.Endpoint.AuthURL == "" {
+		return g.Error("authorization_url or derived URL is required for authorization_code flow")
+	}
+	if conf.Endpoint.TokenURL == "" {
+		return g.Error("authentication_url is required for authorization_code flow")
+	}
+
+	// Use dynamic port for local server
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return g.Error(err, "failed to listen on dynamic port")
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	conf.RedirectURL = fmt.Sprintf("http://localhost:%d/callback", port)
+
+	// Generate state and PKCE if applicable
+	stateVal := generateRandomState()
+	var opts []oauth2.AuthCodeOption
+	var verifier string
+	if conf.ClientSecret == "" { // Enable PKCE for public clients
+		verifier = oauth2.GenerateVerifier()
+		opts = append(opts, oauth2.S256ChallengeOption(verifier))
+	}
+	opts = append(opts, oauth2.AccessTypeOffline) // Request refresh token
+
+	authURL := conf.AuthCodeURL(stateVal, opts...)
+
+	// Channels for code and errors
+	codeChan := make(chan string)
+	errorChan := make(chan error)
+	server := http.Server{}
+
+	// Callback handler
+	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != stateVal {
+			fmt.Fprintf(w, `<h1>Authorization Failed</h1><p>Invalid state parameter.</p>`)
+			errorChan <- g.Error("invalid state in callback")
+			return
+		}
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			fmt.Fprintf(w, `<h1>Authorization Failed</h1><p>No authorization code received.</p>`)
+			errorChan <- g.Error("no authorization code received")
+			return
+		}
+		fmt.Fprintf(w, `<h1>Authorization Successful!</h1><p>You can close this window.</p>`)
+		codeChan <- code
+	})
+
+	// Start server
+	go func() {
+		server.Handler = http.DefaultServeMux
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			errorChan <- g.Error(err, "failed to start callback server")
+		}
+	}()
 
 	// Open browser
 	g.Info("Opening browser for OAuth2 authorization...")
-	g.Info("If the browser doesn't open automatically, please visit: %s", fullAuthURL)
-
-	if err := a.openBrowser(fullAuthURL); err != nil {
-		g.Warn("Failed to open browser automatically: %v", err)
-		g.Info("Please manually open the following URL in your browser:")
-		g.Info("%s", fullAuthURL)
+	g.Info("If the browser doesn't open, visit: %s", authURL)
+	if err := a.openBrowser(authURL); err != nil {
+		g.Warn("Failed to open browser: %v", err)
+		g.Info("Please open: %s", authURL)
 	}
 
-	// Wait for authorization code or timeout
+	// Wait for code or timeout
+	var code string
 	select {
-	case code := <-codeChan:
-		g.Info("Authorization code received, exchanging for access token...")
-		return a.exchangeCodeForToken(code)
+	case code = <-codeChan:
+		g.Info("Authorization code received, exchanging for token...")
 	case err := <-errorChan:
-		return "", err
+		server.Shutdown(context.Background())
+		return err
 	case <-time.After(5 * time.Minute):
 		server.Shutdown(context.Background())
-		return "", g.Error("authorization timeout after 5 minutes")
-	case <-a.conn.Context.Ctx.Done():
+		return g.Error("authorization timeout after 5 minutes")
+	case <-ctx.Done():
 		server.Shutdown(context.Background())
-		return "", g.Error("authorization cancelled")
+		return g.Error("authorization cancelled")
 	}
+
+	// Exchange code for token
+	exOpts := []oauth2.AuthCodeOption{}
+	if verifier != "" {
+		exOpts = append(exOpts, oauth2.VerifierOption(verifier))
+	}
+	tok, err := conf.Exchange(ctx, code, exOpts...)
+	if err != nil {
+		return g.Error(err, "failed to exchange code for token")
+	}
+	state.Token = tok.AccessToken
+	if tok.RefreshToken != "" {
+		g.Debug("OAuth refreshToken = %s", tok.RefreshToken)
+		a.SaveToken(tok)
+	}
+	g.Trace("OAuth accessToken = %s", tok.AccessToken)
+	server.Shutdown(context.Background())
+	return nil
 }
 
-// exchangeCodeForToken exchanges an authorization code for an access token
-func (a *AuthenticatorOAuth2) exchangeCodeForToken(code string) (token string, err error) {
-	// Render template values
-	clientID, err := a.conn.renderString(a.ClientID)
-	if err != nil {
-		return "", g.Error(err, "could not render client_id")
-	}
-
-	clientSecret, err := a.conn.renderString(a.ClientSecret)
-	if err != nil {
-		return "", g.Error(err, "could not render client_secret")
-	}
-
-	redirectURI, err := a.conn.renderString(a.RedirectURI)
-	if err != nil {
-		return "", g.Error(err, "could not render redirect_uri")
-	}
-
-	authURL, err := a.conn.renderString(a.AuthenticationURL)
-	if err != nil {
-		return "", g.Error(err, "could not render authentication_url")
-	}
-
-	if clientID == "" {
-		return "", g.Error("client_id is required for authorization_code flow")
-	}
-	if clientSecret == "" {
-		return "", g.Error("client_secret is required for authorization_code flow")
-	}
-	if authURL == "" {
-		return "", g.Error("authentication_url is required for authorization_code flow")
-	}
-
-	// For server flow, use the localhost redirect URI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8080/callback"
-	}
-
-	// Prepare request payload
-	payload := map[string]string{
-		"grant_type":    "authorization_code",
-		"code":          code,
-		"client_id":     clientID,
-		"client_secret": clientSecret,
-		"redirect_uri":  redirectURI,
-	}
-
-	// Make request
-	resp, err := a.makeOAuthRequest(authURL, payload)
-	if err != nil {
-		return "", g.Error(err, "failed to make OAuth2 authorization code request")
-	}
-
-	// Extract token from response
-	if accessToken, ok := resp["access_token"].(string); ok {
-		// Store refresh token if provided
-		if refreshToken, ok := resp["refresh_token"].(string); ok {
-			// TODO: need to be stored in home folder
-			g.Debug("OAuth refreshToken = %s", refreshToken)
-			a.conn.State.Auth.Token = refreshToken
-		}
-		g.Trace("OAuth accessToken = %s", accessToken)
-		return accessToken, nil
-	}
-
-	return "", g.Error("no access_token found in OAuth2 authorization code response")
+// generateRandomState creates a secure random state string.
+func generateRandomState() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
 }
 
-// makeOAuthRequest makes an HTTP request for OAuth2 token exchange
-func (a *AuthenticatorOAuth2) makeOAuthRequest(url string, payload map[string]string) (response map[string]any, err error) {
-	// Convert payload to form data
-	formData := strings.Builder{}
-	first := true
-	for key, value := range payload {
-		if !first {
-			formData.WriteString("&")
-		}
-		formData.WriteString(key)
-		formData.WriteString("=")
-		formData.WriteString(strings.ReplaceAll(value, " ", "%20"))
-		first = false
-	}
-
-	// Create HTTP request
-	a.conn.Context.Debug("oauth POST request to %s", url)
-	a.conn.Context.Trace("oauth POST request payload: %s", g.Marshal(payload))
-	a.conn.Context.Trace("oauth POST request form data: %s", formData.String())
-	req, err := http.NewRequestWithContext(a.conn.Context.Ctx, "POST", url, strings.NewReader(formData.String()))
-	if err != nil {
-		return nil, g.Error(err, "failed to create OAuth2 request")
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	// Make the request
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, g.Error(err, "failed to execute OAuth2 request")
-	}
-
-	a.conn.Context.Debug("oauth POST response status code: %d", resp.StatusCode)
-
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, g.Error(err, "failed to read OAuth2 response body")
-	}
-
-	a.conn.Context.Trace("oauth POST response body: %s", string(body))
-
-	// Check for HTTP errors
-	if resp.StatusCode >= 400 {
-		return nil, g.Error("OAuth2 request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse JSON response
-	var result map[string]any
-	if err := g.JSONUnmarshal(body, &result); err != nil {
-		return nil, g.Error(err, "failed to parse OAuth2 response JSON")
-	}
-
-	// Check for OAuth2 error in response
-	if errorCode, ok := result["error"].(string); ok {
-		errorDesc := ""
-		if desc, ok := result["error_description"].(string); ok {
-			errorDesc = ": " + desc
-		}
-		return nil, g.Error("OAuth2 error: %s%s", errorCode, errorDesc)
-	}
-
-	return result, nil
-}
-
-// openBrowser opens the default browser to the given URL
+// openBrowser opens the default browser to the given URL (unchanged from original).
 func (a *AuthenticatorOAuth2) openBrowser(url string) error {
 	var cmd string
 	var args []string
@@ -760,11 +446,43 @@ func (a *AuthenticatorOAuth2) openBrowser(url string) error {
 		args = []string{"/c", "start"}
 	case "darwin":
 		cmd = "open"
-	default: // "linux", "freebsd", "openbsd", "netbsd"
+	default: // linux, etc.
 		cmd = "xdg-open"
 	}
 	args = append(args, url)
 	return exec.Command(cmd, args...).Start()
+}
+
+// TokenFile returns a secure path for token storage.
+func (a *AuthenticatorOAuth2) TokenFile() string {
+	dir := filepath.Join(env.HomeDir, "api", "tokens")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		g.Warn("could not create folder %s => %s", dir, err.Error())
+	}
+	name := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(a.conn.Spec.Name)), " ", "_")
+	return filepath.Join(dir, name+".json")
+}
+
+// SaveToken securely saves the token (use keyring for better security).
+func (a *AuthenticatorOAuth2) SaveToken(tok *oauth2.Token) error {
+	data, err := json.Marshal(tok)
+	if err != nil {
+		return err
+	}
+	// For keyring: keyring.Set("sling", a.conn.Name, string(data))
+	filePath := a.TokenFile()
+	g.Debug("saving token in %s", filePath)
+	return os.WriteFile(filePath, data, 0600)
+}
+
+// LoadToken loads the stored token.
+func (a *AuthenticatorOAuth2) LoadToken() (*oauth2.Token, error) {
+	data, err := os.ReadFile(a.TokenFile())
+	if err != nil {
+		return nil, err
+	}
+	tok := &oauth2.Token{}
+	return tok, json.Unmarshal(data, tok)
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////
