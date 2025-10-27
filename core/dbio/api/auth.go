@@ -3,7 +3,11 @@ package api
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -13,7 +17,7 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
-	"strconv"
+	"sort"
 	"strings"
 	"time"
 
@@ -837,9 +841,11 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 // AuthenticatorHMAC
 type AuthenticatorHMAC struct {
 	AuthenticatorBase
-	AccessKey string `yaml:"access_key" json:"access_key"`
-	Secret    string `yaml:"secret" json:"secret"`
-	Algorithm string `yaml:"algorithm" json:"algorithm"` // e.g., "sha256" (only sha256 supported for now)
+	Algorithm     string            `yaml:"algorithm" json:"algorithm"`
+	Secret        string            `yaml:"secret" json:"secret"`
+	SigningString string            `yaml:"signing_string" json:"signing_string"`
+	ReqHeaders    map[string]string `yaml:"request_headers" json:"request_headers"`
+	NonceLength   int               `yaml:"nonce_length" json:"nonce_length,omitempty"` // Length of random nonce bytes (0 to disable)
 }
 
 func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
@@ -850,39 +856,132 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 	state.Sign = func(ctx context.Context, req *http.Request, bodyBytes []byte) error {
 		var signature string
 
-		// Generate timestamp (milliseconds since Unix epoch)
-		timestamp := time.Now().UTC().UnixMilli()
+		// Fixed timestamp for consistency
+		now := time.Now().UTC()
+		timestampSec := now.Unix()
+		timestampMs := now.UnixMilli()
+
+		// Path includes query params
+		path := req.URL.RequestURI()
+
+		// Compute body hashes for various algorithms
+		bodyHashMd5 := md5.Sum(bodyBytes)
+		bodyHashMd5Hex := hex.EncodeToString(bodyHashMd5[:])
+
+		bodyHashSha1 := sha1.Sum(bodyBytes)
+		bodyHashSha1Hex := hex.EncodeToString(bodyHashSha1[:])
+
+		bodyHashSha256 := sha256.Sum256(bodyBytes)
+		bodyHashSha256Hex := hex.EncodeToString(bodyHashSha256[:])
+
+		bodyHashSha512 := sha512.Sum512(bodyBytes)
+		bodyHashSha512Hex := hex.EncodeToString(bodyHashSha512[:])
+
+		// Raw body
+		bodyRaw := string(bodyBytes)
+
+		// Canonical query string (sorted)
+		queryValues, _ := url.ParseQuery(req.URL.RawQuery)
+		var queryParts []string
+		var queryKeys []string
+		for k := range queryValues {
+			queryKeys = append(queryKeys, k)
+		}
+		sort.Strings(queryKeys)
+		for _, k := range queryKeys {
+			vals := queryValues[k]
+			sort.Strings(vals)
+			for _, v := range vals {
+				queryParts = append(queryParts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+			}
+		}
+		canonicalQuery := strings.Join(queryParts, "&")
+
+		// Canonical headers (lowercase keys, sorted, joined values)
+		var headersStr strings.Builder
+		headerKeys := make([]string, 0, len(req.Header))
+		for k := range req.Header {
+			headerKeys = append(headerKeys, strings.ToLower(k))
+		}
+		sort.Strings(headerKeys)
+		for _, k := range headerKeys {
+			origK := req.Header[k] // Note: keys are case-insensitive, but we use lowered for sorting
+			headersStr.WriteString(k + ":" + strings.Join(origK, ",") + "\n")
+		}
+		canonicalHeaders := headersStr.String()
+
+		// Date formats
+		dateIso := now.Format(time.RFC3339)
+		dateRfc1123 := now.Format(time.RFC1123)
+
+		// Generate nonce if enabled
+		var nonce string
+		if a.NonceLength > 0 {
+			nonceBytes := make([]byte, a.NonceLength)
+			if _, err := rand.Read(nonceBytes); err != nil {
+				return g.Error(err, "could not generate nonce")
+			}
+			nonce = hex.EncodeToString(nonceBytes)
+		}
+
+		templateMap := g.M(
+			"http_method", req.Method,
+			"http_path", path,
+			"http_body_md5", bodyHashMd5Hex,
+			"http_body_sha1", bodyHashSha1Hex,
+			"http_body_sha256", bodyHashSha256Hex,
+			"http_body_sha512", bodyHashSha512Hex,
+			"http_body_raw", bodyRaw,
+			"http_query", canonicalQuery,
+			"http_headers", canonicalHeaders,
+			"unix_time", cast.ToString(timestampSec),
+			"unix_time_ms", cast.ToString(timestampMs),
+			"date_iso", dateIso,
+			"date_rfc1123", dateRfc1123,
+			"nonce", nonce,
+		)
 
 		switch a.Algorithm {
 		case "sha256":
-			// Compute body hash
-			bodyHash := sha256.Sum256(bodyBytes)
-			bodyHashHex := hex.EncodeToString(bodyHash[:])
+			stringToSign := g.Rm(a.SigningString, templateMap)
 
-			// Path includes query params
-			path := req.URL.RequestURI()
-
-			// String to sign: method + path + bodyHash + accessKey + timestamp
-			stringToSign := fmt.Sprintf("%s %s %s %s %d",
-				req.Method,
-				path,
-				bodyHashHex,
-				a.AccessKey,
-				timestamp,
-			)
+			stringToSign, err = a.conn.renderString(stringToSign)
+			if err != nil {
+				return g.Error(err, "could not render string for HMAC signer")
+			}
 
 			// Compute HMAC-SHA256
 			mac := hmac.New(sha256.New, []byte(a.Secret))
 			mac.Write([]byte(stringToSign))
 			signature = hex.EncodeToString(mac.Sum(nil))
+		case "sha512":
+			stringToSign := g.Rm(a.SigningString, templateMap)
+
+			stringToSign, err = a.conn.renderString(stringToSign)
+			if err != nil {
+				return g.Error(err, "could not render string for HMAC signer")
+			}
+
+			// Compute HMAC-SHA512
+			mac := hmac.New(sha512.New, []byte(a.Secret))
+			mac.Write([]byte(stringToSign))
+			signature = hex.EncodeToString(mac.Sum(nil))
 		default:
-			return g.Error("invalid algorithm: %s", a.Algorithm)
+			return g.Error("invalid algorithm (%s), only 'sha256' and 'sha512' are supported", a.Algorithm)
 		}
 
+		// set signature
+		templateMap["signature"] = signature
+
 		// Add headers
-		req.Header.Set("Authorization", a.AccessKey)
-		req.Header.Set("X-Authorization-Timestamp", strconv.FormatInt(timestamp, 10))
-		req.Header.Set("X-Authorization-Signature-SHA256", signature)
+		for key, value := range a.ReqHeaders {
+			value = g.Rm(value, templateMap)
+			value, err = a.conn.renderString(value)
+			if err != nil {
+				return g.Error(err, "could not render string for HMAC header: %s", key)
+			}
+			req.Header.Set(key, value)
+		}
 
 		return nil
 	}

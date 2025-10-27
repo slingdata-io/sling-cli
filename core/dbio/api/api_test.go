@@ -2,12 +2,21 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1572,6 +1581,495 @@ endpoints:
 	customHeader, exists := endpoint.State["custom_header"]
 	assert.True(t, exists, "custom_header should be extracted from header")
 	assert.Equal(t, "test-value", cast.ToString(customHeader), "custom_header should be test-value")
+}
+
+func TestHMACAuthentication(t *testing.T) {
+	tests := []struct {
+		name           string
+		algorithm      string
+		signingString  string
+		requestHeaders map[string]string
+		secret         string
+		nonceLength    int
+		expectError    bool
+		validateFunc   func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool
+		description    string
+	}{
+		{
+			name:          "hmac_sha256_basic",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_path}{http_body_sha256}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+			},
+			secret:      "test_secret_key",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Recreate the signature calculation
+				bodyHash := sha256.Sum256(bodyBytes)
+				bodyHashHex := hex.EncodeToString(bodyHash[:])
+				stringToSign := req.Method + req.URL.RequestURI() + bodyHashHex
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "Basic HMAC-SHA256 signing with method, path, and body hash",
+		},
+		{
+			name:          "hmac_sha512_basic",
+			algorithm:     "sha512",
+			signingString: "{http_method}{http_path}{unix_time}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+				"X-Timestamp": "{unix_time}",
+			},
+			secret:      "test_secret_512",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Get timestamp from header
+				timestamp := req.Header.Get("X-Timestamp")
+				if timestamp == "" {
+					return false
+				}
+
+				stringToSign := req.Method + req.URL.RequestURI() + timestamp
+
+				mac := hmac.New(sha512.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC-SHA512 signing with timestamp",
+		},
+		{
+			name:          "hmac_with_nonce",
+			algorithm:     "sha256",
+			signingString: "{http_method}{nonce}{unix_time}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+				"X-Nonce":     "{nonce}",
+				"X-Timestamp": "{unix_time}",
+			},
+			secret:      "nonce_secret",
+			nonceLength: 16,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				nonce := req.Header.Get("X-Nonce")
+				timestamp := req.Header.Get("X-Timestamp")
+
+				if nonce == "" || timestamp == "" {
+					return false
+				}
+
+				// Nonce should be hex-encoded and correct length
+				if len(nonce) != 32 { // 16 bytes = 32 hex chars
+					t.Logf("Invalid nonce length: %d (expected 32)", len(nonce))
+					return false
+				}
+
+				stringToSign := req.Method + nonce + timestamp
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with nonce generation",
+		},
+		{
+			name:          "hmac_with_query_params",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_query}{unix_time}",
+			requestHeaders: map[string]string{
+				"Authorization": "HMAC {signature}",
+				"X-Timestamp":   "{unix_time}",
+			},
+			secret:      "query_secret",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				timestamp := req.Header.Get("X-Timestamp")
+				if timestamp == "" {
+					return false
+				}
+
+				// Canonical query string (sorted)
+				queryValues, _ := url.ParseQuery(req.URL.RawQuery)
+				var queryParts []string
+				var queryKeys []string
+				for k := range queryValues {
+					queryKeys = append(queryKeys, k)
+				}
+				sort.Strings(queryKeys)
+				for _, k := range queryKeys {
+					vals := queryValues[k]
+					sort.Strings(vals)
+					for _, v := range vals {
+						queryParts = append(queryParts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+					}
+				}
+				canonicalQuery := strings.Join(queryParts, "&")
+
+				stringToSign := req.Method + canonicalQuery + timestamp
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				authHeader := req.Header.Get("Authorization")
+				if !strings.HasPrefix(authHeader, "HMAC ") {
+					return false
+				}
+				actualSig := strings.TrimPrefix(authHeader, "HMAC ")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with canonical query parameters",
+		},
+		{
+			name:          "hmac_with_body_hashes",
+			algorithm:     "sha256",
+			signingString: "{http_body_md5}{http_body_sha1}{http_body_sha256}",
+			requestHeaders: map[string]string{
+				"X-Signature":   "{signature}",
+				"X-Body-MD5":    "{http_body_md5}",
+				"X-Body-SHA1":   "{http_body_sha1}",
+				"X-Body-SHA256": "{http_body_sha256}",
+			},
+			secret:      "hash_secret",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				md5Hash := md5.Sum(bodyBytes)
+				md5Hex := hex.EncodeToString(md5Hash[:])
+
+				sha1Hash := sha1.Sum(bodyBytes)
+				sha1Hex := hex.EncodeToString(sha1Hash[:])
+
+				sha256Hash := sha256.Sum256(bodyBytes)
+				sha256Hex := hex.EncodeToString(sha256Hash[:])
+
+				// Verify body hash headers
+				if req.Header.Get("X-Body-MD5") != md5Hex {
+					t.Logf("MD5 mismatch")
+					return false
+				}
+				if req.Header.Get("X-Body-SHA1") != sha1Hex {
+					t.Logf("SHA1 mismatch")
+					return false
+				}
+				if req.Header.Get("X-Body-SHA256") != sha256Hex {
+					t.Logf("SHA256 mismatch")
+					return false
+				}
+
+				stringToSign := md5Hex + sha1Hex + sha256Hex
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with multiple body hash algorithms",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track what was received
+			var capturedRequest *http.Request
+
+			// Create mock HTTP server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedRequest = r
+
+				// Read body
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+
+				// Validate signature if validator provided
+				if tt.validateFunc != nil {
+					if !tt.validateFunc(t, r, body, tt.secret) {
+						w.WriteHeader(http.StatusUnauthorized)
+						json.NewEncoder(w).Encode(map[string]any{
+							"error": "Invalid signature",
+						})
+						return
+					}
+				}
+
+				// Success
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "result": "success"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			// Create spec with HMAC authentication
+			spec := Spec{
+				Name: "test_hmac_api",
+				Authentication: Authentication{
+					"type":            AuthTypeHMAC,
+					"algorithm":       tt.algorithm,
+					"signing_string":  tt.signingString,
+					"request_headers": tt.requestHeaders,
+					"secret":          tt.secret,
+					"nonce_length":    tt.nonceLength,
+				},
+				EndpointMap: EndpointMap{
+					"test_endpoint": Endpoint{
+						Name: "test_endpoint",
+						Request: Request{
+							URL:    server.URL + "/api/test?foo=bar&baz=qux",
+							Method: MethodPost,
+							Payload: map[string]any{
+								"test": "data",
+							},
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data"},
+						},
+					},
+				},
+			}
+
+			// Convert to proper spec
+			specBody, err := yaml.Marshal(spec)
+			if !assert.NoError(t, err) {
+				return
+			}
+			spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Create API connection
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			assert.NoError(t, err)
+
+			// Authenticate (this sets up the Sign function)
+			err = ac.Authenticate()
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.True(t, ac.State.Auth.Authenticated)
+
+			// Make request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+			assert.NoError(t, err, tt.description)
+			assert.NotNil(t, df)
+
+			// Collect data
+			data, err := df.Collect()
+			assert.NoError(t, err, "Should collect data successfully")
+			assert.Equal(t, 1, len(data.Rows), "Should receive 1 record")
+
+			// Verify the request was captured
+			assert.NotNil(t, capturedRequest, "Request should have been captured")
+
+			// Verify signature header was set
+			for headerName := range tt.requestHeaders {
+				headerValue := capturedRequest.Header.Get(headerName)
+				assert.NotEmpty(t, headerValue, "Header %s should be set", headerName)
+			}
+		})
+	}
+}
+
+func TestHMACAuthenticationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		algorithm   string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "invalid_algorithm",
+			algorithm:   "sha1",
+			expectError: true,
+			errorMsg:    "only 'sha256' and 'sha512' are supported",
+		},
+		{
+			name:        "empty_algorithm_defaults_to_sha256",
+			algorithm:   "",
+			expectError: false,
+			errorMsg:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			spec := Spec{
+				Name: "test_hmac_api",
+				Authentication: Authentication{
+					"type":           AuthTypeHMAC,
+					"algorithm":      tt.algorithm,
+					"signing_string": "{http_method}",
+					"request_headers": map[string]string{
+						"X-Signature": "{signature}",
+					},
+					"secret": "test_secret",
+				},
+				EndpointMap: EndpointMap{
+					"test_endpoint": Endpoint{
+						Name: "test_endpoint",
+						Request: Request{
+							URL:    server.URL + "/test",
+							Method: MethodGet,
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data"},
+						},
+					},
+				},
+			}
+
+			// Convert to proper spec
+			specBody, err := yaml.Marshal(spec)
+			if !assert.NoError(t, err) {
+				return
+			}
+			spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			assert.NoError(t, err)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err) // Authenticate itself doesn't error, the Sign function does
+
+			// Make request - this is where the error should occur for invalid algorithm
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectError {
+				// Error should occur during request or collection
+				if err == nil {
+					_, err = df.Collect()
+				}
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+				if df != nil {
+					data, err := df.Collect()
+					assert.NoError(t, err)
+					assert.NotNil(t, data)
+				}
+			}
+		})
+	}
+}
+
+func TestHMACAuthenticationTemplating(t *testing.T) {
+	// Test that HMAC secret and signing_string support templating
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Just verify that signature header exists (signature validation is done in main tests)
+		actualSig := r.Header.Get("X-Signature")
+		timestamp := r.Header.Get("X-Timestamp")
+
+		if actualSig == "" || timestamp == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{"error": "Missing signature or timestamp"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"success": true}},
+		})
+	}))
+	defer server.Close()
+
+	spec := Spec{
+		Name: "test_hmac_templating",
+		Authentication: Authentication{
+			"type":           AuthTypeHMAC,
+			"algorithm":      "sha256",
+			"signing_string": "{http_method}{unix_time}",
+			"request_headers": map[string]string{
+				"X-Signature": "{signature}",
+				"X-Timestamp": "{unix_time}",
+			},
+			"secret": "{secrets.api_secret}", // Templated secret
+		},
+		EndpointMap: EndpointMap{
+			"test_endpoint": Endpoint{
+				Name: "test_endpoint",
+				Request: Request{
+					URL:    server.URL + "/test",
+					Method: MethodGet,
+				},
+				Response: Response{
+					Records: Records{JmesPath: "data"},
+				},
+			},
+		},
+	}
+
+	// Convert to proper spec
+	specBody, err := yaml.Marshal(spec)
+	assert.NoError(t, err)
+	spec, err = LoadSpec(string(specBody))
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state": map[string]any{},
+		"secrets": map[string]any{
+			"api_secret": "my_api_secret_123",
+		},
+	})
+	assert.NoError(t, err)
+
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
 }
 
 func TestBasicAuthentication(t *testing.T) {
