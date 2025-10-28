@@ -333,7 +333,7 @@ type Endpoint struct {
 	conn         *APIConnection
 	client       http.Client
 	eval         *goval.Evaluator
-	backoffTimer *time.Timer
+	backoffUntil time.Time // backoff expiration time - all goroutines can check this
 	totalRecords int
 	totalReqs    int
 	contextMap   StateMap // extra contextual properties
@@ -770,37 +770,34 @@ func (iter *Iteration) renderString(val any, req ...*SingleRequest) (newVal stri
 		extra = req[0].Map()
 	}
 
+	// Copy iteration state (lock iter.context separately)
 	iter.context.Lock()
-	// Create a copy of the state to avoid concurrent access issues
 	stateCopy := make(map[string]any)
 	for k, v := range iter.state {
 		stateCopy[k] = v
 	}
+	iter.context.Unlock()
 
-	// Create a copy of syncMap to avoid concurrent access issues
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
 	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	iter.endpoint.context.Lock()
 	if iter.endpoint.syncMap != nil {
-		iter.endpoint.context.Lock()
 		for k, v := range iter.endpoint.syncMap {
 			syncCopy[k] = v
 		}
-		iter.endpoint.context.Unlock()
 	}
-
-	// Create a copy of configMap to avoid concurrent access issues
-	contextCopy := make(map[string]any)
 	if iter.endpoint.contextMap != nil {
-		iter.endpoint.context.Lock()
 		for k, v := range iter.endpoint.contextMap {
 			contextCopy[k] = v
 		}
-		iter.endpoint.context.Unlock()
 	}
+	iter.endpoint.context.Unlock()
 
 	extra["state"] = stateCopy
 	extra["sync"] = syncCopy
 	extra["context"] = contextCopy
-	iter.context.Unlock()
 
 	return iter.endpoint.conn.renderString(val, extra)
 }
@@ -811,37 +808,34 @@ func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, er
 		extra = req[0].Map()
 	}
 
+	// Copy iteration state (lock iter.context separately)
 	iter.context.Lock()
-	// Create a copy of the state to avoid concurrent access issues
 	stateCopy := make(map[string]any)
 	for k, v := range iter.state {
 		stateCopy[k] = v
 	}
+	iter.context.Unlock()
 
-	// Create a copy of syncMap to avoid concurrent access issues
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
 	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	iter.endpoint.context.Lock()
 	if iter.endpoint.syncMap != nil {
-		iter.endpoint.context.Lock()
 		for k, v := range iter.endpoint.syncMap {
 			syncCopy[k] = v
 		}
-		iter.endpoint.context.Unlock()
 	}
-
-	// Create a copy of configMap to avoid concurrent access issues
-	contextCopy := make(map[string]any)
 	if iter.endpoint.contextMap != nil {
-		iter.endpoint.context.Lock()
 		for k, v := range iter.endpoint.contextMap {
 			contextCopy[k] = v
 		}
-		iter.endpoint.context.Unlock()
 	}
+	iter.endpoint.context.Unlock()
 
 	extra["state"] = stateCopy
 	extra["sync"] = syncCopy
 	extra["context"] = contextCopy
-	iter.context.Unlock()
 
 	return iter.endpoint.conn.renderAny(val, extra)
 }
