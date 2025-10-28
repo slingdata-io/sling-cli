@@ -1034,6 +1034,9 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 					// keeps the expression untouched
 					value = key
 				} else {
+					if errChk := e.Check(expr); errChk != nil {
+						return "", g.Error(errChk, "invalid expression: %s", expr)
+					}
 					return "", g.Error(err, "could not render expression: %s", expr)
 				}
 			}
