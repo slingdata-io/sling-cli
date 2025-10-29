@@ -200,10 +200,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
-	// check for update, and print note
-	go checkUpdate()
-	defer printUpdateAvailable()
-
 runReplication:
 	defer connection.CloseAll()
 
@@ -214,6 +210,10 @@ runReplication:
 		} else {
 			g.Info(env.CyanString(text))
 		}
+
+		// check for update, and print note
+		go checkUpdate()
+		defer printUpdateAvailable()
 	}
 
 	if pipelineCfgPath != "" {
