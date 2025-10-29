@@ -404,8 +404,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// Transfer data from temp to final table
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
-	} else if err := transferData(cfg, tgtConn, tableTmp, targetTable); err != nil {
-		err = g.Error(err, "error transferring data from temp to final table")
+	} else if err := mergeData(cfg, tgtConn, tableTmp, targetTable); err != nil {
+		err = g.Error(err, "error merging data from temp to final table")
 		return 0, err
 	}
 
@@ -885,7 +885,7 @@ func prepareFinal(
 	return nil
 }
 
-func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
+func mergeData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
 	if cfg.Mode == FullRefreshMode && g.In(tgtConn.GetType(), dbio.TypeDbIceberg) {
 		// Use swap, we cannot yet insert from one table to another
 		return transferBySwappingTables(tgtConn, tableTmp, targetTable)
