@@ -385,7 +385,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	defer tgtConn.Rollback() // rollback in case of error
 
 	// pre-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePreMerge); err != nil {
 		err = g.Error(err, "error executing pre-merge hooks")
 		return 0, err
 	}
@@ -410,7 +410,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// post-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePostMerge); err != nil {
 		err = g.Error(err, "error executing post-merge hooks")
 		return 0, err
 	}
@@ -498,7 +498,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	defer tgtConn.Rollback()
 
 	// pre-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePreMerge); err != nil {
 		err = g.Error(err, "error executing pre-merge hooks")
 		return 0, err
 	}
@@ -565,7 +565,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// post-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePostMerge); err != nil {
 		err = g.Error(err, "error executing post-merge hooks")
 		return 0, err
 	}
