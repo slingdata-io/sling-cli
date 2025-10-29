@@ -214,6 +214,7 @@ func checkUpdate() {
 			"exec_id", os.Getenv("SLING_EXEC_ID"),
 			"channel", lo.Ternary(isDevChannel, "dev", "stable"),
 			"version_cli", core.VersionSlash(),
+			"package", getSlingPackage(),
 		))),
 		nil,
 		5,
