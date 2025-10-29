@@ -836,6 +836,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
+			} else {
+				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_tmp")
+				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}
 	}
@@ -937,6 +940,14 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		m["object_full_name"] = table.FDQN()
+
+		// set temp table
+		if tOpts := cfg.Target.Options; tOpts != nil {
+			tableTmp, _ := database.ParseTableName(tOpts.TableTmp, cfg.TgtConn.Type)
+			m["object_temp_schema"] = tableTmp.Schema
+			m["object_temp_table"] = tableTmp.Name
+			m["object_temp_full_name"] = tableTmp.FDQN()
+		}
 
 		// legacy
 		m["target_table"] = m["object_table"]

@@ -152,6 +152,10 @@ streams:
   public.run_state_test:
     object: public.run_state_test2
     hooks:
+      pre_merge:
+        - type: query
+          connection: '{target.name}'
+          query: alter table {object.temp_full_name} replica identity full
       post:
         - type: log
           message: |
