@@ -213,7 +213,7 @@ func checkUpdate() {
 		strings.NewReader(g.Marshal(g.M(
 			"exec_id", os.Getenv("SLING_EXEC_ID"),
 			"channel", lo.Ternary(isDevChannel, "dev", "stable"),
-			"version_cli", core.Version,
+			"version_cli", core.VersionSlash(),
 		))),
 		nil,
 		5,
@@ -223,13 +223,7 @@ func checkUpdate() {
 	if time.Now().Second()%4 != 0 && len(respMap) > 0 {
 		updateVersion = respMap["version_latest"]
 		if isDevChannel {
-			// convert to slash version for comparison
-			parts := strings.Split(strings.TrimSuffix(core.Version, ")"), " (")
-			if len(parts) != 2 {
-				return
-			}
-			slashVersion := parts[0] + "/" + parts[1]
-			if slashVersion != updateVersion && updateVersion != "" {
+			if core.VersionSlash() != updateVersion && updateVersion != "" {
 				updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
 			}
 		} else {
