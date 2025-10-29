@@ -685,6 +685,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 
 	// Set DDL for temp table
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
+	tableTmp.DDL = strings.ReplaceAll(tableTmp.DDL, targetTable.FullName(), tableTmp.FullName())
 	tableTmp.Raw = tableTmp.FullName()
 	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
 		return database.Table{}, g.Error(err, "could not set keys for "+tableTmp.FullName())
