@@ -223,7 +223,13 @@ func checkUpdate() {
 	if time.Now().Second()%4 != 0 && len(respMap) > 0 {
 		updateVersion = respMap["version_latest"]
 		if isDevChannel {
-			if core.Version != updateVersion && updateVersion != "" {
+			// convert to slash version for comparison
+			parts := strings.Split(strings.TrimSuffix(core.Version, ")"), " (")
+			if len(parts) != 2 {
+				return
+			}
+			slashVersion := parts[0] + "/" + parts[1]
+			if slashVersion != updateVersion && updateVersion != "" {
 				updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
 			}
 		} else {
