@@ -10,7 +10,7 @@ on:
 
 jobs:
   trigger:
-    runs-on: [self-hosted, linux, vm]
+    runs-on: ubuntu-latest
     steps:
         
       - name: Trigger Dev Build on Specific Branch
