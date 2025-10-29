@@ -11,9 +11,14 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
-	"github.com/spf13/cast"
+)
+
+var (
+	// detect if running dev or stable channel
+	isDevChannel = strings.Contains(core.Version, "dev")
 )
 
 // getDownloadURL returns the appropriate download URL based on the channel (dev or stable)
@@ -47,12 +52,9 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	ok = true
 	env.TelMap["downloaded"] = false
 
-	// detect if running dev or stable channel
-	isDevChannel := strings.Contains(core.Version, "dev")
-
 	// get latest version number (skipped for dev channel)
 	if !isDevChannel {
-		checkUpdate(true)
+		checkUpdate()
 		if updateVersion == core.Version {
 			g.Info("Already up-to-date!")
 			return
@@ -192,13 +194,7 @@ func upgradeScoop() (err error) {
 	return nil
 }
 
-func checkUpdate(force bool) {
-	if strings.Contains(core.Version, "dev") {
-		return
-	} else if time.Now().Second()%4 != 0 && !force {
-		// a way to check/notify about a new version less frequently
-		return
-	}
+func checkUpdate() {
 
 	instruction := "Please run `sling update`"
 	switch getSlingPackage() {
@@ -212,17 +208,38 @@ func checkUpdate(force bool) {
 		instruction = "Please run `docker pull slingdata/sling` and recreate your container."
 	}
 
-	const url = "https://api.github.com/repos/slingdata-io/sling-cli/releases"
-	_, respB, _ := net.ClientDo("GET", url, nil, nil)
-	arr := []map[string]any{}
-	g.JSONUnmarshal(respB, &arr)
-	if len(arr) > 0 && arr[0] != nil {
-		updateVersion = strings.TrimPrefix(cast.ToString(arr[0]["tag_name"]), "v")
-		isNew, err := g.CompareVersions(core.Version, updateVersion)
-		if err != nil {
-			g.DebugLow("Error comparing versions: %s", err.Error())
-		} else if isNew {
-			updateMessage = g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction)
+	_, respB, _ := net.ClientDo(
+		"POST", "https://version.slingdata.io",
+		strings.NewReader(g.Marshal(g.M(
+			"exec_id", os.Getenv("SLING_EXEC_ID"),
+			"channel", lo.Ternary(isDevChannel, "dev", "stable"),
+			"version_cli", core.Version,
+		))),
+		nil,
+		5,
+	)
+	respMap := map[string]string{}
+	g.JSONUnmarshal(respB, &respMap)
+	if time.Now().Second()%4 != 0 && len(respMap) > 0 {
+		updateVersion = respMap["version_latest"]
+		if isDevChannel {
+			if core.Version != updateVersion && updateVersion != "" {
+				updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
+			}
+		} else {
+			isNew, err := g.CompareVersions(core.Version, updateVersion)
+			if err != nil {
+				g.Debug("Error comparing versions: %s", err.Error())
+			} else if isNew {
+				updateMessage = env.GreenString(g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction))
+			}
+		}
+		if message := respMap["media"]; message != "" {
+			if updateMessage != "" {
+				updateMessage = updateMessage + "\n" + env.BlueString(message)
+			} else {
+				updateMessage = env.BlueString(message)
+			}
 		}
 	}
 }

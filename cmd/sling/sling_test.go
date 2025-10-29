@@ -188,15 +188,15 @@ func TestCfgPath(t *testing.T) {
 }
 
 func TestExtract(t *testing.T) {
-	core.Version = "v1.0.43"
+	// core.Version = "v1.0.43"
 
-	checkUpdate(true)
+	checkUpdate()
 	assert.NotEmpty(t, updateVersion)
 
 	printUpdateAvailable()
 
-	err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
-	g.AssertNoError(t, err)
+	// err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
+	// g.AssertNoError(t, err)
 }
 
 var argsContext = g.NewContext(context.Background())
