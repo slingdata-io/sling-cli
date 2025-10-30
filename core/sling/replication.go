@@ -452,7 +452,7 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (err error) {
 	case HookStageEnd:
 		hooksRaw = rd.Hooks.End
 	default:
-		return g.Error("invalid default hook stage: %s", stage)
+		return g.Error("invalid replication level hook stage: %s", stage)
 	}
 
 	if hooksRaw == nil {
@@ -1127,11 +1127,27 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		rd.Tasks = append(rd.Tasks, &cfg)
 	}
 
-	if err = rd.ParseReplicationHook(HookStageStart); err != nil {
-		return g.Error(err, "could not parse start hooks")
-	}
-	if err = rd.ParseReplicationHook(HookStageEnd); err != nil {
-		return g.Error(err, "could not parse end hooks")
+	// parse and validate replication level hooks
+	{
+		if err = rd.ParseReplicationHook(HookStageStart); err != nil {
+			return g.Error(err, "could not parse start hooks")
+		}
+		if err = rd.ParseReplicationHook(HookStageEnd); err != nil {
+			return g.Error(err, "could not parse end hooks")
+		}
+
+		// validate for pre/post/pre_merge/post_merge at replication level
+		stageHooks := map[string][]any{
+			"pre":        rd.Hooks.Pre,
+			"post":       rd.Hooks.Post,
+			"pre_merge":  rd.Hooks.PreMerge,
+			"post_merge": rd.Hooks.PostMerge,
+		}
+		for stage, hooks := range stageHooks {
+			if len(hooks) > 0 {
+				return g.Error(`cannot declare a "%s" hook at replication level, only accepts start/end. Try putting it as a defaults.hooks.%s`, stage, stage)
+			}
+		}
 	}
 
 	rd.Compiled = true
