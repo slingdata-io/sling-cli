@@ -735,7 +735,17 @@ func setTimeout(values ...string) (deadline time.Time) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT = %s mins reached!", timeout) })
+		time.AfterFunc(duration, func() {
+			if cast.ToBool(os.Getenv("SLING_TIMEOUT_STACK")) {
+				// Print all goroutine stacks before panicking
+				buf := make([]byte, 1<<20) // 1MB buffer
+				stackLen := runtime.Stack(buf, true)
+				fmt.Fprintf(os.Stderr, "%s\n", buf[:stackLen])
+				panic(g.F("SLING_TIMEOUT = %s mins reached!", timeout))
+			} else {
+				g.Warn("SLING_TIMEOUT = %s mins reached!", timeout)
+			}
+		})
 
 		// set deadline for status setting later
 		g.Debug("setting timeout for %s minutes", timeout)
