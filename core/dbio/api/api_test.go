@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -680,6 +681,8 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		ExpectedRecords   []map[string]any `yaml:"expected_records"`
 		ExpectedState     map[string]any   `yaml:"expected_state"`
 		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
+		ExpectedStore     map[string]any   `yaml:"expected_store"`
+		ExpectedEnv       map[string]any   `yaml:"expected_env"`
 	}
 
 	// Read the YAML file
@@ -1001,6 +1004,37 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 							assert.Equal(t, expectedValue, actualValue)
 						}
 					}
+				}
+			}
+
+			// Check store was updated correctly
+			if len(tc.ExpectedStore) > 0 {
+				actualStore := ac.GetReplicationStore()
+
+				for key, expectedValue := range tc.ExpectedStore {
+					actualValue, exists := actualStore[key]
+					assert.True(t, exists, "Expected store key %s to exist", key)
+
+					// Handle numeric comparisons
+					switch expected := expectedValue.(type) {
+					case int:
+						assert.Equal(t, float64(expected), cast.ToFloat64(actualValue))
+					case float64:
+						assert.Equal(t, expected, cast.ToFloat64(actualValue))
+					default:
+						assert.Equal(t, expectedValue, actualValue)
+					}
+				}
+			}
+
+			// Check environment variables were set correctly
+			if len(tc.ExpectedEnv) > 0 {
+				for key, expectedValue := range tc.ExpectedEnv {
+					actualValue := os.Getenv(key)
+					assert.NotEmpty(t, actualValue, "Expected env variable %s to be set", key)
+
+					// All env vars are strings
+					assert.Equal(t, cast.ToString(expectedValue), actualValue)
 				}
 			}
 		})

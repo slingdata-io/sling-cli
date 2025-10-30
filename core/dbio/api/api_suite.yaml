@@ -560,3 +560,52 @@
 #       active: "true"
 #   expected_state: {}
 #   expected_next_state: {}
+
+- id: 10
+  name: test_processor_outputs_env_and_store
+  mock_response:
+    data:
+      - id: 1
+        name: Item 1
+        value: 100
+      - id: 2
+        name: Item 2
+        value: 200
+      - id: 3
+        name: Item 3
+        value: 150
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            # Test context.store output - store first name
+            - expression: record.name
+              aggregation: first
+              output: context.store.first_name
+
+            # Test env output - store last name as environment variable
+            - expression: record.name
+              aggregation: last
+              output: env.TEST_LAST_NAME
+          records:
+            jmespath: data
+  expected_records:
+    - id: "1"
+      name: Item 1
+      value: "100"
+    - id: "2"
+      name: Item 2
+      value: "200"
+    - id: "3"
+      name: Item 3
+      value: "150"
+  expected_state: {}
+  expected_store:
+    first_name: Item 1
+  expected_env:
+    TEST_LAST_NAME: Item 3
