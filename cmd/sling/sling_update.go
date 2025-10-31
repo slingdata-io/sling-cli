@@ -221,7 +221,7 @@ func checkUpdate() {
 	)
 	respMap := map[string]string{}
 	g.JSONUnmarshal(respB, &respMap)
-	if time.Now().Second()%4 != 0 && len(respMap) > 0 {
+	if time.Now().Second()%3 == 0 && len(respMap) > 0 {
 		updateVersion = respMap["version_latest"]
 		if isDevChannel {
 			if core.VersionSlash() != updateVersion && updateVersion != "" {
