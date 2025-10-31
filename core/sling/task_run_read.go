@@ -400,6 +400,7 @@ func (t *TaskExecution) ReadFromApi(cfg *Config, srcConn *api.APIConnection) (df
 		Limit:       cfg.Source.Limit(),
 		Metadata:    t.setGetMetadata(),
 		Mode:        strings.ToLower(string(cfg.Mode)),
+		Range:       g.PtrVal(t.Config.Source.Options.Range),
 		DsConfigMap: t.getSourceOptionsMap(),
 	}
 	df, err = srcConn.ReadDataflow(cfg.StreamName, sCfg)

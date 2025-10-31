@@ -76,7 +76,7 @@
     pagination:
       id: cursor_xyz789
       limit: 50
-      hasMore: true
+      hasMore: false
     items:
       - id: 1
         status: shipped
@@ -91,6 +91,9 @@
     endpoints:
       test_endpoint:
         name: test_endpoint
+        request:
+          parameters:
+            cursor: "{state.page_cursor}"
         response:
           processors:
             - expression: response.json.pagination.id
@@ -102,7 +105,7 @@
           records:
             jmespath: items
         pagination:
-          stop_condition: "length(response.json.items) == 0"
+          stop_condition: "response.json.pagination.hasMore == false"
           next_state:
             page_cursor: "{state.cursor}"
             id: "{response.json.pagination.id}"
@@ -144,6 +147,9 @@
         state:
           base_url: https://api.example.com
           version: v2
+        request:
+          parameters:
+            cursor: "{state.cursor}"
         response:
           processors:
             - expression: response.json.meta.next_cursor
@@ -162,7 +168,7 @@
           records:
             jmespath: results
         pagination:
-          stop_condition: "is_null(response.json.meta.next_cursor)"
+          stop_condition: response.json.meta.next_cursor == "next_page_123"
           next_state:
             cursor: "{state.next_cursor}"
             limit: "{state.page_size}"
@@ -209,6 +215,9 @@
           default_limit: 50
           max_limit: 100
           base_time: "2025-01-10T00:00:00Z"
+        request:
+          parameters:
+            token: "{state.token}"
         response:
           processors:
             - expression: response.json.pagination.next_token
@@ -223,7 +232,7 @@
           records:
             jmespath: data
         pagination:
-          stop_condition: "!state.has_more || is_null(state.token)"
+          stop_condition: '!state.has_more || is_null(state.token) || response.json.pagination.next_token == "token_456"'
           next_state:
             # Use coalesce to handle null per_page
             limit: "{ coalesce(response.json.pagination.per_page, state.default_limit) }"
@@ -551,3 +560,52 @@
 #       active: "true"
 #   expected_state: {}
 #   expected_next_state: {}
+
+- id: 10
+  name: test_processor_outputs_env_and_store
+  mock_response:
+    data:
+      - id: 1
+        name: Item 1
+        value: 100
+      - id: 2
+        name: Item 2
+        value: 200
+      - id: 3
+        name: Item 3
+        value: 150
+  spec:
+    name: test_api
+    authentication:
+      type: none
+    endpoints:
+      test_endpoint:
+        name: test_endpoint
+        response:
+          processors:
+            # Test context.store output - store first name
+            - expression: record.name
+              aggregation: first
+              output: context.store.first_name
+
+            # Test env output - store last name as environment variable
+            - expression: record.name
+              aggregation: last
+              output: env.TEST_LAST_NAME
+          records:
+            jmespath: data
+  expected_records:
+    - id: "1"
+      name: Item 1
+      value: "100"
+    - id: "2"
+      name: Item 2
+      value: "200"
+    - id: "3"
+      name: Item 3
+      value: "150"
+  expected_state: {}
+  expected_store:
+    first_name: Item 1
+  expected_env:
+    TEST_LAST_NAME: Item 3

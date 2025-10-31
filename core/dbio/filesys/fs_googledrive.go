@@ -186,6 +186,26 @@ func (fs *GoogleDriveFileSysClient) Buckets() (paths []string, err error) {
 	return
 }
 
+// queryList runs a list query with retries
+func (fs *GoogleDriveFileSysClient) queryList(query string, fields googleapi.Field) (result *drive.FileList, err error) {
+
+	attempt := 0
+
+retry:
+	attempt++
+
+	result, err = fs.client.Files.List().Q(query).Fields(fields).IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+	if err != nil {
+		if strings.Contains(err.Error(), "Error 500") && attempt < 5 {
+			time.Sleep(2 * time.Second)
+			goto retry
+		}
+		return nil, g.Error(err, "Could not query: "+query)
+	}
+
+	return result, nil
+}
+
 // getFileID gets the file ID from a path
 func (fs *GoogleDriveFileSysClient) getFileID(path string) (fileID string, err error) {
 	// If a specific file ID is set, return it directly (for single file access)
@@ -224,7 +244,7 @@ func (fs *GoogleDriveFileSysClient) getFileID(path string) (fileID string, err e
 
 		// Search for the part in the current parent
 		query := fmt.Sprintf("name='%s' and '%s' in parents and trashed=false", part, parentID)
-		result, err := fs.client.Files.List().Q(query).Fields("files(id, name, mimeType)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+		result, err := fs.queryList(query, "files(id, name, mimeType)")
 		if err != nil {
 			return "", g.Error(err, "Could not search for file: "+part)
 		}
@@ -271,7 +291,7 @@ func (fs *GoogleDriveFileSysClient) Write(uri string, reader io.Reader) (bw int6
 
 	// Check if file already exists
 	query := fmt.Sprintf("name='%s' and '%s' in parents and trashed=false", name, parentID)
-	result, err := fs.client.Files.List().Q(query).Fields("files(id)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+	result, err := fs.queryList(query, "files(id)")
 	if err != nil {
 		return 0, g.Error(err, "Could not check if file exists")
 	}
@@ -749,7 +769,7 @@ func (fs *GoogleDriveFileSysClient) getOrCreateFolder(path string) (folderID str
 
 		// Check if folder exists
 		query := fmt.Sprintf("name='%s' and '%s' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false", part, parentID)
-		result, err := fs.client.Files.List().Q(query).Fields("files(id)").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).Do()
+		result, err := fs.queryList(query, "files(id)")
 		if err != nil {
 			return "", g.Error(err, "Could not search for folder: "+part)
 		}

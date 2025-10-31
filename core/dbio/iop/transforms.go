@@ -719,10 +719,11 @@ func (t transformsNS) ReplaceNonPrintable(val string) string {
 }
 
 type Evaluator struct {
-	Eval         *goval.Evaluator
-	State        map[string]any
-	NoComputeKey string
-	VarPrefixes  []string
+	Eval            *goval.Evaluator
+	State           map[string]any
+	NoComputeKey    string
+	VarPrefixes     []string
+	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
 
 	bracketRegex *regexp.Regexp
 }
@@ -811,6 +812,42 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 
 }
 
+func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []string) map[string]any {
+	if stateMap == nil {
+		stateMap = g.M()
+	}
+
+	for _, varToCheck := range varsToCheck {
+		varToCheck = strings.TrimSpace(varToCheck)
+		parts := strings.Split(varToCheck, ".")
+		if len(parts) != 2 {
+			// continue
+		}
+		section := parts[0]
+		key := parts[1]
+		if g.In(section, e.VarPrefixes...) {
+			_, ok := stateMap[section]
+			if !ok {
+				stateMap[section] = g.M()
+			}
+
+			nested, err := cast.ToStringMapE(stateMap[section])
+			if err != nil {
+				g.Warn("could not convert to map to fill missing key for %s: %#v", section, stateMap[section])
+				nested = g.M()
+			} else if nested == nil {
+				nested = g.M()
+			}
+			if _, ok := nested[key]; !ok {
+				nested[key] = nil
+			}
+			stateMap[section] = nested // set back
+		}
+	}
+
+	return stateMap
+}
+
 func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal string, err error) {
 	output, err := e.RenderAny(val, extras...)
 	if err != nil {
@@ -862,7 +899,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 	output = input
 
 	noCompute := false // especially in SQL queries
-	stateMap := g.M()
+	stateMap := g.M("null", nil)
 	err = copier.CopyWithOption(&stateMap, &e.State, copier.Option{DeepCopy: true})
 	if err != nil {
 		return nil, g.Error(err, "could not deep copy for evaluation")
@@ -908,26 +945,8 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		}
 
 		// ensure vars exist. if it doesn't, set at nil
-		for _, varToCheck := range varsToCheck {
-			varToCheck = strings.TrimSpace(varToCheck)
-			parts := strings.Split(varToCheck, ".")
-			if len(parts) != 2 {
-				// continue
-			}
-			section := parts[0]
-			key := parts[1]
-			if g.In(section, e.VarPrefixes...) {
-				_, ok := stateMap[section]
-				if !ok {
-					stateMap[section] = g.M()
-				}
-
-				nested := cast.ToStringMap(stateMap[section])
-				if _, ok := nested[key]; !ok {
-					nested[key] = nil
-				}
-				stateMap[section] = nested // set back
-			}
+		if !e.KeepMissingExpr {
+			stateMap = e.FillMissingKeys(stateMap, varsToCheck)
 		}
 
 		// Check for operators that indicate evaluation/computation is needed
@@ -1002,15 +1021,22 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		var jpValue any
 		jpValue, err = jmespath.Search(expr, stateMap)
 
+		key := "{" + expr + "}"
 		// If jmespath failed or if we detected evaluation operators/functions, use goval
-		if callsFuncOrEvals || err != nil {
+		if callsFuncOrEvals || err != nil || e.KeepMissingExpr {
 			value, err = e.Eval.Evaluate(expr, stateMap, GlobalFunctionMap)
 			if err != nil {
 				// check if jmespath rendered
 				if jpValue != nil && validJmesPath {
 					value = jpValue
 					err = nil // use jmespath result
+				} else if e.KeepMissingExpr && strings.Contains(err.Error(), "no member") {
+					// keeps the expression untouched
+					value = key
 				} else {
+					if errChk := e.Check(expr); errChk != nil {
+						return "", g.Error(errChk, "invalid expression: %s", expr)
+					}
 					return "", g.Error(err, "could not render expression: %s", expr)
 				}
 			}
@@ -1018,7 +1044,6 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 			value = jpValue
 		}
 
-		key := "{" + expr + "}"
 		if strings.TrimSpace(inputStr) == key {
 			output = value
 		} else {

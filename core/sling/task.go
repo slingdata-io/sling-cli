@@ -610,6 +610,14 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
 		case contains("CSV table encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
+		case contains("it does not have a replica identity and publishes updates"):
+			helpString = `Since PG replication is turned on, you'll need to create a replica identity on the respective table for executing UPDATE/DELETE operations. You can use target_options.table_ddl to specify an extra statement to define the replication identity upon creation, such as:
+			
+				target_options:
+					table_ddl: |
+						create table {object.full_name} ({col_types});
+						alter table {object.full_name} replica identity full
+			`
 		}
 	}
 	return

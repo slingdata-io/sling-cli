@@ -151,6 +151,10 @@ hooks:
 streams:
   public.run_state_test:
     object: public.run_state_test2
+    target_options:
+      table_ddl: |
+        create table {object.full_name} ({col_types});
+        alter table {object.full_name} replica identity full
     hooks:
       post:
         - type: log

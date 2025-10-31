@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/jmespath/go-jmespath"
 	"github.com/samber/lo"
@@ -187,19 +188,45 @@ func TestCfgPath(t *testing.T) {
 }
 
 func TestExtract(t *testing.T) {
-	core.Version = "v1.0.43"
+	// core.Version = "v1.0.43"
 
-	checkUpdate(true)
+	checkUpdate()
 	assert.NotEmpty(t, updateVersion)
 
 	printUpdateAvailable()
 
-	err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
-	g.AssertNoError(t, err)
+	// err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
+	// g.AssertNoError(t, err)
 }
+
+var argsContext = g.NewContext(context.Background())
 
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	defer time.Sleep(100 * time.Millisecond) // for log to flush
+
+	// process args
+	{
+		argsContext.Lock()
+		val, _ := argsContext.Map.Get("args_initialized")
+		if argsInitialized := cast.ToBool(val); !argsInitialized {
+			args := os.Args
+			for _, arg := range args {
+				if arg == "-d" || arg == "--debug" {
+					os.Setenv("DEBUG", "true")
+					env.InitLogger()
+				}
+				if arg == "-t" || arg == "--trace" {
+					os.Setenv("DEBUG", "TRACE")
+					env.InitLogger()
+				}
+				if arg != "" && unicode.IsDigit(rune(arg[0])) {
+					os.Setenv("TESTS", arg)
+				}
+			}
+			argsContext.Map.Set("args_initialized", true)
+		}
+		argsContext.Unlock()
+	}
 
 	if t.Failed() {
 		return

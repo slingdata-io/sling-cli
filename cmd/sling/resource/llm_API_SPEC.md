@@ -92,6 +92,13 @@ authentication:
   # - Any auth mechanism with known expiration
   expires: 3600
 
+  # Automatically refresh OAuth2 tokens on expiry (optional, default: false)
+  # When true, Sling will automatically use the refresh token to get a new access token
+  # Only applicable for OAuth2 flows that provide refresh tokens (authorization_code, password)
+  # Requires a valid refresh_token to be available from initial authentication
+  # Works in conjunction with the 'expires' field
+  refresh_on_expire: true
+
 
 # Default settings applied to all endpoints
 defaults:
@@ -141,8 +148,27 @@ endpoints:
     depends_on: []
 
     # Stream-level overrides for replication configuration (optional)
-    # Used in special circumstances to further configure the corresponding 
-    # replication stream. Can set keys such as `mode`, `hooks`, etc.
+    # Used to customize the behavior of the replication stream for this specific endpoint
+    # These overrides are passed to the stream processor and can modify replication behavior
+    #
+    # Common override keys:
+    # - mode: Replication mode (e.g., "full-refresh", "incremental", "snapshot")
+    # - hooks: Custom hooks for pre/post processing
+    # - object: Target object/table name override
+    # - primary_key: Override primary key detection
+    # - update_key: Override update key for incremental loads
+    #
+    # Example use cases:
+    # - Force a specific endpoint to always use full-refresh mode
+    # - Set a custom table name for a specific endpoint
+    # - Apply endpoint-specific transformations via hooks
+    # - Override column mappings or data types
+    #
+    # Example:
+    # overrides:
+    #   mode: "full-refresh"
+    #   object: "custom_table_name"
+    #   primary_key: ["custom_id"]
     overrides: {}
 
     # Initial state variables for this endpoint (merged with defaults.state)
@@ -172,7 +198,7 @@ endpoints:
     # Execution:
     # - Runs ONCE before any pagination or iteration
     # - State changes are preserved for main request
-    # - Shares same endpoint context and state
+    # - Shares same endpoint state
     # - Can use same Call structure as sequence authentication
     setup:
       # Call 1: Create async export job
@@ -624,7 +650,18 @@ authentication:
   client_secret: "{secrets.oauth_client_secret}" # Optional for some providers
   refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
-  
+
+  # OAuth2 - Automatic Token Refresh on Expiry
+  # For flows that provide refresh tokens (authorization_code, password)
+  type: "oauth2"
+  flow: "authorization_code"
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
+  authentication_url: "https://api.example.com/oauth/token"
+  expires: 3600  # Token expires in 1 hour
+  refresh_on_expire: true  # Automatically refresh when expired
+  refresh_token: "{secrets.refresh_token}"  # Initial refresh token
+
   # AWS Signature v4 Authentication
   type: "aws-sigv4"
   aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
@@ -633,7 +670,18 @@ authentication:
   aws_secret_access_key: "{secrets.aws_secret_access_key}"
   aws_session_token: "{secrets.aws_session_token}"  # Optional for temporary credentials
   aws_profile: "{secrets.aws_profile}"  # Optional, use AWS profile instead of keys
-  
+
+  # HMAC Authentication (e.g., Kraken, Binance, custom APIs)
+  type: "hmac"
+  algorithm: "sha256"  # sha256 or sha512
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+  request_headers:
+    X-Signature: "{signature}"
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"
+  nonce_length: 16  # Optional: generates random nonce (in bytes, hex-encoded)
+
   # Custom Authentication Sequence
   type: "sequence"
   sequence:
@@ -665,6 +713,106 @@ authentication:
 
 **Refresh Token Flow**: For refreshing expired access tokens using a previously obtained refresh token.
 
+### HMAC Authentication Details
+
+HMAC (Hash-based Message Authentication Code) is used by many APIs for request signing, particularly cryptocurrency exchanges (Kraken, Binance) and custom enterprise APIs.
+
+**How It Works**:
+1. A string is constructed from request components (method, path, timestamp, body hash, etc.)
+2. The string is signed using HMAC-SHA256 or HMAC-SHA512 with a secret key
+3. The signature and related headers are added to each request
+
+**Configuration**:
+
+```yaml
+authentication:
+  type: "hmac"
+  algorithm: "sha256"  # Required: "sha256" or "sha512"
+  secret: "{secrets.api_secret}"  # Required: Secret key for signing
+
+  # Required: Template string to sign
+  # Available variables: http_method, http_path, http_query, http_headers,
+  # http_body_raw, http_body_md5, http_body_sha1, http_body_sha256, http_body_sha512,
+  # unix_time, unix_time_ms, date_iso, date_rfc1123, nonce
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+
+  # Required: Headers to add to each request
+  # {signature} is the computed HMAC signature (hex-encoded)
+  # All template variables from signing_string are available
+  request_headers:
+    X-Signature: "{signature}"
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"  # Optional: Many APIs also need an API key
+
+  # Optional: Length of random nonce in bytes (generates hex string of 2x length)
+  # If set, generates a random nonce for each request
+  # Available as {nonce} in signing_string and request_headers
+  nonce_length: 16  # Generates 32-character hex string
+```
+
+**Available Template Variables**:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `http_method` | HTTP method | "GET", "POST" |
+| `http_path` | Request path with query params | "/api/users?limit=10" |
+| `http_query` | Canonical query string (sorted) | "foo=bar&limit=10" |
+| `http_headers` | Canonical headers (sorted) | "content-type:application/json\n" |
+| `http_body_raw` | Raw request body | '{"key":"value"}' |
+| `http_body_md5` | MD5 hash of body (hex) | "5d41402abc4b..." |
+| `http_body_sha1` | SHA1 hash of body (hex) | "aaf4c61ddcc5..." |
+| `http_body_sha256` | SHA256 hash of body (hex) | "2c26b46b68ff..." |
+| `http_body_sha512` | SHA512 hash of body (hex) | "e718483d0ce7..." |
+| `unix_time` | Unix timestamp (seconds) | "1698765432" |
+| `unix_time_ms` | Unix timestamp (milliseconds) | "1698765432123" |
+| `date_iso` | ISO 8601 date | "2023-10-31T15:30:32Z" |
+| `date_rfc1123` | RFC 1123 date | "Tue, 31 Oct 2023 15:30:32 GMT" |
+| `nonce` | Random hex string | "a3f2c8d9..." (if nonce_length set) |
+| `signature` | Computed HMAC signature | "e4d909c290d0..." (only in request_headers) |
+
+**Common Patterns**:
+
+```yaml
+# Kraken-style: Method + Path + Nonce + Body Hash
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{http_path}{nonce}{http_body_sha256}"
+  request_headers:
+    API-Key: "{secrets.api_key}"
+    API-Sign: "{signature}"
+    API-Nonce: "{nonce}"
+  nonce_length: 16
+
+# Simple: Method + Timestamp + Body
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{unix_time}{http_body_raw}"
+  request_headers:
+    Authorization: "HMAC {signature}"
+    X-Timestamp: "{unix_time}"
+
+# AWS-style: Query String + Headers
+authentication:
+  type: "hmac"
+  algorithm: "sha256"
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}\n{http_path}\n{http_query}\n{http_headers}"
+  request_headers:
+    Authorization: "SignatureMethod=HmacSHA256, Signature={signature}"
+    X-Amz-Date: "{date_iso}"
+```
+
+**Important Notes**:
+- All template variables in `signing_string` and `request_headers` support state/env/secrets templating
+- The `{signature}` variable is only available in `request_headers` (computed after signing)
+- Canonical query string (`http_query`) is sorted alphabetically by key
+- Canonical headers (`http_headers`) are lowercase, sorted, with joined values
+- Nonce is generated fresh for each request when `nonce_length` is set
+
 ## Variable Scopes and Expressions
 
 Sling uses `{...}` syntax for embedding expressions and accessing variables within YAML strings. Expressions are evaluated using the `goval` library with custom functions.
@@ -674,6 +822,7 @@ Available variable scopes:
 - `secrets`: Sensitive credentials passed to Sling (e.g., `{secrets.api_key}`).
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
 - `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `{coalesce(sync.var, state.var, default_value)}`.
+- `context`: **Runtime values** passed from replication configuration (read-only). Includes `context.mode` (replication mode), `context.store` (state storage location), `context.limit` (max records), `context.range_start`, `context.range_end` (for backfill ranges from `source_options.range`). See the Context Variables section below for details.
 - `auth`: Authentication data after successful authentication (e.g., `{auth.token}` for OAuth2 access tokens, refresh tokens stored here).
 - `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts` (number of retry attempts).
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
@@ -856,7 +1005,7 @@ Endpoints define specific API operations. They inherit settings from `defaults` 
 
 ```yaml
 request:
-  # Request full URL, can includ state variables
+  # Request full URL, can include state variables
   url: "{state.base_url}/users/{state.user_id}?active=true"
   # Method: GET, POST, PUT, PATCH, DELETE, etc.
   method: "POST"
@@ -1381,6 +1530,91 @@ response:
 - Test incremental loading by running endpoint multiple times
 - Check that sync values are actually being persisted between runs
 - Use `coalesce(sync.key, default_value)` to handle first run
+
+## Context Variables
+
+Context variables are **read-only runtime values** passed from the replication configuration to the API spec. They allow endpoints to support both backfill and incremental modes with a single configuration.
+
+**Available Context Variables**:
+
+| Variable | Type | Description | Set From |
+|----------|------|-------------|----------|
+| `context.mode` | string | Replication mode | Replication config `mode` field |
+| `context.store` | string | State storage location | Environment variable `SLING_STATE` |
+| `context.limit` | integer | Max records to fetch | Replication config `source_options.limit` |
+| `context.range_start` | string | Backfill range start | Replication config `source_options.range` (first value) |
+| `context.range_end` | string | Backfill range end | Replication config `source_options.range` (second value) |
+
+**Common Pattern: Backfill with Incremental Fallback**
+
+This pattern supports three scenarios: backfill (with range), incremental (with sync state), and first run (with default).
+
+```yaml
+endpoints:
+  events:
+    sync: [last_date]  # Persist for incremental runs
+
+    iterate:
+      # Priority: context.range_start → sync.last_date → default
+      over: >
+        range(
+          coalesce(context.range_start, sync.last_date, date_format(date_add(now(), -7, "day"), "%Y-%m-%d")),
+          coalesce(context.range_end, date_format(now(), "%Y-%m-%d")),
+          "1d"
+        )
+      into: "state.current_date"
+
+    request:
+      url: "{state.base_url}/events/daily/{state.current_date}"
+
+    response:
+      records:
+        jmespath: "events[]"
+        primary_key: ["event_id"]
+      processors:
+        - expression: "state.current_date"
+          output: "state.last_date"
+          aggregation: "maximum"
+```
+
+**Replication Configs**:
+
+```yaml
+# Backfill mode: Process specific date range
+source_options:
+  range: '2024-01-01,2024-01-31'  # Sets context.range_start and context.range_end
+
+# Incremental mode: Use sync state (no range specified)
+# Uses sync.last_date from previous run
+
+# Testing mode: Limit records
+source_options:
+  limit: 100  # Sets context.limit
+```
+
+**Other Uses**:
+
+```yaml
+# Mode-specific behavior
+state:
+  batch_size: '{if(context.mode == "backfill", 1000, 100)}'
+
+# Limit for testing
+response:
+  records:
+    limit: '{coalesce(context.limit, null)}'
+
+# Numeric ID ranges
+iterate:
+  over: >
+    range(
+      coalesce(context.range_start, sync.last_id, "1"),
+      coalesce(context.range_end, "999999"),
+      "1000"
+    )
+```
+
+**Important**: Always use `coalesce()` with context variables to provide fallback values. Context variables are read-only and cannot be written to.
 
 ## Dynamic Endpoints
 

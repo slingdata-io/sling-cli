@@ -113,7 +113,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
 
-			records := data.Records()
+			records := data.Records(false)
 			if len(records) > 0 {
 				record := records[0]
 				g.Debug("   columns = %s", g.Marshal(lo.Keys(record)))

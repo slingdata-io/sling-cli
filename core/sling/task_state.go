@@ -160,6 +160,10 @@ type ObjectState struct {
 	Table    string `json:"table,omitempty"`
 	Name     string `json:"name,omitempty"`
 	FullName string `json:"full_name,omitempty"`
+
+	TempSchema   string `json:"temp_schema,omitempty"`
+	TempTable    string `json:"temp_table,omitempty"`
+	TempFullName string `json:"temp_full_name,omitempty"`
 }
 
 func StateSet(t *TaskExecution) {
@@ -209,6 +213,9 @@ func StateSet(t *TaskExecution) {
 		run.Object.FullName = cast.ToString(fMap["object_full_name"])
 		run.Object.Schema = cast.ToString(fMap["object_schema"])
 		run.Object.Table = cast.ToString(fMap["object_table"])
+		run.Object.TempSchema = cast.ToString(fMap["object_temp_schema"])
+		run.Object.TempTable = cast.ToString(fMap["object_temp_table"])
+		run.Object.TempFullName = cast.ToString(fMap["object_temp_full_name"])
 
 		state.Runs[runID] = run
 
