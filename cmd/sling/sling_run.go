@@ -740,7 +740,7 @@ func setTimeout(values ...string) (deadline time.Time) {
 				// Print all goroutine stacks before panicking
 				buf := make([]byte, 1<<20) // 1MB buffer
 				stackLen := runtime.Stack(buf, true)
-				fmt.Fprintf(os.Stderr, "%s\n", buf[:stackLen])
+				env.Println(string(buf[:stackLen]))
 				panic(g.F("SLING_TIMEOUT = %s mins reached!", timeout))
 			} else {
 				g.Warn("SLING_TIMEOUT = %s mins reached!", timeout)
