@@ -256,11 +256,12 @@ func (pse *PipelineStepExecution) Execute() (err error) {
 
 	// Update current step in pipeline
 	if !g.In(pse.Step.Type(), "log") {
-		pse.Pipeline.Context.Lock() // for map access
-		pse.Map = pse.Step.PayloadMap()
-		pse.Pipeline.Context.Unlock() // for map access
 		g.Debug(`executing step "%s" (type: %s)`, pse.Step.ID(), pse.Step.Type())
 	}
+
+	pse.Pipeline.Context.Lock() // for map access
+	pse.Map = pse.Step.PayloadMap()
+	pse.Pipeline.Context.Unlock() // for map access
 
 	defer StoreSet(pse.Pipeline)
 	StoreSet(pse.Pipeline)
