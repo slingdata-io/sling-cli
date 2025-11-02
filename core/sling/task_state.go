@@ -15,6 +15,7 @@ type RuntimeState interface {
 	SetStoreData(key string, value any, del bool)
 	Marshall() string
 	TaskExecution() *TaskExecution
+	StepExecution() *PipelineStepExecution
 }
 
 // ReplicationState is for runtime state
@@ -56,6 +57,10 @@ func (rs *ReplicationState) TaskExecution() *TaskExecution {
 	if rs.Run != nil && rs.Run.Task != nil {
 		return rs.Run.Task
 	}
+	return nil
+}
+
+func (rs *ReplicationState) StepExecution() *PipelineStepExecution {
 	return nil
 }
 
@@ -127,6 +132,7 @@ type RunState struct {
 	Error      *string                 `json:"error"`
 	Config     ReplicationStreamConfig `json:"config"`
 	Task       *TaskExecution          `json:"-"`
+	Step       *PipelineStepExecution  `json:"-"`
 }
 
 type ConnState struct {
@@ -166,7 +172,7 @@ type ObjectState struct {
 	TempFullName string `json:"temp_full_name,omitempty"`
 }
 
-func StateSet(t *TaskExecution) {
+func (t *TaskExecution) StateSet() {
 	StoreSet(t)
 
 	if t.Replication != nil && t.Config != nil && t.Context != nil {

@@ -24,6 +24,8 @@ func init() {
 			StoreSetReplicationExec(v)
 		case *sling.Pipeline:
 			StoreSetPipelineExec(v)
+		case *sling.PipelineStepExecution:
+			StoreSetPipelineExec(v.Pipeline)
 		}
 		return nil
 	}

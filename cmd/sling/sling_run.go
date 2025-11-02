@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 
+	"github.com/samber/lo"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
@@ -199,6 +200,14 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
+
+	// set run mode
+	if os.Getenv("SLING_RUN_MODE") == "" {
+		os.Setenv(
+			"SLING_RUN_MODE",
+			lo.Ternary(pipelineCfgPath != "", "pipeline", "replication"),
+		)
+	}
 
 runReplication:
 	defer connection.CloseAll()
@@ -394,14 +403,14 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	}
 
 	// set log sink if not pipeline mode
-	if plMode, _ := ctx.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
+	if sling.IsReplicationRunMode() {
 		env.LogSink = func(ll *g.LogLine) {
 			ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
 			task.AppendOutput(ll)
 		}
 	}
 
-	sling.StateSet(task) // set into store
+	task.StateSet() // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -412,7 +421,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = ctx
 
 	// set into store after
-	defer sling.StateSet(task)
+	defer task.StateSet()
 
 	// run task
 	setTM()
@@ -531,8 +540,8 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			cleanedForChunkLoad[cfg.Target.Object] = true
 		}
 
-		if plMode, _ := ctx.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
-			env.LogSink = nil // clear log sink if not pipeline mode
+		if sling.IsReplicationRunMode() {
+			env.LogSink = nil // clear log sink if replication mode
 		}
 
 		if cfg.ReplicationStream.Disabled {
@@ -601,7 +610,6 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	timeoutR := pipeline.Env["SLING_TIMEOUT"]
 	timeoutE := os.Getenv("SLING_TIMEOUT")
 
-	pipeline.Context = ctx
 	setTimeout(cast.ToString(timeoutR), timeoutE)
 
 	pipelineMap := g.M()
@@ -628,6 +636,7 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	// set function here due to scoping
 	sling.HookRunReplication = runReplication
 
+	pipeline.Context = ctx
 	err = pipeline.Execute()
 
 	return

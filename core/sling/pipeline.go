@@ -111,11 +111,12 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 
 	for i, stepRaw := range pipeline.Steps {
 		opts := ParseOptions{
-			index: i,
-			state: state,
-			stage: HookStage(g.F("step-%02d", i+1)),
-			kind:  HookKindStep,
-			md5:   g.MD5(g.Marshal(stepRaw)),
+			index:   i,
+			state:   state,
+			stage:   HookStage(g.F("step-%02d", i+1)),
+			kind:    HookKindStep,
+			md5:     g.MD5(g.Marshal(stepRaw)),
+			context: pipeline.Context,
 		}
 		step, err := ParseHook(stepRaw, opts)
 		if err != nil {
@@ -139,11 +140,6 @@ func (pl *Pipeline) GetSteps() Hooks {
 
 // Execute executes the pipeline steps using PipelineStepExecution
 func (pl *Pipeline) Execute() (err error) {
-	// set context as pipeline mode
-	if pl.Context != nil {
-		pl.Context.Map.Set("pipeline_mode", true)
-	}
-
 	// Build step ID map for goto functionality
 	idStepMap := map[string]int{}
 	for i, step := range pl.steps {
@@ -218,6 +214,10 @@ type PipelineStepExecution struct {
 	Step        Hook            `json:"-"` // The specific step to execute
 }
 
+func (pse *PipelineStepExecution) Context() *g.Context {
+	return pse.Pipeline.Context
+}
+
 // Execute executes a single pipeline step
 func (pse *PipelineStepExecution) Execute() (err error) {
 	if pse.Pipeline == nil {
@@ -232,47 +232,45 @@ func (pse *PipelineStepExecution) Execute() (err error) {
 	pse.Status = ExecStatusRunning
 
 	// Start ticker to update state every 5 seconds
-	if StoreSet != nil {
-		ticker5s := time.NewTicker(5 * time.Second)
-		go func() {
-			defer ticker5s.Stop()
-			for range ticker5s.C {
-				if pse.Status != ExecStatusRunning {
-					return // is done
-				}
-				if pse.Pipeline.Context != nil {
-					select {
-					case <-pse.Pipeline.Context.Ctx.Done():
-						return
-					case <-ticker5s.C:
-						StoreSet(pse.Pipeline)
-					}
-				} else {
-					StoreSet(pse.Pipeline)
-				}
+	ticker5s := time.NewTicker(5 * time.Second)
+	go func() {
+		defer ticker5s.Stop()
+		for range ticker5s.C {
+			if pse.Status != ExecStatusRunning {
+				return // is done
 			}
-		}()
-	}
+			if pse.Context() != nil {
+				select {
+				case <-pse.Context().Ctx.Done():
+					return
+				case <-ticker5s.C:
+					pse.StateSet()
+				}
+			} else {
+				pse.StateSet()
+			}
+		}
+	}()
 
 	// Update current step in pipeline
 	if !g.In(pse.Step.Type(), "log") {
 		g.Debug(`executing step "%s" (type: %s)`, pse.Step.ID(), pse.Step.Type())
 	}
 
-	pse.Pipeline.Context.Lock() // for map access
+	pse.Context().Lock() // for map access
 	pse.Map = pse.Step.PayloadMap()
-	pse.Pipeline.Context.Unlock() // for map access
+	pse.Context().Unlock() // for map access
 
-	defer StoreSet(pse.Pipeline)
-	StoreSet(pse.Pipeline)
+	defer pse.StateSet()
+	pse.StateSet()
 
 	// Execute the step
 	stepErr := pse.Step.Execute()
 	_, err = pse.Step.ExecuteOnDone(stepErr)
 
-	pse.Pipeline.Context.Lock() // for map access
+	pse.Context().Lock() // for map access
 	pse.Map = pse.Step.PayloadMap()
-	pse.Pipeline.Context.Unlock() // for map access
+	pse.Context().Unlock() // for map access
 
 	// Set completion status and end time
 	pse.EndTime = g.Ptr(time.Now())
@@ -288,6 +286,33 @@ func (pse *PipelineStepExecution) Execute() (err error) {
 	return nil
 }
 
+func (pse *PipelineStepExecution) StateSet() {
+	StoreSet(pse)
+
+	if pse != nil && pse.Pipeline != nil {
+		pse.Context().Lock()
+		defer pse.Context().Unlock()
+
+		state, err := pse.Pipeline.RuntimeState()
+		if err != nil {
+			return
+		}
+
+		if state.Run == nil {
+			state.Run = &RunState{
+				Step: pse,
+			}
+		} else if state.Run.Step == nil {
+			state.Run.Step = pse
+		}
+
+		state.Run.ID = pse.Step.ID()
+		state.Run.StartTime = pse.StartTime
+		state.Run.EndTime = pse.EndTime
+		state.Run.Status = pse.Status
+	}
+}
+
 // RuntimeState returns the state for use
 func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 	if pl.state == nil {
@@ -296,6 +321,16 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 			Store: map[string]any{},
 			Env:   pl.Env,
 			Runs:  map[string]*RunState{},
+		}
+	}
+
+	if pl.CurrentStep != nil {
+		pl.state.Run.Step = pl.CurrentStep
+	}
+
+	if pl.state.Run == nil {
+		pl.state.Run = &RunState{
+			Step: pl.CurrentStep,
 		}
 	}
 
@@ -334,5 +369,12 @@ func (ps *PipelineState) Marshall() string {
 }
 
 func (ps *PipelineState) TaskExecution() *TaskExecution {
+	return nil
+}
+
+func (ps *PipelineState) StepExecution() *PipelineStepExecution {
+	if ps.Run != nil && ps.Run.Step != nil {
+		return ps.Run.Step
+	}
 	return nil
 }

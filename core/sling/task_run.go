@@ -88,7 +88,7 @@ func (t *TaskExecution) Execute() error {
 				case <-t.Context.Ctx.Done():
 					return
 				case <-ticker5s.C:
-					StateSet(t)
+					t.StateSet()
 				}
 			}
 		}()
@@ -116,7 +116,7 @@ func (t *TaskExecution) Execute() error {
 		}
 
 		// update into store
-		StateSet(t)
+		t.StateSet()
 
 		g.Debug("Sling version: %s (%s %s)", core.Version, runtime.GOOS, runtime.GOARCH)
 		g.DebugLow("type is %s", t.Type)
@@ -219,7 +219,7 @@ func (t *TaskExecution) Execute() error {
 	defer t.Context.Map.Remove("new_status") // clean up
 
 	// update into store
-	StateSet(t)
+	t.StateSet()
 
 	// post-hooks
 	if hookErr := t.ExecuteHooks(HookStagePost); hookErr != nil {

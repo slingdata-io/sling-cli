@@ -519,7 +519,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 		df:           iop.NewDataflow(),
 		Replication:  rd,
 	}
-	StateSet(te)
+	te.StateSet()
 
 	// recover from panic and set state
 	defer func() {
@@ -527,10 +527,10 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 			err = g.Error("panic occurred! %#v\n%s", r, string(debug.Stack()))
 		}
 		te.EndTime = g.Ptr(time.Now())
-		StateSet(te)
+		te.StateSet()
 	}()
 
-	if plMode, _ := rd.Context.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
+	if IsReplicationRunMode() {
 		env.LogSink = func(ll *g.LogLine) {
 			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
 			te.AppendOutput(ll)

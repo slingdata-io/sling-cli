@@ -40,11 +40,12 @@ type HookMap struct {
 }
 
 type ParseOptions struct {
-	stage HookStage
-	kind  HookKind
-	index int
-	state RuntimeState
-	md5   string
+	stage   HookStage
+	kind    HookKind
+	index   int
+	state   RuntimeState
+	md5     string
+	context *g.Context
 }
 
 type HookStage string
