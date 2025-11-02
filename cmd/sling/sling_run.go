@@ -393,10 +393,12 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.Err = g.Error(replication.FailErr)
 	}
 
-	// set log sink
-	env.LogSink = func(ll *g.LogLine) {
-		ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
-		task.AppendOutput(ll)
+	// set log sink if not pipeline mode
+	if plMode, _ := ctx.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
+		env.LogSink = func(ll *g.LogLine) {
+			ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
+			task.AppendOutput(ll)
+		}
 	}
 
 	sling.StateSet(task) // set into store
@@ -529,7 +531,9 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			cleanedForChunkLoad[cfg.Target.Object] = true
 		}
 
-		env.LogSink = nil // clear log sink
+		if plMode, _ := ctx.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
+			env.LogSink = nil // clear log sink if not pipeline mode
+		}
 
 		if cfg.ReplicationStream.Disabled {
 			println()
@@ -597,6 +601,7 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	timeoutR := pipeline.Env["SLING_TIMEOUT"]
 	timeoutE := os.Getenv("SLING_TIMEOUT")
 
+	pipeline.Context = ctx
 	setTimeout(cast.ToString(timeoutR), timeoutE)
 
 	pipelineMap := g.M()
@@ -604,7 +609,7 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	// track usage
 	defer func() {
 		steps := []map[string]any{}
-		for _, s := range pipeline.Steps {
+		for _, s := range pipeline.GetSteps() {
 			steps = append(steps, s.PayloadMap())
 		}
 

@@ -530,9 +530,11 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 		StateSet(te)
 	}()
 
-	env.LogSink = func(ll *g.LogLine) {
-		ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
-		te.AppendOutput(ll)
+	if plMode, _ := rd.Context.Map.Get("pipeline_mode"); !cast.ToBool(plMode) {
+		env.LogSink = func(ll *g.LogLine) {
+			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
+			te.AppendOutput(ll)
+		}
 	}
 
 	switch stage {
