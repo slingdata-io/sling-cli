@@ -137,6 +137,27 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 	return endpoints, nil
 }
 
+// compile all spec endpoints
+func (ac *APIConnection) CompileEndpoints() (compiledEndpoints Endpoints, err error) {
+	// render dynamic endpoint if needed
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints for compilation")
+	}
+
+	compiledEndpoints = Endpoints{}
+	for _, name := range ac.Spec.endpointsOrdered {
+		endpoint := ac.Spec.EndpointMap[name]
+		endpoint.conn = ac
+		if err = compileSpecEndpoint(&endpoint, ac.Spec); err != nil {
+			return compiledEndpoints, g.Error(err, "endpoint compilation failed")
+		}
+
+		compiledEndpoints = append(compiledEndpoints, endpoint)
+	}
+
+	return
+}
+
 type APIStreamConfig struct {
 	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
@@ -149,8 +170,9 @@ type APIStreamConfig struct {
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
-	if !ac.State.Auth.Authenticated {
-		return nil, g.Error("not authenticated")
+	// Ensure authentication before reading dataflow
+	if err := ac.EnsureAuthenticated(); err != nil {
+		return nil, g.Error(err, "could not authenticate")
 	}
 
 	// render dynamic endpoint if needed
