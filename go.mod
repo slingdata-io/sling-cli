@@ -41,6 +41,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.1
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
+	github.com/ibmdb/go_ibm_db v0.5.4
 	github.com/integrii/flaggy v1.5.2
 	github.com/itchyny/timefmt-go v0.1.6
 	github.com/jaswdr/faker v1.19.1
@@ -208,6 +209,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
+	github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20231201235250-de7065d80cb9 // indirect

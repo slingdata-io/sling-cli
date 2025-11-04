@@ -538,6 +538,10 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/hinshun/vt10x v0.0.0-20220119200601-820417d04eec h1:qv2VnGeEQHchGaZ/u7lxST/RaJw+cv273q79D81Xbog=
 github.com/hinshun/vt10x v0.0.0-20220119200601-820417d04eec/go.mod h1:Q48J4R4DvxnHolD5P8pOtXigYlRuPLGl6moFx3ulM68=
+github.com/ibmdb/go_ibm_db v0.5.4 h1:cveEOt1J2PoQivQdxIQB0f8ugDJYKaSmh7RUKAaJyAE=
+github.com/ibmdb/go_ibm_db v0.5.4/go.mod h1:BA12Alfe+h5BMGZGE+b0pqP4leILZkpoxe5qr/iMoHw=
+github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70 h1:muF5XqVkHnMdbMDXusPdKtuT8qWzefBgSuLH1JVHcC4=
+github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70/go.mod h1:NSpUK0x9IyEoM1EjTp2/S8ErxZfRHoA2DfwiYobFSkc=
 github.com/imdario/mergo v0.3.12/go.mod h1:jmQim1M+e3UYxmgPu/WyfjB3N3VflVyUjjjwH0dnCYA=
 github.com/imdario/mergo v0.3.16 h1:wwQJbIsHYGMUyLSPrEq1CT16AhnhNJQ51+4fdHUnCl4=
 github.com/imdario/mergo v0.3.16/go.mod h1:WBLT9ZmE3lPoWsEzCh9LPo3TiwVN+ZKEjmz+hD27ysY=

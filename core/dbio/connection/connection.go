@@ -528,6 +528,11 @@ func (c *Connection) setURL() (err error) {
 				setIfMissing("database", U.PopParam("database"))
 			case dbio.TypeDbOracle:
 				setIfMissing("sid", pathValue)
+			case dbio.TypeDbDB2:
+				setIfMissing("currentSchema", U.PopParam("currentSchema"))
+				setIfMissing("sslConnection", U.PopParam("sslConnection"))
+				setIfMissing("connectTimeout", U.PopParam("connectTimeout"))
+				setIfMissing("authenticationType", U.PopParam("authenticationType"))
 			}
 
 			// set database
@@ -725,6 +730,11 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["keyfile"]; ok {
 			template = template + "&credentialsFile={keyfile}"
 		}
+	case dbio.TypeDbDB2:
+		setIfMissing("username", c.Data["user"])
+		setIfMissing("password", "")
+		setIfMissing("port", c.Type.DefPort())
+		template = "db2://{username}:{password}@{host}:{port}/{database}"
 	case dbio.TypeDbSnowflake:
 		// setIfMissing("schema", "public")
 		// template = "snowflake://{username}:{password}@{host}.snowflakecomputing.com:443/{database}?schema={schema}&warehouse={warehouse}"

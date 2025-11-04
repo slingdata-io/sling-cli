@@ -296,6 +296,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &BigTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "clickhouse:") {
 		conn = &ClickhouseConn{URL: URL}
+	} else if strings.HasPrefix(URL, "db2:") {
+		conn = &DB2Conn{URL: URL}
 	} else if strings.HasPrefix(URL, "exasol:") {
 		conn = &ExasolConn{URL: URL}
 	} else if strings.HasPrefix(URL, "proton:") {
@@ -364,6 +366,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "mysql"
 	case dbio.TypeDbOracle:
 		driverName = "oracle"
+	case dbio.TypeDbDB2:
+		driverName = "go_ibm_db"
 	case dbio.TypeDbBigQuery:
 		driverName = "bigquery"
 	case dbio.TypeDbSnowflake:
