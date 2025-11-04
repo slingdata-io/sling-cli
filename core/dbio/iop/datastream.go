@@ -2384,6 +2384,270 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 	return readerChn
 }
 
+// NewGeojsonReaderChnl provides a channel of readers for GeoJSON format
+// Handles two scenarios:
+// 1. Single row with single JSON column (aggregated) - extracts JSON directly
+// 2. Multiple rows with geometry + properties - builds FeatureCollection
+func (ds *Datastream) NewGeojsonReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
+	readerChn = make(chan *io.PipeReader, 100)
+
+	// Scenario 1: Single row with single JSON column (aggregated GeoJSON)
+	if len(ds.Columns) == 1 && ds.Columns[0].Type.IsJSON() {
+		return ds.newGeojsonExtractReaderChnl(sc)
+	}
+
+	// Scenario 2: Multiple rows - build FeatureCollection from rows
+	// Look for geometry column (common names: geometry, geom, geojson)
+	geometryColIdx := ds.findGeometryColumn()
+	if geometryColIdx >= 0 {
+		return ds.newGeojsonFromRowsReaderChnl(sc, geometryColIdx)
+	}
+
+	// Fallback: use standard JSON writer (will wrap in array)
+	return ds.NewJsonReaderChnl(sc)
+}
+
+// findGeometryColumn finds the index of a geometry column by common naming patterns
+// Returns -1 if no geometry column found
+func (ds *Datastream) findGeometryColumn() int {
+	geometryNames := []string{"geometry", "geom", "geojson", "geo", "the_geom", "wkb_geometry", "shape"}
+	
+	// First pass: look for columns matching geometry name patterns
+	for i, col := range ds.Columns {
+		colNameLower := strings.ToLower(col.Name)
+		for _, geoName := range geometryNames {
+			if colNameLower == geoName || strings.HasSuffix(colNameLower, "_"+geoName) {
+				return i
+			}
+		}
+	}
+	
+	// Second pass: if no named geometry column found, check for JSON columns
+	// (might be ST_ASGEOJSON result in a column with a different name)
+	for i, col := range ds.Columns {
+		if col.Type.IsJSON() {
+			return i
+		}
+	}
+	
+	return -1
+}
+
+// newGeojsonExtractReaderChnl extracts JSON value from single column directly
+func (ds *Datastream) newGeojsonExtractReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
+	readerChn = make(chan *io.PipeReader, 100)
+
+	pipe := g.NewPipe()
+	readerChn <- pipe.Reader
+	rowCount := int64(0)
+
+	go func() {
+		defer close(readerChn)
+
+		for batch := range ds.BatchChan {
+			for row0 := range batch.Rows {
+				rowCount++
+				if rowCount > 1 {
+					// If multiple rows detected, we need to close current pipe and switch to array format
+					// But for GeoJSON single-column extraction, we typically expect single row
+					// So we'll just write the first row's JSON value directly
+					// Multiple rows would create invalid GeoJSON anyway
+					pipe.Writer.Close()
+					break
+				}
+
+				// Extract JSON value from single column (first row only)
+				if len(row0) > 0 {
+					val := row0[0]
+					var jsonBytes []byte
+					var err error
+
+					// If it's already a string containing JSON, parse and re-marshal to ensure compact format
+					// Note: This creates a temporary copy in memory but ensures correct whitespace removal
+					// and handles edge cases (whitespace inside strings, etc.)
+					if sVal, ok := val.(string); ok {
+						if looksLikeJson(sVal) {
+							// It's a JSON string - parse and re-marshal to remove whitespace
+							var jsonVal any
+							if err := g.Unmarshal(sVal, &jsonVal); err == nil {
+								// Re-marshal to ensure compact format (no whitespace)
+								jsonBytes, err = json.Marshal(jsonVal)
+								if err != nil {
+									ds.Context.CaptureErr(g.Error(err, "error marshaling geojson value"))
+									pipe.Writer.Close()
+									return
+								}
+							} else {
+								// If parsing fails, write original (shouldn't happen for valid JSON)
+								jsonBytes = []byte(sVal)
+							}
+						} else {
+							// Not JSON, marshal as regular value
+							jsonBytes, err = json.Marshal(val)
+							if err != nil {
+								ds.Context.CaptureErr(g.Error(err, "error marshaling geojson value"))
+								pipe.Writer.Close()
+								return
+							}
+						}
+					} else {
+						// Value is already parsed JSON (map/array), marshal it (produces compact format)
+						jsonBytes, err = json.Marshal(val)
+						if err != nil {
+							ds.Context.CaptureErr(g.Error(err, "error marshaling geojson value"))
+							pipe.Writer.Close()
+							return
+						}
+					}
+
+					_, err = pipe.Writer.Write(jsonBytes)
+					if err != nil {
+						ds.Context.CaptureErr(g.Error(err, "error writing geojson"))
+						pipe.Writer.Close()
+						return
+					}
+				}
+			}
+		}
+
+		pipe.Writer.Close()
+	}()
+
+	return readerChn
+}
+
+// newGeojsonFromRowsReaderChnl builds GeoJSON FeatureCollection from multiple rows
+// Each row becomes a Feature with geometry and properties
+func (ds *Datastream) newGeojsonFromRowsReaderChnl(sc StreamConfig, geometryColIdx int) (readerChn chan *io.PipeReader) {
+	readerChn = make(chan *io.PipeReader, 100)
+
+	pipe := g.NewPipe()
+	readerChn <- pipe.Reader
+	firstFeature := true
+
+	go func() {
+		defer close(readerChn)
+
+		// Write FeatureCollection opening
+		pipe.Writer.Write([]byte(`{"type":"FeatureCollection","features":[`))
+
+		for batch := range ds.BatchChan {
+			for row0 := range batch.Rows {
+				if !firstFeature {
+					pipe.Writer.Write([]byte{','})
+				}
+				firstFeature = false
+
+				// Build Feature from row
+				feature := g.M()
+				feature["type"] = "Feature"
+
+				// Extract geometry
+				if geometryColIdx < len(row0) {
+					geomVal := row0[geometryColIdx]
+					var geometry any
+
+					// If geometry is a JSON string, parse it
+					if sVal, ok := geomVal.(string); ok {
+						if looksLikeJson(sVal) {
+							if err := g.Unmarshal(sVal, &geometry); err == nil {
+								feature["geometry"] = geometry
+							} else {
+								// If parsing fails, treat as WKT or other format - skip for now
+								feature["geometry"] = nil
+							}
+						} else {
+							// Not JSON, might be WKT - skip for now, would need PostGIS conversion
+							feature["geometry"] = nil
+						}
+					} else if geomVal != nil {
+						// Already parsed JSON (map/array)
+						feature["geometry"] = geomVal
+					} else {
+						feature["geometry"] = nil
+					}
+				} else {
+					feature["geometry"] = nil
+				}
+
+				// Extract properties (all columns except geometry)
+				properties := g.M()
+				for i, val := range row0 {
+					if i != geometryColIdx && i < len(ds.Columns) {
+						col := ds.Columns[i]
+						// Convert value appropriately
+						if sVal, ok := val.(string); ok && col.Type.IsJSON() {
+							if looksLikeJson(sVal) {
+								var v any
+								if err := g.Unmarshal(sVal, &v); err == nil {
+									properties[col.Name] = v
+								} else {
+									properties[col.Name] = val
+								}
+							} else {
+								properties[col.Name] = val
+							}
+						} else {
+							properties[col.Name] = val
+						}
+					}
+				}
+				feature["properties"] = properties
+
+				// Marshal feature to JSON
+				featureBytes, err := json.Marshal(feature)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error marshaling feature"))
+					pipe.Writer.Close()
+					return
+				}
+
+				_, err = pipe.Writer.Write(featureBytes)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing feature"))
+					pipe.Writer.Close()
+					return
+				}
+			}
+		}
+
+		// Write FeatureCollection closing
+		pipe.Writer.Write([]byte(`]}`))
+		pipe.Writer.Close()
+	}()
+
+	return readerChn
+}
+
+// writeJsonRecord writes a single JSON record (helper for fallback case)
+func (ds *Datastream) writeJsonRecord(writer io.Writer, cols Columns, row0 []any, addComma bool) {
+	if addComma {
+		writer.Write([]byte{','})
+	}
+
+	rec := g.M()
+	for i, val := range row0 {
+		if sVal, ok := val.(string); ok && cols[i].Type.IsJSON() {
+			if looksLikeJson(sVal) {
+				var v any
+				if err := g.Unmarshal(sVal, &v); err == nil {
+					val = v
+				}
+			} else if sVal == "null" {
+				val = nil
+			}
+		}
+		rec[cols.Names()[i]] = val
+	}
+
+	b, err := json.Marshal(rec)
+	if err != nil {
+		ds.Context.CaptureErr(g.Error(err, "error marshaling rec"))
+		return
+	}
+	writer.Write(b)
+}
+
 // NewJsonLinesReaderChnl provides a channel of readers as the limit is reached
 // each channel flows as fast as the consumer consumes
 func (ds *Datastream) NewJsonLinesReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
