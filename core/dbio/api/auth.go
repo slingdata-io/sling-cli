@@ -705,6 +705,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 				return g.Error(err, "could not render string for HMAC header: %s", key)
 			}
 			req.Header.Set(key, value)
+			g.Trace(`    rendered HMAC request header "%s" => %s`, key, value)
 		}
 
 		return nil
