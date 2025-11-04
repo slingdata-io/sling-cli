@@ -668,6 +668,8 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 				return g.Error(err, "could not render string for HMAC signer")
 			}
 
+			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
+
 			// Compute HMAC-SHA256
 			mac := hmac.New(sha256.New, []byte(a.Secret))
 			mac.Write([]byte(stringToSign))
@@ -680,6 +682,8 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 				return g.Error(err, "could not render string for HMAC signer")
 			}
 
+			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
+
 			// Compute HMAC-SHA512
 			mac := hmac.New(sha512.New, []byte(a.Secret))
 			mac.Write([]byte(stringToSign))
@@ -690,6 +694,8 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 
 		// set signature
 		templateMap["signature"] = signature
+
+		g.Trace(`  rendered HMAC template for request headers => %s`, g.Marshal(templateMap))
 
 		// Add headers
 		for key, value := range a.ReqHeaders {
