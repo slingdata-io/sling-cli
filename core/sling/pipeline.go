@@ -149,6 +149,7 @@ func (pl *Pipeline) Execute() (err error) {
 	// Execute each step
 	for i := 0; i < len(pl.steps); i++ {
 		step := pl.steps[i]
+		step.SetContext(pl.Context) // update with latest context
 
 		// Create execution context for this step
 		pse := &PipelineStepExecution{

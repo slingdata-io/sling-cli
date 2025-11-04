@@ -21,6 +21,7 @@ type Hook interface {
 	ID() string
 	Context() *g.Context
 	SetExtra(map[string]any)
+	SetContext(*g.Context)
 	Stage() HookStage
 	Status() ExecStatus
 	Execute() error
