@@ -1063,3 +1063,16 @@
   output_contains:
     - 'execution succeeded'
 
+# Test JSON camelCase to PostgreSQL with column_casing (should only create snake_case columns)
+- id: 129
+  name: Test JSON camelCase to PostgreSQL column casing (reproduce duplicate columns bug)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.67.json_postgres_column_casing.yaml'
+  conns:
+    - postgres
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - '✓ All 3 JSON records imported successfully'
+    - '✓ Correct number of unique columns (5: user_id, first_name, last_name, email_address, _sling_loaded_at)'
+    - '✓ Data correctly imported into snake_case columns'

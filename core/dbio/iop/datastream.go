@@ -441,6 +441,11 @@ func (ds *Datastream) Close() {
 
 // SetColumns sets the columns
 func (ds *Datastream) AddColumns(newCols Columns, overwrite bool) (added Columns) {
+	// apply column casing
+	if casing := ds.config.ColumnCasing; !casing.IsEmpty() {
+		newCols = casing.ApplyColumns(newCols, ds.config.TargetType)
+	}
+
 	mergedCols, colsAdded, colsChanged := ds.Columns.Merge(newCols, overwrite)
 	ds.Columns = mergedCols.ValidateNames(ds.Sp.Config.TargetType)
 	added = colsAdded.AddedCols
