@@ -633,6 +633,8 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 	sourceConn := connection.GetLocalConns().Get(rd.Source)
 	if sourceConn.Name == "" {
 		return g.Error("did not find connection: %s", rd.Source)
+	} else if sourceConn.Connection.Type.IsAPI() {
+		return nil // let core/dbio/api/api.go handle chunking
 	} else if !sourceConn.Connection.Type.IsDb() {
 		return g.Error("must be a database connection for chunking: %s", rd.Source)
 	}
