@@ -571,6 +571,14 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 		a.Algorithm = "sha256"
 	}
 
+	var secret string
+	if a.Secret != "" {
+		secret, err = a.conn.renderString(a.Secret)
+		if err != nil {
+			return g.Error(err, "could not render secret for HMAC authentication")
+		}
+	}
+
 	state.Sign = func(iter *Iteration, req *http.Request, bodyBytes []byte) error {
 		var signature string
 
@@ -671,7 +679,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
 
 			// Compute HMAC-SHA256
-			mac := hmac.New(sha256.New, []byte(a.Secret))
+			mac := hmac.New(sha256.New, []byte(secret))
 			mac.Write([]byte(stringToSign))
 			signature = hex.EncodeToString(mac.Sum(nil))
 		case "sha512":
@@ -685,7 +693,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 			g.Trace(`  rendered HMAC string_to_sign "%s" => %s`, a.SigningString, stringToSign)
 
 			// Compute HMAC-SHA512
-			mac := hmac.New(sha512.New, []byte(a.Secret))
+			mac := hmac.New(sha512.New, []byte(secret))
 			mac.Write([]byte(stringToSign))
 			signature = hex.EncodeToString(mac.Sum(nil))
 		default:
