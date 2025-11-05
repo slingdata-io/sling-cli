@@ -130,7 +130,7 @@ func (conn *MySQLConn) Connect(timeOut ...int) (err error) {
 	// Check if this is a Cloud SQL connection with IAM auth
 	if conn.GetProp("gcp_instance") != "" && conn.GetProp("gcp_use_iam_auth") == "true" {
 		conn.isCloudSQL = true
-		g.Trace("Detected Cloud SQL connection with IAM authentication")
+		g.Trace("detected Cloud SQL connection with IAM authentication")
 		return conn.connectCloudSQL(timeOut...)
 	}
 
@@ -159,7 +159,7 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 	}
 
 	instanceName := fmt.Sprintf("%s:%s:%s", gcpProject, gcpRegion, gcpInstance)
-	g.Debug("Cloud SQL instance connection name: %s", instanceName)
+	g.Debug("cloud SQL instance connection name: %s", instanceName)
 
 	// Build dialer options with IAM authentication
 	dialerOpts := []cloudsqlconn.Option{
@@ -168,25 +168,23 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 
 	// Support lazy refresh for serverless environments
 	if cast.ToBool(conn.GetProp("gcp_lazy_refresh")) {
-		g.Trace("Enabling lazy refresh mode for Cloud SQL connector")
+		g.Trace("enabling lazy refresh mode for Cloud SQL connector")
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithLazyRefresh())
 	}
 
 	// Support three credential methods: ADC (default), credentials file, or credentials JSON
 	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
-		g.Trace("Using explicit GCP credentials from JSON string")
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
 	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
-		g.Trace("Using explicit GCP credentials from file: %s", credsFile)
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))
 	} else {
-		g.Trace("Using Application Default Credentials (ADC) for Cloud SQL authentication")
+		g.Debug("using Application Default Credentials (ADC) for Cloud SQL authentication")
 	}
 
 	// Support private IP connections
 	defaultDialOpts := []cloudsqlconn.DialOption{}
 	if cast.ToBool(conn.GetProp("gcp_use_private_ip")) {
-		g.Trace("Using private IP for Cloud SQL connection")
+		g.Trace("using private IP for Cloud SQL connection")
 		defaultDialOpts = append(defaultDialOpts, cloudsqlconn.WithPrivateIP())
 	}
 	if len(defaultDialOpts) > 0 {
@@ -195,7 +193,7 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 
 	// Generate unique driver name to avoid conflicts with multiple Cloud SQL connections
 	driverName := fmt.Sprintf("cloudsql-mysql-%d", time.Now().UnixNano())
-	g.Trace("Registering Cloud SQL MySQL driver: %s", driverName)
+	g.Trace("registering Cloud SQL MySQL driver: %s", driverName)
 
 	// Register the Cloud SQL MySQL driver
 	cleanup, err := cloudsqlmysql.RegisterDriver(driverName, dialerOpts...)
@@ -224,7 +222,7 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 	dsn := fmt.Sprintf("%s@%s(%s)/%s?parseTime=true",
 		user, driverName, instanceName, database)
 
-	g.Debug("Connecting to Cloud SQL MySQL instance => %s", dsn)
+	g.Trace("connecting to Cloud SQL MySQL instance => %s", dsn)
 
 	// Open the connection using the Cloud SQL driver
 	db, err := sqlx.Open(driverName, dsn)
@@ -245,7 +243,7 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
-	g.Trace("Cloud SQL connection pool configured: max_open=%d, max_idle=%d", maxConns, maxConns/4)
+	g.Trace("cloud SQL connection pool configured: max_open=%d, max_idle=%d", maxConns, maxConns/4)
 
 	// Set timeout if provided
 	timeout := 15
@@ -271,10 +269,9 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 			"5. Network connectivity issue (check gcp_use_private_ip setting and VPC configuration)",
 		}
 
-		return g.Error("Cloud SQL connection test failed: %s\n%s", errorMsg, strings.Join(hints, "\n"))
+		return g.Error("Cloud SQL connection ping failed: %s\n%s", errorMsg, strings.Join(hints, "\n"))
 	}
 
-	g.Info("Successfully connected to Cloud SQL MySQL instance: %s", instanceName)
 	conn.BaseConn.URL = fmt.Sprintf("mysql://%s@cloudsql(%s)/%s", user, instanceName, database)
 	conn.Type = dbio.TypeDbMySQL
 
@@ -320,7 +317,7 @@ func (conn *MySQLConn) formatIAMUsername() string {
 	}
 
 	if user != originalUser {
-		g.Trace("Formatted IAM username: %s -> %s", originalUser, user)
+		g.Trace("formatted IAM username: %s -> %s", originalUser, user)
 	}
 
 	return user
@@ -330,7 +327,7 @@ func (conn *MySQLConn) formatIAMUsername() string {
 func (conn *MySQLConn) Close() error {
 	// Cleanup Cloud SQL resources first
 	if conn.isCloudSQL {
-		g.Trace("Closing Cloud SQL connection and cleaning up resources")
+		g.Trace("closing Cloud SQL connection and cleaning up resources")
 
 		if conn.cloudSQLCleanup != nil {
 			conn.cloudSQLCleanup()
