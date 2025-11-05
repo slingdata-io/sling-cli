@@ -364,8 +364,10 @@ func NewArrowWriter(w io.Writer, columns Columns) (a *ArrowWriter, err error) {
 
 	// set minimum decimal precision/scale
 	for i, col := range columns {
-		columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
-		columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
+		if col.IsDecimal() {
+			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
+			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
+		}
 	}
 
 	a = &ArrowWriter{
