@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"unicode"
 
@@ -16,6 +17,17 @@ import (
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
+)
+
+// Track CLI test failures
+type cliTestFailure struct {
+	testID string
+	name   string
+}
+
+var (
+	cliTestFailuresMux sync.Mutex
+	cliTestFailures    []cliTestFailure
 )
 
 type testCase struct {
@@ -32,6 +44,37 @@ type testCase struct {
 
 	OutputContains       []string `yaml:"output_contains"`
 	OutputDoesNotContain []string `yaml:"output_does_not_contain"`
+}
+
+func TestMain(m *testing.M) {
+	// Run all tests
+	exitCode := m.Run()
+
+	// Print summary of failures
+	cliTestFailuresMux.Lock()
+	if len(cliTestFailures) > 0 {
+		println()
+		println("================================================================================")
+		println("                      CLI TEST FAILURE SUMMARY")
+		println("================================================================================")
+		println()
+
+		for _, failure := range cliTestFailures {
+			println(g.F("❌ FAILED: %s", failure.testID))
+			println(g.F("   Test: %s", failure.name))
+			println()
+		}
+
+		println("================================================================================")
+		println(g.F("Total Failed CLI Tests: %d", len(cliTestFailures)))
+		println("================================================================================")
+	} else {
+		println()
+		println("✅ All CLI tests passed!")
+	}
+	cliTestFailuresMux.Unlock()
+
+	os.Exit(exitCode)
 }
 
 func TestCLI(t *testing.T) {
@@ -132,7 +175,9 @@ func TestCLI(t *testing.T) {
 		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
-		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
+
+		testID := g.F("%d/%s", tt.ID, tt.Name)
+		t.Run(testID, func(t *testing.T) {
 			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
 			p, err := process.NewProc("bash")
@@ -140,7 +185,7 @@ func TestCLI(t *testing.T) {
 				return
 			}
 			p.Capture = true
-			p.Print = true
+			// p.Print = true
 			p.WorkDir = "../.."
 
 			// set new env
@@ -216,7 +261,14 @@ func TestCLI(t *testing.T) {
 			}
 		})
 		if t.Failed() {
-			break
+			// Track failure
+			cliTestFailuresMux.Lock()
+			cliTestFailures = append(cliTestFailures, cliTestFailure{
+				testID: testID,
+				name:   tt.Run,
+			})
+			cliTestFailuresMux.Unlock()
+			// Don't break - let all tests complete
 		}
 	}
 }

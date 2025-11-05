@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,18 @@ var testMux sync.Mutex
 var testContext = g.NewContext(context.Background())
 
 var conns = connection.GetLocalConns()
+
+// Track test failures
+type testFailure struct {
+	connType dbio.Type
+	testID   string
+}
+
+var (
+	testFailuresMux  sync.Mutex
+	testFailures     []testFailure
+	suiteFailuresMap = make(map[dbio.Type]string) // connType -> last failed testID
+)
 
 type testDB struct {
 	name string
@@ -101,6 +114,38 @@ var connMap = map[dbio.Type]connTest{
 func init() {
 	env.InitLogger()
 	core.Version = "test"
+}
+
+func TestMain(m *testing.M) {
+	// Run all tests
+	exitCode := m.Run()
+
+	// Print summary of failures
+	testFailuresMux.Lock()
+	if len(suiteFailuresMap) > 0 {
+		println()
+		println("================================================================================")
+		println("                         TEST FAILURE SUMMARY")
+		println("================================================================================")
+		println()
+
+		for connType, lastTestID := range suiteFailuresMap {
+			println(g.F("❌ FAILED: %s", connType))
+			println(g.F("   Last Failed Test: %s", lastTestID))
+			println()
+		}
+
+		println("================================================================================")
+		println(g.F("Total Failed Test Suites: %d", len(suiteFailuresMap)))
+		println(g.F("Total Failed Tests: %d", len(testFailures)))
+		println("================================================================================")
+	} else {
+		println()
+		println("✅ All test suites passed!")
+	}
+	testFailuresMux.Unlock()
+
+	os.Exit(exitCode)
 }
 
 func TestOptions(t *testing.T) {
@@ -394,18 +439,36 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 				continue
 			}
 		}
-		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
+
+		testID := g.F("%s/%s", connType, file.RelPath)
+		t.Run(testID, func(t *testing.T) {
 			runOneTask(t, file, connType)
 		})
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
-			testContext.Cancel()
-			return
+			// Track failure
+			testFailuresMux.Lock()
+			testFailures = append(testFailures, testFailure{
+				connType: connType,
+				testID:   testID,
+			})
+			suiteFailuresMap[connType] = testID
+			testFailuresMux.Unlock()
+			// Don't cancel context or return early - let all tests complete
+			// Go's test framework will report all failures at the end
 		}
 	}
 }
 
 func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
+	defer func() {
+		if r := recover(); r != nil {
+			info := string(debug.Stack())
+			g.Warn(g.F("panic occurred! %#v\n%s", r, info))
+			t.FailNow()
+		}
+	}()
+
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("SLING_CHECKSUM_ROWS", "10000") // so that it errors when checksums don't match
 	println()
