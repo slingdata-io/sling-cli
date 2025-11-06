@@ -117,6 +117,25 @@ func init() {
 }
 
 func TestMain(m *testing.M) {
+	// Init args
+	args := os.Args
+	for _, arg := range args {
+		if arg == "-d" || arg == "--debug" {
+			os.Setenv("DEBUG", "true")
+			env.InitLogger()
+		}
+		if arg == "-a" || arg == "--all" {
+			os.Setenv("RUN_ALL", "true") // runs all test, don't fail early
+		}
+		if arg == "-t" || arg == "--trace" {
+			os.Setenv("DEBUG", "TRACE")
+			env.InitLogger()
+		}
+		if arg != "" && unicode.IsDigit(rune(arg[0])) {
+			os.Setenv("TESTS", arg)
+		}
+	}
+
 	// Run all tests
 	exitCode := m.Run()
 
@@ -280,34 +299,8 @@ func TestExtract(t *testing.T) {
 	// g.AssertNoError(t, err)
 }
 
-var argsContext = g.NewContext(context.Background())
-
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 	defer time.Sleep(100 * time.Millisecond) // for log to flush
-
-	// process args
-	{
-		argsContext.Lock()
-		val, _ := argsContext.Map.Get("args_initialized")
-		if argsInitialized := cast.ToBool(val); !argsInitialized {
-			args := os.Args
-			for _, arg := range args {
-				if arg == "-d" || arg == "--debug" {
-					os.Setenv("DEBUG", "true")
-					env.InitLogger()
-				}
-				if arg == "-t" || arg == "--trace" {
-					os.Setenv("DEBUG", "TRACE")
-					env.InitLogger()
-				}
-				if arg != "" && unicode.IsDigit(rune(arg[0])) {
-					os.Setenv("TESTS", arg)
-				}
-			}
-			argsContext.Map.Set("args_initialized", true)
-		}
-		argsContext.Unlock()
-	}
 
 	if t.Failed() {
 		return
@@ -490,8 +483,11 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			})
 			suiteFailuresMap[connType] = testID
 			testFailuresMux.Unlock()
-			// Don't cancel context or return early - let all tests complete
-			// Go's test framework will report all failures at the end
+
+			// cancel early if not specified
+			if !cast.ToBool(os.Getenv("RUN_ALL")) {
+				testContext.Cancel()
+			}
 		}
 	}
 }
