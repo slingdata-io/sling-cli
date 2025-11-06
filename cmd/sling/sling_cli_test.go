@@ -1,4 +1,4 @@
-package main_test
+package main
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"unicode"
 
@@ -17,17 +16,6 @@ import (
 	"github.com/spf13/cast"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
-)
-
-// Track CLI test failures
-type cliTestFailure struct {
-	testID string
-	name   string
-}
-
-var (
-	cliTestFailuresMux sync.Mutex
-	cliTestFailures    []cliTestFailure
 )
 
 type testCase struct {
@@ -44,37 +32,6 @@ type testCase struct {
 
 	OutputContains       []string `yaml:"output_contains"`
 	OutputDoesNotContain []string `yaml:"output_does_not_contain"`
-}
-
-func TestMain(m *testing.M) {
-	// Run all tests
-	exitCode := m.Run()
-
-	// Print summary of failures
-	cliTestFailuresMux.Lock()
-	if len(cliTestFailures) > 0 {
-		println()
-		println("================================================================================")
-		println("                      CLI TEST FAILURE SUMMARY")
-		println("================================================================================")
-		println()
-
-		for _, failure := range cliTestFailures {
-			println(g.F("❌ FAILED: %s", failure.testID))
-			println(g.F("   Test: %s", failure.name))
-			println()
-		}
-
-		println("================================================================================")
-		println(g.F("Total Failed CLI Tests: %d", len(cliTestFailures)))
-		println("================================================================================")
-	} else {
-		println()
-		println("✅ All CLI tests passed!")
-	}
-	cliTestFailuresMux.Unlock()
-
-	os.Exit(exitCode)
 }
 
 func TestCLI(t *testing.T) {
@@ -185,7 +142,9 @@ func TestCLI(t *testing.T) {
 				return
 			}
 			p.Capture = true
-			// p.Print = true
+			if os.Getenv("DEBUG") != "" {
+				p.Print = true
+			}
 			p.WorkDir = "../.."
 
 			// set new env
@@ -262,12 +221,12 @@ func TestCLI(t *testing.T) {
 		})
 		if t.Failed() {
 			// Track failure
-			cliTestFailuresMux.Lock()
-			cliTestFailures = append(cliTestFailures, cliTestFailure{
-				testID: testID,
-				name:   tt.Run,
+			testFailuresMux.Lock()
+			testFailures = append(testFailures, testFailure{
+				connType: "CLI",
+				testID:   testID,
 			})
-			cliTestFailuresMux.Unlock()
+			testFailuresMux.Unlock()
 			// Don't break - let all tests complete
 		}
 	}

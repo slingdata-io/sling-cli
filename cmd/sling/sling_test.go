@@ -122,26 +122,62 @@ func TestMain(m *testing.M) {
 
 	// Print summary of failures
 	testFailuresMux.Lock()
-	if len(suiteFailuresMap) > 0 {
+
+	hasDatabaseFailures := len(suiteFailuresMap) > 0
+	cliFailures := []testFailure{}
+	for _, failure := range testFailures {
+		if failure.connType == "CLI" {
+			cliFailures = append(cliFailures, failure)
+		}
+	}
+	hasCLIFailures := len(cliFailures) > 0
+
+	if hasDatabaseFailures || hasCLIFailures {
 		println()
 		println("================================================================================")
 		println("                         TEST FAILURE SUMMARY")
 		println("================================================================================")
 		println()
 
-		for connType, lastTestID := range suiteFailuresMap {
-			println(g.F("❌ FAILED: %s", connType))
-			println(g.F("   Last Failed Test: %s", lastTestID))
+		// Database test failures
+		if hasDatabaseFailures {
+			println("DATABASE TEST SUITES:")
+			println()
+			for connType, lastTestID := range suiteFailuresMap {
+				println(g.F("  ❌ FAILED: %s", connType))
+				println(g.F("     Last Failed Test: %s", lastTestID))
+				println()
+			}
+			println(g.F("  Total Failed DB Test Suites: %d", len(suiteFailuresMap)))
+			dbFailureCount := 0
+			for _, failure := range testFailures {
+				if failure.connType != "CLI" {
+					dbFailureCount++
+				}
+			}
+			println(g.F("  Total Failed DB Tests: %d", dbFailureCount))
+			println()
+		}
+
+		// CLI test failures
+		if hasCLIFailures {
+			println("CLI TESTS:")
+			println()
+			for _, failure := range cliFailures {
+				println(g.F("  ❌ FAILED: %s", failure.testID))
+				println()
+			}
+			println(g.F("  Total Failed CLI Tests: %d", len(cliFailures)))
 			println()
 		}
 
 		println("================================================================================")
-		println(g.F("Total Failed Test Suites: %d", len(suiteFailuresMap)))
-		println(g.F("Total Failed Tests: %d", len(testFailures)))
+		totalFailures := len(testFailures)
+		println(g.F("TOTAL FAILED TESTS: %d", totalFailures))
 		println("================================================================================")
 	} else {
 		println()
-		println("✅ All test suites passed!")
+		println("✅ All tests passed!")
 	}
 	testFailuresMux.Unlock()
 
