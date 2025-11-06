@@ -282,7 +282,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	})
 
 	// Begin transaction for temp table operations
-	if err := tgtConn.BeginContext(df.Context.Ctx); err != nil {
+	txOptions := determineTxOptions(cfg, tgtConn.GetType())
+	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to temp table")
 		return 0, err
 	}
@@ -375,8 +376,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// need to contain the final write in a transcation after data is loaded
-
-	txOptions := determineTxOptions(cfg, tgtConn.GetType())
+	txOptions = determineTxOptions(cfg, tgtConn.GetType())
 	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to final table")
 		return 0, err
