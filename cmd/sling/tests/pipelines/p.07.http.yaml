@@ -1,4 +1,7 @@
 steps:
+  - type: delete
+    location: aws_s3/tmp/planets.json
+
   - type: http
     url: https://swapi.dev/api/planets
     write_to: aws_s3/tmp/planets.json
@@ -9,4 +12,19 @@ steps:
   
   - type: check
     check: 'length(store.planets) > 0'
+
+  - type: delete
+    location: local//tmp/output/
+    recursive: true
+
+  - type: http
+    url: https://swapi.dev/api/people
+    write_to: local//tmp/output/
+
+  - type: read
+    from: local//tmp/output/people
+    into: people
+  
+  - type: check
+    check: 'length(store.people) > 0'
   

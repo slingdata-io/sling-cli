@@ -1079,4 +1079,4 @@
   name: Test HTTP write_to
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
   output_contains:
-    - 'successfully executed step "step-03" (type: check)'
+    - 'successfully executed step "step-08" (type: check)'
