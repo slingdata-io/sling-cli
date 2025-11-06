@@ -243,7 +243,11 @@ mariadb	float	float	col_float float	TRUE	TRUE	A single-precision floating point 
 mariadb	geometry	string	col_geometry geometry	FALSE	FALSE	A spatial value of any type
 mariadb	geometrycollection	string	col_geometrycollection geometrycollection	FALSE	FALSE	A collection of GEOMETRYvalues
 mariadb	geomcollection	string		FALSE	FALSE	
-mariadb	unsigned int	bigint	col_int int	TRUE	TRUE	A standard integer
+mariadb	unsigned bigint	decimal(28,0)	col_unsigned_bigint bigint unsigned	TRUE	TRUE	An unsigned large integer
+mariadb	unsigned int	bigint	col_unsigned_int int unsigned	TRUE	TRUE	An unsigned standard integer
+mariadb	unsigned mediumint	bigint	col_unsigned_mediumint mediumint unsigned	TRUE	TRUE	An unsigned medium-sized integer
+mariadb	unsigned smallint	integer	col_unsigned_smallint smallint unsigned	TRUE	TRUE	An unsigned small integer
+mariadb	unsigned tinyint	integer	col_unsigned_tinyint tinyint unsigned	TRUE	TRUE	An unsigned very small integer
 mariadb	int	integer	col_int int	TRUE	TRUE	A standard integer
 mariadb	json	json	col_json json	TRUE	TRUE	JSON Data Type
 mariadb	linestring	string	col_linestring linestring	FALSE	FALSE	A curve (one or more POINT values)
@@ -315,7 +319,11 @@ mysql	float	float	col_float float	TRUE	TRUE	A single-precision floating point nu
 mysql	geometry	string	col_geometry geometry	FALSE	FALSE	A spatial value of any type
 mysql	geometrycollection	string	col_geometrycollection geometrycollection	FALSE	FALSE	A collection of GEOMETRYvalues
 mysql	geomcollection	string		FALSE	FALSE	
-mysql	unsigned int	bigint	col_int int	TRUE	TRUE	A standard integer
+mysql	unsigned bigint	decimal(28,0)	col_unsigned_bigint bigint unsigned	TRUE	TRUE	An unsigned large integer
+mysql	unsigned int	bigint	col_unsigned_int int unsigned	TRUE	TRUE	An unsigned standard integer
+mysql	unsigned mediumint	bigint	col_unsigned_mediumint mediumint unsigned	TRUE	TRUE	An unsigned medium-sized integer
+mysql	unsigned smallint	integer	col_unsigned_smallint smallint unsigned	TRUE	TRUE	An unsigned small integer
+mysql	unsigned tinyint	integer	col_unsigned_tinyint tinyint unsigned	TRUE	TRUE	An unsigned very small integer
 mysql	int	integer	col_int int	TRUE	TRUE	A standard integer
 mysql	json	json	col_json json	TRUE	TRUE	JSON Data Type
 mysql	linestring	string	col_linestring linestring	FALSE	FALSE	A curve (one or more POINT values)

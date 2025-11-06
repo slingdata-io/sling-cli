@@ -642,6 +642,9 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["statement_timeout"]; ok {
 			template = template + "&statement_timeout={statement_timeout}"
 		}
+		if _, ok := c.Data["gcp_instance"]; ok {
+			setIfMissing("host", "host.com") // set to allow
+		}
 	case dbio.TypeDbRedshift:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
@@ -659,6 +662,9 @@ func (c *Connection) setURL() (err error) {
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())
 		template = "mysql://{username}:{password}@{host}:{port}/{database}"
+		if _, ok := c.Data["gcp_instance"]; ok {
+			setIfMissing("host", "host.com") // set to allow
+		}
 	case dbio.TypeDbMariaDB:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")

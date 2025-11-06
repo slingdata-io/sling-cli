@@ -1,0 +1,37 @@
+# ./sling run -r tests/replications/apis/r.polygon.yaml --streams stocks_daily_market_summary -d --mode full-refresh
+
+source: polygon
+target: postgres
+
+defaults:
+  mode: full-refresh
+  object: apis.{source_name}_{stream_name}
+
+  source_options:
+    flatten: 1 # flatten records 1 level only
+
+hooks:
+  start:
+    - type: query
+      connection: '{target.name}'
+      query: |
+        with tickers as (
+          select 'AAPL' as ticker
+          union select 'NVDA' as ticker
+          union select 'MSFT' as ticker
+        )
+        , dates as (
+            select (current_date - interval '1 day' * i)::date as date
+            from generate_series(1, 3) as i
+        )
+        select tickers.ticker, dates.date
+        from tickers, dates
+      into: ticker_date_records
+
+streams:
+  '*':
+
+env:
+  SLING_STATE: postgres/sling_state.postgres # one state table per replication
+  SLING_LOADED_AT_COLUMN: timestamp
+  SLING_THREADS: 2

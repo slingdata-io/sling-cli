@@ -35,3 +35,12 @@ func init() {
 	// update version string
 	Version = g.F("%s (%s)", parts[0], parts[1])
 }
+
+func VersionSlash() string {
+	// convert to slash version for dev if applicable
+	parts := strings.Split(strings.TrimSuffix(Version, ")"), " (")
+	if len(parts) != 2 {
+		return Version
+	}
+	return parts[0] + "/" + parts[1]
+}

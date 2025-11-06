@@ -14,7 +14,7 @@ endpoints:
   connections:
 
     iterate:
-      over: "state.replication_store.records"
+      over: "context.store.records"
       into: "state.test_record"
       
     request:

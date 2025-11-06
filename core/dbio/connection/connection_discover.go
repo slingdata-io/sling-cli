@@ -81,7 +81,9 @@ func (c *Connection) Test() (ok bool, err error) {
 		if limit > 1000 {
 			limit = 1000 // let's set the max limit to 1000 for testing
 		}
-		g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
+		if g.Getenv("SLING_TEST_ENDPOINT_LIMIT") == "" {
+			g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
+		}
 
 		for _, endpoint := range endpoints {
 			// check for match to test (if provided)
@@ -113,7 +115,7 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			g.Debug("   got %d records from endpoint: %s", len(data.Rows), endpoint.Name)
 
-			records := data.Records()
+			records := data.Records(false)
 			if len(records) > 0 {
 				record := records[0]
 				g.Debug("   columns = %s", g.Marshal(lo.Keys(record)))

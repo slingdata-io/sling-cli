@@ -24,6 +24,8 @@ func init() {
 			StoreSetReplicationExec(v)
 		case *sling.Pipeline:
 			StoreSetPipelineExec(v)
+		case *sling.PipelineStepExecution:
+			StoreSetPipelineExec(v.Pipeline)
 		}
 		return nil
 	}
@@ -164,7 +166,7 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		}
 	}
 
-	if fileName := os.Getenv("SLING_REPLICATION_NAME"); fileName != "" {
+	if fileName := os.Getenv("SLING_FILE_NAME"); fileName != "" {
 		exec.FilePath = g.String(fileName)
 	} else if t.Replication != nil && t.Replication.Env["SLING_CONFIG_PATH"] != nil {
 		exec.FilePath = g.String(cast.ToString(t.Replication.Env["SLING_CONFIG_PATH"]))

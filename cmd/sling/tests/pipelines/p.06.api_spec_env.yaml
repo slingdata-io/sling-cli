@@ -1,0 +1,11 @@
+steps:
+  - type: store
+    key: env.NEW_KEY
+    value: my-key-1
+
+  - type: store
+    map:
+      env.NEW_KEY: my-key-2
+
+  - type: replication
+    path: cmd/sling/tests/pipelines/p.06.replication.yaml

@@ -18,6 +18,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 // ParquetArrowReader is a parquet reader object using arrow v18
@@ -222,6 +223,15 @@ type ParquetArrowWriter struct {
 }
 
 func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compression) (p *ParquetArrowWriter, err error) {
+
+	// set minimum decimal precision/scale
+	for i, col := range columns {
+		if col.IsDecimal() {
+			columns[i].DbPrecision = lo.Ternary(col.DbPrecision < env.DdlMinDecLength, int(env.DdlMinDecLength), col.DbPrecision)
+			columns[i].DbScale = lo.Ternary(col.DbScale < env.DdlMinDecScale, env.DdlMinDecScale, col.DbScale)
+		}
+	}
+
 	p = &ParquetArrowWriter{
 		columns:       columns,
 		mem:           memory.NewGoAllocator(),
@@ -230,9 +240,6 @@ func NewParquetArrowWriter(w io.Writer, columns Columns, codec compress.Compress
 
 	// Create arrow schema from columns
 	p.arrowSchema = ColumnsToArrowSchema(columns)
-	if err != nil {
-		return nil, g.Error(err, "could not create arrow schema")
-	}
 
 	// Create parquet writer properties
 	writerProps := parquet.NewWriterProperties(

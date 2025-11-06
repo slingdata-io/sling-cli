@@ -733,8 +733,7 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		}
 	}
 
-	conn.SetProp("connected", "true")
-	conn.SetProp("connect_time", cast.ToString(time.Now()))
+	conn.postConnect()
 
 	return nil
 }
@@ -752,6 +751,13 @@ func reconnectIfClosed(conn Connection) (err error) {
 		}
 	}
 	return
+}
+
+func (conn *BaseConn) postConnect() {
+
+	conn.SetProp("connected", "true")
+	conn.SetProp("connect_time", cast.ToString(time.Now()))
+
 }
 
 // Close closes the connection

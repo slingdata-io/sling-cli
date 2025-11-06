@@ -1443,6 +1443,27 @@ func (cc *ColumnCasing) IsEmpty() bool {
 	return false
 }
 
+// IsEmpty return true if nil or blank
+func (cc *ColumnCasing) ApplyColumns(cols Columns, tgtType dbio.Type) (newCols Columns) {
+	newCols = cols
+
+	// apply casing first
+	nameMap := map[string]string{}
+	if !cc.IsEmpty() && tgtType != "" {
+		g.Debug(`applying column casing (%s) for target type (%s)`, *cc, tgtType)
+		for i, col := range newCols {
+			newName := cc.Apply(col.Name, tgtType)
+			nameMap[strings.ToLower(newName)] = col.Name // map new name to old name
+			newCols[i].Name = newName
+			if col.Name != newName {
+				g.Debug("   %s => %s", col.Name, newName)
+			}
+		}
+	}
+
+	return
+}
+
 var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
 
 // Apply applies column casing to provided name.

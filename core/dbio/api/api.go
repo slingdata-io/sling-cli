@@ -20,6 +20,7 @@ type APIConnection struct {
 	State     *APIState
 	Context   *g.Context
 	evaluator *iop.Evaluator `json:"-" yaml:"-"`
+	sp        *iop.StreamProcessor
 }
 
 // NewAPIConnection creates an
@@ -34,7 +35,8 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
-		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
+		sp:        iop.NewStreamProcessor(),
 	}
 
 	// Merge spec defaults state into ac.State.State first
@@ -71,9 +73,9 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 }
 
 func (ac *APIConnection) GetReplicationStore() (store map[string]any) {
-	err := g.JSONConvert(ac.State.State["replication_store"], &store)
+	err := g.JSONConvert(ac.State.Store, &store)
 	if err != nil {
-		g.Warn("could not unmarshal from API state replication_store: " + err.Error())
+		g.Warn("could not unmarshal from API state replication store: " + err.Error())
 	}
 
 	if store == nil {
@@ -86,7 +88,7 @@ func (ac *APIConnection) SetReplicationStore(store map[string]any) {
 	if store == nil {
 		store = g.M()
 	}
-	ac.State.State["replication_store"] = store
+	ac.State.Store = store
 }
 
 // Close performs cleanup of all resources
@@ -98,16 +100,8 @@ func (ac *APIConnection) Close() error {
 func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints, err error) {
 
 	// Render dynamic endpoints if needed
-	if ac.Spec.IsDynamic() {
-		// Ensure authentication before rendering dynamic endpoints
-		if err := ac.EnsureAuthenticated(); err != nil {
-			return nil, g.Error(err, "authentication required for dynamic endpoints")
-		}
-
-		// Render dynamic endpoints (this will populate ac.Spec.EndpointMap)
-		if err := ac.RenderDynamicEndpoints(); err != nil {
-			return nil, g.Error(err, "failed to render dynamic endpoints")
-		}
+	if err := ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "failed to render dynamic endpoints")
 	}
 
 	// Collect all endpoints (static + dynamically generated)
@@ -143,6 +137,27 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 	return endpoints, nil
 }
 
+// compile all spec endpoints
+func (ac *APIConnection) CompileEndpoints() (compiledEndpoints Endpoints, err error) {
+	// render dynamic endpoint if needed
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints for compilation")
+	}
+
+	compiledEndpoints = Endpoints{}
+	for _, name := range ac.Spec.endpointsOrdered {
+		endpoint := ac.Spec.EndpointMap[name]
+		endpoint.conn = ac
+		if err = compileSpecEndpoint(&endpoint, ac.Spec); err != nil {
+			return compiledEndpoints, g.Error(err, "endpoint compilation failed")
+		}
+
+		compiledEndpoints = append(compiledEndpoints, endpoint)
+	}
+
+	return
+}
+
 type APIStreamConfig struct {
 	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
@@ -150,12 +165,19 @@ type APIStreamConfig struct {
 	Limit       int
 	Metadata    iop.Metadata
 	Mode        string
+	Range       string
 	DsConfigMap map[string]any // stream processor options
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
-	if !ac.State.Auth.Authenticated {
-		return nil, g.Error("not authenticated")
+	// Ensure authentication before reading dataflow
+	if err := ac.EnsureAuthenticated(); err != nil {
+		return nil, g.Error(err, "could not authenticate")
+	}
+
+	// render dynamic endpoint if needed
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints")
 	}
 
 	// get endpoint, match to name
@@ -252,6 +274,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 type APIState struct {
 	Env     map[string]string     `json:"env,omitempty"`
 	State   map[string]any        `json:"state,omitempty"`
+	Store   map[string]any        `json:"store,omitempty"`
 	Secrets map[string]any        `json:"secrets,omitempty"`
 	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
 	Auth    APIStateAuth          `json:"auth,omitempty"`
@@ -263,8 +286,8 @@ type APIStateAuth struct {
 	Headers       map[string]string `json:"-"`                    // to inject
 	ExpiresAt     int64             `json:"expires_at,omitempty"` // Unix timestamp when auth expires
 
-	Sign  func(context.Context, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4
-	Mutex *sync.Mutex                                        `json:"-" yaml:"-"` // Mutex for auth operations
+	Sign  func(*Iteration, *http.Request, []byte) error `json:"-"`          // for AWS Sigv4, HMAC
+	Mutex *sync.Mutex                                   `json:"-" yaml:"-"` // Mutex for auth operations
 }
 
 var bracketRegex = regexp.MustCompile(`\{([^\{\}]+)\}`)
@@ -303,7 +326,6 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 		"state", stateMapCopy,
 		"secrets", secretsCopy,
 		"auth", ac.State.Auth,
-		"null", nil,
 	)
 
 	// Add queues to the state map
@@ -552,9 +574,15 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 	// Create extra maps for rendering - this will be merged with ac.State.State
 	extraMaps := g.M("state", stateMap)
 
+	g.Trace("rendering dynamic endpoint %s with extra state map: %s", dynEndpoint.Endpoint.Name, g.Marshal(extraMaps))
+
+	// we only want to render the "into" state, leave the rest so that they are render at compilation
+	evaluator := iop.NewEvaluator([]string{"state"})
+	evaluator.KeepMissingExpr = true // this tells evaluator to leave expression if missing
+
 	// Render the endpoint name
 	if renderedEndpoint.Name != "" {
-		renderedName, err := ac.renderString(renderedEndpoint.Name, extraMaps)
+		renderedName, err := evaluator.RenderString(renderedEndpoint.Name, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint name")
 		}
@@ -563,7 +591,7 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render description if present
 	if renderedEndpoint.Description != "" {
-		renderedDesc, err := ac.renderString(renderedEndpoint.Description, extraMaps)
+		renderedDesc, err := evaluator.RenderString(renderedEndpoint.Description, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint description")
 		}
@@ -572,66 +600,16 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Render docs URL if present
 	if renderedEndpoint.Docs != "" {
-		renderedDocs, err := ac.renderString(renderedEndpoint.Docs, extraMaps)
+		renderedDocs, err := evaluator.RenderString(renderedEndpoint.Docs, extraMaps)
 		if err != nil {
 			return nil, g.Error(err, "could not render endpoint docs")
 		}
 		renderedEndpoint.Docs = renderedDocs
 	}
 
-	// Render the request URL
-	if renderedEndpoint.Request.URL != "" {
-		renderedURL, err := ac.renderString(renderedEndpoint.Request.URL, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render request URL")
-		}
-		renderedEndpoint.Request.URL = renderedURL
-	}
-
-	// Render request headers
-	if len(renderedEndpoint.Request.Headers) > 0 {
-		renderedHeaders, err := ac.renderAny(renderedEndpoint.Request.Headers, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render request headers")
-		}
-		if headers, ok := renderedHeaders.(map[string]any); ok {
-			renderedEndpoint.Request.Headers = headers
-		}
-	}
-
-	// Render request parameters
-	if len(renderedEndpoint.Request.Parameters) > 0 {
-		renderedParams, err := ac.renderAny(renderedEndpoint.Request.Parameters, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render request parameters")
-		}
-		if params, ok := renderedParams.(map[string]any); ok {
-			renderedEndpoint.Request.Parameters = params
-		}
-	}
-
-	// Render request payload if present
-	if renderedEndpoint.Request.Payload != nil {
-		renderedPayload, err := ac.renderAny(renderedEndpoint.Request.Payload, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render request payload")
-		}
-		renderedEndpoint.Request.Payload = renderedPayload
-	}
-
-	// Render state values
-	if len(renderedEndpoint.State) > 0 {
-		renderedState, err := ac.renderAny(renderedEndpoint.State, extraMaps)
-		if err != nil {
-			return nil, g.Error(err, "could not render endpoint state")
-		}
-		if state, ok := renderedState.(map[string]any); ok {
-			renderedEndpoint.State = state
-		}
-	}
-
-	// Initialize context for the endpoint
+	// Initialize state and context for the endpoint
 	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
+	renderedEndpoint.State = stateMap
 
 	return &renderedEndpoint, nil
 }
@@ -642,6 +620,13 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	if !ac.Spec.IsDynamic() {
 		return nil // No dynamic endpoints to render
+	} else if ac.Spec.rendered {
+		return nil
+	}
+
+	// Ensure authentication before rendering dynamic endpoints
+	if err := ac.EnsureAuthenticated(); err != nil {
+		return g.Error(err, "authentication required for dynamic endpoints")
 	}
 
 	// Initialize EndpointMap if nil
@@ -652,6 +637,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 	g.Debug("rendering %d dynamic endpoint definition(s)", len(ac.Spec.DynamicEndpoints))
 
 	// Process each dynamic endpoint definition
+	generatedNames := []string{}
 	for dynIdx, dynEndpoint := range ac.Spec.DynamicEndpoints {
 		g.Debug("processing dynamic endpoint definition %d", dynIdx+1)
 
@@ -670,6 +656,7 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 			g.Debug("running setup sequence (%d calls)", len(dynEndpoint.Setup))
 
 			baseEndpoint := &Endpoint{
+				Name:    "dynamic.setup",
 				context: g.NewContext(ac.Context.Ctx),
 				conn:    ac,
 				State:   setupState,
@@ -740,7 +727,6 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 		g.Debug("iterating over %d items to generate endpoints", len(iterList))
 
 		// Generate endpoints for each item in the iteration list
-		generatedCount := 0
 		for itemIdx, iterValue := range iterList {
 			// Render the endpoint template with the current iteration value
 			renderedEndpoint, err := ac.renderEndpointTemplate(dynEndpoint, iterValue, setupState)
@@ -753,23 +739,46 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 				return g.Error("duplicate endpoint name generated: %s (check your dynamic endpoint template)", renderedEndpoint.Name)
 			}
 
-			// Validate and set defaults for the rendered endpoint
-			if err := compileSpecEndpoint(renderedEndpoint, ac.Spec); err != nil {
-				return g.Error(err, "validation failed for generated endpoint: %s", renderedEndpoint.Name)
-			}
+			g.Trace("rendered dynamic endpoint: %s => %s", renderedEndpoint.Name, g.Marshal(renderedEndpoint))
 
 			// Add to endpoint map
 			ac.Spec.EndpointMap[renderedEndpoint.Name] = *renderedEndpoint
 			ac.Spec.endpointsOrdered = append(ac.Spec.endpointsOrdered, renderedEndpoint.Name)
 
-			generatedCount++
+			generatedNames = append(generatedNames, renderedEndpoint.Name)
 		}
-
-		g.Debug("generated %d endpoints from dynamic endpoint definition %d", generatedCount, dynIdx+1)
 	}
 
-	g.Debug("dynamic endpoint rendering complete, total endpoints: %d", len(ac.Spec.EndpointMap))
+	ac.Spec.rendered = true
+	g.Debug("dynamic endpoint rendering complete, generated %d total endpoints: %s", len(generatedNames), g.Marshal(generatedNames))
 	return nil
+}
+
+func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err error) {
+
+	baseAuth := AuthenticatorBase{Type: ac.Spec.Authentication.Type(), conn: ac}
+
+	switch baseAuth.Type {
+	case AuthTypeNone:
+		authenticator = &baseAuth
+	case AuthTypeBasic:
+		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
+	case AuthTypeSequence:
+		authenticator = &AuthenticatorSequence{AuthenticatorBase: baseAuth}
+	case AuthTypeOAuth2:
+		authenticator = &AuthenticatorOAuth2{AuthenticatorBase: baseAuth}
+	case AuthTypeAWSSigV4:
+		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
+	case AuthTypeHMAC:
+		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
+	}
+
+	// so we write all the properties
+	if err = g.JSONConvert(ac.Spec.Authentication, authenticator); err != nil {
+		return nil, g.Error(err, "could not make authenticator for: %s", baseAuth.Type)
+	}
+
+	return
 }
 
 // IsAuthExpired checks if the authentication has expired
@@ -786,9 +795,14 @@ func (ac *APIConnection) EnsureAuthenticated() error {
 	ac.State.Auth.Mutex.Lock()
 	defer ac.State.Auth.Mutex.Unlock()
 
+	if ac.Spec.Authentication == nil {
+		ac.State.Auth.Authenticated = true
+		return nil
+	}
+
 	// Check if authentication has expired or not authenticated
 	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
-		g.Debug("Authentication expired or not authenticated, re-authenticating...")
+		g.Trace("authentication expired or not authenticated, re-authenticating...")
 		if err := ac.Authenticate(); err != nil {
 			return g.Error(err, "failed to authenticate")
 		}
