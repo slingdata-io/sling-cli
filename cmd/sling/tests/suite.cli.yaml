@@ -1067,8 +1067,6 @@
 - id: 129
   name: Test JSON camelCase to PostgreSQL column casing (reproduce duplicate columns bug)
   run: 'sling run -d -r cmd/sling/tests/replications/r.67.json_postgres_column_casing.yaml'
-  conns:
-    - postgres
   streams: 1
   rows: 3
   output_contains:
@@ -1076,3 +1074,9 @@
     - '✓ All 3 JSON records imported successfully'
     - '✓ Correct number of unique columns (5: user_id, first_name, last_name, email_address, _sling_loaded_at)'
     - '✓ Data correctly imported into snake_case columns'
+
+- id: 130
+  name: Test HTTP write_to
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
+  output_contains:
+    - 'successfully executed step "step-03" (type: check)'

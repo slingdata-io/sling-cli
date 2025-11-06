@@ -1,0 +1,12 @@
+steps:
+  - type: http
+    url: https://swapi.dev/api/planets
+    write_to: aws_s3/tmp/planets.json
+
+  - type: read
+    from: aws_s3/tmp/planets.json
+    into: planets
+  
+  - type: check
+    check: 'length(store.planets) > 0'
+  
