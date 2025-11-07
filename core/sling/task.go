@@ -610,6 +610,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
 		case contains("CSV table encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
+		case contains("Invalid Input Error: CSV Error on Line:"):
+			helpString = "By default, Sling uses CSV serialization to pipe data into DuckDB. Try setting the `copy_method: arrow_http` property in your connection to avoid serialization errors. See https://docs.slingdata.io/connections/database-connections for more details."
 		case contains("it does not have a replica identity and publishes updates"):
 			helpString = `Since PG replication is turned on, you'll need to create a replica identity on the respective table for executing UPDATE/DELETE operations. You can use target_options.table_ddl to specify an extra statement to define the replication identity upon creation, such as:
 			
