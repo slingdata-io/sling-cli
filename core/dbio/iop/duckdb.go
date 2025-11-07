@@ -1278,7 +1278,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		// start server in background, wait for it to start
 		importContext.Wg.Read.Add()
 		go func() {
-			g.Debug("started %s for duckdb direct %s stream", httpURL, format, g.M("batch_limit", sc.BatchLimit))
+			g.Debug("started %s for duckdb direct %s stream (batch_limit=%d)", httpURL, format, sc.BatchLimit)
 			importContext.Wg.Read.Done()
 			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
 				g.Error(err, "duckdb import http server error")
