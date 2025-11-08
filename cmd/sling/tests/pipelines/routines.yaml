@@ -1,0 +1,80 @@
+routines:
+  # Simple routine to test basic functionality
+  test_logging:
+    - type: log
+      message: "Starting routine: test_logging"
+
+    - type: log
+      message: "Parameter value: {params.test_value}"
+
+    - type: log
+      message: "Environment variable: {env.TEST_ENV_VAR}"
+
+    - type: log
+      message: "Routine test_logging completed"
+
+  # Routine to validate query execution
+  validate_data:
+    - type: log
+      message: "Validating data for table: {params.table_name}"
+
+    - type: query
+      connection: "{params.connection}"
+      id: count_check
+      query: "SELECT COUNT(*) as row_count FROM {params.table_name}"
+
+    - type: log
+      message: "Table {params.table_name} has {state.count_check.result[0].row_count} rows"
+
+    - type: check
+      check: "state.count_check.result[0].row_count > 0"
+      failure_message: "Table {params.table_name} is empty"
+
+  # Routine to test file operations
+  file_operations:
+    - type: log
+      message: "Processing file: {params.file_path}"
+
+    - type: read
+      from: "{params.file_path}"
+      into: file_content
+
+    - type: check
+      check: "length(store.file_content) > 0"
+      failure_message: "File {params.file_path} is empty"
+
+    - type: log
+      message: "File content length: {length(store.file_content)}"
+
+  # Routine to test http operations
+  fetch_data:
+    - type: log
+      message: "Fetching data from: {params.url}"
+
+    - type: http
+      url: "{params.url}"
+      write_to: "{params.output_path}"
+
+    - type: read
+      from: "{params.output_path}"
+      into: api_response
+
+    - type: log
+      message: "API response received, length: {length(store.api_response)}"
+
+    - type: check
+      check: "length(store.api_response) > 0"
+      failure_message: "API response is empty"
+
+  # Routine that calls another routine (nested)
+  run_validation_suite:
+    - type: log
+      message: "Starting validation suite"
+
+    - type: routine
+      routine: "test_logging"
+      params:
+        test_value: "nested_routine_test"
+
+    - type: log
+      message: "Validation suite completed"

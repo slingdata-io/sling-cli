@@ -146,6 +146,11 @@ func (pl *Pipeline) Execute() (err error) {
 		idStepMap[step.ID()] = i
 	}
 
+	// set envs
+	for k, v := range pl.Env {
+		os.Setenv(k, g.CastToString(v))
+	}
+
 	// Execute each step
 	for i := 0; i < len(pl.steps); i++ {
 		step := pl.steps[i]

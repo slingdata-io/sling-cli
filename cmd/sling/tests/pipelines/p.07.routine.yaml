@@ -1,0 +1,139 @@
+env:
+  SLING_ROUTINES_DIR: cmd/sling/tests/pipelines
+  TEST_ENV_VAR: "environment_test_value"
+
+steps:
+  # Test 1: Simple routine with params and env
+  - type: log
+    message: "=== Test 1: Simple logging routine ==="
+
+  - type: routine
+    id: simple_test
+    routine: test_logging
+    params:
+      test_value: "hello_from_pipeline"
+    on_failure: abort
+
+  - type: check
+    check: state.simple_test.status == "success"
+    failure_message: "Simple routine test failed"
+
+  # Test 2: Create test data and validate with routine
+  - type: log
+    message: "=== Test 2: Data validation routine ==="
+
+  - type: query
+    connection: postgres
+    query: |
+      DROP TABLE IF EXISTS public.test_routine_table;
+      CREATE TABLE public.test_routine_table (
+        id INT,
+        name VARCHAR(50)
+      );
+      INSERT INTO public.test_routine_table VALUES
+        (1, 'test1'),
+        (2, 'test2'),
+        (3, 'test3');
+
+  - type: routine
+    id: validation_test
+    routine: validate_data
+    params:
+      connection: "postgres"
+      table_name: "public.test_routine_table"
+    on_failure: abort
+
+  - type: check
+    check: state.validation_test.status == "success"
+    failure_message: "Validation routine test failed"
+
+  # Test 3: File operations routine
+  - type: log
+    message: "=== Test 3: File operations routine ==="
+
+  - type: write
+    to: local//tmp/routine_test_file.txt
+    content: "This is test content for routine file operations"
+
+  - type: routine
+    id: file_test
+    routine: file_operations
+    params:
+      file_path: "local//tmp/routine_test_file.txt"
+    on_failure: abort
+
+  - type: check
+    check: state.file_test.status == "success"
+    failure_message: "File operations routine test failed"
+
+  # Test 4: HTTP routine
+  - type: log
+    message: "=== Test 4: HTTP fetch routine ==="
+
+  - type: delete
+    location: local//tmp/routine_http_test.json
+    on_failure: skip
+
+  - type: routine
+    id: http_test
+    routine: fetch_data
+    params:
+      url: "https://swapi.dev/api/planets/1"
+      output_path: "local//tmp/routine_http_test.json"
+    on_failure: abort
+
+  - type: check
+    check: state.http_test.status == "success"
+    failure_message: "HTTP routine test failed"
+
+  # Test 5: Nested routine (routine calling routine)
+  - type: log
+    message: "=== Test 5: Nested routine test ==="
+
+  - type: routine
+    id: nested_test
+    routine: run_validation_suite
+    on_failure: abort
+
+  - type: check
+    check: state.nested_test.status == "success"
+    failure_message: "Nested routine test failed"
+
+  # Test 6: Conditional routine execution
+  - type: log
+    message: "=== Test 6: Conditional routine execution ==="
+
+  - type: store
+    key: should_run_routine
+    value: true
+
+  - type: routine
+    if: "store.should_run_routine == true"
+    id: conditional_test
+    routine: test_logging
+    params:
+      test_value: "conditional_execution"
+
+  - type: check
+    check: state.conditional_test.status == "success"
+    failure_message: "Conditional routine test failed"
+
+  # Cleanup
+  - type: log
+    message: "=== Cleanup ==="
+
+  - type: query
+    connection: postgres
+    query: "DROP TABLE IF EXISTS public.test_routine_table"
+    on_failure: skip
+
+  - type: delete
+    location: local//tmp/routine_test_file.txt
+    on_failure: skip
+
+  - type: delete
+    location: local//tmp/routine_http_test.json
+    on_failure: skip
+
+  - type: log
+    message: "=== All routine tests completed successfully ==="

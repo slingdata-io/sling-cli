@@ -1080,3 +1080,23 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
   output_contains:
     - 'successfully executed step "step-08" (type: check)'
+
+- id: 131
+  name: Test Routine Hook
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.routine.yaml'
+  output_contains:
+    - '=== Test 1: Simple logging routine ==='
+    - 'Starting routine: test_logging'
+    - 'Parameter value: hello_from_pipeline'
+    - 'Environment variable: environment_test_value'
+    - '=== Test 2: Data validation routine ==='
+    - 'Validating data for table: public.test_routine_table'
+    - 'Table public.test_routine_table has'
+    - '=== Test 3: File operations routine ==='
+    - 'Processing file: local//tmp/routine_test_file.txt'
+    - '=== Test 4: HTTP fetch routine ==='
+    - 'Fetching data from: https://swapi.dev/api/planets/1'
+    - '=== Test 5: Nested routine test ==='
+    - 'Starting validation suite'
+    - '=== Test 6: Conditional routine execution ==='
+    - '=== All routine tests completed successfully ==='
