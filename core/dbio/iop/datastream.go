@@ -302,7 +302,7 @@ func (ds *Datastream) GetConfig() (configMap map[string]string) {
 	// lower the keys
 	configMapI := g.M()
 	g.JSONConvert(ds.Sp.Config, &configMapI)
-	return g.ToMapString(configMapI)
+	return g.CastToMapString(configMapI)
 }
 
 // CastRowToString returns the row as string casted

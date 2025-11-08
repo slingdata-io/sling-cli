@@ -20,7 +20,6 @@ type APIConnection struct {
 	State     *APIState
 	Context   *g.Context
 	evaluator *iop.Evaluator `json:"-" yaml:"-"`
-	sp        *iop.StreamProcessor
 }
 
 // NewAPIConnection creates an
@@ -36,7 +35,6 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		},
 		Spec:      spec,
 		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
-		sp:        iop.NewStreamProcessor(),
 	}
 
 	// Merge spec defaults state into ac.State.State first

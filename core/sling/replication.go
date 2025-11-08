@@ -1057,7 +1057,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 
 		// config overwrite
-		taskEnv := g.ToMapString(rd.Env)
+		taskEnv := g.CastToMapString(rd.Env)
 		var incrementalValStr string
 
 		if cfgOverwrite != nil {

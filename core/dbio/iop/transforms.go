@@ -831,9 +831,9 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 				stateMap[section] = g.M()
 			}
 
-			nested, err := cast.ToStringMapE(stateMap[section])
+			nested, err := g.CastToMapAnyE(stateMap[section])
 			if err != nil {
-				g.Warn("could not convert to map to fill missing key for %s: %#v", section, stateMap[section])
+				g.Warn(`could not convert to map to fill missing key for "%s": %#v`, section, stateMap[section])
 				nested = g.M()
 			} else if nested == nil {
 				nested = g.M()

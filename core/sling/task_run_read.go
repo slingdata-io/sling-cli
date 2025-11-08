@@ -273,7 +273,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 		// construct props by merging with options
 		props := append(
 			g.MapToKVArr(cfg.SrcConn.DataS()),
-			g.MapToKVArr(g.ToMapString(options))...,
+			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)
@@ -354,7 +354,7 @@ func (t *TaskExecution) ReadFromFile(cfg *Config) (df *iop.Dataflow, err error) 
 			return t.df, err
 		}
 	} else {
-		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin), g.ToMapString(options))
+		stream, err = filesys.MakeDatastream(bufio.NewReader(os.Stdin), g.CastToMapString(options))
 		if err != nil {
 			err = g.Error(err, "Could not MakeDatastream")
 			return t.df, err
