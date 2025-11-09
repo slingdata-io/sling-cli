@@ -1094,6 +1094,7 @@
     - 'Table public.test_routine_table has'
     - '=== Test 3: File operations routine ==='
     - 'Processing file: local//tmp/routine_test_file.txt'
+    - 'routine (missing_param_test) requires params that were not provided: ["test_param"]'
     - '=== Test 4: HTTP fetch routine ==='
     - 'Fetching data from: https://swapi.dev/api/planets/1'
     - '=== Test 5: Nested routine test ==='

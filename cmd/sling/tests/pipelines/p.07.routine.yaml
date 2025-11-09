@@ -66,6 +66,10 @@ steps:
       file_path: "local//tmp/routine_test_file.txt"
     on_failure: abort
 
+  - type: routine
+    routine: missing_param_test
+    on_failure: warn
+
   - type: check
     check: state.file_test.status == "success"
     failure_message: "File operations routine test failed"

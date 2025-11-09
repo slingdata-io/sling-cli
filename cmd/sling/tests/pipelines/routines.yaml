@@ -1,5 +1,6 @@
 routines:
   # Simple routine to test basic functionality
+  # required_params: [test_value]
   test_logging:
     - type: log
       message: "Starting routine: test_logging"
@@ -19,6 +20,7 @@ routines:
       value: '{ state.completion_log.message }'
 
   # Routine to validate query execution
+  # required_params: [table_name]
   validate_data:
     - type: log
       message: "Validating data for table: {params.table_name}"
@@ -36,6 +38,7 @@ routines:
       failure_message: "Table {params.table_name} is empty"
 
   # Routine to test file operations
+  # required_params: [file_path]
   file_operations:
     - type: log
       message: "Processing file: {params.file_path}"
@@ -83,3 +86,9 @@ routines:
 
     - type: log
       message: "Validation suite completed"
+
+  # Routine that calls another routine (nested)
+  # required_params: [test_param]
+  missing_param_test:
+    - type: log
+      message: "Starting validation suite"
