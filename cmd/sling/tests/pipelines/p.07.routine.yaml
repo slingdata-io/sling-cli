@@ -18,6 +18,10 @@ steps:
     check: state.simple_test.status == "success"
     failure_message: "Simple routine test failed"
 
+  - type: check
+    check: state.simple_test.completion_log_message == "Routine test_logging completed"
+    failure_message: "completion_log_message is not being set"
+
   # Test 2: Create test data and validate with routine
   - type: log
     message: "=== Test 2: Data validation routine ==="

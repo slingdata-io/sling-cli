@@ -12,6 +12,11 @@ routines:
 
     - type: log
       message: "Routine test_logging completed"
+      id: completion_log
+    
+    - type: store
+      key: output.completion_log_message
+      value: '{ state.completion_log.message }'
 
   # Routine to validate query execution
   validate_data:
