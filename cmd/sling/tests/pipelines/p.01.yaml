@@ -5,6 +5,14 @@ steps:
   - type: replication
     path: cmd/sling/tests/replications/r.19.yaml
 
+  - type: replication
+    config: 
+      source: postgres
+      target: aws_s3
+      streams:
+        public.test1k_postgres_pg_parquet:
+          object: test/test1k_postgres_pg_parquet.parquet
+        
   - type: log
     message: '{runtime_state}'
     level: warn
@@ -12,3 +20,6 @@ steps:
   - type: command
     command: [ls, -l]
     print: true
+  
+  - type: delete
+    location: aws_s3/test/test1k_postgres_pg_parquet.parquet
