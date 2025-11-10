@@ -130,6 +130,7 @@ type RunState struct {
 	EndTime    *time.Time              `json:"end_time"`
 	Duration   int64                   `json:"duration"`
 	Error      *string                 `json:"error"`
+	IncrValue  any                     `json:"incremental_value"`
 	Config     ReplicationStreamConfig `json:"config"`
 	Task       *TaskExecution          `json:"-"`
 	Step       *PipelineStepExecution  `json:"-"`
@@ -234,6 +235,7 @@ func (t *TaskExecution) StateSet() {
 		run.Status = t.Status
 		run.StartTime = t.StartTime
 		run.EndTime = t.EndTime
+		run.IncrValue = t.Config.IncrementalVal
 		run.Config = g.PtrVal(t.Config.ReplicationStream)
 		run.Config.Hooks = HookMap{} // no nested values
 		if run.StartTime != nil {
