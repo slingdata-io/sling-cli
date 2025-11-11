@@ -4,9 +4,12 @@ steps:
 
   - type: replication
     path: cmd/sling/tests/replications/r.19.yaml
+    env:
+      RESET: 'true'
 
-  - type: replication
-    config: 
+  - replication: file://cmd/sling/tests/replications/r.19.yaml
+
+  - replication: 
       source: postgres
       target: aws_s3
       streams:
