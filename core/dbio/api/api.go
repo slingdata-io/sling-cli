@@ -607,7 +607,16 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Initialize state and context for the endpoint
 	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
-	renderedEndpoint.State = stateMap
+	if renderedEndpoint.State == nil {
+		renderedEndpoint.State = stateMap
+	} else {
+		for k, v := range stateMap {
+			// only set if key doesn't exist
+			if _, exists := renderedEndpoint.State[k]; !exists {
+				renderedEndpoint.State[k] = v
+			}
+		}
+	}
 
 	return &renderedEndpoint, nil
 }
