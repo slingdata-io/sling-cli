@@ -1,0 +1,37 @@
+source: postgres
+target: local
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: geojson
+  source_options:
+    geometry_column: geom
+
+streams:
+  test_geojson_inline:
+    object: 'file:///tmp/test_geojson_output.geojson'
+    sql: |
+      -- Create test data inline using CTE
+      WITH test_data AS (
+        SELECT
+          1 as id,
+          'Point 1' as name,
+          ST_GeomFromText('POINT(9.09425263416477 53.4920035631827)', 4326)::geometry as geom
+        UNION ALL
+        SELECT
+          2 as id,
+          'Point 2' as name,
+          ST_GeomFromText('POINT(13.0532270916455 49.199065154883)', 4326)::geometry as geom
+        UNION ALL
+        SELECT
+          3 as id,
+          'Point 3' as name,
+          ST_GeomFromText('POINT(7.81573202029895 52.6718611999912)', 4326)::geometry as geom
+      )
+      SELECT
+        id,
+        name,
+        geom
+      FROM test_data
+

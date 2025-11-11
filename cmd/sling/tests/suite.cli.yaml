@@ -1063,3 +1063,14 @@
   output_contains:
     - 'execution succeeded'
 
+# Test PostGIS (PostgreSQL) to GeoJSON as target
+- id: 129
+  name: Test PostGIS (PostgreSQL) to GeoJSON as target
+  run: 'sling run -d -r cmd/sling/tests/replications/r.67.postgres_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - '"type":"FeatureCollection"'
+    - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+    - '"properties":{"id":1,"name":"Point 1"}'
+
