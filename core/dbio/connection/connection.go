@@ -479,10 +479,11 @@ func (c *Connection) setURL() (err error) {
 	} else if c.URL() != "" {
 		U, err := net.NewURL(c.URL())
 		if err != nil {
-			// this does not return the full error since that can leak passwords
-			// only in TRACE debug mode
-			g.Trace(err.Error())
-			return g.Error("could not parse provided credentials / url")
+			suffix := ""
+			if !strings.Contains(c.Name, "://") {
+				suffix = " for " + c.Name
+			}
+			return g.Error("could not parse provided credentials / url" + suffix)
 		}
 
 		c.Type = SchemeType(c.URL())
@@ -1009,7 +1010,7 @@ func (c *Connection) setURL() (err error) {
 		template = "athena://{aws_region}"
 	default:
 		if c.Type.IsUnknown() {
-			g.Trace("no type detected for %s", c.Name)
+			// g.Trace("no type detected for %s", c.Name)
 		}
 		return nil
 	}

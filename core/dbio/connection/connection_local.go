@@ -212,7 +212,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			}
 		} else {
 			// Parse URL
-			if !strings.Contains(val, "://") || strings.Contains(val, "{") || strings.Contains(val, "[") {
+			if !strings.Contains(val, "://") || strings.Contains(val, "{") || strings.Contains(val, "[") || strings.Contains(val, "\n") {
 				continue
 			}
 
