@@ -1045,7 +1045,7 @@ func (conn *AthenaConn) GetSchemata(level SchemataLevel, schemaName string, tabl
 			)
 		}
 		if err != nil {
-			if strings.Contains(err.Error(), "TYPE_NOT_FOUND") || strings.Contains(err.Error(), "GENERIC_INTERNAL_ERROR") || strings.Contains(err.Error(), "AccessDenied") {
+			if strings.Contains(err.Error(), "TYPE_NOT_FOUND") || strings.Contains(err.Error(), "GENERIC_INTERNAL_ERROR") || strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "PERMISSION_DENIED") || strings.Contains(err.Error(), "INTERNAL_ERROR_QUERY_ENGINE") {
 				g.Warn(g.ErrMsg(err))
 				err = nil
 			} else {

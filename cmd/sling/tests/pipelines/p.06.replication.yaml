@@ -1,0 +1,6 @@
+source: swapi
+target: postgres
+
+streams:
+  data_planets:
+    object: public.{stream_name}

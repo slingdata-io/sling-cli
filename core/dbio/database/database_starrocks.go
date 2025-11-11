@@ -73,6 +73,7 @@ func (conn *StarRocksConn) Connect(timeOut ...int) (err error) {
 			minor := cast.ToInt(versionParts[1])
 			patch := cast.ToInt(versionParts[2])
 			conn.version = major*100 + minor*10 + patch
+			g.Debug("starrocks version => %s (%d)", version, conn.version)
 		}
 	}
 
@@ -97,6 +98,16 @@ func (conn *StarRocksConn) GetURL(newURL ...string) string {
 	u.Query().Add("parseTime", "true")
 
 	return u.DSN
+}
+
+// NewTransaction creates a new transaction
+func (conn *StarRocksConn) NewTransaction(ctx context.Context, options ...*sql.TxOptions) (tx Transaction, err error) {
+	// transactions are BETA in 3.5. only inserts are supported in 3.5, let's disable for now
+	if conn.version >= 350 {
+		g.Debug("transactions are in BETA in starrocks 3.5, disabling")
+		return nil, nil
+	}
+	return conn.BaseConn.NewTransaction(ctx, options...)
 }
 
 func (conn *StarRocksConn) WaitAlterTable(table Table) (err error) {

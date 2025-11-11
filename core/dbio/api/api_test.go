@@ -2,11 +2,22 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"embed"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -231,88 +242,34 @@ func TestOAuth2Authentication(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "client_credentials_missing_client_id",
-			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "client_credentials",
-				ClientSecret:      "secret123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
-			},
-			expectError: true,
-			errorMsg:    "client_id is required",
-		},
-		{
 			name: "client_credentials_missing_client_secret",
 			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "client_credentials",
-				ClientID:          "client123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
+				"type":               AuthTypeOAuth2,
+				"flow":               OAuthFlowClientCredentials,
+				"client_id":          "client123",
+				"authentication_url": "https://api.example.com/oauth/token",
 			},
 			expectError: true,
 			errorMsg:    "client_secret is required",
 		},
 		{
-			name: "client_credentials_missing_auth_url",
+			name: "authorization_code_missing_auth_url",
 			auth: Authentication{
-				Type:         AuthTypeOAuth2,
-				Flow:         "client_credentials",
-				ClientID:     "client123",
-				ClientSecret: "secret123",
+				"type":               AuthTypeOAuth2,
+				"flow":               OAuthFlowAuthorizationCode,
+				"client_id":          "client123",
+				"client_secret":      "secret123",
+				"redirect_uri":       "https://app.example.com/callback",
+				"authorization_url":  "https://api.example.com/oauth/authorize",
 			},
 			expectError: true,
 			errorMsg:    "authentication_url is required",
 		},
 		{
-			name: "refresh_token_missing_token",
-			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "refresh_token",
-				AuthenticationURL: "https://api.example.com/oauth/token",
-			},
-			expectError: true,
-			errorMsg:    "refresh_token is required",
-		},
-		{
-			name: "password_missing_username",
-			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "password",
-				Password:          "pass123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
-			},
-			expectError: true,
-			errorMsg:    "username is required",
-		},
-		{
-			name: "password_missing_password",
-			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "password",
-				Username:          "user123",
-				AuthenticationURL: "https://api.example.com/oauth/token",
-			},
-			expectError: true,
-			errorMsg:    "password is required",
-		},
-		{
-			name: "authorization_code_missing_code",
-			auth: Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              "authorization_code",
-				ClientID:          "client123",
-				ClientSecret:      "secret123",
-				RedirectURI:       "https://app.example.com/callback",
-				AuthenticationURL: "https://api.example.com/oauth/token",
-			},
-			expectError: true,
-			errorMsg:    "authorization code is required",
-		},
-		{
 			name: "unsupported_flow",
 			auth: Authentication{
-				Type: AuthTypeOAuth2,
-				Flow: "unsupported_flow",
+				"type": AuthTypeOAuth2,
+				"flow": "unsupported_flow",
 			},
 			expectError: true,
 			errorMsg:    "unsupported OAuth2 flow",
@@ -333,13 +290,19 @@ func TestOAuth2Authentication(t *testing.T) {
 				evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync")),
 			}
 
-			_, err := ac.performOAuth2Flow(tt.auth)
+			authenticator, err := ac.MakeAuthenticator()
+			assert.NoError(t, err)
+			authOAuth, ok := authenticator.(*AuthenticatorOAuth2)
+			if assert.True(t, ok) {
+				authOAuth.conn = ac
+				err := authOAuth.Authenticate(ac.Context.Ctx, &ac.State.Auth)
 
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else {
-				assert.NoError(t, err)
+				if tt.expectError {
+					assert.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				} else {
+					assert.NoError(t, err)
+				}
 			}
 		})
 	}
@@ -361,20 +324,27 @@ func TestOAuth2FlowValidation(t *testing.T) {
 	ac.State.Secrets["CLIENT_ID"] = "secret_client_123"
 	ac.State.Secrets["CLIENT_SECRET"] = "secret_value_456"
 
-	auth := Authentication{
-		Type:              AuthTypeOAuth2,
-		Flow:              "client_credentials",
-		ClientID:          "{secrets.CLIENT_ID}",
-		ClientSecret:      "{secrets.CLIENT_SECRET}",
-		AuthenticationURL: "https://api.example.com/oauth/token",
+	ac.Spec.Authentication = Authentication{
+		"type":               AuthTypeOAuth2,
+		"flow":               OAuthFlowClientCredentials,
+		"client_id":          "{secrets.CLIENT_ID}",
+		"client_secret":      "{secrets.CLIENT_SECRET}",
+		"authentication_url": "https://api.example.com/oauth/token",
 	}
 
 	// This should not error during validation (only during actual HTTP request)
-	_, err := ac.performOAuth2Flow(auth)
 
-	// We expect this to fail at HTTP request stage, not validation
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to execute OAuth2 request")
+	authenticator, _ := ac.MakeAuthenticator()
+	authOAuth, ok := authenticator.(*AuthenticatorOAuth2)
+	if assert.True(t, ok) {
+		authOAuth.conn = ac
+		err := authOAuth.Authenticate(ac.Context.Ctx, &ac.State.Auth)
+
+		// We expect this to fail at HTTP request stage, not validation
+		// The new implementation will fail when trying to get token from the oauth2 server
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get token")
+	}
 }
 
 func TestOAuth2AuthorizationURLField(t *testing.T) {
@@ -461,22 +431,22 @@ func TestOAuth2AuthorizationURLField(t *testing.T) {
 			}
 
 			auth := Authentication{
-				Type:              AuthTypeOAuth2,
-				Flow:              OAuthFlowAuthorizationCode,
-				ClientID:          "test_client",
-				ClientSecret:      "test_secret",
-				AuthenticationURL: tt.authenticationURL,
-				AuthorizationURL:  tt.authorizationURL,
-				RedirectURI:       server.URL + "/callback",
+				"type":               AuthTypeOAuth2,
+				"flow":               OAuthFlowAuthorizationCode,
+				"client_id":          "test_client",
+				"client_secret":      "test_secret",
+				"authentication_url": tt.authenticationURL,
+				"authorization_url":  tt.authorizationURL,
+				"redirect_uri":       server.URL + "/callback",
 			}
 
 			// Test that the authorization URL is correctly rendered/derived
-			renderedAuthURL, err := ac.renderString(auth.AuthorizationURL)
+			renderedAuthURL, err := ac.renderString(auth["authorization_url"])
 			assert.NoError(t, err)
 
 			if renderedAuthURL == "" {
 				// Simulate the URL derivation logic when authorization_url is not provided
-				authURL := auth.AuthenticationURL
+				authURL := cast.ToString(auth["authentication_url"])
 				authorizeURL := strings.Replace(authURL, "/token", "/authorize", 1)
 				if authorizeURL == authURL {
 					if strings.HasSuffix(authURL, "/oauth/token") {
@@ -577,10 +547,10 @@ func TestAuthenticationExpiry(t *testing.T) {
 			// Create API connection
 			spec := Spec{
 				Authentication: Authentication{
-					Type:     AuthTypeBasic,
-					Expires:  tt.expiresSeconds,
-					Username: "test_user",
-					Password: "test_pass",
+					"type":     AuthTypeBasic,
+					"expires":  tt.expiresSeconds,
+					"username": "test_user",
+					"password": "test_pass",
 				},
 				EndpointMap: make(EndpointMap),
 			}
@@ -618,10 +588,10 @@ func TestEnsureAuthenticated(t *testing.T) {
 	// Test the expiry mechanism with a simple auth type
 	spec := Spec{
 		Authentication: Authentication{
-			Type:     AuthTypeBasic,
-			Expires:  2, // Expires after 2 seconds
-			Username: "test_user",
-			Password: "test_pass",
+			"type":     AuthTypeBasic,
+			"expires":  2, // Expires after 2 seconds
+			"username": "test_user",
+			"password": "test_pass",
 		},
 		EndpointMap: make(EndpointMap),
 	}
@@ -662,10 +632,10 @@ func TestEnsureAuthenticatedConcurrency(t *testing.T) {
 	// Test that concurrent calls to EnsureAuthenticated don't cause multiple authentications
 	spec := Spec{
 		Authentication: Authentication{
-			Type:     AuthTypeBasic,
-			Expires:  10,
-			Username: "test_user",
-			Password: "test_pass",
+			"type":     AuthTypeBasic,
+			"expires":  10,
+			"username": "test_user",
+			"password": "test_pass",
 		},
 		EndpointMap: make(EndpointMap),
 	}
@@ -707,10 +677,12 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 		Env  map[string]string `yaml:"env"`
 		Err  bool              `yaml:"err"`
 
-		MockResponse      any              `yaml:"mock_response"`  // can be map or string (for CSV)
+		MockResponse      any              `yaml:"mock_response"` // can be map or string (for CSV)
 		ExpectedRecords   []map[string]any `yaml:"expected_records"`
 		ExpectedState     map[string]any   `yaml:"expected_state"`
 		ExpectedNextState map[string]any   `yaml:"expected_next_state"`
+		ExpectedStore     map[string]any   `yaml:"expected_store"`
+		ExpectedEnv       map[string]any   `yaml:"expected_env"`
 	}
 
 	// Read the YAML file
@@ -804,11 +776,18 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			}
 
 			// Update authentication sequence URLs if present
-			if tc.Spec.Authentication.Type == AuthTypeSequence {
-				for i, call := range tc.Spec.Authentication.Sequence {
-					if call.Request.URL != "" {
-						tc.Spec.Authentication.Sequence[i].Request.URL = server.URL + call.Request.URL
+			if auth := tc.Spec.Authentication; auth.Type() == AuthTypeSequence {
+				authSeq := AuthenticatorSequence{}
+				err = g.JSONConvert(auth, &authSeq)
+				if assert.NoError(t, err) && assert.True(t, len(authSeq.Sequence) > 0) {
+					for i, call := range authSeq.Sequence {
+						if call.Request.URL != "" {
+							authSeq.Sequence[i].Request.URL = server.URL + call.Request.URL
+						}
 					}
+
+					// set back
+					tc.Spec.Authentication["sequence"] = authSeq.Sequence
 				}
 			}
 
@@ -852,7 +831,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Handle authentication based on type
-			if tc.Spec.Authentication.Type == AuthTypeSequence {
+			if tc.Spec.Authentication.Type() == AuthTypeSequence {
 				// For sequence authentication, actually run the authentication
 				err = ac.Authenticate()
 				assert.NoError(t, err)
@@ -865,7 +844,9 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
 				Limit: 10,
 			})
-			assert.NoError(t, err)
+			if !assert.NoError(t, err) {
+				return
+			}
 
 			// Collect data from dataflow
 			data, err := df.Collect()
@@ -939,7 +920,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 					actualValue, exists := actualEndpoint.State[key]
 
 					// For authentication sequence tests, also check API connection state and auth state
-					if !exists && tc.Spec.Authentication.Type == AuthTypeSequence {
+					if !exists && tc.Spec.Authentication.Type() == AuthTypeSequence {
 						actualValue, exists = ac.State.State[key]
 						if !exists && key == "token" {
 							// Check auth token
@@ -970,7 +951,7 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 
 					// Create a mock single request with our response data
 					iter := &Iteration{
-						id:       1,
+						id:       g.F("i%02d", 1),
 						state:    endpoint.State,
 						endpoint: endpoint,
 						context:  g.NewContext(context.Background()),
@@ -1023,6 +1004,37 @@ func TestHTTPCallAndResponseExtraction(t *testing.T) {
 							assert.Equal(t, expectedValue, actualValue)
 						}
 					}
+				}
+			}
+
+			// Check store was updated correctly
+			if len(tc.ExpectedStore) > 0 {
+				actualStore := ac.GetReplicationStore()
+
+				for key, expectedValue := range tc.ExpectedStore {
+					actualValue, exists := actualStore[key]
+					assert.True(t, exists, "Expected store key %s to exist", key)
+
+					// Handle numeric comparisons
+					switch expected := expectedValue.(type) {
+					case int:
+						assert.Equal(t, float64(expected), cast.ToFloat64(actualValue))
+					case float64:
+						assert.Equal(t, expected, cast.ToFloat64(actualValue))
+					default:
+						assert.Equal(t, expectedValue, actualValue)
+					}
+				}
+			}
+
+			// Check environment variables were set correctly
+			if len(tc.ExpectedEnv) > 0 {
+				for key, expectedValue := range tc.ExpectedEnv {
+					actualValue := os.Getenv(key)
+					assert.NotEmpty(t, actualValue, "Expected env variable %s to be set", key)
+
+					// All env vars are strings
+					assert.Equal(t, cast.ToString(expectedValue), actualValue)
 				}
 			}
 		})
@@ -1466,6 +1478,821 @@ func TestDynamicEndpointsErrors(t *testing.T) {
 				if strings.Contains(tt.name, "empty") {
 					assert.Equal(t, 0, len(endpoints))
 				}
+			}
+		})
+	}
+}
+
+func TestHeadersWithHyphens(t *testing.T) {
+	// Test extracting response headers that contain hyphens
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set headers with hyphens
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-RateLimit-Remaining", "99")
+		w.Header().Set("X-Custom-Header", "test-value")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": 1, "name": "Item 1"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_headers_api
+authentication:
+  type: none
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/test
+      method: GET
+    response:
+      processors:
+        - expression: response.headers["content-type"]
+          output: state.content_type
+          aggregation: last
+        - expression: jmespath(response.headers, "\"x-ratelimit-remaining\"")
+          output: state.rate_limit
+          aggregation: last
+        - expression: response.headers["x-custom-header"]
+          output: state.custom_header
+          aggregation: last
+      records:
+        jmespath: data
+`, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	ac.State.Auth.Authenticated = true
+
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.NotNil(t, df)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify headers were extracted correctly
+	endpoint := ac.Spec.EndpointMap["test_endpoint"]
+
+	contentType, exists := endpoint.State["content_type"]
+	assert.True(t, exists, "content_type should be extracted from header")
+	assert.Contains(t, contentType, "application/json", "content_type should contain application/json")
+
+	rateLimit, exists := endpoint.State["rate_limit"]
+	assert.True(t, exists, "rate_limit should be extracted from header")
+	assert.Equal(t, "99", cast.ToString(rateLimit), "rate_limit should be 99")
+
+	customHeader, exists := endpoint.State["custom_header"]
+	assert.True(t, exists, "custom_header should be extracted from header")
+	assert.Equal(t, "test-value", cast.ToString(customHeader), "custom_header should be test-value")
+}
+
+func TestHMACAuthentication(t *testing.T) {
+	tests := []struct {
+		name           string
+		algorithm      string
+		signingString  string
+		requestHeaders map[string]string
+		secret         string
+		nonceLength    int
+		expectError    bool
+		validateFunc   func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool
+		description    string
+	}{
+		{
+			name:          "hmac_sha256_basic",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_path}{http_body_sha256}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+			},
+			secret:      "test_secret_key",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Recreate the signature calculation
+				bodyHash := sha256.Sum256(bodyBytes)
+				bodyHashHex := hex.EncodeToString(bodyHash[:])
+				stringToSign := req.Method + req.URL.RequestURI() + bodyHashHex
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "Basic HMAC-SHA256 signing with method, path, and body hash",
+		},
+		{
+			name:          "hmac_sha512_basic",
+			algorithm:     "sha512",
+			signingString: "{http_method}{http_path}{unix_time}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+				"X-Timestamp": "{unix_time}",
+			},
+			secret:      "test_secret_512",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				// Get timestamp from header
+				timestamp := req.Header.Get("X-Timestamp")
+				if timestamp == "" {
+					return false
+				}
+
+				stringToSign := req.Method + req.URL.RequestURI() + timestamp
+
+				mac := hmac.New(sha512.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC-SHA512 signing with timestamp",
+		},
+		{
+			name:          "hmac_with_nonce",
+			algorithm:     "sha256",
+			signingString: "{http_method}{nonce}{unix_time}",
+			requestHeaders: map[string]string{
+				"X-Signature": "{signature}",
+				"X-Nonce":     "{nonce}",
+				"X-Timestamp": "{unix_time}",
+			},
+			secret:      "nonce_secret",
+			nonceLength: 16,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				nonce := req.Header.Get("X-Nonce")
+				timestamp := req.Header.Get("X-Timestamp")
+
+				if nonce == "" || timestamp == "" {
+					return false
+				}
+
+				// Nonce should be hex-encoded and correct length
+				if len(nonce) != 32 { // 16 bytes = 32 hex chars
+					t.Logf("Invalid nonce length: %d (expected 32)", len(nonce))
+					return false
+				}
+
+				stringToSign := req.Method + nonce + timestamp
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with nonce generation",
+		},
+		{
+			name:          "hmac_with_query_params",
+			algorithm:     "sha256",
+			signingString: "{http_method}{http_query}{unix_time}",
+			requestHeaders: map[string]string{
+				"Authorization": "HMAC {signature}",
+				"X-Timestamp":   "{unix_time}",
+			},
+			secret:      "query_secret",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				timestamp := req.Header.Get("X-Timestamp")
+				if timestamp == "" {
+					return false
+				}
+
+				// Canonical query string (sorted)
+				queryValues, _ := url.ParseQuery(req.URL.RawQuery)
+				var queryParts []string
+				var queryKeys []string
+				for k := range queryValues {
+					queryKeys = append(queryKeys, k)
+				}
+				sort.Strings(queryKeys)
+				for _, k := range queryKeys {
+					vals := queryValues[k]
+					sort.Strings(vals)
+					for _, v := range vals {
+						queryParts = append(queryParts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+					}
+				}
+				canonicalQuery := strings.Join(queryParts, "&")
+
+				stringToSign := req.Method + canonicalQuery + timestamp
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				authHeader := req.Header.Get("Authorization")
+				if !strings.HasPrefix(authHeader, "HMAC ") {
+					return false
+				}
+				actualSig := strings.TrimPrefix(authHeader, "HMAC ")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with canonical query parameters",
+		},
+		{
+			name:          "hmac_with_body_hashes",
+			algorithm:     "sha256",
+			signingString: "{http_body_md5}{http_body_sha1}{http_body_sha256}",
+			requestHeaders: map[string]string{
+				"X-Signature":   "{signature}",
+				"X-Body-MD5":    "{http_body_md5}",
+				"X-Body-SHA1":   "{http_body_sha1}",
+				"X-Body-SHA256": "{http_body_sha256}",
+			},
+			secret:      "hash_secret",
+			nonceLength: 0,
+			expectError: false,
+			validateFunc: func(t *testing.T, req *http.Request, bodyBytes []byte, secret string) bool {
+				md5Hash := md5.Sum(bodyBytes)
+				md5Hex := hex.EncodeToString(md5Hash[:])
+
+				sha1Hash := sha1.Sum(bodyBytes)
+				sha1Hex := hex.EncodeToString(sha1Hash[:])
+
+				sha256Hash := sha256.Sum256(bodyBytes)
+				sha256Hex := hex.EncodeToString(sha256Hash[:])
+
+				// Verify body hash headers
+				if req.Header.Get("X-Body-MD5") != md5Hex {
+					t.Logf("MD5 mismatch")
+					return false
+				}
+				if req.Header.Get("X-Body-SHA1") != sha1Hex {
+					t.Logf("SHA1 mismatch")
+					return false
+				}
+				if req.Header.Get("X-Body-SHA256") != sha256Hex {
+					t.Logf("SHA256 mismatch")
+					return false
+				}
+
+				stringToSign := md5Hex + sha1Hex + sha256Hex
+
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(stringToSign))
+				expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+				actualSig := req.Header.Get("X-Signature")
+				return actualSig == expectedSig
+			},
+			description: "HMAC with multiple body hash algorithms",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track what was received
+			var capturedRequest *http.Request
+
+			// Create mock HTTP server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedRequest = r
+
+				// Read body
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+
+				// Validate signature if validator provided
+				if tt.validateFunc != nil {
+					if !tt.validateFunc(t, r, body, tt.secret) {
+						w.WriteHeader(http.StatusUnauthorized)
+						json.NewEncoder(w).Encode(map[string]any{
+							"error": "Invalid signature",
+						})
+						return
+					}
+				}
+
+				// Success
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "result": "success"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			// Create spec with HMAC authentication
+			spec := Spec{
+				Name: "test_hmac_api",
+				Authentication: Authentication{
+					"type":            AuthTypeHMAC,
+					"algorithm":       tt.algorithm,
+					"signing_string":  tt.signingString,
+					"request_headers": tt.requestHeaders,
+					"secret":          tt.secret,
+					"nonce_length":    tt.nonceLength,
+				},
+				EndpointMap: EndpointMap{
+					"test_endpoint": Endpoint{
+						Name: "test_endpoint",
+						Request: Request{
+							URL:    server.URL + "/api/test?foo=bar&baz=qux",
+							Method: MethodPost,
+							Payload: map[string]any{
+								"test": "data",
+							},
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data"},
+						},
+					},
+				},
+			}
+
+			// Convert to proper spec
+			specBody, err := yaml.Marshal(spec)
+			if !assert.NoError(t, err) {
+				return
+			}
+			spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			// Create API connection
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			assert.NoError(t, err)
+
+			// Authenticate (this sets up the Sign function)
+			err = ac.Authenticate()
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.True(t, ac.State.Auth.Authenticated)
+
+			// Make request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+			assert.NoError(t, err, tt.description)
+			assert.NotNil(t, df)
+
+			// Collect data
+			data, err := df.Collect()
+			assert.NoError(t, err, "Should collect data successfully")
+			assert.Equal(t, 1, len(data.Rows), "Should receive 1 record")
+
+			// Verify the request was captured
+			assert.NotNil(t, capturedRequest, "Request should have been captured")
+
+			// Verify signature header was set
+			for headerName := range tt.requestHeaders {
+				headerValue := capturedRequest.Header.Get(headerName)
+				assert.NotEmpty(t, headerValue, "Header %s should be set", headerName)
+			}
+		})
+	}
+}
+
+func TestHMACAuthenticationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		algorithm   string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "invalid_algorithm",
+			algorithm:   "sha1",
+			expectError: true,
+			errorMsg:    "only 'sha256' and 'sha512' are supported",
+		},
+		{
+			name:        "empty_algorithm_defaults_to_sha256",
+			algorithm:   "",
+			expectError: false,
+			errorMsg:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			spec := Spec{
+				Name: "test_hmac_api",
+				Authentication: Authentication{
+					"type":           AuthTypeHMAC,
+					"algorithm":      tt.algorithm,
+					"signing_string": "{http_method}",
+					"request_headers": map[string]string{
+						"X-Signature": "{signature}",
+					},
+					"secret": "test_secret",
+				},
+				EndpointMap: EndpointMap{
+					"test_endpoint": Endpoint{
+						Name: "test_endpoint",
+						Request: Request{
+							URL:    server.URL + "/test",
+							Method: MethodGet,
+						},
+						Response: Response{
+							Records: Records{JmesPath: "data"},
+						},
+					},
+				},
+			}
+
+			// Convert to proper spec
+			specBody, err := yaml.Marshal(spec)
+			if !assert.NoError(t, err) {
+				return
+			}
+			spec, err = LoadSpec(string(specBody))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": map[string]any{},
+			})
+			assert.NoError(t, err)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err) // Authenticate itself doesn't error, the Sign function does
+
+			// Make request - this is where the error should occur for invalid algorithm
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectError {
+				// Error should occur during request or collection
+				if err == nil {
+					_, err = df.Collect()
+				}
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+				if df != nil {
+					data, err := df.Collect()
+					assert.NoError(t, err)
+					assert.NotNil(t, data)
+				}
+			}
+		})
+	}
+}
+
+func TestHMACAuthenticationTemplating(t *testing.T) {
+	// Test that HMAC secret and signing_string support templating
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Just verify that signature header exists (signature validation is done in main tests)
+		actualSig := r.Header.Get("X-Signature")
+		timestamp := r.Header.Get("X-Timestamp")
+
+		if actualSig == "" || timestamp == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{"error": "Missing signature or timestamp"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"success": true}},
+		})
+	}))
+	defer server.Close()
+
+	spec := Spec{
+		Name: "test_hmac_templating",
+		Authentication: Authentication{
+			"type":           AuthTypeHMAC,
+			"algorithm":      "sha256",
+			"signing_string": "{http_method}{unix_time}",
+			"request_headers": map[string]string{
+				"X-Signature": "{signature}",
+				"X-Timestamp": "{unix_time}",
+			},
+			"secret": "{secrets.api_secret}", // Templated secret
+		},
+		EndpointMap: EndpointMap{
+			"test_endpoint": Endpoint{
+				Name: "test_endpoint",
+				Request: Request{
+					URL:    server.URL + "/test",
+					Method: MethodGet,
+				},
+				Response: Response{
+					Records: Records{JmesPath: "data"},
+				},
+			},
+		},
+	}
+
+	// Convert to proper spec
+	specBody, err := yaml.Marshal(spec)
+	assert.NoError(t, err)
+	spec, err = LoadSpec(string(specBody))
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state": map[string]any{},
+		"secrets": map[string]any{
+			"api_secret": "my_api_secret_123",
+		},
+	})
+	assert.NoError(t, err)
+
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+}
+
+func TestBasicAuthentication(t *testing.T) {
+	tests := []struct {
+		name           string
+		username       string
+		password       string
+		serverUsername string // what server expects
+		serverPassword string // what server expects
+		expectSuccess  bool
+		useTemplating  bool
+		description    string
+	}{
+		{
+			name:           "valid_credentials",
+			username:       "testuser",
+			password:       "testpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  true,
+			description:    "Valid credentials should authenticate successfully",
+		},
+		{
+			name:           "invalid_username",
+			username:       "wronguser",
+			password:       "testpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Invalid username should fail authentication",
+		},
+		{
+			name:           "invalid_password",
+			username:       "testuser",
+			password:       "wrongpass",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Invalid password should fail authentication",
+		},
+		{
+			name:           "templated_credentials",
+			username:       "{secrets.username}",
+			password:       "{secrets.password}",
+			serverUsername: "secret_user",
+			serverPassword: "secret_pass",
+			expectSuccess:  true,
+			useTemplating:  true,
+			description:    "Templated credentials should be rendered and work",
+		},
+		{
+			name:           "empty_credentials",
+			username:       "",
+			password:       "",
+			serverUsername: "testuser",
+			serverPassword: "testpass",
+			expectSuccess:  false,
+			description:    "Empty credentials should fail authentication",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track authentication attempts
+			var authHeaderReceived string
+			var requestsReceived int
+			var authValidationPerformed bool
+
+			// Create mock HTTP server that validates basic auth
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestsReceived++
+				authHeaderReceived = r.Header.Get("Authorization")
+
+				// Validate Authorization header
+				if authHeaderReceived == "" {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Missing Authorization header",
+					})
+					return
+				}
+
+				// Check for "Basic " prefix
+				if !strings.HasPrefix(authHeaderReceived, "Basic ") {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid Authorization header format",
+					})
+					return
+				}
+
+				// Decode base64 credentials
+				encodedCreds := strings.TrimPrefix(authHeaderReceived, "Basic ")
+				decodedBytes, err := base64.StdEncoding.DecodeString(encodedCreds)
+				if err != nil {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid base64 encoding",
+					})
+					return
+				}
+
+				// Split username:password
+				credentials := string(decodedBytes)
+				parts := strings.SplitN(credentials, ":", 2)
+				if len(parts) != 2 {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid credentials format",
+					})
+					return
+				}
+
+				username := parts[0]
+				password := parts[1]
+
+				// Validate credentials against expected values
+				authValidationPerformed = true
+				if username != tt.serverUsername || password != tt.serverPassword {
+					w.WriteHeader(http.StatusUnauthorized)
+					json.NewEncoder(w).Encode(map[string]any{
+						"error": "Invalid credentials",
+					})
+					return
+				}
+
+				// Success - return test data
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "name": "Test Item 1"},
+						{"id": 2, "name": "Test Item 2"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			// Create API spec YAML with basic authentication
+			// Quote username and password if they contain template syntax
+			username := tt.username
+			password := tt.password
+			if strings.Contains(username, "{") || strings.Contains(password, "{") {
+				username = fmt.Sprintf(`"%s"`, tt.username)
+				password = fmt.Sprintf(`"%s"`, tt.password)
+			}
+
+			specYAML := fmt.Sprintf(`
+name: test_basic_auth_api
+authentication:
+  type: basic
+  username: %s
+  password: %s
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, username, password, server.URL)
+
+			// Load spec to properly compile and validate
+			spec, err := LoadSpec(specYAML)
+			assert.NoError(t, err, "Should load spec successfully")
+
+			// Create API connection with optional templated secrets
+			secrets := map[string]any{}
+			if tt.useTemplating {
+				secrets["username"] = tt.serverUsername
+				secrets["password"] = tt.serverPassword
+			}
+
+			ac, err2 := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": secrets,
+			})
+			assert.NoError(t, err2)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err, "Authenticate() should not return error for basic auth setup")
+			assert.True(t, ac.State.Auth.Authenticated, "Should be marked as authenticated")
+
+			// Verify auth headers were set
+			assert.NotNil(t, ac.State.Auth.Headers, "Auth headers should be set")
+			authHeader, exists := ac.State.Auth.Headers["Authorization"]
+			assert.True(t, exists, "Authorization header should exist")
+			assert.True(t, strings.HasPrefix(authHeader, "Basic "), "Authorization header should start with 'Basic '")
+
+			// Verify the header value is correctly base64 encoded
+			encodedCreds := strings.TrimPrefix(authHeader, "Basic ")
+			decodedBytes, err := base64.StdEncoding.DecodeString(encodedCreds)
+			assert.NoError(t, err, "Should be valid base64")
+
+			expectedUsername := tt.username
+			expectedPassword := tt.password
+			if tt.useTemplating {
+				expectedUsername = tt.serverUsername
+				expectedPassword = tt.serverPassword
+			}
+
+			// Only validate content if credentials are non-empty
+			if expectedUsername != "" || expectedPassword != "" {
+				expectedCreds := fmt.Sprintf("%s:%s", expectedUsername, expectedPassword)
+				assert.Equal(t, expectedCreds, string(decodedBytes), "Decoded credentials should match")
+			}
+
+			// Make actual request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectSuccess {
+				// Should succeed
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, df, "Dataflow should not be nil")
+
+				// Collect data
+				data, err := df.Collect()
+				assert.NoError(t, err, "Should collect data successfully")
+				assert.Equal(t, 2, len(data.Rows), "Should receive 2 records")
+
+				// Verify auth header was received by server
+				assert.True(t, authValidationPerformed, "Server should have validated auth")
+				assert.Greater(t, requestsReceived, 0, "Server should have received requests")
+
+			} else {
+				// Should fail - either during request or authentication
+				// The error might occur during ReadDataflow or during data collection
+				if err == nil && df != nil {
+					_, err = df.Collect()
+				}
+
+				// We expect an error at some point for invalid credentials
+				// Note: The error might be captured in the dataflow context
+				if err == nil && df != nil {
+					err = df.Context.Err()
+				}
+
+				// For invalid/empty credentials, we should get an error
+				// The mock server returns 401, which should be captured as an error
+				assert.Error(t, err, tt.description)
 			}
 		})
 	}

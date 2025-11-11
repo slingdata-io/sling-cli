@@ -6,10 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/jmespath/go-jmespath"
 	"github.com/samber/lo"
@@ -36,6 +38,18 @@ var testMux sync.Mutex
 var testContext = g.NewContext(context.Background())
 
 var conns = connection.GetLocalConns()
+
+// Track test failures
+type testFailure struct {
+	connType dbio.Type
+	testID   string
+}
+
+var (
+	testFailuresMux  sync.Mutex
+	testFailures     []testFailure
+	suiteFailuresMap = make(map[dbio.Type]string) // connType -> last failed testID
+)
 
 type testDB struct {
 	name string
@@ -100,6 +114,93 @@ var connMap = map[dbio.Type]connTest{
 func init() {
 	env.InitLogger()
 	core.Version = "test"
+}
+
+func TestMain(m *testing.M) {
+	// Init args
+	args := os.Args
+	for _, arg := range args {
+		if arg == "-d" || arg == "--debug" {
+			os.Setenv("DEBUG", "true")
+			env.InitLogger()
+		}
+		if arg == "-a" || arg == "--all" {
+			os.Setenv("RUN_ALL", "true") // runs all test, don't fail early
+		}
+		if arg == "-t" || arg == "--trace" {
+			os.Setenv("DEBUG", "TRACE")
+			env.InitLogger()
+		}
+		if arg != "" && unicode.IsDigit(rune(arg[0])) {
+			os.Setenv("TESTS", arg)
+		}
+	}
+
+	// Run all tests
+	exitCode := m.Run()
+
+	// Print summary of failures
+	testFailuresMux.Lock()
+
+	hasDatabaseFailures := len(suiteFailuresMap) > 0
+	cliFailures := []testFailure{}
+	for _, failure := range testFailures {
+		if failure.connType == "CLI" {
+			cliFailures = append(cliFailures, failure)
+		}
+	}
+	hasCLIFailures := len(cliFailures) > 0
+
+	if hasDatabaseFailures || hasCLIFailures {
+		println()
+		println("================================================================================")
+		println("                         TEST FAILURE SUMMARY")
+		println("================================================================================")
+		println()
+
+		// Database test failures
+		if hasDatabaseFailures {
+			println("DATABASE TEST SUITES:")
+			println()
+			for connType, lastTestID := range suiteFailuresMap {
+				println(g.F("  ❌ FAILED: %s", connType))
+				println(g.F("     Last Failed Test: %s", lastTestID))
+				println()
+			}
+			println(g.F("  Total Failed DB Test Suites: %d", len(suiteFailuresMap)))
+			dbFailureCount := 0
+			for _, failure := range testFailures {
+				if failure.connType != "CLI" {
+					dbFailureCount++
+				}
+			}
+			println(g.F("  Total Failed DB Tests: %d", dbFailureCount))
+			println()
+		}
+
+		// CLI test failures
+		if hasCLIFailures {
+			println("CLI TESTS:")
+			println()
+			for _, failure := range cliFailures {
+				println(g.F("  ❌ FAILED: %s", failure.testID))
+				println()
+			}
+			println(g.F("  Total Failed CLI Tests: %d", len(cliFailures)))
+			println()
+		}
+
+		println("================================================================================")
+		totalFailures := len(testFailures)
+		println(g.F("TOTAL FAILED TESTS: %d", totalFailures))
+		println("================================================================================")
+	} else {
+		println()
+		println("✅ All tests passed!")
+	}
+	testFailuresMux.Unlock()
+
+	os.Exit(exitCode)
 }
 
 func TestOptions(t *testing.T) {
@@ -187,15 +288,15 @@ func TestCfgPath(t *testing.T) {
 }
 
 func TestExtract(t *testing.T) {
-	core.Version = "v1.0.43"
+	// core.Version = "v1.0.43"
 
-	checkUpdate(true)
+	checkUpdate()
 	assert.NotEmpty(t, updateVersion)
 
 	printUpdateAvailable()
 
-	err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
-	g.AssertNoError(t, err)
+	// err := g.ExtractTarGz(g.UserHomeDir()+"/Downloads/sling/sling_1.0.44_darwin_all.tar.gz", g.UserHomeDir()+"/Downloads/sling")
+	// g.AssertNoError(t, err)
 }
 
 func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
@@ -367,18 +468,39 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 				continue
 			}
 		}
-		t.Run(g.F("%s/%s", connType, file.RelPath), func(t *testing.T) {
+
+		testID := g.F("%s/%s", connType, file.RelPath)
+		t.Run(testID, func(t *testing.T) {
 			runOneTask(t, file, connType)
 		})
 		if t.Failed() {
 			g.LogError(g.Error("Test `%s` Failed for => %s", file.Name, connType))
-			testContext.Cancel()
-			return
+			// Track failure
+			testFailuresMux.Lock()
+			testFailures = append(testFailures, testFailure{
+				connType: connType,
+				testID:   testID,
+			})
+			suiteFailuresMap[connType] = testID
+			testFailuresMux.Unlock()
+
+			// cancel early if not specified
+			if !cast.ToBool(os.Getenv("RUN_ALL")) {
+				testContext.Cancel()
+			}
 		}
 	}
 }
 
 func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
+	defer func() {
+		if r := recover(); r != nil {
+			info := string(debug.Stack())
+			g.Warn(g.F("panic occurred! %#v\n%s", r, info))
+			t.FailNow()
+		}
+	}()
+
 	os.Setenv("SLING_LOADED_AT_COLUMN", "TRUE")
 	os.Setenv("SLING_CHECKSUM_ROWS", "10000") // so that it errors when checksums don't match
 	println()

@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 
+	"github.com/samber/lo"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/dbio/connection"
@@ -200,9 +201,13 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	os.Setenv("SLING_CLI", "TRUE")
 	os.Setenv("SLING_CLI_ARGS", g.Marshal(os.Args[1:]))
 
-	// check for update, and print note
-	go checkUpdate(false)
-	defer printUpdateAvailable()
+	// set run mode
+	if os.Getenv("SLING_RUN_MODE") == "" {
+		os.Setenv(
+			"SLING_RUN_MODE",
+			lo.Ternary(pipelineCfgPath != "", "pipeline", "replication"),
+		)
+	}
 
 runReplication:
 	defer connection.CloseAll()
@@ -214,6 +219,10 @@ runReplication:
 		} else {
 			g.Info(env.CyanString(text))
 		}
+
+		// check for update, and print note
+		go checkUpdate()
+		defer printUpdateAvailable()
 	}
 
 	if pipelineCfgPath != "" {
@@ -393,13 +402,15 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 		task.Err = g.Error(replication.FailErr)
 	}
 
-	// set log sink
-	env.LogSink = func(ll *g.LogLine) {
-		ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
-		task.AppendOutput(ll)
+	// set log sink if not pipeline mode
+	if sling.IsReplicationRunMode() {
+		env.LogSink = func(ll *g.LogLine) {
+			ll.Group = g.F("%s,%s", task.ExecID, task.Config.StreamID())
+			task.AppendOutput(ll)
+		}
 	}
 
-	sling.StateSet(task) // set into store
+	task.StateSet() // set into store
 
 	if task.Err != nil {
 		err = g.Error(task.Err)
@@ -410,7 +421,7 @@ func runTask(cfg *sling.Config, replication *sling.ReplicationConfig) (err error
 	task.Context = ctx
 
 	// set into store after
-	defer sling.StateSet(task)
+	defer task.StateSet()
 
 	// run task
 	setTM()
@@ -529,7 +540,9 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 			cleanedForChunkLoad[cfg.Target.Object] = true
 		}
 
-		env.LogSink = nil // clear log sink
+		if sling.IsReplicationRunMode() {
+			env.LogSink = nil // clear log sink if replication mode
+		}
 
 		if cfg.ReplicationStream.Disabled {
 			println()
@@ -604,7 +617,7 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	// track usage
 	defer func() {
 		steps := []map[string]any{}
-		for _, s := range pipeline.Steps {
+		for _, s := range pipeline.GetSteps() {
 			steps = append(steps, s.PayloadMap())
 		}
 
@@ -623,6 +636,7 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	// set function here due to scoping
 	sling.HookRunReplication = runReplication
 
+	pipeline.Context = ctx
 	err = pipeline.Execute()
 
 	return
@@ -735,7 +749,17 @@ func setTimeout(values ...string) (deadline time.Time) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() { g.Warn("SLING_TIMEOUT = %s mins reached!", timeout) })
+		time.AfterFunc(duration, func() {
+			if cast.ToBool(os.Getenv("SLING_TIMEOUT_STACK")) {
+				// Print all goroutine stacks before panicking
+				buf := make([]byte, 1<<20) // 1MB buffer
+				stackLen := runtime.Stack(buf, true)
+				env.Println(string(buf[:stackLen]))
+				panic(g.F("SLING_TIMEOUT = %s mins reached!", timeout))
+			} else {
+				g.Warn("SLING_TIMEOUT = %s mins reached!", timeout)
+			}
+		})
 
 		// set deadline for status setting later
 		g.Debug("setting timeout for %s minutes", timeout)

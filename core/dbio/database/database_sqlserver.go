@@ -2,6 +2,7 @@ package database
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,9 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"cloud.google.com/go/cloudsqlconn"
+	cloudsqlmssql "cloud.google.com/go/cloudsqlconn/sqlserver/mssql"
+	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"golang.org/x/text/encoding/unicode"
@@ -33,9 +37,11 @@ import (
 // MsSQLServerConn is a Microsoft SQL Server connection
 type MsSQLServerConn struct {
 	BaseConn
-	URL         string
-	versionNum  int
-	versionYear int
+	URL             string
+	versionNum      int
+	versionYear     int
+	isCloudSQL      bool
+	cloudSQLCleanup func()
 }
 
 // Init initiates the object
@@ -274,7 +280,14 @@ func (conn *MsSQLServerConn) FedAuth() string {
 }
 
 func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
-	err = conn.BaseConn.Connect(timeOut...)
+
+	// Check if this is a Cloud SQL connection
+	if conn.GetProp("gcp_instance") != "" {
+		conn.isCloudSQL = true
+		err = conn.connectCloudSQL(timeOut...)
+	} else {
+		err = conn.BaseConn.Connect(timeOut...)
+	}
 	if err != nil {
 		return err
 	}
@@ -304,6 +317,165 @@ func (conn *MsSQLServerConn) Connect(timeOut ...int) (err error) {
 	}
 
 	return nil
+}
+
+// connectCloudSQL establishes a connection to Google Cloud SQL SQL Server (non-IAM)
+// Note: Cloud SQL for SQL Server does NOT support IAM authentication
+// This method provides secure Cloud SQL Proxy connectivity but still requires username/password
+func (conn *MsSQLServerConn) connectCloudSQL(timeOut ...int) error {
+	ctx := conn.Context().Ctx
+
+	// Build instance connection name: project:region:instance
+	gcpProject := conn.GetProp("gcp_project")
+	gcpRegion := conn.GetProp("gcp_region")
+	gcpInstance := conn.GetProp("gcp_instance")
+
+	if gcpProject == "" || gcpRegion == "" || gcpInstance == "" {
+		return g.Error("gcp_project, gcp_region, and gcp_instance are required for Cloud SQL connectivity")
+	}
+
+	instanceName := fmt.Sprintf("%s:%s:%s", gcpProject, gcpRegion, gcpInstance)
+	g.Debug("Cloud SQL instance connection name: %s", instanceName)
+
+	// Build dialer options (WITHOUT IAM authentication - not supported for SQL Server)
+	dialerOpts := []cloudsqlconn.Option{}
+
+	// Support lazy refresh for serverless environments
+	if cast.ToBool(conn.GetProp("gcp_lazy_refresh")) {
+		g.Trace("enabling lazy refresh mode for Cloud SQL connector")
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithLazyRefresh())
+	}
+
+	// Support three credential methods: ADC (default), credentials file, or credentials JSON
+	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
+	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))
+	} else {
+		g.Debug("Using Application Default Credentials (ADC) for Cloud SQL connectivity")
+	}
+
+	// Support private IP connections
+	defaultDialOpts := []cloudsqlconn.DialOption{}
+	if cast.ToBool(conn.GetProp("gcp_use_private_ip")) {
+		g.Trace("using private IP for Cloud SQL connection")
+		defaultDialOpts = append(defaultDialOpts, cloudsqlconn.WithPrivateIP())
+	}
+	if len(defaultDialOpts) > 0 {
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithDefaultDialOptions(defaultDialOpts...))
+	}
+
+	// Generate unique driver name to avoid conflicts with multiple Cloud SQL connections
+	driverName := fmt.Sprintf("cloudsql-sqlserver-%d", time.Now().UnixNano())
+	g.Trace("registering Cloud SQL SQL Server driver: %s", driverName)
+
+	// Register the Cloud SQL SQL Server driver
+	cleanup, err := cloudsqlmssql.RegisterDriver(driverName, dialerOpts...)
+	if err != nil {
+		return g.Error(err, "could not register Cloud SQL SQL Server driver")
+	}
+
+	// Store cleanup function for later use
+	conn.cloudSQLCleanup = func() {
+		if err := cleanup(); err != nil {
+			g.LogError(err, "error during Cloud SQL cleanup")
+		}
+	}
+
+	// Get connection parameters
+	user := conn.GetProp("user")
+	password := conn.GetProp("password")
+	database := conn.GetProp("database")
+
+	if user == "" {
+		conn.cloudSQLCleanup()
+		return g.Error("user property is required for Cloud SQL connection")
+	}
+
+	if password == "" {
+		conn.cloudSQLCleanup()
+		return g.Error("password property is required for Cloud SQL SQL Server connection (IAM authentication not supported)")
+	}
+
+	if database == "" {
+		conn.cloudSQLCleanup()
+		return g.Error("database property is required for Cloud SQL connection")
+	}
+
+	// Build SQL Server connection string for Cloud SQL
+	// Format: sqlserver://user:password@host?database=db&cloudsql=project:region:instance
+	dsn := fmt.Sprintf("sqlserver://%s:%s@localhost?database=%s&cloudsql=%s",
+		user, password, database, instanceName)
+
+	g.Trace("connecting to Cloud SQL SQL Server instance => %s", dsn)
+
+	// Open the connection using the Cloud SQL driver
+	db, err := sqlx.Open(driverName, dsn)
+	if err != nil {
+		conn.cloudSQLCleanup()
+		return g.Error(err, "could not open Cloud SQL SQL Server connection")
+	}
+
+	conn.db = db
+
+	// Configure connection pool settings
+	maxConns := cast.ToInt(conn.GetProp("max_conns"))
+	if maxConns == 0 {
+		maxConns = 25
+	}
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns / 4) // 25% of max connections
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	g.Trace("cloud SQL connection pool configured: max_open=%d, max_idle=%d", maxConns, maxConns/4)
+
+	// Set timeout if provided
+	timeout := 15
+	if len(timeOut) > 0 && timeOut[0] > 0 {
+		timeout = timeOut[0]
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	// Test the connection
+	if err = db.PingContext(timeoutCtx); err != nil {
+		conn.cloudSQLCleanup()
+		errorMsg := err.Error()
+
+		// Provide helpful troubleshooting hints
+		hints := []string{
+			"Common issues:",
+			"1. Service account missing 'Cloud SQL Client' role: gcloud projects add-iam-policy-binding PROJECT --member=serviceAccount:SA@PROJECT.iam.gserviceaccount.com --role=roles/cloudsql.client",
+			"2. Database user not created or password incorrect (IAM authentication NOT supported for SQL Server)",
+			"3. Network connectivity issue (check gcp_use_private_ip setting and VPC configuration)",
+			"4. SQL Server instance not running or connection name incorrect",
+		}
+
+		return g.Error("Cloud SQL connection ping failed: %s\n%s", errorMsg, strings.Join(hints, "\n"))
+	}
+
+	conn.BaseConn.URL = fmt.Sprintf("sqlserver://%s@cloudsql(%s)/%s", user, instanceName, database)
+	conn.Type = dbio.TypeDbSQLServer
+
+	return nil
+}
+
+// Close closes the SQL Server connection and cleans up Cloud SQL resources if applicable
+func (conn *MsSQLServerConn) Close() error {
+	// Cleanup Cloud SQL resources first
+	if conn.isCloudSQL {
+		g.Trace("closing Cloud SQL connection and cleaning up resources")
+
+		if conn.cloudSQLCleanup != nil {
+			conn.cloudSQLCleanup()
+			conn.cloudSQLCleanup = nil
+		}
+	}
+
+	// Call base connection close
+	return conn.BaseConn.Close()
 }
 
 func (conn *MsSQLServerConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (string, error) {
