@@ -3,7 +3,9 @@ set -e
 # build binary
 cd cmd/sling
 rm -f && go build .
-cd-
+cd -
+
+export RUN_ALL=true
 
 echo 'TESTING CLI'
 bash scripts/test.cli.sh
