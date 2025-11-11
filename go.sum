@@ -948,6 +948,8 @@ github.com/trinodb/trino-go-client v0.328.0/go.mod h1:e/nck9W6hy+9bbyZEpXKFlNsuf
 github.com/twmb/murmur3 v1.1.6/go.mod h1:Qq/R7NUyOfr65zD+6Q5IHKsJLwP7exErjN6lyyq3OSQ=
 github.com/twmb/murmur3 v1.1.8 h1:8Yt9taO/WN3l08xErzjeschgZU2QSrwm1kclYq+0aRg=
 github.com/twmb/murmur3 v1.1.8/go.mod h1:Qq/R7NUyOfr65zD+6Q5IHKsJLwP7exErjN6lyyq3OSQ=
+github.com/twpayne/go-geom v1.6.1 h1:iLE+Opv0Ihm/ABIcvQFGIiFBXd76oBIar9drAwHFhR4=
+github.com/twpayne/go-geom v1.6.1/go.mod h1:Kr+Nly6BswFsKM5sd31YaoWS5PeDDH2NftJTK7Gd028=
 github.com/uptrace/bun v1.2.12 h1:XRvGko5tIZ5A3T0GkLsbFFnSR2Yd6knuML8eJVGTLM0=
 github.com/uptrace/bun v1.2.12/go.mod h1:ZS4nPaEv2Du3OFqAD/irk3WVP6xTB3/9TWqjJbgKYBU=
 github.com/uptrace/bun/dialect/mssqldialect v1.2.12 h1:dkApi4IKagaGgo7udjIQkULoMr4aRj0PCCUqr7rGiig=
