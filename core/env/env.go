@@ -181,7 +181,7 @@ func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
 	if body == "" {
 		return EnvFile{
 			Connections: map[string]map[string]interface{}{},
-			Variables:   map[string]interface{}{},
+			Env:         map[string]interface{}{},
 		}, nil
 	}
 	err = yaml.Unmarshal([]byte(body), &ef)

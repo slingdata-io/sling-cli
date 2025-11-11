@@ -14,7 +14,8 @@ import (
 
 type EnvFile struct {
 	Connections map[string]map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Variables   map[string]interface{}            `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Env         map[string]interface{}            `json:"env,omitempty" yaml:"env,omitempty"`
+	Variables   map[string]interface{}            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
@@ -64,7 +65,7 @@ func (ef *EnvFile) WriteEnvFile() (err error) {
 
 	efMap := yaml.MapSlice{
 		{Key: "connections", Value: connsMap},
-		{Key: "variables", Value: ef.Variables},
+		{Key: "env", Value: ef.Env},
 	}
 
 	envBytes, err := yaml.Marshal(efMap)
@@ -148,11 +149,15 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		ef.Connections = map[string]map[string]interface{}{}
 	}
 
-	if ef.Variables == nil {
-		ef.Variables = map[string]interface{}{}
+	if ef.Env == nil {
+		if ef.Variables == nil {
+			ef.Env = map[string]interface{}{}
+		} else {
+			ef.Env = ef.Variables // support legacy
+		}
 	}
 
-	for k, v := range ef.Variables {
+	for k, v := range ef.Env {
 		if _, found := envMap[k]; !found {
 			os.Setenv(k, cast.ToString(v))
 		}
