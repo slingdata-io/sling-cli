@@ -282,7 +282,8 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	})
 
 	// Begin transaction for temp table operations
-	if err := tgtConn.BeginContext(df.Context.Ctx); err != nil {
+	txOptions := determineTxOptions(cfg, tgtConn.GetType())
+	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to temp table")
 		return 0, err
 	}
@@ -375,8 +376,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	}
 
 	// need to contain the final write in a transcation after data is loaded
-
-	txOptions := determineTxOptions(cfg, tgtConn.GetType())
+	txOptions = determineTxOptions(cfg, tgtConn.GetType())
 	if err := tgtConn.BeginContext(df.Context.Ctx, &txOptions); err != nil {
 		err = g.Error(err, "could not open transaction to write to final table")
 		return 0, err
@@ -385,7 +385,7 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	defer tgtConn.Rollback() // rollback in case of error
 
 	// pre-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePreMerge); err != nil {
 		err = g.Error(err, "error executing pre-merge hooks")
 		return 0, err
 	}
@@ -404,13 +404,13 @@ func (t *TaskExecution) WriteToDb(cfg *Config, df *iop.Dataflow, tgtConn databas
 	// Transfer data from temp to final table
 	if cnt == 0 {
 		t.SetProgress("0 rows inserted. Nothing to do.")
-	} else if err := transferData(cfg, tgtConn, tableTmp, targetTable); err != nil {
-		err = g.Error(err, "error transferring data from temp to final table")
+	} else if err := mergeData(cfg, tgtConn, tableTmp, targetTable); err != nil {
+		err = g.Error(err, "error merging data from temp to final table")
 		return 0, err
 	}
 
 	// post-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePostMerge); err != nil {
 		err = g.Error(err, "error executing post-merge hooks")
 		return 0, err
 	}
@@ -498,7 +498,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	defer tgtConn.Rollback()
 
 	// pre-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePreMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePreMerge); err != nil {
 		err = g.Error(err, "error executing pre-merge hooks")
 		return 0, err
 	}
@@ -565,7 +565,7 @@ func (t *TaskExecution) writeToDbDirectly(cfg *Config, df *iop.Dataflow, tgtConn
 	}
 
 	// post-merge-hooks
-	if t.Err = t.ExecuteHooks(HookStagePostMerge); t.Err != nil {
+	if err = t.ExecuteHooks(HookStagePostMerge); err != nil {
 		err = g.Error(err, "error executing post-merge hooks")
 		return 0, err
 	}
@@ -685,6 +685,7 @@ func initializeTempTable(cfg *Config, tgtConn database.Connection, targetTable d
 
 	// Set DDL for temp table
 	tableTmp.DDL = strings.Replace(targetTable.DDL, targetTable.Raw, tableTmp.FullName(), 1)
+	tableTmp.DDL = strings.ReplaceAll(tableTmp.DDL, targetTable.FullName(), tableTmp.FullName())
 	tableTmp.Raw = tableTmp.FullName()
 	if err := tableTmp.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys); err != nil {
 		return database.Table{}, g.Error(err, "could not set keys for "+tableTmp.FullName())
@@ -885,7 +886,7 @@ func prepareFinal(
 	return nil
 }
 
-func transferData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
+func mergeData(cfg *Config, tgtConn database.Connection, tableTmp, targetTable database.Table) error {
 	if cfg.Mode == FullRefreshMode && g.In(tgtConn.GetType(), dbio.TypeDbIceberg) {
 		// Use swap, we cannot yet insert from one table to another
 		return transferBySwappingTables(tgtConn, tableTmp, targetTable)

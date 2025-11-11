@@ -20,3 +20,11 @@ func Sling(cfg *Config) (err error) {
 
 	return
 }
+
+func IsReplicationRunMode() bool {
+	return os.Getenv("SLING_RUN_MODE") == "replication"
+}
+
+func IsPipelineRunMode() bool {
+	return os.Getenv("SLING_RUN_MODE") == "pipeline"
+}

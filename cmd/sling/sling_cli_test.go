@@ -1,4 +1,4 @@
-package main_test
+package main
 
 import (
 	"bytes"
@@ -132,7 +132,9 @@ func TestCLI(t *testing.T) {
 		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
-		t.Run(g.F("%d/%s", tt.ID, tt.Name), func(t *testing.T) {
+
+		testID := g.F("%d/%s", tt.ID, tt.Name)
+		t.Run(testID, func(t *testing.T) {
 			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
 			p, err := process.NewProc("bash")
@@ -140,7 +142,9 @@ func TestCLI(t *testing.T) {
 				return
 			}
 			p.Capture = true
-			p.Print = true
+			if os.Getenv("DEBUG") != "" {
+				p.Print = true
+			}
 			p.WorkDir = "../.."
 
 			// set new env
@@ -216,7 +220,14 @@ func TestCLI(t *testing.T) {
 			}
 		})
 		if t.Failed() {
-			break
+			// Track failure
+			testFailuresMux.Lock()
+			testFailures = append(testFailures, testFailure{
+				connType: "CLI",
+				testID:   testID,
+			})
+			testFailuresMux.Unlock()
+			// Don't break - let all tests complete
 		}
 	}
 }

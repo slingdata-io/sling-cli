@@ -11,7 +11,7 @@ Principal Instructions for LLMs:
 - The Sling API specs are intended to extract data from API sources. It is not intended for pushing or updating data into an API endpoint (typically via methods `POST`/`PATCH`/`PUT`/`DELETE`). Ignore or omit endpoints which are intended for creating/updating/deleting data into an API resource.
 - When reading API documentation, if an endpoint is marked as `DEPRECATED`, you should ignore this endpoint unless explicitly instructed by the user.
 - Don't be verbose with extra comments indicating optional additional inputs/parameters, or whether a pagination is required or not, etc. Only put comments in a section of the API spec where it might be confusing for a human.
-- Make sure to use the browser MCP (if available) to understand how the subject API resource works. This includes: Authentication, Pagination and how the response is structured for each endpoint, so that Sling can parse the data correctly.
+- Make sure to use the browser MCP (if available or equivalent) to understand how the subject API resource works. This includes: Authentication, Pagination and how the response is structured for each endpoint, so that Sling can parse the data correctly.
 - If something in the API documentation is unclear, pause and ask the human operator for instructions. It is better to get confirmation than to build an unstable API spec.
 
 
@@ -52,9 +52,7 @@ name: "Example API"
 # Description of what the API does
 description: "This API provides access to example data"
 
-# Declares queues for passing data between endpoints
-# Queues are file-backed temporary storage that operate in write-then-read mode
-# Once a queue transitions to reading mode, no more writes are allowed
+# Queues pass data between endpoints (write-then-read, temporary storage)
 queues:
   - user_ids
 
@@ -75,22 +73,8 @@ authentication:
   authentication_url: "https://api.example.com/oauth/token"
   scopes: ["read:data", "write:data"]
 
-  # Expiration time in seconds (for automatic re-authentication)
-  # When set, Sling automatically re-authenticates before each request if auth has expired
-  # Example: expires: 3600 means authentication is valid for 1 hour
-  #
-  # How it works:
-  # 1. After successful authentication, ExpiresAt timestamp is calculated (now + expires seconds)
-  # 2. Before EVERY request, Sling checks if current time >= ExpiresAt
-  # 3. If expired (or not authenticated), automatic re-authentication is triggered
-  # 4. Re-authentication is thread-safe via mutex - concurrent requests wait for a single re-auth
-  # 5. All endpoints share the same authentication state
-  #
-  # Use cases:
-  # - OAuth2 access tokens that expire after a set time
-  # - Session-based APIs with time limits
-  # - Any auth mechanism with known expiration
-  expires: 3600
+  expires: 3600  # Re-auth interval in seconds; automatic before each request if expired
+  refresh_on_expire: true  # Auto-refresh OAuth2 tokens (requires refresh_token)
 
 
 # Default settings applied to all endpoints
@@ -140,10 +124,7 @@ endpoints:
     # Ensures execution order: dependencies run first
     depends_on: []
 
-    # Stream-level overrides for replication configuration (optional)
-    # Used in special circumstances to further configure the corresponding 
-    # replication stream. Can set keys such as `mode`, `hooks`, etc.
-    overrides: {}
+    overrides: {}  # Stream processor config: mode, hooks, object, primary_key, update_key, etc.
 
     # Initial state variables for this endpoint (merged with defaults.state)
     state:
@@ -162,18 +143,7 @@ endpoints:
     # Values are read from 'sync.' scope and written to 'state.' scope for the next run.
     sync: ["last_updated"]
     
-    # Setup sequence - calls executed BEFORE the main endpoint requests (optional)
-    # Perfect for:
-    # - Async job creation patterns (create job, poll for completion, get download URL)
-    # - Authentication tokens that need special handling
-    # - Fetching metadata needed for main requests (e.g., workspace IDs, API versions)
-    # - Rate limit pre-checking
-    #
-    # Execution:
-    # - Runs ONCE before any pagination or iteration
-    # - State changes are preserved for main request
-    # - Shares same endpoint context and state
-    # - Can use same Call structure as sequence authentication
+    # Setup: runs once before main requests (job creation, metadata fetching, polling)
     setup:
       # Call 1: Create async export job
       - request:
@@ -215,17 +185,7 @@ endpoints:
       url: "{state.data_url}"  # URL obtained from setup
       method: "GET"
 
-    # Teardown sequence - calls executed AFTER the main endpoint completes (optional)
-    # Perfect for:
-    # - Cleanup of temporary resources (delete jobs, close sessions)
-    # - Sending completion notifications
-    # - Logging or analytics
-    # - Releasing locks or quotas
-    #
-    # Execution:
-    # - Runs ONCE after all pagination and iteration complete
-    # - Runs even if main request fails (for cleanup)
-    # - Has access to final endpoint state
+    # Teardown: runs once after all requests complete (cleanup, logging, notifications)
     teardown:
       - request:
           url: "{state.base_url}/export/cleanup/{state.job_id}"
@@ -256,25 +216,7 @@ endpoints:
 
     # Response processing configuration
     response:
-      # Optional: Force response format interpretation
-      # Overrides the Content-Type header from the API response
-      # Supported formats: "json", "csv", "xml"
-      #
-      # Use cases:
-      # - API returns incorrect Content-Type header
-      # - API returns data in a format different from what it advertises
-      # - You want to parse text/plain as JSON or CSV
-      #
-      # Format behaviors:
-      # - "json": Parses response as JSON, applies JMESPath, extracts records
-      # - "csv": Parses as CSV, converts to JSON records (first row = headers)
-      # - "xml": Parses as XML, converts to JSON structure
-      #
-      # If not specified, Sling auto-detects from Content-Type header:
-      # - application/json → JSON
-      # - text/csv → CSV
-      # - application/xml → XML
-      format: "json"
+      format: "json"  # Force format: json/csv/xml (overrides Content-Type header, auto-detected if omitted)
       
       # How to extract records from response
       records:
@@ -290,9 +232,7 @@ endpoints:
         # Optional: Max records to process (useful for testing)
         limit: 1000
         
-        # Optional: Specify Bloom filter parameters for efficient deduplication of large datasets
-        # Format: "<estimated_items>,<false_positive_probability>" (e.g., "1000000,0.001")
-        duplicate_tolerance: "1000000,0.001"
+        duplicate_tolerance: "1000000,0.001"  # Bloom filter for large datasets: "capacity,error_rate"
 
       # Post-processing transformations and aggregations
       processors:
@@ -374,182 +314,48 @@ endpoints:
       # ... response config ...
 ```
 
-### Queue Implementation Details
+### Queue Details
 
-Queues are backed by **temporary files** on disk and operate in a **write-then-read** manner within a single Sling run:
+**Lifecycle**: Declare → Write (via processors) → Read (via iterate) → Auto-cleanup. Queues are temporary JSONL files. Producers run before consumers (auto-ordered). Cannot write after reading starts.
 
-**Lifecycle Phases**:
+**Usage Tips**: Use descriptive names, keep items small (IDs/strings), let Sling determine execution order.
 
-1. **Declaration Phase**: Queue must be declared in top-level `queues` array before use
-   ```yaml
-   queues:
-     - product_ids
-     - order_ids
-   ```
+### Direct Queue-to-Records
 
-2. **Writing Phase**: Endpoints produce data to queues via processors
-   - Each `output: queue.<name>` writes one item to the queue file
-   - Items are JSON-encoded and written line-by-line
-   - Multiple endpoints can write to the same queue concurrently (thread-safe)
-   - Queue remains in writing mode until a consumer reads it
-
-3. **Transition Phase**: Triggered when an endpoint starts iterating over a queue
-   - `Reset()` is called to transition from writing to reading mode
-   - File pointer moves to the beginning
-   - **No more writes allowed after this point**
-   - Attempting to write after transition results in error
-
-4. **Reading Phase**: Consumer endpoint reads items from queue
-   - `Next()` reads one line at a time from the file
-   - Each line is JSON-decoded back to original value
-   - Multiple consumers can read from the same queue (but rare)
-   - Continues until end of file
-
-5. **Cleanup Phase**: When connection closes
-   - All queue temporary files are closed
-   - Files are deleted from disk
-   - Memory is freed
-
-**File Location**:
-- Temporary directory: System temp dir (e.g., `/tmp` on Linux, `%TEMP%` on Windows)
-- File name format: `sling_queue_<queue_name>_<random>.jsonl`
-- Automatically created when first write occurs
-- Automatically removed on cleanup
-
-**Execution Order**:
-- Sling uses **topological sorting** to determine execution order
-- Producer endpoints (write to queue) run before consumer endpoints (read from queue)
-- Dependencies are automatically inferred from queue usage
-- Can be explicitly set with `depends_on` if needed
-
-**Thread Safety**:
-- Queue writes are protected by mutex
-- Multiple endpoints can write concurrently
-- Reads are sequential (one item at a time)
-- Transition is protected to ensure no concurrent writes during switch
-
-**Error Handling**:
-```yaml
-# This will ERROR: Cannot write to queue after reading starts
-endpoints:
-  producer:
-    # Runs first, writes to queue
-    response:
-      processors:
-        - output: "queue.user_ids"
-
-  consumer:
-    # Runs second, reads from queue
-    iterate:
-      over: "queue.user_ids"
-
-  late_producer:
-    # Would run third, tries to write - ERROR!
-    depends_on: ["consumer"]  # This creates the problematic ordering
-    response:
-      processors:
-        - output: "queue.user_ids"  # ERROR: Queue already in reading mode
-```
-
-**Best Practices**:
-- Declare all queues upfront in `queues` array
-- Use descriptive queue names (e.g., `product_ids`, not `q1`)
-- Keep queue items simple (IDs, strings, small objects)
-- Don't use queues for large objects (use direct API calls instead)
-- Let Sling determine execution order (don't override unnecessarily)
-
-**Performance Considerations**:
-- Queue files use JSON Lines format (efficient line-by-line read/write)
-- No memory limit - queues can hold millions of items
-- Disk I/O is the bottleneck (but typically fast enough)
-- Good for passing IDs/small values between endpoints
-- Not ideal for large payloads (consider direct pass-through instead)
-
-### Special Queue Syntax: Direct Queue-to-Records
-
-You can pipe a queue directly into an endpoint's records **without making any HTTP requests**. This is useful for transforming or processing queue data without calling an API.
-
-**Key Behavior**:
-- When `iterate.into` is set to `"response.records"`, **NO HTTP request is made**
-- Queue items are read and become response records directly
-- Processors can still transform the records
-- Useful for data transformation, filtering, or aggregation
-
-**Example: Transform Queue Data**
+Set `iterate.into: "response.records"` to process queue items **without HTTP requests**. Useful for transforming, filtering, or validating queue data.
 
 ```yaml
 queues:
   - user_ids
 
 endpoints:
-  # Endpoint 1: Produces user IDs to queue
-  fetch_users:
+  fetch_users:  # Producer
     request:
       url: "{state.base_url}/users"
     response:
-      records:
-        jmespath: "users[]"
       processors:
         - expression: "record.id"
           output: "queue.user_ids"
 
-  # Endpoint 2: Transforms queue data WITHOUT API calls
-  transform_user_ids:
-    description: "Transform queue data without making API calls"
+  transform_user_ids:  # Transform without API call
     iterate:
       over: "queue.user_ids"
-      into: "response.records"  # Special syntax: NO HTTP request!
-
-    # NO request block needed - it would be ignored anyway
-
+      into: "response.records"  # No HTTP request
     response:
       processors:
-        # record is the queue item itself
         - expression: "upper(record)"
           output: "record.user_id_upper"
-        - expression: "{record}_transformed"
-          output: "record.transformed_id"
+        - expression: "record"
+          if: "!is_null(record) && record != ''"  # Filter
+          output: "queue.valid_user_ids"
 
-  # Endpoint 3: Uses transformed queue in API call
-  fetch_user_details:
+  fetch_user_details:  # Consumer with API call
     iterate:
-      over: "queue.user_ids"  # Original queue, not transformed
+      over: "queue.valid_user_ids"
       into: "state.user_id"
-
     request:
-      url: "{state.base_url}/users/{state.user_id}"  # Makes HTTP request
+      url: "{state.base_url}/users/{state.user_id}"
 ```
-
-**When to Use**:
-- **Data transformation**: Convert queue items before using in API calls
-- **Filtering**: Remove unwanted items from queue
-- **Aggregation**: Combine multiple queue items into one
-- **Validation**: Check queue items before processing
-- **Debugging**: Inspect queue contents
-
-**Example: Filter Queue Items**
-
-```yaml
-filter_valid_ids:
-  description: "Only keep valid user IDs (non-null, non-empty)"
-  iterate:
-    over: "queue.raw_user_ids"
-    into: "response.records"
-
-  response:
-    processors:
-      # Only write valid IDs to new queue
-      - expression: "record"
-        if: "!is_null(record) && record != ''"
-        output: "queue.valid_user_ids"
-```
-
-**Important Notes**:
-- The `request` block is **ignored** when using `into: "response.records"`
-- `iterate.over` must reference a queue (e.g., `queue.my_queue`)
-- Each queue item becomes one record
-- Processors run on each record as usual
-- Can write to other queues in processors
 
 ## Authentication
 
@@ -575,36 +381,16 @@ authentication:
     - "read:data"
     - "write:data"
 
-  # OAuth2 - Authorization Code Flow (automatic browser mode - recommended for CLI)
-  type: "oauth2"
-  flow: "authorization_code"
-  client_id: "{secrets.oauth_client_id}"
-  client_secret: "{secrets.oauth_client_secret}"
-  authentication_url: "https://api.example.com/oauth/token"        # Token exchange endpoint
-  authorization_url: "https://api.example.com/oauth/authorize"     # Optional: Authorization endpoint (auto-derived if not provided)
-  # redirect_uri: "" # Leave empty or use localhost for automatic browser flow
-  scopes:
-    - "read:data"
-  # Automatic browser flow:
-  # 1. Starts local HTTP server on random available port
-  # 2. Automatically opens user's default browser to authorization URL
-  # 3. User authorizes in browser
-  # 4. Browser redirects to localhost callback with authorization code
-  # 5. Local server receives code and exchanges it for access token
-  # 6. Displays success/error page to user (auto-closes after 3 seconds)
-  # 7. Timeout: 5 minutes for user to complete authorization
-  # 8. Refresh token (if provided by API) is stored for future use
-
-  # OAuth2 - Authorization Code Flow (manual mode for web apps or pre-obtained code)
+  # OAuth2 - Authorization Code (automatic browser or manual with pre-obtained code)
   type: "oauth2"
   flow: "authorization_code"
   client_id: "{secrets.oauth_client_id}"
   client_secret: "{secrets.oauth_client_secret}"
   authentication_url: "https://api.example.com/oauth/token"
-  redirect_uri: "https://myapp.example.com/callback"
-  token: "{secrets.authorization_code}" # Pre-obtained authorization code
-  # Manual mode: Assumes you have already obtained an authorization code through
-  # your own OAuth flow. Sling will exchange this code for an access token.
+  authorization_url: "https://api.example.com/oauth/authorize"  # Auto-derived if omitted
+  # redirect_uri: "" # Empty/localhost = auto browser flow, custom URI = manual mode
+  token: "{secrets.authorization_code}"  # For manual mode with pre-obtained code
+  scopes: ["read:data"]
 
   # OAuth2 - Resource Owner Password Credentials (deprecated, avoid if possible)
   type: "oauth2"
@@ -620,11 +406,11 @@ authentication:
   # OAuth2 - Refresh Token Flow
   type: "oauth2"
   flow: "refresh_token"
-  client_id: "{secrets.oauth_client_id}" # Optional for some providers
-  client_secret: "{secrets.oauth_client_secret}" # Optional for some providers
+  client_id: "{secrets.oauth_client_id}"
+  client_secret: "{secrets.oauth_client_secret}"
   refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
-  
+
   # AWS Signature v4 Authentication
   type: "aws-sigv4"
   aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
@@ -633,7 +419,18 @@ authentication:
   aws_secret_access_key: "{secrets.aws_secret_access_key}"
   aws_session_token: "{secrets.aws_session_token}"  # Optional for temporary credentials
   aws_profile: "{secrets.aws_profile}"  # Optional, use AWS profile instead of keys
-  
+
+  # HMAC Authentication (e.g., Kraken, Binance, custom APIs)
+  type: "hmac"
+  algorithm: "sha256"  # sha256 or sha512
+  secret: "{secrets.api_secret}"
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+  request_headers:
+    X-Signature: "{signature}"
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"
+  nonce_length: 16  # Optional: generates random nonce (in bytes, hex-encoded)
+
   # Custom Authentication Sequence
   type: "sequence"
   sequence:
@@ -653,17 +450,28 @@ authentication:
           Authorization: "Bearer {state.access_token}"
 ```
 
-### OAuth2 Flow Details
+### HMAC Authentication
 
-**Client Credentials Flow**: Best for server-to-server authentication where the application authenticates itself.
+HMAC signs requests using a secret key. Common for crypto exchanges and custom APIs.
 
-**Authorization Code Flow**: 
-- **Interactive Mode**: When `redirect_uri` is empty or points to localhost, Sling automatically starts a local server and opens your browser for authorization.
-- **Manual Mode**: When you have a specific redirect URI, provide the authorization code in the `token` field.
+```yaml
+authentication:
+  type: "hmac"
+  algorithm: "sha256"  # sha256 or sha512
+  secret: "{secrets.api_secret}"
+  # Template vars: http_method, http_path, http_query, http_body_*, unix_time*, date_*, nonce
+  signing_string: "{http_method}{http_path}{unix_time}{http_body_sha256}"
+  request_headers:
+    X-Signature: "{signature}"  # Computed HMAC (only available in headers)
+    X-Timestamp: "{unix_time}"
+    X-API-Key: "{secrets.api_key}"
+  nonce_length: 16  # Optional: random hex nonce (bytes)
 
-**Password Flow**: For trusted applications with user credentials (deprecated by OAuth2 spec).
-
-**Refresh Token Flow**: For refreshing expired access tokens using a previously obtained refresh token.
+# Common patterns:
+# Kraken: "{http_method}{http_path}{nonce}{http_body_sha256}"
+# Simple: "{http_method}{unix_time}{http_body_raw}"
+# AWS: "{http_method}\n{http_path}\n{http_query}\n{http_headers}"
+```
 
 ## Variable Scopes and Expressions
 
@@ -674,6 +482,7 @@ Available variable scopes:
 - `secrets`: Sensitive credentials passed to Sling (e.g., `{secrets.api_key}`).
 - `state`: Variables defined in `defaults.state` or `endpoints.<name>.state`. These are local to each endpoint iteration and can be updated by pagination (`next_state`) or processors (`output: state.<var>`).
 - `sync`: Persistent state variables read at the start of an endpoint run (values from the previous run's `state` matching the `sync` list). Use `{coalesce(sync.var, state.var, default_value)}`.
+- `context`: **Runtime values** passed from replication configuration (read-only). Includes `context.mode` (replication mode), `context.store` (state storage location), `context.limit` (max records), `context.range_start`, `context.range_end` (for backfill ranges from `source_options.range`). See the Context Variables section below for details.
 - `auth`: Authentication data after successful authentication (e.g., `{auth.token}` for OAuth2 access tokens, refresh tokens stored here).
 - `request`: Information about the current HTTP request being made (available in rule/pagination evaluation). Includes `request.url`, `request.method`, `request.headers`, `request.payload`, `request.attempts` (number of retry attempts).
 - `response`: Information about the HTTP response received (available in rule/pagination/processor evaluation). Includes `response.status`, `response.headers`, `response.text`, `response.json` (parsed body), `response.records` (extracted records).
@@ -685,153 +494,22 @@ State variables (`state.`) within an endpoint have a defined render order determ
 
 ### State Variable Rendering Order
 
-Sling uses **topological sorting** to determine the correct order to evaluate state variables based on their dependencies. This ensures that variables are always rendered with their dependencies already resolved.
-
-**How It Works**:
-
-1. **Dependency Detection**: Sling scans all state variable expressions for references to other state variables
-2. **Topological Sort**: Variables are ordered so dependencies come before dependents
-3. **Evaluation**: Variables are rendered in the determined order
-4. **Circular Detection**: Circular dependencies are caught and reported as errors
-
-**Example: Simple Dependencies**
+State variables resolve dependencies automatically via topological sort. Dependencies are evaluated first. Circular dependencies cause errors.
 
 ```yaml
 state:
-  # No dependencies - rendered first
-  base_url: "https://api.example.com"
+  base_url: "https://api.com"              # No dependencies
+  users_url: "{state.base_url}/users"      # Depends on base_url
+  full_url: "{state.users_url}?limit=100"  # Depends on users_url
+# Renders: base_url → users_url → full_url
 
-  # Depends on base_url - rendered second
-  users_url: "{state.base_url}/users"
-
-  # Depends on users_url - rendered third
-  full_url: "{state.users_url}?limit=100"
-
-  # No dependencies - rendered first (order with base_url doesn't matter)
-  api_key: "{secrets.api_key}"
+# ❌ Circular dependency error:
+state:
+  var_a: "{state.var_b}"  # A → B
+  var_b: "{state.var_a}"  # B → A (circular!)
 ```
 
-**Rendering Order**: `base_url`, `api_key` → `users_url` → `full_url`
-
-**Example: Complex Dependencies**
-
-```yaml
-state:
-  # Level 0: No dependencies
-  tenant_id: "{env.TENANT_ID}"
-  region: "us-west-2"
-
-  # Level 1: Depends on Level 0
-  base_url: "https://{state.tenant_id}.api.{state.region}.example.com"
-  workspace_id: "{sync.workspace_id}"
-
-  # Level 2: Depends on Level 1
-  api_endpoint: "{state.base_url}/workspaces/{state.workspace_id}"
-
-  # Level 3: Depends on Level 2
-  full_request_url: "{state.api_endpoint}/data?format=json"
-```
-
-**Rendering Order**:
-1. `tenant_id`, `region` (no dependencies)
-2. `base_url`, `workspace_id` (depend on Level 0)
-3. `api_endpoint` (depends on Level 1)
-4. `full_request_url` (depends on Level 2)
-
-**Circular Dependency Detection**:
-
-```yaml
-# ❌ This will ERROR: Circular dependency detected
-state:
-  var_a: "{state.var_b + 1}"  # Depends on var_b
-  var_b: "{state.var_a + 1}"  # Depends on var_a (circular!)
-
-# Error message:
-# "circular dependency detected for state variable: var_a"
-```
-
-**Complex Circular Example**:
-
-```yaml
-# ❌ This will also ERROR: Indirect circular dependency
-state:
-  var_a: "{state.var_b}"     # A depends on B
-  var_b: "{state.var_c}"     # B depends on C
-  var_c: "{state.var_a}"     # C depends on A (circular!)
-
-# Error: Chain A → B → C → A creates a cycle
-```
-
-**Best Practices**:
-
-1. **Keep Dependencies Simple**: Avoid long dependency chains
-   ```yaml
-   # ✅ GOOD: Short chain
-   state:
-     base: "https://api.com"
-     url: "{state.base}/users"
-
-   # ⚠️ AVOID: Long chain (harder to debug)
-   state:
-     a: "value"
-     b: "{state.a}"
-     c: "{state.b}"
-     d: "{state.c}"
-     e: "{state.d}"
-   ```
-
-2. **Use Descriptive Names**: Makes dependency chains easier to understand
-   ```yaml
-   # ✅ GOOD: Clear dependency flow
-   state:
-     tenant_id: "{env.TENANT}"
-     tenant_url: "https://{state.tenant_id}.api.com"
-     workspace_endpoint: "{state.tenant_url}/workspace"
-
-   # ❌ BAD: Unclear dependencies
-   state:
-     var1: "{env.TENANT}"
-     var2: "https://{state.var1}.api.com"
-     var3: "{state.var2}/workspace"
-   ```
-
-3. **Avoid Unnecessary Dependencies**: Reference external scopes directly when possible
-   ```yaml
-   # ✅ GOOD: Direct reference
-   state:
-     api_key_header: "Bearer {secrets.api_key}"
-
-   # ⚠️ UNNECESSARY: Extra indirection
-   state:
-     api_key: "{secrets.api_key}"
-     api_key_header: "Bearer {state.api_key}"
-   ```
-
-4. **Test Dependency Order**: If unsure, add debug logging to see evaluation order
-   ```yaml
-   state:
-     var_a: "{log('Rendering var_a') || 'value_a'}"
-     var_b: "{log('Rendering var_b using var_a=' + state.var_a) || state.var_a}"
-   ```
-
-**Edge Cases**:
-
-```yaml
-# ✅ VALID: Variable references itself in transformation
-state:
-  counter: "{ coalesce(state.counter, 0) + 1 }"
-  # This is allowed because it's not a circular dependency in the evaluation phase
-
-# ✅ VALID: Optional dependency (won't cause circular error)
-state:
-  workspace: "{ coalesce(state.workspace, env.DEFAULT_WORKSPACE) }"
-
-# ✅ VALID: Conditional dependency
-state:
-  url: "{ if(env.USE_CUSTOM, state.custom_url, state.default_url) }"
-  default_url: "https://api.com"
-  custom_url: "https://custom.api.com"
-```
+**Best Practices**: Keep chains short, use descriptive names, reference external scopes directly (e.g., `{secrets.key}` instead of `{state.key: "{secrets.key}"}`)
 
 ## Endpoints
 
@@ -856,7 +534,7 @@ Endpoints define specific API operations. They inherit settings from `defaults` 
 
 ```yaml
 request:
-  # Request full URL, can includ state variables
+  # Request full URL, can include state variables
   url: "{state.base_url}/users/{state.user_id}?active=true"
   # Method: GET, POST, PUT, PATCH, DELETE, etc.
   method: "POST"
@@ -999,6 +677,8 @@ response:
       # - 'record': Replaces the entire record (useful for field selection/renaming)
       # - 'queue.<queue_name>': Appends the result to the named queue.
       # - 'state.<variable>': Updates state variable (requires aggregation if processing multiple records)
+      # - 'env.<variable>': Sets an environment variable (requires aggregation, stored as string)
+      # - 'context.store.<key>': Stores value in replication store for use in hooks (requires aggregation)
       output: "record.created_at_dt"
 
     - # Example using aggregation with IF condition
@@ -1015,100 +695,65 @@ response:
       # Aggregation type: maximum, minimum, flatten, first, last (default: none)
       aggregation: "maximum"
 
-**Overwriting Records with `output: "record"`**:
-
-You can completely replace a record by setting `output: "record"`. This is useful for:
-- Selecting a subset of fields
-- Renaming fields
-- Reshaping the record structure
-- Flattening nested data
+**Overwriting Records**: Set `output: "record"` to replace entire record (field selection, renaming, flattening).
 
 ```yaml
-# Example 1: Select specific fields using object()
 processors:
-  - expression: 'object("id", record.id, "name", record.name, "email", record.email)'
+  # Select fields
+  - expression: 'object("id", record.id, "name", record.name)'
     output: "record"
-# Before: {"id": 123, "name": "John", "email": "john@example.com", "internal_id": "abc", "metadata": {...}}
-# After:  {"id": 123, "name": "John", "email": "john@example.com"}
 
-# Example 2: Rename fields
-processors:
-  - expression: 'object("user_id", record.id, "full_name", record.name, "contact_email", record.email)'
+  # Rename fields
+  - expression: 'object("user_id", record.id, "full_name", record.name)'
     output: "record"
-# Before: {"id": 123, "name": "John Doe", "email": "john@example.com"}
-# After:  {"user_id": 123, "full_name": "John Doe", "contact_email": "john@example.com"}
 
-# Example 3: Flatten nested data using jmespath()
-processors:
-  - expression: 'jmespath(record, "{id: id, name: user.profile.name, country: user.address.country}")'
+  # Flatten nested
+  - expression: 'jmespath(record, "{id: id, name: user.name, country: address.country}")'
     output: "record"
-# Before: {"id": 123, "user": {"profile": {"name": "John"}, "address": {"country": "USA"}}}
-# After:  {"id": 123, "name": "John", "country": "USA"}
-
-# Example 4: Create array fields
-processors:
-  - expression: 'object("id", record.id, "tags", array(record.tag1, record.tag2, record.tag3))'
-    output: "record"
-# Before: {"id": 123, "tag1": "urgent", "tag2": "customer", "tag3": "priority"}
-# After:  {"id": 123, "tags": ["urgent", "customer", "priority"]}
 ```
 
-**Important Notes**:
-- When using `output: "record"`, the ENTIRE record is replaced
-- All previous fields are discarded unless explicitly included in the expression
-- Use `object()` to build records field-by-field
-- Use `jmespath()` for complex transformations with projection syntax
-- Use `array()` to create array fields from multiple values
-
-**Processor IF Condition Examples**:
+**Processor IF Conditions**: Control processor execution with boolean conditions.
 
 ```yaml
-response:
-  processors:
-    # Example 1: Only process non-null values
-    - expression: "record.email"
-      if: "!is_null(record.email)"
-      output: "record.email_normalized"
+processors:
+  - expression: "record.email"
+    if: "!is_null(record.email)"  # Only non-null
+    output: "record.email_normalized"
 
-    # Example 2: Only process US customers
-    - expression: "record.id"
-      if: "record.country == 'US'"
-      output: "queue.us_customer_ids"
+  - expression: "record.id"
+    if: "record.country == 'US' && record.status == 'active'"  # Multiple checks
+    output: "queue.us_customer_ids"
 
-    # Example 3: Only process if amount is above threshold
-    - expression: "record.amount * 1.1"  # Add 10% markup
-      if: "record.amount > 100"
-      output: "record.amount_with_markup"
-
-    # Example 4: Complex condition with multiple checks
-    - expression: "record.user_id"
-      if: "record.status == 'active' && record.verified == true && record.balance > 0"
-      output: "queue.eligible_user_ids"
-
-    # Example 5: Check if field exists and is not empty
-    - expression: "upper(record.name)"
-      if: "!is_null(record.name) && record.name != ''"
-      output: "record.name_upper"
-
-    # Example 6: Date-based filtering
-    - expression: "record.id"
-      if: "date_parse(record.created_at, 'auto') > date_add(now(), -7, 'day')"
-      output: "queue.recent_ids"
-
-    # Example 7: Type checking
-    - expression: "cast(record.value, 'int')"
-      if: "is_null(try_cast(record.value, 'int')) == false"
-      output: "record.value_int"
+  - expression: "record.id"
+    if: "date_parse(record.created_at, 'auto') > date_add(now(), -7, 'day')"  # Date filtering
+    output: "queue.recent_ids"
 ```
 
-**IF Condition Best Practices**:
-- Always return a boolean (use comparison operators: `==`, `!=`, `>`, `<`, `>=`, `<=`)
-- Use `&&` for AND, `||` for OR
-- Check for null before accessing nested fields: `!is_null(record.user) && !is_null(record.user.email)`
-- Use functions like `is_null()`, `is_empty()`, `contains()` for cleaner conditions
-- Keep conditions simple and readable
-- Test with actual data to ensure conditions work as expected
+**Tip**: Use `is_null()`, `is_empty()`, `contains()` for cleaner conditions. Check nulls before accessing nested fields.
 
+**Environment Variables and Store Output**: Use `env.*` and `context.store.*` outputs to pass values to replication hooks.
+
+```yaml
+processors:
+  # Store max timestamp in environment variable (accessible as {env.LAST_UPDATE} in hooks)
+  - expression: "record.updated_at"
+    output: "env.LAST_UPDATE"
+    aggregation: "maximum"
+
+  # Store first record ID in replication store (accessible as {store.first_id} in hooks)
+  - expression: "record.id"
+    output: "context.store.first_id"
+    aggregation: "first"
+
+  # Store last processed date in store for validation in hooks
+  - expression: "record.process_date"
+    output: "context.store.last_process_date"
+    aggregation: "last"
+```
+
+**Note**: Both `env.*` and `context.store.*` require an aggregation type since they operate across all records. Values stored in `context.store.*` are available in replication hooks as `{store.key_name}`, while environment variables are accessible as `{env.VAR_NAME}`.
+
+```yaml
   rules:
     # Define actions based on response conditions (status code, headers, body).
     # Rules are evaluated in order. Execution stops at the first matching rule with action stop/fail/retry.
@@ -1138,113 +783,20 @@ response:
     #   condition: "response.status == 404" # Ignore 404s
 ```
 
-**Deduplication:** If `primary_key` is defined, Sling automatically tracks seen keys within the current run and skips duplicate records:
+**Deduplication**: When `primary_key` is set, Sling tracks seen keys and skips duplicates.
 
-**Default Behavior (In-Memory Map)**:
-- Uses a Go map to store all unique primary key values
-- Guarantees 100% deduplication accuracy (no false positives)
-- Memory usage: ~100 bytes per unique key on average
-- Best for: Small to medium datasets (< 1 million records)
-- Example memory: 1M records ≈ 100MB RAM
+- **Default**: In-memory map (100% accurate, ~100 bytes/record)
+- **Bloom Filter**: Set `duplicate_tolerance` for large datasets (>1M records). Format: `"capacity,error_rate"` (e.g., `"10000000,0.001"` = 10M items, 0.1% false positives, ~15MB memory)
 
-**Bloom Filter Mode (Low Memory)**:
-- Enabled when `duplicate_tolerance` is specified
-- Format: `"estimated_items,false_positive_probability"`
-- Uses probabilistic data structure for space efficiency
-- Memory usage: ~1.5 bytes per item for 0.1% false positive rate
-- Trade-off: Small chance of false positives (marking unique records as duplicates)
-
-**When to Use Bloom Filter**:
-- Expecting millions of records (> 1 million)
-- Memory is constrained
-- Can tolerate occasional false positives
-- Deduplication is more important than 100% accuracy
-
-**Examples**:
-
-```yaml
-# Default: Accurate but memory-intensive (no duplicate_tolerance)
-response:
-  records:
-    jmespath: "data[]"
-    primary_key: ["id"]
-    # Uses in-memory map, 100% accurate
-
-# Bloom filter: Memory-efficient for large datasets
-response:
-  records:
-    jmespath: "data[]"
-    primary_key: ["id"]
-    duplicate_tolerance: "10000000,0.001"  # 10M items, 0.1% false positive rate
-    # Memory: ~15MB instead of ~1GB
-```
-
-**Bloom Filter Parameters**:
-- `"1000000,0.001"`: 1M items, 0.1% false positives, ~1.5MB memory
-- `"10000000,0.001"`: 10M items, 0.1% false positives, ~15MB memory
-- `"100000000,0.001"`: 100M items, 0.1% false positives, ~150MB memory
-- Lower false positive rate = more memory (0.01% ≈ 2x memory vs 0.1%)
-
-**How It Works**:
-1. Primary key fields are extracted from each record
-2. Key values are concatenated with separator `||~~||`
-3. For in-memory map: Direct lookup in hash map
-4. For Bloom filter: Hash the key and check/set bits
-5. Duplicate records are silently skipped (not streamed to destination)
-
-**Rules & Retries:** Sling automatically handles rate limiting with intelligent header parsing:
-
-When `response.status == 429` and the action is `retry`, Sling checks for standard rate limit headers in this priority order:
-
-1. **`RateLimit-Reset`**: Seconds to wait before retrying (most direct)
-   - Format: `RateLimit-Reset: 45` means wait 45 seconds
-   - This is the preferred header as it's most explicit
-
-2. **`Retry-After`**: Standard HTTP header for retry delays
-   - Format: `Retry-After: 30` (seconds) or `Retry-After: Wed, 21 Oct 2025 07:28:00 GMT` (HTTP date)
-   - Widely supported across APIs
-
-3. **`RateLimit-Policy`** with **`RateLimit-Remaining`**: IETF draft format for complex rate limiting
-   - Policy format: `"hour";q=1000;w=3600, "day";q=5000;w=86400`
-     - `q=1000`: Quota of 1000 requests
-     - `w=3600`: Window of 3600 seconds (1 hour)
-   - Remaining format: `RateLimit-Remaining: 50` (50 requests left)
-   - **Calculation logic**:
-     - If `remaining == 0`: Wait for full window (`w` seconds)
-     - If `remaining > 0`: Calculate proportional wait time:
-       - `wait_time = window * (1 - (remaining / quota))`
-       - Example: `q=100, w=60, remaining=10` → `wait_time = 60 * (1 - 10/100) = 54 seconds`
-   - This provides intelligent backoff based on actual quota consumption
-
-4. **Alternate header names** (case-insensitive):
-   - `Rate-Limit-Reset`, `ratelimit-reset` (variations of RateLimit-Reset)
-   - Checked if standard headers not found
-
-**Header Priority and Fallback**:
-- If **any** rate limit header is found and valid, it **overrides** the configured `backoff` strategy
-- If **no** rate limit headers are found or they're invalid:
-  - Falls back to configured `backoff` strategy (none, constant, linear, exponential, jitter)
-  - Uses `backoff_base` and attempt number to calculate delay
-- This ensures optimal retry timing whether the API provides hints or not
-
-**Examples**:
+**Rules & Retries**: For `response.status == 429`, Sling auto-detects rate limit headers (`RateLimit-Reset`, `Retry-After`, `RateLimit-Policy`). If found, uses header value; otherwise falls back to configured `backoff` strategy.
 
 ```yaml
 rules:
-  # Will use RateLimit-Reset header if provided by API (status 429)
-  # Otherwise uses exponential backoff: 2s, 4s, 8s
   - action: "retry"
     condition: "response.status == 429"
     max_attempts: 3
-    backoff: "exponential"
-    backoff_base: 2
-
-  # Custom retry for specific error with linear backoff
-  - action: "retry"
-    condition: "response.status == 503"
-    max_attempts: 5
-    backoff: "linear"     # 3s, 6s, 9s, 12s, 15s
-    backoff_base: 3
+    backoff: "exponential"  # none, constant, linear, exponential, jitter
+    backoff_base: 2  # Fallback if no rate limit headers
 ```
 
 ## Sync State for Incremental Loads
@@ -1292,252 +844,96 @@ endpoints:
 
 ### Sync Validation
 
-Sling performs **automatic validation** at spec load time to ensure sync configuration is correct. This catches common errors early before any API calls are made.
-
-**What is Validated**:
-- Every key in the `sync` array must have a corresponding processor that writes to `state.<key>`
-- Prevents silent failures where sync values are never updated
-- Ensures incremental loading works as intended
-
-**Validation Rules**:
+Each `sync` key must have a processor writing to `state.<key>`. Validated at spec load time.
 
 ```yaml
 endpoints:
-  valid_example:
-    sync: ["last_id", "max_timestamp"]
+  valid:
+    sync: ["last_id"]
     response:
       processors:
-        # ✅ VALID: Writes to state.last_id
         - expression: "record.id"
-          output: "state.last_id"
+          output: "state.last_id"  # ✅ Matches sync key
           aggregation: "last"
-        # ✅ VALID: Writes to state.max_timestamp
-        - expression: "record.updated_at"
-          output: "state.max_timestamp"
-          aggregation: "maximum"
 
-  invalid_example:
-    sync: ["last_id", "max_timestamp"]
+  invalid:
+    sync: ["last_id"]
     response:
       processors:
-        # ✅ Has processor for last_id
         - expression: "record.id"
-          output: "state.last_id"
-          aggregation: "last"
-        # ❌ MISSING processor for max_timestamp!
-        # This will fail validation with error:
-        # "endpoint 'invalid_example' declares sync key(s) [max_timestamp]
-        #  but has no processor writing to state.max_timestamp"
+          output: "record.last_id"  # ❌ Wrong scope (should be state.last_id)
 ```
 
-**Error Messages**:
+## Context Variables
 
-When validation fails, you'll see a clear error like:
-```
-sync validation failed:
-  - endpoint 'users' declares sync key(s) [last_user_id, last_sync_time] but has no processor writing to state.last_user_id, state.last_sync_time
-  - endpoint 'orders' declares sync key(s) [max_order_date] but has no processor writing to state.max_order_date
-```
+Read-only runtime values from replication config. Support backfill and incremental modes.
 
-**Common Mistakes to Avoid**:
+| Variable | Type | Description | Set From |
+|----------|------|-------------|----------|
+| `context.mode` | string | Replication mode | Config `mode` field |
+| `context.store` | string | State storage location | Env `SLING_STATE` |
+| `context.limit` | integer | Max records | Config `source_options.limit` |
+| `context.range_start` | string | Backfill range start | Config `source_options.range` (first) |
+| `context.range_end` | string | Backfill range end | Config `source_options.range` (second) |
+
+**Pattern: Backfill with Incremental Fallback**
 
 ```yaml
-# ❌ WRONG: Writing to sync.* instead of state.*
-sync: ["last_id"]
-response:
-  processors:
-    - expression: "record.id"
-      output: "sync.last_id"  # ❌ Should be state.last_id
-      aggregation: "last"
+endpoints:
+  events:
+    sync: [last_date]
+    iterate:
+      over: >
+        range(
+          coalesce(context.range_start, sync.last_date, "2024-01-01"),  # Priority order
+          coalesce(context.range_end, date_format(now(), "%Y-%m-%d")),
+          "1d"
+        )
+      into: "state.current_date"
+    response:
+      processors:
+        - expression: "state.current_date"
+          output: "state.last_date"
+          aggregation: "maximum"
 
-# ❌ WRONG: Writing to record.* instead of state.*
-sync: ["last_timestamp"]
-response:
-  processors:
-    - expression: "record.created_at"
-      output: "record.last_timestamp"  # ❌ Should be state.last_timestamp
-      aggregation: "maximum"
-
-# ❌ WRONG: Typo in sync key name
-sync: ["last_updated_at"]
-response:
-  processors:
-    - expression: "record.updated_at"
-      output: "state.last_update_at"  # ❌ Mismatch: last_updated_at vs last_update_at
-      aggregation: "maximum"
-
-# ✅ CORRECT: Match sync key with state.* output
-sync: ["last_updated_at"]
-response:
-  processors:
-    - expression: "record.updated_at"
-      output: "state.last_updated_at"  # ✅ Matches sync key
-      aggregation: "maximum"
+# Replication config for backfill:
+# source_options:
+#   range: '2024-01-01,2024-01-31'  # Sets context.range_start/end
 ```
 
-**Best Practices**:
-- Always use aggregation with sync values (`maximum`, `minimum`, `last`, etc.)
-- Use descriptive sync key names (`last_sync_timestamp`, not `ts`)
-- Test incremental loading by running endpoint multiple times
-- Check that sync values are actually being persisted between runs
-- Use `coalesce(sync.key, default_value)` to handle first run
+**Tip**: Always use `coalesce()` to provide fallbacks. Context variables are read-only.
 
 ## Dynamic Endpoints
 
-Dynamic endpoints allow you to generate API endpoints at runtime based on discovery or catalog endpoints. This is a fully implemented feature useful when:
-- The API provides a catalog/discovery endpoint that lists available data sources
-- Endpoints are tenant-specific or user-specific
-- The list of available endpoints changes frequently
-
-**How It Works**:
-1. Authentication occurs first (if specified)
-2. Setup sequence runs to discover/fetch the list of items
-3. The `iterate` expression is evaluated to get an array of items
-4. For each item, a new endpoint is generated from the template
-5. All generated endpoints are validated, added to the spec, and executed
-
-**Structure**:
+Generate endpoints at runtime from discovery/catalog APIs. Runs after auth, before static endpoints.
 
 ```yaml
-name: "Dynamic API"
-description: "API with dynamically generated endpoints"
-
-defaults:
-  request:
-    headers:
-      Authorization: Bearer {secrets.api_key}
-  state:
-    base_url: "https://api.example.com/v1"
-
-# Define dynamic endpoint definitions
-# Each definition can generate multiple endpoints
 dynamic_endpoints:
-  - # Optional: Setup sequence to fetch/discover available items
-    setup:
+  - setup:  # Optional: fetch list of items
       - request:
-          url: "{state.base_url}/api/catalog"
-          method: "GET"
+          url: "{state.base_url}/catalog"
         response:
           processors:
-            # Extract list of tables/endpoints from response
             - expression: 'jmespath(response.json, "tables")'
               output: "state.table_list"
 
-    # Expression to iterate over (can be state var, JSON literal, or JMESPath)
-    # Examples:
-    # - "state.table_list" - state variable from setup
-    # - '["users", "orders", "products"]' - JSON literal array
-    # - '["table1", "table2"]' - inline JSON array
-    iterate: "state.table_list"
+    iterate: "state.table_list"  # Or JSON literal: '["a","b","c"]'
+    into: "state.current_table"  # Must be state.*
 
-    # Variable to store current iteration value (must be state.*)
-    into: "state.current_table"
-
-    # Template for generated endpoints
-    # All fields support template rendering with {state.current_table}
-    endpoint:
+    endpoint:  # Template with {state.current_table} access
       name: "{state.current_table.name}"
       description: "Table: {state.current_table.description}"
-
       state:
         table_id: "{state.current_table.id}"
-        table_path: "{state.current_table.path}"
-
       request:
-        url: "{state.base_url}/data/{state.table_path}"
-        method: "GET"
-        parameters:
-          limit: 1000
-
-      response:
-        records:
-          jmespath: "data.rows[]"
-          primary_key: ["id"]
-```
-
-**Key Features**:
-
-1. **Multiple Dynamic Definitions**: You can have multiple `dynamic_endpoints` entries, each generating its own set of endpoints
-2. **Template Rendering**: All endpoint fields are rendered as templates with access to:
-   - `state.current_table` (or whatever variable name you specify in `into`)
-   - All other state variables from setup
-   - Environment variables via `env.*`
-   - Secrets via `secrets.*`
-3. **Iterate Options**:
-   - **State variable**: `"state.my_list"` - from setup processors
-   - **JSON literal**: `'["a", "b", "c"]'` - inline array
-   - **JMESPath**: `"state.data.items[*].name"` - extract from state
-4. **Automatic Ordering**: Generated endpoints are automatically ordered based on dependencies
-5. **Validation**: Each generated endpoint is validated and merged with defaults
-
-**Example: Iterate Over JSON Literal**
-
-```yaml
-dynamic_endpoints:
-  - # No setup needed - iterate directly over inline list
-    iterate: '["customers", "orders", "products", "invoices"]'
-    into: "state.table_name"
-
-    endpoint:
-      name: "{state.table_name}"
-      description: "Sync {state.table_name} table"
-
-      request:
-        url: "{state.base_url}/tables/{state.table_name}/export"
-        method: "GET"
-
-      response:
-        records:
-          jmespath: "data[]"
-          primary_key: ["id"]
-```
-
-**Example: Complex Discovery**
-
-```yaml
-dynamic_endpoints:
-  - setup:
-      # First call: Get list of workspaces
-      - request:
-          url: "{state.base_url}/workspaces"
-        response:
-          processors:
-            - expression: 'jmespath(response.json, "workspaces")'
-              output: "state.workspaces"
-
-      # Second call: For each workspace, get tables
-      - request:
-          url: "{state.base_url}/workspace/{state.workspaces[0].id}/tables"
-        response:
-          processors:
-            - expression: 'jmespath(response.json, "tables")'
-              output: "state.all_tables"
-
-    iterate: "state.all_tables"
-    into: "state.table"
-
-    endpoint:
-      name: "{state.table.workspace_name}_{state.table.name}"
-      description: "{state.table.workspace_name} / {state.table.name}"
-
-      state:
-        workspace_id: "{state.table.workspace_id}"
-        table_id: "{state.table.id}"
-
-      request:
-        url: "{state.base_url}/workspace/{state.workspace_id}/table/{state.table_id}/rows"
-
+        url: "{state.base_url}/data/{state.table_id}"
       response:
         records:
           jmespath: "rows[]"
+          primary_key: ["id"]
 ```
 
-**Important Notes**:
-- Dynamic endpoints are rendered **after authentication** and **before** static endpoint execution
-- Generated endpoint names must be unique (duplicates will cause an error)
-- The `into` variable must start with `state.`
-- All fields in the endpoint template support template rendering
-- Generated endpoints share the same `defaults` as static endpoints
+**Notes**: Generated names must be unique. All endpoint fields support templates with access to `state.*`, `env.*`, `secrets.*`.
 
 ## Template for New API Specs
 
@@ -1545,103 +941,47 @@ dynamic_endpoints:
 name: "API Name"
 description: "API Description"
 
-# Optional: Declare queues if needed
-# queues:
-#   - item_ids
-
 authentication:
-  type: "basic" # basic|oauth2|aws-sigv4|sequence|""
+  type: "basic"
   username: "{secrets.username}"
   password: "{secrets.password}"
-  
-  # OAuth2 Client Credentials example (most common for APIs):
-  # type: "oauth2"
-  # flow: "client_credentials"
-  # client_id: "{secrets.oauth_client_id}"
-  # client_secret: "{secrets.oauth_client_secret}"
-  # authentication_url: "https://api.example.com/oauth/token"
-  # scopes: ["read:data"]
 
 defaults:
+  state:
+    base_url: "https://api.base.url/v1"
+    limit: 100
   request:
-    method: "GET"
     headers:
       Accept: "application/json"
-      # Common headers like User-Agent can go here
-    timeout: 30
-    rate: 10 # Adjust based on API limits
+    rate: 10
     concurrency: 5
-  state:
-    base_url: "https://api.base.url/v1" # Base URL for API requests
-    limit: 100 # Default page size or limit
 
 endpoints:
-  # Key is the endpoint name
   items:
-    description: "Fetch a list of items"
+    description: "Fetch items"
     state:
-      # Example state for pagination or filtering
-      starting_after: '{sync.last_item_id}' # For cursor pagination + incremental
-      created_since: '{coalesce(sync.last_sync_time, date_format(date_add(now(), -1, 'day'), '%Y-%m-%d'))}'
-
-    # Persist last item ID and timestamp for next run
-    sync: [last_item_id, last_sync_time]
+      starting_after: '{coalesce(sync.last_item_id, null)}'
+    sync: [last_item_id]
 
     request:
-      url: "{state.base_url}/items" # Relative to defaults.request.url
+      url: "{state.base_url}/items"
       parameters:
         limit: '{state.limit}'
         starting_after: '{state.starting_after}'
-        created_since: '{state.created_since}'
 
     pagination:
-      # Update 'starting_after' state with the ID of the last record from the response
       next_state:
         starting_after: "{response.records[-1].id}"
-      # Stop when the API indicates no more pages or returns an empty list
-      stop_condition: 'jmespath(response.json, "has_more") || length(response.records) == 0'
+      stop_condition: 'length(response.records) == 0'
 
     response:
       records:
-        jmespath: "data[]" # JMESPath to extract records array
-        primary_key: ["id"] # Field(s) for deduplication
-        # Optional: for large datasets
-        # duplicate_tolerance: "1000000,0.001"
-
+        jmespath: "data[]"
+        primary_key: ["id"]
       processors:
-        # Store the ID of the last record processed in this run for the next pagination cursor
         - expression: "record.id"
           output: "state.last_item_id"
           aggregation: "last"
-
-        # Store the latest updated_at timestamp for the next incremental run
-        - expression: "record.updated_at"
-          output: "state.last_sync_time"
-          aggregation: "maximum"
-
-        # Optional: Send IDs to a queue for another endpoint
-        # - expression: "record.id"
-        #   output: "queue.item_ids"
-
-      # Optional: Custom rules for this endpoint
-      # rules:
-      #   - action: "continue"
-      #     condition: "response.status == 404" # Ignore 404s
-
-  # Optional: Another endpoint using iteration
-  # get_item_details:
-  #   description: "Get details for each item ID"
-  #   iterate:
-  #     over: "queue.item_ids"
-  #     into: "state.current_item_id"
-  #     concurrency: 10
-  #   request:
-  #     url: "{state.base_url}/items/{state.current_item_id}"
-  #   response:
-  #     records:
-  #       jmespath: "data" # Assuming single item response
-  #       primary_key: ["id"]
-
 ```
 
 ---

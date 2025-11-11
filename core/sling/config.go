@@ -836,6 +836,9 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_sling_duckdb_tmp")
 				tableTmp.Schema = "main"
 				tgtOpts.TableTmp = tableTmp.FullName()
+			} else {
+				tableTmp := makeTempTableName(cfg.TgtConn.Type, table, "_tmp")
+				tgtOpts.TableTmp = tableTmp.FullName()
 			}
 		}
 	}
@@ -911,6 +914,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 		if cfg.StreamName != "" {
 			m["stream_name"] = strings.ToLower(cfg.StreamName)
 		}
+		if cfg.Source.UpdateKey != "" {
+			m["update_key"] = cfg.SrcConn.Type.Quote(cfg.Source.UpdateKey)
+		}
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
@@ -934,6 +940,14 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			}
 		}
 		m["object_full_name"] = table.FDQN()
+
+		// set temp table
+		if tOpts := cfg.Target.Options; tOpts != nil {
+			tableTmp, _ := database.ParseTableName(tOpts.TableTmp, cfg.TgtConn.Type)
+			m["object_temp_schema"] = tableTmp.Schema
+			m["object_temp_table"] = tableTmp.Name
+			m["object_temp_full_name"] = tableTmp.FDQN()
+		}
 
 		// legacy
 		m["target_table"] = m["object_table"]
@@ -1012,6 +1026,9 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 				streamScanner := dbio.TypeDbDuckDb.GetTemplateValue("function." + duck.GetScannerFunc(fileFormat))
 				m["stream_scanner"] = g.R(streamScanner, "uri", strings.TrimPrefix(uri, "file://"))
 			}
+			if cfg.Source.UpdateKey != "" {
+				m["update_key"] = dbio.TypeDbDuckDb.Quote(cfg.Source.UpdateKey)
+			}
 		}
 	}
 
@@ -1083,9 +1100,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	for origKey, v := range m {
-		for _, key := range lo.Keys(nm) {
-			if strings.HasPrefix(origKey, key+"_") {
-				nm[key][strings.TrimPrefix(origKey, key+"_")] = v
+		for _, prefix := range lo.Keys(nm) {
+			if strings.HasPrefix(origKey, prefix+"_") {
+				nm[prefix][strings.TrimPrefix(origKey, prefix+"_")] = v
+				// TODO: use evaluator instead of dot notation patch
+				newKey := prefix + "." + strings.TrimPrefix(origKey, prefix+"_")
+				m[newKey] = v
 			}
 		}
 	}

@@ -1,0 +1,85 @@
+source: LOCAL
+target: POSTGRES
+
+hooks:
+  start:
+    - type: command
+      command: bash cmd/sling/tests/replications/r.67.json_postgres_column_casing.yaml.prep.sh
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.temp_json_file;
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify total records were imported
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.temp_json_file
+      into: result_count
+
+    - type: check
+      check: int_parse(store.result_count[0].count) == 3
+      success_message: "✓ All 3 JSON records imported successfully"
+
+    # Check what columns were created - this should reveal the bug
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        AND table_name = 'temp_json_file'
+        ORDER BY ordinal_position
+      into: result_columns
+
+    - type: log
+      message: |
+        Columns created: {store.result_columns}
+
+    # This should fail if duplicate columns (both camelCase and snake_case) are created
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(DISTINCT column_name) as unique_count FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'temp_json_file'
+      into: result_unique_count
+
+    - type: check
+      check: int_parse(store.result_unique_count[0].unique_count) == 5
+      success_message: "✓ Correct number of unique columns (5: user_id, first_name, last_name, email_address, _sling_loaded_at)"
+      failure_message: "✗ Incorrect number of columns - found {store.result_unique_count[0].unique_count}, expected 5. This might indicate duplicate columns with different casings."
+
+    # Verify data is in snake_case columns
+    - type: query
+      connection: '{target.name}'
+      query: SELECT user_id, first_name, last_name, email_address FROM public.temp_json_file ORDER BY user_id
+      into: result_data
+
+    - type: log
+      message: |
+        Data in snake_case columns: {store.result_data}
+
+    - type: check
+      check: store.result_data[0].first_name == "John"
+      success_message: "✓ Data correctly imported into snake_case columns"
+
+    # Cleanup files
+    - type: command
+      command: rm -rf /tmp/sling-test-files/
+
+    # Cleanup table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.temp_json_file;
+
+streams:
+  file:///tmp/sling-test-files/camel_case_data.json:
+    object: public.temp_json_file
+    mode: full-refresh
+    source_options:
+      flatten: true
+    target_options:
+      column_casing: snake

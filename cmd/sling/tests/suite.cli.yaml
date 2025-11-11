@@ -1063,14 +1063,31 @@
   output_contains:
     - 'execution succeeded'
 
-# Test PostGIS (PostgreSQL) to GeoJSON as target
+# Test JSON camelCase to PostgreSQL with column_casing (should only create snake_case columns)
 - id: 129
+  name: Test JSON camelCase to PostgreSQL column casing (reproduce duplicate columns bug)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.67.json_postgres_column_casing.yaml'
+  streams: 1
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - '✓ All 3 JSON records imported successfully'
+    - '✓ Correct number of unique columns (5: user_id, first_name, last_name, email_address, _sling_loaded_at)'
+    - '✓ Data correctly imported into snake_case columns'
+
+- id: 130
+  name: Test HTTP write_to
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
+  output_contains:
+    - 'successfully executed step "step-08" (type: check)'
+
+# Test PostGIS (PostgreSQL) to GeoJSON as target
+- id: 131
   name: Test PostGIS (PostgreSQL) to GeoJSON as target
-  run: 'sling run -d -r cmd/sling/tests/replications/r.67.postgres_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
   rows: 3
   output_contains:
     - 'execution succeeded'
     - '"type":"FeatureCollection"'
     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
     - '"properties":{"id":1,"name":"Point 1"}'
-

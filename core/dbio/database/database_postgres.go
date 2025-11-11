@@ -2,12 +2,17 @@ package database
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/cloudsqlconn"
+	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
+	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/spf13/cast"
@@ -20,7 +25,9 @@ import (
 // PostgresConn is a Postgres connection
 type PostgresConn struct {
 	BaseConn
-	URL string
+	URL             string
+	isCloudSQL      bool
+	cloudSQLCleanup func()
 }
 
 // Init initiates the object
@@ -43,6 +50,14 @@ func (conn *PostgresConn) Init() error {
 
 // Connect connects to the database
 func (conn *PostgresConn) Connect(timeOut ...int) error {
+	// Check if this is a Cloud SQL connection with IAM auth
+	if conn.GetProp("gcp_instance") != "" {
+		conn.isCloudSQL = true
+		g.Trace("detected Cloud SQL connection with IAM authentication")
+		return conn.connectCloudSQL(timeOut...)
+	}
+
+	// Standard Postgres connection
 	err := conn.BaseConn.Connect(timeOut...)
 	if err != nil {
 		return err
@@ -57,6 +72,161 @@ func (conn *PostgresConn) Connect(timeOut ...int) error {
 	}
 
 	return nil
+}
+
+// connectCloudSQL connects to Google Cloud SQL using IAM authentication
+func (conn *PostgresConn) connectCloudSQL(timeOut ...int) error {
+	ctx := conn.Context().Ctx
+
+	// Build instance connection name: project:region:instance
+	instanceName := fmt.Sprintf("%s:%s:%s",
+		conn.GetProp("gcp_project"),
+		conn.GetProp("gcp_region"),
+		conn.GetProp("gcp_instance"),
+	)
+
+	g.Trace("connecting to Cloud SQL instance: %s", instanceName)
+
+	// Build dialer options with IAM authentication
+	dialerOpts := []cloudsqlconn.Option{
+		cloudsqlconn.WithIAMAuthN(),
+	}
+
+	// Check for serverless environment (lazy refresh)
+	if cast.ToBool(conn.GetProp("gcp_lazy_refresh")) {
+		g.Trace("enabling lazy refresh for serverless environment")
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithLazyRefresh())
+	}
+
+	// Handle credential options (in priority order)
+	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
+		g.Trace("using explicit GCP credentials from JSON content")
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
+	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
+		g.Trace("using explicit GCP credentials file: %s", credsFile)
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))
+	} else {
+		g.Trace("using Application Default Credentials (ADC) for Cloud SQL")
+	}
+
+	// Build default dial options
+	var defaultDialOpts []cloudsqlconn.DialOption
+	if conn.GetProp("gcp_use_private_ip") == "true" {
+		g.Trace("configuring private IP for Cloud SQL connection")
+		defaultDialOpts = append(defaultDialOpts, cloudsqlconn.WithPrivateIP())
+	}
+	if len(defaultDialOpts) > 0 {
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithDefaultDialOptions(defaultDialOpts...))
+	}
+
+	// Format IAM username (ensure lowercase, trim .gserviceaccount.com, add .iam suffix)
+	user := strings.ToLower(conn.GetProp("user", "username"))
+	if user == "" {
+		return g.Error("username is required for Cloud SQL IAM authentication")
+	}
+	user = strings.TrimSuffix(user, ".gserviceaccount.com")
+
+	// Get database name
+	dbName := conn.GetProp("database")
+	if dbName == "" {
+		return g.Error("database is required for Cloud SQL connection")
+	}
+
+	// Register the pgxv5 driver with Cloud SQL connector
+	// This automatically handles IAM token generation and injection
+	driverName := fmt.Sprintf("cloudsql-postgres-%d", time.Now().UnixNano())
+	g.Trace("driver options summary: IAM=true, LazyRefresh=%v, PrivateIP=%v",
+		cast.ToBool(conn.GetProp("gcp_lazy_refresh")),
+		cast.ToBool(conn.GetProp("gcp_use_private_ip")))
+
+	cleanup, err := pgxv5.RegisterDriver(driverName, dialerOpts...)
+	if err != nil {
+		return g.Error(err, "could not register Cloud SQL driver")
+	}
+
+	conn.cloudSQLCleanup = func() {
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			g.LogError(cleanupErr, "error during Cloud SQL cleanup")
+		}
+	}
+
+	// Build connection string with instance connection name as host
+	// For IAM auth, OMIT password field entirely - IAM handles authentication via token injection
+	// The pgxv5 driver will extract the host and use it as the instance connection name
+	connString := fmt.Sprintf("host=%s user=%s dbname=%s sslmode=disable", instanceName, user, dbName)
+	g.Trace("full connection string format: host=%s user=%s dbname=%s sslmode=disable", instanceName, user, dbName)
+
+	sqlDB, err := sql.Open(driverName, connString)
+	if err != nil {
+		if conn.cloudSQLCleanup != nil {
+			conn.cloudSQLCleanup()
+		}
+		return g.Error(err, "could not open Cloud SQL connection")
+	}
+
+	// Wrap the sql.DB in sqlx.DB for compatibility with the rest of the codebase
+	conn.db = sqlx.NewDb(sqlDB, "postgres")
+
+	// Configure connection pool
+	maxConns := cast.ToInt(conn.GetProp("max_conns"))
+	if maxConns == 0 {
+		maxConns = 25
+	}
+	conn.db.SetMaxOpenConns(maxConns)
+	conn.db.SetMaxIdleConns(maxConns / 4)
+	conn.db.SetConnMaxLifetime(30 * time.Minute)
+	conn.db.SetConnMaxIdleTime(5 * time.Minute)
+
+	g.Trace("cloud SQL connection pool configured: max_conns=%d, max_idle=%d", maxConns, maxConns/4)
+
+	// Test connection with ping
+	pingTimeout := 15
+	if len(timeOut) > 0 && timeOut[0] != 0 {
+		pingTimeout = timeOut[0]
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, time.Duration(pingTimeout)*time.Second)
+	defer cancel()
+
+	err = conn.db.PingContext(pingCtx)
+	if err != nil {
+		if conn.cloudSQLCleanup != nil {
+			conn.cloudSQLCleanup()
+		}
+		return g.Error(err, "could not ping Cloud SQL instance. Verify: 1) IAM auth flag 'cloudsql.iam_authentication=on', 2) SA '%s' has 'Cloud SQL Instance User' role, 3) SA added as IAM db user with full email, 4) DB privileges granted to '%s', 5) Credentials file valid and matches SA, 6) Cloud SQL Admin API enabled", user, user)
+	}
+
+	// Set role if provided
+	if val := conn.GetProp("role"); val != "" {
+		_, err = conn.Exec("SET ROLE " + val)
+		if err != nil {
+			return g.Error(err, "could not set role")
+		}
+	}
+
+	if !cast.ToBool(conn.GetProp("silent")) {
+		g.Debug(`opened "%s" connection (%s)`, conn.Type, conn.GetProp("sling_conn_id"))
+	}
+
+	conn.postConnect()
+
+	return nil
+}
+
+// Close closes the database connection and cleans up Cloud SQL resources
+func (conn *PostgresConn) Close() error {
+	// Cleanup Cloud SQL resources first
+	if conn.isCloudSQL {
+		g.Trace("closing Cloud SQL connection and cleaning up resources")
+
+		// Call cleanup function to unregister driver
+		if conn.cloudSQLCleanup != nil {
+			conn.cloudSQLCleanup()
+			conn.cloudSQLCleanup = nil
+		}
+	}
+
+	// Call base connection close
+	return conn.BaseConn.Close()
 }
 
 // CopyToStdout Copy TO STDOUT
@@ -240,7 +410,7 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 	ds.SetEmpty()
 
-	g.Trace("COPY %d ROWS", count)
+	g.Trace("cOPY %d ROWS", count)
 	return count, nil
 }
 

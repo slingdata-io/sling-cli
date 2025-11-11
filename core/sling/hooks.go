@@ -21,6 +21,7 @@ type Hook interface {
 	ID() string
 	Context() *g.Context
 	SetExtra(map[string]any)
+	SetContext(*g.Context)
 	Stage() HookStage
 	Status() ExecStatus
 	Execute() error
@@ -40,11 +41,12 @@ type HookMap struct {
 }
 
 type ParseOptions struct {
-	stage HookStage
-	kind  HookKind
-	index int
-	state RuntimeState
-	md5   string
+	stage   HookStage
+	kind    HookKind
+	index   int
+	state   RuntimeState
+	md5     string
+	context *g.Context
 }
 
 type HookStage string

@@ -11,10 +11,40 @@ import (
 	"github.com/flarco/g/net"
 	"github.com/flarco/g/process"
 	"github.com/kardianos/osext"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core"
 	"github.com/slingdata-io/sling-cli/core/env"
-	"github.com/spf13/cast"
 )
+
+var (
+	// detect if running dev or stable channel
+	isDevChannel = strings.Contains(core.Version, "dev")
+)
+
+// getDownloadURL returns the appropriate download URL based on the channel (dev or stable)
+func getDownloadURL(isDevChannel bool) string {
+	baseURL := "https://github.com/slingdata-io/sling-cli/releases/latest/download"
+	if isDevChannel {
+		baseURL = "https://f.slingdata.io/dev/latest"
+	}
+
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+
+	if !g.In(osName, "linux", "darwin", "windows") {
+		return "" // unsupported OS
+	}
+
+	if arch != "amd64" {
+		arch = "arm64" // assume arm64 if not amd64
+	}
+
+	if isDevChannel && osName == "windows" {
+		arch = "amd64" // only amd64 for windows dev channel
+	}
+
+	return g.F("%s/sling_%s_%s.tar.gz", baseURL, osName, arch)
+}
 
 func updateCLI(c *g.CliSC) (ok bool, err error) {
 	// Print Progress: https://gist.github.com/albulescu/e61979cc852e4ee8f49c
@@ -22,37 +52,19 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	ok = true
 	env.TelMap["downloaded"] = false
 
-	// get latest version number
-	checkUpdate(true)
-	if updateVersion == core.Version {
-		g.Info("Already up-to-date!")
-		return
-	} else if core.Version == "dev" {
-		g.Info("Using dev version!")
-		return
+	// get latest version number (skipped for dev channel)
+	if !isDevChannel {
+		checkUpdate()
+		if updateVersion == core.Version {
+			g.Info("Already up-to-date!")
+			return
+		}
+		env.TelMap["new_version"] = updateVersion
 	}
 
-	env.TelMap["new_version"] = updateVersion
-	url := ""
-	if runtime.GOOS == "linux" {
-		if runtime.GOARCH == "amd64" {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_amd64.tar.gz"
-		} else {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_linux_arm64.tar.gz"
-		}
-	} else if runtime.GOOS == "darwin" {
-		if runtime.GOARCH == "amd64" {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_darwin_amd64.tar.gz"
-		} else {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_darwin_arm64.tar.gz"
-		}
-	} else if runtime.GOOS == "windows" {
-		if runtime.GOARCH == "amd64" {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_windows_amd64.tar.gz"
-		} else {
-			url = "https://github.com/slingdata-io/sling-cli/releases/latest/download/sling_windows_arm64.tar.gz"
-		}
-	} else {
+	// get download URL for the appropriate channel
+	url := getDownloadURL(isDevChannel)
+	if url == "" {
 		return ok, g.Error("OS Unsupported: %s", runtime.GOOS)
 	}
 
@@ -85,7 +97,13 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 
 	tazGzFilePath := path.Join(folderPath, "sling.tar.gz")
 
-	g.Info("Downloading latest version (%s)", updateVersion)
+	// show appropriate message for dev vs stable channel
+	if isDevChannel {
+		g.Info("Updating to latest dev build...")
+	} else {
+		g.Info("Downloading latest version (%s)", updateVersion)
+	}
+
 	err = net.DownloadFile(url, tazGzFilePath)
 	if err != nil {
 		g.Warn("Unable to download update!")
@@ -127,7 +145,11 @@ func updateCLI(c *g.CliSC) (ok bool, err error) {
 	os.Rename(execFileName+".old", filePath+".old")
 	os.RemoveAll(folderPath)
 
-	g.Info("Updated to " + strings.TrimSpace(string(updateVersion)))
+	if isDevChannel {
+		g.Info("Updated to latest dev build")
+	} else {
+		g.Info("Updated to " + strings.TrimSpace(string(updateVersion)))
+	}
 
 	return ok, nil
 }
@@ -172,13 +194,7 @@ func upgradeScoop() (err error) {
 	return nil
 }
 
-func checkUpdate(force bool) {
-	if strings.Contains(core.Version, "dev") {
-		return
-	} else if time.Now().Second()%4 != 0 && !force {
-		// a way to check/notify about a new version less frequently
-		return
-	}
+func checkUpdate() {
 
 	instruction := "Please run `sling update`"
 	switch getSlingPackage() {
@@ -192,17 +208,39 @@ func checkUpdate(force bool) {
 		instruction = "Please run `docker pull slingdata/sling` and recreate your container."
 	}
 
-	const url = "https://api.github.com/repos/slingdata-io/sling-cli/releases"
-	_, respB, _ := net.ClientDo("GET", url, nil, nil)
-	arr := []map[string]any{}
-	g.JSONUnmarshal(respB, &arr)
-	if len(arr) > 0 && arr[0] != nil {
-		updateVersion = strings.TrimPrefix(cast.ToString(arr[0]["tag_name"]), "v")
-		isNew, err := g.CompareVersions(core.Version, updateVersion)
-		if err != nil {
-			g.DebugLow("Error comparing versions: %s", err.Error())
-		} else if isNew {
-			updateMessage = g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction)
+	_, respB, _ := net.ClientDo(
+		"POST", "https://version.slingdata.io",
+		strings.NewReader(g.Marshal(g.M(
+			"exec_id", os.Getenv("SLING_EXEC_ID"),
+			"channel", lo.Ternary(isDevChannel, "dev", "stable"),
+			"version_cli", core.VersionSlash(),
+			"package", getSlingPackage(),
+		))),
+		nil,
+		5,
+	)
+	respMap := map[string]string{}
+	g.JSONUnmarshal(respB, &respMap)
+	if time.Now().Second()%6 == 0 && len(respMap) > 0 {
+		updateVersion = respMap["version_latest"]
+		if isDevChannel {
+			if core.VersionSlash() != updateVersion && updateVersion != "" {
+				updateMessage = env.GreenString(g.F("FYI there is a new sling dev build released => %s. You can run `sling update` to download it.", updateVersion))
+			}
+		} else {
+			isNew, err := g.CompareVersions(core.Version, updateVersion)
+			if err != nil {
+				g.Debug("Error comparing versions: %s", err.Error())
+			} else if isNew {
+				updateMessage = env.GreenString(g.F("FYI there is a new sling version released (%s). %s", updateVersion, instruction))
+			}
+		}
+		if message := respMap["media"]; message != "" {
+			if updateMessage != "" {
+				updateMessage = updateMessage + "\n" + env.BlueString(message)
+			} else {
+				updateMessage = env.BlueString(message)
+			}
 		}
 	}
 }
