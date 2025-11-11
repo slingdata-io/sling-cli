@@ -221,6 +221,9 @@ type PipelineStepExecution struct {
 }
 
 func (pse *PipelineStepExecution) Context() *g.Context {
+	if pse.Pipeline == nil {
+		return nil
+	}
 	return pse.Pipeline.Context
 }
 
