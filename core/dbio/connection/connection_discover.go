@@ -113,6 +113,29 @@ func (c *Connection) Test() (ok bool, err error) {
 
 			// set limits for testing
 			options := api.APIStreamConfig{Flatten: 1, Limit: limit}
+
+			// set context if provided
+			contextPayload := cast.ToString(g.Getenv("SLING_TEST_ENDPOINT_CONTEXT"))
+			if contextPayload != "" {
+				contextMap := g.M()
+				if err := g.Unmarshal(contextPayload, &contextMap); err != nil {
+					g.Warn("could not set context for spec testing: %s", err.Error())
+				}
+
+				// set store
+				if store, ok := contextMap["store"]; ok && store != "" {
+					storeMap, err := g.UnmarshalMap(cast.ToString(store))
+					if err != nil {
+						g.Warn("could not unmarshal context store: %s", err.Error())
+					}
+					apiClient.SetReplicationStore(storeMap)
+				}
+
+				// set range & mode
+				options.Range = cast.ToString(contextMap["range"])
+				options.Mode = cast.ToString(contextMap["mode"])
+			}
+
 			df, err := apiClient.ReadDataflow(endpoint.Name, options)
 			if err != nil {
 				return ok, g.Error(err, "error testing endpoint: %s", endpoint.Name)
