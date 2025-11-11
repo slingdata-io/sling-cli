@@ -128,6 +128,14 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 		os.MkdirAll(conn.DataPath, 0775)
 	}
 
+	// if catalog type is sqlite, create folder first
+	if conn.CatalogType == "sqlite" {
+		parentDir := filepath.Dir(conn.CatalogConnStr)
+		if err := os.MkdirAll(parentDir, 0775); err != nil {
+			g.Warn("could not create parent folder for sqlite catalog file: %s", err.Error())
+		}
+	}
+
 	// Attach the DuckLake database
 	attachSQL := conn.buildAttachSQL()
 	_, err = conn.Exec(attachSQL + noDebugKey)
