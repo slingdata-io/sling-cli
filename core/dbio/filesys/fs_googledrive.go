@@ -10,6 +10,7 @@ import (
 
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
@@ -92,8 +93,12 @@ func (fs *GoogleDriveFileSysClient) Connect() (err error) {
 
 	// Try different authentication methods
 	if val := fs.GetProp("KEY_BODY"); val != "" {
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(val)
+		if err != nil {
+			return g.Error(err, "could not decode GCP credentials")
+		}
 		// Service account credentials from JSON body
-		config, err := google.JWTConfigFromJSON([]byte(val), scopes...)
+		config, err := google.JWTConfigFromJSON([]byte(decodedCredJSON), scopes...)
 		if err != nil {
 			return g.Error(err, "could not parse Google Drive service account key")
 		}

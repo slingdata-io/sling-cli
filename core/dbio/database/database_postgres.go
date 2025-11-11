@@ -103,8 +103,13 @@ func (conn *PostgresConn) connectCloudSQL(timeOut ...int) error {
 
 	// Handle credential options (in priority order)
 	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
+		// Detect and decode base64 if necessary
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(credJSON)
+		if err != nil {
+			return g.Error(err, "could not decode GCP credentials")
+		}
 		g.Trace("using explicit GCP credentials from JSON content")
-		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(decodedCredJSON)))
 	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
 		g.Trace("using explicit GCP credentials file: %s", credsFile)
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))

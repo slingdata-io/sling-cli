@@ -1,6 +1,8 @@
 package iop
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"reflect"
 	"sort"
@@ -304,4 +306,27 @@ func (js *jsonStream) extractNestedArray(rec map[string]any) (recordsInterf []ma
 	}
 
 	return recordsInterf
+}
+
+// DecodeJSONIfBase64 detects if the json body is base64-encoded and decodes them
+func DecodeJSONIfBase64(jsonBody string) (string, error) {
+	// First check if it's already valid JSON
+	if json.Valid([]byte(jsonBody)) {
+		return jsonBody, nil
+	}
+
+	// Try to decode as base64
+	decoded, err := base64.StdEncoding.DecodeString(jsonBody)
+	if err != nil {
+		// If base64 decode fails, return original (might be malformed JSON)
+		return jsonBody, nil
+	}
+
+	// Verify the decoded content is valid JSON
+	if json.Valid(decoded) {
+		return string(decoded), nil
+	}
+
+	// If decoded content is not valid JSON, return original
+	return jsonBody, nil
 }
