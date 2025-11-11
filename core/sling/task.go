@@ -620,6 +620,8 @@ func ErrorHelper(err error) (helpString string) {
 						create table {object.full_name} ({col_types});
 						alter table {object.full_name} replica identity full
 			`
+		case contains("s3.amazonaws.com") && contains("HTTP Error: Unable to connect to URL"):
+			helpString = `If you are using Ducklake with S3, make sure to specify the region with "s3_region"`
 		}
 	}
 	return
