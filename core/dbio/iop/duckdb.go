@@ -26,8 +26,8 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.3.2"
-	DuckDbVersionMD    = "1.3.2"
+	DuckDbVersion      = "1.4.1"
+	DuckDbVersionMD    = "1.4.1"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
