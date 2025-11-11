@@ -85,6 +85,16 @@ func (c *Connection) Test() (ok bool, err error) {
 			g.Debug(env.MagentaString(g.F("testing endpoints with a record limit: %d. Set env var SLING_TEST_ENDPOINT_LIMIT to modify.", limit)))
 		}
 
+		maxRequests := cast.ToInt(g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS", "2"))
+		if maxRequests == 0 {
+			maxRequests = 3
+		}
+
+		apiClient.Context.Map.Set("max_requests", maxRequests)
+		if g.Getenv("SLING_TEST_ENDPOINT_MAX_REQUESTS") == "" {
+			g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", maxRequests)))
+		}
+
 		for _, endpoint := range endpoints {
 			// check for match to test (if provided)
 			allowTest := len(testEndpoints) == 0
