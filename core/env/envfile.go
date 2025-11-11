@@ -13,9 +13,9 @@ import (
 )
 
 type EnvFile struct {
-	Connections map[string]map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Env         map[string]interface{}            `json:"env,omitempty" yaml:"env,omitempty"`
-	Variables   map[string]interface{}            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
+	Connections map[string]map[string]any `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
+	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
@@ -146,12 +146,12 @@ func LoadEnvFile(path string) (ef EnvFile) {
 	}
 
 	if ef.Connections == nil {
-		ef.Connections = map[string]map[string]interface{}{}
+		ef.Connections = map[string]map[string]any{}
 	}
 
 	if ef.Env == nil {
 		if ef.Variables == nil {
-			ef.Env = map[string]interface{}{}
+			ef.Env = map[string]any{}
 		} else {
 			ef.Env = ef.Variables // support legacy
 		}

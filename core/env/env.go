@@ -180,8 +180,8 @@ func LoadSlingEnvFile() (ef EnvFile) {
 func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
 	if body == "" {
 		return EnvFile{
-			Connections: map[string]map[string]interface{}{},
-			Env:         map[string]interface{}{},
+			Connections: map[string]map[string]any{},
+			Env:         map[string]any{},
 		}, nil
 	}
 	err = yaml.Unmarshal([]byte(body), &ef)
@@ -255,16 +255,16 @@ func GetHomeDirConnsMap() (connsMap map[string]map[string]any, err error) {
 	return connsMap, nil
 }
 
-func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string]any, err error) {
+func readConnectionsMap(env map[string]any) (conns map[string]map[string]any, err error) {
 	conns = map[string]map[string]any{}
 
 	if connections, ok := env["connections"]; ok {
 		switch connectionsV := connections.(type) {
-		case map[string]interface{}, map[interface{}]interface{}:
+		case map[string]any, map[interface{}]interface{}:
 			connMap := cast.ToStringMap(connectionsV)
 			for name, v := range connMap {
 				switch v.(type) {
-				case map[string]interface{}, map[interface{}]interface{}:
+				case map[string]any, map[interface{}]interface{}:
 					conns[strings.ToLower(name)] = cast.ToStringMap(v)
 				default:
 					g.Warn("did not handle %s", name)
