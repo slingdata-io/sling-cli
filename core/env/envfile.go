@@ -65,7 +65,7 @@ func (ef *EnvFile) WriteEnvFile() (err error) {
 
 	efMap := yaml.MapSlice{
 		{Key: "connections", Value: connsMap},
-		{Key: "env", Value: ef.Env},
+		{Key: "variables", Value: ef.Env},
 	}
 
 	envBytes, err := yaml.Marshal(efMap)
