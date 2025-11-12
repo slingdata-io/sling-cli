@@ -1084,15 +1084,216 @@ func TestEvaluatorExtractVars(t *testing.T) {
 			expr:     `value(state.query, "SELECT * FROM \"table\" WHERE id = 5")`,
 			expected: []string{"state.query"},
 		},
+		{
+			name:     "context_vars",
+			expr:     `context.store.user_id`,
+			expected: []string{"context.store.user_id"},
+		},
 	}
 
 	for _, tt := range tests {
 
 		t.Run(tt.name, func(t *testing.T) {
 			// Create evaluator with initial state
-			eval := NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync"))
+			eval := NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context"))
 			result := eval.ExtractVars(tt.expr)
 			assert.ElementsMatch(t, tt.expected, result, "References should match expected values")
+		})
+	}
+}
+
+func TestEvaluatorFillMissingKeys(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialState map[string]any
+		varsToCheck  []string
+		expected     map[string]any
+	}{
+		{
+			name:         "2-level key - simple",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"state.value"},
+			expected: map[string]any{
+				"state": map[string]any{"value": nil},
+			},
+		},
+		{
+			name:         "3-level key",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"context.store.user_id"},
+			expected: map[string]any{
+				"context": map[string]any{
+					"store": map[string]any{
+						"user_id": nil,
+					},
+				},
+			},
+		},
+		{
+			name:         "4-level key",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"context.store.user_id.part4"},
+			expected: map[string]any{
+				"context": map[string]any{
+					"store": map[string]any{
+						"user_id": map[string]any{
+							"part4": nil,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "existing intermediate levels",
+			initialState: map[string]any{
+				"state": map[string]any{
+					"nested": map[string]any{
+						"existing": "value",
+					},
+				},
+			},
+			varsToCheck: []string{"state.nested.new_key"},
+			expected: map[string]any{
+				"state": map[string]any{
+					"nested": map[string]any{
+						"existing": "value",
+						"new_key":  nil,
+					},
+				},
+			},
+		},
+		{
+			name:         "mixed levels",
+			initialState: map[string]any{},
+			varsToCheck: []string{
+				"state.simple",
+				"env.nested.key",
+				"store.deep.nested.value",
+			},
+			expected: map[string]any{
+				"state": map[string]any{"simple": nil},
+				"env": map[string]any{
+					"nested": map[string]any{"key": nil},
+				},
+				"store": map[string]any{
+					"deep": map[string]any{
+						"nested": map[string]any{
+							"value": nil,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "key already exists with value",
+			initialState: map[string]any{
+				"state": map[string]any{
+					"nested": map[string]any{
+						"key": "existing_value",
+					},
+				},
+			},
+			varsToCheck: []string{"state.nested.key"},
+			expected: map[string]any{
+				"state": map[string]any{
+					"nested": map[string]any{
+						"key": "existing_value",
+					},
+				},
+			},
+		},
+		{
+			name:         "invalid prefix - should skip",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"invalid.key.path"},
+			expected:     map[string]any{},
+		},
+		{
+			name:         "single part - should skip",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"state"},
+			expected:     map[string]any{},
+		},
+		{
+			name:         "5-level deep nesting",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"context.a.b.c.d.e"},
+			expected: map[string]any{
+				"context": map[string]any{
+					"a": map[string]any{
+						"b": map[string]any{
+							"c": map[string]any{
+								"d": map[string]any{
+									"e": nil,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "multiple vars with shared prefixes",
+			initialState: map[string]any{},
+			varsToCheck: []string{
+				"state.user.id",
+				"state.user.name",
+				"state.user.profile.email",
+			},
+			expected: map[string]any{
+				"state": map[string]any{
+					"user": map[string]any{
+						"id":   nil,
+						"name": nil,
+						"profile": map[string]any{
+							"email": nil,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "partially existing nested structure",
+			initialState: map[string]any{
+				"context": map[string]any{
+					"store": map[string]any{
+						"existing_key": "value",
+					},
+				},
+			},
+			varsToCheck: []string{"context.store.user_id.nested"},
+			expected: map[string]any{
+				"context": map[string]any{
+					"store": map[string]any{
+						"existing_key": "value",
+						"user_id": map[string]any{
+							"nested": nil,
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "non-map value in path - should skip",
+			initialState: map[string]any{
+				"state": map[string]any{
+					"user": "john_doe", // This is a string, not a map
+				},
+			},
+			varsToCheck: []string{"state.user.profile.name"},
+			expected: map[string]any{
+				"state": map[string]any{
+					"user": "john_doe", // Should remain unchanged - not replaced with a map
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "context"))
+			result := eval.FillMissingKeys(tt.initialState, tt.varsToCheck)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

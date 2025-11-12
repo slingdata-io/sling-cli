@@ -758,10 +758,10 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 	}
 
 	// Regular expression for finding variable references
-	// Matches env., state., secrets., auth. followed by a variable name
-	// example regex: `(env|state|secrets|auth|response|request|sync)\.\w+`
+	// Matches env., state., secrets., auth. followed by one or more nested variable names
+	// example regex: `(env|state|secrets|auth|response|request|sync)(\.\w+)+`
 	prefixes := strings.Join(e.VarPrefixes, "|")
-	refRegex := regexp.MustCompile(`(` + prefixes + `)\.\w+`)
+	refRegex := regexp.MustCompile(`(` + prefixes + `)(\.\w+)+`)
 
 	// First, we need to identify string literals to exclude them
 	// Track positions of string literals
@@ -820,28 +820,45 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 	for _, varToCheck := range varsToCheck {
 		varToCheck = strings.TrimSpace(varToCheck)
 		parts := strings.Split(varToCheck, ".")
-		if len(parts) != 2 {
-			// continue
+		if len(parts) < 2 {
+			continue
 		}
-		section := parts[0]
-		key := parts[1]
-		if g.In(section, e.VarPrefixes...) {
-			_, ok := stateMap[section]
-			if !ok {
-				stateMap[section] = g.M()
-			}
 
-			nested, err := g.CastToMapAnyE(stateMap[section])
-			if err != nil {
-				g.Warn(`could not convert to map to fill missing key for "%s": %#v`, section, stateMap[section])
-				nested = g.M()
-			} else if nested == nil {
-				nested = g.M()
+		section := parts[0]
+		if !g.In(section, e.VarPrefixes...) {
+			continue
+		}
+
+		// Navigate and create nested structure as needed
+		current := stateMap
+		for i, key := range parts {
+			if i == len(parts)-1 {
+				// Last key - set to nil if it doesn't exist
+				if _, exists := current[key]; !exists {
+					current[key] = nil
+				}
+			} else {
+				// Intermediate key - ensure it exists as a map
+				if _, exists := current[key]; !exists {
+					// Key doesn't exist - create new map
+					current[key] = make(map[string]any)
+				}
+
+				// Navigate to the next level using type assertion
+				if nextMap, ok := current[key].(map[string]any); ok {
+					current = nextMap
+				} else {
+					// Try casting with g.CastToMapAnyE as fallback
+					nextMap, err := g.CastToMapAnyE(current[key])
+					if err != nil || nextMap == nil {
+						// Value exists but is not a map - don't replace it, skip this var
+						// The evaluator will error when it tries to access nested keys on a non-map value
+						break
+					} else {
+						current = nextMap
+					}
+				}
 			}
-			if _, ok := nested[key]; !ok {
-				nested[key] = nil
-			}
-			stateMap[section] = nested // set back
 		}
 	}
 
