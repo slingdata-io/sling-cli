@@ -316,6 +316,7 @@ type Endpoint struct {
 	Description string     `yaml:"description" json:"description,omitempty"`
 	Docs        string     `yaml:"docs" json:"docs,omitempty"`
 	Disabled    bool       `yaml:"disabled" json:"disabled"`
+	Dynamic     bool       `yaml:"dynamic,omitempty" json:"dynamic,omitempty"` // is generated
 	State       StateMap   `yaml:"state" json:"state"`
 	Sync        []string   `yaml:"sync" json:"sync,omitempty"`
 	Request     Request    `yaml:"request" json:"request"`
