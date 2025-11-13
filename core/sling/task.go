@@ -36,9 +36,8 @@ type TaskExecution struct {
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
-	skipStream    bool            `json:"skip_stream"`
-	lastIncrement time.Time       // the time of last row increment (to determine stalling)
-	Output        strings.Builder `json:"-"`
+	skipStream    bool      `json:"skip_stream"`
+	lastIncrement time.Time // the time of last row increment (to determine stalling)
 	OutputLines   chan *g.LogLine
 
 	Replication    *ReplicationConfig `json:"replication"`
@@ -88,10 +87,6 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
 		OutputLines:  make(chan *g.LogLine, 5000),
-	}
-
-	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
-		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 	}
 
 	err := cfg.Prepare()
@@ -240,8 +235,6 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 }
 
 func (t *TaskExecution) AppendOutput(ll *g.LogLine) {
-	t.Output.WriteString(ll.Line() + "\n") // add new-line char
-
 	// push line if not full
 	select {
 	case t.OutputLines <- ll:

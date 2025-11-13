@@ -54,7 +54,6 @@ type Execution struct {
 	EndTime   *time.Time       `json:"end_time,omitempty" gorm:"index"`
 	Bytes     uint64           `json:"bytes,omitempty"`
 	ExitCode  int              `json:"exit_code,omitempty"`
-	Output    string           `json:"output,omitempty" sql:"default ''"`
 	Rows      uint64           `json:"rows,omitempty"`
 	Pid       int              `json:"pid,omitempty"`
 	Version   string           `json:"version,omitempty"`
@@ -147,7 +146,6 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
 		Bytes:     bytes,
-		Output:    t.Output.String(),
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
@@ -252,7 +250,6 @@ func StoreSetReplicationExec(t *sling.TaskExecution) {
 		exec.Err = e.Err
 		exec.Bytes = e.Bytes
 		exec.Rows = e.Rows
-		exec.Output = e.Output
 		exec.Replication = e.Replication
 		exec.Task = e.Task
 	} else {

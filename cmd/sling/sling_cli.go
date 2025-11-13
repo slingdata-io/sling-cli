@@ -504,7 +504,7 @@ func main() {
 				ctx.Cancel()
 				select {
 				case <-done:
-				case <-time.After(5 * time.Second):
+				case <-time.After(10 * time.Second):
 				}
 			}
 			exit()

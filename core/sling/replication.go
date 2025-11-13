@@ -532,7 +532,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	if IsReplicationRunMode() {
 		env.LogSink = func(ll *g.LogLine) {
-			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
+			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamID())
 			te.AppendOutput(ll)
 		}
 	}
