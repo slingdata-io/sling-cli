@@ -1,0 +1,26 @@
+source: local
+target: local
+
+defaults:
+  mode: full-refresh
+
+  # These hooks should execute for ALL streams (both exact and wildcard)
+  # BUG: They only execute for exact streams, not wildcard-matched streams
+  hooks:
+    pre:
+      - type: log
+        message: "🔴 PRE HOOK EXECUTED for stream: {stream.name}"
+
+    post:
+      - type: log
+        message: "🟢 POST HOOK EXECUTED for stream: {stream.name}"
+
+streams:
+  # Wildcard pattern - should match test1.1.csv and test1.2.csv
+  # BUG: hooks in defaults will NOT execute for these wildcard-matched streams
+  cmd/sling/tests/files/test1.*.csv:
+    object: /tmp/wildcard_{stream_file_name}
+
+  # Exact stream name - hooks in defaults WILL execute for this
+  cmd/sling/tests/files/test2.csv:
+    object: /tmp/exact_test2.csv

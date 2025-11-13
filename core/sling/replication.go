@@ -1328,13 +1328,17 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"hooks":       func() { stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks)) },
 	}
 
 	for key, setFunc := range defaultSet {
 		if _, found := streamMap[key]; !found {
 			setFunc() // if not found, set default
 		}
+	}
+
+	// set default hooks
+	if stream.Hooks.IsEmpty() {
+		stream.Hooks = replicationCfg.Defaults.Hooks
 	}
 
 	// set default options
