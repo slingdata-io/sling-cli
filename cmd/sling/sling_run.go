@@ -49,6 +49,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	showExamples := false
 	selectStreams := []string{}
 
+	// set function here due to scoping
+	sling.HookRunReplication = runReplication
+
 	// recover from panic
 	defer func() {
 		if r := recover(); r != nil {
@@ -632,9 +635,6 @@ func runPipeline(pipelineCfgPath string) (err error) {
 		// telemetry
 		Track("run")
 	}()
-
-	// set function here due to scoping
-	sling.HookRunReplication = runReplication
 
 	pipeline.Context = ctx
 	err = pipeline.Execute()
