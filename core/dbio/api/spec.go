@@ -928,6 +928,7 @@ const (
 	RuleTypeContinue RuleType = "continue" // Continue processing responses and rules
 	RuleTypeStop     RuleType = "stop"     // Stop processing requests for this endpoint
 	RuleTypeFail     RuleType = "fail"     // Stop processing and return an error
+	RuleTypeSkip     RuleType = "skip"     // Skip records from response and continue
 )
 
 type BackoffType string
