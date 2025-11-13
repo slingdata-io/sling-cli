@@ -54,6 +54,7 @@ type Execution struct {
 	EndTime   *time.Time       `json:"end_time,omitempty" gorm:"index"`
 	Bytes     uint64           `json:"bytes,omitempty"`
 	ExitCode  int              `json:"exit_code,omitempty"`
+	Output    string           `json:"output,omitempty" sql:"default ''"`
 	Rows      uint64           `json:"rows,omitempty"`
 	Pid       int              `json:"pid,omitempty"`
 	Version   string           `json:"version,omitempty"`
