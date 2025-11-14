@@ -471,6 +471,10 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (err error) {
 		if err != nil {
 			return g.Error(err, "error parsing %s-hook", stage)
 		} else if hook != nil {
+			if hook.Type() == "replication" {
+				return g.Error("can't call a replication hook inside a replication. Use a pipeline.")
+			}
+
 			hooks = append(hooks, hook)
 		}
 	}
@@ -581,6 +585,10 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)
 		} else if hook != nil {
+			if hook.Type() == "replication" {
+				return nil, g.Error("can't call a replication hook inside a replication. Use a pipeline.")
+			}
+
 			hooks = append(hooks, hook)
 		}
 	}
