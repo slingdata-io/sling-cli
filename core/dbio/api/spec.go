@@ -627,6 +627,7 @@ func (ep *Endpoint) setup() (err error) {
 	// sync state back with proper locking
 	ep.context.Lock()
 	maps.Copy(ep.State, baseEndpoint.State)
+	ep.stopIters = baseEndpoint.stopIters
 	ep.context.Unlock()
 
 	g.Debug("endpoint setup completed successfully")
