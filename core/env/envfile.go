@@ -159,7 +159,7 @@ func LoadEnvFile(path string) (ef EnvFile) {
 
 	for k, v := range ef.Env {
 		if _, found := envMap[k]; !found {
-			os.Setenv(k, cast.ToString(v))
+			os.Setenv(k, g.CastToString(v))
 		}
 	}
 	return ef
