@@ -113,7 +113,6 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		opts := ParseOptions{
 			index:   i,
 			state:   state,
-			stage:   HookStage(g.F("step-%02d", i+1)),
 			kind:    HookKindStep,
 			md5:     g.MD5(g.Marshal(stepRaw)),
 			context: pipeline.Context,
