@@ -186,8 +186,8 @@ func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
 	}
 	err = yaml.Unmarshal([]byte(body), &ef)
 
-	if ef.Env == nil {
-		if ef.Variables == nil {
+	if len(ef.Env) == 0 {
+		if len(ef.Variables) == 0 {
 			ef.Env = map[string]any{}
 		} else {
 			ef.Env = ef.Variables // support legacy

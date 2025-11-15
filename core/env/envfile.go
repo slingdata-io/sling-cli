@@ -149,8 +149,8 @@ func LoadEnvFile(path string) (ef EnvFile) {
 		ef.Connections = map[string]map[string]any{}
 	}
 
-	if ef.Env == nil {
-		if ef.Variables == nil {
+	if len(ef.Env) == 0 {
+		if len(ef.Variables) == 0 {
 			ef.Env = map[string]any{}
 		} else {
 			ef.Env = ef.Variables // support legacy
