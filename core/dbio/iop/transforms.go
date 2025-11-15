@@ -43,6 +43,8 @@ var (
 			},
 		}
 	}
+
+	LocalConnections = map[string]map[string]any{}
 )
 
 func init() {

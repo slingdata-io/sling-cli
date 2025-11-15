@@ -109,7 +109,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 			}
 
 			// populate env
-			rd.state.Env = g.ToMap(task.Env)
+			rd.state.Env = g.CastToMapAny(task.Env)
 
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type

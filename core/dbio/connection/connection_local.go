@@ -14,6 +14,7 @@ import (
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -253,6 +254,10 @@ func GetLocalConns(options ...any) ConnEntries {
 	if localConnsExclude == "" {
 		localConnsTs = time.Now()
 		localConns = connArr
+		iop.LocalConnections = map[string]map[string]any{}
+		for name, entry := range connsMap {
+			iop.LocalConnections[strings.ToLower(name)] = entry.Connection.Data
+		}
 	}
 
 	return connArr
