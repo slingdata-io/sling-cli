@@ -604,10 +604,11 @@ func (ep *Endpoint) setup() (err error) {
 	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
 
 	baseEndpoint := &Endpoint{
-		Name:    g.F("%s.setup", ep.Name),
-		context: g.NewContext(ep.context.Ctx),
-		conn:    ep.conn,
-		State:   g.M(),
+		Name:       g.F("%s.setup", ep.Name),
+		context:    g.NewContext(ep.context.Ctx),
+		conn:       ep.conn,
+		State:      g.M(),
+		contextMap: g.M("store", ep.conn.State.Store),
 	}
 
 	// only copy over headers
