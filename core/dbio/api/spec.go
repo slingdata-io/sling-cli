@@ -355,6 +355,24 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 	ep.State[key] = val
 }
 
+func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
+	contextMap := g.M(
+		"mode", sCfg.Mode,
+		"store", ep.conn.State.Store,
+		"limit", sCfg.Limit,
+	)
+
+	// set backfill params
+	if rangeParts := strings.Split(sCfg.Range, ","); sCfg.Range != "" {
+		contextMap["range_start"] = rangeParts[0]
+		if len(rangeParts) > 1 {
+			contextMap["range_end"] = lo.Ternary[any](rangeParts[1] == "", nil, rangeParts[1])
+		}
+	}
+
+	ep.contextMap = contextMap
+}
+
 func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
 	if state == nil {
 		state = g.M()
@@ -608,7 +626,7 @@ func (ep *Endpoint) setup() (err error) {
 		context:    g.NewContext(ep.context.Ctx),
 		conn:       ep.conn,
 		State:      g.M(),
-		contextMap: g.M("store", ep.conn.State.Store),
+		contextMap: ep.contextMap,
 	}
 
 	// only copy over headers

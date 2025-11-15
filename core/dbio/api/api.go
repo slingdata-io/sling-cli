@@ -204,6 +204,9 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		return nil, g.Error(err, "endpoint is disabled in spec")
 	}
 
+	// make context map
+	endpoint.setContextMap(sCfg)
+
 	// setup if specified
 	if err = endpoint.setup(); err != nil {
 		return nil, g.Error(err, "could not setup for main request")
