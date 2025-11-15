@@ -1112,3 +1112,25 @@
     - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test1.1.csv'
     - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test1.2.csv'
     - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test1.2.csv'
+
+- id: 133
+  name: Test SSH Command Hook
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.08.ssh_command.yaml'
+  output_contains:
+    - '=== Test 1: Basic SSH command execution ==='
+    - 'SSH hostname output:'
+    - '=== Test 2: SSH command with working directory ==='
+    - 'SSH pwd output:'
+    - '=== Test 3: SSH command with environment variables ==='
+    - 'SSH env output:'
+    - 'hello_from_ssh'
+    - '=== Test 4: SSH command array format ==='
+    - 'SSH array command output:'
+    - 'test array command'
+    - '=== Test 5: SSH command with timeout ==='
+    - 'SSH timeout command output:'
+    - 'completed'
+    - '=== Test 6: SSH command creating and reading a file ==='
+    - 'SSH file content:'
+    - 'test content'
+    - '=== All SSH command tests completed successfully ==='
