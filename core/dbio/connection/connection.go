@@ -444,8 +444,6 @@ func (c *Connection) setFromEnv() {
 			varKey := strings.TrimLeft(val, "$")
 			if newVal := os.Getenv(varKey); newVal != "" {
 				c.Data[k] = newVal
-			} else {
-				g.Warn("No env var value found for %s", val)
 			}
 		}
 	}
