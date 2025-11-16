@@ -425,7 +425,9 @@
   name: Run sling pipeline 01
   run: 'sling run -p cmd/sling/tests/pipelines/p.01.yaml -d'
   output_contains:
-    - 'executed step "step-02" (type: replication)'
+    - 'executed step "step-03-replication"'
+    - 'key1 => value-from-pipeline'
+    - 'key2 => value-from-replication'
 
 - id: 70
   name: Run sling chunking

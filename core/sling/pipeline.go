@@ -356,6 +356,10 @@ type PipelineState struct {
 	Run       *RunState                 `json:"run,omitempty"`
 }
 
+func (ps *PipelineState) GetStore() map[string]any {
+	return ps.Store
+}
+
 func (ps *PipelineState) SetStoreData(key string, value any, del bool) {
 	if del {
 		delete(ps.Store, key)
@@ -385,4 +389,33 @@ func (ps *PipelineState) StepExecution() *PipelineStepExecution {
 		return ps.Run.Step
 	}
 	return nil
+}
+
+func SetPipelineStoreEnv(store map[string]any) {
+	payload, err := g.JSONMarshal(store)
+	if err == nil {
+		err = os.Setenv("SLING_PIPELINE_STORE", string(payload))
+		if err != nil {
+			g.Warn("could not set pipeline store payload into env: %s", err.Error())
+		}
+	} else {
+		g.Warn("could not marshal pipeline store payload before replication: %s", err.Error())
+	}
+}
+
+func GetPipelineStoreEnv() (store map[string]any) {
+
+	var err error
+	if storePayload := os.Getenv("SLING_PIPELINE_STORE"); storePayload != "" {
+		store, err = g.UnmarshalMap(storePayload)
+		if err != nil {
+			g.Warn("could not unmarshal pipeline store payload: %s", err.Error())
+		}
+	}
+
+	if store == nil {
+		store = g.M()
+	}
+
+	return
 }

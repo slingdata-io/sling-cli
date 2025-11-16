@@ -13,6 +13,7 @@ type RuntimeState interface {
 	SetStateData(id string, data map[string]any)
 	SetStateKeyValue(id, key string, value any)
 	SetStoreData(key string, value any, del bool)
+	GetStore() map[string]any
 	Marshall() string
 	TaskExecution() *TaskExecution
 	StepExecution() *PipelineStepExecution
@@ -31,6 +32,10 @@ type ReplicationState struct {
 	Object    *ObjectState              `json:"object,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (rs *ReplicationState) GetStore() map[string]any {
+	return rs.Store
 }
 
 func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {

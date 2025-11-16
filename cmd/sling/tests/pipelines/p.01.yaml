@@ -1,6 +1,10 @@
 steps:
   - type: log
     message: '{runtime_state}'
+  
+  - type: store
+    key: key1
+    value: value-from-pipeline
 
   - type: replication
     path: cmd/sling/tests/replications/r.19.yaml
@@ -19,6 +23,9 @@ steps:
   - type: log
     message: '{runtime_state}'
     level: warn
+        
+  - type: log
+    message: 'key2 => {store.key2}'
 
   - type: command
     command: [ls, -l]

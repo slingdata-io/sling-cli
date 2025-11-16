@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -518,6 +519,13 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 	}
 
+	// set pipeline store data
+	if store := sling.GetPipelineStoreEnv(); len(store) > 0 && sling.IsPipelineRunMode() {
+		if state, _ := replication.RuntimeState(); state != nil {
+			maps.Copy(state.Store, store)
+		}
+	}
+
 	// run start hooks if not thread child
 	if !isThreadChild {
 		if err = replication.ExecuteReplicationHook(sling.HookStageStart); err != nil {
@@ -596,6 +604,10 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 
 	if streamCnt > 1 {
 		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
+	}
+
+	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
+		sling.SetPipelineStoreEnv(state.Store)
 	}
 
 	return eG.Err()
