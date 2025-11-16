@@ -303,10 +303,11 @@ const (
 type Sequence []Call
 
 type Call struct {
-	If         string     `yaml:"if" json:"if"`
-	Request    Request    `yaml:"request" json:"request"`
-	Pagination Pagination `yaml:"pagination" json:"pagination"`
-	Response   Response   `yaml:"response" json:"response"`
+	If             string          `yaml:"if" json:"if"`
+	Request        Request         `yaml:"request" json:"request"`
+	Pagination     Pagination      `yaml:"pagination" json:"pagination"`
+	Response       Response        `yaml:"response" json:"response"`
+	Authentication *Authentication `yaml:"authentication,omitempty" json:"authentication,omitempty"`
 }
 
 // Endpoints is a collection of API endpoints
