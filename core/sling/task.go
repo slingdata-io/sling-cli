@@ -456,6 +456,13 @@ func (t *TaskExecution) hasStateWithUpdateKey() bool {
 	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey()
 }
 
+func (t *TaskExecution) hasRange() bool {
+	if so := t.Config.Source.Options; so != nil {
+		return g.PtrVal(so.Range) != ""
+	}
+	return false
+}
+
 func (t *TaskExecution) getSourceOptionsMap() (options map[string]any) {
 	options = g.M()
 

@@ -567,7 +567,10 @@ func (t *TaskExecution) runApiToDb() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			if len(srcConn.State.Store) == 0 && !t.hasRange() {
+				// warn if no store/range is provided
+				g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			}
 			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {
@@ -657,7 +660,10 @@ func (t *TaskExecution) runApiToFile() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			if len(srcConn.State.Store) == 0 && !t.hasRange() {
+				// warn if no store/range is provided
+				g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			}
 			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {
