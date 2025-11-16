@@ -749,12 +749,12 @@ func setTimeout(values ...string) (deadline time.Time) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() {
+		time.AfterFunc(duration-time.Millisecond, func() {
+			filePath := dumpRuntimeStack()
 			if cast.ToBool(os.Getenv("SLING_TIMEOUT_STACK")) {
 				// Print all goroutine stacks before panicking
-				buf := make([]byte, 1<<20) // 1MB buffer
-				stackLen := runtime.Stack(buf, true)
-				env.Println(string(buf[:stackLen]))
+				content, _ := os.ReadFile(filePath)
+				env.Println(string(content))
 				panic(g.F("SLING_TIMEOUT = %s mins reached!", timeout))
 			} else {
 				g.Warn("SLING_TIMEOUT = %s mins reached!", timeout)
@@ -768,4 +768,19 @@ func setTimeout(values ...string) (deadline time.Time) {
 		break
 	}
 	return deadline
+}
+
+func dumpRuntimeStack() string {
+	buf := make([]byte, 1<<20) // 1MB buffer
+	stackLen := runtime.Stack(buf, true)
+
+	folderPath := path.Join(env.GetTempFolder(), "sling", "runtime")
+	filePath := path.Join(folderPath, g.NowFileStr())
+	if os.MkdirAll(folderPath, 0755) == nil {
+		if os.WriteFile(filePath, buf[:stackLen], 0755) == nil {
+			os.Setenv("SLING_RUNTIME_DUMP_FILE", filePath)
+			return filePath
+		}
+	}
+	return ""
 }
