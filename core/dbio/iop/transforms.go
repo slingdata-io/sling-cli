@@ -17,6 +17,7 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
@@ -44,7 +45,7 @@ var (
 		}
 	}
 
-	LocalConnections = map[string]map[string]any{}
+	LocalConnections = cmap.New[map[string]any]()
 )
 
 func init() {

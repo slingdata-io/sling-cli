@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
@@ -254,9 +255,9 @@ func GetLocalConns(options ...any) ConnEntries {
 	if localConnsExclude == "" {
 		localConnsTs = time.Now()
 		localConns = connArr
-		iop.LocalConnections = map[string]map[string]any{}
+		iop.LocalConnections = cmap.New[map[string]any]()
 		for name, entry := range connsMap {
-			iop.LocalConnections[strings.ToLower(name)] = entry.Connection.Data
+			iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
 		}
 	}
 
