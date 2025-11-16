@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -63,18 +64,170 @@ func (ac *APIConnection) Authenticate() (err error) {
 		g.Debug("authentication will expire at %s", time.Unix(ac.State.Auth.ExpiresAt, 0).Format(time.RFC3339))
 	}
 
-	for key, endpoint := range ac.Spec.EndpointMap {
-		for k, v := range ac.State.Auth.Headers {
-			if len(endpoint.Request.Headers) == 0 {
-				endpoint.Request.Headers = g.M()
-			}
-			endpoint.Request.Headers[k] = v
-		}
-		ac.Spec.EndpointMap[key] = endpoint
+	return
+}
+
+func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err error) {
+
+	baseAuth := AuthenticatorBase{Type: ac.Spec.Authentication.Type(), conn: ac}
+
+	switch baseAuth.Type {
+	case AuthTypeNone:
+		authenticator = &baseAuth
+	case AuthTypeBasic:
+		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
+	case AuthTypeSequence:
+		authenticator = &AuthenticatorSequence{AuthenticatorBase: baseAuth}
+	case AuthTypeOAuth2:
+		authenticator = &AuthenticatorOAuth2{AuthenticatorBase: baseAuth}
+	case AuthTypeAWSSigV4:
+		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
+	case AuthTypeHMAC:
+		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
+	}
+
+	// so we write all the properties
+	if err = g.JSONConvert(ac.Spec.Authentication, authenticator); err != nil {
+		return nil, g.Error(err, "could not make authenticator for: %s", baseAuth.Type)
 	}
 
 	return
 }
+
+// IsAuthExpired checks if the authentication has expired
+func (ac *APIConnection) IsAuthExpired() bool {
+	if ac.State.Auth.ExpiresAt == 0 {
+		return false // No expiry set
+	}
+	return time.Now().Unix() >= ac.State.Auth.ExpiresAt
+}
+
+// EnsureAuthenticated checks if authentication is valid and re-authenticates if needed
+// This method ensures thread-safe authentication checks and re-authentication
+func (ac *APIConnection) EnsureAuthenticated() error {
+	ac.State.Auth.Mutex.Lock()
+	defer ac.State.Auth.Mutex.Unlock()
+
+	if ac.Spec.Authentication == nil {
+		ac.State.Auth.Authenticated = true
+		return nil
+	}
+
+	// Check if authentication has expired or not authenticated
+	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
+		g.Trace("authentication expired or not authenticated, re-authenticating...")
+		if err := ac.Authenticate(); err != nil {
+			return g.Error(err, "failed to authenticate")
+		}
+	}
+	return nil
+}
+
+///////////////////////////////////////////////
+
+// Authenticate performs the auth workflow if needed. Like a Connect step.
+// Header based auths (such as Basic, or Bearer) don't need this step
+// save payload in APIState.Auth
+func (ep *Endpoint) Authenticate() (err error) {
+
+	if ep.Authentication == nil {
+		ep.auth.Authenticated = true
+		return nil
+	}
+
+	authenticator, err := ep.MakeAuthenticator()
+	if err != nil {
+		return g.Error(err, "could not make authenticator for: %s", authenticator.AuthType())
+	}
+
+	if err = authenticator.Authenticate(ep.context.Ctx, &ep.auth); err != nil {
+		return g.Error(err, "could not authenticate for: %s", authenticator.AuthType())
+	}
+
+	// set authenticated
+
+	ep.auth.Authenticated = true
+
+	// Setup auth expiry timer
+	if ep.Authentication.Expires() > 0 {
+		// Calculate expiry time
+		expiryDuration := time.Duration(ep.Authentication.Expires()) * time.Second
+		ep.auth.ExpiresAt = time.Now().Add(expiryDuration).Unix()
+		g.Debug("authentication will expire at %s", time.Unix(ep.auth.ExpiresAt, 0).Format(time.RFC3339))
+	}
+
+	return
+}
+
+func (ep *Endpoint) specifiesAuthentication() bool {
+	_, exists := ep.originalMap["authentication"]
+	return exists
+}
+
+func (ep *Endpoint) EnsureAuthenticated() error {
+	ep.auth.Mutex.Lock()
+	defer ep.auth.Mutex.Unlock()
+
+	if ep.Authentication == nil {
+		// if specified as null, no auth required
+		if ep.specifiesAuthentication() {
+			ep.auth.Authenticated = true
+			return nil
+		}
+
+		return ep.conn.EnsureAuthenticated()
+	}
+
+	// Check if authentication has expired or not authenticated
+	if !ep.auth.Authenticated || ep.IsAuthExpired() {
+		g.Trace("authentication expired or not authenticated, re-authenticating...")
+		if err := ep.Authenticate(); err != nil {
+			return g.Error(err, "failed to authenticate")
+		}
+	}
+	return nil
+}
+
+// IsAuthExpired checks if the authentication has expired
+func (ep *Endpoint) IsAuthExpired() bool {
+	if ep.auth.ExpiresAt == 0 {
+		return false // No expiry set
+	}
+	return time.Now().Unix() >= ep.auth.ExpiresAt
+}
+
+func (ep *Endpoint) MakeAuthenticator() (authenticator Authenticator, err error) {
+
+	baseAuth := AuthenticatorBase{
+		Type:     ep.Authentication.Type(),
+		conn:     ep.conn,
+		endpoint: ep,
+	}
+
+	switch baseAuth.Type {
+	case AuthTypeNone:
+		authenticator = &baseAuth
+	case AuthTypeBasic:
+		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
+	case AuthTypeSequence:
+		authenticator = &AuthenticatorSequence{AuthenticatorBase: baseAuth}
+	case AuthTypeOAuth2:
+		authenticator = &AuthenticatorOAuth2{AuthenticatorBase: baseAuth}
+	case AuthTypeAWSSigV4:
+		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
+	case AuthTypeHMAC:
+		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
+	}
+
+	// so we write all the properties
+	if err = g.JSONConvert(ep.Authentication, authenticator); err != nil {
+		return nil, g.Error(err, "could not make authenticator for: %s", baseAuth.Type)
+	}
+
+	return
+}
+
+////////////////////////////////////////////
 
 type Authenticator interface {
 	AuthType() AuthType
@@ -88,7 +241,8 @@ type AuthenticatorBase struct {
 	Type    AuthType `yaml:"type" json:"type"`
 	Expires int      `yaml:"expires" json:"expires,omitempty"` // when set, re-auth after number of seconds
 
-	conn *APIConnection `yaml:"-" json:"-"`
+	conn     *APIConnection `yaml:"-" json:"-"`
+	endpoint *Endpoint      `yaml:"-" json:"-"`
 }
 
 func (a *AuthenticatorBase) AuthType() AuthType {
@@ -103,6 +257,13 @@ func (a *AuthenticatorBase) Refresh(ctx context.Context, state *APIStateAuth) (e
 	return
 }
 
+func (a *AuthenticatorBase) renderString(val any, extraMaps ...map[string]any) (string, error) {
+	if a.endpoint != nil {
+		return a.endpoint.renderString(val, extraMaps...)
+	}
+	return a.conn.renderString(val, extraMaps...)
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////
 // AuthenticatorBasic
 type AuthenticatorBasic struct {
@@ -112,7 +273,7 @@ type AuthenticatorBasic struct {
 }
 
 func (a *AuthenticatorBasic) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
-	userPass, err := a.conn.renderString(g.F("%s:%s", a.Username, a.Password))
+	userPass, err := a.renderString(g.F("%s:%s", a.Username, a.Password))
 	if err != nil {
 		return g.Error(err, "could not render user-password")
 	}
@@ -133,10 +294,12 @@ type AuthenticatorSequence struct {
 func (a *AuthenticatorSequence) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
 
 	baseEndpoint := &Endpoint{
-		Name:    "api.auth",
-		State:   g.M(),
-		context: g.NewContext(a.conn.Context.Ctx),
-		conn:    a.conn,
+		Name:      "api.auth",
+		State:     g.M(),
+		context:   g.NewContext(a.conn.Context.Ctx),
+		conn:      a.conn,
+		aggregate: NewAggregateState(),
+		auth:      APIStateAuth{Mutex: &sync.Mutex{}},
 	}
 
 	g.Debug("running authentication sequence")
@@ -176,32 +339,32 @@ type AuthenticatorOAuth2 struct {
 // Authenticate performs OAuth2 authentication based on the configured flow.
 func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
 	// Render template values
-	clientID, err := a.conn.renderString(a.ClientID)
+	clientID, err := a.renderString(a.ClientID)
 	if err != nil {
 		return g.Error(err, "could not render client_id")
 	}
 
-	clientSecret, err := a.conn.renderString(a.ClientSecret)
+	clientSecret, err := a.renderString(a.ClientSecret)
 	if err != nil {
 		return g.Error(err, "could not render client_secret")
 	}
 
-	redirectURI, err := a.conn.renderString(a.RedirectURI)
+	redirectURI, err := a.renderString(a.RedirectURI)
 	if err != nil {
 		return g.Error(err, "could not render redirect_uri")
 	}
 
-	authURL, err := a.conn.renderString(a.AuthenticationURL) // Token URL
+	authURL, err := a.renderString(a.AuthenticationURL) // Token URL
 	if err != nil {
 		return g.Error(err, "could not render authentication_url")
 	}
 
-	authorizeURL, err := a.conn.renderString(a.AuthorizationURL)
+	authorizeURL, err := a.renderString(a.AuthorizationURL)
 	if err != nil {
 		return g.Error(err, "could not render authorization_url")
 	}
 
-	deviceAuthURL, err := a.conn.renderString(a.DeviceAuthURL)
+	deviceAuthURL, err := a.renderString(a.DeviceAuthURL)
 	if err != nil {
 		return g.Error(err, "could not render device_auth_url")
 	}
@@ -498,7 +661,6 @@ type AuthenticatorAWSSigV4 struct {
 }
 
 func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
-	ac := a.conn
 
 	props := map[string]string{
 		"aws_service":           a.AwsService,
@@ -511,7 +673,7 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 
 	// render prop values
 	for key, val := range props {
-		props[key], err = ac.renderString(val)
+		props[key], err = a.renderString(val)
 		if err != nil {
 			return g.Error(err, "could not render %s", key)
 		}
@@ -529,12 +691,12 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 	}
 
 	// load AWS creds
-	cfg, err := iop.MakeAwsConfig(ac.Context.Ctx, props)
+	cfg, err := iop.MakeAwsConfig(a.conn.Context.Ctx, props)
 	if err != nil {
 		return g.Error(err, "could not make AWS config for authentication")
 	}
 
-	ac.State.Auth.Sign = func(iter *Iteration, req *http.Request, bodyBytes []byte) error {
+	sign := func(iter *Iteration, req *http.Request, bodyBytes []byte) error {
 		// Calculate the SHA256 hash of the request body.
 		hasher := sha256.New()
 		hasher.Write(bodyBytes)
@@ -550,6 +712,12 @@ func (a *AuthenticatorAWSSigV4) Authenticate(ctx context.Context, state *APIStat
 
 		// Sign the request, which adds the 'Authorization' and other necessary headers.
 		return signer.SignHTTP(iter.context.Ctx, creds, req, payloadHash, awsService, awsRegion, time.Now())
+	}
+
+	if a.endpoint != nil {
+		a.endpoint.auth.Sign = sign
+	} else {
+		a.conn.State.Auth.Sign = sign
 	}
 
 	return
@@ -573,7 +741,7 @@ func (a *AuthenticatorHMAC) Authenticate(ctx context.Context, state *APIStateAut
 
 	var secret string
 	if a.Secret != "" {
-		secret, err = a.conn.renderString(a.Secret)
+		secret, err = a.renderString(a.Secret)
 		if err != nil {
 			return g.Error(err, "could not render secret for HMAC authentication")
 		}
