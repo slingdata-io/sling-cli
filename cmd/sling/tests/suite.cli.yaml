@@ -1136,3 +1136,8 @@
     - 'SSH file content:'
     - 'test content'
     - '=== All SSH command tests completed successfully ==='
+
+- id: 134
+  name: Test MSSQL to Postgres decimal precision
+  run: 'sling run -d -r cmd/sling/tests/replications/r.69.mssql_postgres_decimal.yaml'
+  streams: 1
