@@ -608,7 +608,7 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
-		case contains("CSV table encountered too many errors"):
+		case contains("CSV") && contains("encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
 		case contains("Invalid Input Error: CSV Error on Line:"):
 			helpString = "By default, Sling uses CSV serialization to pipe data into DuckDB. Try setting the `copy_method: arrow_http` property in your connection to avoid serialization errors. See https://docs.slingdata.io/connections/database-connections for more details."
