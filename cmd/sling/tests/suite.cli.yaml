@@ -1160,3 +1160,21 @@
   err: true
   output_contains:
    - cannot be assigned to zero-based row
+
+- id: 138
+  name: Test wildcard stream with disabled table exclusion
+  run: |
+    sling conns exec mysql "
+      DROP TABLE IF EXISTS testing_1;
+      DROP TABLE IF EXISTS testing_2;
+      DROP TABLE IF EXISTS testing_3;
+      CREATE TABLE testing_1 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_1 (id, name) VALUES (1, 'table_one');
+      CREATE TABLE testing_2 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_2 (id, name) VALUES (2, 'table_two');
+      CREATE TABLE testing_3 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_3 (id, name) VALUES (3, 'table_three');
+    "
+    sling run -d -r cmd/sling/tests/replications/r.72.wildcard_disabled.yaml
+  output_contains:
+    - '✅ SUCCESS: Wildcard with disabled stream works correctly'

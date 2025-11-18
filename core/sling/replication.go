@@ -340,8 +340,12 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						table := wildcard.TableMap[wsn]
 
 						// check if table name exists
-						_, _, found := rd.GetStream(table.FullName())
+						_, streamCfg, found := rd.GetStream(table.FullName())
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
@@ -355,15 +359,23 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						node := wildcard.NodeMap[wsn]
 
 						// check if node path exists
-						_, _, found := rd.GetStream(node.Path())
+						_, streamCfg, found := rd.GetStream(node.Path())
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
 
 						// check if node URI exists
-						_, _, found = rd.GetStream(node.URI)
+						_, streamCfg, found = rd.GetStream(node.URI)
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
@@ -403,6 +415,10 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						// check if endpoint exists
 						key, stream, found := rd.GetStream(endpoint.Name)
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if stream != nil && stream.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							if len(endpoint.DependsOn) > 0 {
 								if stream == nil {
@@ -1035,6 +1051,12 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 		SetStreamDefaults(name, &stream, *rd)
 		stream.replication = rd
+
+		// Skip disabled streams entirely during compilation
+		if stream.Disabled {
+			g.Debug("skipping disabled stream: %s", name)
+			continue
+		}
 
 		if stream.Object == "" {
 			return g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
