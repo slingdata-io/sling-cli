@@ -62,7 +62,7 @@ hooks:
     # Verify row count matches
     - type: check
       check: store.source_count[0].count == store.target_count[0].count
-      message: "Row count mismatch: source has {store.source_count[0].count} rows, target has {store.target_count[0].count} rows"
+      failure_message: "Row count mismatch: source has {store.source_count[0].count} rows, target has {store.target_count[0].count} rows"
 
     # Get source data
     - type: query
@@ -110,28 +110,32 @@ hooks:
 
     # Check decimal precision for each row
     - type: check
+      check: pretty_table(store.source_data) == pretty_table(store.target_data)
+      failure_message: "Table mismatch: pretty_table(store.source_data) == pretty_table(store.target_data)"
+
+    - type: check
       check: float_parse(store.source_data[0].decimal_6_5) == float_parse(store.target_data[0].decimal_6_5)
-      message: "Row 1 decimal_6_5 mismatch: source={store.source_data[0].decimal_6_5}, target={store.target_data[0].decimal_6_5}"
+      failure_message: "Row 1 decimal_6_5 mismatch: source={store.source_data[0].decimal_6_5}, target={store.target_data[0].decimal_6_5}"
 
     - type: check
       check: float_parse(store.source_data[0].decimal_10_4) == float_parse(store.target_data[0].decimal_10_4)
-      message: "Row 1 decimal_10_4 mismatch: source={store.source_data[0].decimal_10_4}, target={store.target_data[0].decimal_10_4}"
+      failure_message: "Row 1 decimal_10_4 mismatch: source={store.source_data[0].decimal_10_4}, target={store.target_data[0].decimal_10_4}"
 
     - type: check
       check: float_parse(store.source_data[0].decimal_18_6) == float_parse(store.target_data[0].decimal_18_6)
-      message: "Row 1 decimal_18_6 mismatch: source={store.source_data[0].decimal_18_6}, target={store.target_data[0].decimal_18_6}"
+      failure_message: "Row 1 decimal_18_6 mismatch: source={store.source_data[0].decimal_18_6}, target={store.target_data[0].decimal_18_6}"
 
     - type: check
       check: float_parse(store.source_data[2].decimal_6_5) == float_parse(store.target_data[2].decimal_6_5)
-      message: "Row 3 (small values) decimal_6_5 mismatch: source={store.source_data[2].decimal_6_5}, target={store.target_data[2].decimal_6_5}"
+      failure_message: "Row 3 (small values) decimal_6_5 mismatch: source={store.source_data[2].decimal_6_5}, target={store.target_data[2].decimal_6_5}"
 
     - type: check
       check: float_parse(store.source_data[2].decimal_10_4) == float_parse(store.target_data[2].decimal_10_4)
-      message: "Row 3 (small values) decimal_10_4 mismatch: source={store.source_data[2].decimal_10_4}, target={store.target_data[2].decimal_10_4}"
+      failure_message: "Row 3 (small values) decimal_10_4 mismatch: source={store.source_data[2].decimal_10_4}, target={store.target_data[2].decimal_10_4}"
 
     - type: check
       check: float_parse(store.source_data[3].money_col) == float_parse(store.target_data[3].money_col)
-      message: "Row 4 (max values) money_col mismatch: source={store.source_data[3].money_col}, target={store.target_data[3].money_col}"
+      failure_message: "Row 4 (max values) money_col mismatch: source={store.source_data[3].money_col}, target={store.target_data[3].money_col}"
 
     # Clean up
     - type: query
