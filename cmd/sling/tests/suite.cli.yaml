@@ -1141,3 +1141,8 @@
   name: Test MSSQL to Postgres decimal precision
   run: 'sling run -d -r cmd/sling/tests/replications/r.69.mssql_postgres_decimal.yaml'
   streams: 1
+
+- id: 135
+  name: Test MSSQL to Postgres decimal cast_as (float and string)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.70.mssql_postgres_decimal_cast_as.yaml'
+  streams: 2
