@@ -1146,3 +1146,17 @@
   name: Test MSSQL to Postgres decimal cast_as (float and string)
   run: 'sling run -d -r cmd/sling/tests/replications/r.70.mssql_postgres_decimal_cast_as.yaml'
   streams: 2
+
+- id: 136
+  name: Test nested JSON to SQLite with CLI flags
+  run: |
+    bash cmd/sling/tests/replications/r.71.json_sqlite_nested.sh
+
+    sling run -d --src-conn LOCAL --tgt-conn SQLITE --src-stream "file:///tmp/test_nested_json/*.json" --tgt-object "main.test_nested_json_cli" --mode full-refresh --src-options '{ format: json, flatten: true }'
+
+- id: 137
+  name: Test nested JSON to SQLite with replication config (pre-defined columns)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
+  err: true
+  output_contains:
+   - cannot be assigned to zero-based row
