@@ -1178,3 +1178,10 @@
     sling run -d -r cmd/sling/tests/replications/r.72.wildcard_disabled.yaml
   output_contains:
     - '✅ SUCCESS: Wildcard with disabled stream works correctly'
+
+- id: 139
+  name: Test DuckDB reading Parquet with large strings from S3 (issue #668)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.73.duckdb_large_parquet.yaml'
+  output_contains:
+    - '✓ All 100 rows with large strings loaded successfully'
+    - '✓ Large string values preserved (exactly 65,330 chars)'

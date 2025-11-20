@@ -420,6 +420,13 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 		args = append(args, dsn)
 	}
 
+	// set max buffer size
+	maxBufferSize := cast.ToInt(duck.GetProp("max_buffer_size"))
+	if maxBufferSize == 0 {
+		maxBufferSize = cast.ToInt(os.Getenv("SLING_MAX_BUFFER_SIZE"))
+	}
+	duck.Proc.MaxBufferSize = maxBufferSize
+
 	// default extensions
 	duck.AddExtension("json")
 
@@ -890,10 +897,12 @@ func (duck *DuckDb) initScanner() {
 			})
 		} else {
 			if strings.Contains(line, duckDbEOFMarker) {
+				g.Trace("duckdb scanner: EOF marker seen")
 				eofTimer = time.AfterFunc(25*time.Millisecond, func() {
 					resetWriter() // since result set ended
 				})
 			} else if strings.Contains(line, duckDbSOFMarker) {
+				g.Trace("duckdb scanner: SOF marker seen")
 				stdOutWriter = duck.query.writer
 				duck.query.started = true
 			} else if stdOutWriter != nil {
