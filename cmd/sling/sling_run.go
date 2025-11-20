@@ -761,7 +761,7 @@ func setTimeout(values ...string) (deadline time.Time) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration-time.Millisecond, func() {
+		time.AfterFunc(duration-time.Second, func() {
 			filePath := dumpRuntimeStack()
 			if cast.ToBool(os.Getenv("SLING_TIMEOUT_STACK")) {
 				// Print all goroutine stacks before panicking
