@@ -549,7 +549,7 @@ func (fs *BaseFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamConf
 		}
 
 		switch Cfg.Format {
-		case dbio.FileTypeJson:
+		case dbio.FileTypeJson, dbio.FileTypeGeojson:
 			err = ds.ConsumeJsonReader(reader)
 		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(reader)
@@ -936,6 +936,14 @@ func (fs *BaseFileSysClient) WriteDataflowReady(df *iop.Dataflow, url string, fi
 					break
 				}
 			}
+		case dbio.FileTypeGeojson:
+			// Use special GeoJSON reader that extracts JSON from single column
+			for reader := range ds.NewGeojsonReaderChnl(sc) {
+				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
+				if err != nil {
+					break
+				}
+			}
 		case dbio.FileTypeJsonLines:
 			for reader := range ds.NewJsonLinesReaderChnl(sc) {
 				err := processReader(&iop.BatchReader{Columns: ds.Columns, Reader: reader, Counter: -1, Batch: ds.CurrentBatch})
@@ -1150,7 +1158,7 @@ func GetDataflow(fs FileSysClient, nodes FileNodes, cfg iop.FileStreamConfig) (d
 			}
 		}
 
-		if allowMerging && (cfg.Format.IsJson() || isFiletype(dbio.FileTypeJson, nodes.URIs()...) || isFiletype(dbio.FileTypeJsonLines, nodes.URIs()...)) {
+		if allowMerging && (cfg.Format.IsJson() || isFiletype(dbio.FileTypeJson, nodes.URIs()...) || isFiletype(dbio.FileTypeJsonLines, nodes.URIs()...) || isFiletype(dbio.FileTypeGeojson, nodes.URIs()...)) {
 			ds, err := MergeReaders(fs, dbio.FileTypeJson, nodes, cfg)
 			if err != nil {
 				df.Context.CaptureErr(g.Error(err, "Unable to merge paths at %s", fs.GetProp("url")))
@@ -1485,7 +1493,7 @@ func MakeDatastream(reader io.Reader, cfg map[string]string) (ds *iop.Datastream
 	}
 
 	peekStr := string(data)
-	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") || cfg["format"] == "json" {
+	if strings.HasPrefix(peekStr, "[") || strings.HasPrefix(peekStr, "{") || cfg["format"] == "json" || cfg["format"] == "geojson" {
 		ds = iop.NewDatastream(iop.Columns{})
 		ds.SafeInference = true
 		ds.SetConfig(cfg)
@@ -1693,11 +1701,11 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 
 	}()
 
-	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines) {
+	if g.In(fileType, dbio.FileTypeCsv, dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson) {
 		pipeW.Close()
 
 		switch fileType {
-		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson:
 			err = ds.ConsumeJsonReaderChl(readerChn, false)
 		case dbio.FileTypeCsv:
 			err = ds.ConsumeCsvReaderChl(readerChn)
@@ -1722,7 +1730,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 		}()
 
 		switch fileType {
-		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson:
 			err = ds.ConsumeJsonReader(pipeR)
 		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(pipeR)
@@ -1742,7 +1750,7 @@ func MergeReaders(fs FileSysClient, fileType dbio.FileType, nodes FileNodes, cfg
 func InferFileFormat(path string, defaults ...dbio.FileType) dbio.FileType {
 	path = strings.TrimSpace(strings.ToLower(path))
 
-	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeArrow, dbio.FileTypeJson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
+	for _, fileType := range []dbio.FileType{dbio.FileTypeCsv, dbio.FileTypeJsonLines, dbio.FileTypeArrow, dbio.FileTypeJson, dbio.FileTypeGeojson, dbio.FileTypeXml, dbio.FileTypeParquet, dbio.FileTypeAvro, dbio.FileTypeSAS, dbio.FileTypeExcel} {
 		ext := fileType.Ext()
 		if strings.HasSuffix(path, ext) || strings.Contains(path, ext+".") {
 			return fileType
