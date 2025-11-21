@@ -707,6 +707,10 @@ func (ep *Endpoint) setup() (err error) {
 		}
 	}
 
+	// set in context original sequence array
+	array, _ := jmespath.Search("setup", ep.originalMap)
+	baseEndpoint.context.Map.Set("sequence_array", array)
+
 	// copy over state from endpoint with proper locking
 	ep.context.Lock()
 	if ep.State != nil {
@@ -745,6 +749,10 @@ func (ep *Endpoint) teardown() (err error) {
 		aggregate: ep.aggregate,
 		auth:      APIStateAuth{Mutex: &sync.Mutex{}},
 	}
+
+	// set in context original sequence array
+	array, _ := jmespath.Search("teardown", ep.originalMap)
+	baseEndpoint.context.Map.Set("sequence_array", array)
 
 	// only copy over headers if not exists
 	if baseEndpoint.Request.Headers == nil {

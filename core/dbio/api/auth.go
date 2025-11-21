@@ -145,7 +145,6 @@ func (ep *Endpoint) Authenticate() (err error) {
 	}
 
 	// set authenticated
-
 	ep.auth.Authenticated = true
 
 	// Setup auth expiry timer
