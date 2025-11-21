@@ -724,9 +724,9 @@ func (conn *ClickhouseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Co
 
 	switch {
 	case srcCol.IsInteger() && tgtCol.IsString():
-		selectStr = g.F("toString(%s)", qName)
+		fallthrough
 	case srcCol.IsBool() && tgtCol.IsString():
-		selectStr = g.F("toString(%s)", qName)
+		selectStr = g.F("case when %s = 1 then 'true' else 'false' end", qName)
 	default:
 		selectStr = qName
 	}
