@@ -70,6 +70,7 @@ const (
 	FloatType      ColumnType = "float"
 	TimeType       ColumnType = "time"
 	TimezType      ColumnType = "timez"
+	GeometryType   ColumnType = "geometry"
 )
 
 type ConstraintEvalFunc func(value any) bool
@@ -119,6 +120,7 @@ type ColumnStats struct {
 	DateCnt      int64  `json:"date_cnt,omitempty"`
 	DateTimeCnt  int64  `json:"datetime_cnt,omitempty"`
 	DateTimeZCnt int64  `json:"datetimez_cnt,omitempty"`
+	GeometryCnt  int64  `json:"geometry_cnt,omitempty"`
 	TotalCnt     int64  `json:"total_cnt"`
 	UniqCnt      int64  `json:"uniq_cnt"`
 	Checksum     uint64 `json:"checksum"`
@@ -831,6 +833,9 @@ func InferFromStats(columns []Column, safe bool, noDebug bool) []Column {
 			}
 			col.goType = reflect.TypeOf(time.Now())
 			colStats.Min = 0
+		} else if colStats.GeometryCnt > 0 && colStats.GeometryCnt+colStats.NullCnt == colStats.TotalCnt {
+			col.Type = GeometryType
+			col.goType = reflect.TypeOf("geometry")
 		} else {
 			// Mixed types or unrecognized - default to string/text
 			if colStats.MaxLen >= 4000 {
@@ -1117,7 +1122,7 @@ func (ct ColumnType) IsBinary() bool {
 // IsString returns whether the column is a string
 func (ct ColumnType) IsString() bool {
 	switch ct {
-	case StringType, TextType, JsonType, BinaryType, UUIDType:
+	case StringType, TextType, JsonType, BinaryType, UUIDType, GeometryType:
 		return true
 	}
 	return false
@@ -1188,9 +1193,18 @@ func (ct ColumnType) IsTime() bool {
 	return false
 }
 
+// IsGeometry returns whether the column is a geometry object
+func (ct ColumnType) IsGeometry() bool {
+	switch ct {
+	case GeometryType:
+		return true
+	}
+	return false
+}
+
 // IsValid returns whether the column has a valid type
 func (ct ColumnType) IsValid() bool {
-	return ct.IsBinary() || ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime() || ct.IsTime()
+	return ct.IsBinary() || ct.IsString() || ct.IsJSON() || ct.IsNumber() || ct.IsBool() || ct.IsDate() || ct.IsDatetime() || ct.IsTime() || ct.IsGeometry()
 }
 
 func isDate(t *time.Time) bool {

@@ -5,8 +5,8 @@ defaults:
   mode: full-refresh
   target_options:
     format: geojson
-  source_options:
-    geometry_column: geom
+  columns:
+    geom: geometry
 
 streams:
   test_geojson_inline:

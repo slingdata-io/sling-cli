@@ -1431,7 +1431,6 @@ type SourceOptions struct {
 	ChunkCount     *int                `json:"chunk_count,omitempty" yaml:"chunk_count,omitempty"`
 	ChunkExpr      *string             `json:"chunk_expr,omitempty" yaml:"chunk_expr,omitempty"`
 	Encoding       *iop.Encoding       `json:"encoding,omitempty" yaml:"encoding,omitempty"`
-	GeometryColumn *string             `json:"geometry_column,omitempty" yaml:"geometry_column,omitempty"`
 
 	// columns & transforms were moved out of source_options
 	// https://github.com/slingdata-io/sling-cli/issues/348
@@ -1593,9 +1592,6 @@ func (o *SourceOptions) SetDefaults(sourceOptions SourceOptions) {
 	}
 	if o.MaxDecimals == nil {
 		o.MaxDecimals = sourceOptions.MaxDecimals
-	}
-	if o.GeometryColumn == nil {
-		o.GeometryColumn = sourceOptions.GeometryColumn
 	}
 	if o.Encoding == nil {
 		o.Encoding = sourceOptions.Encoding

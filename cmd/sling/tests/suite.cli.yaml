@@ -1081,10 +1081,21 @@
   output_contains:
     - 'successfully executed step "step-08" (type: check)'
 
-# Test PostGIS (PostgreSQL) to GeoJSON as target
+# Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 - id: 131
   name: Test PostGIS (PostgreSQL) to GeoJSON as target
-  run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geom_column_definition_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+  rows: 3
+  output_contains:
+    - 'execution succeeded'
+    - '"type":"FeatureCollection"'
+    - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+    - '"properties":{"id":1,"name":"Point 1"}'
+
+# Test PostGIS (PostgreSQL) to GeoJSON as target with default geometry column name "geometry"
+- id: 132
+  name: Test PostGIS (PostgreSQL) to GeoJSON as target
+  run: 'sling run -d -r cmd/sling/tests/replications/r.69.postgres_geom_column_default_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
   rows: 3
   output_contains:
     - 'execution succeeded'

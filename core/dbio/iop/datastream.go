@@ -2394,31 +2394,39 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 }
 
 // NewGeojsonReaderChnl creates a GeoJSON FeatureCollection reader from datastream rows.
-// Requires geometry_column to be specified in source_options. The geometry column becomes
-// the Feature geometry, all other columns become Feature properties.
+// Requires a column with type "geometry" to be specified in the columns section. If not provided, it will fallback to "geometry".
+// The geometry column becomes the Feature geometry, all other columns become Feature properties.
 func (ds *Datastream) NewGeojsonReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
 	readerChn = make(chan *io.PipeReader, 100)
 
-	geometryColName := ds.Sp.Config.GeometryColumn
-	g.Debug("NewGeojsonReaderChnl: geometry column: %s", geometryColName)
-	if geometryColName == "" {
-		ds.Context.CaptureErr(g.Error("geometry_column must be specified in source_options for GeoJSON format"))
-		return ds.NewJsonReaderChnl(sc)
-	}
-
-	geometryColIdx := -1
-	for i, col := range ds.Columns {
-		if strings.EqualFold(col.Name, geometryColName) {
-			geometryColIdx = i
+	// Find the geometry column name from config columns if provided
+	var geometryColName string
+	for _, configCol := range ds.Columns {
+		if configCol.Type == GeometryType {
+			geometryColName = configCol.Name
 			break
 		}
 	}
 
-	if geometryColIdx < 0 {
+	// Fallback to default column name"geometry" if not provided in config
+	if geometryColName == "" {
+		geometryColName = "geometry"
+	}
+
+	// Get the geometry column by name to get its position
+	geometryCol := ds.Columns.GetColumn(geometryColName)
+	if geometryCol == nil {
 		ds.Context.CaptureErr(g.Error("geometry column '%s' not found in query result", geometryColName))
 		return ds.NewJsonReaderChnl(sc)
 	}
 
+	geometryColIdx := geometryCol.Position - 1
+	if geometryColIdx < 0 || geometryColIdx >= len(ds.Columns) {
+		ds.Context.CaptureErr(g.Error("geometry column '%s' has invalid position", geometryColName))
+		return ds.NewJsonReaderChnl(sc)
+	}
+
+	g.Debug("NewGeojsonReaderChnl: geometry column: %s (index: %d)", geometryColName, geometryColIdx)
 	return ds.newGeojsonFromRowsReaderChnl(sc, geometryColIdx)
 }
 

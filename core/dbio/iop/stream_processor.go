@@ -74,7 +74,6 @@ type StreamConfig struct {
 	BoolAsInt      bool           `json:"-"`
 	Columns        Columns        `json:"columns"` // list of column types. Can be partial list! likely is!
 	Transforms     Transform
-	GeometryColumn string         `json:"geometry_column"`
 
 	Map map[string]string `json:"-"`
 }
@@ -407,10 +406,6 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["bool_at_int"]; ok {
 		sp.Config.BoolAsInt = cast.ToBool(val)
-	}
-
-	if val, ok := configMap["geometry_column"]; ok {
-		sp.Config.GeometryColumn =  cast.ToString(val)
 	}
 
 	if val, ok := configMap["columns"]; ok {
