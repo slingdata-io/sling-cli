@@ -1195,3 +1195,9 @@
     - '✅ SUCCESS: Boolean values correctly converted to strings in ClickHouse'
     - '✓ clickhouse_test2.is_active has boolean type'
     - '✅ SUCCESS: Boolean values correctly stored as boolean type in clickhouse_test2'
+
+- id: 141
+  name: Test {fields} placeholder with select parameter (issue #669)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.75.fields_placeholder_select.yaml'
+  output_contains:
+    - SELECT "id", "name"
