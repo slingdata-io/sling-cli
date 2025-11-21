@@ -525,6 +525,19 @@ func (cols Columns) DbTypes(args ...bool) []string {
 	return fields
 }
 
+// Map return the map of columns
+func (cols Columns) Map() map[string]*Column {
+	colsMap := map[string]*Column{}
+	for _, col := range cols {
+		colsMap[col.Name] = &col
+		keyLower := strings.ToLower(col.Name)
+		if _, exists := colsMap[keyLower]; !exists {
+			colsMap[keyLower] = &col // for lower case matching, don't overwrite
+		}
+	}
+	return colsMap
+}
+
 // FieldMap return the fields map of indexes
 // when `toLower` is true, field keys are lower cased
 func (cols Columns) FieldMap(toLower bool) map[string]int {

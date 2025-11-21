@@ -270,7 +270,7 @@ variable:
   # bind_string: "@p{c}"
   batch_rows: 200
   batch_values: 2000
-  bool_as: string
+  bool_as: integer
   error_filter_table_exists: already
   quote_char: '`'
   timestamp_layout: '2006-01-02 15:04:05.000000000 -07'

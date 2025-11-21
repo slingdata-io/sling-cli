@@ -1185,3 +1185,13 @@
   output_contains:
     - '✓ All 100 rows with large strings loaded successfully'
     - '✓ Large string values preserved (exactly 65,330 chars)'
+
+- id: 140
+  name: Test ClickHouse boolean to string conversion (issue #626)
+  run: |
+    TARGET=clickhouse sling run -d -r cmd/sling/tests/replications/r.74.clickhouse_bool_string.yaml
+    TARGET=clickhouse_top sling run -d -r cmd/sling/tests/replications/r.74.clickhouse_bool_string.yaml
+  output_contains:
+    - '✅ SUCCESS: Boolean values correctly converted to strings in ClickHouse'
+    - '✓ clickhouse_test2.is_active has boolean type'
+    - '✅ SUCCESS: Boolean values correctly stored as boolean type in clickhouse_test2'

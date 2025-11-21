@@ -1,0 +1,174 @@
+# Test for issue #626: ClickHouse should handle boolean-to-string conversion
+# When target column is already a String type, we shouldn't force boolean conversion
+source: postgres
+target: '{TARGET}'
+
+env:
+  TARGET: ${TARGET}
+
+hooks:
+  start:
+    # Create source table in postgres with boolean field
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.clickhouse_test1;
+        CREATE TABLE public.clickhouse_test1 (
+          id INTEGER,
+          name VARCHAR(100),
+          is_active BOOLEAN
+        );
+        INSERT INTO public.clickhouse_test1 (id, name, is_active) VALUES
+          (1, 'Test Record 1', true),
+          (2, 'Test Record 2', false),
+          (3, 'Test Record 3', true);
+
+    # Create target table in clickhouse with boolean column as String
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS default.clickhouse_test1;
+        CREATE TABLE default.clickhouse_test1 (
+          id Int32,
+          name String,
+          is_active String
+        ) ENGINE = MergeTree() ORDER BY id;
+
+  end:
+    # Check that execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify data was loaded correctly
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM default.clickhouse_test1 ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Loaded data: {store.result}
+        Row count: {length(store.result)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result) == 3
+      failure_message: "Expected 3 rows but found {length(store.result)}"
+
+    # Verify first row - boolean true should be converted to string
+    - type: check
+      check: int_parse(store.result[0].id) == 1
+      failure_message: "Expected id=1 but found {store.result[0].id}"
+
+    - type: check
+      check: store.result[0].name == "Test Record 1"
+      failure_message: "Expected 'Test Record 1' but found {store.result[0].name}"
+
+    # The boolean true should be stored as string "true" or "1" in ClickHouse
+    - type: log
+      message: |
+        is_active value for row 1: {store.result[0].is_active}
+
+    - type: check
+      check: store.result[0].is_active == "true" || store.result[0].is_active == "1"
+      failure_message: "Expected 'true' or '1' but found {store.result[0].is_active}"
+
+    # Verify second row - boolean false should be converted to string
+    - type: check
+      check: int_parse(store.result[1].id) == 2
+      failure_message: "Expected id=2 but found {store.result[1].id}"
+
+    - type: check
+      check: store.result[1].is_active == "false" || store.result[1].is_active == "0"
+      failure_message: "Expected 'false' or '0' but found {store.result[1].is_active}"
+
+    # Verify third row
+    - type: check
+      check: int_parse(store.result[2].id) == 3
+      failure_message: "Expected id=3 but found {store.result[2].id}"
+
+    - type: check
+      check: store.result[2].is_active == "true" || store.result[2].is_active == "1"
+      failure_message: "Expected 'true' or '1' but found {store.result[2].is_active}"
+
+    - type: log
+      message: "✅ SUCCESS: Boolean values correctly converted to strings in ClickHouse"
+
+    # ===== Verify second stream: clickhouse_test2 should have boolean type =====
+
+    # Check column type for is_active in clickhouse_test2
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT name, type
+        FROM system.columns
+        WHERE database = 'default'
+          AND table = 'clickhouse_test2'
+          AND name = 'is_active'
+      into: col_type_result
+
+    - type: log
+      message: |
+        clickhouse_test2 is_active column type: {store.col_type_result[0].type}
+
+    # Verify is_active is boolean type (Bool or UInt8 in ClickHouse)
+    - type: check
+      check: contains(store.col_type_result[0].type, "Bool") || contains(store.col_type_result[0].type, "Int8")
+      failure_message: "Expected Bool or UInt8 but found {store.col_type_result[0].type}"
+      success_message: "✓ clickhouse_test2.is_active has boolean type: {store.col_type_result[0].type}"
+
+    # Verify data was loaded correctly in clickhouse_test2
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM default.clickhouse_test2 ORDER BY id
+      into: result2
+
+    - type: log
+      message: |
+        clickhouse_test2 loaded data: {store.result2}
+        Row count: {length(store.result2)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result2) == 3
+      failure_message: "Expected 3 rows in test2 but found {length(store.result2)}"
+
+    # Verify boolean values are actual booleans (0 or 1 as integers)
+    - type: check
+      check: bool_parse(store.result2[0].is_active) == true
+      failure_message: "Expected is_active=1 (true) for row 1 but found {store.result2[0].is_active}"
+
+    - type: check
+      check: bool_parse(store.result2[1].is_active) == false
+      failure_message: "Expected is_active=0 (false) for row 2 but found {store.result2[1].is_active}"
+
+    - type: check
+      check: bool_parse(store.result2[2].is_active) == true
+      failure_message: "Expected is_active=1 (true) for row 3 but found {store.result2[2].is_active}"
+
+    - type: log
+      message: "✅ SUCCESS: Boolean values correctly stored as boolean type in clickhouse_test2"
+
+    # Cleanup source table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.clickhouse_test1;
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS default.clickhouse_test1;
+        DROP TABLE IF EXISTS default.clickhouse_test2;
+
+streams:
+  public.clickhouse_test1:
+    object: default.clickhouse_test1
+    mode: incremental
+    primary_key: id
+  
+  clickhouse_test1:
+    sql: select * from public.clickhouse_test1
+    object: default.clickhouse_test2
+    mode: full-refresh # should be bool
