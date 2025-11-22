@@ -1003,6 +1003,7 @@ const (
 	RuleTypeRetry    RuleType = "retry"    // Retry the request up to MaxAttempts times
 	RuleTypeContinue RuleType = "continue" // Continue processing responses and rules
 	RuleTypeStop     RuleType = "stop"     // Stop processing requests for this endpoint
+	RuleTypeBreak    RuleType = "break"    // Stop processing requests for this iteration
 	RuleTypeFail     RuleType = "fail"     // Stop processing and return an error
 	RuleTypeSkip     RuleType = "skip"     // Skip records from response and continue
 )
