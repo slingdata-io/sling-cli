@@ -487,6 +487,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			// cancel early if not specified
 			if !cast.ToBool(os.Getenv("RUN_ALL")) {
 				testContext.Cancel()
+				return
 			}
 		}
 	}

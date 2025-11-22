@@ -501,10 +501,11 @@ func main() {
 			if cliRun.Sc.Used {
 				env.Println("\ninterrupting...")
 				interrupted = true
+				dumpRuntimeStack()
 				ctx.Cancel()
 				select {
 				case <-done:
-				case <-time.After(5 * time.Second):
+				case <-time.After(10 * time.Second):
 				}
 			}
 			exit()

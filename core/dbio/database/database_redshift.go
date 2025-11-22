@@ -254,6 +254,9 @@ func (conn *RedshiftConn) Unload(ctx *g.Context, fileFormat dbio.FileType, table
 
 // BulkExportStream reads in bulk
 func (conn *RedshiftConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	if conn.GetProp("AWS_BUCKET") == "" {
+		return conn.BaseConn.BulkExportStream(table)
+	}
 
 	df, err := conn.BulkExportFlow(table)
 	if err != nil {

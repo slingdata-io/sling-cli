@@ -1,0 +1,109 @@
+steps:
+  - type: log
+    message: '=== Test 1: Basic SSH command execution ==='
+
+  - type: command
+    id: ssh_hostname
+    ssh_conn: SFTP
+    command: hostname
+    capture: true
+
+  - type: log
+    message: 'SSH hostname output: {state.ssh_hostname.output.stdout}'
+
+  - type: check
+    check: length(state.ssh_hostname.output.stdout) > 0
+    failure_message: 'SSH command did not return hostname'
+
+  - type: log
+    message: '=== Test 2: SSH command with working directory ==='
+
+  - type: command
+    id: ssh_pwd
+    ssh_conn: SFTP
+    command: pwd
+    working_dir: /tmp
+    capture: true
+
+  - type: log
+    message: 'SSH pwd output: {state.ssh_pwd.output.stdout}'
+
+  - type: check
+    check: contains(state.ssh_pwd.output.stdout, "/tmp")
+    failure_message: 'SSH working directory not applied correctly'
+
+  - type: log
+    message: '=== Test 3: SSH command with environment variables ==='
+
+  - type: command
+    id: ssh_env
+    ssh_conn: SFTP
+    command: echo $TEST_VAR
+    env:
+      TEST_VAR: hello_from_ssh
+    capture: true
+
+  - type: log
+    message: 'SSH env output: {state.ssh_env.output.stdout}'
+
+  - type: check
+    check: contains(state.ssh_env.output.stdout, "hello_from_ssh")
+    failure_message: 'SSH environment variable not set correctly'
+
+  - type: log
+    message: '=== Test 4: SSH command array format ==='
+
+  - type: command
+    id: ssh_array
+    ssh_conn: SFTP
+    command: ['echo', 'test', 'array', 'command']
+    capture: true
+
+  - type: log
+    message: 'SSH array command output: {state.ssh_array.output.stdout}'
+
+  - type: check
+    check: contains(state.ssh_array.output.stdout, "test array command")
+    failure_message: 'SSH array command format failed'
+
+  - type: log
+    message: '=== Test 5: SSH command with timeout ==='
+
+  - type: command
+    id: ssh_timeout
+    ssh_conn: SFTP
+    command: sleep 1 && echo "completed"
+    timeout: 5
+    capture: true
+
+  - type: log
+    message: 'SSH timeout command output: {state.ssh_timeout.output.stdout}'
+
+  - type: check
+    check: contains(state.ssh_timeout.output.stdout, "completed")
+    failure_message: 'SSH command with timeout failed'
+
+  - type: log
+    message: '=== Test 6: SSH command creating and reading a file ==='
+
+  - type: command
+    id: ssh_create_file
+    ssh_conn: SFTP
+    command: 'echo "test content" > /tmp/ssh_test_file.txt && cat /tmp/ssh_test_file.txt'
+    capture: true
+
+  - type: log
+    message: 'SSH file content: {state.ssh_create_file.output.stdout}'
+
+  - type: check
+    check: contains(state.ssh_create_file.output.stdout, "test content")
+    failure_message: 'SSH file creation/read failed'
+
+  - type: command
+    id: ssh_cleanup
+    ssh_conn: SFTP
+    command: rm -f /tmp/ssh_test_file.txt
+    capture: false
+
+  - type: log
+    message: '=== All SSH command tests completed successfully ==='

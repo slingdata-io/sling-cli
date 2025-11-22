@@ -425,7 +425,9 @@
   name: Run sling pipeline 01
   run: 'sling run -p cmd/sling/tests/pipelines/p.01.yaml -d'
   output_contains:
-    - 'executed step "step-02" (type: replication)'
+    - 'executed step "step-03-replication"'
+    - 'key1 => value-from-pipeline'
+    - 'key2 => value-from-replication'
 
 - id: 70
   name: Run sling chunking
@@ -1080,3 +1082,129 @@
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
   output_contains:
     - 'successfully executed step "step-08" (type: check)'
+
+- id: 131
+  name: Test Routine Hook
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.routine.yaml'
+  output_contains:
+    - '=== Test 1: Simple logging routine ==='
+    - 'Starting routine: test_logging'
+    - 'Parameter value: hello_from_pipeline'
+    - 'Environment variable: environment_test_value'
+    - '=== Test 2: Data validation routine ==='
+    - 'Validating data for table: public.test_routine_table'
+    - 'Table public.test_routine_table has'
+    - '=== Test 3: File operations routine ==='
+    - 'Processing file: local//tmp/routine_test_file.txt'
+    - 'routine (missing_param_test) requires params that were not provided: ["test_param"]'
+    - '=== Test 4: HTTP fetch routine ==='
+    - 'Fetching data from: https://swapi.dev/api/planets/1'
+    - '=== Test 5: Nested routine test ==='
+    - 'Starting validation suite'
+    - '=== Test 6: Conditional routine execution ==='
+    - '=== All routine tests completed successfully ==='
+
+- id: 132
+  name: Test hooks in defaults with wildcards
+  run: 'sling run -d -r cmd/sling/tests/replications/r.68.defaults_hooks_wildcard.yaml'
+  output_contains:
+    - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test2.csv'
+    - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test2.csv'
+    - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test1.1.csv'
+    - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test1.1.csv'
+    - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test1.2.csv'
+    - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test1.2.csv'
+
+- id: 133
+  name: Test SSH Command Hook
+  run: 'sling run -d -p cmd/sling/tests/pipelines/p.08.ssh_command.yaml'
+  output_contains:
+    - '=== Test 1: Basic SSH command execution ==='
+    - 'SSH hostname output:'
+    - '=== Test 2: SSH command with working directory ==='
+    - 'SSH pwd output:'
+    - '=== Test 3: SSH command with environment variables ==='
+    - 'SSH env output:'
+    - 'hello_from_ssh'
+    - '=== Test 4: SSH command array format ==='
+    - 'SSH array command output:'
+    - 'test array command'
+    - '=== Test 5: SSH command with timeout ==='
+    - 'SSH timeout command output:'
+    - 'completed'
+    - '=== Test 6: SSH command creating and reading a file ==='
+    - 'SSH file content:'
+    - 'test content'
+    - '=== All SSH command tests completed successfully ==='
+
+- id: 134
+  name: Test MSSQL to Postgres decimal precision
+  run: 'sling run -d -r cmd/sling/tests/replications/r.69.mssql_postgres_decimal.yaml'
+  streams: 1
+
+- id: 135
+  name: Test MSSQL to Postgres decimal cast_as (float and string)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.70.mssql_postgres_decimal_cast_as.yaml'
+  streams: 2
+
+- id: 136
+  name: Test nested JSON to SQLite with CLI flags
+  run: |
+    bash cmd/sling/tests/replications/r.71.json_sqlite_nested.sh
+
+    sling run -d --src-conn LOCAL --tgt-conn SQLITE --src-stream "file:///tmp/test_nested_json/*.json" --tgt-object "main.test_nested_json_cli" --mode full-refresh --src-options '{ format: json, flatten: true }'
+
+- id: 137
+  name: Test nested JSON to SQLite with replication config (pre-defined columns)
+  run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
+  err: true
+  output_contains:
+   - cannot be assigned to zero-based row
+
+- id: 138
+  name: Test wildcard stream with disabled table exclusion
+  run: |
+    sling conns exec mysql "
+      DROP TABLE IF EXISTS testing_1;
+      DROP TABLE IF EXISTS testing_2;
+      DROP TABLE IF EXISTS testing_3;
+      CREATE TABLE testing_1 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_1 (id, name) VALUES (1, 'table_one');
+      CREATE TABLE testing_2 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_2 (id, name) VALUES (2, 'table_two');
+      CREATE TABLE testing_3 (id INT PRIMARY KEY, name VARCHAR(50));
+      INSERT INTO testing_3 (id, name) VALUES (3, 'table_three');
+    "
+    sling run -d -r cmd/sling/tests/replications/r.72.wildcard_disabled.yaml
+  output_contains:
+    - '✅ SUCCESS: Wildcard with disabled stream works correctly'
+
+- id: 139
+  name: 'Test DuckDB reading Parquet with large strings from S3 (issue #668)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.73.duckdb_large_parquet.yaml'
+  output_contains:
+    - '✓ All 100 rows with large strings loaded successfully'
+    - '✓ Large string values preserved (exactly 65,330 chars)'
+
+- id: 140
+  name: 'Test ClickHouse boolean to string conversion (issue #626)'
+  run: |
+    TARGET=clickhouse sling run -d -r cmd/sling/tests/replications/r.74.clickhouse_bool_string.yaml
+    TARGET=clickhouse_top sling run -d -r cmd/sling/tests/replications/r.74.clickhouse_bool_string.yaml
+  output_contains:
+    - '✅ SUCCESS: Boolean values correctly converted to strings in ClickHouse'
+    - '✓ clickhouse_test2.is_active has boolean type'
+    - '✅ SUCCESS: Boolean values correctly stored as boolean type in clickhouse_test2'
+
+- id: 141
+  name: 'Test {fields} placeholder with select parameter (issue #669)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.75.fields_placeholder_select.yaml'
+  output_contains:
+    - SELECT "id", "name"
+
+- id: 142
+  name: 'Test columns casting to string for DDL (issue #651)'
+  run: 'sling run -d -r cmd/sling/tests/replications/r.32.columns_cast_to_string.yaml'
+  output_contains:
+    - 'Column type for date_col: character varying'
+    - casting column 'date_col' as 'string'

@@ -171,10 +171,98 @@ jobs:
           cd core/dbio
           bash scripts/test.sh
 
+  build-test-python:
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[bump]'))"
+
+    runs-on: [self-hosted, linux, mpc]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout sling-cli
+        uses: actions/checkout@v2
+        with:
+          path: sling-cli
+
+      - name: Checkout sling-python
+        uses: actions/checkout@v2
+        with:
+          repository: slingdata-io/sling-python
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          path: sling-python
+
+      - uses: myrotvorets/set-commit-status-action@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
+          status: pending
+
+      - name: Set up GoLang
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Load Secrets
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+
+      - name: Load Secrets (dbio)
+        uses: flarco/infisical-action@v3
+        with:
+          version: 0.28.1
+          client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          path: /dbio
+          env: dev
+
+      - name: Build Sling Binary
+        working-directory: sling-cli
+        run: |
+          # Prep
+          bash scripts/ci/prep.linux.sh
+
+          # build
+          bash scripts/ci/build.linux.sh dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install Python dependencies
+        run: |
+          pip install pytest pyarrow pandas
+
+      - name: Install sling-python package
+        working-directory: sling-python
+        run: |
+          cd sling
+          pip install -e .
+
+      - name: Run Python Tests
+        working-directory: sling-python/sling
+        env:
+          SLING_BINARY: ${{ github.workspace }}/sling-cli/cmd/sling/sling
+        run: |
+          # Run the tests
+          python -m pytest tests/tests.py -v
+          SLING_USE_ARROW=false python -m pytest tests/test_sling_class.py -v
+          SLING_USE_ARROW=true python -m pytest tests/test_sling_class.py -v
+
+      - uses: myrotvorets/set-commit-status-action@master
+        if: always()
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sha: ${{ github.sha }}
+          status: ${{ job.status }}
+
   build-test-success:
 
     runs-on: ubuntu-latest
-    needs: [ build-test-sling, build-test-dbio, build-test-sling-cli ]
+    needs: [ build-test-sling, build-test-dbio, build-test-sling-cli, build-test-python ]
 
     steps:
       - uses: actions/checkout@v2

@@ -1,0 +1,85 @@
+source: mysql
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  end:
+    # Check that execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify only testing_1 and testing_2 were copied (not testing_3)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name LIKE 'testing_%'
+        ORDER BY table_name
+      into: result
+
+    - type: log
+      message: |
+        Tables copied to target: {store.result}
+        Number of tables: {length(store.result)}
+
+    # Verify exactly 2 tables were created (testing_1 and testing_2)
+    - type: check
+      check: length(store.result) == 2
+      failure_message: "Expected 2 tables but found {length(store.result)}"
+
+    # Verify testing_1 exists
+    - type: check
+      check: store.result[0].table_name == "testing_1"
+      failure_message: "Expected testing_1 but found {store.result[0].table_name}"
+
+    # Verify testing_2 exists
+    - type: check
+      check: store.result[1].table_name == "testing_2"
+      failure_message: "Expected testing_2 but found {store.result[1].table_name}"
+
+    # Verify testing_3 does NOT exist (was disabled)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT COUNT(*) as cnt
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'testing_3'
+      into: testing_3_check
+
+    - type: check
+      check: store.testing_3_check[0].cnt == 0
+      failure_message: "testing_3 should not exist but it does!"
+
+    - type: log
+      message: "✅ SUCCESS: Wildcard with disabled stream works correctly"
+
+    # Cleanup source tables
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS testing_1;
+        DROP TABLE IF EXISTS testing_2;
+        DROP TABLE IF EXISTS testing_3;
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.testing_1;
+        DROP TABLE IF EXISTS public.testing_2;
+        DROP TABLE IF EXISTS public.testing_3;
+
+streams:
+  # Use wildcard to match all testing_* tables
+  mysql.testing_*:
+    object: public.{stream_table}
+
+  # Explicitly disable testing_3
+  mysql.testing_3:
+    disabled: true

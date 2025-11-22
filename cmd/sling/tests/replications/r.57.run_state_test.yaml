@@ -184,3 +184,8 @@ streams:
           name: "Check run.total_rows is 0"
           check: run.total_rows == 0
           failure_message: 'run.total_rows should be 0, got: {run.total_rows}'
+
+        - type: check
+          check: '!is_null(run.incremental_value)'
+          on_failure: abort
+          success_message: 'run.incremental_value => {run.incremental_value}'

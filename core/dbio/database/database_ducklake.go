@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -126,6 +127,14 @@ func (conn *DuckLakeConn) Connect(timeOut ...int) (err error) {
 	case conn.DataPath != "":
 		// ensure dir is created
 		os.MkdirAll(conn.DataPath, 0775)
+	}
+
+	// if catalog type is sqlite, create folder first
+	if conn.CatalogType == "sqlite" {
+		parentDir := filepath.Dir(conn.CatalogConnStr)
+		if err := os.MkdirAll(parentDir, 0775); err != nil {
+			g.Warn("could not create parent folder for sqlite catalog file: %s", err.Error())
+		}
 	}
 
 	// Attach the DuckLake database

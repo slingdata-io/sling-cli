@@ -39,7 +39,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		options := t.getTargetOptionsMap()
 		props := append(
 			g.MapToKVArr(cfg.TgtConn.DataS()),
-			g.MapToKVArr(g.ToMapString(options))...,
+			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)

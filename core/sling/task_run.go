@@ -24,10 +24,6 @@ import (
 	"github.com/spf13/cast"
 )
 
-// connPool a way to cache connections to that they don't have to reconnect
-// for each replication steps
-var connPool = map[string]database.Connection{}
-
 var (
 	start                time.Time
 	slingLoadedAtColumn  = "_sling_loaded_at"
@@ -109,6 +105,10 @@ func (t *TaskExecution) Execute() error {
 			}
 		}()
 
+		if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
+			t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
+		}
+
 		t.Status = ExecStatusRunning
 
 		if t.Err != nil {
@@ -175,6 +175,7 @@ func (t *TaskExecution) Execute() error {
 		case <-time.After(5 * time.Second):
 		}
 		if t.Err == nil {
+			newStatus = ExecStatusTerminated
 			t.Err = g.Error("Execution interrupted")
 		}
 	}
@@ -193,7 +194,7 @@ func (t *TaskExecution) Execute() error {
 		if ok && cast.ToInt64(deadline) <= (time.Now().Unix()+1) {
 			t.SetProgress("execution failed (timed-out)")
 			newStatus = ExecStatusTimedOut
-		} else {
+		} else if newStatus != ExecStatusTerminated {
 			t.SetProgress("execution failed")
 			newStatus = ExecStatusError
 		}
@@ -566,7 +567,10 @@ func (t *TaskExecution) runApiToDb() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			if len(srcConn.State.Store) == 0 && !t.hasRange() {
+				// warn if no store/range is provided
+				g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			}
 			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {
@@ -656,7 +660,10 @@ func (t *TaskExecution) runApiToFile() (err error) {
 
 	if t.Config.Mode == IncrementalMode {
 		if os.Getenv("SLING_STATE") == "" {
-			g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			if len(srcConn.State.Store) == 0 && !t.hasRange() {
+				// warn if no store/range is provided
+				g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+			}
 			goto skipGetState
 		}
 		if err = getIncrementalValueViaState(t); err != nil {

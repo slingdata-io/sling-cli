@@ -1,6 +1,7 @@
 package iop
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -676,5 +677,92 @@ func TestValidateNames(t *testing.T) {
 
 		// Third column should have _2 suffix
 		assert.Equal(t, "abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_1234567_2", newCols[2].Name)
+	})
+}
+
+func TestDecodeJSONIfBase64(t *testing.T) {
+	// Test 1: Valid JSON - should return as-is
+	t.Run("ValidJSON", func(t *testing.T) {
+		validJSON := `{"key": "value", "number": 123}`
+		result, err := DecodeJSONIfBase64(validJSON)
+		assert.NoError(t, err)
+		assert.Equal(t, validJSON, result)
+	})
+
+	// Test 2: Base64-encoded JSON - should decode
+	t.Run("Base64EncodedJSON", func(t *testing.T) {
+		originalJSON := `{"type": "service_account", "project_id": "my-project"}`
+		base64JSON := base64.StdEncoding.EncodeToString([]byte(originalJSON))
+
+		result, err := DecodeJSONIfBase64(base64JSON)
+		assert.NoError(t, err)
+		assert.Equal(t, originalJSON, result)
+	})
+
+	// Test 3: Complex nested JSON in base64
+	t.Run("Base64EncodedComplexJSON", func(t *testing.T) {
+		complexJSON := `{
+  "type": "service_account",
+  "project_id": "test-project",
+  "private_key_id": "key123",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg==\n-----END PRIVATE KEY-----\n",
+  "client_email": "test@test.iam.gserviceaccount.com",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "nested": {
+    "data": [1, 2, 3],
+    "more": "values"
+  }
+}`
+		base64JSON := base64.StdEncoding.EncodeToString([]byte(complexJSON))
+
+		result, err := DecodeJSONIfBase64(base64JSON)
+		assert.NoError(t, err)
+		assert.JSONEq(t, complexJSON, result)
+	})
+
+	// Test 4: Invalid base64 - should return original
+	t.Run("InvalidBase64", func(t *testing.T) {
+		invalidBase64 := "this is not base64 !!@@##"
+		result, err := DecodeJSONIfBase64(invalidBase64)
+		assert.NoError(t, err)
+		assert.Equal(t, invalidBase64, result)
+	})
+
+	// Test 5: Valid base64 but not JSON - should return original
+	t.Run("Base64NotJSON", func(t *testing.T) {
+		notJSON := "just some plain text"
+		base64NotJSON := base64.StdEncoding.EncodeToString([]byte(notJSON))
+
+		result, err := DecodeJSONIfBase64(base64NotJSON)
+		assert.NoError(t, err)
+		// Should return the base64 string since decoded content is not valid JSON
+		assert.Equal(t, base64NotJSON, result)
+	})
+
+	// Test 6: Empty string - should return empty string
+	t.Run("EmptyString", func(t *testing.T) {
+		result, err := DecodeJSONIfBase64("")
+		assert.NoError(t, err)
+		assert.Equal(t, "", result)
+	})
+
+	// Test 7: JSON array in base64
+	t.Run("Base64EncodedJSONArray", func(t *testing.T) {
+		jsonArray := `[{"id": 1, "name": "test"}, {"id": 2, "name": "test2"}]`
+		base64Array := base64.StdEncoding.EncodeToString([]byte(jsonArray))
+
+		result, err := DecodeJSONIfBase64(base64Array)
+		assert.NoError(t, err)
+		assert.JSONEq(t, jsonArray, result)
+	})
+
+	// Test 8: JSON with special characters
+	t.Run("Base64EncodedJSONWithSpecialChars", func(t *testing.T) {
+		specialJSON := `{"message": "Hello\nWorld\t!", "emoji": "🎉", "quotes": "He said \"hi\""}`
+		base64Special := base64.StdEncoding.EncodeToString([]byte(specialJSON))
+
+		result, err := DecodeJSONIfBase64(base64Special)
+		assert.NoError(t, err)
+		assert.JSONEq(t, specialJSON, result)
 	})
 }

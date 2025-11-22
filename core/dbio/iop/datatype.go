@@ -525,6 +525,19 @@ func (cols Columns) DbTypes(args ...bool) []string {
 	return fields
 }
 
+// Map return the map of columns
+func (cols Columns) Map() map[string]*Column {
+	colsMap := map[string]*Column{}
+	for _, col := range cols {
+		colsMap[col.Name] = &col
+		keyLower := strings.ToLower(col.Name)
+		if _, exists := colsMap[keyLower]; !exists {
+			colsMap[keyLower] = &col // for lower case matching, don't overwrite
+		}
+	}
+	return colsMap
+}
+
 // FieldMap return the fields map of indexes
 // when `toLower` is true, field keys are lower cased
 func (cols Columns) FieldMap(toLower bool) map[string]int {
@@ -1215,6 +1228,8 @@ func (cc *ColumnConstraint) parse() {
 // GetNativeType returns the native column type from generic
 func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType string, err error) {
 	template, _ := t.Template()
+
+remap:
 	nativeType, ok := template.GeneralTypeMap[string(col.Type)]
 	if !ok {
 		err = g.Error(
@@ -1315,6 +1330,15 @@ func (col *Column) GetNativeType(t dbio.Type, ct ColumnTyping) (nativeType strin
 				ct.Decimal = &DecimalColumnTyping{}
 			}
 			precision, scale = ct.Decimal.Apply(*col)
+
+			switch ct.Decimal.CastAs {
+			case "float":
+				col.Type = FloatType
+				goto remap
+			case "string":
+				col.Type = StringType
+				goto remap
+			}
 		}
 
 		nativeType = strings.ReplaceAll(
@@ -1571,10 +1595,11 @@ func (sct *StringColumnTyping) Apply(length, max int) (newLength int) {
 
 // DecimalColumnTyping contains decimal type mapping configurations
 type DecimalColumnTyping struct {
-	MinPrecision *int `json:"min_precision,omitempty" yaml:"min_precision,omitempty"` // Total number of digits
-	MaxPrecision int  `json:"max_precision,omitempty" yaml:"max_precision,omitempty"` // Total number of digits
-	MinScale     *int `json:"min_scale,omitempty" yaml:"min_scale,omitempty"`         // Number of digits after decimal point
-	MaxScale     int  `json:"max_scale,omitempty" yaml:"max_scale,omitempty"`         // Number of digits after decimal point
+	MinPrecision *int   `json:"min_precision,omitempty" yaml:"min_precision,omitempty"` // Total number of digits
+	MaxPrecision int    `json:"max_precision,omitempty" yaml:"max_precision,omitempty"` // Total number of digits
+	MinScale     *int   `json:"min_scale,omitempty" yaml:"min_scale,omitempty"`         // Number of digits after decimal point
+	MaxScale     int    `json:"max_scale,omitempty" yaml:"max_scale,omitempty"`
+	CastAs       string `json:"cast_as,omitempty" yaml:"cast_as,omitempty"`
 }
 
 func (dct *DecimalColumnTyping) Apply(col Column) (precision, scale int) {

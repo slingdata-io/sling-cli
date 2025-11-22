@@ -1,0 +1,253 @@
+source: MSSQL
+target: POSTGRES
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop tables if exists
+        IF OBJECT_ID('dbo.decimal_test1', 'U') IS NOT NULL DROP TABLE dbo.decimal_test1;
+        IF OBJECT_ID('dbo.decimal_test2', 'U') IS NOT NULL DROP TABLE dbo.decimal_test2;
+
+        -- Create source table for float cast test
+        CREATE TABLE dbo.decimal_test1 (
+          id INT PRIMARY KEY,
+          decimal_6_5 DECIMAL(6,5),
+          decimal_10_4 DECIMAL(10,4),
+          decimal_18_6 DECIMAL(18,6),
+          numeric_12_3 NUMERIC(12,3),
+          description NVARCHAR(100)
+        );
+
+        -- Create source table for string cast test
+        CREATE TABLE dbo.decimal_test2 (
+          id INT PRIMARY KEY,
+          decimal_6_5 DECIMAL(6,5),
+          decimal_10_4 DECIMAL(10,4),
+          decimal_18_6 DECIMAL(18,6),
+          numeric_12_3 NUMERIC(12,3),
+          description NVARCHAR(100)
+        );
+
+        -- Insert test data into both tables
+        INSERT INTO dbo.decimal_test1 VALUES
+        (1, 1.23450, 1234.5678, 123456.789012, 12345.678, N'Basic positive values'),
+        (2, -1.23450, -1234.5678, -123456.789012, -12345.678, N'Basic negative values'),
+        (3, 0.00100, 0.0001, 0.000001, 0.001, N'Very small values'),
+        (4, 9.99999, 999999.9999, 999999999999.999999, 999999999.999, N'Maximum values'),
+        (5, 0.00000, 0.0000, 0.000000, 0.000, N'Zero values');
+
+        INSERT INTO dbo.decimal_test2 VALUES
+        (1, 1.23450, 1234.5678, 123456.789012, 12345.678, N'Basic positive values'),
+        (2, -1.23450, -1234.5678, -123456.789012, -12345.678, N'Basic negative values'),
+        (3, 0.00100, 0.0001, 0.000001, 0.001, N'Very small values'),
+        (4, 9.99999, 999999.9999, 999999999999.999999, 999999999.999, N'Maximum values'),
+        (5, 0.00000, 0.0000, 0.000000, 0.000, N'Zero values');
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.decimal_test1
+      into: source_count1
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.decimal_test2
+      into: source_count2
+
+    - type: log
+      message: |
+        Created MSSQL source tables:
+        - decimal_test1 (cast_as float): {store.source_count1[0].count} rows
+        - decimal_test2 (cast_as string): {store.source_count2[0].count} rows
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row counts match
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.decimal_test1
+      into: target_count1
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM public.decimal_test2
+      into: target_count2
+
+    - type: check
+      check: store.source_count1[0].count == store.target_count1[0].count
+      failure_message: "decimal_test1 row count mismatch: source has {store.source_count1[0].count} rows, target has {store.target_count1[0].count} rows"
+
+    - type: check
+      check: store.source_count2[0].count == store.target_count2[0].count
+      failure_message: "decimal_test2 row count mismatch: source has {store.source_count2[0].count} rows, target has {store.target_count2[0].count} rows"
+
+    # Check column data types in target for decimal_test1 (should be float/double precision)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          column_name,
+          data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'decimal_test1'
+          AND column_name IN ('decimal_6_5', 'decimal_10_4', 'decimal_18_6', 'numeric_12_3')
+        ORDER BY column_name
+      into: test1_column_types
+
+    - type: log
+      message: |
+        decimal_test1 column types (should be double precision):
+        {pretty_table(store.test1_column_types)}
+
+    # Verify all decimal columns are stored as double precision (float)
+    - type: check
+      check: store.test1_column_types[0].data_type == "double precision"
+      failure_message: "decimal_test1.decimal_10_4 should be 'double precision', got '{store.test1_column_types[0].data_type}'"
+
+    - type: check
+      check: store.test1_column_types[1].data_type == "double precision"
+      failure_message: "decimal_test1.decimal_18_6 should be 'double precision', got '{store.test1_column_types[1].data_type}'"
+
+    - type: check
+      check: store.test1_column_types[2].data_type == "double precision"
+      failure_message: "decimal_test1.decimal_6_5 should be 'double precision', got '{store.test1_column_types[2].data_type}'"
+
+    - type: check
+      check: store.test1_column_types[3].data_type == "double precision"
+      failure_message: "decimal_test1.numeric_12_3 should be 'double precision', got '{store.test1_column_types[3].data_type}'"
+
+    # Check column data types in target for decimal_test2 (should be text/varchar)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          column_name,
+          data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'decimal_test2'
+          AND column_name IN ('decimal_6_5', 'decimal_10_4', 'decimal_18_6', 'numeric_12_3')
+        ORDER BY column_name
+      into: test2_column_types
+
+    - type: log
+      message: |
+        decimal_test2 column types (should be character varying):
+        {pretty_table(store.test2_column_types)}
+
+    # Verify all decimal columns are stored as character varying (string)
+    - type: check
+      check: store.test2_column_types[0].data_type == "character varying"
+      failure_message: "decimal_test2.decimal_10_4 should be 'character varying', got '{store.test2_column_types[0].data_type}'"
+
+    - type: check
+      check: store.test2_column_types[1].data_type == "character varying"
+      failure_message: "decimal_test2.decimal_18_6 should be 'character varying', got '{store.test2_column_types[1].data_type}'"
+
+    - type: check
+      check: store.test2_column_types[2].data_type == "character varying"
+      failure_message: "decimal_test2.decimal_6_5 should be 'character varying', got '{store.test2_column_types[2].data_type}'"
+
+    - type: check
+      check: store.test2_column_types[3].data_type == "character varying"
+      failure_message: "decimal_test2.numeric_12_3 should be 'character varying', got '{store.test2_column_types[3].data_type}'"
+
+    # Get data from both tables to verify values
+    - type: query
+      connection: '{source.name}'
+      query: |
+        SELECT id, decimal_6_5, decimal_10_4, decimal_18_6, numeric_12_3
+        FROM dbo.decimal_test1
+        ORDER BY id
+      into: source_data1
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, decimal_6_5, decimal_10_4, decimal_18_6, numeric_12_3
+        FROM public.decimal_test1
+        ORDER BY id
+      into: target_data1
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT id, decimal_6_5, decimal_10_4, decimal_18_6, numeric_12_3
+        FROM public.decimal_test2
+        ORDER BY id
+      into: target_data2
+
+    - type: log
+      message: |
+        Source data (decimal_test1):
+        {pretty_table(store.source_data1)}
+
+    - type: log
+      message: |
+        Target data (decimal_test1) - cast as float:
+        {pretty_table(store.target_data1)}
+
+    - type: log
+      message: |
+        Target data (decimal_test2) - cast as string:
+        {pretty_table(store.target_data2)}
+
+    # Verify decimal_test1 values (float) match source
+    - type: check
+      check: float_parse(store.source_data1[0].decimal_6_5) == float_parse(store.target_data1[0].decimal_6_5)
+      failure_message: "decimal_test1 row 1 decimal_6_5 mismatch: source={store.source_data1[0].decimal_6_5}, target={store.target_data1[0].decimal_6_5}"
+
+    - type: check
+      check: float_parse(store.source_data1[0].decimal_10_4) == float_parse(store.target_data1[0].decimal_10_4)
+      failure_message: "decimal_test1 row 1 decimal_10_4 mismatch: source={store.source_data1[0].decimal_10_4}, target={store.target_data1[0].decimal_10_4}"
+
+    - type: check
+      check: float_parse(store.source_data1[2].decimal_6_5) == float_parse(store.target_data1[2].decimal_6_5)
+      failure_message: "decimal_test1 row 3 decimal_6_5 (small value) mismatch: source={store.source_data1[2].decimal_6_5}, target={store.target_data1[2].decimal_6_5}"
+
+    # Verify decimal_test2 values (string) can be parsed as floats and match
+    - type: check
+      check: float_parse(store.source_data1[0].decimal_6_5) == float_parse(store.target_data2[0].decimal_6_5)
+      failure_message: "decimal_test2 row 1 decimal_6_5 (as string) mismatch: source={store.source_data1[0].decimal_6_5}, target={store.target_data2[0].decimal_6_5}"
+
+    - type: check
+      check: float_parse(store.source_data1[0].decimal_10_4) == float_parse(store.target_data2[0].decimal_10_4)
+      failure_message: "decimal_test2 row 1 decimal_10_4 (as string) mismatch: source={store.source_data1[0].decimal_10_4}, target={store.target_data2[0].decimal_10_4}"
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.decimal_test1', 'U') IS NOT NULL DROP TABLE dbo.decimal_test1;
+        IF OBJECT_ID('dbo.decimal_test2', 'U') IS NOT NULL DROP TABLE dbo.decimal_test2;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.decimal_test1 CASCADE;
+        DROP TABLE IF EXISTS public.decimal_test2 CASCADE;
+
+streams:
+  dbo.decimal_test1:
+    object: public.decimal_test1
+    mode: full-refresh
+    target_options:
+      column_casing: lower
+      column_typing:
+        decimal:
+          cast_as: float
+
+  dbo.decimal_test2:
+    object: public.decimal_test2
+    mode: full-refresh
+    target_options:
+      column_casing: lower
+      column_typing:
+        decimal:
+          cast_as: string
