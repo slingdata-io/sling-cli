@@ -409,7 +409,7 @@
     RESET: 'true'
   rows: 551
   output_contains:
-    - 'executed hook "start-02" (type: delete)'
+    - 'executed hook "start-03-delete" (type: delete)'
     - 'writing incremental state (value => 2019-06-01'
 
 - id: 68
@@ -417,7 +417,7 @@
   run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --streams ''test1k_postgres_pg_parquet'''
   rows: '>78'
   output_contains:
-    - 'skipped hook "start-02"'
+    - 'skipped hook "start-03-delete"'
     - 'hook (inspect_file_check) failed => check failure'
     - 'writing incremental state (value => 2019-07-01'
 
@@ -1081,7 +1081,7 @@
   name: Test HTTP write_to
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
   output_contains:
-    - 'successfully executed step "step-08" (type: check)'
+    - 'successfully executed step "step-08-check" (type: check)'
 
 - id: 131
   name: Test Routine Hook
