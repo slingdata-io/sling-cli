@@ -15,6 +15,7 @@ import (
 )
 
 type APIConnection struct {
+	Name      string
 	Spec      Spec
 	State     *APIState
 	Context   *g.Context
@@ -25,6 +26,7 @@ type APIConnection struct {
 func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *APIConnection, err error) {
 
 	ac = &APIConnection{
+		Name:    cast.ToString(data["name"]),
 		Context: g.NewContext(ctx),
 		State: &APIState{
 			Env:    g.KVArrToMap(os.Environ()...),
@@ -34,6 +36,11 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		},
 		Spec:      spec,
 		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
+	}
+
+	if ac.Name == "" {
+		// use normalized spec name
+		ac.Name = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(spec.Name)), " ", "_")
 	}
 
 	// Merge spec defaults state into ac.State.State first

@@ -621,8 +621,7 @@ func (a *AuthenticatorOAuth2) TokenFile() string {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		g.Warn("could not create folder %s => %s", dir, err.Error())
 	}
-	name := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(a.conn.Spec.Name)), " ", "_")
-	return filepath.Join(dir, name+".json")
+	return filepath.Join(dir, a.conn.Name+".json")
 }
 
 // SaveToken securely saves the token (use keyring for better security).
