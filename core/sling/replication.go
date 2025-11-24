@@ -1241,6 +1241,12 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 		"stream_name",
 		"stream_file_path",
 		"stream_file_name",
+		"stream.table",
+		"stream.table_lower",
+		"stream.table_upper",
+		"stream.name",
+		"stream.file_path",
+		"stream.file_name",
 	}
 	for _, v := range vars {
 		if strings.Contains(s.Object, g.F("{%s}", v)) {

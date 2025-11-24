@@ -1102,9 +1102,10 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	for origKey, v := range m {
 		for _, prefix := range lo.Keys(nm) {
 			if strings.HasPrefix(origKey, prefix+"_") {
-				nm[prefix][strings.TrimPrefix(origKey, prefix+"_")] = v
+				newSuffix := strings.TrimPrefix(origKey, prefix+"_")
+				nm[prefix][newSuffix] = v
 				// TODO: use evaluator instead of dot notation patch
-				newKey := prefix + "." + strings.TrimPrefix(origKey, prefix+"_")
+				newKey := prefix + "." + newSuffix
 				m[newKey] = v
 			}
 		}

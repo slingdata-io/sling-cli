@@ -1108,6 +1108,7 @@
   name: Test hooks in defaults with wildcards
   run: 'sling run -d -r cmd/sling/tests/replications/r.68.defaults_hooks_wildcard.yaml'
   output_contains:
+    - 'wrote 14 rows to file:///tmp/wildcard_test1_upsert'
     - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test2.csv'
     - 'POST HOOK EXECUTED for stream: cmd/sling/tests/files/test2.csv'
     - 'PRE HOOK EXECUTED for stream: cmd/sling/tests/files/test1.1.csv'
