@@ -627,7 +627,10 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 		return database.Table{}, err
 	}
 	fm["table"] = targetTable.Raw
-	targetTable.DDL = g.Rm(targetTable.DDL, fm)
+	targetTable.DDL, err = cfg.evaluator.RenderString(targetTable.DDL, fm)
+	if err != nil {
+		return database.Table{}, g.Error(err, "could not render target table DDL")
+	}
 
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 

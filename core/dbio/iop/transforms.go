@@ -727,6 +727,7 @@ type Evaluator struct {
 	NoComputeKey    string
 	VarPrefixes     []string
 	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
+	AllowNoPrefix   bool
 
 	bracketRegex *regexp.Regexp
 }
@@ -751,20 +752,15 @@ func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
 
 // ExtractVars identifies variable references in a string expression,
 // ignoring those inside double quotes. It can recognize patterns like env.VAR, state.VAR, secrets.VAR, and auth.VAR.
+// When AllowNoPrefix is true, it also captures unprefixed variables like MY_VAR, some_value, etc.
 func (e *Evaluator) ExtractVars(expr string) []string {
 	// To track found variable references
 	var references []string
 
-	if len(e.VarPrefixes) == 0 {
+	if len(e.VarPrefixes) == 0 && !e.AllowNoPrefix {
 		g.Warn("did not set VarPrefixes in Evaluator")
 		return []string{}
 	}
-
-	// Regular expression for finding variable references
-	// Matches env., state., secrets., auth. followed by one or more nested variable names
-	// example regex: `(env|state|secrets|auth|response|request|sync)(\.\w+)+`
-	prefixes := strings.Join(e.VarPrefixes, "|")
-	refRegex := regexp.MustCompile(`(` + prefixes + `)(\.\w+)+`)
 
 	// First, we need to identify string literals to exclude them
 	// Track positions of string literals
@@ -791,23 +787,70 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 		}
 	}
 
-	// Find all potential references
-	matches := refRegex.FindAllStringIndex(expr, -1)
-
-	// Filter out references that are inside string literals
-	for _, match := range matches {
-		isInString := false
+	// Helper function to check if match is inside a string literal
+	isInStringRange := func(match []int) bool {
 		for _, strRange := range stringRanges {
 			if match[0] >= strRange[0] && match[1] <= strRange[1] {
-				isInString = true
-				break
+				return true
 			}
 		}
+		return false
+	}
 
-		if !isInString {
-			// Extract the actual reference
-			reference := expr[match[0]:match[1]]
-			references = append(references, reference)
+	// Regular expression for finding prefixed variable references
+	// Matches env., state., secrets., auth. followed by one or more nested variable names
+	// example regex: `(env|state|secrets|auth|response|request|sync)(\.\w+)+`
+	if len(e.VarPrefixes) > 0 {
+		prefixes := strings.Join(e.VarPrefixes, "|")
+		refRegex := regexp.MustCompile(`(` + prefixes + `)(\.\w+)+`)
+		matches := refRegex.FindAllStringIndex(expr, -1)
+
+		// Filter out references that are inside string literals
+		for _, match := range matches {
+			if !isInStringRange(match) {
+				// Extract the actual reference
+				reference := expr[match[0]:match[1]]
+				references = append(references, reference)
+			}
+		}
+	}
+
+	// When AllowNoPrefix is enabled, also capture unprefixed variables
+	// Matches standalone identifiers (word characters, not starting with a digit)
+	if e.AllowNoPrefix {
+		// Match word-only identifiers that aren't part of a dotted path
+		// Negative lookbehind/lookahead to avoid matching parts of prefixed vars or function names
+		noPrefixRegex := regexp.MustCompile(`\b([a-zA-Z_]\w*)\b`)
+		matches := noPrefixRegex.FindAllStringIndex(expr, -1)
+
+		for _, match := range matches {
+			if !isInStringRange(match) {
+				reference := expr[match[0]:match[1]]
+
+				// Skip if this is part of a prefixed variable (already captured)
+				// Check if it's preceded by a dot (part of a path) or followed by a dot (a prefix)
+				isPrefixOrPath := false
+				if match[0] > 0 && expr[match[0]-1] == '.' {
+					isPrefixOrPath = true // Part of a path like "env.VAR"
+				}
+				if match[1] < len(expr) && expr[match[1]] == '.' {
+					isPrefixOrPath = true // A prefix like "env" in "env.VAR"
+				}
+
+				// Skip if it's a known prefix
+				if g.In(reference, e.VarPrefixes...) {
+					isPrefixOrPath = true
+				}
+
+				// Skip if it's a function call (followed by opening parenthesis)
+				if match[1] < len(expr) && expr[match[1]] == '(' {
+					isPrefixOrPath = true // Function name like "if(" or "coalesce("
+				}
+
+				if !isPrefixOrPath && !g.In(reference, references...) {
+					references = append(references, reference)
+				}
+			}
 		}
 	}
 
@@ -823,6 +866,16 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 	for _, varToCheck := range varsToCheck {
 		varToCheck = strings.TrimSpace(varToCheck)
 		parts := strings.Split(varToCheck, ".")
+
+		// Handle unprefixed variables when AllowNoPrefix is enabled
+		if len(parts) == 1 && e.AllowNoPrefix {
+			// Single word variable without prefix - store at root level
+			if _, exists := stateMap[varToCheck]; !exists {
+				stateMap[varToCheck] = nil
+			}
+			continue
+		}
+
 		if len(parts) < 2 {
 			continue
 		}
@@ -879,6 +932,10 @@ func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal stri
 		newVal = g.Marshal(output)
 	default:
 		newVal = cast.ToString(output)
+	}
+
+	if val == nil || val == "" {
+		return "", nil
 	}
 
 	return
@@ -946,6 +1003,17 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		if strings.Contains(expr, "runtime_state") {
 			can = true
 		}
+
+		// When AllowNoPrefix is enabled, allow simple identifiers (unprefixed variables)
+		if e.AllowNoPrefix && !can {
+			// Check if expression is a simple identifier without dots or complex operations
+			// This allows {MY_VAR} to be rendered even without a prefix
+			simpleIdentifierRegex := regexp.MustCompile(`^[a-zA-Z_]\w*$`)
+			if simpleIdentifierRegex.MatchString(expr) {
+				can = true
+			}
+		}
+
 		return can
 	}
 
@@ -1050,7 +1118,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 				if jpValue != nil && validJmesPath {
 					value = jpValue
 					err = nil // use jmespath result
-				} else if e.KeepMissingExpr && strings.Contains(err.Error(), "no member") {
+				} else if e.KeepMissingExpr && (strings.Contains(err.Error(), "no member") || strings.Contains(err.Error(), "does not exist")) {
 					// keeps the expression untouched
 					value = key
 				} else {

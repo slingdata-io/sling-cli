@@ -522,7 +522,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	// create a pseudo-stream for the start and end hook, also with LogSink
 	stream := &ReplicationStreamConfig{Object: "_", replication: rd}
-	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage))
+	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage), nil)
 	if err != nil {
 		return g.Error(err, "could not make replication hook: %s", stage)
 	}
@@ -704,7 +704,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
-			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name)
+			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name, nil)
 			if err != nil {
 				return g.Error(err, "could not prepare stream config for chunking: %s", stream.name)
 			}
@@ -1150,14 +1150,13 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 
 		var cfg Config
-		cfg, err = rd.StreamToTaskConfig(&stream, name)
+		cfg, err = rd.StreamToTaskConfig(&stream, name, taskEnv)
 		if err != nil {
 			err = g.Error(err, "could not prepare stream config: %s", name)
 			return
 		}
 
-		// set env, and IncrementalValStr
-		cfg.Env = taskEnv
+		// set IncrementalValStr
 		cfg.IncrementalVal = incrementalVal
 		cfg.IncrementalValStr = incrementalValStr
 
@@ -1256,7 +1255,7 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 	return false
 }
 
-func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string) (cfg Config, err error) {
+func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string, env map[string]string) (cfg Config, err error) {
 
 	// use overrides if specified
 	if overrides := stream.overrides; overrides != nil {
@@ -1316,6 +1315,7 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		StreamName:        name,
 		ReplicationStream: stream,
 		DependsOn:         stream.dependsOn,
+		Env:               env,
 	}
 
 	// so that the next stream does not retain previous pointer values

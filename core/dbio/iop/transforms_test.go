@@ -1233,7 +1233,7 @@ func TestEvaluatorFillMissingKeys(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple vars with shared prefixes",
+			name:         "multiple vars with shared prefixes",
 			initialState: map[string]any{},
 			varsToCheck: []string{
 				"state.user.id",
@@ -1713,5 +1713,618 @@ func BenchmarkPtEvaluatorEval(b *testing.B) {
 		if err != nil {
 			return
 		}
+	}
+}
+
+func TestEvaluatorKeepMissingExpr(t *testing.T) {
+	// Test cases for KeepMissingExpr functionality
+	tests := []struct {
+		name            string
+		input           any
+		expected        any
+		state           map[string]any
+		keepMissingExpr bool
+		expectError     bool
+	}{
+		// KeepMissingExpr=true - missing expressions should remain unchanged
+		{
+			name:            "missing_variable_kept_intact",
+			input:           "Value: {state.missing_var}",
+			expected:        "Value: {state.missing_var}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "missing_nested_variable_kept_intact",
+			input:           "Config: {state.config.database.host}",
+			expected:        "Config: {state.config.database.host}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "multiple_missing_variables_kept_intact",
+			input:           "User: {state.user}, Email: { upper(state.email) }",
+			expected:        "User: {state.user}, Email: { upper(state.email) }",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "mixed_existing_and_missing_variables",
+			input:           "Name: {state.name}, Missing: {state.missing}",
+			expected:        "Name: John, Missing: {state.missing}",
+			state:           map[string]any{"state": map[string]any{"name": "John"}},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "missing_env_variable_kept_intact",
+			input:           "API: {env.API_URL}",
+			expected:        "API: {env.API_URL}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "missing_store_variable_kept_intact",
+			input:           "Cache: {store.cache_key}",
+			expected:        "Cache: {store.cache_key}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "missing_deeply_nested_variable_kept_intact",
+			input:           "Path: {state.level1.level2.level3.value}",
+			expected:        "Path: {state.level1.level2.level3.value}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "partially_missing_nested_path",
+			input:           "Value: {state.config.missing.field}",
+			expected:        "Value: {state.config.missing.field}",
+			state:           map[string]any{"state": map[string]any{"config": map[string]any{"existing": "value"}}},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "direct_missing_expression",
+			input:           "{state.missing}",
+			expected:        "{state.missing}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+
+		// KeepMissingExpr=false - missing expressions should be evaluated to nil/empty
+		{
+			name:            "missing_variable_evaluated_to_empty",
+			input:           "Value: {state.missing_var}",
+			expected:        "Value: ",
+			state:           map[string]any{},
+			keepMissingExpr: false,
+		},
+		{
+			name:            "missing_nested_variable_evaluated_to_empty",
+			input:           "Config: {state.config.database.host}",
+			expected:        "Config: ",
+			state:           map[string]any{},
+			keepMissingExpr: false,
+		},
+		{
+			name:            "direct_missing_expression_evaluated_to_nil",
+			input:           "{state.missing}",
+			expected:        nil,
+			state:           map[string]any{},
+			keepMissingExpr: false,
+		},
+		{
+			name:            "mixed_existing_and_missing_default_behavior",
+			input:           "Name: {state.name}, Missing: {state.missing}",
+			expected:        "Name: John, Missing: ",
+			state:           map[string]any{"state": map[string]any{"name": "John"}},
+			keepMissingExpr: false,
+		},
+
+		// Edge cases with expressions and functions
+		{
+			name:            "missing_variable_in_expression_kept",
+			input:           "Result: {state.missing * 2}",
+			expected:        "Result: {state.missing * 2}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "missing_variable_in_comparison_kept",
+			input:           "Valid: {state.missing > 10}",
+			expected:        "Valid: {state.missing > 10}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "multiple_expressions_some_missing",
+			input:           "A: {state.existing}, B: {state.missing}, C: {state.another}",
+			expected:        "A: found, B: {state.missing}, C: {state.another}",
+			state:           map[string]any{"state": map[string]any{"existing": "found"}},
+			keepMissingExpr: true,
+		},
+
+		// Complex scenarios
+		{
+			name:            "template_with_missing_placeholders",
+			input:           "Hello {state.username}, your balance is {state.account.balance}",
+			expected:        "Hello {state.username}, your balance is {state.account.balance}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "api_url_template_with_missing_vars",
+			input:           "https://api.example.com/{env.VERSION}/users/{state.user_id}",
+			expected:        "https://api.example.com/{env.VERSION}/users/{state.user_id}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "sql_query_template_with_missing_vars",
+			input:           "SELECT * FROM users WHERE id = {state.user_id} AND status = '{state.status}'",
+			expected:        "SELECT * FROM users WHERE id = {state.user_id} AND status = '{state.status}'",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+
+		// Partial evaluation scenarios
+		{
+			name:            "some_vars_exist_some_dont",
+			input:           "Config: host={env.HOST}, port={env.PORT}, db={env.DATABASE}",
+			expected:        "Config: host=localhost, port={env.PORT}, db={env.DATABASE}",
+			state:           map[string]any{"env": map[string]any{"HOST": "localhost"}},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "nested_map_with_missing_field",
+			input:           "User: {state.user.name}, Role: {state.user.role}",
+			expected:        "User: Alice, Role: {state.user.role}",
+			state:           map[string]any{"state": map[string]any{"user": map[string]any{"name": "Alice"}}},
+			keepMissingExpr: true,
+		},
+
+		// Empty and null states
+		{
+			name:            "empty_state_all_missing",
+			input:           "{state.a} {state.b} {state.c}",
+			expected:        "{state.a} {state.b} {state.c}",
+			state:           map[string]any{},
+			keepMissingExpr: true,
+		},
+		{
+			name:            "nil_state_handled_gracefully",
+			input:           "Value: {state.value}",
+			expected:        "Value: {state.value}",
+			state:           nil,
+			keepMissingExpr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create evaluator with initial state
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "secrets"), tt.state)
+			eval.KeepMissingExpr = tt.keepMissingExpr
+
+			// Process the input
+			result, err := eval.RenderAny(tt.input)
+
+			// Check for expected errors
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+
+			// Check the result
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEvaluatorAllowNoPrefix(t *testing.T) {
+	// Test cases for AllowNoPrefix functionality
+	tests := []struct {
+		name          string
+		input         any
+		expected      any
+		state         map[string]any
+		allowNoPrefix bool
+		expectError   bool
+	}{
+		// Basic unprefixed variable tests with AllowNoPrefix=true
+		{
+			name:          "simple_unprefixed_variable",
+			input:         "Hello, {MY_VAR}!",
+			expected:      "Hello, World!",
+			state:         map[string]any{"MY_VAR": "World"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "multiple_unprefixed_variables",
+			input:         "User: {USERNAME}, ID: {USER_ID}",
+			expected:      "User: alice, ID: 123",
+			state:         map[string]any{"USERNAME": "alice", "USER_ID": 123},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_variable_direct_value",
+			input:         "{COUNTER}",
+			expected:      42,
+			state:         map[string]any{"COUNTER": 42},
+			allowNoPrefix: true,
+		},
+
+		// Mixed prefixed and unprefixed variables
+		{
+			name:     "mixed_prefixed_and_unprefixed",
+			input:    "Env: {env.MODE}, Var: {MY_VAR}",
+			expected: "Env: production, Var: test",
+			state: map[string]any{
+				"env":    map[string]any{"MODE": "production"},
+				"MY_VAR": "test",
+			},
+			allowNoPrefix: true,
+		},
+		{
+			name:     "mixed_state_and_unprefixed",
+			input:    "State value: {state.value}, Custom: {CUSTOM}",
+			expected: "State value: 10, Custom: 20",
+			state: map[string]any{
+				"state":  map[string]any{"value": 10},
+				"CUSTOM": 20,
+			},
+			allowNoPrefix: true,
+		},
+
+		// AllowNoPrefix=false - unprefixed variables should NOT be rendered
+		{
+			name:          "unprefixed_without_allow_no_prefix",
+			input:         "Value: {MY_VAR}",
+			expected:      "Value: {MY_VAR}",
+			state:         map[string]any{"MY_VAR": "test"},
+			allowNoPrefix: false,
+		},
+		{
+			name:     "prefixed_works_without_allow_no_prefix",
+			input:    "Value: {state.value}",
+			expected: "Value: 100",
+			state: map[string]any{
+				"state": map[string]any{"value": 100},
+			},
+			allowNoPrefix: false,
+		},
+
+		// Edge cases
+		{
+			name:          "unprefixed_with_underscore",
+			input:         "{SOME_LONG_VAR_NAME}",
+			expected:      "value",
+			state:         map[string]any{"SOME_LONG_VAR_NAME": "value"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_lowercase",
+			input:         "{my_var}",
+			expected:      "lowercase",
+			state:         map[string]any{"my_var": "lowercase"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_with_numbers",
+			input:         "{VAR123}",
+			expected:      "numbered",
+			state:         map[string]any{"VAR123": "numbered"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_missing_variable",
+			input:         "{MISSING}",
+			expected:      nil,
+			state:         map[string]any{},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_in_string_context",
+			input:         "Prefix: {PREFIX}, Value: {VALUE}, Suffix: {SUFFIX}",
+			expected:      "Prefix: pre, Value: val, Suffix: post",
+			state:         map[string]any{"PREFIX": "pre", "VALUE": "val", "SUFFIX": "post"},
+			allowNoPrefix: true,
+		},
+
+		// Unprefixed variables in expressions
+		{
+			name:          "unprefixed_in_arithmetic",
+			input:         "Total: {COUNT * 2}",
+			expected:      "Total: 20",
+			state:         map[string]any{"COUNT": 10},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_in_comparison",
+			input:         "Valid: {AGE >= 18}",
+			expected:      "Valid: true",
+			state:         map[string]any{"AGE": 21},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_in_function",
+			input:         "Result: {if(ENABLED, \"yes\", \"no\")}",
+			expected:      "Result: yes",
+			state:         map[string]any{"ENABLED": true},
+			allowNoPrefix: true,
+		},
+
+		// More function tests with unprefixed variables
+		{
+			name:          "coalesce_with_unprefixed",
+			input:         "{coalesce(MISSING_VAR, DEFAULT_VALUE)}",
+			expected:      "default",
+			state:         map[string]any{"DEFAULT_VALUE": "default"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "nested_if_with_unprefixed",
+			input:         "{if(PREMIUM, if(ADMIN, \"premium-admin\", \"premium-user\"), \"free\")}",
+			expected:      "premium-admin",
+			state:         map[string]any{"PREMIUM": true, "ADMIN": true},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "string_concat_with_unprefixed",
+			input:         "{FIRST_NAME + \" \" + LAST_NAME}",
+			expected:      "John Doe",
+			state:         map[string]any{"FIRST_NAME": "John", "LAST_NAME": "Doe"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "cast_function_with_unprefixed",
+			input:         "{cast(NUMBER_VAR, \"string\")}",
+			expected:      "42",
+			state:         map[string]any{"NUMBER_VAR": 42},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "mixed_prefixed_unprefixed_in_function",
+			input:         "{coalesce(env.API_KEY, BACKUP_KEY, \"default-key\")}",
+			expected:      "backup123",
+			state:         map[string]any{"env": map[string]any{}, "BACKUP_KEY": "backup123"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "logical_and_with_unprefixed",
+			input:         "{AUTHENTICATED && AUTHORIZED}",
+			expected:      true,
+			state:         map[string]any{"AUTHENTICATED": true, "AUTHORIZED": true},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "logical_or_with_unprefixed",
+			input:         "{IS_ADMIN || IS_MODERATOR}",
+			expected:      true,
+			state:         map[string]any{"IS_ADMIN": false, "IS_MODERATOR": true},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "ternary_with_unprefixed",
+			input:         "{STATUS == \"active\" ? ACTIVE_COUNT : INACTIVE_COUNT}",
+			expected:      100,
+			state:         map[string]any{"STATUS": "active", "ACTIVE_COUNT": 100, "INACTIVE_COUNT": 5},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "multiple_unprefixed_in_complex_expression",
+			input:         "{(PRICE * QUANTITY) + TAX - DISCOUNT}",
+			expected:      115.0,
+			state:         map[string]any{"PRICE": 10.0, "QUANTITY": 10, "TAX": 20.0, "DISCOUNT": 5.0},
+			allowNoPrefix: true,
+		},
+
+		// Unprefixed in maps and arrays
+		{
+			name:          "unprefixed_in_map",
+			input:         map[string]any{"key": "{MY_VALUE}"},
+			expected:      map[string]any{"key": "mapped"},
+			state:         map[string]any{"MY_VALUE": "mapped"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_in_array",
+			input:         []string{"{ITEM1}", "{ITEM2}"},
+			expected:      []any{"first", "second"},
+			state:         map[string]any{"ITEM1": "first", "ITEM2": "second"},
+			allowNoPrefix: true,
+		},
+
+		// Complex scenarios
+		{
+			name:     "complex_mixed_scenario",
+			input:    "API: {API_URL}, Token: {secrets.token}, User: {USERNAME}",
+			expected: "API: https://api.example.com, Token: abc123, User: john",
+			state: map[string]any{
+				"API_URL":  "https://api.example.com",
+				"secrets":  map[string]any{"token": "abc123"},
+				"USERNAME": "john",
+			},
+			allowNoPrefix: true,
+		},
+		{
+			name:     "unprefixed_with_nested_map",
+			input:    map[string]any{"config": map[string]any{"host": "{HOST}", "port": "{PORT}"}},
+			expected: map[string]any{"config": map[string]any{"host": "localhost", "port": 8080}},
+			state: map[string]any{
+				"HOST": "localhost",
+				"PORT": 8080,
+			},
+			allowNoPrefix: true,
+		},
+
+		// When a prefix name exists as a key in state, it gets rendered as JSON
+		{
+			name:     "prefix_name_rendered_as_json",
+			input:    "State: {state.value}, Prefix: {state}",
+			expected: "State: 5, Prefix: {\"value\":5}",
+			state: map[string]any{
+				"state": map[string]any{"value": 5},
+			},
+			allowNoPrefix: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create evaluator with initial state
+			eval := NewEvaluator(g.ArrStr("state", "store", "env", "secrets"), tt.state)
+			eval.AllowNoPrefix = tt.allowNoPrefix
+
+			// Process the input
+			result, err := eval.RenderAny(tt.input)
+
+			// Check for expected errors
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+
+			// Check the result
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEvaluatorExtractVarsWithAllowNoPrefix(t *testing.T) {
+	tests := []struct {
+		name          string
+		expr          string
+		expected      []string
+		allowNoPrefix bool
+	}{
+		// With AllowNoPrefix=true
+		{
+			name:          "extract_unprefixed_variable",
+			expr:          "MY_VAR",
+			expected:      []string{"MY_VAR"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "extract_multiple_unprefixed",
+			expr:          "VAR1 + VAR2",
+			expected:      []string{"VAR1", "VAR2"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "extract_mixed_prefixed_unprefixed",
+			expr:          "env.MODE + MY_VAR",
+			expected:      []string{"env.MODE", "MY_VAR"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_with_function",
+			expr:          "if(ENABLED, state.value, 0)",
+			expected:      []string{"ENABLED", "state.value"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "unprefixed_in_string_concat",
+			expr:          `"Prefix: " + MY_VAR + " Suffix"`,
+			expected:      []string{"MY_VAR"},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "skip_prefixes_themselves",
+			expr:          "state.value + env",
+			expected:      []string{"state.value"},
+			allowNoPrefix: true,
+		},
+
+		// With AllowNoPrefix=false
+		{
+			name:          "no_extraction_without_allow_no_prefix",
+			expr:          "MY_VAR",
+			expected:      []string{},
+			allowNoPrefix: false,
+		},
+		{
+			name:          "only_prefixed_extracted_without_allow",
+			expr:          "env.MODE + MY_VAR",
+			expected:      []string{"env.MODE"},
+			allowNoPrefix: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(g.ArrStr("env", "state", "secrets"))
+			eval.AllowNoPrefix = tt.allowNoPrefix
+			result := eval.ExtractVars(tt.expr)
+			assert.ElementsMatch(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEvaluatorFillMissingKeysWithAllowNoPrefix(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialState  map[string]any
+		varsToCheck   []string
+		expected      map[string]any
+		allowNoPrefix bool
+	}{
+		{
+			name:          "fill_unprefixed_variable",
+			initialState:  map[string]any{},
+			varsToCheck:   []string{"MY_VAR"},
+			expected:      map[string]any{"MY_VAR": nil},
+			allowNoPrefix: true,
+		},
+		{
+			name:         "fill_multiple_unprefixed",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"VAR1", "VAR2", "VAR3"},
+			expected: map[string]any{
+				"VAR1": nil,
+				"VAR2": nil,
+				"VAR3": nil,
+			},
+			allowNoPrefix: true,
+		},
+		{
+			name:         "fill_mixed_prefixed_and_unprefixed",
+			initialState: map[string]any{},
+			varsToCheck:  []string{"state.value", "MY_VAR"},
+			expected: map[string]any{
+				"state":  map[string]any{"value": nil},
+				"MY_VAR": nil,
+			},
+			allowNoPrefix: true,
+		},
+		{
+			name:          "dont_fill_unprefixed_without_allow",
+			initialState:  map[string]any{},
+			varsToCheck:   []string{"MY_VAR"},
+			expected:      map[string]any{},
+			allowNoPrefix: false,
+		},
+		{
+			name: "preserve_existing_unprefixed_value",
+			initialState: map[string]any{
+				"MY_VAR": "existing",
+			},
+			varsToCheck: []string{"MY_VAR"},
+			expected: map[string]any{
+				"MY_VAR": "existing",
+			},
+			allowNoPrefix: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := NewEvaluator(g.ArrStr("state", "env"))
+			eval.AllowNoPrefix = tt.allowNoPrefix
+			result := eval.FillMissingKeys(tt.initialState, tt.varsToCheck)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }

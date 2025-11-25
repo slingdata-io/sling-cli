@@ -516,6 +516,11 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Env[k] = os.ExpandEnv(v)
 	}
 
+	// Set evaluator
+	cfg.evaluator = iop.NewEvaluator(g.ArrStr("env", "target", "source", "stream", "object", "timestamp"))
+	cfg.evaluator.AllowNoPrefix = true
+	cfg.evaluator.KeepMissingExpr = true
+
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if len(cfg.Target.Data) == 0 {
@@ -706,8 +711,16 @@ func (cfg *Config) Prepare() (err error) {
 	g.Trace("object format map: %s", g.Marshal(fMap))
 
 	// sql & where prop
-	cfg.Source.Where = g.Rm(cfg.Source.Where, fMap)
-	cfg.Source.Query = g.R(g.Rm(cfg.Source.Query, fMap), "where_cond", cfg.Source.Where)
+	cfg.Source.Where, err = cfg.evaluator.RenderString(cfg.Source.Where, fMap)
+	if err != nil {
+		return g.Error(err, "could not render where clause")
+	}
+
+	cfg.Source.Query, err = cfg.evaluator.RenderString(cfg.Source.Query, fMap)
+	if err != nil {
+		return g.Error(err, "could not render query clause")
+	}
+	cfg.Source.Query = g.R(cfg.Source.Query, "where_cond", cfg.Source.Where)
 	if cfg.ReplicationStream != nil {
 		cfg.ReplicationStream.SQL = cfg.Source.Query
 	}
@@ -727,13 +740,19 @@ func (cfg *Config) Prepare() (err error) {
 					err = nil // don't return error in case the table full name ends with .sql
 				}
 			} else {
-				cfg.Source.Stream = g.Rm(sqlFromFile, fMap)
+				cfg.Source.Stream, err = cfg.evaluator.RenderString(sqlFromFile, fMap)
+				if err != nil {
+					return g.Error(err, "could not render query file")
+				}
 				if cfg.ReplicationStream != nil {
 					cfg.ReplicationStream.SQL = cfg.Source.Stream
 				}
 			}
 		} else if sTable.IsQuery() {
-			cfg.Source.Stream = g.Rm(sTable.SQL, fMap)
+			cfg.Source.Stream, err = cfg.evaluator.RenderString(sTable.SQL, fMap)
+			if err != nil {
+				return g.Error(err, "could not render SQL query")
+			}
 			if cfg.ReplicationStream != nil {
 				cfg.ReplicationStream.SQL = cfg.Source.Stream
 			}
@@ -749,7 +768,11 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not get pre-sql body")
 			}
-			cfg.Target.Options.PreSQL = g.String(g.Rm(sql, fMap))
+			renderedPreSQL, err := cfg.evaluator.RenderString(sql, fMap)
+			if err != nil {
+				return g.Error(err, "could not render pre-SQL query")
+			}
+			cfg.Target.Options.PreSQL = g.String(renderedPreSQL)
 			if cfg.ReplicationStream != nil {
 				cfg.ReplicationStream.TargetOptions.PreSQL = cfg.Target.Options.PreSQL
 			}
@@ -761,7 +784,11 @@ func (cfg *Config) Prepare() (err error) {
 			if err != nil {
 				return g.Error(err, "could not get post-sql body")
 			}
-			cfg.Target.Options.PostSQL = g.String(g.Rm(sql, fMap))
+			renderedPostSQL, err := cfg.evaluator.RenderString(sql, fMap)
+			if err != nil {
+				return g.Error(err, "could not render post-SQL query")
+			}
+			cfg.Target.Options.PostSQL = g.String(renderedPostSQL)
 			if cfg.ReplicationStream != nil {
 				cfg.ReplicationStream.TargetOptions.PostSQL = cfg.Target.Options.PostSQL
 			}
@@ -795,11 +822,31 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		if g.In(k, "run_timestamp", "object_full_name", "stream_full_name") {
 			continue // don't clean those keys, will add an underscore prefix
 		}
-		m[k] = iop.CleanName(cast.ToString(v))
+
+		// handle maps
+		if g.In(k, "timestamp", "env", "source", "target", "stream", "object") {
+			if subMap, ok := v.(map[string]any); ok {
+				for sk, sv := range subMap {
+					if (k == "timestamp") || (k == "env") ||
+						(k == "object" && sk == "full_name") ||
+						(k == "stream" && sk == "full_name") {
+						continue // don't clean those keys, will add an underscore prefix
+					}
+					subMap[sk] = iop.CleanName(g.CastToString(sv))
+				}
+				m[k] = subMap
+			}
+		} else {
+			m[k] = iop.CleanName(g.CastToString(v))
+		}
 	}
 
 	// replace placeholders
-	cfg.Target.Object = strings.TrimSpace(g.Rm(cfg.Target.Object, m))
+	renderedObject, err := cfg.evaluator.RenderString(cfg.Target.Object, m)
+	if err != nil {
+		return g.Error(err, "could not render object name")
+	}
+	cfg.Target.Object = strings.TrimSpace(renderedObject)
 
 	if cfg.TgtConn.Type.IsDb() {
 		// normalize casing of object names
@@ -847,8 +894,11 @@ func (cfg *Config) FormatTargetObjectName() (err error) {
 		cfg.Target.Data["url"] = cfg.Target.Object
 		cfg.TgtConn.Data["url"] = cfg.Target.Object
 	} else if cfg.TgtConn.Type.IsFile() {
-		url := cast.ToString(cfg.Target.Data["url"])
-		cfg.Target.Data["url"] = strings.TrimSpace(g.Rm(url, m))
+		url, err := cfg.evaluator.RenderString(cast.ToString(cfg.Target.Data["url"]), m)
+		if err != nil {
+			return g.Error(err, "could not render object name")
+		}
+		cfg.Target.Data["url"] = url
 	}
 
 	// set on ReplicationStream
@@ -888,12 +938,22 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.SrcConn.Type.IsDb() {
+		cfg.Source.Stream, err = cfg.evaluator.RenderString(cfg.Source.Stream, m)
+		if err != nil {
+			return m, g.Error(err, "could not pre-render source stream")
+		}
+
 		table, err := database.ParseTableName(cfg.Source.Stream, cfg.SrcConn.Type)
 		if err != nil {
 			return m, g.Error(err, "could not parse stream table name")
 		}
 
 		if table.SQL != "" && cfg.StreamName != "" {
+			cfg.StreamName, err = cfg.evaluator.RenderString(cfg.StreamName, m)
+			if err != nil {
+				return m, g.Error(err, "could not pre-render stream name")
+			}
+
 			table, err = database.ParseTableName(cfg.StreamName, cfg.SrcConn.Type)
 			if err != nil {
 				return m, g.Error(err, "could not parse stream name: %s", cfg.StreamName)
@@ -920,6 +980,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 	}
 
 	if cfg.TgtConn.Type.IsDb() {
+		// pre-render
+		cfg.Target.Object, err = cfg.evaluator.RenderString(cfg.Target.Object, m)
+		if err != nil {
+			return m, g.Error(err, "could not pre-render target object")
+		}
+
 		m["object_name"] = cfg.Target.Object
 
 		table, err := database.ParseTableName(cfg.Target.Object, cfg.TgtConn.Type)
@@ -943,6 +1009,11 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 		// set temp table
 		if tOpts := cfg.Target.Options; tOpts != nil {
+			tOpts.TableTmp, err = cfg.evaluator.RenderString(tOpts.TableTmp, m)
+			if err != nil {
+				return m, g.Error(err, "could not pre-render temp table")
+			}
+
 			tableTmp, _ := database.ParseTableName(tOpts.TableTmp, cfg.TgtConn.Type)
 			m["object_temp_schema"] = tableTmp.Schema
 			m["object_temp_table"] = tableTmp.Name
@@ -1087,6 +1158,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			"date":      now.Format(time.DateOnly),
 			"datetime":  now.Format(time.DateTime),
 		},
+		"env":    g.AsMap(cfg.Env),
 		"source": {},
 		"target": {},
 		"stream": {},
@@ -1104,9 +1176,6 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			if strings.HasPrefix(origKey, prefix+"_") {
 				newSuffix := strings.TrimPrefix(origKey, prefix+"_")
 				nm[prefix][newSuffix] = v
-				// TODO: use evaluator instead of dot notation patch
-				newKey := prefix + "." + newSuffix
-				m[newKey] = v
 			}
 		}
 	}
@@ -1146,7 +1215,7 @@ type Config struct {
 	MetadataRowID     bool  `json:"-" yaml:"-"`
 	MetadataExecID    bool  `json:"-" yaml:"-"`
 
-	extraTransforms []string `json:"-" yaml:"-"`
+	evaluator *iop.Evaluator
 }
 
 // Scan scan value into Jsonb, implements sql.Scanner interface
