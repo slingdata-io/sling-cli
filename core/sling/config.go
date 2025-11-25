@@ -626,10 +626,7 @@ func (cfg *Config) Prepare() (err error) {
 	}
 
 	// Set evaluator
-	cfg.evaluator = iop.NewEvaluator(g.ArrStr("env", "target", "source", "stream", "object", "timestamp"))
-	cfg.evaluator.AllowNoPrefix = true
-	cfg.evaluator.KeepMissingExpr = true
-	cfg.evaluator.IgnoreSyntaxErr = true // let's not error if syntax is incorrect
+	cfg.initEvaluator()
 
 	// format target name, now we have source info
 	err = cfg.FormatTargetObjectName()
@@ -808,7 +805,18 @@ func (cfg *Config) Prepare() (err error) {
 	return
 }
 
+func (cfg *Config) initEvaluator() {
+	cfg.evaluator = iop.NewEvaluator(g.ArrStr("env", "target", "source", "stream", "object", "timestamp"))
+	cfg.evaluator.AllowNoPrefix = true
+	cfg.evaluator.KeepMissingExpr = true
+	cfg.evaluator.IgnoreSyntaxErr = true // let's not error if syntax is incorrect
+}
+
 func (cfg *Config) FormatTargetObjectName() (err error) {
+	if cfg.evaluator == nil {
+		cfg.initEvaluator()
+	}
+
 	m, err := cfg.GetFormatMap()
 	if err != nil {
 		return g.Error(err, "could not get formatting variables")
