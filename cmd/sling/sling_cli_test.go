@@ -265,21 +265,22 @@ func TestCLI(t *testing.T) {
 				}
 				assert.False(t, found, "Output contains %#v", notContain)
 			}
-		})
-		if t.Failed() {
-			// Track failure
-			testFailuresMux.Lock()
-			testFailures = append(testFailures, testFailure{
-				connType: "CLI",
-				testID:   testID,
-			})
-			testFailuresMux.Unlock()
 
-			// cancel early if not specified
-			if !cast.ToBool(os.Getenv("RUN_ALL")) {
-				testContext.Cancel()
-				return
+			// Track failure inside the subtest where t refers to the subtest
+			if t.Failed() {
+				testFailuresMux.Lock()
+				testFailures = append(testFailures, testFailure{
+					connType: "CLI",
+					testID:   testID,
+				})
+				testFailuresMux.Unlock()
 			}
+		})
+
+		// cancel early if not specified (check parent test failure status)
+		if t.Failed() && !cast.ToBool(os.Getenv("RUN_ALL")) {
+			testContext.Cancel()
+			return
 		}
 	}
 }
