@@ -516,11 +516,6 @@ func (cfg *Config) Prepare() (err error) {
 		cfg.Env[k] = os.ExpandEnv(v)
 	}
 
-	// Set evaluator
-	cfg.evaluator = iop.NewEvaluator(g.ArrStr("env", "target", "source", "stream", "object", "timestamp"))
-	cfg.evaluator.AllowNoPrefix = true
-	cfg.evaluator.KeepMissingExpr = true
-
 	// Set Target
 	cfg.Target.Object = strings.TrimSpace(cfg.Target.Object)
 	if len(cfg.Target.Data) == 0 {
@@ -629,6 +624,12 @@ func (cfg *Config) Prepare() (err error) {
 		}
 		cfg.SrcConn = srcConn
 	}
+
+	// Set evaluator
+	cfg.evaluator = iop.NewEvaluator(g.ArrStr("env", "target", "source", "stream", "object", "timestamp"))
+	cfg.evaluator.AllowNoPrefix = true
+	cfg.evaluator.KeepMissingExpr = true
+	cfg.evaluator.IgnoreSyntaxErr = true // let's not error if syntax is incorrect
 
 	// format target name, now we have source info
 	err = cfg.FormatTargetObjectName()

@@ -728,6 +728,7 @@ type Evaluator struct {
 	VarPrefixes     []string
 	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
 	AllowNoPrefix   bool
+	IgnoreSyntaxErr bool
 
 	bracketRegex *regexp.Regexp
 }
@@ -1121,6 +1122,13 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 				} else if e.KeepMissingExpr && (strings.Contains(err.Error(), "no member") || strings.Contains(err.Error(), "does not exist")) {
 					// keeps the expression untouched
 					value = key
+				} else if e.IgnoreSyntaxErr {
+					if e.KeepMissingExpr {
+						value = key
+					} else if g.IsTrace() {
+						g.Warn("could not render expression: %s => %s", expr, err.Error())
+					}
+					err = nil // unset error
 				} else {
 					if errChk := e.Check(expr); errChk != nil {
 						return "", g.Error(errChk, "invalid expression: %s", expr)
