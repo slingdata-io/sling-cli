@@ -7,10 +7,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -36,6 +38,8 @@ type testCase struct {
 
 func TestCLI(t *testing.T) {
 	args := os.Args
+	var parallelMode bool
+
 	for _, arg := range args {
 		if arg == "-d" || arg == "--debug" {
 			os.Setenv("DEBUG", "true")
@@ -44,6 +48,13 @@ func TestCLI(t *testing.T) {
 		if arg == "-t" || arg == "--trace" {
 			os.Setenv("DEBUG", "TRACE")
 			env.InitLogger()
+		}
+		if arg == "-p" || arg == "--parallel" {
+			parallelMode = true
+		}
+
+		if arg == "-a" || arg == "--all" {
+			os.Setenv("RUN_ALL", "true") // runs all test, don't fail earlys
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
 			os.Setenv("TESTS", arg)
@@ -128,14 +139,50 @@ func TestCLI(t *testing.T) {
 		tests = append(tests, tc)
 	}
 
+	if parallelMode {
+		t.Parallel()
+	}
+
+	running := cmap.New[testCase]()
+
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		for range ticker.C {
+			ids := running.Keys()
+			if len(ids) == 0 {
+				ticker.Stop()
+				return
+			}
+			now := time.Now().Format(time.DateTime)
+			env.Println(env.YellowString(g.F("%s -- running => %s", now, g.Marshal(ids))))
+		}
+	}()
+
 	for _, tt := range tests {
 		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
 
 		testID := g.F("%d/%s", tt.ID, tt.Name)
+
 		t.Run(testID, func(t *testing.T) {
-			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
+			if parallelMode {
+				t.Parallel()
+			}
+
+			running.Set(g.CastToString(tt.ID), tt)
+			defer running.Remove(g.CastToString(tt.ID))
+
+		retry:
+			for _, needID := range tt.Needs {
+				if running.Has(g.CastToString(needID)) {
+					time.Sleep(time.Second)
+					goto retry
+				}
+			}
+
+			now := time.Now().Format(time.DateTime)
+			env.Println(env.GreenString(g.F("%s -- %02d | ", now, tt.ID) + tt.Run))
 
 			p, err := process.NewProc("bash")
 			if !g.AssertNoError(t, err) {
@@ -227,7 +274,12 @@ func TestCLI(t *testing.T) {
 				testID:   testID,
 			})
 			testFailuresMux.Unlock()
-			// Don't break - let all tests complete
+
+			// cancel early if not specified
+			if !cast.ToBool(os.Getenv("RUN_ALL")) {
+				testContext.Cancel()
+				return
+			}
 		}
 	}
 }
