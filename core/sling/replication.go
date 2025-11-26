@@ -541,6 +541,22 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	}
 	te.StateSet()
 
+	// loop until end of hook
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				te.StateSet()
+			}
+		}
+	}()
+
 	// recover from panic and set state
 	defer func() {
 		if r := recover(); r != nil {
