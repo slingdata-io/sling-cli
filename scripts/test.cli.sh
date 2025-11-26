@@ -1,9 +1,5 @@
 set -e  # exit on error
 shopt -s expand_aliases
 
-## test cli commands
-export AWS_ACCESS_KEY_ID=''     # clear aws env so s3 doesn't use it
-export AWS_SECRET_ACCESS_KEY='' # clear aws env so s3 doesn't use it
-
 cd cmd/sling
-go test -v -run TestCLI -timeout 20m
+go test -v -run TestCLI -timeout 20m -- -a -p

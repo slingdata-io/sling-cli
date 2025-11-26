@@ -248,6 +248,7 @@
 - id: 40
   name: Run sling with replication configuration 09 and constraints
   run: '# sling run -r cmd/sling/tests/replications/r.09.yaml'
+  group: sqlite
   streams: '>1'
   fails: 2
 
@@ -305,6 +306,7 @@
 - id: 49
   name: Run sling with replication configuration 14 (specific streams)
   run: 'sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows'
+  needs: [48]
   rows: 0
 
 - id: 50
