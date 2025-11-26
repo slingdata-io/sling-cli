@@ -237,9 +237,11 @@
   name: Run sling with replication configuration 07
   run: sling run -r cmd/sling/tests/replications/r.07.yaml
   streams: 15
+  group: sqlite
 
 - id: 39
   name: Run sling with replication configuration 08
+  group: sqlite
   run: 'sling run -r cmd/sling/tests/replications/r.08.yaml'
   streams: 4
 
@@ -259,6 +261,7 @@
 
 - id: 42
   name: Run sling with replication configuration 09 and tags
+  group: sqlite
   run: 'sling run -r cmd/sling/tests/replications/r.09.yaml --streams tag:my_table'
   streams: 3
 
@@ -1173,6 +1176,7 @@
 
 - id: 136
   name: Test nested JSON to SQLite with CLI flags
+  group: sqlite
   run: |
     bash cmd/sling/tests/replications/r.71.json_sqlite_nested.sh
 
@@ -1182,6 +1186,7 @@
   name: Test nested JSON to SQLite with replication config (pre-defined columns)
   run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
   err: true
+  group: sqlite
   output_contains:
    - cannot be assigned to zero-based row
 
