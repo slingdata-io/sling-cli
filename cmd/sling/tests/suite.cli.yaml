@@ -1031,6 +1031,7 @@
   name: Test MSSQL to PostgreSQL encoding handling
   run: 'sling run -d -r cmd/sling/tests/replications/r.59.mssql_postgres_encoding.yaml'
   rows: 10
+  needs: [120]
   output_contains:
     - 'execution succeeded'
 
