@@ -1,9 +1,6 @@
 name: sling-platform
 
-defaults:
-  state:
-    base_url: '{ secrets.base_url }'
-  
+defaults:  
   request:
     headers:
       Authorization: 'Sling-Project-Token {secrets.api_token}'
