@@ -43,6 +43,7 @@ var conns = connection.GetLocalConns()
 type testFailure struct {
 	connType dbio.Type
 	testID   string
+	otherIDs []string
 }
 
 var (
@@ -186,6 +187,9 @@ func TestMain(m *testing.M) {
 			println()
 			for _, failure := range cliFailures {
 				println(g.F("  ❌ FAILED: %s", failure.testID))
+				if len(failure.otherIDs) > 0 {
+					println(g.F("     OTHERS: %s", g.Marshal(failure.otherIDs)))
+				}
 				println()
 				runIDs = append(runIDs, strings.Split(failure.testID, "/")[0])
 			}

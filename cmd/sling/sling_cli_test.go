@@ -287,6 +287,7 @@ func TestCLI(t *testing.T) {
 					testFailures = append(testFailures, testFailure{
 						connType: "CLI",
 						testID:   testID,
+						otherIDs: running.Keys(),
 					})
 					testFailuresMux.Unlock()
 				}
