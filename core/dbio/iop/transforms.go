@@ -994,6 +994,18 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		}
 	}
 
+	// When JSON unmarshals map[string]any with all string values, it creates map[string]string
+	// We need to ensure it's map[string]any for JMESPath to navigate it properly
+	for key, mapVal := range stateMap {
+		if valMap, ok := mapVal.(map[string]string); ok {
+			valMapAny := make(map[string]any, len(valMap))
+			for k, v := range valMap {
+				valMapAny[k] = v
+			}
+			stateMap[key] = valMapAny
+		}
+	}
+
 	// Create evaluator for expression evaluation
 	canRender := func(expr string) bool {
 		expr = strings.TrimSpace(expr)
