@@ -912,6 +912,8 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 						// The evaluator will error when it tries to access nested keys on a non-map value
 						break
 					} else {
+						// Persist the converted map back to current[key] for JMESPath compatibility
+						current[key] = nextMap
 						current = nextMap
 					}
 				}

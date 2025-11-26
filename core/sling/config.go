@@ -1159,6 +1159,12 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 
 	now := time.Now()
 
+	// Convert cfg.Env (map[string]string) to map[string]any for JMESPath
+	envMap := make(map[string]any, len(cfg.Env))
+	for k, v := range cfg.Env {
+		envMap[k] = v
+	}
+
 	// nested formatting for jmespath lookup
 	nm := map[string]map[string]any{
 		"timestamp": {
@@ -1167,7 +1173,7 @@ func (cfg *Config) GetFormatMap() (m map[string]any, err error) {
 			"date":      now.Format(time.DateOnly),
 			"datetime":  now.Format(time.DateTime),
 		},
-		"env":    g.AsMap(cfg.Env),
+		"env":    envMap,
 		"source": {},
 		"target": {},
 		"stream": {},
