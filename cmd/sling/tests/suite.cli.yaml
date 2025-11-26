@@ -26,7 +26,7 @@
   name: Run sling with CSV source and POSTGRES target
   run: 'sling run --src-stream file://cmd/sling/tests/files/test1.1.csv --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh'
   rows: 18
-  needs: [4]
+  after: [4]
 
 - id: 6
   name: Run sling with CSV source and MSSQL target
@@ -75,19 +75,19 @@
   name: Run sling with POSTGRES source and CSV output
   run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout > /tmp/my_table.csv'
   rows: 18
-  needs: [5]
+  after: [5]
 
 - id: 15
   name: Run sling with POSTGRES source and CSV target
   run: 'sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv'
   rows: 18
-  needs: [5]
+  after: [5]
 
 - id: 16
   name: Run sling with POSTGRES source and select columns
   run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select ''id,email'' -l 2'
   rows: 2
-  needs: [5]
+  after: [5]
   output_contains:
     - 'id,email'
 
@@ -95,7 +95,7 @@
   name: Run sling with POSTGRES source and exclude columns
   run: 'sling run --src-conn POSTGRES --src-stream public.my_table --stdout --select ''-id'' -l 2'
   rows: 2
-  needs: [5]
+  after: [5]
   output_contains:
     - 'first_name,last_name,email,target,create_dt'
 
@@ -103,7 +103,7 @@
   name: Run sling with gzipped CSV source and POSTGRES target with ignore existing
   run: 'cat cmd/sling/tests/files/test1.1.csv.gz | sling run --tgt-conn POSTGRES --tgt-object public.my_table --mode full-refresh --tgt-options ''ignore_existing: true'''
   rows: 0
-  needs: [17]
+  after: [17]
   output_contains:
     - execution succeeded
 
@@ -111,7 +111,7 @@
   name: Run sling with POSTGRES source and CSV target with ignore existing
   run: 'sling run --src-conn POSTGRES --src-stream public.my_table --tgt-object file:///tmp/my_table.csv --tgt-options ''ignore_existing: true'''
   rows: 0
-  needs: [18]
+  after: [18]
   output_contains:
     - execution succeeded
 
@@ -124,7 +124,7 @@
   name: Execute SQL command on POSTGRES
   run: 'sling conns exec postgres "select 1 from "postgres"."public"."my_table_bytes" where byte_val::bytea::text like ''%89504e470d0a1a0a0000000d%''"'
   rows: 1
-  needs: [20]
+  after: [20]
   output_contains:
     - "1"
 
@@ -139,7 +139,7 @@
   name: Execute SQL command to select distinct stream URL
   run: 'sling conns exec postgres "select distinct _sling_stream_url from public.many_jsons"'
   rows: 4
-  needs: [22]
+  after: [22]
   output_contains:
     - _SLING_STREAM_URL
 
@@ -147,7 +147,7 @@
   name: Execute SQL command to select stream URL by row number
   run: 'sling conns exec postgres "select _sling_stream_url from public.many_jsons where _sling_row_num = 18" # should show different file names'
   rows: 3
-  needs: [23]
+  after: [23]
   output_contains:
     - _SLING_STREAM_URL
 
@@ -155,7 +155,7 @@
   name: Execute SQL command to check column names
   run: 'sling conns exec postgres "select column_name from information_schema.columns where table_schema = ''public'' and table_name = ''many_jsons'' and column_name like ''_sling%''" # should not have _sling_loaded_at'
   rows: 2
-  needs: [24]
+  after: [24]
   output_contains:
     - _sling_row_num
     - _sling_stream_url
@@ -164,13 +164,13 @@
   name: Run sling with JSON source and timestamp column
   run: 'SLING_LOADED_AT_COLUMN=''timestamp'' sling run --src-stream file://core/dbio/filesys/test/test1/json --tgt-conn postgres --tgt-object public.many_jsons --mode full-refresh'
   rows: 2019
-  needs: [25]
+  after: [25]
 
 - id: 27
   name: Execute SQL command to check data type of timestamp column
   run: 'sling conns exec postgres "select data_type from information_schema.columns where table_schema = ''public'' and table_name = ''many_jsons'' and column_name = ''_sling_loaded_at'' and data_type like ''timestamp%''" # _sling_loaded_at should be a timestamp'
   rows: 1
-  needs: [26]
+  after: [26]
   output_contains:
     - timestamp with
 
@@ -184,7 +184,7 @@
   name: Execute SQL command to count rows in POSTGRES table
   run: 'sling conns exec POSTGRES ''select count(1) from public.my_table'''
   rows: 1
-  needs: [18]
+  after: [18]
   output_contains:
     - 18
 
@@ -299,6 +299,7 @@
     - 'test/parquet/test1.parquet'
 
 - id: 48
+  after: [46]
   name: Run sling with replication configuration 14
   run: 'sling run -d -r cmd/sling/tests/replications/r.14.yaml'
   streams: 5
@@ -306,7 +307,7 @@
 - id: 49
   name: Run sling with replication configuration 14 (specific streams)
   run: 'sling run -r cmd/sling/tests/replications/r.14.yaml --streams cmd/sling/tests/files/test1.csv,cmd/sling/tests/files/test1.upsert.csv # file incremental. Second run should have no new rows'
-  needs: [48]
+  after: [48]
   rows: 0
 
 - id: 50
@@ -354,7 +355,7 @@
   name: Run sling with incremental (delete missing soft)
   run: 'sling run -d --src-conn postgres --src-stream ''select * from public.test1k_postgres_pg where {incremental_where_cond} limit 900'' --tgt-conn mysql --tgt-object ''mysql.public_test1k_postgres_pg'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: soft }'''
   rows: 0
-  needs: [56]
+  after: [56]
   output_contains:
     - and not exists (
 
@@ -362,7 +363,7 @@
   name: Run sling with incremental (delete missing hard)
   run: 'sling run -d --src-conn postgres --src-stream ''select * from public.test1k_postgres_pg where {incremental_where_cond} limit 900'' --tgt-conn mysql --tgt-object ''mysql.public_test1k_postgres_pg'' --mode incremental --primary-key id --update-key create_dt --tgt-options ''{ delete_missing: hard }'''
   rows: 0
-  needs: [57]
+  after: [57]
   output_contains:
     - and not exists (
 
@@ -390,7 +391,7 @@
   name: Run sling with incremental writing to partitioned parquet (aws)
   run: 'FORMAT=parquet sling run -d -r cmd/sling/tests/replications/r.17.yaml'
   rows: 40
-  needs: [60]
+  after: [60]
   output_contains:
     - partition_by (
 
@@ -398,7 +399,7 @@
   name: Run sling writing to partitioned csv (aws)
   run: 'FORMAT=csv sling run -d -r cmd/sling/tests/replications/r.17.yaml --mode full-refresh'
   rows: 1002
-  needs: [61]
+  after: [61]
   output_contains:
     - partition_by (
 
@@ -429,7 +430,7 @@
 - id: 67
   name: 'Run sling hooks & source partitioned (backfill)'
   run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01'
-  needs: [61]
+  after: [61, 46, 48]
   env:
     RESET: 'true'
   rows: 551
@@ -441,7 +442,7 @@
   name: 'Run sling hooks & source partitioned (incremental)'
   run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --streams ''test1k_postgres_pg_parquet'''
   rows: '>78'
-  needs: [67]
+  after: [67, 46, 48]
   output_contains:
     - 'skipped hook "start-03-delete"'
     - 'hook (inspect_file_check) failed => check failure'
@@ -529,7 +530,7 @@
     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_s3
-  needs: [74]
+  after: [74]
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -564,7 +565,7 @@
     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_sql
-  needs: [75]
+  after: [75]
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -581,7 +582,7 @@
     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_glue
-  needs: [77]
+  after: [77]
   streams: 2
   output_contains:
     - committed iceberg snapshot
@@ -1031,7 +1032,7 @@
   name: Test MSSQL to PostgreSQL encoding handling
   run: 'sling run -d -r cmd/sling/tests/replications/r.59.mssql_postgres_encoding.yaml'
   rows: 10
-  needs: [120]
+  after: [120]
   output_contains:
     - 'execution succeeded'
 

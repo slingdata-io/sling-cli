@@ -13,6 +13,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -22,7 +23,7 @@ import (
 
 type testCase struct {
 	ID      int               `yaml:"id"`
-	Needs   []int             `yaml:"needs"`
+	After   []int             `yaml:"after"`
 	Group   string            `yaml:"group"`
 	Name    string            `yaml:"name"`
 	Run     string            `yaml:"run"`
@@ -189,7 +190,7 @@ func TestCLI(t *testing.T) {
 				defer running.Remove(g.CastToString(tt.ID))
 
 			retry:
-				for _, needID := range tt.Needs {
+				for _, needID := range tt.After {
 					if running.Has(g.CastToString(needID)) {
 						time.Sleep(time.Second)
 						goto retry
@@ -287,7 +288,9 @@ func TestCLI(t *testing.T) {
 					testFailures = append(testFailures, testFailure{
 						connType: "CLI",
 						testID:   testID,
-						otherIDs: running.Keys(),
+						otherIDs: lo.Filter(running.Keys(), func(k string, i int) bool {
+							return k != testID
+						}),
 					})
 					testFailuresMux.Unlock()
 				}
