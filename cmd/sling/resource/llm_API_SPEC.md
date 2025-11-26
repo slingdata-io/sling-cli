@@ -6,13 +6,32 @@ This guide explains how to create API specifications for Sling. Follow this docu
 
 Sling API specs are YAML files that define how to interact with REST APIs. They specify authentication, endpoints, request formation, iteration, pagination, response processing, and state management.
 
-Principal Instructions for LLMs:
-- Use the documentation details below to construct a Sling API spec.
-- The Sling API specs are intended to extract data from API sources. It is not intended for pushing or updating data into an API endpoint (typically via methods `POST`/`PATCH`/`PUT`/`DELETE`). Ignore or omit endpoints which are intended for creating/updating/deleting data into an API resource.
-- When reading API documentation, if an endpoint is marked as `DEPRECATED`, you should ignore this endpoint unless explicitly instructed by the user.
-- Don't be verbose with extra comments indicating optional additional inputs/parameters, or whether a pagination is required or not, etc. Only put comments in a section of the API spec where it might be confusing for a human.
-- Make sure to use the browser MCP (if available or equivalent) to understand how the subject API resource works. This includes: Authentication, Pagination and how the response is structured for each endpoint, so that Sling can parse the data correctly.
-- If something in the API documentation is unclear, pause and ask the human operator for instructions. It is better to get confirmation than to build an unstable API spec.
+## Principal Instructions for LLMs
+
+**Core Guidelines:**
+- Use this document to construct Sling API specs for **data extraction only** (GET endpoints). Ignore POST/PATCH/PUT/DELETE endpoints intended for creating/updating/deleting data.
+- Skip endpoints marked as `DEPRECATED` unless explicitly instructed by the user.
+- Keep specs clean: avoid verbose comments about optional parameters or pagination details. Only add comments where the configuration might confuse a human.
+
+**Research Process:**
+1. **Use browser MCP** (or equivalent) to explore the target API's documentation. Understand:
+   - Authentication method (Bearer token, OAuth2, Basic Auth, API key in header/query)
+   - Pagination style (see Common Pagination Patterns below)
+   - Response structure (where records are located, e.g., `data[]`, `items[]`, `results[]`)
+2. **Identify incremental sync fields** (e.g., `updated_at`, `modified_since`, `cursor`) for efficient data loading.
+3. **Ask for clarification** if documentation is unclear. It's better to confirm than build an unstable spec.
+
+**Common Pagination Patterns:**
+- **Cursor-based** (Stripe, Shopify): Use `starting_after`, `cursor`, or `page_token`. Stop when `has_more: false` or empty response.
+- **Page number** (older APIs): Increment `page` parameter. Stop when `page >= total_pages` or empty response.
+- **Offset-based**: Increment `offset` by `limit`. Stop when `offset >= total_count` or empty response.
+- **Link header** (GitHub): Parse `Link` header for `rel="next"` URL. Stop when no next link.
+
+**Incremental Sync Best Practices:**
+- Always look for timestamp/cursor fields to enable incremental loading.
+- Use `sync: [field_name]` to persist state between runs.
+- Initialize with `coalesce(sync.field, default_value)` to handle first run.
+- Use `aggregation: "maximum"` for timestamps, `aggregation: "last"` for cursors.
 
 
 ## Basic Structure
@@ -411,6 +430,17 @@ authentication:
   refresh_token: "{secrets.refresh_token}"
   authentication_url: "https://api.example.com/oauth/token"
 
+  # OAuth2 - Device Code Flow (for CLI/headless environments - Google, Microsoft, GitHub)
+  type: "oauth2"
+  flow: "device_code"
+  client_id: "{secrets.oauth_client_id}"
+  # client_secret is optional for public clients (e.g., native apps)
+  authentication_url: "https://oauth2.googleapis.com/token"
+  device_auth_url: "https://oauth2.googleapis.com/device/code"  # Auto-derived if omitted
+  scopes:
+    - "https://www.googleapis.com/auth/spreadsheets.readonly"
+  # User will be prompted to visit a URL and enter a code; token is stored automatically
+
   # AWS Signature v4 Authentication
   type: "aws-sigv4"
   aws_service: "execute-api"  # Service name (e.g., execute-api, s3, lambda)
@@ -448,6 +478,38 @@ authentication:
         url: "https://api.example.com/auth/validate"
         headers:
           Authorization: "Bearer {state.access_token}"
+```
+
+### Endpoint-Level Authentication Override
+
+Endpoints can override or disable the connection-level authentication. This is useful when some endpoints don't require auth or use different credentials.
+
+```yaml
+authentication:
+  type: "basic"
+  username: "{secrets.main_user}"
+  password: "{secrets.main_pass}"
+
+endpoints:
+  # Uses connection-level auth (basic)
+  protected_data:
+    request:
+      url: "{state.base_url}/protected"
+
+  # No auth for this endpoint
+  public_data:
+    authentication: null  # Explicitly disables auth
+    request:
+      url: "{state.base_url}/public"
+
+  # Different auth for this endpoint
+  admin_data:
+    authentication:
+      type: "basic"
+      username: "{secrets.admin_user}"
+      password: "{secrets.admin_pass}"
+    request:
+      url: "{state.base_url}/admin"
 ```
 
 ### HMAC Authentication
@@ -756,31 +818,41 @@ processors:
 ```yaml
   rules:
     # Define actions based on response conditions (status code, headers, body).
-    # Rules are evaluated in order. Execution stops at the first matching rule with action stop/fail/retry.
-    - # Action: retry, continue, stop, fail
-      action: "retry"
-      # Condition: Expression evaluating to true triggers the action.
+    # Rules are evaluated in order. Execution stops at the first matching rule.
+    # Actions: retry, continue, stop, fail, skip, break
+    - action: "retry"
       condition: "response.status == 429 || response.status >= 500"
-      # Max attempts for retry action.
       max_attempts: 5
-      # Backoff strategy for retry: none, constant, linear, exponential, jitter
-      backoff: "exponential"
-      # Base delay in seconds for backoff calculation (default: 1 for retry)
-      backoff_base: 2
-      # Optional message for logging when rule is met.
+      backoff: "exponential"  # none, constant, linear, exponential, jitter
+      backoff_base: 2         # Base delay in seconds
       message: "Server error or rate limit hit, retrying..."
 
     - action: "fail"
       condition: "response.status == 401 || response.status == 403"
       message: "Authentication/Authorization failed"
 
-    # Default rules (implicitly added if not defined, processed last):
-    # - action: retry, condition: response.status == 429, ...
+    - action: "continue"
+      condition: "response.status == 404"
+      message: "Resource not found, continuing..."
+
+    - action: "skip"
+      condition: "response.status == 204"
+      message: "No content, skipping records from this response"
+      # skip: Processes rules but skips extracting records from response
+
+    - action: "break"
+      condition: "state.items_processed >= state.max_items"
+      message: "Reached max items limit"
+      # break: Stops processing for current iteration only (not entire endpoint)
+
+    - action: "stop"
+      condition: "response.json.is_complete == true"
+      message: "Data extraction complete"
+      # stop: Completely stops endpoint execution (all iterations)
+
+    # Default rules (implicitly added, processed last):
+    # - action: retry, condition: response.status == 429, max_attempts: 3, backoff: linear
     # - action: fail, condition: response.status >= 400
-    # You can override the defaults by providing your own rules for these conditions.
-    # Example: To ignore 404 errors and continue:
-    # - action: "continue"
-    #   condition: "response.status == 404" # Ignore 404s
 ```
 
 **Deduplication**: When `primary_key` is set, Sling tracks seen keys and skips duplicates.
