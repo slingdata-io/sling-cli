@@ -2,9 +2,19 @@ source: mysql
 target: postgres
 
 defaults:
+  object: public.{stream_table}
   mode: full-refresh
 
 hooks:
+  start:
+    # Cleanup target tables if exists
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.testing_1;
+        DROP TABLE IF EXISTS public.testing_2;
+        DROP TABLE IF EXISTS public.testing_3;
+
   end:
     # Check that execution succeeded
     - type: check
@@ -78,7 +88,6 @@ hooks:
 streams:
   # Use wildcard to match all testing_* tables
   mysql.testing_*:
-    object: public.{stream_table}
 
   # Explicitly disable testing_3
   mysql.testing_3:
