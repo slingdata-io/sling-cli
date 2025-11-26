@@ -47,6 +47,7 @@ hooks:
       id: file-copy
       from: aws_s3/sling-state/test/r.19
       to: local//tmp/test/sling-state/test/r.19
+      single_file: false
 
     - type: check
       check: state["file-copy"].bytes_written > 0

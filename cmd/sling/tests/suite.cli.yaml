@@ -254,6 +254,7 @@
 - id: 41
   name: Run sling with replication configuration 09
   run: 'sling run -d -r cmd/sling/tests/replications/r.09.yaml'
+  group: sqlite
   streams: '>1'
   output_contains:
     - 'from "public"."my_table_bytes"'
@@ -426,6 +427,7 @@
 - id: 67
   name: 'Run sling hooks & source partitioned (backfill)'
   run: 'sling run -r cmd/sling/tests/replications/r.19.yaml -d --mode backfill --range 2018-01-01,2019-05-01'
+  needs: [61]
   env:
     RESET: 'true'
   rows: 551
