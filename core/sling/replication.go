@@ -1068,12 +1068,6 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		SetStreamDefaults(name, &stream, *rd)
 		stream.replication = rd
 
-		// Skip disabled streams entirely during compilation
-		if stream.Disabled {
-			g.Debug("skipping disabled stream: %s", name)
-			continue
-		}
-
 		if stream.Object == "" {
 			return g.Error("need to specify `object` for stream `%s`. Please see https://docs.slingdata.io/sling-cli for help.", name)
 		}
