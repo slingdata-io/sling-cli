@@ -158,6 +158,8 @@ func TestMain(m *testing.M) {
 		println("================================================================================")
 		println()
 
+		runIDs := []string{}
+
 		// Database test failures
 		if hasDatabaseFailures {
 			println("DATABASE TEST SUITES:")
@@ -185,6 +187,7 @@ func TestMain(m *testing.M) {
 			for _, failure := range cliFailures {
 				println(g.F("  ❌ FAILED: %s", failure.testID))
 				println()
+				runIDs = append(runIDs, strings.Split(failure.testID, "/")[0])
 			}
 			println(g.F("  Total Failed CLI Tests: %d", len(cliFailures)))
 			println()
@@ -193,6 +196,9 @@ func TestMain(m *testing.M) {
 		println("================================================================================")
 		totalFailures := len(testFailures)
 		println(g.F("TOTAL FAILED TESTS: %d", totalFailures))
+		if len(runIDs) > 0 {
+			println(g.F("RUN STRING: %s", strings.Join(runIDs, ",")))
+		}
 		println("================================================================================")
 	} else {
 		println()
