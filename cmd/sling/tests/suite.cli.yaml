@@ -1239,3 +1239,16 @@
   output_contains:
     - 'Column type for date_col: character varying'
     - casting column 'date_col' as 'string'
+
+- id: 143
+  name: Test HTTP POST hooks with JSON payloads
+  run: 'sling run -p cmd/sling/tests/pipelines/p.09.http_post.yaml'
+  output_contains:
+    - '✓ Test 1 PASSED: Basic map payload correctly converted to JSON'
+    - '✓ Test 2 PASSED: Template variables correctly substituted in map payload'
+    - '✓ Test 3 PASSED: Nested structures correctly marshaled to JSON'
+    - '✓ Test 4 PASSED: Array payload correctly marshaled with variable substitution'
+    - '✓ Test 5 PASSED: String in JSON payload'
+    - '✓ Test 6 PASSED: Special characters properly handled in JSON payload'
+    - '✓ Test 7 PASSED: Edge cases handled correctly'
+    - 'All tests completed successfully!'
