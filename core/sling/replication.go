@@ -398,6 +398,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 						setEndpointProps := func(s *ReplicationStreamConfig) {
 							s.dependsOn = endpoint.DependsOn
+
 							if s.PrimaryKeyI == nil {
 								s.PrimaryKeyI = endpoint.Response.Records.PrimaryKey
 							}
@@ -431,11 +432,22 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 							continue
 						}
 
-						cfg := rd.Streams[wildcard.Pattern]
-						if cfg == nil {
+						// Create a copy of the wildcard config for each endpoint
+						// to avoid shared state between endpoints
+						templateCfg := rd.Streams[wildcard.Pattern]
+						var cfg *ReplicationStreamConfig
+						if templateCfg == nil {
 							cfg = &ReplicationStreamConfig{}
+						} else {
+							cfgCopy := *templateCfg
+							cfg = &cfgCopy
+							// Reset endpoint-specific fields that should come from the endpoint spec
+							cfg.PrimaryKeyI = nil
+							cfg.Description = ""
+							cfg.dependsOn = nil
+							cfg.overrides = nil
 						}
-						setEndpointProps(cfg) // set overrides
+						setEndpointProps(cfg) // set endpoint props
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
 					}
@@ -1327,7 +1339,6 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		DependsOn:         stream.dependsOn,
 		Env:               env,
 	}
-
 	// so that the next stream does not retain previous pointer values
 	g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
 	g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
