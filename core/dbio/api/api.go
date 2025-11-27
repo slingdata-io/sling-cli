@@ -67,6 +67,12 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		}
 	}
 
+	if inputs, ok := data["inputs"]; ok {
+		if err = g.JSONConvert(inputs, &ac.State.Inputs); err != nil {
+			return ac, g.Error(err)
+		}
+	}
+
 	// set endpoint contexts
 	for key, endpoint := range ac.Spec.EndpointMap {
 		endpoint.context = g.NewContext(ac.Context.Ctx)
@@ -284,6 +290,7 @@ type APIState struct {
 	Env     map[string]string     `json:"env,omitempty"`
 	State   map[string]any        `json:"state,omitempty"`
 	Store   map[string]any        `json:"store,omitempty"`
+	Inputs  map[string]any        `json:"inputs,omitempty"`
 	Secrets map[string]any        `json:"secrets,omitempty"`
 	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
 	Auth    APIStateAuth          `json:"auth,omitempty"`
@@ -330,10 +337,18 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 		}
 	}
 
+	inputsCopy := make(map[string]any)
+	if ac.State.Inputs != nil {
+		for k, v := range ac.State.Inputs {
+			inputsCopy[k] = v
+		}
+	}
+
 	stateMap := g.M(
 		"env", envCopy,
 		"state", stateMapCopy,
 		"secrets", secretsCopy,
+		"inputs", inputsCopy,
 		"auth", ac.State.Auth,
 	)
 
