@@ -962,6 +962,9 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		return nil, g.Error("unable to convert RenderAny input to string")
 	}
 
+	inputStrTrimmed := strings.TrimSpace(inputStr)
+	isJsonLike := (strings.HasPrefix(inputStrTrimmed, "{") && strings.HasSuffix(inputStrTrimmed, "}")) || (strings.HasPrefix(inputStrTrimmed, "[") && strings.HasSuffix(inputStrTrimmed, "]"))
+
 	expressions, err := e.FindMatches(inputStr)
 	if err != nil {
 		return nil, err
@@ -1130,7 +1133,7 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 				if jpValue != nil && validJmesPath {
 					value = jpValue
 					err = nil // use jmespath result
-				} else if e.KeepMissingExpr && (strings.Contains(err.Error(), "no member") || strings.Contains(err.Error(), "does not exist")) {
+				} else if e.KeepMissingExpr && (strings.Contains(err.Error(), "no member") || strings.Contains(err.Error(), "does not exist") || isJsonLike || strings.Contains(err.Error(), "syntax error: unexpected ':'")) {
 					// keeps the expression untouched
 					value = key
 				} else if e.IgnoreSyntaxErr {
