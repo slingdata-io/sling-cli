@@ -834,10 +834,14 @@ func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
 		expr := cast.ToString(iter.state[key])
 		iter.context.Unlock()
 
-		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
+		// Use FindMatches instead of bracketRegex to properly handle nested brackets and quoted strings
+		matches, matchErr := iter.endpoint.conn.evaluator.FindMatches(expr)
+		if matchErr != nil {
+			g.Trace("could not find matches for state variable %s: %v", key, matchErr)
+		}
 		if len(matches) > 0 {
 			for _, match := range matches {
-				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match[1])
+				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match)
 				for _, varReferenced := range varsReferenced {
 					if strings.HasPrefix(varReferenced, "state.") {
 						refKey := strings.TrimPrefix(varReferenced, "state.")

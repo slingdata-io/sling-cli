@@ -420,6 +420,11 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]any, err error) {
 	data = make(map[string]any)
 
+	// Render dynamic endpoints first to ensure they exist in EndpointMap
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints for sync state")
+	}
+
 	// Iterate through all endpoints
 	for _, endpoint := range ac.Spec.EndpointMap {
 		// Skip if no sync values defined
@@ -444,6 +449,11 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]an
 // using the Endpoint.Sync values.
 // Inputs is map[Sync.value] = Endpoint.syncMap[Sync.value]
 func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any) (err error) {
+	// Render dynamic endpoints first to ensure they exist in EndpointMap
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return g.Error(err, "could not render dynamic endpoints for sync state")
+	}
+
 	// Iterate through all endpoints
 	for key, endpoint := range ac.Spec.EndpointMap {
 
@@ -476,8 +486,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any
 	return nil
 }
 
-func hasBrackets(expr string) bool {
-	matches := bracketRegex.FindAllStringSubmatch(expr, -1)
+func (iter *Iteration) hasBrackets(expr string) bool {
+	matches, _ := iter.endpoint.conn.evaluator.FindMatches(expr)
 	return len(matches) > 0
 }
 
