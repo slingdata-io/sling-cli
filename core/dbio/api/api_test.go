@@ -2297,3 +2297,241 @@ endpoints:
 		})
 	}
 }
+
+func TestTokenAuthentication(t *testing.T) {
+	tests := []struct {
+		name          string
+		headerName    string
+		headerValue   string
+		secrets       map[string]any
+		useTemplating bool
+		expectSuccess bool
+		description   string
+	}{
+		{
+			name:          "api_key_header",
+			headerName:    "X-API-Key",
+			headerValue:   "my-api-key-123",
+			expectSuccess: true,
+			description:   "Static API key header should be injected",
+		},
+		{
+			name:          "authorization_bearer",
+			headerName:    "Authorization",
+			headerValue:   "Bearer token123",
+			expectSuccess: true,
+			description:   "Bearer token header should be injected",
+		},
+		{
+			name:        "templated_header",
+			headerName:  "Authorization",
+			headerValue: "Bearer {secrets.token}",
+			secrets: map[string]any{
+				"token": "secret_token_value",
+			},
+			useTemplating: true,
+			expectSuccess: true,
+			description:   "Templated header should be rendered with secret value",
+		},
+		{
+			name:          "empty_header_name",
+			headerName:    "",
+			headerValue:   "some-value",
+			expectSuccess: true,
+			description:   "Empty header name should still succeed (no header injected)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track what headers were received
+			var receivedHeaders http.Header
+
+			// Create mock HTTP server that captures headers
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				receivedHeaders = r.Header.Clone()
+
+				// Return success with test data
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "name": "Test Item 1"},
+						{"id": 2, "name": "Test Item 2"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			specYAML := fmt.Sprintf(`
+name: test_token_auth_api
+authentication:
+  type: token
+  header_name: "%s"
+  header_value: "%s"
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, tt.headerName, tt.headerValue, server.URL)
+
+			// Load spec
+			spec, err := LoadSpec(specYAML)
+			if !assert.NoError(t, err, "Should load spec successfully") {
+				return
+			}
+
+			// Create API connection with optional secrets
+			secrets := tt.secrets
+			if secrets == nil {
+				secrets = map[string]any{}
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": secrets,
+			})
+			assert.NoError(t, err)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err, "Authenticate() should not return error for token auth setup")
+			assert.True(t, ac.State.Auth.Authenticated, "Should be marked as authenticated")
+
+			// Verify auth headers were set
+			assert.NotNil(t, ac.State.Auth.Headers, "Auth headers should be set")
+
+			// For non-empty header name, verify the header was set
+			if tt.headerName != "" {
+				actualVal, exists := ac.State.Auth.Headers[tt.headerName]
+				assert.True(t, exists, "Header %s should exist in auth headers", tt.headerName)
+
+				// Check that templated values were rendered
+				if tt.useTemplating && strings.Contains(tt.headerValue, "{secrets.") {
+					assert.NotContains(t, actualVal, "{secrets.", "Template should be rendered")
+				}
+			}
+
+			// Make actual request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectSuccess {
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, df, "Dataflow should not be nil")
+
+				// Collect data
+				data, err := df.Collect()
+				assert.NoError(t, err, "Should collect data successfully")
+				assert.Equal(t, 2, len(data.Rows), "Should receive 2 records")
+
+				// Verify header was received by server (if header name is set)
+				if tt.headerName != "" {
+					expectedVal := tt.headerValue
+					// For templated values, get the expected rendered value
+					if tt.useTemplating && strings.Contains(tt.headerValue, "{secrets.token}") {
+						expectedVal = strings.Replace(tt.headerValue, "{secrets.token}", cast.ToString(tt.secrets["token"]), 1)
+					}
+					actualVal := receivedHeaders.Get(tt.headerName)
+					assert.Equal(t, expectedVal, actualVal, "Header %s should have correct value", tt.headerName)
+				}
+			} else {
+				if err == nil && df != nil {
+					_, err = df.Collect()
+				}
+				assert.Error(t, err, tt.description)
+			}
+		})
+	}
+}
+
+func TestTokenAuthenticationWithSequence(t *testing.T) {
+	// Test that token auth works with sequence calls
+	var requestCount int
+	var allReceivedHeaders []http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		allReceivedHeaders = append(allReceivedHeaders, r.Header.Clone())
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		// Different responses for different paths
+		switch r.URL.Path {
+		case "/setup":
+			json.NewEncoder(w).Encode(map[string]any{
+				"config_value": "setup_complete",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": 1, "name": "Test"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_token_auth_sequence
+authentication:
+  type: token
+  header_name: X-API-Key
+  header_value: "test-api-key-123"
+endpoints:
+  test_endpoint:
+    setup:
+      - request:
+          url: %s/setup
+          method: GET
+        response:
+          processors:
+            - expression: response.json.config_value
+              output: state.config
+              aggregation: last
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Authenticate
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+
+	// Read dataflow (this should trigger setup sequence and main request)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify that headers were sent to all requests (setup + main)
+	assert.GreaterOrEqual(t, requestCount, 2, "Should have made at least 2 requests (setup + main)")
+
+	// Verify all requests received the auth header
+	for i, headers := range allReceivedHeaders {
+		assert.Equal(t, "test-api-key-123", headers.Get("X-API-Key"),
+			"Request %d should have X-API-Key header", i+1)
+	}
+}

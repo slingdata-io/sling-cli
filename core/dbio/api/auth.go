@@ -74,6 +74,8 @@ func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err e
 	switch baseAuth.Type {
 	case AuthTypeNone:
 		authenticator = &baseAuth
+	case AuthTypeToken:
+		authenticator = &AuthenticatorToken{AuthenticatorBase: baseAuth}
 	case AuthTypeBasic:
 		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
 	case AuthTypeSequence:
@@ -206,6 +208,8 @@ func (ep *Endpoint) MakeAuthenticator() (authenticator Authenticator, err error)
 	switch baseAuth.Type {
 	case AuthTypeNone:
 		authenticator = &baseAuth
+	case AuthTypeToken:
+		authenticator = &AuthenticatorToken{AuthenticatorBase: baseAuth}
 	case AuthTypeBasic:
 		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
 	case AuthTypeSequence:
@@ -281,6 +285,30 @@ func (a *AuthenticatorBasic) Authenticate(ctx context.Context, state *APIStateAu
 	state.Headers = map[string]string{"Authorization": g.F("Basic %s", credentialsB64)}
 
 	return
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////
+// AuthenticatorToken
+type AuthenticatorToken struct {
+	AuthenticatorBase
+	HeaderName  string `yaml:"header_name,omitempty" json:"header_name,omitempty"`
+	HeaderValue string `yaml:"header_value,omitempty" json:"header_value,omitempty"`
+}
+
+func (a *AuthenticatorToken) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+	// Initialize headers map
+	state.Headers = make(map[string]string)
+
+	// Render the header value (supports templating like {secrets.API_KEY})
+	if a.HeaderName != "" {
+		renderedVal, err := a.renderString(a.HeaderValue)
+		if err != nil {
+			return g.Error(err, "could not render header_value for: %s", a.HeaderName)
+		}
+		state.Headers[a.HeaderName] = renderedVal
+	}
+
+	return nil
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////

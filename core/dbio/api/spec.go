@@ -279,6 +279,7 @@ type AuthType string
 
 const (
 	AuthTypeNone     AuthType = ""
+	AuthTypeToken    AuthType = "token"
 	AuthTypeSequence AuthType = "sequence"
 	AuthTypeBasic    AuthType = "basic"
 	AuthTypeOAuth2   AuthType = "oauth2"
