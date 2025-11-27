@@ -227,6 +227,7 @@
   name: Run sling with replication configuration 05 and streams
   run: 'sling run -r cmd/sling/tests/replications/r.05.yaml --streams ''s3://ocral/mlo.community.test/channels.json,s3://ocral/mlo.community.test/random/'''
   streams: 2
+  after: [35]
 
 - id: 37
   name: Run sling with replication configuration 06
@@ -451,6 +452,7 @@
 - id: 69
   name: Run sling pipeline 01
   run: 'sling run -p cmd/sling/tests/pipelines/p.01.yaml -d'
+  after: [68]
   output_contains:
     - 'executed step "step-03-replication"'
     - 'key1 => value-from-pipeline'
