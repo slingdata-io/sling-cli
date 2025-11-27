@@ -681,6 +681,31 @@ func TestEvaluator(t *testing.T) {
 				"state": map[string]any{"a": 12, "b": 10}, // 12 & 10 = 8
 			},
 		},
+		// Nested brackets in strings (Airtable filter_formula use case)
+		{
+			name:     "nested_brackets_in_ternary",
+			input:    `{!is_null(state.field) ? "{" + state.field + "}" : "default"}`,
+			expected: "{MyField}",
+			state: map[string]any{
+				"state": map[string]any{"field": "MyField"},
+			},
+		},
+		{
+			name:     "nested_brackets_in_ternary_null",
+			input:    `{!is_null(state.field) ? "{" + state.field + "}" : "default"}`,
+			expected: "default",
+			state: map[string]any{
+				"state": map[string]any{"field": nil},
+			},
+		},
+		{
+			name:     "nested_brackets_complex_airtable",
+			input:    `{!is_null(state.last_modified_field) ? "{" + state.last_modified_field + "} > '2025-01-01'" : null}`,
+			expected: "{Updated At} > '2025-01-01'",
+			state: map[string]any{
+				"state": map[string]any{"last_modified_field": "Updated At"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -2325,6 +2350,119 @@ func TestEvaluatorFillMissingKeysWithAllowNoPrefix(t *testing.T) {
 			eval.AllowNoPrefix = tt.allowNoPrefix
 			result := eval.FillMissingKeys(tt.initialState, tt.varsToCheck)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEvaluatorFindMatches(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		expected    []string
+		expectError bool
+		errorMsg    string
+	}{
+		// Basic cases
+		{
+			name:     "simple_expression",
+			input:    "Hello {state.name}!",
+			expected: []string{"state.name"},
+		},
+		{
+			name:     "multiple_expressions",
+			input:    "{state.a} and {state.b}",
+			expected: []string{"state.a", "state.b"},
+		},
+		{
+			name:     "no_expressions",
+			input:    "plain text",
+			expected: nil,
+		},
+
+		// Nested brackets in strings
+		{
+			name:     "nested_brackets_in_string",
+			input:    `{"{" + state.field + "}"}`,
+			expected: []string{`"{" + state.field + "}"`},
+		},
+		{
+			name:     "airtable_filter_formula",
+			input:    `{!is_null(state.field) ? "{" + state.field + "} > 'value'" : null}`,
+			expected: []string{`!is_null(state.field) ? "{" + state.field + "} > 'value'" : null`},
+		},
+
+		// Complex nesting
+		{
+			name:     "multiple_nested_braces_in_string",
+			input:    `{func("{inner1}", "{inner2}")}`,
+			expected: []string{`func("{inner1}", "{inner2}")`},
+		},
+
+		// Error cases
+		{
+			name:        "unclosed_bracket",
+			input:       "Hello {state.name",
+			expectError: true,
+			errorMsg:    "unclosed bracket",
+		},
+		{
+			name:        "unclosed_bracket_with_nested",
+			input:       `{"{" + state.field`,
+			expectError: true,
+			errorMsg:    "unclosed bracket",
+		},
+
+		// Edge cases
+		{
+			name:     "empty_expression",
+			input:    "{}",
+			expected: []string{""},
+		},
+		{
+			name:     "whitespace_expression",
+			input:    "{ state.name }",
+			expected: []string{" state.name "},
+		},
+		{
+			name:     "escaped_quotes_in_expression",
+			input:    `{state.val == "test \"quoted\""}`,
+			expected: []string{`state.val == "test \"quoted\""`},
+		},
+		{
+			name:     "empty_input",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "consecutive_expressions",
+			input:    "{a}{b}{c}",
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "expression_with_newlines",
+			input:    "{\n  state.value\n}",
+			expected: []string{"\n  state.value\n"},
+		},
+		{
+			name:     "deeply_nested_brackets_in_string",
+			input:    `{format("{{nested}}")}`,
+			expected: []string{`format("{{nested}}")`},
+		},
+	}
+
+	eval := NewEvaluator(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := eval.FindMatches(tt.input)
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }

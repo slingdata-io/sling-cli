@@ -729,8 +729,6 @@ type Evaluator struct {
 	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
 	AllowNoPrefix   bool
 	IgnoreSyntaxErr bool
-
-	bracketRegex *regexp.Regexp
 }
 
 func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
@@ -747,7 +745,6 @@ func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
 		State:        stateMap,
 		NoComputeKey: "__sling_no_compute__",
 		VarPrefixes:  varPrefixes,
-		bracketRegex: regexp.MustCompile(`\{([^{}]+)\}`),
 	}
 }
 
@@ -965,13 +962,13 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		return nil, g.Error("unable to convert RenderAny input to string")
 	}
 
-	matches := e.bracketRegex.FindAllStringSubmatch(inputStr, -1)
+	expressions, err := e.FindMatches(inputStr)
+	if err != nil {
+		return nil, err
+	}
 
-	expressions := []string{}
 	varsToCheck := []string{} // to ensure existence in state maps
-	for _, match := range matches {
-		expression := match[1]
-		expressions = append(expressions, expression)
+	for _, expression := range expressions {
 		varsToCheck = append(varsToCheck, e.ExtractVars(expression)...)
 	}
 
@@ -1272,4 +1269,61 @@ func (e *Evaluator) Check(expr string) (err error) {
 	}
 
 	return nil
+}
+
+// FindMatches parses the input string and extracts expressions within curly braces,
+// properly handling nested brackets and quoted strings.
+// Returns an error if brackets are unbalanced.
+func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err error) {
+	var result []string
+	runes := []rune(inputStr)
+	n := len(runes)
+	i := 0
+
+	for i < n {
+		if runes[i] == '{' {
+			// Found potential expression start
+			start := i
+			depth := 1
+			i++
+			inDoubleQuote := false
+
+			for i < n && depth > 0 {
+				c := runes[i]
+
+				// Handle escape sequences
+				if c == '\\' && i+1 < n {
+					i += 2 // Skip escaped character
+					continue
+				}
+
+				// Track quote state
+				if c == '"' {
+					inDoubleQuote = !inDoubleQuote
+				}
+
+				// Only count brackets outside of quotes
+				if !inDoubleQuote {
+					if c == '{' {
+						depth++
+					} else if c == '}' {
+						depth--
+					}
+				}
+				i++
+			}
+
+			if depth != 0 {
+				return nil, g.Error("unclosed bracket starting at position %d in: %s", start, inputStr)
+			}
+
+			// Extract expression (without outer braces)
+			expr := string(runes[start+1 : i-1])
+			result = append(result, expr)
+		} else {
+			i++
+		}
+	}
+
+	return result, nil
 }
