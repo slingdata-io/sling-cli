@@ -10,6 +10,7 @@ hello:
 # Build the sling binary
 build:
     #!/usr/bin/env bash
+    set -e
     echo "Building sling binary..."
     cd cmd/sling && rm -f sling && go build . && cd -
     echo "✓ Build complete"
