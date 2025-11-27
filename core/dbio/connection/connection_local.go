@@ -302,6 +302,25 @@ func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 		return g.Error("need to specify valid `type` key or provide `url`.")
 	}
 
+	// need to set secrets and inputs as maps
+	if t == "api" {
+		if secretsStr := cast.ToString(kvMap["secrets"]); secretsStr != "" {
+			secrets, err := g.UnmarshalYAMLMap(secretsStr)
+			if err != nil {
+				return g.Error(err, "could not parse secrets string")
+			}
+			kvMap["secrets"] = secrets
+		}
+
+		if inputsStr := cast.ToString(kvMap["inputs"]); inputsStr != "" {
+			inputs, err := g.UnmarshalYAMLMap(inputsStr)
+			if err != nil {
+				return g.Error(err, "could not parse inputs string")
+			}
+			kvMap["inputs"] = inputs
+		}
+	}
+
 	ef := ec.EnvFile
 	ef.Connections[name] = kvMap
 	err = ef.WriteEnvFile()
