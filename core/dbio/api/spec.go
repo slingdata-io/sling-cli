@@ -976,14 +976,14 @@ const (
 	AggregationTypeNone    AggregationType = ""        // No aggregation, apply transformation at record level
 	AggregationTypeMaximum AggregationType = "maximum" // Keep the maximum value across records
 	AggregationTypeMinimum AggregationType = "minimum" // Keep the minimum value across records
-	AggregationTypeFlatten AggregationType = "flatten" // Collect all values into an array
+	AggregationTypeCollect AggregationType = "collect" // Collect all values into an array
 	AggregationTypeFirst   AggregationType = "first"   // Keep only the first encountered value
 	AggregationTypeLast    AggregationType = "last"    // Keep only the last encountered value
 )
 
 var AggregationTypes = []AggregationType{
 	AggregationTypeNone, AggregationTypeMaximum,
-	AggregationTypeMinimum, AggregationTypeFlatten,
+	AggregationTypeMinimum, AggregationTypeCollect,
 	AggregationTypeFirst, AggregationTypeLast,
 }
 
