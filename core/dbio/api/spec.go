@@ -230,7 +230,16 @@ func (a Authentication) Type() AuthType {
 	if a == nil {
 		return AuthTypeNone
 	}
-	return AuthType(cast.ToString(a["type"]))
+	authType := AuthType(cast.ToString(a["type"]))
+
+	// If no type specified but headers are provided, default to static
+	if authType == AuthTypeNone {
+		if _, hasHeaders := a["headers"]; hasHeaders {
+			return AuthTypeStatic
+		}
+	}
+
+	return authType
 }
 
 func (a Authentication) Expires() int {
@@ -279,7 +288,7 @@ type AuthType string
 
 const (
 	AuthTypeNone     AuthType = ""
-	AuthTypeToken    AuthType = "token"
+	AuthTypeStatic   AuthType = "static"
 	AuthTypeSequence AuthType = "sequence"
 	AuthTypeBasic    AuthType = "basic"
 	AuthTypeOAuth2   AuthType = "oauth2"

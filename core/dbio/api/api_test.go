@@ -2298,34 +2298,37 @@ endpoints:
 	}
 }
 
-func TestTokenAuthentication(t *testing.T) {
+func TestStaticAuthentication(t *testing.T) {
 	tests := []struct {
 		name          string
-		headerName    string
-		headerValue   string
+		headers       map[string]string
 		secrets       map[string]any
 		useTemplating bool
 		expectSuccess bool
 		description   string
+		useShorthand  bool // if true, omit type: static (test defaulting behavior)
 	}{
 		{
-			name:          "api_key_header",
-			headerName:    "X-API-Key",
-			headerValue:   "my-api-key-123",
+			name: "api_key_header",
+			headers: map[string]string{
+				"X-API-Key": "my-api-key-123",
+			},
 			expectSuccess: true,
 			description:   "Static API key header should be injected",
 		},
 		{
-			name:          "authorization_bearer",
-			headerName:    "Authorization",
-			headerValue:   "Bearer token123",
+			name: "authorization_bearer",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+			},
 			expectSuccess: true,
 			description:   "Bearer token header should be injected",
 		},
 		{
-			name:        "templated_header",
-			headerName:  "Authorization",
-			headerValue: "Bearer {secrets.token}",
+			name: "templated_header",
+			headers: map[string]string{
+				"Authorization": "Bearer {secrets.token}",
+			},
 			secrets: map[string]any{
 				"token": "secret_token_value",
 			},
@@ -2334,11 +2337,29 @@ func TestTokenAuthentication(t *testing.T) {
 			description:   "Templated header should be rendered with secret value",
 		},
 		{
-			name:          "empty_header_name",
-			headerName:    "",
-			headerValue:   "some-value",
+			name:          "empty_headers",
+			headers:       map[string]string{},
 			expectSuccess: true,
-			description:   "Empty header name should still succeed (no header injected)",
+			description:   "Empty headers should still succeed (no header injected)",
+		},
+		{
+			name: "multiple_headers",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+				"X-API-Key":     "my-api-key-456",
+				"X-Custom":      "custom-value",
+			},
+			expectSuccess: true,
+			description:   "Multiple headers should all be injected",
+		},
+		{
+			name: "headers_only_shorthand",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+			},
+			expectSuccess: true,
+			useShorthand:  true,
+			description:   "Headers without type should default to static",
 		},
 	}
 
@@ -2363,12 +2384,29 @@ func TestTokenAuthentication(t *testing.T) {
 			}))
 			defer server.Close()
 
+			// Build headers YAML section
+			headersYAML := ""
+			for k, v := range tt.headers {
+				headersYAML += fmt.Sprintf("    %s: \"%s\"\n", k, v)
+			}
+
+			// Build authentication section
+			var authSection string
+			if tt.useShorthand {
+				// Test shorthand: just headers without type
+				authSection = fmt.Sprintf(`authentication:
+  headers:
+%s`, headersYAML)
+			} else {
+				authSection = fmt.Sprintf(`authentication:
+  type: static
+  headers:
+%s`, headersYAML)
+			}
+
 			specYAML := fmt.Sprintf(`
-name: test_token_auth_api
-authentication:
-  type: token
-  header_name: "%s"
-  header_value: "%s"
+name: test_static_auth_api
+%s
 endpoints:
   test_endpoint:
     request:
@@ -2377,7 +2415,7 @@ endpoints:
     response:
       records:
         jmespath: data
-`, tt.headerName, tt.headerValue, server.URL)
+`, authSection, server.URL)
 
 			// Load spec
 			spec, err := LoadSpec(specYAML)
@@ -2399,19 +2437,19 @@ endpoints:
 
 			// Authenticate
 			err = ac.Authenticate()
-			assert.NoError(t, err, "Authenticate() should not return error for token auth setup")
+			assert.NoError(t, err, "Authenticate() should not return error for static auth setup")
 			assert.True(t, ac.State.Auth.Authenticated, "Should be marked as authenticated")
 
 			// Verify auth headers were set
 			assert.NotNil(t, ac.State.Auth.Headers, "Auth headers should be set")
 
-			// For non-empty header name, verify the header was set
-			if tt.headerName != "" {
-				actualVal, exists := ac.State.Auth.Headers[tt.headerName]
-				assert.True(t, exists, "Header %s should exist in auth headers", tt.headerName)
+			// For each header in the test, verify it was set
+			for headerName, headerValue := range tt.headers {
+				actualVal, exists := ac.State.Auth.Headers[headerName]
+				assert.True(t, exists, "Header %s should exist in auth headers", headerName)
 
 				// Check that templated values were rendered
-				if tt.useTemplating && strings.Contains(tt.headerValue, "{secrets.") {
+				if tt.useTemplating && strings.Contains(headerValue, "{secrets.") {
 					assert.NotContains(t, actualVal, "{secrets.", "Template should be rendered")
 				}
 			}
@@ -2430,15 +2468,15 @@ endpoints:
 				assert.NoError(t, err, "Should collect data successfully")
 				assert.Equal(t, 2, len(data.Rows), "Should receive 2 records")
 
-				// Verify header was received by server (if header name is set)
-				if tt.headerName != "" {
-					expectedVal := tt.headerValue
+				// Verify headers were received by server
+				for headerName, headerValue := range tt.headers {
+					expectedVal := headerValue
 					// For templated values, get the expected rendered value
-					if tt.useTemplating && strings.Contains(tt.headerValue, "{secrets.token}") {
-						expectedVal = strings.Replace(tt.headerValue, "{secrets.token}", cast.ToString(tt.secrets["token"]), 1)
+					if tt.useTemplating && strings.Contains(headerValue, "{secrets.token}") {
+						expectedVal = strings.Replace(headerValue, "{secrets.token}", cast.ToString(tt.secrets["token"]), 1)
 					}
-					actualVal := receivedHeaders.Get(tt.headerName)
-					assert.Equal(t, expectedVal, actualVal, "Header %s should have correct value", tt.headerName)
+					actualVal := receivedHeaders.Get(headerName)
+					assert.Equal(t, expectedVal, actualVal, "Header %s should have correct value", headerName)
 				}
 			} else {
 				if err == nil && df != nil {
@@ -2450,8 +2488,8 @@ endpoints:
 	}
 }
 
-func TestTokenAuthenticationWithSequence(t *testing.T) {
-	// Test that token auth works with sequence calls
+func TestStaticAuthenticationWithSequence(t *testing.T) {
+	// Test that static auth works with sequence calls
 	var requestCount int
 	var allReceivedHeaders []http.Header
 
@@ -2479,11 +2517,11 @@ func TestTokenAuthenticationWithSequence(t *testing.T) {
 	defer server.Close()
 
 	specYAML := fmt.Sprintf(`
-name: test_token_auth_sequence
+name: test_static_auth_sequence
 authentication:
-  type: token
-  header_name: X-API-Key
-  header_value: "test-api-key-123"
+  type: static
+  headers:
+    X-API-Key: "test-api-key-123"
 endpoints:
   test_endpoint:
     setup:

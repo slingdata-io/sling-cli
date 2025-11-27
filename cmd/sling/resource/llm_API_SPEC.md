@@ -395,6 +395,11 @@ authentication:
   # No Authentication
   type: "" # or omit the authentication block
 
+  # Static Header Authentication (API Key / Bearer Token)
+  type: "static"
+  headers:
+    Authorization: "Bearer {secrets.api_token}"  # or X-API-Key, etc.
+
   # Basic Auth
   type: "basic"
   username: "{secrets.username}"

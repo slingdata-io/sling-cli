@@ -74,8 +74,8 @@ func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err e
 	switch baseAuth.Type {
 	case AuthTypeNone:
 		authenticator = &baseAuth
-	case AuthTypeToken:
-		authenticator = &AuthenticatorToken{AuthenticatorBase: baseAuth}
+	case AuthTypeStatic:
+		authenticator = &AuthenticatorStatic{AuthenticatorBase: baseAuth}
 	case AuthTypeBasic:
 		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
 	case AuthTypeSequence:
@@ -208,8 +208,8 @@ func (ep *Endpoint) MakeAuthenticator() (authenticator Authenticator, err error)
 	switch baseAuth.Type {
 	case AuthTypeNone:
 		authenticator = &baseAuth
-	case AuthTypeToken:
-		authenticator = &AuthenticatorToken{AuthenticatorBase: baseAuth}
+	case AuthTypeStatic:
+		authenticator = &AuthenticatorStatic{AuthenticatorBase: baseAuth}
 	case AuthTypeBasic:
 		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
 	case AuthTypeSequence:
@@ -288,24 +288,23 @@ func (a *AuthenticatorBasic) Authenticate(ctx context.Context, state *APIStateAu
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////
-// AuthenticatorToken
-type AuthenticatorToken struct {
+// AuthenticatorStatic
+type AuthenticatorStatic struct {
 	AuthenticatorBase
-	HeaderName  string `yaml:"header_name,omitempty" json:"header_name,omitempty"`
-	HeaderValue string `yaml:"header_value,omitempty" json:"header_value,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 }
 
-func (a *AuthenticatorToken) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
+func (a *AuthenticatorStatic) Authenticate(ctx context.Context, state *APIStateAuth) (err error) {
 	// Initialize headers map
 	state.Headers = make(map[string]string)
 
-	// Render the header value (supports templating like {secrets.API_KEY})
-	if a.HeaderName != "" {
-		renderedVal, err := a.renderString(a.HeaderValue)
+	// Render each header value (supports templating like {secrets.API_KEY})
+	for headerName, headerValue := range a.Headers {
+		renderedVal, err := a.renderString(headerValue)
 		if err != nil {
-			return g.Error(err, "could not render header_value for: %s", a.HeaderName)
+			return g.Error(err, "could not render header value for: %s", headerName)
 		}
-		state.Headers[a.HeaderName] = renderedVal
+		state.Headers[headerName] = renderedVal
 	}
 
 	return nil
