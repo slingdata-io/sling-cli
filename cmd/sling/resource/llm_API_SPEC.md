@@ -1193,6 +1193,7 @@ request:
 | `object(k1, v1, k2, v2, ...)`  | Creates object from key/value pairs | Even number of arguments (key, value pairs) | Map/object        | `object("name", "John", "age", 30)` → `{"name": "John", "age": 30}` |
 | `keys(map)`                    | Gets keys from map              | `map` object                              | Array of keys     | `keys({"a": 1, "b": 2})` → `["a", "b"]`                       |
 | `values(map)`                  | Gets values from map            | `map` object                              | Array of values   | `values({"a": 1, "b": 2})` → `[1, 2]`                         |
+| `exists(collection, item)`     | Checks if key exists in map or value exists in array | `collection`: Map or array, `item`: Key or value to find | Boolean           | `exists({"a": 1}, "a")` → true, `exists([1, 2], 2)` → true   |
 | `jmespath(object, expression)` | Evaluates JMESPath expression   | `object`, `expression` (string)           | Query result      | `jmespath(response.json, "data.items[?age > 30]")`            |
 | `get_path(object, path)`       | Gets value using dot notation   | `object`, `path` (string, e.g., "a.b[0]") | Value at path     | `get_path(response.json, "user.profile.email")`              |
 | `filter(array, expression)`    | Filters array (goval expression)| `array`, `expression` (string uses `value`) | Filtered array    | `filter([1, 2, 3], "value > 1")` → `[2, 3]`                  |
