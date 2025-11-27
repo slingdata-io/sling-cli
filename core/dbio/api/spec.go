@@ -318,6 +318,8 @@ type Call struct {
 	Pagination     Pagination      `yaml:"pagination" json:"pagination"`
 	Response       Response        `yaml:"response" json:"response"`
 	Authentication *Authentication `yaml:"authentication,omitempty" json:"authentication,omitempty"`
+	Iterate        string          `yaml:"iterate" json:"iterate"`
+	Into           string          `yaml:"into" json:"into"`
 }
 
 // Endpoints is a collection of API endpoints

@@ -2573,3 +2573,195 @@ endpoints:
 			"Request %d should have X-API-Key header", i+1)
 	}
 }
+
+func TestSequenceCallIteration(t *testing.T) {
+	// Test that setup sequence can iterate over a list from state
+	var requestPaths []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch r.URL.Path {
+		case "/bases":
+			json.NewEncoder(w).Encode(map[string]any{
+				"bases": []map[string]any{
+					{"id": "base1", "name": "Base One"},
+					{"id": "base2", "name": "Base Two"},
+				},
+			})
+		case "/bases/base1/tables":
+			json.NewEncoder(w).Encode(map[string]any{
+				"tables": []map[string]any{
+					{"name": "table_a"},
+				},
+			})
+		case "/bases/base2/tables":
+			json.NewEncoder(w).Encode(map[string]any{
+				"tables": []map[string]any{
+					{"name": "table_b"},
+					{"name": "table_c"},
+				},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": 1, "name": "Test"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_sequence_call_iteration
+endpoints:
+  test_endpoint:
+    setup:
+      # Step 1: Get list of bases
+      - request:
+          url: %s/bases
+        response:
+          processors:
+            - expression: response.json.bases
+              output: state.bases
+              aggregation: last
+
+      # Step 2: Iterate over bases to get tables
+      - iterate: state.bases
+        into: state.base
+        request:
+          url: %s/bases/{state.base.id}/tables
+        response:
+          processors:
+            - expression: response.json.tables
+              output: state.all_tables
+              aggregation: collect
+
+    request:
+      url: %s/data
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Bypass authentication for testing
+	ac.State.Auth.Authenticated = true
+
+	// Read dataflow (this should trigger setup sequence with iteration)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify the correct requests were made:
+	// 1. /bases (get list)
+	// 2. /bases/base1/tables (iteration 1)
+	// 3. /bases/base2/tables (iteration 2)
+	// 4. /data (main request)
+	assert.Equal(t, 4, len(requestPaths), "Should have made 4 requests")
+	assert.Equal(t, "/bases", requestPaths[0])
+	assert.Equal(t, "/bases/base1/tables", requestPaths[1])
+	assert.Equal(t, "/bases/base2/tables", requestPaths[2])
+	assert.Equal(t, "/data", requestPaths[3])
+}
+
+func TestSequenceCallIterationJSONLiteral(t *testing.T) {
+	// Test that setup sequence can iterate over a JSON literal array
+	var requestPaths []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch r.URL.Path {
+		case "/regions/us-east":
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":  "US East",
+				"count": 100,
+			})
+		case "/regions/us-west":
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":  "US West",
+				"count": 200,
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"total": 300},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_sequence_call_iteration_json
+endpoints:
+  test_endpoint:
+    setup:
+      - iterate: '[{"id": "us-east"}, {"id": "us-west"}]'
+        into: state.region
+        request:
+          url: %s/regions/{state.region.id}
+        response:
+          processors:
+            - expression: response.json
+              output: state.region_data
+              aggregation: collect
+
+    request:
+      url: %s/summary
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Bypass authentication for testing
+	ac.State.Auth.Authenticated = true
+
+	// Read dataflow (this should trigger setup sequence with iteration)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify the correct requests were made:
+	// 1. /regions/us-east (iteration 1)
+	// 2. /regions/us-west (iteration 2)
+	// 3. /summary (main request)
+	assert.Equal(t, 3, len(requestPaths), "Should have made 3 requests")
+	assert.Equal(t, "/regions/us-east", requestPaths[0])
+	assert.Equal(t, "/regions/us-west", requestPaths[1])
+	assert.Equal(t, "/summary", requestPaths[2])
+}
