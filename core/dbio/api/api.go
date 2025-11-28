@@ -35,7 +35,7 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
-		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "inputs", "auth", "response", "request", "sync", "context")),
 	}
 
 	if ac.Name == "" {

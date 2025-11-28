@@ -377,7 +377,6 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
 	contextMap := g.M(
 		"mode", sCfg.Mode,
-		"inputs", ep.conn.State.Inputs,
 		"store", ep.conn.State.Store,
 		"limit", sCfg.Limit,
 	)
