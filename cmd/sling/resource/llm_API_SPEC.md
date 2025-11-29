@@ -974,7 +974,7 @@ Read-only runtime values from replication config. Support backfill and increment
 | Variable | Type | Description | Set From |
 |----------|------|-------------|----------|
 | `context.mode` | string | Replication mode | Config `mode` field |
-| `context.store` | string | State storage location | Env `SLING_STATE` |
+| `context.store` | map | Store values from replication | Replication `store` variable |
 | `context.limit` | integer | Max records | Config `source_options.limit` |
 | `context.range_start` | string | Backfill range start | Config `source_options.range` (first) |
 | `context.range_end` | string | Backfill range end | Config `source_options.range` (second) |
@@ -1196,6 +1196,10 @@ request:
 | `exists(collection, item)`     | Checks if key exists in map or value exists in array | `collection`: Map or array, `item`: Key or value to find | Boolean           | `exists({"a": 1}, "a")` → true, `exists([1, 2], 2)` → true   |
 | `jmespath(object, expression)` | Evaluates JMESPath expression   | `object`, `expression` (string)           | Query result      | `jmespath(response.json, "data.items[?age > 30]")`            |
 | `get_path(object, path)`       | Gets value using dot notation   | `object`, `path` (string, e.g., "a.b[0]") | Value at path     | `get_path(response.json, "user.profile.email")`              |
+| `object_rename(map, old, new, ...)` | Renames keys in map       | `map`: Object, followed by pairs of `old_key`, `new_key` | Modified map      | `object_rename({"a": 1}, "a", "x")` → `{"x": 1}` |
+| `object_delete(map, key1, ...)`  | Deletes keys from map        | `map`: Object, followed by keys to delete | Modified map      | `object_delete({"a": 1, "b": 2}, "a")` → `{"b": 2}` |
+| `object_casing(map, casing)`  | Transforms keys to specified casing | `map`: Object, `casing`: "snake", "camel", "upper", "lower" | Modified map      | `object_casing({"firstName": "John"}, "snake")` → `{"first_name": "John"}` |
+| `object_merge(map1, map2, ...)` | Merges multiple maps together | Two or more maps (later maps override earlier) | Merged map      | `object_merge({"a": 1}, {"b": 2})` → `{"a": 1, "b": 2}` |
 | `filter(array, expression)`    | Filters array (goval expression)| `array`, `expression` (string uses `value`) | Filtered array    | `filter([1, 2, 3], "value > 1")` → `[2, 3]`                  |
 | `map(array, expression)`       | Maps array (goval expression)   | `array`, `expression` (string uses `value`) | Transformed array | `map([1, 2, 3], "value * 2")` → `[2, 4, 6]`                    |
 | `sort(array[, descending])`    | Sorts array elements            | `array`, `descending` (optional bool)     | Sorted array      | `sort([3, 1, 2])` → `[1, 2, 3]`                               |
