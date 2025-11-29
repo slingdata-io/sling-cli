@@ -609,7 +609,7 @@ func (a *AuthenticatorOAuth2) authorizationCodeFlow(ctx context.Context, conf *o
 	}
 	state.Token = tok.AccessToken
 	if tok.RefreshToken != "" {
-		g.Debug("OAuth refreshToken = %s", tok.RefreshToken)
+		g.Trace("OAuth refreshToken = %s", tok.RefreshToken)
 		a.SaveToken(tok)
 	}
 	g.Trace("OAuth accessToken = %s", tok.AccessToken)
@@ -665,11 +665,19 @@ func (a *AuthenticatorOAuth2) SaveToken(tok *oauth2.Token) error {
 
 // LoadToken loads the stored token.
 func (a *AuthenticatorOAuth2) LoadToken() (*oauth2.Token, error) {
+	tok := &oauth2.Token{}
+
+	// attempt to load from secrets first, then from file
+	err := g.Unmarshal(g.Marshal(a.conn.State.Secrets), tok)
+	if err == nil && tok.AccessToken != "" {
+		return tok, nil
+	}
+
+	// load from file
 	data, err := os.ReadFile(a.TokenFile())
 	if err != nil {
 		return nil, err
 	}
-	tok := &oauth2.Token{}
 	return tok, json.Unmarshal(data, tok)
 }
 
