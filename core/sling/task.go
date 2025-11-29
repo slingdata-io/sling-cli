@@ -624,6 +624,8 @@ func ErrorHelper(err error) (helpString string) {
 			`
 		case contains("s3.amazonaws.com") && contains("HTTP Error: Unable to connect to URL"):
 			helpString = `If you are using Ducklake with S3, make sure to specify the region with "s3_region"`
+		case contains("Error 1205 (HY000): Lock wait timeout exceeded"):
+			helpString = "This error occurs when the statement is waiting too long to acquire a lock on the table, likely because another transaction is holding a lock. Try setting `innodb_lock_wait_timeout` property in your connection. See https://docs.slingdata.io/connections/database-connections/mysql"
 		}
 	}
 	return
