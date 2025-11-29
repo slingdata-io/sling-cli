@@ -1448,7 +1448,7 @@ const (
 	SnakeColumnCasing     ColumnCasing = "snake"     // converts snake casing according to target database. Lower-case for files.
 	UpperColumnCasing     ColumnCasing = "upper"     // make it upper case
 	LowerColumnCasing     ColumnCasing = "lower"     // make it lower case
-
+	CamelColumnCasing     ColumnCasing = "camel"     // converts to camelCase
 )
 
 // Equals evaluates equality for column casing (pointer safe)
@@ -1520,6 +1520,8 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 		return strings.ToUpper(name)
 	case cc.Equals(LowerColumnCasing):
 		return strings.ToLower(name)
+	case cc.Equals(CamelColumnCasing):
+		return toCamelCase(name)
 	case cc.Equals(TargetColumnCasing), cc.Equals(SnakeColumnCasing):
 		// lower case for target file system
 		if tgtConnType.DBNameUpperCase() {
@@ -1529,6 +1531,383 @@ func (cc *ColumnCasing) Apply(name string, tgtConnType dbio.Type) string {
 	}
 
 	return name
+}
+
+// toCamelCase converts a string to camelCase
+// Examples: "first_name" -> "firstName", "FirstName" -> "firstName", "FIRST_NAME" -> "firstName"
+func toCamelCase(name string) string {
+	if name == "" {
+		return name
+	}
+
+	// First normalize to snake_case to handle various input formats
+	// Handle camelCase/PascalCase transitions
+	name = matchAllCap.ReplaceAllString(name, "${1}_${2}")
+	name = strings.ToLower(name)
+
+	// Split by underscores and other separators
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+
+	if len(parts) == 0 {
+		return name
+	}
+
+	// First part stays lowercase, subsequent parts get capitalized
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			result += strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+
+	return result
+}
+
+// Selector provides efficient field selection, exclusion, and renaming.
+// Use NewSelector to build from select expressions, then Apply for each field.
+type Selector struct {
+	included     map[string]struct{} // lowercase exact includes
+	excluded     map[string]struct{} // lowercase exact excludes
+	renamed      map[string]string   // lowercase old -> new name
+	includeGlobs []string            // glob patterns to include (lowercase)
+	excludeGlobs []string            // glob patterns to exclude (lowercase)
+	all          bool                // true if "*" was specified
+	cache        map[string]string   // cached new name
+	casing       *ColumnCasing
+	ConnType     dbio.Type
+}
+
+// NewSelector creates a Selector from select expressions.
+// All field matching is case-insensitive.
+func NewSelector(selectExprs []string, casing ColumnCasing) *Selector {
+	s := &Selector{
+		included: make(map[string]struct{}),
+		excluded: make(map[string]struct{}),
+		renamed:  make(map[string]string),
+		cache:    make(map[string]string),
+		casing:   &casing,
+	}
+
+	for _, expr := range selectExprs {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			continue
+		}
+		if expr == "*" {
+			s.all = true
+			continue
+		}
+
+		field, newName, isExclude, _ := parseSelectExpr(expr)
+		fieldLower := strings.ToLower(field)
+
+		if isExclude {
+			if strings.Contains(field, "*") {
+				s.excludeGlobs = append(s.excludeGlobs, fieldLower)
+			} else {
+				s.excluded[fieldLower] = struct{}{}
+			}
+		} else if newName != "" {
+			s.renamed[fieldLower] = newName
+		} else {
+			if strings.Contains(field, "*") {
+				s.includeGlobs = append(s.includeGlobs, fieldLower)
+			} else {
+				s.included[fieldLower] = struct{}{}
+			}
+		}
+	}
+
+	return s
+}
+
+// Apply checks if a field should be included and returns its (possibly renamed) name.
+// Results are cached for O(1) lookups after the first call for each field.
+// Priority: rename > exclude > glob exclude > All > include > glob include
+func (s *Selector) Apply(name string) (new string, included bool) {
+	nameLower := strings.ToLower(name)
+
+	// Check cache first
+	if res, ok := s.cache[nameLower]; ok {
+		if res == "" {
+			return "", false
+		}
+		return res, true
+	}
+
+	// Compute result
+	res := s.compute(name, nameLower)
+
+	// Cache and return
+	s.cache[nameLower] = res
+	if res == "" {
+		return "", false
+	}
+	return res, true
+}
+
+// compute calculates the selector result for a field (uncached)
+// Returns the new name if included, or "" if excluded
+func (s *Selector) compute(name, nameLower string) string {
+	// 1. Apply casing
+	if s.casing != nil {
+		name = s.casing.Apply(name, s.ConnType)
+	}
+
+	// 2. Check rename first (highest priority)
+	if newName, ok := s.renamed[nameLower]; ok {
+		return newName
+	}
+
+	// 3. Check exact exclusion
+	if _, excluded := s.excluded[nameLower]; excluded {
+		return ""
+	}
+
+	// 4. Check glob exclusions
+	for _, pattern := range s.excludeGlobs {
+		if matchesSelectGlob(nameLower, pattern) {
+			return ""
+		}
+	}
+
+	// 5. If All mode, include (after exclusions checked)
+	if s.all {
+		return name
+	}
+
+	// 6. Check exact inclusion
+	if _, included := s.included[nameLower]; included {
+		return name
+	}
+
+	// 7. Check glob inclusions
+	for _, pattern := range s.includeGlobs {
+		if matchesSelectGlob(nameLower, pattern) {
+			return name
+		}
+	}
+
+	return ""
+}
+
+// ApplySelect applies select expressions to filter, rename, and reorder fields.
+// Select syntax:
+//   - "field"         -> include field
+//   - "-field"        -> exclude field
+//   - "field as new"  -> rename field to new
+//   - "*"             -> include all fields
+//   - "prefix*"       -> include fields starting with prefix
+//   - "*suffix"       -> include fields ending with suffix
+//   - "-prefix*"      -> exclude fields starting with prefix
+//   - "-*suffix"      -> exclude fields ending with suffix
+//
+// Field matching is case-insensitive.
+// Returns new fields slice with selected/renamed fields in order specified.
+func ApplySelect(fields []string, selectExprs []string) (newFields []string, err error) {
+	if len(selectExprs) == 0 {
+		return fields, nil
+	}
+
+	// Build case-insensitive field lookup map: lowerName -> index
+	fieldMap := make(map[string]int, len(fields))
+	for i, f := range fields {
+		fieldMap[strings.ToLower(f)] = i
+	}
+
+	// Check if "*" (select all) is present
+	hasSelectAll := false
+	for _, expr := range selectExprs {
+		if strings.TrimSpace(expr) == "*" {
+			hasSelectAll = true
+			break
+		}
+	}
+
+	if hasSelectAll {
+		// "All mode": start with all fields, apply exclusions and renames
+		return applySelectAllMode(fields, fieldMap, selectExprs)
+	}
+
+	// "Explicit mode": only include what's explicitly selected
+	return applySelectExplicitMode(fields, fieldMap, selectExprs)
+}
+
+// applySelectAllMode handles select when "*" is present
+// Starts with all fields, applies exclusions and renames
+func applySelectAllMode(fields []string, fieldMap map[string]int, selectExprs []string) ([]string, error) {
+	// Track excluded fields and renames
+	excluded := make(map[int]bool)
+	renames := make(map[int]string) // index -> newName
+
+	for _, expr := range selectExprs {
+		expr = strings.TrimSpace(expr)
+		if expr == "*" {
+			continue
+		}
+
+		field, newName, isExclude, err := parseSelectExpr(expr)
+		if err != nil {
+			return nil, err
+		}
+
+		if isExclude {
+			// Handle exclusion (may be glob pattern)
+			if strings.Contains(field, "*") {
+				// Glob exclusion
+				for i, f := range fields {
+					if matchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
+						excluded[i] = true
+					}
+				}
+			} else {
+				// Exact exclusion
+				if idx, ok := fieldMap[strings.ToLower(field)]; ok {
+					excluded[idx] = true
+				}
+				// Silently ignore if field not found for exclusions
+			}
+		} else if newName != "" {
+			// Rename
+			if idx, ok := fieldMap[strings.ToLower(field)]; ok {
+				renames[idx] = newName
+			} else {
+				return nil, g.Error("field '%s' not found for rename", field)
+			}
+		}
+		// Ignore plain includes in all mode (they're already included)
+	}
+
+	// Build result: all fields minus exclusions, with renames applied
+	newFields := make([]string, 0, len(fields))
+	for i, f := range fields {
+		if excluded[i] {
+			continue
+		}
+		if newName, ok := renames[i]; ok {
+			newFields = append(newFields, newName)
+		} else {
+			newFields = append(newFields, f)
+		}
+	}
+
+	return newFields, nil
+}
+
+// applySelectExplicitMode handles select without "*"
+// Only includes explicitly listed fields
+func applySelectExplicitMode(fields []string, fieldMap map[string]int, selectExprs []string) ([]string, error) {
+	newFields := make([]string, 0)
+	added := make(map[int]bool) // Track which fields have been added to avoid duplicates
+
+	for _, expr := range selectExprs {
+		expr = strings.TrimSpace(expr)
+
+		field, newName, isExclude, err := parseSelectExpr(expr)
+		if err != nil {
+			return nil, err
+		}
+
+		if isExclude {
+			// Exclusions have no effect in explicit mode (nothing to exclude from)
+			continue
+		}
+
+		if strings.Contains(field, "*") {
+			// Glob include
+			for i, f := range fields {
+				if added[i] {
+					continue
+				}
+				if matchesSelectGlob(strings.ToLower(f), strings.ToLower(field)) {
+					newFields = append(newFields, f)
+					added[i] = true
+				}
+			}
+		} else {
+			// Exact include (with optional rename)
+			idx, ok := fieldMap[strings.ToLower(field)]
+			if !ok {
+				return nil, g.Error("field '%s' not found", field)
+			}
+			if added[idx] {
+				continue // Already added
+			}
+			if newName != "" {
+				newFields = append(newFields, newName)
+			} else {
+				newFields = append(newFields, fields[idx])
+			}
+			added[idx] = true
+		}
+	}
+
+	return newFields, nil
+}
+
+// parseSelectExpr parses a single select expression
+// Returns: (fieldName, newName, isExclusion, error)
+// Examples:
+//
+//	"field"          -> ("field", "", false, nil)
+//	"-field"         -> ("field", "", true, nil)
+//	"field as new"   -> ("field", "new", false, nil)
+//	"prefix*"        -> ("prefix*", "", false, nil)
+//	"-*suffix"       -> ("*suffix", "", true, nil)
+func parseSelectExpr(expr string) (field string, newName string, exclude bool, err error) {
+	expr = strings.TrimSpace(expr)
+
+	// Check for exclusion prefix
+	if strings.HasPrefix(expr, "-") {
+		exclude = true
+		expr = strings.TrimPrefix(expr, "-")
+	}
+
+	// Check for rename (case-insensitive "as")
+	// Split by " as " (with spaces to avoid matching "as" in field names like "has_value")
+	parts := strings.SplitN(strings.ToLower(expr), " as ", 2)
+	if len(parts) == 2 {
+		// Get original case versions
+		field = strings.TrimSpace(expr[:len(parts[0])])
+		newName = strings.TrimSpace(expr[len(parts[0])+4:]) // +4 for " as "
+		if exclude {
+			return "", "", false, g.Error("cannot combine exclusion (-) with rename (as): %s", expr)
+		}
+		return field, newName, false, nil
+	}
+
+	field = strings.TrimSpace(expr)
+	return field, "", exclude, nil
+}
+
+// matchesSelectGlob checks if name matches a simple glob pattern (prefix* or *suffix)
+// Both name and pattern should be lowercase for case-insensitive matching
+func matchesSelectGlob(name, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return name == pattern
+	}
+
+	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
+		// *middle* - contains
+		middle := strings.Trim(pattern, "*")
+		return strings.Contains(name, middle)
+	} else if strings.HasPrefix(pattern, "*") {
+		// *suffix
+		suffix := strings.TrimPrefix(pattern, "*")
+		return strings.HasSuffix(name, suffix)
+	} else if strings.HasSuffix(pattern, "*") {
+		// prefix*
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(name, prefix)
+	}
+
+	// Pattern has * in the middle: prefix*suffix
+	idx := strings.Index(pattern, "*")
+	prefix := pattern[:idx]
+	suffix := pattern[idx+1:]
+	return strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
 }
 
 // ColumnTyping contains type-specific mapping configurations

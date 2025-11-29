@@ -981,7 +981,9 @@ type Records struct {
 	JmesPath   string   `yaml:"jmespath" json:"jmespath,omitempty"` // for json or xml
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
 	UpdateKey  string   `yaml:"update_key" json:"update_key,omitempty"`
-	Limit      int      `yaml:"limit" json:"limit,omitempty"` // to limit the records, useful for testing
+	Limit      int      `yaml:"limit" json:"limit,omitempty"`   // to limit the records, useful for testing
+	Casing     string   `yaml:"casing" json:"casing,omitempty"` // "snake" or "camel"
+	Select     []string `yaml:"select" json:"select,omitempty"` // include/exclude/rename
 
 	DuplicateTolerance string `yaml:"duplicate_tolerance" json:"duplicate_tolerance,omitempty"`
 }
@@ -1079,9 +1081,9 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 	}
 }
 
-func (lrs *SingleRequest) Records() []any {
+func (lrs *SingleRequest) Records() []map[string]any {
 	if lrs.Response == nil || len(lrs.Response.Records) == 0 {
-		return make([]any, 0)
+		return make([]map[string]any, 0)
 	}
 	return lrs.Response.Records
 }
@@ -1115,11 +1117,11 @@ type RequestState struct {
 
 // ResponseState captures the state of the HTTP response for reference and debugging
 type ResponseState struct {
-	Status  int            `yaml:"status" json:"status"`
-	Headers map[string]any `yaml:"headers" json:"headers"`
-	Text    string         `yaml:"text" json:"text"`
-	JSON    any            `yaml:"json" json:"json"`
-	Records []any          `yaml:"records" json:"records"`
+	Status  int              `yaml:"status" json:"status"`
+	Headers map[string]any   `yaml:"headers" json:"headers"`
+	Text    string           `yaml:"text" json:"text"`
+	JSON    any              `yaml:"json" json:"json"`
+	Records []map[string]any `yaml:"records" json:"records"`
 }
 
 // AggregateState stores aggregated values during response processing
