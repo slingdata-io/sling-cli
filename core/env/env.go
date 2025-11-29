@@ -33,6 +33,7 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
+	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
 )
 
 const (
