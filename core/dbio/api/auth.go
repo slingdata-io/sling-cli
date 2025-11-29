@@ -450,6 +450,15 @@ func (a *AuthenticatorOAuth2) Authenticate(ctx context.Context, state *APIStateA
 		g.Warn("Stored refresh token invalid, falling back to authentication")
 	}
 
+	// if agent mode and not client_credentials, use frontend to auth.
+	// client_credentials doesn't need browser
+	if env.IsAgentMode && a.Flow != OAuthFlowClientCredentials {
+		if storedTok != nil {
+			return g.Error("Stored refresh token is invalid. Need to re-authenticate. Please use the 'Connections' panel in the Platform UI.")
+		}
+		return g.Error("Need to authenticate via OAuth. Please use the 'Connections' panel in the Platform UI.")
+	}
+
 	if a.Flow == "" {
 		a.Flow = OAuthFlowAuthorizationCode
 	}
