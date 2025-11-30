@@ -898,6 +898,63 @@ rules:
     backoff_base: 2  # Fallback if no rate limit headers
 ```
 
+**Extending Default Rules/Processors**: Instead of completely overriding defaults, use modifier syntax to prepend or append:
+
+- `+rules` - Prepend rules (evaluated BEFORE defaults)
+- `rules+` - Append rules (evaluated AFTER defaults, before hardcoded rules)
+- `+processors` / `processors+` - Same pattern for processors
+
+```yaml
+# Example: Prepend a rule to break on 403 for a specific endpoint
+# without losing the default retry/rate-limit handling
+endpoints:
+  issue_timeline:
+    response:
+      +rules:
+        - action: break
+          condition: response.status == 403
+          message: "Access denied for this timeline"
+      # Default rules from 'defaults.response.rules' are still applied after +rules
+```
+
+When combined, the final rule order is:
+1. `+rules` (prepend)
+2. `rules` (explicit or inherited from defaults)
+3. `rules+` (append)
+4. Hardcoded retry/fail rules (always last)
+
+**Extending Default Setup/Teardown**: The same modifier syntax works for endpoint `setup` and `teardown` sequences:
+
+- `+setup` - Prepend setup calls (executed BEFORE defaults)
+- `setup+` - Append setup calls (executed AFTER defaults)
+- `+teardown` / `teardown+` - Same pattern for teardown
+
+```yaml
+# Example: Add pre-check before default setup and cleanup after default teardown
+defaults:
+  setup:
+    - request:
+        url: "{base_url}/auth/refresh"
+
+endpoints:
+  my_endpoint:
+    +setup:  # Runs BEFORE default setup
+      - request:
+          url: "{base_url}/pre-check"
+    teardown+:  # Runs AFTER default teardown
+      - request:
+          url: "{base_url}/cleanup"
+    request:
+      url: "{base_url}/data"
+```
+
+When combined, the final execution order is:
+1. `+setup` (prepend)
+2. `setup` (explicit or inherited from defaults)
+3. `setup+` (append)
+
+Same pattern applies to teardown.
+
 ## Sync State for Incremental Loads
 
 📖 [View documentation](https://docs.slingdata.io/concepts/api-specs/advanced)

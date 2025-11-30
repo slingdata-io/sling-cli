@@ -96,6 +96,9 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 		compiledEndpointMap[name] = endpoint
 	}
 
+	// update spec.EndpointMap with compiled endpoints
+	spec.EndpointMap = compiledEndpointMap
+
 	// validate that all queues used by endpoints are declared
 	if err = spec.validateQueues(compiledEndpointMap); err != nil {
 		return spec, g.Error(err, "queue validation failed")
@@ -336,6 +339,14 @@ type Endpoint struct {
 	aggregate    AggregateState
 	originalMap  map[string]any
 	auth         APIStateAuth
+
+	// Modifier fields for prepending/appending to default setup/teardown (populated by custom unmarshal)
+	// Use +setup to prepend setup calls (executed before defaults)
+	// Use setup+ to append setup calls (executed after defaults)
+	prependSetup    Sequence `yaml:"-" json:"-"`
+	appendSetup     Sequence `yaml:"-" json:"-"`
+	prependTeardown Sequence `yaml:"-" json:"-"`
+	appendTeardown  Sequence `yaml:"-" json:"-"`
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -947,6 +958,115 @@ type Response struct {
 	Records    Records       `yaml:"records" json:"records"`
 	Processors []Processor   `yaml:"processors" json:"processors,omitempty"`
 	Rules      []Rule        `yaml:"rules" json:"rules,omitempty"`
+
+	// Modifier fields for prepending/appending to defaults (populated by custom unmarshal)
+	// Use +rules to prepend rules (evaluated before defaults)
+	// Use rules+ to append rules (evaluated after defaults, before hardcoded)
+	PrependRules      []Rule      `yaml:"-" json:"-"`
+	AppendRules       []Rule      `yaml:"-" json:"-"`
+	PrependProcessors []Processor `yaml:"-" json:"-"`
+	AppendProcessors  []Processor `yaml:"-" json:"-"`
+}
+
+// UnmarshalYAML handles +rules/rules+ and +processors/processors+ modifier syntax
+func (r *Response) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First unmarshal into a map to capture modifier keys
+	var rawMap map[string]interface{}
+	if err := unmarshal(&rawMap); err != nil {
+		return err
+	}
+
+	// Handle standard fields via type alias to avoid recursion
+	type ResponseAlias Response
+	alias := &ResponseAlias{}
+
+	// Re-marshal and unmarshal to get standard fields
+	if data, err := yaml.Marshal(rawMap); err == nil {
+		yaml.Unmarshal(data, alias)
+	}
+	*r = Response(*alias)
+
+	// Handle modifier keys for rules
+	if v, ok := rawMap["+rules"]; ok {
+		r.PrependRules = parseRulesFromInterface(v)
+	}
+	if v, ok := rawMap["rules+"]; ok {
+		r.AppendRules = parseRulesFromInterface(v)
+	}
+
+	// Handle modifier keys for processors
+	if v, ok := rawMap["+processors"]; ok {
+		r.PrependProcessors = parseProcessorsFromInterface(v)
+	}
+	if v, ok := rawMap["processors+"]; ok {
+		r.AppendProcessors = parseProcessorsFromInterface(v)
+	}
+
+	return nil
+}
+
+// parseRulesFromInterface converts an interface{} to []Rule
+func parseRulesFromInterface(v interface{}) []Rule {
+	var rules []Rule
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &rules)
+	}
+	return rules
+}
+
+// parseProcessorsFromInterface converts an interface{} to []Processor
+func parseProcessorsFromInterface(v interface{}) []Processor {
+	var processors []Processor
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &processors)
+	}
+	return processors
+}
+
+// UnmarshalYAML handles +setup/setup+ and +teardown/teardown+ modifier syntax for Endpoint
+func (ep *Endpoint) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First unmarshal into a map to capture modifier keys
+	var rawMap map[string]interface{}
+	if err := unmarshal(&rawMap); err != nil {
+		return err
+	}
+
+	// Handle standard fields via type alias to avoid recursion
+	type EndpointAlias Endpoint
+	alias := &EndpointAlias{}
+
+	// Re-marshal and unmarshal to get standard fields
+	if data, err := yaml.Marshal(rawMap); err == nil {
+		yaml.Unmarshal(data, alias)
+	}
+	*ep = Endpoint(*alias)
+
+	// Handle modifier keys for setup
+	if v, ok := rawMap["+setup"]; ok {
+		ep.prependSetup = parseSequenceFromInterface(v)
+	}
+	if v, ok := rawMap["setup+"]; ok {
+		ep.appendSetup = parseSequenceFromInterface(v)
+	}
+
+	// Handle modifier keys for teardown
+	if v, ok := rawMap["+teardown"]; ok {
+		ep.prependTeardown = parseSequenceFromInterface(v)
+	}
+	if v, ok := rawMap["teardown+"]; ok {
+		ep.appendTeardown = parseSequenceFromInterface(v)
+	}
+
+	return nil
+}
+
+// parseSequenceFromInterface converts an interface{} to Sequence ([]Call)
+func parseSequenceFromInterface(v interface{}) Sequence {
+	var seq Sequence
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &seq)
+	}
+	return seq
 }
 
 // Records configures how to extract and process data records from a response
