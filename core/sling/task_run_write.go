@@ -619,6 +619,12 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 
 	if cfg.Target.Options.TableDDL != nil {
 		targetTable.DDL = *cfg.Target.Options.TableDDL
+		if strings.HasPrefix(targetTable.DDL, "file://") {
+			targetTable.DDL, err = GetSQLText(targetTable.DDL)
+			if err != nil {
+				return database.Table{}, g.Error(err, "could not read ddl file")
+			}
+		}
 	}
 
 	// inject variables
