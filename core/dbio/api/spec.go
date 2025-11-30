@@ -40,6 +40,9 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 		return spec, g.Error(err, "error loading API spec")
 	}
 
+	// store body
+	spec.originalBody = specBody
+
 	rootMap := yaml.MapSlice{}
 	err = yaml.Unmarshal([]byte(specBody), &rootMap)
 	if err != nil {
@@ -116,6 +119,7 @@ type Spec struct {
 	EndpointMap      EndpointMap      `yaml:"endpoints" json:"endpoints"`
 	DynamicEndpoints DynamicEndpoints `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
+	originalBody     string
 	originalMap      map[string]any
 	endpointsOrdered []string
 	rendered         bool
@@ -123,6 +127,10 @@ type Spec struct {
 
 func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
+}
+
+func (s *Spec) MD5() string {
+	return g.MD5(s.originalBody)
 }
 
 // validateQueues checks that all queues used by endpoints are declared at the Spec level
