@@ -2297,3 +2297,471 @@ endpoints:
 		})
 	}
 }
+
+func TestStaticAuthentication(t *testing.T) {
+	tests := []struct {
+		name          string
+		headers       map[string]string
+		secrets       map[string]any
+		useTemplating bool
+		expectSuccess bool
+		description   string
+		useShorthand  bool // if true, omit type: static (test defaulting behavior)
+	}{
+		{
+			name: "api_key_header",
+			headers: map[string]string{
+				"X-API-Key": "my-api-key-123",
+			},
+			expectSuccess: true,
+			description:   "Static API key header should be injected",
+		},
+		{
+			name: "authorization_bearer",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+			},
+			expectSuccess: true,
+			description:   "Bearer token header should be injected",
+		},
+		{
+			name: "templated_header",
+			headers: map[string]string{
+				"Authorization": "Bearer {secrets.token}",
+			},
+			secrets: map[string]any{
+				"token": "secret_token_value",
+			},
+			useTemplating: true,
+			expectSuccess: true,
+			description:   "Templated header should be rendered with secret value",
+		},
+		{
+			name:          "empty_headers",
+			headers:       map[string]string{},
+			expectSuccess: true,
+			description:   "Empty headers should still succeed (no header injected)",
+		},
+		{
+			name: "multiple_headers",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+				"X-API-Key":     "my-api-key-456",
+				"X-Custom":      "custom-value",
+			},
+			expectSuccess: true,
+			description:   "Multiple headers should all be injected",
+		},
+		{
+			name: "headers_only_shorthand",
+			headers: map[string]string{
+				"Authorization": "Bearer token123",
+			},
+			expectSuccess: true,
+			useShorthand:  true,
+			description:   "Headers without type should default to static",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Track what headers were received
+			var receivedHeaders http.Header
+
+			// Create mock HTTP server that captures headers
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				receivedHeaders = r.Header.Clone()
+
+				// Return success with test data
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": 1, "name": "Test Item 1"},
+						{"id": 2, "name": "Test Item 2"},
+					},
+				})
+			}))
+			defer server.Close()
+
+			// Build headers YAML section
+			headersYAML := ""
+			for k, v := range tt.headers {
+				headersYAML += fmt.Sprintf("    %s: \"%s\"\n", k, v)
+			}
+
+			// Build authentication section
+			var authSection string
+			if tt.useShorthand {
+				// Test shorthand: just headers without type
+				authSection = fmt.Sprintf(`authentication:
+  headers:
+%s`, headersYAML)
+			} else {
+				authSection = fmt.Sprintf(`authentication:
+  type: static
+  headers:
+%s`, headersYAML)
+			}
+
+			specYAML := fmt.Sprintf(`
+name: test_static_auth_api
+%s
+endpoints:
+  test_endpoint:
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, authSection, server.URL)
+
+			// Load spec
+			spec, err := LoadSpec(specYAML)
+			if !assert.NoError(t, err, "Should load spec successfully") {
+				return
+			}
+
+			// Create API connection with optional secrets
+			secrets := tt.secrets
+			if secrets == nil {
+				secrets = map[string]any{}
+			}
+
+			ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+				"state":   map[string]any{},
+				"secrets": secrets,
+			})
+			assert.NoError(t, err)
+
+			// Authenticate
+			err = ac.Authenticate()
+			assert.NoError(t, err, "Authenticate() should not return error for static auth setup")
+			assert.True(t, ac.State.Auth.Authenticated, "Should be marked as authenticated")
+
+			// Verify auth headers were set
+			assert.NotNil(t, ac.State.Auth.Headers, "Auth headers should be set")
+
+			// For each header in the test, verify it was set
+			for headerName, headerValue := range tt.headers {
+				actualVal, exists := ac.State.Auth.Headers[headerName]
+				assert.True(t, exists, "Header %s should exist in auth headers", headerName)
+
+				// Check that templated values were rendered
+				if tt.useTemplating && strings.Contains(headerValue, "{secrets.") {
+					assert.NotContains(t, actualVal, "{secrets.", "Template should be rendered")
+				}
+			}
+
+			// Make actual request to test endpoint
+			df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+				Limit: 10,
+			})
+
+			if tt.expectSuccess {
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, df, "Dataflow should not be nil")
+
+				// Collect data
+				data, err := df.Collect()
+				assert.NoError(t, err, "Should collect data successfully")
+				assert.Equal(t, 2, len(data.Rows), "Should receive 2 records")
+
+				// Verify headers were received by server
+				for headerName, headerValue := range tt.headers {
+					expectedVal := headerValue
+					// For templated values, get the expected rendered value
+					if tt.useTemplating && strings.Contains(headerValue, "{secrets.token}") {
+						expectedVal = strings.Replace(headerValue, "{secrets.token}", cast.ToString(tt.secrets["token"]), 1)
+					}
+					actualVal := receivedHeaders.Get(headerName)
+					assert.Equal(t, expectedVal, actualVal, "Header %s should have correct value", headerName)
+				}
+			} else {
+				if err == nil && df != nil {
+					_, err = df.Collect()
+				}
+				assert.Error(t, err, tt.description)
+			}
+		})
+	}
+}
+
+func TestStaticAuthenticationWithSequence(t *testing.T) {
+	// Test that static auth works with sequence calls
+	var requestCount int
+	var allReceivedHeaders []http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		allReceivedHeaders = append(allReceivedHeaders, r.Header.Clone())
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		// Different responses for different paths
+		switch r.URL.Path {
+		case "/setup":
+			json.NewEncoder(w).Encode(map[string]any{
+				"config_value": "setup_complete",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": 1, "name": "Test"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_static_auth_sequence
+authentication:
+  type: static
+  headers:
+    X-API-Key: "test-api-key-123"
+endpoints:
+  test_endpoint:
+    setup:
+      - request:
+          url: %s/setup
+          method: GET
+        response:
+          processors:
+            - expression: response.json.config_value
+              output: state.config
+              aggregation: last
+    request:
+      url: %s/data
+      method: GET
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Authenticate
+	err = ac.Authenticate()
+	assert.NoError(t, err)
+
+	// Read dataflow (this should trigger setup sequence and main request)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify that headers were sent to all requests (setup + main)
+	assert.GreaterOrEqual(t, requestCount, 2, "Should have made at least 2 requests (setup + main)")
+
+	// Verify all requests received the auth header
+	for i, headers := range allReceivedHeaders {
+		assert.Equal(t, "test-api-key-123", headers.Get("X-API-Key"),
+			"Request %d should have X-API-Key header", i+1)
+	}
+}
+
+func TestSequenceCallIteration(t *testing.T) {
+	// Test that setup sequence can iterate over a list from state
+	var requestPaths []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch r.URL.Path {
+		case "/bases":
+			json.NewEncoder(w).Encode(map[string]any{
+				"bases": []map[string]any{
+					{"id": "base1", "name": "Base One"},
+					{"id": "base2", "name": "Base Two"},
+				},
+			})
+		case "/bases/base1/tables":
+			json.NewEncoder(w).Encode(map[string]any{
+				"tables": []map[string]any{
+					{"name": "table_a"},
+				},
+			})
+		case "/bases/base2/tables":
+			json.NewEncoder(w).Encode(map[string]any{
+				"tables": []map[string]any{
+					{"name": "table_b"},
+					{"name": "table_c"},
+				},
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": 1, "name": "Test"},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_sequence_call_iteration
+endpoints:
+  test_endpoint:
+    setup:
+      # Step 1: Get list of bases
+      - request:
+          url: %s/bases
+        response:
+          processors:
+            - expression: response.json.bases
+              output: state.bases
+              aggregation: last
+
+      # Step 2: Iterate over bases to get tables
+      - iterate: state.bases
+        into: state.base
+        request:
+          url: %s/bases/{state.base.id}/tables
+        response:
+          processors:
+            - expression: response.json.tables
+              output: state.all_tables
+              aggregation: collect
+
+    request:
+      url: %s/data
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Bypass authentication for testing
+	ac.State.Auth.Authenticated = true
+
+	// Read dataflow (this should trigger setup sequence with iteration)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify the correct requests were made:
+	// 1. /bases (get list)
+	// 2. /bases/base1/tables (iteration 1)
+	// 3. /bases/base2/tables (iteration 2)
+	// 4. /data (main request)
+	assert.Equal(t, 4, len(requestPaths), "Should have made 4 requests")
+	assert.Equal(t, "/bases", requestPaths[0])
+	assert.Equal(t, "/bases/base1/tables", requestPaths[1])
+	assert.Equal(t, "/bases/base2/tables", requestPaths[2])
+	assert.Equal(t, "/data", requestPaths[3])
+}
+
+func TestSequenceCallIterationJSONLiteral(t *testing.T) {
+	// Test that setup sequence can iterate over a JSON literal array
+	var requestPaths []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch r.URL.Path {
+		case "/regions/us-east":
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":  "US East",
+				"count": 100,
+			})
+		case "/regions/us-west":
+			json.NewEncoder(w).Encode(map[string]any{
+				"name":  "US West",
+				"count": 200,
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"total": 300},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	specYAML := fmt.Sprintf(`
+name: test_sequence_call_iteration_json
+endpoints:
+  test_endpoint:
+    setup:
+      - iterate: '[{"id": "us-east"}, {"id": "us-west"}]'
+        into: state.region
+        request:
+          url: %s/regions/{state.region.id}
+        response:
+          processors:
+            - expression: response.json
+              output: state.region_data
+              aggregation: collect
+
+    request:
+      url: %s/summary
+    response:
+      records:
+        jmespath: data
+`, server.URL, server.URL)
+
+	spec, err := LoadSpec(specYAML)
+	assert.NoError(t, err)
+
+	ac, err := NewAPIConnection(context.Background(), spec, map[string]any{
+		"state":   map[string]any{},
+		"secrets": map[string]any{},
+	})
+	assert.NoError(t, err)
+
+	// Bypass authentication for testing
+	ac.State.Auth.Authenticated = true
+
+	// Read dataflow (this should trigger setup sequence with iteration)
+	df, err := ac.ReadDataflow("test_endpoint", APIStreamConfig{
+		Limit: 10,
+	})
+	assert.NoError(t, err)
+
+	data, err := df.Collect()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(data.Rows))
+
+	// Verify the correct requests were made:
+	// 1. /regions/us-east (iteration 1)
+	// 2. /regions/us-west (iteration 2)
+	// 3. /summary (main request)
+	assert.Equal(t, 3, len(requestPaths), "Should have made 3 requests")
+	assert.Equal(t, "/regions/us-east", requestPaths[0])
+	assert.Equal(t, "/regions/us-west", requestPaths[1])
+	assert.Equal(t, "/summary", requestPaths[2])
+}

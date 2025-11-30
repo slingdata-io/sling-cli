@@ -39,7 +39,7 @@ func (t *TaskExecution) WriteToFile(cfg *Config, df *iop.Dataflow) (cnt uint64, 
 		options := t.getTargetOptionsMap()
 		props := append(
 			g.MapToKVArr(cfg.TgtConn.DataS()),
-			g.MapToKVArr(g.ToMapString(options))...,
+			g.MapToKVArr(g.CastToMapString(options))...,
 		)
 
 		fs, err := filesys.NewFileSysClientFromURLContext(t.Context.Ctx, uri, props...)
@@ -619,6 +619,12 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 
 	if cfg.Target.Options.TableDDL != nil {
 		targetTable.DDL = *cfg.Target.Options.TableDDL
+		if strings.HasPrefix(targetTable.DDL, "file://") {
+			targetTable.DDL, err = GetSQLText(targetTable.DDL)
+			if err != nil {
+				return database.Table{}, g.Error(err, "could not read ddl file")
+			}
+		}
 	}
 
 	// inject variables
@@ -627,7 +633,10 @@ func initializeTargetTable(cfg *Config, tgtConn database.Connection) (database.T
 		return database.Table{}, err
 	}
 	fm["table"] = targetTable.Raw
-	targetTable.DDL = g.Rm(targetTable.DDL, fm)
+	targetTable.DDL, err = cfg.evaluator.RenderString(targetTable.DDL, fm)
+	if err != nil {
+		return database.Table{}, g.Error(err, "could not render target table DDL")
+	}
 
 	targetTable.SetKeys(cfg.Source.PrimaryKey(), cfg.Source.UpdateKey, cfg.Target.Options.TableKeys)
 

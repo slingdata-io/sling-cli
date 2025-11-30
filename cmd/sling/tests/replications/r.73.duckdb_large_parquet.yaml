@@ -1,0 +1,91 @@
+# Test for issue #668: DuckDB hanging when reading Parquet files with large string values
+# This test generates a Parquet file with strings >65,330 characters and reads it using DuckDB scanner
+# Then writes to DuckLake database (matching the original issue scenario)
+source: aws_s3
+target: ducklake
+
+defaults:
+  mode: full-refresh
+  source_options:
+    format: parquet
+  target_options:
+    column_typing:
+      decimal:
+        min_precision: 30
+        max_precision: 60
+        min_scale: 0
+        max_scale: 9
+
+hooks:
+  start:
+    # Generate test Parquet file with very large strings (>65,330 chars)
+    - type: command
+      command: python3 cmd/sling/tests/scripts/generate_large_parquet.py
+
+    # Copy the generated file to S3
+    - type: copy
+      from: local//tmp/sling-test/test_large_strings.parquet
+      to: aws_s3/temp/test_large_strings.parquet
+
+    # Drop target table if exists
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS main.parquet_example;
+
+  end:
+    # If errored, do not proceed with verification
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row count
+    - type: query
+      connection: '{target.name}'
+      query: SELECT COUNT(*) as count FROM main.parquet_example
+      into: result
+
+    - type: log
+      message: |
+        Row count loaded: {store.result[0].count}
+
+    # Ensure all 100 rows were loaded
+    - type: check
+      check: int_parse(store.result[0].count) == 100
+      success_message: "✓ All 100 rows with large strings loaded successfully"
+
+    # Verify one of the large strings was loaded correctly
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          blog_id,
+          LENGTH(rich_format) as string_length
+        FROM main.parquet_example
+        WHERE blog_id = 1
+      into: row_check
+
+    - type: log
+      message: |
+        Sample row blog_id=1: string_length={store.row_check[0].string_length}
+
+    # Verify the string is exactly 65,330 characters (the threshold from issue #668)
+    - type: check
+      check: int_parse(store.row_check[0].string_length) == 65330
+      success_message: "✓ Large string values preserved (exactly 65,330 chars)"
+      failure_message: "actual value is => { int_parse(store.row_check[0].string_length) }"
+
+    # Cleanup: drop target table
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS main.parquet_example;
+
+    # Cleanup: remove temporary Parquet files
+    - type: command
+      command: rm -rf /tmp/sling-test/test_large_strings.parquet
+
+streams:
+  temp/test_large_strings.parquet:
+    object: main.parquet_example
+    mode: full-refresh
+    single: true
+    select: ["blog_id", "rich_format"]

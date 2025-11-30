@@ -153,6 +153,7 @@ clickhouse	map	json	col_map json	FALSE	FALSE
 clickhouse	lowcardinality	string	col_lowcardinality json	FALSE	FALSE	
 clickhouse	enum8	string	col_enum8 json	FALSE	FALSE	
 clickhouse	ipv6	string	col_enum8 json	FALSE	FALSE	
+clickhouse	bool	bool	col_boolean boolean	TRUE	TRUE	
 duckdb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 duckdb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
 duckdb	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB

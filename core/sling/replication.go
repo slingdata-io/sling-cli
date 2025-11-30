@@ -109,7 +109,7 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 			}
 
 			// populate env
-			rd.state.Env = g.ToMap(task.Env)
+			rd.state.Env = g.CastToMapAny(task.Env)
 
 			// populate source
 			rd.state.Source.Type = task.SrcConn.Type
@@ -340,8 +340,12 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						table := wildcard.TableMap[wsn]
 
 						// check if table name exists
-						_, _, found := rd.GetStream(table.FullName())
+						_, streamCfg, found := rd.GetStream(table.FullName())
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
@@ -355,15 +359,23 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						node := wildcard.NodeMap[wsn]
 
 						// check if node path exists
-						_, _, found := rd.GetStream(node.Path())
+						_, streamCfg, found := rd.GetStream(node.Path())
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
 
 						// check if node URI exists
-						_, _, found = rd.GetStream(node.URI)
+						_, streamCfg, found = rd.GetStream(node.URI)
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if streamCfg != nil && streamCfg.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							continue
 						}
@@ -386,6 +398,7 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 
 						setEndpointProps := func(s *ReplicationStreamConfig) {
 							s.dependsOn = endpoint.DependsOn
+
 							if s.PrimaryKeyI == nil {
 								s.PrimaryKeyI = endpoint.Response.Records.PrimaryKey
 							}
@@ -403,6 +416,10 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 						// check if endpoint exists
 						key, stream, found := rd.GetStream(endpoint.Name)
 						if found {
+							// if the explicit stream is disabled, skip it entirely
+							if stream != nil && stream.Disabled {
+								continue
+							}
 							// leave as is for order to be respected
 							if len(endpoint.DependsOn) > 0 {
 								if stream == nil {
@@ -415,11 +432,22 @@ func (rd *ReplicationConfig) ProcessWildcards() (err error) {
 							continue
 						}
 
-						cfg := rd.Streams[wildcard.Pattern]
-						if cfg == nil {
+						// Create a copy of the wildcard config for each endpoint
+						// to avoid shared state between endpoints
+						templateCfg := rd.Streams[wildcard.Pattern]
+						var cfg *ReplicationStreamConfig
+						if templateCfg == nil {
 							cfg = &ReplicationStreamConfig{}
+						} else {
+							cfgCopy := *templateCfg
+							cfg = &cfgCopy
+							// Reset endpoint-specific fields that should come from the endpoint spec
+							cfg.PrimaryKeyI = nil
+							cfg.Description = ""
+							cfg.dependsOn = nil
+							cfg.overrides = nil
 						}
-						setEndpointProps(cfg) // set overrides
+						setEndpointProps(cfg) // set endpoint props
 						rd.AddStream(endpoint.Name, cfg)
 						newStreamNames = append(newStreamNames, endpoint.Name)
 					}
@@ -471,6 +499,10 @@ func (rd *ReplicationConfig) ParseReplicationHook(stage HookStage) (err error) {
 		if err != nil {
 			return g.Error(err, "error parsing %s-hook", stage)
 		} else if hook != nil {
+			if hook.Type() == "replication" {
+				return g.Error("can't call a replication hook inside a replication. Use a pipeline.")
+			}
+
 			hooks = append(hooks, hook)
 		}
 	}
@@ -502,7 +534,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	// create a pseudo-stream for the start and end hook, also with LogSink
 	stream := &ReplicationStreamConfig{Object: "_", replication: rd}
-	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage))
+	cfg, err := rd.StreamToTaskConfig(stream, g.F("__sling_replication_hook_%s__", stage), nil)
 	if err != nil {
 		return g.Error(err, "could not make replication hook: %s", stage)
 	}
@@ -521,6 +553,22 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 	}
 	te.StateSet()
 
+	// loop until end of hook
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				te.StateSet()
+			}
+		}
+	}()
+
 	// recover from panic and set state
 	defer func() {
 		if r := recover(); r != nil {
@@ -532,7 +580,7 @@ func (rd *ReplicationConfig) ExecuteReplicationHook(stage HookStage) (err error)
 
 	if IsReplicationRunMode() {
 		env.LogSink = func(ll *g.LogLine) {
-			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamName)
+			ll.Group = g.F("%s,%s", te.ExecID, cfg.StreamID())
 			te.AppendOutput(ll)
 		}
 	}
@@ -581,6 +629,10 @@ func (rd *ReplicationConfig) ParseStreamHook(stage HookStage, rs *ReplicationStr
 		if err != nil {
 			return nil, g.Error(err, "error parsing %s-hook", stage)
 		} else if hook != nil {
+			if hook.Type() == "replication" {
+				return nil, g.Error("can't call a replication hook inside a replication. Use a pipeline.")
+			}
+
 			hooks = append(hooks, hook)
 		}
 	}
@@ -680,7 +732,7 @@ func (rd *ReplicationConfig) ProcessChunks() (err error) {
 		} else if stream.config.Mode == IncrementalMode {
 			// need to get the max value target side if the table exists
 			var tempCfg Config
-			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name)
+			tempCfg, err = rd.StreamToTaskConfig(&stream.config, stream.name, nil)
 			if err != nil {
 				return g.Error(err, "could not prepare stream config for chunking: %s", stream.name)
 			}
@@ -1057,8 +1109,9 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 
 		// config overwrite
-		taskEnv := g.ToMapString(rd.Env)
+		taskEnv := g.CastToMapString(rd.Env)
 		var incrementalValStr string
+		var incrementalVal any
 
 		if cfgOverwrite != nil {
 			if string(cfgOverwrite.Mode) != "" && stream.Mode != cfgOverwrite.Mode {
@@ -1107,6 +1160,7 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 			if newFiles := cfgOverwrite.Source.Files; newFiles != nil {
 				stream.Files = newFiles
 			}
+			incrementalVal = cfgOverwrite.IncrementalVal
 			incrementalValStr = cfgOverwrite.IncrementalValStr
 
 			// merge to existing replication env, overwrite if key already exists
@@ -1118,14 +1172,14 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 		}
 
 		var cfg Config
-		cfg, err = rd.StreamToTaskConfig(&stream, name)
+		cfg, err = rd.StreamToTaskConfig(&stream, name, taskEnv)
 		if err != nil {
 			err = g.Error(err, "could not prepare stream config: %s", name)
 			return
 		}
 
-		// set env, and IncrementalValStr
-		cfg.Env = taskEnv
+		// set IncrementalValStr
+		cfg.IncrementalVal = incrementalVal
 		cfg.IncrementalValStr = incrementalValStr
 
 		rd.Tasks = append(rd.Tasks, &cfg)
@@ -1208,6 +1262,12 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 		"stream_name",
 		"stream_file_path",
 		"stream_file_name",
+		"stream.table",
+		"stream.table_lower",
+		"stream.table_upper",
+		"stream.name",
+		"stream.file_path",
+		"stream.file_name",
 	}
 	for _, v := range vars {
 		if strings.Contains(s.Object, g.F("{%s}", v)) {
@@ -1217,7 +1277,7 @@ func (s *ReplicationStreamConfig) ObjectHasStreamVars() bool {
 	return false
 }
 
-func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string) (cfg Config, err error) {
+func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig, name string, env map[string]string) (cfg Config, err error) {
 
 	// use overrides if specified
 	if overrides := stream.overrides; overrides != nil {
@@ -1277,8 +1337,8 @@ func (rd *ReplicationConfig) StreamToTaskConfig(stream *ReplicationStreamConfig,
 		StreamName:        name,
 		ReplicationStream: stream,
 		DependsOn:         stream.dependsOn,
+		Env:               env,
 	}
-
 	// so that the next stream does not retain previous pointer values
 	g.Unmarshal(g.Marshal(stream.SourceOptions), &cfg.Source.Options)
 	g.Unmarshal(g.Marshal(stream.TargetOptions), &cfg.Target.Options)
@@ -1325,13 +1385,17 @@ func SetStreamDefaults(name string, stream *ReplicationStreamConfig, replication
 		"single":      func() { stream.Single = g.Ptr(g.PtrVal(replicationCfg.Defaults.Single)) },
 		"transforms":  func() { stream.Transforms = replicationCfg.Defaults.Transforms },
 		"columns":     func() { stream.Columns = replicationCfg.Defaults.Columns },
-		"hooks":       func() { stream.Hooks = g.PtrVal(g.Ptr(replicationCfg.Defaults.Hooks)) },
 	}
 
 	for key, setFunc := range defaultSet {
 		if _, found := streamMap[key]; !found {
 			setFunc() // if not found, set default
 		}
+	}
+
+	// set default hooks
+	if stream.Hooks.IsEmpty() {
+		stream.Hooks = replicationCfg.Defaults.Hooks
 	}
 
 	// set default options

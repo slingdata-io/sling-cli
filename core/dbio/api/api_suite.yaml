@@ -226,7 +226,7 @@
             - expression: response.json.pagination.has_more
               output: state.has_more
               aggregation: last
-            - expression: greatest(response.json.data[0].created, response.json.data[1].created, response.json.data[2].created)
+            - expression: greatest(record.created)
               output: state.max_created
               aggregation: last
           records:

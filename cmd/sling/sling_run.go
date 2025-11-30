@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -48,6 +49,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
+
+	// set function here due to scoping
+	sling.HookRunReplication = runReplication
 
 	// recover from panic
 	defer func() {
@@ -515,6 +519,13 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		g.Info("Sling Replication [%d streams] | %s -> %s", streamCnt, replication.Source, replication.Target)
 	}
 
+	// set pipeline store data
+	if store := sling.GetPipelineStoreEnv(); len(store) > 0 && sling.IsPipelineRunMode() {
+		if state, _ := replication.RuntimeState(); state != nil {
+			maps.Copy(state.Store, store)
+		}
+	}
+
 	// run start hooks if not thread child
 	if !isThreadChild {
 		if err = replication.ExecuteReplicationHook(sling.HookStageStart); err != nil {
@@ -595,6 +606,10 @@ func replicationRun(cfgPath string, cfgOverwrite *sling.Config, selectStreams ..
 		g.Info("Sling Replication Completed in %s | %s -> %s | %s | %s\n", g.DurationString(delta), replication.Source, replication.Target, successStr, failureStr)
 	}
 
+	if state, _ := replication.RuntimeState(); state != nil && sling.IsPipelineRunMode() {
+		sling.SetPipelineStoreEnv(state.Store)
+	}
+
 	return eG.Err()
 }
 
@@ -632,9 +647,6 @@ func runPipeline(pipelineCfgPath string) (err error) {
 		// telemetry
 		Track("run")
 	}()
-
-	// set function here due to scoping
-	sling.HookRunReplication = runReplication
 
 	pipeline.Context = ctx
 	err = pipeline.Execute()
@@ -749,12 +761,12 @@ func setTimeout(values ...string) (deadline time.Time) {
 		_ = cancel
 
 		ctx = g.NewContext(parent) // overwrite global context
-		time.AfterFunc(duration, func() {
+		time.AfterFunc(duration-time.Second, func() {
+			filePath := dumpRuntimeStack()
 			if cast.ToBool(os.Getenv("SLING_TIMEOUT_STACK")) {
 				// Print all goroutine stacks before panicking
-				buf := make([]byte, 1<<20) // 1MB buffer
-				stackLen := runtime.Stack(buf, true)
-				env.Println(string(buf[:stackLen]))
+				content, _ := os.ReadFile(filePath)
+				env.Println(string(content))
 				panic(g.F("SLING_TIMEOUT = %s mins reached!", timeout))
 			} else {
 				g.Warn("SLING_TIMEOUT = %s mins reached!", timeout)
@@ -768,4 +780,19 @@ func setTimeout(values ...string) (deadline time.Time) {
 		break
 	}
 	return deadline
+}
+
+func dumpRuntimeStack() string {
+	buf := make([]byte, 1<<20) // 1MB buffer
+	stackLen := runtime.Stack(buf, true)
+
+	folderPath := path.Join(env.GetTempFolder(), "sling", "runtime")
+	filePath := path.Join(folderPath, g.NowFileStr())
+	if os.MkdirAll(folderPath, 0755) == nil {
+		if os.WriteFile(filePath, buf[:stackLen], 0755) == nil {
+			os.Setenv("SLING_RUNTIME_DUMP_FILE", filePath)
+			return filePath
+		}
+	}
+	return ""
 }

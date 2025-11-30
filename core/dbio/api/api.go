@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/flarco/g"
 	"github.com/jmespath/go-jmespath"
@@ -16,17 +15,18 @@ import (
 )
 
 type APIConnection struct {
+	Name      string
 	Spec      Spec
 	State     *APIState
 	Context   *g.Context
 	evaluator *iop.Evaluator `json:"-" yaml:"-"`
-	sp        *iop.StreamProcessor
 }
 
 // NewAPIConnection creates an
 func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *APIConnection, err error) {
 
 	ac = &APIConnection{
+		Name:    cast.ToString(data["name"]),
 		Context: g.NewContext(ctx),
 		State: &APIState{
 			Env:    g.KVArrToMap(os.Environ()...),
@@ -35,8 +35,12 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 			Auth:   APIStateAuth{Mutex: &sync.Mutex{}},
 		},
 		Spec:      spec,
-		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "auth", "response", "request", "sync", "context")),
-		sp:        iop.NewStreamProcessor(),
+		evaluator: iop.NewEvaluator(g.ArrStr("env", "state", "secrets", "inputs", "auth", "response", "request", "sync", "context")),
+	}
+
+	if ac.Name == "" {
+		// use normalized spec name
+		ac.Name = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(spec.Name)), " ", "_")
 	}
 
 	// Merge spec defaults state into ac.State.State first
@@ -63,9 +67,16 @@ func NewAPIConnection(ctx context.Context, spec Spec, data map[string]any) (ac *
 		}
 	}
 
+	if inputs, ok := data["inputs"]; ok {
+		if err = g.JSONConvert(inputs, &ac.State.Inputs); err != nil {
+			return ac, g.Error(err)
+		}
+	}
+
 	// set endpoint contexts
 	for key, endpoint := range ac.Spec.EndpointMap {
 		endpoint.context = g.NewContext(ac.Context.Ctx)
+		endpoint.auth = APIStateAuth{Mutex: &sync.Mutex{}}
 		ac.Spec.EndpointMap[key] = endpoint
 	}
 
@@ -170,10 +181,6 @@ type APIStreamConfig struct {
 }
 
 func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig) (df *iop.Dataflow, err error) {
-	// Ensure authentication before reading dataflow
-	if err := ac.EnsureAuthenticated(); err != nil {
-		return nil, g.Error(err, "could not authenticate")
-	}
 
 	// render dynamic endpoint if needed
 	if err = ac.RenderDynamicEndpoints(); err != nil {
@@ -194,6 +201,7 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 		}
 		// set endpoint conn
 		endpoint.conn = ac
+		endpoint.auth = APIStateAuth{Mutex: &sync.Mutex{}}
 
 		if err = compileSpecEndpoint(endpoint, ac.Spec); err != nil {
 			return nil, g.Error(err, "endpoint validation failed")
@@ -205,6 +213,13 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 	if endpoint.Disabled {
 		return nil, g.Error(err, "endpoint is disabled in spec")
 	}
+
+	if err := endpoint.EnsureAuthenticated(); err != nil {
+		return nil, g.Error(err, "could not authenticate")
+	}
+
+	// make context map
+	endpoint.setContextMap(sCfg)
 
 	// setup if specified
 	if err = endpoint.setup(); err != nil {
@@ -275,6 +290,7 @@ type APIState struct {
 	Env     map[string]string     `json:"env,omitempty"`
 	State   map[string]any        `json:"state,omitempty"`
 	Store   map[string]any        `json:"store,omitempty"`
+	Inputs  map[string]any        `json:"inputs,omitempty"`
 	Secrets map[string]any        `json:"secrets,omitempty"`
 	Queues  map[string]*iop.Queue `json:"queues,omitempty"` // appends to file
 	Auth    APIStateAuth          `json:"auth,omitempty"`
@@ -321,10 +337,18 @@ func (ac *APIConnection) getStateMap(extraMaps map[string]any) map[string]any {
 		}
 	}
 
+	inputsCopy := make(map[string]any)
+	if ac.State.Inputs != nil {
+		for k, v := range ac.State.Inputs {
+			inputsCopy[k] = v
+		}
+	}
+
 	stateMap := g.M(
 		"env", envCopy,
 		"state", stateMapCopy,
 		"secrets", secretsCopy,
+		"inputs", inputsCopy,
 		"auth", ac.State.Auth,
 	)
 
@@ -396,6 +420,11 @@ func (ac *APIConnection) renderAny(input any, extraMaps ...map[string]any) (outp
 func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]any, err error) {
 	data = make(map[string]any)
 
+	// Render dynamic endpoints first to ensure they exist in EndpointMap
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return nil, g.Error(err, "could not render dynamic endpoints for sync state")
+	}
+
 	// Iterate through all endpoints
 	for _, endpoint := range ac.Spec.EndpointMap {
 		// Skip if no sync values defined
@@ -420,6 +449,11 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]an
 // using the Endpoint.Sync values.
 // Inputs is map[Sync.value] = Endpoint.syncMap[Sync.value]
 func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any) (err error) {
+	// Render dynamic endpoints first to ensure they exist in EndpointMap
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return g.Error(err, "could not render dynamic endpoints for sync state")
+	}
+
 	// Iterate through all endpoints
 	for key, endpoint := range ac.Spec.EndpointMap {
 
@@ -452,8 +486,8 @@ func (ac *APIConnection) PutSyncedState(endpointName string, data map[string]any
 	return nil
 }
 
-func hasBrackets(expr string) bool {
-	matches := bracketRegex.FindAllStringSubmatch(expr, -1)
+func (iter *Iteration) hasBrackets(expr string) bool {
+	matches, _ := iter.endpoint.conn.evaluator.FindMatches(expr)
 	return len(matches) > 0
 }
 
@@ -609,7 +643,17 @@ func (ac *APIConnection) renderEndpointTemplate(dynEndpoint DynamicEndpoint, ite
 
 	// Initialize state and context for the endpoint
 	renderedEndpoint.context = g.NewContext(ac.Context.Ctx)
-	renderedEndpoint.State = stateMap
+	renderedEndpoint.Dynamic = true
+	if renderedEndpoint.State == nil {
+		renderedEndpoint.State = stateMap
+	} else {
+		for k, v := range stateMap {
+			// only set if key doesn't exist
+			if _, exists := renderedEndpoint.State[k]; !exists {
+				renderedEndpoint.State[k] = v
+			}
+		}
+	}
 
 	return &renderedEndpoint, nil
 }
@@ -656,10 +700,12 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 			g.Debug("running setup sequence (%d calls)", len(dynEndpoint.Setup))
 
 			baseEndpoint := &Endpoint{
-				Name:    "dynamic.setup",
-				context: g.NewContext(ac.Context.Ctx),
-				conn:    ac,
-				State:   setupState,
+				Name:      "dynamic.setup",
+				context:   g.NewContext(ac.Context.Ctx),
+				conn:      ac,
+				State:     setupState,
+				aggregate: NewAggregateState(),
+				auth:      APIStateAuth{Mutex: &sync.Mutex{}},
 			}
 
 			if err := runSequence(dynEndpoint.Setup, baseEndpoint); err != nil {
@@ -751,61 +797,5 @@ func (ac *APIConnection) RenderDynamicEndpoints() (err error) {
 
 	ac.Spec.rendered = true
 	g.Debug("dynamic endpoint rendering complete, generated %d total endpoints: %s", len(generatedNames), g.Marshal(generatedNames))
-	return nil
-}
-
-func (ac *APIConnection) MakeAuthenticator() (authenticator Authenticator, err error) {
-
-	baseAuth := AuthenticatorBase{Type: ac.Spec.Authentication.Type(), conn: ac}
-
-	switch baseAuth.Type {
-	case AuthTypeNone:
-		authenticator = &baseAuth
-	case AuthTypeBasic:
-		authenticator = &AuthenticatorBasic{AuthenticatorBase: baseAuth}
-	case AuthTypeSequence:
-		authenticator = &AuthenticatorSequence{AuthenticatorBase: baseAuth}
-	case AuthTypeOAuth2:
-		authenticator = &AuthenticatorOAuth2{AuthenticatorBase: baseAuth}
-	case AuthTypeAWSSigV4:
-		authenticator = &AuthenticatorAWSSigV4{AuthenticatorBase: baseAuth}
-	case AuthTypeHMAC:
-		authenticator = &AuthenticatorHMAC{AuthenticatorBase: baseAuth}
-	}
-
-	// so we write all the properties
-	if err = g.JSONConvert(ac.Spec.Authentication, authenticator); err != nil {
-		return nil, g.Error(err, "could not make authenticator for: %s", baseAuth.Type)
-	}
-
-	return
-}
-
-// IsAuthExpired checks if the authentication has expired
-func (ac *APIConnection) IsAuthExpired() bool {
-	if ac.State.Auth.ExpiresAt == 0 {
-		return false // No expiry set
-	}
-	return time.Now().Unix() >= ac.State.Auth.ExpiresAt
-}
-
-// EnsureAuthenticated checks if authentication is valid and re-authenticates if needed
-// This method ensures thread-safe authentication checks and re-authentication
-func (ac *APIConnection) EnsureAuthenticated() error {
-	ac.State.Auth.Mutex.Lock()
-	defer ac.State.Auth.Mutex.Unlock()
-
-	if ac.Spec.Authentication == nil {
-		ac.State.Auth.Authenticated = true
-		return nil
-	}
-
-	// Check if authentication has expired or not authenticated
-	if !ac.State.Auth.Authenticated || ac.IsAuthExpired() {
-		g.Trace("authentication expired or not authenticated, re-authenticating...")
-		if err := ac.Authenticate(); err != nil {
-			return g.Error(err, "failed to authenticate")
-		}
-	}
 	return nil
 }

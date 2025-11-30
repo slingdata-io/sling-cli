@@ -26,8 +26,8 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.3.2"
-	DuckDbVersionMD    = "1.3.2"
+	DuckDbVersion      = "1.4.1"
+	DuckDbVersionMD    = "1.4.1"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
 	duckDbSOFMarker    = "___start_of_duckdb_result___"
@@ -419,6 +419,13 @@ func (duck *DuckDb) Open(timeOut ...int) (err error) {
 
 		args = append(args, dsn)
 	}
+
+	// set max buffer size
+	maxBufferSize := cast.ToInt(duck.GetProp("max_buffer_size"))
+	if maxBufferSize == 0 {
+		maxBufferSize = cast.ToInt(os.Getenv("SLING_MAX_BUFFER_SIZE"))
+	}
+	duck.Proc.MaxBufferSize = maxBufferSize
 
 	// default extensions
 	duck.AddExtension("json")
@@ -890,10 +897,12 @@ func (duck *DuckDb) initScanner() {
 			})
 		} else {
 			if strings.Contains(line, duckDbEOFMarker) {
+				g.Trace("duckdb scanner: EOF marker seen")
 				eofTimer = time.AfterFunc(25*time.Millisecond, func() {
 					resetWriter() // since result set ended
 				})
 			} else if strings.Contains(line, duckDbSOFMarker) {
+				g.Trace("duckdb scanner: SOF marker seen")
 				stdOutWriter = duck.query.writer
 				duck.query.started = true
 			} else if stdOutWriter != nil {
@@ -1278,7 +1287,7 @@ func (duck *DuckDb) DataflowToHttpStream(df *Dataflow, sc StreamConfig) (streamP
 		// start server in background, wait for it to start
 		importContext.Wg.Read.Add()
 		go func() {
-			g.Debug("started %s for duckdb direct %s stream", httpURL, format, g.M("batch_limit", sc.BatchLimit))
+			g.Debug("started %s for duckdb direct %s stream (batch_limit=%d)", httpURL, format, sc.BatchLimit)
 			importContext.Wg.Read.Done()
 			if err := server.Start(g.F("localhost:%d", port)); err != http.ErrServerClosed {
 				g.Error(err, "duckdb import http server error")

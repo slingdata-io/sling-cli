@@ -33,6 +33,7 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
+	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
 )
 
 const (
@@ -180,11 +181,20 @@ func LoadSlingEnvFile() (ef EnvFile) {
 func LoadSlingEnvFileBody(body string) (ef EnvFile, err error) {
 	if body == "" {
 		return EnvFile{
-			Connections: map[string]map[string]interface{}{},
-			Variables:   map[string]interface{}{},
+			Connections: map[string]map[string]any{},
+			Env:         map[string]any{},
 		}, nil
 	}
 	err = yaml.Unmarshal([]byte(body), &ef)
+
+	if len(ef.Env) == 0 {
+		if len(ef.Variables) == 0 {
+			ef.Env = map[string]any{}
+		} else {
+			ef.Env = ef.Variables // support legacy
+		}
+	}
+
 	return
 }
 
@@ -255,16 +265,16 @@ func GetHomeDirConnsMap() (connsMap map[string]map[string]any, err error) {
 	return connsMap, nil
 }
 
-func readConnectionsMap(env map[string]interface{}) (conns map[string]map[string]any, err error) {
+func readConnectionsMap(env map[string]any) (conns map[string]map[string]any, err error) {
 	conns = map[string]map[string]any{}
 
 	if connections, ok := env["connections"]; ok {
 		switch connectionsV := connections.(type) {
-		case map[string]interface{}, map[interface{}]interface{}:
+		case map[string]any, map[interface{}]interface{}:
 			connMap := cast.ToStringMap(connectionsV)
 			for name, v := range connMap {
 				switch v.(type) {
-				case map[string]interface{}, map[interface{}]interface{}:
+				case map[string]any, map[interface{}]interface{}:
 					conns[strings.ToLower(name)] = cast.ToStringMap(v)
 				default:
 					g.Warn("did not handle %s", name)

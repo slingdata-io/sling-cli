@@ -43,6 +43,7 @@ var conns = connection.GetLocalConns()
 type testFailure struct {
 	connType dbio.Type
 	testID   string
+	otherIDs []string
 }
 
 var (
@@ -158,6 +159,8 @@ func TestMain(m *testing.M) {
 		println("================================================================================")
 		println()
 
+		runIDs := []string{}
+
 		// Database test failures
 		if hasDatabaseFailures {
 			println("DATABASE TEST SUITES:")
@@ -184,7 +187,11 @@ func TestMain(m *testing.M) {
 			println()
 			for _, failure := range cliFailures {
 				println(g.F("  ❌ FAILED: %s", failure.testID))
+				if len(failure.otherIDs) > 0 {
+					println(g.F("     OTHERS: %s", g.Marshal(failure.otherIDs)))
+				}
 				println()
+				runIDs = append(runIDs, strings.Split(failure.testID, "/")[0])
 			}
 			println(g.F("  Total Failed CLI Tests: %d", len(cliFailures)))
 			println()
@@ -193,6 +200,9 @@ func TestMain(m *testing.M) {
 		println("================================================================================")
 		totalFailures := len(testFailures)
 		println(g.F("TOTAL FAILED TESTS: %d", totalFailures))
+		if len(runIDs) > 0 {
+			println(g.F("RUN STRING: %s", strings.Join(runIDs, ",")))
+		}
 		println("================================================================================")
 	} else {
 		println()
@@ -487,6 +497,7 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 			// cancel early if not specified
 			if !cast.ToBool(os.Getenv("RUN_ALL")) {
 				testContext.Cancel()
+				return
 			}
 		}
 	}

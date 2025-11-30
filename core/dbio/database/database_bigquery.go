@@ -110,7 +110,11 @@ func (conn *BigQueryConn) getNewClient(timeOut ...int) (client *bigquery.Client,
 	}
 
 	if val := conn.GetProp("GC_KEY_BODY"); val != "" {
-		credJsonBody = val
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(val)
+		if err != nil {
+			return nil, g.Error(err, "could not decode GCP credentials")
+		}
+		credJsonBody = decodedCredJSON
 		authOptions = append(authOptions, option.WithCredentialsJSON([]byte(val)))
 		authOptions = append(authOptions, option.WithScopes(scopes...))
 	} else if val := conn.GetProp("GC_KEY_FILE"); val != "" {

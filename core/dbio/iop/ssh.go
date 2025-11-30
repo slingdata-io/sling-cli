@@ -42,6 +42,14 @@ func (s *SSHClient) SftpClient() (sftpClient *sftp.Client, err error) {
 	return sftp.NewClient(s.client)
 }
 
+// NewSession creates a new SSH session
+func (s *SSHClient) NewSession() (*ssh.Session, error) {
+	if s.client == nil {
+		return nil, g.Error("SSH client not connected")
+	}
+	return s.client.NewSession()
+}
+
 // Connect connects to the server
 func (s *SSHClient) Connect() (err error) {
 
