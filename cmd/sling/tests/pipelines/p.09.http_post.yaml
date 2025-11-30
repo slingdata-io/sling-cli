@@ -1,0 +1,287 @@
+steps:
+  # ========================================
+  # Test 1: Basic YAML Map Payload (CORRECT Usage)
+  # ========================================
+  - type: http
+    id: test1_basic_map
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      message: "Hello from Sling CLI"
+      timestamp: "2024-01-01T00:00:00Z"
+      status: "active"
+      count: 42
+
+  - type: log
+    message: |
+      === Test 1: Basic YAML Map Payload ===
+      Response: {state.test1_basic_map.response.json.json}
+
+  - check: state.test1_basic_map.response.json.json.message == "Hello from Sling CLI"
+
+  - check: state.test1_basic_map.response.json.json.count == 42
+
+  - type: log
+    message: "✓ Test 1 PASSED: Basic map payload correctly converted to JSON"
+
+  # ========================================
+  # Test 2: Template Variables in Payload
+  # ========================================
+  - type: store
+    key: test_user
+    value: "john_doe"
+
+  - type: store
+    key: test_timestamp
+    value: "{now()}"
+
+  - type: http
+    id: test2_template_vars
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      user: "{store.test_user}"
+      timestamp: "{store.test_timestamp}"
+      environment: "{env.USER}"
+      computed: "{upper(store.test_user)}"
+
+  - type: log
+    message: |
+      === Test 2: Template Variables in Payload ===
+      store.test_user => {store.test_user}
+      Response JSON: {state.test2_template_vars.response.json.json}
+
+  - check: state.test2_template_vars.response.json.json.user == "john_doe"
+
+  - check: state.test2_template_vars.response.json.json.computed == "JOHN_DOE"
+
+  - check: length(state.test2_template_vars.response.json.json.timestamp) >= 10
+
+  - type: log
+    message: "✓ Test 2 PASSED: Template variables correctly substituted in map payload"
+
+  # ========================================
+  # Test 3: Complex Nested Structures
+  # ========================================
+  - type: store
+    key: api_key
+    value: "secret_key_12345"
+
+  - type: http
+    id: test3_nested
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      metadata:
+        source: "sling-cli"
+        version: "1.4.27"
+      authentication:
+        type: "bearer"
+        token: "{store.api_key}"
+      data:
+        items:
+          - id: 1
+            name: "Item One"
+          - id: 2
+            name: "Item Two"
+        tags:
+          - "test"
+          - "automation"
+      settings:
+        enabled: true
+        retries: 3
+
+  - type: log
+    message: |
+      === Test 3: Complex Nested Payload ===
+      Response JSON: {state.test3_nested.response.json.json}
+
+  - check: state.test3_nested.response.json.json.metadata.source == "sling-cli"
+
+  - check: state.test3_nested.response.json.json.authentication.token == "secret_key_12345"
+
+  - check: length(state.test3_nested.response.json.json.data.items) == 2
+
+  - check: state.test3_nested.response.json.json.settings.enabled == true
+
+  - type: log
+    message: "✓ Test 3 PASSED: Nested structures correctly marshaled to JSON"
+
+  # ========================================
+  # Test 4: Array Payload with Template Variables
+  # ========================================
+  - type: store
+    key: item1
+    value: "apple"
+
+  - type: store
+    key: item2
+    value: "banana"
+
+  - type: http
+    id: test4_array
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      - id: 1
+        fruit: "{store.item1}"
+      - id: 2
+        fruit: "{store.item2}"
+      - id: 3
+        fruit: "cherry"
+
+  - type: log
+    message: |
+      === Test 4: Array Payload ===
+      Response JSON: {state.test4_array.response.json.json}
+
+  - check: state.test4_array.response.json.json[0].fruit == "apple"
+
+  - check: state.test4_array.response.json.json[1].fruit == "banana"
+
+  - check: length(state.test4_array.response.json.json) == 3
+
+  - type: log
+    message: "✓ Test 4 PASSED: Array payload correctly marshaled with variable substitution"
+
+  # ========================================
+  # Test 5: Payload String Usage - JSON String 
+  # ========================================
+  - type: http
+    id: test5_json_string_payload
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload: |
+      {
+        "message": "OK",
+        "data": {
+          "nested": "value"
+        }
+      }
+
+  - check: state.test5_json_string_payload.response.json.json.message == "OK"
+
+  - log: "✓ Test 5 PASSED: String in JSON payload"
+
+  # ========================================
+  # Test 6: Special Characters and Escaping
+  # ========================================
+  - type: store
+    key: special_text
+    value: 'Text with "quotes" and \backslashes\ and {braces}'
+
+  - type: http
+    id: test6_special_chars
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      description: "{store.special_text}"
+      symbols: "!@#$%^&*()"
+      unicode: "Hello 世界 🌍"
+
+  - type: log
+    message: |
+      === Test 6: Special Characters ===
+      Input: {store.special_text}
+      Response: {state.test6_special_chars.response.json.json}
+
+  - check: state.test6_special_chars.response.json.json.description == store.special_text
+
+  - type: log
+    message: "✓ Test 6 PASSED: Special characters properly handled in JSON payload"
+
+  # ========================================
+  # Test 7: Empty and Null Values
+  # ========================================
+  - type: http
+    id: test7_edge_cases
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      empty_string: ""
+      null_value: null
+      zero_number: 0
+      false_boolean: false
+      empty_array: []
+      empty_object: {}
+
+  - type: log
+    message: |
+      === Test 7: Edge Cases (Empty/Null Values) ===
+      Response: {state.test7_edge_cases.response.json.json}
+
+  - check: state.test7_edge_cases.response.json.json.empty_string == ""
+
+  - check: state.test7_edge_cases.response.json.json.zero_number == 0
+
+  - check: state.test7_edge_cases.response.json.json.false_boolean == false
+
+  - type: log
+    message: "✓ Test 7 PASSED: Edge cases handled correctly"
+
+  # ========================================
+  # Test 8: Post Payload
+  # ========================================
+  - type: http
+    id: test8_post
+    url: https://postman-echo.com/post
+    method: POST
+    headers:
+      Content-Type: application/json
+    payload:
+      RedisClearCache:
+        Keys: [ 'app:Dashboard:*' ]
+          
+
+  - type: log
+    message: |
+      === Test 8: Post ===
+      Response: {state.test8_post.response.json.json}
+
+  - check: length(state.test8_post.response.json.json.RedisClearCache.Keys) > 0
+
+  - type: log
+    message: "✓ Test 8 PASSED: Post handled correctly"
+
+  # ========================================
+  # Final Summary
+  # ========================================
+  - type: log
+    message: |
+
+      ========================================
+      HTTP POST JSON Payload Test Summary
+      ========================================
+
+      ✅ All tests completed successfully!
+
+      Key Takeaways:
+      1. ALWAYS use YAML map structure for JSON payloads
+      2. Template variables work correctly in map values
+      3. Complex nested structures marshal properly to JSON
+      4. Arrays and special characters are handled correctly
+      5. AVOID using payload: | with JSON strings (causes template conflicts)
+
+      Correct Pattern (use YAML maps):
+        payload:
+          key: "value"
+          nested:
+            data: "{store.variable}"
+
+      Incorrect Pattern (JSON string with curly braces):
+        payload: |
+          [JSON string with curly braces causes rendering errors]

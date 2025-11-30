@@ -17,6 +17,7 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/jmespath/go-jmespath"
 	"github.com/maja42/goval"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spf13/cast"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
@@ -43,6 +44,8 @@ var (
 			},
 		}
 	}
+
+	LocalConnections = cmap.New[map[string]any]()
 )
 
 func init() {
@@ -724,8 +727,8 @@ type Evaluator struct {
 	NoComputeKey    string
 	VarPrefixes     []string
 	KeepMissingExpr bool // allows us to leave any missing sub-expression intact
-
-	bracketRegex *regexp.Regexp
+	AllowNoPrefix   bool
+	IgnoreSyntaxErr bool
 }
 
 func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
@@ -742,26 +745,20 @@ func NewEvaluator(varPrefixes []string, states ...map[string]any) *Evaluator {
 		State:        stateMap,
 		NoComputeKey: "__sling_no_compute__",
 		VarPrefixes:  varPrefixes,
-		bracketRegex: regexp.MustCompile(`\{([^{}]+)\}`),
 	}
 }
 
 // ExtractVars identifies variable references in a string expression,
 // ignoring those inside double quotes. It can recognize patterns like env.VAR, state.VAR, secrets.VAR, and auth.VAR.
+// When AllowNoPrefix is true, it also captures unprefixed variables like MY_VAR, some_value, etc.
 func (e *Evaluator) ExtractVars(expr string) []string {
 	// To track found variable references
 	var references []string
 
-	if len(e.VarPrefixes) == 0 {
+	if len(e.VarPrefixes) == 0 && !e.AllowNoPrefix {
 		g.Warn("did not set VarPrefixes in Evaluator")
 		return []string{}
 	}
-
-	// Regular expression for finding variable references
-	// Matches env., state., secrets., auth. followed by a variable name
-	// example regex: `(env|state|secrets|auth|response|request|sync)\.\w+`
-	prefixes := strings.Join(e.VarPrefixes, "|")
-	refRegex := regexp.MustCompile(`(` + prefixes + `)\.\w+`)
 
 	// First, we need to identify string literals to exclude them
 	// Track positions of string literals
@@ -788,23 +785,70 @@ func (e *Evaluator) ExtractVars(expr string) []string {
 		}
 	}
 
-	// Find all potential references
-	matches := refRegex.FindAllStringIndex(expr, -1)
-
-	// Filter out references that are inside string literals
-	for _, match := range matches {
-		isInString := false
+	// Helper function to check if match is inside a string literal
+	isInStringRange := func(match []int) bool {
 		for _, strRange := range stringRanges {
 			if match[0] >= strRange[0] && match[1] <= strRange[1] {
-				isInString = true
-				break
+				return true
 			}
 		}
+		return false
+	}
 
-		if !isInString {
-			// Extract the actual reference
-			reference := expr[match[0]:match[1]]
-			references = append(references, reference)
+	// Regular expression for finding prefixed variable references
+	// Matches env., state., secrets., auth. followed by one or more nested variable names
+	// example regex: `(env|state|secrets|auth|response|request|sync)(\.\w+)+`
+	if len(e.VarPrefixes) > 0 {
+		prefixes := strings.Join(e.VarPrefixes, "|")
+		refRegex := regexp.MustCompile(`(` + prefixes + `)(\.\w+)+`)
+		matches := refRegex.FindAllStringIndex(expr, -1)
+
+		// Filter out references that are inside string literals
+		for _, match := range matches {
+			if !isInStringRange(match) {
+				// Extract the actual reference
+				reference := expr[match[0]:match[1]]
+				references = append(references, reference)
+			}
+		}
+	}
+
+	// When AllowNoPrefix is enabled, also capture unprefixed variables
+	// Matches standalone identifiers (word characters, not starting with a digit)
+	if e.AllowNoPrefix {
+		// Match word-only identifiers that aren't part of a dotted path
+		// Negative lookbehind/lookahead to avoid matching parts of prefixed vars or function names
+		noPrefixRegex := regexp.MustCompile(`\b([a-zA-Z_]\w*)\b`)
+		matches := noPrefixRegex.FindAllStringIndex(expr, -1)
+
+		for _, match := range matches {
+			if !isInStringRange(match) {
+				reference := expr[match[0]:match[1]]
+
+				// Skip if this is part of a prefixed variable (already captured)
+				// Check if it's preceded by a dot (part of a path) or followed by a dot (a prefix)
+				isPrefixOrPath := false
+				if match[0] > 0 && expr[match[0]-1] == '.' {
+					isPrefixOrPath = true // Part of a path like "env.VAR"
+				}
+				if match[1] < len(expr) && expr[match[1]] == '.' {
+					isPrefixOrPath = true // A prefix like "env" in "env.VAR"
+				}
+
+				// Skip if it's a known prefix
+				if g.In(reference, e.VarPrefixes...) {
+					isPrefixOrPath = true
+				}
+
+				// Skip if it's a function call (followed by opening parenthesis)
+				if match[1] < len(expr) && expr[match[1]] == '(' {
+					isPrefixOrPath = true // Function name like "if(" or "coalesce("
+				}
+
+				if !isPrefixOrPath && !g.In(reference, references...) {
+					references = append(references, reference)
+				}
+			}
 		}
 	}
 
@@ -820,28 +864,57 @@ func (e *Evaluator) FillMissingKeys(stateMap map[string]any, varsToCheck []strin
 	for _, varToCheck := range varsToCheck {
 		varToCheck = strings.TrimSpace(varToCheck)
 		parts := strings.Split(varToCheck, ".")
-		if len(parts) != 2 {
-			// continue
-		}
-		section := parts[0]
-		key := parts[1]
-		if g.In(section, e.VarPrefixes...) {
-			_, ok := stateMap[section]
-			if !ok {
-				stateMap[section] = g.M()
-			}
 
-			nested, err := cast.ToStringMapE(stateMap[section])
-			if err != nil {
-				g.Warn("could not convert to map to fill missing key for %s: %#v", section, stateMap[section])
-				nested = g.M()
-			} else if nested == nil {
-				nested = g.M()
+		// Handle unprefixed variables when AllowNoPrefix is enabled
+		if len(parts) == 1 && e.AllowNoPrefix {
+			// Single word variable without prefix - store at root level
+			if _, exists := stateMap[varToCheck]; !exists {
+				stateMap[varToCheck] = nil
 			}
-			if _, ok := nested[key]; !ok {
-				nested[key] = nil
+			continue
+		}
+
+		if len(parts) < 2 {
+			continue
+		}
+
+		section := parts[0]
+		if !g.In(section, e.VarPrefixes...) {
+			continue
+		}
+
+		// Navigate and create nested structure as needed
+		current := stateMap
+		for i, key := range parts {
+			if i == len(parts)-1 {
+				// Last key - set to nil if it doesn't exist
+				if _, exists := current[key]; !exists {
+					current[key] = nil
+				}
+			} else {
+				// Intermediate key - ensure it exists as a map
+				if _, exists := current[key]; !exists {
+					// Key doesn't exist - create new map
+					current[key] = make(map[string]any)
+				}
+
+				// Navigate to the next level using type assertion
+				if nextMap, ok := current[key].(map[string]any); ok {
+					current = nextMap
+				} else {
+					// Try casting with g.CastToMapAnyE as fallback
+					nextMap, err := g.CastToMapAnyE(current[key])
+					if err != nil || nextMap == nil {
+						// Value exists but is not a map - don't replace it, skip this var
+						// The evaluator will error when it tries to access nested keys on a non-map value
+						break
+					} else {
+						// Persist the converted map back to current[key] for JMESPath compatibility
+						current[key] = nextMap
+						current = nextMap
+					}
+				}
 			}
-			stateMap[section] = nested // set back
 		}
 	}
 
@@ -859,6 +932,10 @@ func (e *Evaluator) RenderString(val any, extras ...map[string]any) (newVal stri
 		newVal = g.Marshal(output)
 	default:
 		newVal = cast.ToString(output)
+	}
+
+	if val == nil || val == "" {
+		return "", nil
 	}
 
 	return
@@ -885,13 +962,16 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		return nil, g.Error("unable to convert RenderAny input to string")
 	}
 
-	matches := e.bracketRegex.FindAllStringSubmatch(inputStr, -1)
+	inputStrTrimmed := strings.TrimSpace(inputStr)
+	isJsonLike := (strings.HasPrefix(inputStrTrimmed, "{") && strings.HasSuffix(inputStrTrimmed, "}")) || (strings.HasPrefix(inputStrTrimmed, "[") && strings.HasSuffix(inputStrTrimmed, "]"))
 
-	expressions := []string{}
+	expressions, err := e.FindMatches(inputStr)
+	if err != nil {
+		return nil, err
+	}
+
 	varsToCheck := []string{} // to ensure existence in state maps
-	for _, match := range matches {
-		expression := match[1]
-		expressions = append(expressions, expression)
+	for _, expression := range expressions {
 		varsToCheck = append(varsToCheck, e.ExtractVars(expression)...)
 	}
 
@@ -914,6 +994,18 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		}
 	}
 
+	// When JSON unmarshals map[string]any with all string values, it creates map[string]string
+	// We need to ensure it's map[string]any for JMESPath to navigate it properly
+	for key, mapVal := range stateMap {
+		if valMap, ok := mapVal.(map[string]string); ok {
+			valMapAny := make(map[string]any, len(valMap))
+			for k, v := range valMap {
+				valMapAny[k] = v
+			}
+			stateMap[key] = valMapAny
+		}
+	}
+
 	// Create evaluator for expression evaluation
 	canRender := func(expr string) bool {
 		expr = strings.TrimSpace(expr)
@@ -926,6 +1018,17 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 		if strings.Contains(expr, "runtime_state") {
 			can = true
 		}
+
+		// When AllowNoPrefix is enabled, allow simple identifiers (unprefixed variables)
+		if e.AllowNoPrefix && !can {
+			// Check if expression is a simple identifier without dots or complex operations
+			// This allows {MY_VAR} to be rendered even without a prefix
+			simpleIdentifierRegex := regexp.MustCompile(`^[a-zA-Z_]\w*$`)
+			if simpleIdentifierRegex.MatchString(expr) {
+				can = true
+			}
+		}
+
 		return can
 	}
 
@@ -1030,9 +1133,16 @@ func (e *Evaluator) RenderAny(input any, extras ...map[string]any) (output any, 
 				if jpValue != nil && validJmesPath {
 					value = jpValue
 					err = nil // use jmespath result
-				} else if e.KeepMissingExpr && strings.Contains(err.Error(), "no member") {
+				} else if e.KeepMissingExpr && (strings.Contains(err.Error(), "no member") || strings.Contains(err.Error(), "does not exist") || isJsonLike || strings.Contains(err.Error(), "syntax error: unexpected ':'")) {
 					// keeps the expression untouched
 					value = key
+				} else if e.IgnoreSyntaxErr {
+					if e.KeepMissingExpr {
+						value = key
+					} else if g.IsTrace() {
+						g.Warn("could not render expression: %s => %s", expr, err.Error())
+					}
+					err = nil // unset error
 				} else {
 					if errChk := e.Check(expr); errChk != nil {
 						return "", g.Error(errChk, "invalid expression: %s", expr)
@@ -1162,4 +1272,61 @@ func (e *Evaluator) Check(expr string) (err error) {
 	}
 
 	return nil
+}
+
+// FindMatches parses the input string and extracts expressions within curly braces,
+// properly handling nested brackets and quoted strings.
+// Returns an error if brackets are unbalanced.
+func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err error) {
+	var result []string
+	runes := []rune(inputStr)
+	n := len(runes)
+	i := 0
+
+	for i < n {
+		if runes[i] == '{' {
+			// Found potential expression start
+			start := i
+			depth := 1
+			i++
+			inDoubleQuote := false
+
+			for i < n && depth > 0 {
+				c := runes[i]
+
+				// Handle escape sequences
+				if c == '\\' && i+1 < n {
+					i += 2 // Skip escaped character
+					continue
+				}
+
+				// Track quote state
+				if c == '"' {
+					inDoubleQuote = !inDoubleQuote
+				}
+
+				// Only count brackets outside of quotes
+				if !inDoubleQuote {
+					if c == '{' {
+						depth++
+					} else if c == '}' {
+						depth--
+					}
+				}
+				i++
+			}
+
+			if depth != 0 {
+				return nil, g.Error("unclosed bracket starting at position %d in: %s", start, inputStr)
+			}
+
+			// Extract expression (without outer braces)
+			expr := string(runes[start+1 : i-1])
+			result = append(result, expr)
+		} else {
+			i++
+		}
+	}
+
+	return result, nil
 }

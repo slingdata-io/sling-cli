@@ -147,7 +147,6 @@ func ToExecutionObject(t *sling.TaskExecution) *Execution {
 		StartTime: t.StartTime,
 		EndTime:   t.EndTime,
 		Bytes:     bytes,
-		Output:    t.Output.String(),
 		Rows:      t.GetCount(),
 		ProjectID: g.String(t.Config.Env["SLING_PROJECT_ID"]),
 		FilePath:  g.String(t.Config.Env["SLING_CONFIG_PATH"]),
@@ -252,7 +251,6 @@ func StoreSetReplicationExec(t *sling.TaskExecution) {
 		exec.Err = e.Err
 		exec.Bytes = e.Bytes
 		exec.Rows = e.Rows
-		exec.Output = e.Output
 		exec.Replication = e.Replication
 		exec.Task = e.Task
 	} else {

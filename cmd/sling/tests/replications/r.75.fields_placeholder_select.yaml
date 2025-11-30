@@ -1,0 +1,70 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.test_table_fields;
+        CREATE TABLE public.test_table_fields (
+          id INT,
+          name VARCHAR(100),
+          email VARCHAR(100),
+          created_at TIMESTAMP
+        );
+        INSERT INTO public.test_table_fields (id, name, email, created_at) VALUES
+          (1, 'Alice', 'alice@example.com', '2024-01-01 10:00:00'),
+          (2, 'Bob', 'bob@example.com', '2024-01-02 11:00:00'),
+          (3, 'Charlie', 'charlie@example.com', '2024-01-03 12:00:00');
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # verify the target table has the correct data
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, name FROM public.test_table_fields_output ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Result from target table:
+        {store.result}
+
+    # verify the data has only id and name columns (not email or created_at)
+    - type: check
+      check: store.result[0].id == 1
+
+    - type: check
+      check: store.result[0].name == "Alice"
+
+    - type: check
+      check: store.result[2].id == 3
+
+    - type: check
+      check: store.result[2].name == "Charlie"
+
+    # cleanup
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.test_table_fields;
+
+    - type: query
+      connection: '{target.name}'
+      query: DROP TABLE IF EXISTS public.test_table_fields_output;
+
+streams:
+  test_table_fields:
+    select: [id, name]
+    sql: |
+      SELECT {fields}
+      FROM public.test_table_fields
+      WHERE id > 0
+    object: public.test_table_fields_output

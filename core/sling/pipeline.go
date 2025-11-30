@@ -113,7 +113,6 @@ func LoadPipelineConfig(content string) (pipeline *Pipeline, err error) {
 		opts := ParseOptions{
 			index:   i,
 			state:   state,
-			stage:   HookStage(g.F("step-%02d", i+1)),
 			kind:    HookKindStep,
 			md5:     g.MD5(g.Marshal(stepRaw)),
 			context: pipeline.Context,
@@ -144,6 +143,11 @@ func (pl *Pipeline) Execute() (err error) {
 	idStepMap := map[string]int{}
 	for i, step := range pl.steps {
 		idStepMap[step.ID()] = i
+	}
+
+	// set envs
+	for k, v := range pl.Env {
+		os.Setenv(k, g.CastToString(v))
 	}
 
 	// Execute each step
@@ -216,6 +220,9 @@ type PipelineStepExecution struct {
 }
 
 func (pse *PipelineStepExecution) Context() *g.Context {
+	if pse.Pipeline == nil {
+		return nil
+	}
 	return pse.Pipeline.Context
 }
 
@@ -349,6 +356,10 @@ type PipelineState struct {
 	Run       *RunState                 `json:"run,omitempty"`
 }
 
+func (ps *PipelineState) GetStore() map[string]any {
+	return ps.Store
+}
+
 func (ps *PipelineState) SetStoreData(key string, value any, del bool) {
 	if del {
 		delete(ps.Store, key)
@@ -378,4 +389,33 @@ func (ps *PipelineState) StepExecution() *PipelineStepExecution {
 		return ps.Run.Step
 	}
 	return nil
+}
+
+func SetPipelineStoreEnv(store map[string]any) {
+	payload, err := g.JSONMarshal(store)
+	if err == nil {
+		err = os.Setenv("SLING_PIPELINE_STORE", string(payload))
+		if err != nil {
+			g.Warn("could not set pipeline store payload into env: %s", err.Error())
+		}
+	} else {
+		g.Warn("could not marshal pipeline store payload before replication: %s", err.Error())
+	}
+}
+
+func GetPipelineStoreEnv() (store map[string]any) {
+
+	var err error
+	if storePayload := os.Getenv("SLING_PIPELINE_STORE"); storePayload != "" {
+		store, err = g.UnmarshalMap(storePayload)
+		if err != nil {
+			g.Warn("could not unmarshal pipeline store payload: %s", err.Error())
+		}
+	}
+
+	if store == nil {
+		store = g.M()
+	}
+
+	return
 }

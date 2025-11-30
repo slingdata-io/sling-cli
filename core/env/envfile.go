@@ -13,8 +13,9 @@ import (
 )
 
 type EnvFile struct {
-	Connections map[string]map[string]interface{} `json:"connections,omitempty" yaml:"connections,omitempty"`
-	Variables   map[string]interface{}            `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Connections map[string]map[string]any `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Env         map[string]any            `json:"env,omitempty" yaml:"env,omitempty"`
+	Variables   map[string]any            `json:"variables,omitempty" yaml:"variables,omitempty"` // legacy
 
 	Path       string `json:"-" yaml:"-"`
 	TopComment string `json:"-" yaml:"-"`
@@ -64,7 +65,7 @@ func (ef *EnvFile) WriteEnvFile() (err error) {
 
 	efMap := yaml.MapSlice{
 		{Key: "connections", Value: connsMap},
-		{Key: "variables", Value: ef.Variables},
+		{Key: "variables", Value: ef.Env},
 	}
 
 	envBytes, err := yaml.Marshal(efMap)
@@ -145,16 +146,20 @@ func LoadEnvFile(path string) (ef EnvFile) {
 	}
 
 	if ef.Connections == nil {
-		ef.Connections = map[string]map[string]interface{}{}
+		ef.Connections = map[string]map[string]any{}
 	}
 
-	if ef.Variables == nil {
-		ef.Variables = map[string]interface{}{}
+	if len(ef.Env) == 0 {
+		if len(ef.Variables) == 0 {
+			ef.Env = map[string]any{}
+		} else {
+			ef.Env = ef.Variables // support legacy
+		}
 	}
 
-	for k, v := range ef.Variables {
+	for k, v := range ef.Env {
 		if _, found := envMap[k]; !found {
-			os.Setenv(k, cast.ToString(v))
+			os.Setenv(k, g.CastToString(v))
 		}
 	}
 	return ef

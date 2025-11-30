@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/cloudsqlconn"
 	"cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jmoiron/sqlx"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
@@ -28,6 +30,7 @@ type PostgresConn struct {
 	URL             string
 	isCloudSQL      bool
 	cloudSQLCleanup func()
+	cloudSQLConn    *pgx.Conn
 }
 
 // Init initiates the object
@@ -100,8 +103,13 @@ func (conn *PostgresConn) connectCloudSQL(timeOut ...int) error {
 
 	// Handle credential options (in priority order)
 	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
+		// Detect and decode base64 if necessary
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(credJSON)
+		if err != nil {
+			return g.Error(err, "could not decode GCP credentials")
+		}
 		g.Trace("using explicit GCP credentials from JSON content")
-		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(decodedCredJSON)))
 	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
 		g.Trace("using explicit GCP credentials file: %s", credsFile)
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))
@@ -195,6 +203,14 @@ func (conn *PostgresConn) connectCloudSQL(timeOut ...int) error {
 		return g.Error(err, "could not ping Cloud SQL instance. Verify: 1) IAM auth flag 'cloudsql.iam_authentication=on', 2) SA '%s' has 'Cloud SQL Instance User' role, 3) SA added as IAM db user with full email, 4) DB privileges granted to '%s', 5) Credentials file valid and matches SA, 6) Cloud SQL Admin API enabled", user, user)
 	}
 
+	// Open native pgx connection for COPY operations
+	// This connection will be reused throughout the connection lifecycle
+	err = conn.openCloudSQLNativePgxConn(ctx, instanceName, user, dbName, dialerOpts)
+	if err != nil {
+		g.Warn("could not open native pgx connection for COPY operations: %s", err.Error())
+		conn.SetProp("use_bulk", "false") // set to not use COPY since IAM auth need pgx conn to COPY
+	}
+
 	// Set role if provided
 	if val := conn.GetProp("role"); val != "" {
 		_, err = conn.Exec("SET ROLE " + val)
@@ -212,11 +228,56 @@ func (conn *PostgresConn) connectCloudSQL(timeOut ...int) error {
 	return nil
 }
 
+// openCloudSQLNativePgxConn opens a native pgx connection for Cloud SQL COPY operations
+// This is called once during connectCloudSQL and the connection is reused
+func (conn *PostgresConn) openCloudSQLNativePgxConn(ctx context.Context, instanceName, user, dbName string, dialerOpts []cloudsqlconn.Option) error {
+	// Create Cloud SQL dialer
+	dialer, err := cloudsqlconn.NewDialer(ctx, dialerOpts...)
+	if err != nil {
+		return g.Error(err, "could not create Cloud SQL dialer for native pgx connection")
+	}
+
+	// Build pgx connection config
+	pgxConfig, err := pgx.ParseConfig(fmt.Sprintf("user=%s dbname=%s sslmode=disable", user, dbName))
+	if err != nil {
+		return g.Error(err, "could not parse pgx config")
+	}
+
+	// Set the dialer function to use Cloud SQL connector
+	pgxConfig.DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.Dial(ctx, instanceName)
+	}
+
+	// Open native pgx connection
+	conn.cloudSQLConn, err = pgx.ConnectConfig(ctx, pgxConfig)
+	if err != nil {
+		return g.Error(err, "could not open native pgx connection for Cloud SQL COPY")
+	}
+
+	g.Trace("opened native pgx connection for Cloud SQL COPY operations")
+	return nil
+}
+
+// closeCloudSQLNativeConn closes the native pgx connection
+func (conn *PostgresConn) closeCloudSQLNativeConn() {
+	if conn.cloudSQLConn != nil {
+		ctx := conn.Context().Ctx
+		if err := conn.cloudSQLConn.Close(ctx); err != nil {
+			g.LogError(err, "error closing native Cloud SQL connection")
+		}
+		conn.cloudSQLConn = nil
+		g.Trace("closed native pgx connection for Cloud SQL COPY operations")
+	}
+}
+
 // Close closes the database connection and cleans up Cloud SQL resources
 func (conn *PostgresConn) Close() error {
 	// Cleanup Cloud SQL resources first
 	if conn.isCloudSQL {
 		g.Trace("closing Cloud SQL connection and cleaning up resources")
+
+		// Close native pgx connection if open
+		conn.closeCloudSQLNativeConn()
 
 		// Call cleanup function to unregister driver
 		if conn.cloudSQLCleanup != nil {
@@ -310,6 +371,12 @@ func (conn *PostgresConn) BulkExportStream(table Table) (ds *iop.Datastream, err
 
 // BulkImportStream inserts a stream into a table
 func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	// For Cloud SQL with pgx, use a specialized implementation
+	if conn.isCloudSQL && conn.cloudSQLConn != nil {
+		return conn.bulkImportStreamPgx(tableFName, ds)
+	}
+
+	// Standard lib/pq implementation for normal PostgreSQL
 	var columns iop.Columns
 
 	mux := ds.Context.Mux
@@ -383,7 +450,6 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
 					ds.Context.Cancel()
-					g.Warn(g.Marshal(err))
 					g.Trace("error for rec: %s", g.Pretty(batch.Columns.MakeRec(row)))
 					return g.Error(err, "could not execute statement")
 				}
@@ -410,7 +476,107 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 
 	ds.SetEmpty()
 
-	g.Trace("cOPY %d ROWS", count)
+	g.Trace("COPY %d ROWS", count)
+	return count, nil
+}
+
+// bulkImportStreamPgx handles COPY for Cloud SQL using native pgx
+func (conn *PostgresConn) bulkImportStreamPgx(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	var columns iop.Columns
+
+	mux := ds.Context.Mux
+
+	table, err := ParseTableName(tableFName, conn.GetType())
+	if err != nil {
+		err = g.Error(err, "could not get table name for import")
+		return
+	}
+
+	// Verify native pgx connection is available
+	if conn.cloudSQLConn == nil {
+		return count, g.Error("native pgx connection not available for Cloud SQL COPY")
+	}
+
+	// set OnSchemaChange
+	if df := ds.Df(); df != nil && cast.ToBool(conn.GetProp("adjust_column_type")) {
+		oldOnColumnChanged := df.OnColumnChanged
+		df.OnColumnChanged = func(col iop.Column) error {
+
+			// sleep to allow transaction to close
+			time.Sleep(300 * time.Millisecond)
+
+			mux.Lock()
+			defer mux.Unlock()
+
+			// use pre-defined function
+			err = oldOnColumnChanged(col)
+			if err != nil {
+				return g.Error(err, "could not process ColumnChange for Postgres (pgx)")
+			}
+
+			return nil
+		}
+	}
+
+	// close the transaction from main connection to allow cloudSQLConn connection to COPY
+	if err = conn.Commit(); err != nil {
+		return 0, g.Error(err, "could not commit for COPY operation")
+	}
+
+	for batch := range ds.BatchChan {
+		if batch.ColumnsChanged() || batch.IsFirst() {
+			mux.Lock()
+			columns, err = conn.GetColumns(tableFName, batch.Columns.Names()...)
+			mux.Unlock()
+			if err != nil {
+				return count, g.Error(err, "could not get matching list of columns from table")
+			}
+
+			err = batch.Shape(columns)
+			if err != nil {
+				return count, g.Error(err, "could not shape batch stream")
+			}
+		}
+
+		err = func() error {
+			// Collect rows from batch for CopyFrom
+			var rows [][]interface{}
+			for row := range batch.Rows {
+				rows = append(rows, row)
+			}
+
+			if len(rows) == 0 {
+				return nil
+			}
+
+			// Use pgx CopyFrom with pgx.Identifier for schema.table
+			mux.Lock()
+			rowsInserted, err := conn.cloudSQLConn.CopyFrom(
+				conn.Context().Ctx,
+				pgx.Identifier{table.Schema, table.Name},
+				columns.Names(),
+				pgx.CopyFromRows(rows),
+			)
+			mux.Unlock()
+
+			if err != nil {
+				return g.Error(err, "could not COPY into table %s using pgx", tableFName)
+			}
+
+			count += uint64(rowsInserted)
+			g.Trace("pgx CopyFrom inserted %d rows", rowsInserted)
+
+			return nil
+		}()
+
+		if err != nil {
+			return count, g.Error(err, "could not copy data (pgx)")
+		}
+	}
+
+	ds.SetEmpty()
+
+	g.Trace("pgx COPY %d ROWS", count)
 	return count, nil
 }
 

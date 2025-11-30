@@ -81,7 +81,7 @@ type StreamConfig struct {
 func (sc *StreamConfig) ToMap() map[string]string {
 	m := g.M()
 	g.Unmarshal(g.Marshal(sc), &m)
-	return g.ToMapString(m)
+	return g.CastToMapString(m)
 }
 
 type Transformers struct {

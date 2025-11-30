@@ -46,3 +46,4 @@ cmd/sling/frontend
 pyproject.toml
 uv.lock
 test.xlsx
+.env

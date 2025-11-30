@@ -1,0 +1,52 @@
+source: LOCAL
+target: SQLITE
+
+defaults:
+  mode: full-refresh
+  source_options:
+    format: json
+    flatten: true
+  target_options:
+    column_casing: snake
+
+hooks:
+  start:
+    - type: command
+      command: bash cmd/sling/tests/replications/r.71.json_sqlite_nested.sh
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists main.test_nested_json
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from main.test_nested_json
+      into: result
+
+    - type: log
+      message: |
+        Row count: {store.result[0].cnt}
+
+    # ensure we have 4 rows total
+    - type: check
+      check: int_parse(store.result[0].cnt) == 4
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists main.test_nested_json
+
+streams:
+  "file:///tmp/test_nested_json/*.json":
+    object: "main.test_nested_json"
+    primary_key: [id]
+    source_options:
+      format: json
+      flatten: true
+    columns:
+      id: bigint  # Pre-defining columns triggers error

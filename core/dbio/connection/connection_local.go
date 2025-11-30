@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/flarco/g"
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/api"
 	"github.com/slingdata-io/sling-cli/core/dbio/database"
 	"github.com/slingdata-io/sling-cli/core/dbio/filesys"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
@@ -212,7 +214,7 @@ func GetLocalConns(options ...any) ConnEntries {
 			}
 		} else {
 			// Parse URL
-			if !strings.Contains(val, "://") || strings.Contains(val, "{") || strings.Contains(val, "[") {
+			if !strings.Contains(val, "://") || strings.Contains(val, "{") || strings.Contains(val, "[") || strings.Contains(val, "\n") {
 				continue
 			}
 
@@ -253,6 +255,10 @@ func GetLocalConns(options ...any) ConnEntries {
 	if localConnsExclude == "" {
 		localConnsTs = time.Now()
 		localConns = connArr
+		iop.LocalConnections = cmap.New[map[string]any]()
+		for name, entry := range connsMap {
+			iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
+		}
 	}
 
 	return connArr
@@ -294,6 +300,25 @@ func (ec *EnvFileConns) Set(name string, kvMap map[string]any) (err error) {
 		return g.Error("invalid type (%s)", cast.ToString(t))
 	} else if !found {
 		return g.Error("need to specify valid `type` key or provide `url`.")
+	}
+
+	// need to set secrets and inputs as maps
+	if t == "api" {
+		if secretsStr := cast.ToString(kvMap["secrets"]); secretsStr != "" {
+			secrets, err := g.UnmarshalYAMLMap(secretsStr)
+			if err != nil {
+				return g.Error(err, "could not parse secrets string")
+			}
+			kvMap["secrets"] = secrets
+		}
+
+		if inputsStr := cast.ToString(kvMap["inputs"]); inputsStr != "" {
+			inputs, err := g.UnmarshalYAMLMap(inputsStr)
+			if err != nil {
+				return g.Error(err, "could not parse inputs string")
+			}
+			kvMap["inputs"] = inputs
+		}
 	}
 
 	ef := ec.EnvFile

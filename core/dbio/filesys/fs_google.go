@@ -9,6 +9,7 @@ import (
 	gcstorage "cloud.google.com/go/storage"
 	"github.com/flarco/g"
 	"github.com/samber/lo"
+	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/spf13/cast"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/iterator"
@@ -71,7 +72,11 @@ func (fs *GoogleFileSysClient) Connect() (err error) {
 	var credJsonBody string
 
 	if val := fs.GetProp("KEY_BODY"); val != "" {
-		credJsonBody = val
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(val)
+		if err != nil {
+			return g.Error(err, "could not decode GCP credentials")
+		}
+		credJsonBody = decodedCredJSON
 		authOption = option.WithCredentialsJSON([]byte(val))
 	} else if val := fs.GetProp("KEY_FILE"); val != "" {
 		authOption = option.WithCredentialsFile(val)

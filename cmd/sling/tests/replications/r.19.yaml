@@ -9,11 +9,15 @@ hooks:
   start:
     - type: log
       message: 'runtime_state => {runtime_state}'
+
+    - type: log
+      message: 'key1 => {store.key1}'
       
     - type: delete
       if: env.RESET == "true"
       connection: aws_s3
       path: sling-state/test/r.19 # delete state on replication start
+      recursive: true
 
     - type: inspect
       id: inspect_file
@@ -29,7 +33,7 @@ hooks:
     - type: query
       connection: postgres
       if: env.RESET == "true"
-      query: 'drop table public.test1k_postgres_pg_parquet'
+      query: 'drop table if exists public.test1k_postgres_pg_parquet'
   
   end:
 
@@ -43,10 +47,15 @@ hooks:
       id: file-copy
       from: aws_s3/sling-state/test/r.19
       to: local//tmp/test/sling-state/test/r.19
+      single_file: false
 
     - type: check
       check: state["file-copy"].bytes_written > 0
       on_failure: warn
+
+    - type: store
+      key: key2
+      value: value-from-replication
 
 streams:
   test/public_test1k_postgres_pg_parquet/{part_year}/{part_month}/:

@@ -1,0 +1,67 @@
+source: LOCAL
+target: POSTGRES
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    # Create test CSV file in /tmp with date column
+    - type: command
+      command: |
+        cat > /tmp/columns_cast_date_test.csv << 'EOF'
+        date_col;value
+        20240101;100
+        20240102;200
+        20240115;300
+        EOF
+
+    - type: query
+      connection: '{target.name}'
+      query: drop table if exists public.test_columns_cast
+
+  end:
+    # Check that execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Query the table schema to verify column type
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_name = 'test_columns_cast'
+        AND column_name = 'date_col'
+      into: schema_check
+
+    - type: log
+      message: |
+        Column type for date_col: {store.schema_check[0].data_type}
+
+    # This check will FAIL with current bug - date_col will be timestamp/date instead of varchar
+    - type: check
+      check: lower(store.schema_check[0].data_type) in ["varchar", "text", "character varying"]
+      failure_message: "Expected date_col to be string type, but got {store.schema_check[0].data_type}"
+
+    # Clean up the CSV file
+    - type: command
+      command: rm -f /tmp/columns_cast_date_test.csv
+
+streams:
+  file:///tmp/columns_cast_date_test.csv:
+    object: public.test_columns_cast
+    select: [date_col]
+    columns:
+      date_col: string(20)
+
+    source_options:
+      format: csv
+      delimiter: ";"
+      header: true
+      encoding: utf8
+
+    target_options:
+      column_casing: lower
+      adjust_column_type: true

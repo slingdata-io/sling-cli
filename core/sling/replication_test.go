@@ -1,6 +1,7 @@
 package sling
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -192,5 +193,628 @@ func TestReplicationWildcards(t *testing.T) {
 			}
 		})
 
+	}
+}
+
+// assertMatchesPattern validates that a value matches a regex pattern
+func assertMatchesPattern(t *testing.T, pattern, value, message string) bool {
+	matched, err := regexp.MatchString(pattern, value)
+	if err != nil {
+		t.Errorf("Invalid regex pattern %s: %v", pattern, err)
+		return false
+	}
+	if !matched {
+		t.Errorf("%s: expected pattern %s, got %s", message, pattern, value)
+		return false
+	}
+	return true
+}
+
+func TestReplicationCompile(t *testing.T) {
+	type expectedTask struct {
+		StreamName    string
+		StreamSQL     string // Source.Query if SQL specified
+		ObjectName    string // Target.Object after variable expansion
+		ObjectPattern string // Regex pattern for dynamic values (timestamps, etc.)
+	}
+
+	type testCase struct {
+		Name          string
+		YamlBody      string
+		ExpectedTasks []expectedTask
+		ShouldError   bool // True if compilation should fail
+	}
+
+	tests := []testCase{
+		// Test 1: Simple stream variable expansion
+		{
+			Name: "simple_stream_table_variable",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.{stream_table}_copy
+streams:
+  public.users:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.users",
+					ObjectName: `"public"."users_copy"`,
+				},
+			},
+		},
+
+		// Test 2: Schema and table variables
+		{
+			Name: "stream_schema_and_table",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: backup.{stream_schema}_{stream_table}
+streams:
+  public.customers:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.customers",
+					ObjectName: `"backup"."public_customers"`,
+				},
+			},
+		},
+
+		// Test 3: Case transformation - uppercase
+		{
+			Name: "case_transformation_upper",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{stream_schema_upper}.{stream_table_upper}"
+streams:
+  public.orders:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.orders",
+					ObjectName: `"PUBLIC"."ORDERS"`,
+				},
+			},
+		},
+
+		// Test 4: Case transformation - lowercase
+		{
+			Name: "case_transformation_lower",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{stream_schema_lower}.{stream_table_lower}"
+streams:
+  PUBLIC.PRODUCTS:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "PUBLIC.PRODUCTS",
+					ObjectName: `"public"."products"`,
+				},
+			},
+		},
+
+		// Test 5: Multiple streams
+		{
+			Name: "multiple_streams",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: backup.{stream_table}
+streams:
+  public.users:
+  public.orders:
+  public.products:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.users",
+					ObjectName: `"backup"."users"`,
+				},
+				{
+					StreamName: "public.orders",
+					ObjectName: `"backup"."orders"`,
+				},
+				{
+					StreamName: "public.products",
+					ObjectName: `"backup"."products"`,
+				},
+			},
+		},
+
+		// Test 6: SQL query with sql field
+		{
+			Name: "sql_query",
+			YamlBody: `
+source: postgres
+target: postgres
+streams:
+  analytics_summary:
+    sql: SELECT * FROM public.analytics WHERE year = 2024
+    object: public.analytics_2024
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "analytics_summary",
+					StreamSQL:  "SELECT * FROM public.analytics WHERE year = 2024",
+					ObjectName: `"public"."analytics_2024"`,
+				},
+			},
+		},
+
+		// Test 7: Select columns
+		{
+			Name: "select_columns",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.{stream_table}_subset
+streams:
+  public.users:
+    select: [id, email, created_at]
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.users",
+					ObjectName: `"public"."users_subset"`,
+				},
+			},
+		},
+
+		// Test 8: Where clause
+		{
+			Name: "where_clause",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.{stream_table}_filtered
+streams:
+  public.logs:
+    where: "created_at > '2024-01-01'"
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.logs",
+					ObjectName: `"public"."logs_filtered"`,
+				},
+			},
+		},
+
+		// Test 9: Nested variable format - source
+		{
+			Name: "nested_source_variable",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{source.name}_{stream_table}"
+streams:
+  public.events:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.events",
+					ObjectName: `"public"."postgres_events"`,
+				},
+			},
+		},
+
+		// Test 10: Nested variable format - target
+		{
+			Name: "nested_target_variable",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{target.name}_{ upper(stream_table) }"
+streams:
+  public.metrics:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.metrics",
+					ObjectName: `"public"."postgres_METRICS"`,
+				},
+			},
+		},
+
+		// Test 11: Source and target type variables
+		{
+			Name: "source_target_type_variables",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{source.type}_{target.type}_{stream_table}"
+streams:
+  public.data:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.data",
+					ObjectName: `"public"."postgres_postgres_data"`,
+				},
+			},
+		},
+
+		// Test 12: Timestamp variables with pattern (simple filename)
+		{
+			Name: "timestamp_variables",
+			YamlBody: `
+source: postgres
+target: local
+defaults:
+  mode: full-refresh
+  object: "file://./exports/daily_report_{timestamp.YYYY}_{timestamp.MM}_{timestamp.DD}.csv"
+streams:
+  public.daily_report:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName:    "public.daily_report",
+					ObjectPattern: `^file://\./exports/daily_report_\d{4}_\d{2}_\d{2}\.csv$`,
+				},
+			},
+		},
+
+		// Test 13: Timestamp file_name format
+		{
+			Name: "timestamp_file_name_format",
+			YamlBody: `
+source: postgres
+target: local
+defaults:
+  mode: full-refresh
+  object: "file://./backups/backup_{timestamp.file_name}.csv"
+streams:
+  public.backup:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName:    "public.backup",
+					ObjectPattern: `^file://\./backups/backup_\d{4}_\d{2}_\d{2}_\d{6}\.csv$`,
+				},
+			},
+		},
+
+		// Test 14: Mixed variables in single pattern
+		{
+			Name: "mixed_variables_pattern",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "public.{source.type}_{stream_table}"
+streams:
+  public.mixed_test:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.mixed_test",
+					ObjectName: `"public"."postgres_mixed_test"`,
+				},
+			},
+		},
+
+		// Test 15: Complex pattern with multiple variables
+		{
+			Name: "complex_pattern_multiple_vars",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{stream_schema}_{stream_table}_{source.type}"
+streams:
+  public.complex:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.complex",
+					ObjectName: `"public"."public_complex_postgres"`,
+				},
+			},
+		},
+
+		// Test 16: Stream-specific object override
+		{
+			Name: "stream_specific_object",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: default.{stream_table}
+streams:
+  public.users:
+    object: custom.users_table
+  public.orders:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.users",
+					ObjectName: `"custom"."users_table"`,
+				},
+				{
+					StreamName: "public.orders",
+					ObjectName: `"default"."orders"`,
+				},
+			},
+		},
+
+		// Test 17: Mixed case stream variables
+		{
+			Name: "mixed_case_variables",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: "{stream_schema_upper}_{stream_table_lower}"
+streams:
+  Public.MixedCase:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "Public.MixedCase",
+					ObjectName: `"public"."PUBLIC_mixedcase"`,
+				},
+			},
+		},
+
+		// Test 18: Multiple streams with different schemas
+		{
+			Name: "multiple_schemas",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: backup.{stream_schema}_{stream_table}
+streams:
+  public.table1:
+  analytics.table2:
+  reporting.table3:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.table1",
+					ObjectName: `"backup"."public_table1"`,
+				},
+				{
+					StreamName: "analytics.table2",
+					ObjectName: `"backup"."analytics_table2"`,
+				},
+				{
+					StreamName: "reporting.table3",
+					ObjectName: `"backup"."reporting_table3"`,
+				},
+			},
+		},
+
+		// Test 19: Stream with SQL and variables. no_exist should be kept intact
+		{
+			Name: "sql_with_variables",
+			YamlBody: `
+source: postgres
+target: postgres
+streams:
+  filtered_users:
+    sql: SELECT id, name, '{env.DATE}' as date FROM public.users WHERE date = '{DATE}' -- {no_exist}
+    object: public.{stream_name}_active
+env:
+	DATE: '2025-11-01'
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "filtered_users",
+					StreamSQL:  "SELECT id, name, '2025-11-01' as date FROM public.users WHERE date = '2025-11-01' -- {no_exist}",
+					ObjectName: `"public"."filtered_users_active"`,
+				},
+			},
+		},
+
+		// Test 20: Object variables in target
+		{
+			Name: "object_variables",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: staging.{stream_table}
+streams:
+  public.staging_test:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName: "public.staging_test",
+					ObjectName: `"staging"."staging_test"`,
+				},
+			},
+		},
+
+		// Test 21: Combination of timestamp and source type
+		{
+			Name: "timestamp_and_source_type",
+			YamlBody: `
+source: postgres
+target: local
+defaults:
+  mode: full-refresh
+  object: "file://./archives/{source.type}_data_{timestamp.YYYY}{MM}.csv"
+streams:
+  public.monthly_data:
+`,
+			ExpectedTasks: []expectedTask{
+				{
+					StreamName:    "public.monthly_data",
+					ObjectPattern: `^file://\./archives/postgres_data_\d{4}\d{2}\.csv$`,
+				},
+			},
+		},
+
+		// NEGATIVE TEST CASES
+
+		// Test 22: Missing source connection
+		{
+			Name: "error_missing_source",
+			YamlBody: `
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.test
+streams:
+  test_stream:
+`,
+			ShouldError: true,
+		},
+
+		// Test 23: Missing target connection
+		{
+			Name: "error_missing_target",
+			YamlBody: `
+source: postgres
+defaults:
+  mode: full-refresh
+  object: public.test
+streams:
+  test_stream:
+`,
+			ShouldError: true,
+		},
+
+		// Test 24: Missing stream object
+		{
+			Name: "error_missing_object",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+streams:
+  public.users:
+`,
+			ShouldError: true,
+		},
+
+		// Test 25: Invalid YAML syntax
+		{
+			Name: "error_invalid_yaml",
+			YamlBody: `
+source: postgres
+target: postgres
+defaults:
+  mode: full-refresh
+  object: test
+streams:
+  public.users
+    bad syntax here
+`,
+			ShouldError: true,
+		},
+
+		// Test 26: Non-existent connection
+		{
+			Name: "error_nonexistent_connection",
+			YamlBody: `
+source: nonexistent_connection_xyz
+target: postgres
+defaults:
+  mode: full-refresh
+  object: public.test
+streams:
+  test_stream:
+`,
+			ShouldError: true,
+		},
+	}
+
+	// Normalize YAML indentation for all tests
+	for i := range tests {
+		tests[i].YamlBody = strings.ReplaceAll(tests[i].YamlBody, "\t", "  ")
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			// Unmarshal YAML
+			replication, err := UnmarshalReplication(tt.YamlBody)
+			if tt.ShouldError {
+				// For error cases, we expect either unmarshal or compile to fail
+				if err != nil {
+					return // Test passed - unmarshal failed as expected
+				}
+			} else {
+				if !assert.NoError(t, err, "Failed to unmarshal") {
+					return
+				}
+			}
+
+			// Compile replication
+			err = replication.Compile(nil)
+			if tt.ShouldError {
+				// Expect compilation to fail
+				assert.Error(t, err, "Expected compilation to fail")
+				return
+			}
+			g.LogError(err)
+			if !assert.NoError(t, err, "Failed to compile") {
+				return
+			}
+
+			// Validate task count
+			if !assert.Equal(t, len(tt.ExpectedTasks), len(replication.Tasks),
+				"Task count mismatch") {
+				g.Warn("Expected %d tasks, got %d", len(tt.ExpectedTasks), len(replication.Tasks))
+				for i, task := range replication.Tasks {
+					g.Warn("Task[%d]: StreamName=%s, Object=%s", i, task.StreamName, task.Target.Object)
+				}
+				return
+			}
+
+			// Validate each task
+			for i, expected := range tt.ExpectedTasks {
+				task := replication.Tasks[i]
+
+				assert.Equal(t, expected.StreamName, task.StreamName,
+					"Task[%d] StreamName mismatch", i)
+
+				if expected.StreamSQL != "" {
+					assert.Equal(t, expected.StreamSQL, task.Source.Query,
+						"Task[%d] SQL mismatch", i)
+				}
+
+				// Validate object name - exact match or pattern
+				if expected.ObjectPattern != "" {
+					assertMatchesPattern(t, expected.ObjectPattern, task.Target.Object,
+						g.F("Task[%d] Object pattern mismatch", i))
+				} else if expected.ObjectName != "" {
+					assert.Equal(t, expected.ObjectName, task.Target.Object,
+						"Task[%d] Object mismatch", i)
+				}
+			}
+		})
 	}
 }

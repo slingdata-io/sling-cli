@@ -40,6 +40,10 @@ type HookMap struct {
 	PostMerge []any `json:"post_merge,omitempty" yaml:"post_merge,omitempty"`
 }
 
+func (hm HookMap) IsEmpty() bool {
+	return len(hm.Start)+len(hm.End)+len(hm.Pre)+len(hm.Post)+len(hm.PreMerge)+len(hm.PostMerge) == 0
+}
+
 type ParseOptions struct {
 	stage   HookStage
 	kind    HookKind
