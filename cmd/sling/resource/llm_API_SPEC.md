@@ -373,7 +373,7 @@ endpoints:
         - expression: "upper(record)"
           output: "record.user_id_upper"
         - expression: "record"
-          if: "!is_null(record) && record != ''"  # Filter
+          if: '!is_null(record) && record != ""'  # Filter
           output: "queue.valid_user_ids"
 
   fetch_user_details:  # Consumer with API call
@@ -810,11 +810,11 @@ processors:
     output: "record.email_normalized"
 
   - expression: "record.id"
-    if: "record.country == 'US' && record.status == 'active'"  # Multiple checks
+    if: 'record.country == "US" && record.status == "active"'  # Multiple checks
     output: "queue.us_customer_ids"
 
   - expression: "record.id"
-    if: "date_parse(record.created_at, 'auto') > date_add(now(), -7, 'day')"  # Date filtering
+    if: 'date_parse(record.created_at, "auto") > date_add(now(), -7, "day")'  # Date filtering
     output: "queue.recent_ids"
 ```
 
