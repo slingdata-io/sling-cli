@@ -257,41 +257,6 @@ func (a Authentication) Expires() int {
 	return cast.ToInt(a["expires"])
 }
 
-// Authentication defines how to authenticate with the API
-type Authentication0 struct {
-	Type AuthType `yaml:"type" json:"type"`
-
-	// when set, re-auth after number of seconds
-	Expires int `yaml:"expires" json:"expires,omitempty"`
-
-	// custom authentication workflow
-	Sequence Sequence `yaml:"sequence" json:"sequence,omitempty"`
-
-	// Basic Auth
-	Username string `yaml:"username,omitempty" json:"username,omitempty"`
-	Password string `yaml:"password,omitempty" json:"password,omitempty"`
-
-	// OAuth
-	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
-	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
-	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
-	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
-	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
-	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
-	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
-	RedirectURI       string    `yaml:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
-	RefreshToken      string    `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
-	RefreshOnExpire   bool      `yaml:"refresh_on_expire,omitempty" json:"refresh_on_expire,omitempty"`
-
-	// AWS
-	AwsService         string `yaml:"aws_service,omitempty" json:"aws_service,omitempty"`
-	AwsAccessKeyID     string `yaml:"aws_access_key_id,omitempty" json:"aws_access_key_id,omitempty"`
-	AwsSecretAccessKey string `yaml:"aws_secret_access_key,omitempty" json:"aws_secret_access_key,omitempty"`
-	AwsSessionToken    string `yaml:"aws_session_token,omitempty" json:"aws_session_token,omitempty"`
-	AwsRegion          string `yaml:"aws_region,omitempty" json:"aws_region,omitempty"`
-	AwsProfile         string `yaml:"aws_profile,omitempty" json:"aws_profile,omitempty"`
-}
-
 type AuthType string
 
 const (
