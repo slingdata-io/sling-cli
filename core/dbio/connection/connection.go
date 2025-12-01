@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/samber/lo"
@@ -312,6 +313,7 @@ var connCache = cmap.New[*Connection]()
 
 type AsConnOptions struct {
 	UseCache bool
+	Expire   int // in seconds
 	Extra    map[string]any
 }
 
@@ -347,6 +349,12 @@ func (c *Connection) AsDatabaseContext(ctx context.Context, options ...AsConnOpt
 	}
 	connCache.Set(c.Hash(), c) // cache
 
+	if opt.Expire > 0 {
+		time.AfterFunc(time.Duration(opt.Expire)*time.Second, func() {
+			c.Close()
+		})
+	}
+
 	return c.Database, nil
 }
 
@@ -381,6 +389,12 @@ func (c *Connection) AsFileContext(ctx context.Context, options ...AsConnOptions
 		return
 	}
 	connCache.Set(c.Hash(), c) // cache
+
+	if opt.Expire > 0 {
+		time.AfterFunc(time.Duration(opt.Expire)*time.Second, func() {
+			c.Close()
+		})
+	}
 
 	return c.File, nil
 }
