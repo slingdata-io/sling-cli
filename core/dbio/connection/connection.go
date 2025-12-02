@@ -749,7 +749,7 @@ func (c *Connection) setURL() (err error) {
 		// template = "snowflake://{username}:{password}@{host}.snowflakecomputing.com:443/{database}?schema={schema}&warehouse={warehouse}"
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("host", c.Data["account"])
-		setIfMissing("password", "") // make password optional, especially when using a private key
+		setIfMissing("password", "") // make password optional, especially when using a private key or token
 		c.Data["host"] = strings.ReplaceAll(cast.ToString(c.Data["host"]), ".snowflakecomputing.com", "")
 		template = "snowflake://{username}:{password}@{host}.snowflakecomputing.com:443/{database}?"
 		if _, ok := c.Data["warehouse"]; ok {
@@ -766,6 +766,16 @@ func (c *Connection) setURL() (err error) {
 		}
 		if _, ok := c.Data["passcode"]; ok {
 			template = template + "&passcode={passcode}"
+		}
+		if _, ok := c.Data["token"]; ok {
+			template = template + "&token={token}"
+		}
+		// Enable MFA token caching by default when using username_password_mfa authenticator
+		if strings.EqualFold(cast.ToString(c.Data["authenticator"]), "username_password_mfa") {
+			setIfMissing("clientRequestMfaToken", "true")
+		}
+		if _, ok := c.Data["clientRequestMfaToken"]; ok {
+			template = template + "&clientRequestMfaToken={clientRequestMfaToken}"
 		}
 	case dbio.TypeDbDatabricks:
 		setIfMissing("token", c.Data["password"])
