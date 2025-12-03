@@ -438,44 +438,207 @@ func (conn *Iceberg2Conn) SubmitTemplate(level string, templateMap map[string]st
 		}
 	}
 
-	// Use describe to get schemata columns for views
+	// For schemata queries, information_schema.columns returns "__" placeholder for Iceberg tables.
+	// Use describe as fallback for each table with invalid column metadata.
 	if name == "schemata" && tablesExpr != "" {
 		tables := strings.Split(tablesExpr, ", ")
 		if len(data.Columns) == 0 {
 			data.Columns = iop.NewColumnsFromFields("schema_name", "table_name", "is_view", "column_name", "data_type", "position")
 		}
 
-		for _, table := range tables {
-			viewName := strings.Trim(table, "'")
+		// Check if we got invalid results (the "__" placeholder column)
+		hasInvalidColumns := false
+		for _, row := range data.Rows {
+			if len(row) >= 4 {
+				colName := cast.ToString(row[3]) // column_name is at index 3
+				if colName == "__" {
+					hasInvalidColumns = true
+					break
+				}
+			}
+		}
 
-			// Check that it is a view
-			viewsData, err := conn.GetViews(schemaName)
-			if err != nil {
-				return data, g.Error(err, "could not get views")
-			} else {
-				viewsData = viewsData.Pick("table_name")
-				viewNames := lo.Map(viewsData.ColValues(0), func(v any, i int) string {
-					return cast.ToString(v)
-				})
+		// Get views list once for checking
+		viewsData, err := conn.GetViews(schemaName)
+		if err != nil {
+			return data, g.Error(err, "could not get views")
+		}
+		viewsData = viewsData.Pick("table_name")
+		viewNames := lo.Map(viewsData.ColValues(0), func(v any, i int) string {
+			return cast.ToString(v)
+		})
 
+		if hasInvalidColumns {
+			// Clear invalid rows and rebuild using describe
+			data.Rows = nil
+
+			for _, table := range tables {
+				tblName := strings.Trim(table, "'")
+				isView := g.In(tblName, viewNames...)
+
+				view := Table{Schema: schemaName, Name: tblName, Dialect: dbio.TypeDbIceberg2}
+				cols, err := conn.duck.Describe("select * from " + view.FullName())
+				if err != nil {
+					return data, g.Error(err, "could not describe "+view.FullName())
+				}
+
+				for i, col := range cols {
+					data.Rows = append(data.Rows, []any{schemaName, tblName, isView, col.Name, col.DbType, i + 1})
+				}
+			}
+		} else {
+			// Data is valid, just add views that might be missing (views also need describe)
+			for _, table := range tables {
+				viewName := strings.Trim(table, "'")
+
+				// Check that it is a view
 				if !g.In(viewName, viewNames...) {
 					continue // not a view
 				}
-			}
 
-			view := Table{Schema: schemaName, Name: viewName, Dialect: dbio.TypeDbIceberg2}
-			cols, err := conn.duck.Describe("select * from " + view.FullName())
-			if err != nil {
-				return data, g.Error(err, "could not describe "+view.FullName())
-			}
+				view := Table{Schema: schemaName, Name: viewName, Dialect: dbio.TypeDbIceberg2}
+				cols, err := conn.duck.Describe("select * from " + view.FullName())
+				if err != nil {
+					return data, g.Error(err, "could not describe "+view.FullName())
+				}
 
-			for i, col := range cols {
-				data.Rows = append(data.Rows, []any{schemaName, viewName, true, col.Name, col.DbType, i + 1})
+				for i, col := range cols {
+					data.Rows = append(data.Rows, []any{schemaName, viewName, true, col.Name, col.DbType, i + 1})
+				}
 			}
 		}
 	}
 
 	return
+}
+
+// GetSchemata returns the schemata for the connection
+// We override this to properly handle the describe fallback for Iceberg tables
+// where information_schema.columns returns invalid results
+func (conn *Iceberg2Conn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (Schemata, error) {
+	schemata := Schemata{
+		Databases: map[string]Database{},
+		conn:      &conn.BaseConn,
+	}
+
+	values := g.M()
+	if schemaName != "" {
+		values["schema"] = schemaName
+	}
+	if len(tableNames) > 0 && !(tableNames[0] == "" && len(tableNames) == 1) {
+		tablesQ := []string{}
+		for _, tableName := range tableNames {
+			if strings.TrimSpace(tableName) == "" {
+				continue
+			}
+			tablesQ = append(tablesQ, `'`+tableName+`'`)
+		}
+		if len(tablesQ) > 0 {
+			values["tables"] = strings.Join(tablesQ, ", ")
+		}
+	}
+
+	currDatabase := conn.Type.String()
+	currDbData, err := conn.SubmitTemplate("single", conn.template.Metadata, "current_database", g.M())
+	if err == nil {
+		currDatabase = cast.ToString(currDbData.FirstVal())
+	}
+
+	var data iop.Dataset
+	switch level {
+	case SchemataLevelSchema:
+		data, err = conn.GetSchemas()
+	case SchemataLevelTable:
+		data, err = conn.GetTablesAndViews(schemaName)
+	case SchemataLevelColumn:
+		// Call our own SubmitTemplate which handles the describe fallback
+		data, err = conn.SubmitTemplate(
+			"single", conn.template.Metadata, "schemata",
+			values,
+		)
+	}
+	if err != nil {
+		return schemata, g.Error(err, "Could not get schemata at %s level", level)
+	}
+
+	schemas := map[string]Schema{}
+	for _, rec := range data.Records() {
+		schemaName = cast.ToString(rec["schema_name"])
+		tableName := cast.ToString(rec["table_name"])
+		columnName := cast.ToString(rec["column_name"])
+		dataType := cast.ToString(rec["data_type"])
+
+		// if any of the names contains a period, skip. This messes with the keys
+		if strings.Contains(tableName, ".") ||
+			strings.Contains(schemaName, ".") ||
+			strings.Contains(columnName, ".") {
+			continue
+		}
+
+		switch rec["is_view"].(type) {
+		case int64, float64:
+			if cast.ToInt64(rec["is_view"]) == 0 {
+				rec["is_view"] = false
+			} else {
+				rec["is_view"] = true
+			}
+		default:
+			rec["is_view"] = cast.ToBool(rec["is_view"])
+		}
+
+		schema := Schema{
+			Name:     schemaName,
+			Database: currDatabase,
+			Tables:   map[string]Table{},
+		}
+
+		if _, ok := schemas[strings.ToLower(schema.Name)]; ok {
+			schema = schemas[strings.ToLower(schema.Name)]
+		}
+
+		var table Table
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			table = Table{
+				Name:     tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				IsView:   cast.ToBool(rec["is_view"]),
+				Columns:  iop.Columns{},
+				Dialect:  conn.GetType(),
+			}
+
+			if _, ok := schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]; ok {
+				table = schemas[strings.ToLower(schema.Name)].Tables[strings.ToLower(tableName)]
+			}
+		}
+
+		if level == SchemataLevelColumn {
+			column := iop.Column{
+				Name:     columnName,
+				Type:     NativeTypeToGeneral(columnName, dataType, conn),
+				Table:    tableName,
+				Schema:   schemaName,
+				Database: currDatabase,
+				Position: cast.ToInt(data.Sp.ProcessVal(rec["position"])),
+				DbType:   dataType,
+			}
+
+			table.Columns = append(table.Columns, column)
+		}
+
+		if g.In(level, SchemataLevelTable, SchemataLevelColumn) {
+			schema.Tables[strings.ToLower(tableName)] = table
+		}
+
+		schemas[strings.ToLower(schema.Name)] = schema
+	}
+
+	schemata.Databases[strings.ToLower(currDatabase)] = Database{
+		Name:    currDatabase,
+		Schemas: schemas,
+	}
+
+	return schemata, nil
 }
 
 // Close closes the Iceberg2 connection
