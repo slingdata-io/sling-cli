@@ -46,7 +46,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 	}
 	replicationCfgPath := ""
 	pipelineCfgPath := ""
-	taskCfgStr := ""
 	showExamples := false
 	selectStreams := []string{}
 
@@ -78,9 +77,6 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "pipeline":
 			env.SetTelVal("run_mode", "pipeline")
 			pipelineCfgPath = cast.ToString(v)
-		case "config":
-			env.SetTelVal("run_mode", "task")
-			taskCfgStr = cast.ToString(v)
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "src-stream", "src-table", "src-sql", "src-file":
@@ -191,11 +187,7 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		return ok, nil
 	}
 
-	if val := os.Getenv("SLING_TASK_CONFIG"); val != "" {
-		taskCfgStr = val
-	}
-
-	if taskCfgStr != "" {
+	if taskCfgStr := os.Getenv("SLING_TASK_CONFIG"); taskCfgStr != "" {
 		err = cfg.Unmarshal(taskCfgStr)
 		if err != nil {
 			return ok, g.Error(err, "could not parse task configuration")

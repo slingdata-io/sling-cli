@@ -60,12 +60,6 @@ var cliRunFlags = []g.Flag{
 		Description: "The pipeline config file to use (JSON or YAML).\n",
 	},
 	{
-		Name:        "config",
-		ShortName:   "c",
-		Type:        "string",
-		Description: "The task config string or file to use (JSON or YAML). [deprecated]",
-	},
-	{
 		Name:        "src-conn",
 		ShortName:   "",
 		Type:        "string",
