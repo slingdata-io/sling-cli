@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"gopkg.in/yaml.v2"
 
 	"github.com/samber/lo"
@@ -44,8 +46,9 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		Source: sling.Source{Options: &sling.SourceOptions{}},
 		Target: sling.Target{Options: &sling.TargetOptions{}},
 	}
-	replicationCfgPath := ""
-	pipelineCfgPath := ""
+
+	var replicationCfgPath, pipelineCfgPath, directoryPath string
+
 	showExamples := false
 	selectStreams := []string{}
 
@@ -77,6 +80,42 @@ func processRun(c *g.CliSC) (ok bool, err error) {
 		case "pipeline":
 			env.SetTelVal("run_mode", "pipeline")
 			pipelineCfgPath = cast.ToString(v)
+		case "directory":
+			env.SetTelVal("run_mode", "directory")
+			directoryPath = cast.ToString(v)
+		case "path":
+			filePath := cast.ToString(v)
+			fileInfo, err := os.Stat(filePath)
+			if err != nil {
+				return true, g.Error(err, "error accessing path: %s", filePath)
+			}
+
+			if fileInfo.IsDir() {
+				env.SetTelVal("run_mode", "directory")
+				directoryPath = filePath
+			} else {
+				dirPath, err := os.Getwd()
+				if err != nil {
+					return true, g.Error(err, "unable to determine working dir. Try using flags")
+				}
+				runFile := sling.RunFile{File: g.InfoToFileItem(dirPath, filePath, fileInfo)}
+				valid, err := runFile.IsValid()
+				if err != nil {
+					return true, g.Error(err, "could not load file: %s", filePath)
+				} else if valid {
+					switch runFile.Type {
+					case sling.RunFileReplication:
+						env.SetTelVal("run_mode", "replication")
+						replicationCfgPath = filePath
+					case sling.RunFilePipeline:
+						env.SetTelVal("run_mode", "pipeline")
+						pipelineCfgPath = filePath
+					}
+				} else {
+					return true, g.Error("file is not a valid replication or pipeline: %s", filePath)
+				}
+			}
+
 		case "src-conn":
 			cfg.Source.Conn = cast.ToString(v)
 		case "src-stream", "src-table", "src-sql", "src-file":
@@ -221,7 +260,12 @@ runReplication:
 		defer printUpdateAvailable()
 	}
 
-	if pipelineCfgPath != "" {
+	if directoryPath != "" {
+		err = runDirectory(directoryPath)
+		if err != nil {
+			return ok, g.Error(err, "failure running directory (see docs @ https://docs.slingdata.io)")
+		}
+	} else if pipelineCfgPath != "" {
 		err = runPipeline(pipelineCfgPath)
 		if err != nil {
 			return ok, g.Error(err, "failure running pipeline (see docs @ https://docs.slingdata.io)")
@@ -644,6 +688,82 @@ func runPipeline(pipelineCfgPath string) (err error) {
 	err = pipeline.Execute()
 
 	return
+}
+
+func runDirectory(directoryPath string) (err error) {
+	if !g.PathExists(directoryPath) {
+		return g.Error("directory does not exist: %s", directoryPath)
+	}
+
+	files, err := g.ListDirRecursive(directoryPath)
+	if err != nil {
+		return g.Error(err, "could not list files from %s", directoryPath)
+	}
+
+	// collect replication or pipeline
+	runFiles := sling.RunFiles{}
+	for _, file := range files {
+		if strings.HasSuffix(file.Name, ".yaml") || strings.HasSuffix(file.Name, ".yml") {
+			runFile := sling.RunFile{File: file}
+			valid, err := runFile.IsValid()
+			if err != nil {
+				return g.Error(err, "could not load file: %s", file.RelPath)
+			} else if valid {
+				runFiles = append(runFiles, runFile)
+			}
+		}
+	}
+
+	// get terminal width, fallback to 80 if unable to determine
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		width = int(float64(w) * 0.75)
+	}
+
+	// change working dir
+	if err = os.Chdir(directoryPath); err != nil {
+		return g.Error(err, "could not change working directory to %s", directoryPath)
+	}
+
+	// run them
+	startTime := time.Now()
+	eG := g.ErrorGroup{}
+	successes := 0
+	for _, runFile := range runFiles.Order() {
+		ctx = g.NewContext(context.Background()) // reset master context
+
+		fileName := g.F("%s (%s)", runFile.File.RelPath, runFile.Type)
+		remainingWidth := width - len(fileName) - 2 // subtract 2 for spaces around filename
+		leftSigns := remainingWidth / 2
+		rightSigns := remainingWidth - leftSigns // accounts for odd numbers
+		env.Println(env.GreenString(g.F("%s %s %s", strings.Repeat("=", leftSigns), fileName, strings.Repeat("=", rightSigns))))
+
+		switch runFile.Type {
+		case sling.RunFilePipeline:
+			err = runPipeline(runFile.File.RelPath)
+		case sling.RunFileReplication:
+			err = runReplication(runFile.File.RelPath, nil)
+		}
+		if eG.Capture(err, runFile.File.RelPath) {
+			g.LogError(err)
+		} else {
+			successes++
+		}
+	}
+
+	delta := time.Since(startTime)
+	env.Println(env.GreenString(strings.Repeat("=", width)))
+	successStr := env.GreenString(g.F("%d Successes", successes))
+	failureStr := g.F("%d Failures", len(eG.Errors))
+	if len(eG.Errors) > 0 {
+		failureStr = env.RedString(failureStr)
+	} else {
+		failureStr = env.GreenString(failureStr)
+	}
+
+	g.Info("Sling Run Completed in %s | %s | %s\n", g.DurationString(delta), successStr, failureStr)
+
+	return eG.Err()
 }
 
 func parsePayload(payload string, validate bool) (options map[string]any, err error) {
