@@ -871,14 +871,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					correctType = iop.DatetimeType // clickhouse uses datetime
 				}
 				if correctType == iop.BoolType {
-					correctType = iop.TextType // clickhouse doesn't have bool
+					correctType = iop.IntegerType // clickhouse bool is integer
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json
 				}
 			case srcType == dbio.TypeDbClickhouse && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.BoolType {
-					correctType = iop.TextType // clickhouse doesn't have bool
+					correctType = iop.IntegerType //  clickhouse bool is integer
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json

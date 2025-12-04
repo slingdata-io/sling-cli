@@ -262,6 +262,7 @@ function:
   checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
   # checksum_datetime: toUnixTimestamp64Nano(toDateTime64({field}, 6)) / 1000
   checksum_decimal: ABS(CAST({field} as Nullable(Int64)))
+  checksum_boolean: length(case when {field} is null then '' when {field} > 0 then 'true' else 'false' end)
   now: now()
   cast_to_string: 'toString({field})'
 
