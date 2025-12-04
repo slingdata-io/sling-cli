@@ -34,6 +34,7 @@ var (
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
 	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
+	setupOtel      = func() {}
 )
 
 const (
@@ -159,6 +160,7 @@ func InitLogger() {
 	)
 
 	SetLogger()
+	setupOtel()
 }
 
 func Print(text string) {
