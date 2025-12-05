@@ -1332,7 +1332,6 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 
 	props := g.MapToKVArr(fs.Props())
 	duck := iop.NewDuckDb(context.Background(), props...)
-	duckURI := duck.PrepareFsSecretAndURI(uri)
 
 	if val := fs.GetProp("COMPRESSION"); val != "" && sc.Compression == iop.NoneCompressorType {
 		sc.Compression = iop.CompressorType(strings.ToLower(val))
@@ -1394,7 +1393,7 @@ func WriteDataflowReadyViaDuckDB(fs FileSysClient, df *iop.Dataflow, uri string,
 		// generate sql for export
 		switch fs.FsType() {
 		case dbio.TypeFileLocal:
-			localPath := duckURI
+			localPath := strings.ReplaceAll(uri, "file://", "")
 			// copy files bytes recursively to target
 			if strings.Contains(localPath, "*") {
 				localPath = GetDeepestParent(localPath) // get target folder, since split by files

@@ -13,6 +13,7 @@ type RuntimeState interface {
 	SetStateData(id string, data map[string]any)
 	SetStateKeyValue(id, key string, value any)
 	SetStoreData(key string, value any, del bool)
+	GetStore() map[string]any
 	Marshall() string
 	TaskExecution() *TaskExecution
 	StepExecution() *PipelineStepExecution
@@ -31,6 +32,10 @@ type ReplicationState struct {
 	Object    *ObjectState              `json:"object,omitempty"`
 	Runs      map[string]*RunState      `json:"runs,omitempty"`
 	Run       *RunState                 `json:"run,omitempty"`
+}
+
+func (rs *ReplicationState) GetStore() map[string]any {
+	return rs.Store
 }
 
 func (rs *ReplicationState) SetStoreData(key string, value any, del bool) {
@@ -130,6 +135,8 @@ type RunState struct {
 	EndTime    *time.Time              `json:"end_time"`
 	Duration   int64                   `json:"duration"`
 	Error      *string                 `json:"error"`
+	IncrValue  any                     `json:"incremental_value,omitempty"`
+	Range      string                  `json:"range,omitempty"`
 	Config     ReplicationStreamConfig `json:"config"`
 	Task       *TaskExecution          `json:"-"`
 	Step       *PipelineStepExecution  `json:"-"`
@@ -234,6 +241,8 @@ func (t *TaskExecution) StateSet() {
 		run.Status = t.Status
 		run.StartTime = t.StartTime
 		run.EndTime = t.EndTime
+		run.IncrValue = t.Config.IncrementalVal
+		run.Range = g.PtrVal(g.PtrVal(t.Config.Source.Options).Range)
 		run.Config = g.PtrVal(t.Config.ReplicationStream)
 		run.Config.Hooks = HookMap{} // no nested values
 		if run.StartTime != nil {

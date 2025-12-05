@@ -1,0 +1,54 @@
+name: Request New API Source
+description: Used to request a new API Source for sling to read from
+title: "API Source Request: {API Source Name}"
+labels:
+  - api-spec
+
+body:
+
+  - type: input
+    attributes:
+      label: "API Source Name:"
+      description: Input the name of the API source, such as "Salesforce", "Stripe", "Github", etc
+    validations:
+      required: true  
+
+  - type: textarea
+    attributes:
+      label: API Documentation URL(s)
+      description: >
+        Provide publicly available URL(s) which contain documentation on how to access the API resources.
+
+        Typically has information such as:
+                - Authentication methods and requirements
+                - Endpoint structures and parameters
+                - Response formats and data structures
+                - Pagination patterns
+                - Rate limiting constraints
+                - Filters for incremental updates
+
+        Provide as many URL links as needed (one per line)
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: API Endpoints Required
+      description: >
+        Provide the list of endpoints that you're interested in. An endpoint is basically a specific object available for consumption by the API source. Sling translates each endpoint into a stream, which is then written into a target table or file. 
+
+        Example of endpoints:
+          - users
+          - orders
+          - contacts
+          - locations
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Additional Details
+      description: >
+        Provide any additional details for this request
+    validations:
+      required: false

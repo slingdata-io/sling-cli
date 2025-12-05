@@ -222,14 +222,14 @@ You can target specific tests or suites using environment variables:
    ```sh
    cd cmd/sling
    go test -v -run TestSuiteDatabasePostgres             # run all Postgres tests
-   TESTS="1-3" go test -v -run TestSuiteDatabasePostgres # run Postgres tests 1, 2, 3
+   go test -v -run TestSuiteDatabasePostgres -- 1-3 # run Postgres tests 1, 2, 3
    ```
 
 2. File Suite:
    ```sh
    cd cmd/sling
    go test -v -run TestSuiteFileS3               # run all S3 tests
-   TESTS="1,2,3" go test -v -run TestSuiteFileS3 # run S3 tests 1, 2, 3
+   go test -v -run TestSuiteFileS3 -- 1,2,3 # run S3 tests 1, 2, 3
    ```
 
 3. CLI Suite:
@@ -237,14 +237,14 @@ You can target specific tests or suites using environment variables:
    cd cmd/sling
    export SLING_BIN=./sling
    go test -v -run TestCLI             # run all CLI tests
-   TESTS="31+" go test -v -run TestCLI # run CLI tests 31 and all subsequent tests
+   go test -v -run TestCLI -- 31+ # run CLI tests 31 and all subsequent tests
    ```
 
 You can specify individual test numbers, ranges, or use the '+' suffix to run all tests from a certain number:
 
-- `TESTS="1,2,3"`: Run tests 1, 2, and 3
-- `TESTS="1-5"`: Run tests 1 through 5
-- `TESTS="3+"`: Run test 3 and all subsequent tests
+- `go test -v -run TestCLI -- "1,2,3"`: Run tests 1, 2, and 3
+- `go test -v -run TestSuiteFileS3 -- "1-5"`: Run tests 1 through 5
+- `go test -v -run TestCLI -- "3+"`: Run test 3 and all subsequent tests
 
 #### Test Suites Overview
 

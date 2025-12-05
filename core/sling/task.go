@@ -36,9 +36,8 @@ type TaskExecution struct {
 	data          *iop.Dataset  `json:"-"`
 	prevRowCount  uint64
 	prevByteCount uint64
-	skipStream    bool            `json:"skip_stream"`
-	lastIncrement time.Time       // the time of last row increment (to determine stalling)
-	Output        strings.Builder `json:"-"`
+	skipStream    bool      `json:"skip_stream"`
+	lastIncrement time.Time // the time of last row increment (to determine stalling)
 	OutputLines   chan *g.LogLine
 
 	Replication    *ReplicationConfig `json:"replication"`
@@ -88,10 +87,6 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 		ProgressHist: []string{},
 		cleanupFuncs: []func(){},
 		OutputLines:  make(chan *g.LogLine, 5000),
-	}
-
-	if args := os.Getenv("SLING_CLI_ARGS"); args != "" {
-		t.AppendOutput(&g.LogLine{Level: 9, Text: " -- args: " + args})
 	}
 
 	err := cfg.Prepare()
@@ -240,8 +235,6 @@ func (t *TaskExecution) GetBytes() (inBytes, outBytes uint64) {
 }
 
 func (t *TaskExecution) AppendOutput(ll *g.LogLine) {
-	t.Output.WriteString(ll.Line() + "\n") // add new-line char
-
 	// push line if not full
 	select {
 	case t.OutputLines <- ll:
@@ -463,6 +456,13 @@ func (t *TaskExecution) hasStateWithUpdateKey() bool {
 	return os.Getenv("SLING_STATE") != "" && t.Config.Source.HasUpdateKey()
 }
 
+func (t *TaskExecution) hasRange() bool {
+	if so := t.Config.Source.Options; so != nil {
+		return g.PtrVal(so.Range) != ""
+	}
+	return false
+}
+
 func (t *TaskExecution) getSourceOptionsMap() (options map[string]any) {
 	options = g.M()
 
@@ -593,6 +593,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = "Perhaps setting a higher 'SLING_SAMPLE_SIZE' environment variable could help? This represents the number of records to process in order to infer column types (especially for file sources). The default is 900. Try 2000 or even higher.\nYou can also manually specify the column types with the `columns` input, (see https://docs.slingdata.io/concepts/replication/columns) \nFurthermore, you can try the `target_options.adjust_column_type` setting to allow Sling to automatically alter the column type on the target side."
 		case contains("bcp import"):
 			helpString = "If facing issues with Microsoft's BCP, try disabling Bulk Loading with `use_bulk=false`. See https://docs.slingdata.io/concepts/replication/target-options"
+		case (contains("driver: bad connection") || contains("Timeout exceeded while reading from socket")) && contains("could not commit transaction"):
+			helpString = "Try using the `batch_limit` target option. See https://docs.slingdata.io/concepts/replication/target-options"
 		case contains("pq: canceling statement due to statement timeout "):
 			helpString = "You could try specifying a `statement_timeout` for your Postgres connection. See https://docs.slingdata.io/connections/database-connections/postgres"
 		case contains("[AppendRow]: converting"):
@@ -608,8 +610,10 @@ func ErrorHelper(err error) (helpString string) {
 		case contains("cannot create parquet value") && contains("from go value of type"):
 		case contains("Not implemented Error: Only DuckLake versions"):
 			helpString = "You likely used a newer DuckDB/Ducklake version and reverted to a older version."
-		case contains("CSV table encountered too many errors"):
+		case contains("CSV") && contains("encountered too many errors"):
 			helpString = "Perhaps trying to load with `target_options.format=parquet` could help? This will use Parquet files instead of CSV files."
+		case contains("Invalid Input Error: CSV Error on Line:"):
+			helpString = "By default, Sling uses CSV serialization to pipe data into DuckDB. Try setting the `copy_method: arrow_http` property in your connection to avoid serialization errors. See https://docs.slingdata.io/connections/database-connections for more details."
 		case contains("it does not have a replica identity and publishes updates"):
 			helpString = `Since PG replication is turned on, you'll need to create a replica identity on the respective table for executing UPDATE/DELETE operations. You can use target_options.table_ddl to specify an extra statement to define the replication identity upon creation, such as:
 			
@@ -618,6 +622,10 @@ func ErrorHelper(err error) (helpString string) {
 						create table {object.full_name} ({col_types});
 						alter table {object.full_name} replica identity full
 			`
+		case contains("s3.amazonaws.com") && contains("HTTP Error: Unable to connect to URL"):
+			helpString = `If you are using Ducklake with S3, make sure to specify the region with "s3_region"`
+		case contains("Error 1205 (HY000): Lock wait timeout exceeded"):
+			helpString = "This error occurs when the statement is waiting too long to acquire a lock on the table, likely because another transaction is holding a lock. Try setting `innodb_lock_wait_timeout` property in your connection. See https://docs.slingdata.io/connections/database-connections/mysql"
 		}
 	}
 	return

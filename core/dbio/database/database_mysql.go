@@ -174,7 +174,11 @@ func (conn *MySQLConn) connectCloudSQL(timeOut ...int) error {
 
 	// Support three credential methods: ADC (default), credentials file, or credentials JSON
 	if credJSON := conn.GetProp("gcp_key_body"); credJSON != "" {
-		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(credJSON)))
+		decodedCredJSON, err := iop.DecodeJSONIfBase64(credJSON)
+		if err != nil {
+			return g.Error(err, "could not decode GCP credentials")
+		}
+		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsJSON([]byte(decodedCredJSON)))
 	} else if credsFile := conn.GetProp("gcp_key_file"); credsFile != "" {
 		dialerOpts = append(dialerOpts, cloudsqlconn.WithCredentialsFile(credsFile))
 	} else {
@@ -549,7 +553,12 @@ func (conn *MySQLConn) GenerateMergeSQL(srcTable string, tgtTable string, pkFiel
 	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "src.", srcT.NameQ()+".")
 	upsertMap["src_tgt_pk_equal"] = strings.ReplaceAll(upsertMap["src_tgt_pk_equal"], "tgt.", tgtT.NameQ()+".")
 
-	sqlTemplate := `
+	var sqlTemplate string
+	if timeout := conn.GetProp("innodb_lock_wait_timeout"); timeout != "" {
+		sqlTemplate = g.F("SET innodb_lock_wait_timeout = %s;", timeout)
+	}
+
+	sqlTemplate = sqlTemplate + `
 	delete from {tgt_table}
 	where exists (
 			select 1

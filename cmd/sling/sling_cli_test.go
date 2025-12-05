@@ -7,10 +7,13 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/flarco/g"
 	"github.com/flarco/g/process"
+	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/samber/lo"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
 	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
@@ -20,7 +23,8 @@ import (
 
 type testCase struct {
 	ID      int               `yaml:"id"`
-	Needs   []int             `yaml:"needs"`
+	After   []int             `yaml:"after"`
+	Group   string            `yaml:"group"`
 	Name    string            `yaml:"name"`
 	Run     string            `yaml:"run"`
 	Env     map[string]string `yaml:"env"`
@@ -36,6 +40,8 @@ type testCase struct {
 
 func TestCLI(t *testing.T) {
 	args := os.Args
+	var parallelMode bool
+
 	for _, arg := range args {
 		if arg == "-d" || arg == "--debug" {
 			os.Setenv("DEBUG", "true")
@@ -44,6 +50,13 @@ func TestCLI(t *testing.T) {
 		if arg == "-t" || arg == "--trace" {
 			os.Setenv("DEBUG", "TRACE")
 			env.InitLogger()
+		}
+		if arg == "-p" || arg == "--parallel" {
+			parallelMode = true
+		}
+
+		if arg == "-a" || arg == "--all" {
+			os.Setenv("RUN_ALL", "true") // runs all test, don't fail earlys
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
 			os.Setenv("TESTS", arg)
@@ -128,108 +141,172 @@ func TestCLI(t *testing.T) {
 		tests = append(tests, tc)
 	}
 
+	running := cmap.New[testCase]()
+	groupRun := cmap.New[testCase]()
+
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		for range ticker.C {
+			ids := running.Keys()
+			if len(ids) == 0 {
+				ticker.Stop()
+				return
+			}
+			now := time.Now().Format(time.DateTime)
+			env.Println(env.YellowString(g.F("%s -- running => %s", now, g.Marshal(ids))))
+		}
+	}()
+
+	testContext.SetConcurrencyLimit(1)
+	if parallelMode {
+		g.Warn("using parallel mode")
+		testContext.SetConcurrencyLimit(8)
+	}
+
 	for _, tt := range tests {
 		if !assert.NotEmpty(t, tt.Run, "Command is empty") {
 			break
 		}
 
 		testID := g.F("%d/%s", tt.ID, tt.Name)
-		t.Run(testID, func(t *testing.T) {
-			env.Println(env.GreenString(g.F("%02d | ", tt.ID) + tt.Run))
 
-			p, err := process.NewProc("bash")
-			if !g.AssertNoError(t, err) {
-				return
-			}
-			p.Capture = true
-			if os.Getenv("DEBUG") != "" {
-				p.Print = true
-			}
-			p.WorkDir = "../.."
+		testContext.Wg.Read.Add()
 
-			// set new env
-			p.Env = map[string]string{}
-			for k, v := range defaultEnv {
-				p.Env[k] = v
-			}
-			for k, v := range tt.Env {
-				p.Env[k] = v
+		go func(tt testCase) {
+			defer testContext.Wg.Read.Done()
+
+			if tt.Group != "" {
+			retryGroup:
+				if groupRun.Has(tt.Group) {
+					time.Sleep(time.Second)
+					goto retryGroup
+				}
+				groupRun.Set(tt.Group, tt)
+				defer groupRun.Remove(tt.Group)
 			}
 
-			// create a tmp bash script with the command in tmp folder
-			tmpDir := os.TempDir()
-			tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
-			if err != nil {
-				t.Fatalf("Failed to create temp file: %v", err)
-			}
-			defer os.Remove(tmpFile.Name())
+			t.Run(testID, func(t *testing.T) {
+				running.Set(g.CastToString(tt.ID), tt)
+				defer running.Remove(g.CastToString(tt.ID))
 
-			// write the command to the tmp file
-			lines := []string{
-				"#!/bin/bash",
-				"set -e",
-				"shopt -s expand_aliases",
-				g.F("alias sling=%s", bin),
-				tt.Run,
-			}
-			content := strings.Join(lines, "\n")
-			_, err = tmpFile.WriteString(content)
-			if err != nil {
-				t.Fatalf("Failed to write command to temp file: %v", err)
-			}
-			tmpFile.Close()
-
-			// run
-			err = p.Run(tmpFile.Name())
-			if tt.Err {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-
-			// check output
-			stderr := p.Stderr.String()
-			stdout := p.Stdout.String()
-			for _, contains := range tt.OutputContains {
-				if contains == "" {
-					continue
+			retry:
+				for _, needID := range tt.After {
+					if running.Has(g.CastToString(needID)) {
+						time.Sleep(time.Second)
+						goto retry
+					}
 				}
 
-				found := false
-				if strings.Contains(stderr, contains) {
-					found = true
+				now := time.Now().Format(time.DateTime)
+				env.Println(env.GreenString(g.F("%s -- %02d | ", now, tt.ID) + tt.Run))
+
+				p, err := process.NewProc("bash")
+				if !g.AssertNoError(t, err) {
+					return
 				}
-				if strings.Contains(stdout, contains) {
-					found = true
+				p.Capture = true
+				if os.Getenv("DEBUG") != "" {
+					p.Print = true
 				}
-				assert.True(t, found, "Output does not contain %#v", contains)
-			}
-			for _, notContain := range tt.OutputDoesNotContain {
-				if notContain == "" {
-					continue
+				p.WorkDir = "../.."
+
+				// set new env
+				p.Env = map[string]string{}
+				for k, v := range defaultEnv {
+					p.Env[k] = v
+				}
+				for k, v := range tt.Env {
+					p.Env[k] = v
 				}
 
-				found := false
-				if strings.Contains(stderr, notContain) {
-					found = true
+				// create a tmp bash script with the command in tmp folder
+				tmpDir := os.TempDir()
+				tmpFile, err := os.CreateTemp(tmpDir, g.F("sling_cli_test.%02d.*.sh", tt.ID))
+				if err != nil {
+					t.Fatalf("Failed to create temp file: %v", err)
 				}
-				if strings.Contains(stdout, notContain) {
-					found = true
+				defer os.Remove(tmpFile.Name())
+
+				// write the command to the tmp file
+				lines := []string{
+					"#!/bin/bash",
+					"set -e",
+					"shopt -s expand_aliases",
+					g.F("alias sling=%s", bin),
+					tt.Run,
 				}
-				assert.False(t, found, "Output contains %#v", notContain)
-			}
-		})
-		if t.Failed() {
-			// Track failure
-			testFailuresMux.Lock()
-			testFailures = append(testFailures, testFailure{
-				connType: "CLI",
-				testID:   testID,
+				content := strings.Join(lines, "\n")
+				_, err = tmpFile.WriteString(content)
+				if err != nil {
+					t.Fatalf("Failed to write command to temp file: %v", err)
+				}
+				tmpFile.Close()
+
+				// run
+				err = p.Run(tmpFile.Name())
+				if tt.Err {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
+
+				// check output
+				stderr := p.Stderr.String()
+				stdout := p.Stdout.String()
+				for _, contains := range tt.OutputContains {
+					if contains == "" {
+						continue
+					}
+
+					found := false
+					if strings.Contains(stderr, contains) {
+						found = true
+					}
+					if strings.Contains(stdout, contains) {
+						found = true
+					}
+					assert.True(t, found, "Output does not contain %#v", contains)
+				}
+				for _, notContain := range tt.OutputDoesNotContain {
+					if notContain == "" {
+						continue
+					}
+
+					found := false
+					if strings.Contains(stderr, notContain) {
+						found = true
+					}
+					if strings.Contains(stdout, notContain) {
+						found = true
+					}
+					assert.False(t, found, "Output contains %#v", notContain)
+				}
+
+				// Track failure inside the subtest where t refers to the subtest
+				if t.Failed() {
+					testFailuresMux.Lock()
+					testFailures = append(testFailures, testFailure{
+						connType: "CLI",
+						testID:   testID,
+						otherIDs: lo.Filter(running.Keys(), func(k string, i int) bool {
+							return k != testID
+						}),
+					})
+					testFailuresMux.Unlock()
+				}
 			})
-			testFailuresMux.Unlock()
-			// Don't break - let all tests complete
+		}(tt)
+
+		// cancel early if not specified (check parent test failure status)
+		if t.Failed() && !cast.ToBool(os.Getenv("RUN_ALL")) {
+			testContext.Cancel()
+			return
 		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
+
+	testContext.Wg.Read.Wait()
 }
 
 func TestBase64(t *testing.T) {

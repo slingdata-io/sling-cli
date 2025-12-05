@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"maps"
 	"net/http"
 	"sort"
@@ -39,6 +40,9 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 		return spec, g.Error(err, "error loading API spec")
 	}
 
+	// store body
+	spec.originalBody = specBody
+
 	rootMap := yaml.MapSlice{}
 	err = yaml.Unmarshal([]byte(specBody), &rootMap)
 	if err != nil {
@@ -74,6 +78,8 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 
 		endpoint.Name = endpointName
 		endpoint.originalMap["name"] = endpointName
+		endpoint.context = g.NewContext(context.Background())
+		endpoint.auth = APIStateAuth{Mutex: &sync.Mutex{}}
 
 		if endpoint.State == nil {
 			endpoint.State = g.M() // set default state
@@ -113,6 +119,7 @@ type Spec struct {
 	EndpointMap      EndpointMap      `yaml:"endpoints" json:"endpoints"`
 	DynamicEndpoints DynamicEndpoints `yaml:"dynamic_endpoints" json:"dynamic_endpoints"`
 
+	originalBody     string
 	originalMap      map[string]any
 	endpointsOrdered []string
 	rendered         bool
@@ -120,6 +127,10 @@ type Spec struct {
 
 func (s *Spec) IsDynamic() bool {
 	return len(s.DynamicEndpoints) > 0
+}
+
+func (s *Spec) MD5() string {
+	return g.MD5(s.originalBody)
 }
 
 // validateQueues checks that all queues used by endpoints are declared at the Spec level
@@ -227,7 +238,16 @@ func (a Authentication) Type() AuthType {
 	if a == nil {
 		return AuthTypeNone
 	}
-	return AuthType(cast.ToString(a["type"]))
+	authType := AuthType(cast.ToString(a["type"]))
+
+	// If no type specified but headers are provided, default to static
+	if authType == AuthTypeNone {
+		if _, hasHeaders := a["headers"]; hasHeaders {
+			return AuthTypeStatic
+		}
+	}
+
+	return authType
 }
 
 func (a Authentication) Expires() int {
@@ -276,6 +296,7 @@ type AuthType string
 
 const (
 	AuthTypeNone     AuthType = ""
+	AuthTypeStatic   AuthType = "static"
 	AuthTypeSequence AuthType = "sequence"
 	AuthTypeBasic    AuthType = "basic"
 	AuthTypeOAuth2   AuthType = "oauth2"
@@ -300,10 +321,13 @@ const (
 type Sequence []Call
 
 type Call struct {
-	If         string     `yaml:"if" json:"if"`
-	Request    Request    `yaml:"request" json:"request"`
-	Pagination Pagination `yaml:"pagination" json:"pagination"`
-	Response   Response   `yaml:"response" json:"response"`
+	If             string          `yaml:"if" json:"if"`
+	Request        Request         `yaml:"request" json:"request"`
+	Pagination     Pagination      `yaml:"pagination" json:"pagination"`
+	Response       Response        `yaml:"response" json:"response"`
+	Authentication *Authentication `yaml:"authentication,omitempty" json:"authentication,omitempty"`
+	Iterate        string          `yaml:"iterate" json:"iterate"`
+	Into           string          `yaml:"into" json:"into"`
 }
 
 // Endpoints is a collection of API endpoints
@@ -316,6 +340,7 @@ type Endpoint struct {
 	Description string     `yaml:"description" json:"description,omitempty"`
 	Docs        string     `yaml:"docs" json:"docs,omitempty"`
 	Disabled    bool       `yaml:"disabled" json:"disabled"`
+	Dynamic     bool       `yaml:"dynamic,omitempty" json:"dynamic,omitempty"` // is generated
 	State       StateMap   `yaml:"state" json:"state"`
 	Sync        []string   `yaml:"sync" json:"sync,omitempty"`
 	Request     Request    `yaml:"request" json:"request"`
@@ -326,6 +351,8 @@ type Endpoint struct {
 	Teardown    Sequence   `yaml:"teardown" json:"teardown,omitempty"`
 	DependsOn   []string   `yaml:"depends_on" json:"depends_on"` // upstream endpoints
 	Overrides   any        `yaml:"overrides" json:"overrides"`   // stream overrides
+
+	Authentication *Authentication `yaml:"authentication,omitempty" json:"authentication,omitempty"`
 
 	// whether we should stop the endpoint process.
 	// inflight iterations will continue, no new iterations created
@@ -343,6 +370,7 @@ type Endpoint struct {
 	bloomFilter  *bloom.BloomFilter
 	aggregate    AggregateState
 	originalMap  map[string]any
+	auth         APIStateAuth
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -352,6 +380,83 @@ func (ep *Endpoint) SetStateVal(key string, val any) {
 		ep.State = make(StateMap)
 	}
 	ep.State[key] = val
+}
+
+func (ep *Endpoint) setContextMap(sCfg APIStreamConfig) {
+	contextMap := g.M(
+		"mode", sCfg.Mode,
+		"store", ep.conn.State.Store,
+		"limit", sCfg.Limit,
+	)
+
+	// set backfill params
+	if rangeParts := strings.Split(sCfg.Range, ","); sCfg.Range != "" {
+		contextMap["range_start"] = rangeParts[0]
+		if len(rangeParts) > 1 {
+			contextMap["range_end"] = lo.Ternary[any](rangeParts[1] == "", nil, rangeParts[1])
+		}
+	}
+
+	ep.contextMap = contextMap
+}
+
+func (ep *Endpoint) renderString(val any, extraMaps ...map[string]any) (newVal string, err error) {
+
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderString(val, extra)
+}
+
+func (ep *Endpoint) renderAny(val any, extraMaps ...map[string]any) (newVal any, err error) {
+	extra := g.M()
+	if len(extraMaps) > 0 {
+		extra = extraMaps[0]
+	}
+
+	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
+	syncCopy := make(map[string]any)
+	contextCopy := make(map[string]any)
+
+	ep.context.Lock()
+	if ep.syncMap != nil {
+		for k, v := range ep.syncMap {
+			syncCopy[k] = v
+		}
+	}
+	if ep.contextMap != nil {
+		for k, v := range ep.contextMap {
+			contextCopy[k] = v
+		}
+	}
+	ep.context.Unlock()
+
+	extra["sync"] = syncCopy
+	extra["context"] = contextCopy
+
+	return ep.conn.renderAny(val, extra)
 }
 
 func (ep *Endpoint) Evaluate(expr string, state map[string]interface{}) (result any, err error) {
@@ -603,14 +708,28 @@ func (ep *Endpoint) setup() (err error) {
 	g.Debug("running endpoint setup sequence (%d calls)", len(ep.Setup))
 
 	baseEndpoint := &Endpoint{
-		Name:    g.F("%s.setup", ep.Name),
-		context: g.NewContext(ep.context.Ctx),
-		conn:    ep.conn,
-		State:   g.M(),
+		Name:       g.F("%s.setup", ep.Name),
+		context:    g.NewContext(ep.context.Ctx),
+		conn:       ep.conn,
+		State:      g.M(),
+		contextMap: ep.contextMap,
+		aggregate:  ep.aggregate,
+		auth:       APIStateAuth{Mutex: &sync.Mutex{}},
 	}
 
-	// only copy over headers
-	baseEndpoint.Request.Headers = ep.Request.Headers
+	// only copy over headers if not exists
+	if baseEndpoint.Request.Headers == nil {
+		baseEndpoint.Request.Headers = map[string]any{}
+	}
+	for k, v := range ep.Request.Headers {
+		if _, exists := baseEndpoint.Request.Headers[k]; !exists {
+			baseEndpoint.Request.Headers[k] = v
+		}
+	}
+
+	// set in context original sequence array
+	array, _ := jmespath.Search("setup", ep.originalMap)
+	baseEndpoint.context.Map.Set("sequence_array", array)
 
 	// copy over state from endpoint with proper locking
 	ep.context.Lock()
@@ -626,6 +745,8 @@ func (ep *Endpoint) setup() (err error) {
 	// sync state back with proper locking
 	ep.context.Lock()
 	maps.Copy(ep.State, baseEndpoint.State)
+	ep.stopIters = baseEndpoint.stopIters
+	ep.aggregate = baseEndpoint.aggregate
 	ep.context.Unlock()
 
 	g.Debug("endpoint setup completed successfully")
@@ -641,14 +762,27 @@ func (ep *Endpoint) teardown() (err error) {
 	g.Debug("running endpoint teardown sequence (%d calls)", len(ep.Teardown))
 
 	baseEndpoint := &Endpoint{
-		Name:    g.F("%s.teardown", ep.Name),
-		context: g.NewContext(ep.context.Ctx),
-		conn:    ep.conn,
-		State:   g.M(),
+		Name:      g.F("%s.teardown", ep.Name),
+		context:   g.NewContext(ep.context.Ctx),
+		conn:      ep.conn,
+		State:     g.M(),
+		aggregate: ep.aggregate,
+		auth:      APIStateAuth{Mutex: &sync.Mutex{}},
 	}
 
-	// only copy over headers
-	baseEndpoint.Request.Headers = ep.Request.Headers
+	// set in context original sequence array
+	array, _ := jmespath.Search("teardown", ep.originalMap)
+	baseEndpoint.context.Map.Set("sequence_array", array)
+
+	// only copy over headers if not exists
+	if baseEndpoint.Request.Headers == nil {
+		baseEndpoint.Request.Headers = map[string]any{}
+	}
+	for k, v := range ep.Request.Headers {
+		if _, exists := baseEndpoint.Request.Headers[k]; !exists {
+			baseEndpoint.Request.Headers[k] = v
+		}
+	}
 
 	// copy over state from endpoint with proper locking
 	ep.context.Lock()
@@ -664,6 +798,7 @@ func (ep *Endpoint) teardown() (err error) {
 	// sync state back with proper locking
 	ep.context.Lock()
 	maps.Copy(ep.State, baseEndpoint.State)
+	ep.aggregate = baseEndpoint.aggregate
 	ep.context.Unlock()
 
 	g.Debug("endpoint teardown completed successfully")
@@ -706,10 +841,14 @@ func (iter *Iteration) DetermineStateRenderOrder() (order []string, err error) {
 		expr := cast.ToString(iter.state[key])
 		iter.context.Unlock()
 
-		matches := bracketRegex.FindAllStringSubmatch(expr, -1)
+		// Use FindMatches instead of bracketRegex to properly handle nested brackets and quoted strings
+		matches, matchErr := iter.endpoint.conn.evaluator.FindMatches(expr)
+		if matchErr != nil {
+			g.Trace("could not find matches for state variable %s: %v", key, matchErr)
+		}
 		if len(matches) > 0 {
 			for _, match := range matches {
-				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match[1])
+				varsReferenced := iter.endpoint.conn.evaluator.ExtractVars(match)
 				for _, varReferenced := range varsReferenced {
 					if strings.HasPrefix(varReferenced, "state.") {
 						refKey := strings.TrimPrefix(varReferenced, "state.")
@@ -778,28 +917,9 @@ func (iter *Iteration) renderString(val any, req ...*SingleRequest) (newVal stri
 	}
 	iter.context.Unlock()
 
-	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
-	syncCopy := make(map[string]any)
-	contextCopy := make(map[string]any)
-
-	iter.endpoint.context.Lock()
-	if iter.endpoint.syncMap != nil {
-		for k, v := range iter.endpoint.syncMap {
-			syncCopy[k] = v
-		}
-	}
-	if iter.endpoint.contextMap != nil {
-		for k, v := range iter.endpoint.contextMap {
-			contextCopy[k] = v
-		}
-	}
-	iter.endpoint.context.Unlock()
-
 	extra["state"] = stateCopy
-	extra["sync"] = syncCopy
-	extra["context"] = contextCopy
 
-	return iter.endpoint.conn.renderString(val, extra)
+	return iter.endpoint.renderString(val, extra)
 }
 
 func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, err error) {
@@ -816,28 +936,9 @@ func (iter *Iteration) renderAny(val any, req ...*SingleRequest) (newVal any, er
 	}
 	iter.context.Unlock()
 
-	// Copy endpoint sync and context maps (lock ep.context separately to avoid nested locks)
-	syncCopy := make(map[string]any)
-	contextCopy := make(map[string]any)
-
-	iter.endpoint.context.Lock()
-	if iter.endpoint.syncMap != nil {
-		for k, v := range iter.endpoint.syncMap {
-			syncCopy[k] = v
-		}
-	}
-	if iter.endpoint.contextMap != nil {
-		for k, v := range iter.endpoint.contextMap {
-			contextCopy[k] = v
-		}
-	}
-	iter.endpoint.context.Unlock()
-
 	extra["state"] = stateCopy
-	extra["sync"] = syncCopy
-	extra["context"] = contextCopy
 
-	return iter.endpoint.conn.renderAny(val, extra)
+	return iter.endpoint.renderAny(val, extra)
 }
 
 // StateMap stores the current state of an endpoint's execution
@@ -888,7 +989,9 @@ type Records struct {
 	JmesPath   string   `yaml:"jmespath" json:"jmespath,omitempty"` // for json or xml
 	PrimaryKey []string `yaml:"primary_key" json:"primary_key,omitempty"`
 	UpdateKey  string   `yaml:"update_key" json:"update_key,omitempty"`
-	Limit      int      `yaml:"limit" json:"limit,omitempty"` // to limit the records, useful for testing
+	Limit      int      `yaml:"limit" json:"limit,omitempty"`   // to limit the records, useful for testing
+	Casing     string   `yaml:"casing" json:"casing,omitempty"` // "snake" or "camel"
+	Select     []string `yaml:"select" json:"select,omitempty"` // include/exclude/rename
 
 	DuplicateTolerance string `yaml:"duplicate_tolerance" json:"duplicate_tolerance,omitempty"`
 }
@@ -899,14 +1002,14 @@ const (
 	AggregationTypeNone    AggregationType = ""        // No aggregation, apply transformation at record level
 	AggregationTypeMaximum AggregationType = "maximum" // Keep the maximum value across records
 	AggregationTypeMinimum AggregationType = "minimum" // Keep the minimum value across records
-	AggregationTypeFlatten AggregationType = "flatten" // Collect all values into an array
+	AggregationTypeCollect AggregationType = "collect" // Collect all values into an array
 	AggregationTypeFirst   AggregationType = "first"   // Keep only the first encountered value
 	AggregationTypeLast    AggregationType = "last"    // Keep only the last encountered value
 )
 
 var AggregationTypes = []AggregationType{
 	AggregationTypeNone, AggregationTypeMaximum,
-	AggregationTypeMinimum, AggregationTypeFlatten,
+	AggregationTypeMinimum, AggregationTypeCollect,
 	AggregationTypeFirst, AggregationTypeLast,
 }
 
@@ -926,7 +1029,9 @@ const (
 	RuleTypeRetry    RuleType = "retry"    // Retry the request up to MaxAttempts times
 	RuleTypeContinue RuleType = "continue" // Continue processing responses and rules
 	RuleTypeStop     RuleType = "stop"     // Stop processing requests for this endpoint
+	RuleTypeBreak    RuleType = "break"    // Stop processing requests for this iteration
 	RuleTypeFail     RuleType = "fail"     // Stop processing and return an error
+	RuleTypeSkip     RuleType = "skip"     // Skip records from response and continue
 )
 
 type BackoffType string
@@ -984,9 +1089,9 @@ func NewSingleRequest(iter *Iteration) *SingleRequest {
 	}
 }
 
-func (lrs *SingleRequest) Records() []any {
+func (lrs *SingleRequest) Records() []map[string]any {
 	if lrs.Response == nil || len(lrs.Response.Records) == 0 {
-		return make([]any, 0)
+		return make([]map[string]any, 0)
 	}
 	return lrs.Response.Records
 }
@@ -1020,15 +1125,19 @@ type RequestState struct {
 
 // ResponseState captures the state of the HTTP response for reference and debugging
 type ResponseState struct {
-	Status  int            `yaml:"status" json:"status"`
-	Headers map[string]any `yaml:"headers" json:"headers"`
-	Text    string         `yaml:"text" json:"text"`
-	JSON    any            `yaml:"json" json:"json"`
-	Records []any          `yaml:"records" json:"records"`
+	Status  int              `yaml:"status" json:"status"`
+	Headers map[string]any   `yaml:"headers" json:"headers"`
+	Text    string           `yaml:"text" json:"text"`
+	JSON    any              `yaml:"json" json:"json"`
+	Records []map[string]any `yaml:"records" json:"records"`
 }
 
 // AggregateState stores aggregated values during response processing
 type AggregateState struct {
-	value any
-	array []any
+	value map[string]any   // map of key to single value
+	array map[string][]any // map of key to array
+}
+
+func NewAggregateState() AggregateState {
+	return AggregateState{value: g.M(), array: map[string][]any{}}
 }

@@ -417,8 +417,10 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				return g.Error(err, "could not prepare statement")
 			}
 
-			var decimalCols, intCols, jsonCols, int64Cols, floatCols []int
+			var decimalCols, intCols, jsonCols, int64Cols, floatCols, boolCols []int
+			insColMap := insCols.Map()
 			for i, col := range batch.Columns {
+				insCol := g.PtrVal(insColMap[col.Name])
 				switch {
 				case col.Type == iop.DecimalType:
 					decimalCols = append(decimalCols, i)
@@ -430,6 +432,13 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 					int64Cols = append(int64Cols, i)
 				case col.Type == iop.FloatType:
 					floatCols = append(floatCols, i)
+				case col.Type == iop.BoolType:
+					// only set as bool if target column type is boolean/int
+					// need to maintain string booleans for existing replications
+					// see https://github.com/slingdata-io/sling-cli/issues/626
+					if insCol.IsBool() || insCol.IsInteger() {
+						boolCols = append(boolCols, i)
+					}
 				}
 			}
 
@@ -482,6 +491,14 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				for _, colI := range floatCols {
 					if row[colI] != nil {
 						row[colI], err = cast.ToFloat64E(row[colI])
+						eG.Capture(err)
+					}
+				}
+
+				// set Bool correctly if target column is not string
+				for _, colI := range boolCols {
+					if row[colI] != nil {
+						row[colI], err = cast.ToBoolE(row[colI])
 						eG.Capture(err)
 					}
 				}
@@ -699,4 +716,20 @@ func (conn *ClickhouseConn) GetNativeType(col iop.Column) (nativeType string, er
 	}
 
 	return nativeType, err
+}
+
+// CastColumnForSelect casts to the correct target column type
+func (conn *ClickhouseConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.IsInteger() && tgtCol.IsString():
+		fallthrough
+	case srcCol.IsBool() && tgtCol.IsString():
+		selectStr = g.F("case when %s = 1 then 'true' else 'false' end", qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
