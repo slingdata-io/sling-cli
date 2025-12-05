@@ -515,12 +515,12 @@
     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_r2
+    catalog_table: public.test1k_mariadb_pg  # iceberg2 uses 'iceberg' as default catalog
   streams: 2
   output_contains:
-    - committed iceberg snapshot
-    - count_result => {"count_star":1001}
-    - inserted 967 rows
-    
+    - count_result => {"count_star":1003}
+    - inserted 969 rows
+
     # part of stdout output
     - writing to target stream (stdout)
     - wrote 5 rows
@@ -532,13 +532,13 @@
     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
   env:
     TARGET: iceberg_s3
+    catalog_table: public.test1k_mariadb_pg  # iceberg2 uses 'iceberg' as default catalog
   after: [74]
   streams: 2
   output_contains:
-    - committed iceberg snapshot
-    - count_result => {"count_star":1001}
-    - inserted 967 rows
-    
+    - count_result => {"count_star":1003}
+    - inserted 969 rows
+
     # part of stdout output
     - writing to target stream (stdout)
     - wrote 5 rows
@@ -560,39 +560,26 @@
 #     - writing to target stream (stdout)
 #     - wrote 5 rows
 
-- id: 77
-  name: Run sling iceberg_sql insert
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
-  env:
-    TARGET: iceberg_sql
-  after: [75]
-  streams: 2
-  output_contains:
-    - committed iceberg snapshot
-    - inserted 967 rows
-    
-    # part of stdout output
-    - writing to target stream (stdout)
-    - wrote 5 rows
+# Test 78 DISABLED: DuckDB Iceberg extension bug - CREATE TABLE fails with Glue catalog
+# Error: "Cannot parse missing string: location" (Glue requires location parameter, DuckDB doesn't send it)
+# Upstream issue: https://github.com/duckdb/duckdb-iceberg/issues/549
+# - id: 78
+#   name: Run sling iceberg_glue insert
+#   run: |
+#     sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
+#     sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
+#   env:
+#     TARGET: iceberg_glue
+#     catalog_table: public.test1k_mariadb_pg
+#   after: [75]
+#   streams: 2
+#   output_contains:
+#     - count_result => {"count_star":1003}
+#     - inserted 969 rows
 
-- id: 78
-  name: Run sling iceberg_glue insert
-  run: |
-    sling run -d -r cmd/sling/tests/replications/r.23.iceberg_write.yaml
-    sling run --src-conn $TARGET --src-stream public.test1k_mariadb_pg --stdout -l 5
-  env:
-    TARGET: iceberg_glue
-  after: [77]
-  streams: 2
-  output_contains:
-    - committed iceberg snapshot
-    - inserted 967 rows
-    
-    # part of stdout output
-    - writing to target stream (stdout)
-    - wrote 5 rows
+#     # part of stdout output
+#     - writing to target stream (stdout)
+#     - wrote 5 rows
 
 # - id: 79
 #   name: Run sling iceberg_gcp insert

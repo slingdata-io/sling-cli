@@ -3,19 +3,21 @@ target: '{target}'
 
 hooks:
   end:
-    # does not work for gcp or sql
+    # does not work for gcp or sql or glue (original iceberg connector only)
     - type: check
       id: target_check
-      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql"&& lower(target.name) != "iceberg_glue"
+      check: lower(target.name) != "iceberg_gcp" && lower(target.name) != "iceberg_sql" && lower(target.name) != "iceberg_glue"
       failure_message: skipping target {target.name}
       on_failure: break
-      
+
     # verify that we can query with custom SQL via duckDB
+    # For iceberg (original), use iceberg_catalog.public.test1k_mariadb_pg
+    # For iceberg2, the default catalog is already 'iceberg', so just use public.test1k_mariadb_pg
     - type: query
       connection: '{target}'
-      query: select count(*) from iceberg_catalog.public.test1k_mariadb_pg
+      query: select count(*) as count_star from {env.catalog_table}
       into: count_result
-    
+
     - type: log
       message: 'count_result => { store.count_result[0] }'
 
@@ -33,4 +35,5 @@ streams:
   
 env:
   target: ${TARGET}
+  catalog_table: ${catalog_table}
   

@@ -230,6 +230,51 @@ ducklake	utinyint	integer	col_utinyint utinyint	TRUE	TRUE
 ducklake	uuid	uuid	col_uuid uuid	TRUE	TRUE	
 ducklake	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	
 ducklake	interval	string	col_interval interval	TRUE	TRUE	
+iceberg2	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
+iceberg2	int64	bigint	col_bigint bigint	TRUE	TRUE	A large integer
+iceberg2	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
+iceberg2	blob	binary	col_blob blob	TRUE	TRUE	A small BLOB
+iceberg2	char	string	col_char char(17)	TRUE	TRUE	A fixed-length nonbinary (character) string
+iceberg2	date	date	col_date date	TRUE	TRUE	A date value in CCYY-MM-DD format
+iceberg2	datetime	datetime	col_datetime datetime	TRUE	TRUE	A date and time value in CCYY-MM-DD hh:mm:ss format
+iceberg2	decimal	decimal	col_decimal decimal	TRUE	TRUE	A fixed-point number
+iceberg2	double	float	col_double double	TRUE	TRUE	A double-precision floating point number
+iceberg2	enum	string	col_enum enum ('value1','value2','value3')	FALSE	FALSE	An enumeration
+iceberg2	float	float	col_float float	TRUE	TRUE	A single-precision floating point number
+iceberg2	float32	float	col_float float	TRUE	TRUE	A single-precision floating point number
+iceberg2	float64	float	col_float float	TRUE	TRUE	A single-precision floating point number
+iceberg2	integer	integer	col_int int	TRUE	TRUE	A standard integer
+iceberg2	int16	integer	col_int int	TRUE	TRUE	A standard integer
+iceberg2	int32	integer	col_int int	TRUE	TRUE	A standard integer
+iceberg2	json	json	col_json json	TRUE	TRUE	JSON Data Type
+iceberg2	int8	smallint	col_int int	TRUE	TRUE	A standard integer
+iceberg2	smallint	smallint	col_smallint smallint	TRUE	TRUE	A small integer
+iceberg2	text	text	col_text text	TRUE	TRUE	A small non-binary string
+iceberg2	time	time	col_time time	TRUE	TRUE	A time value in hh:mm:ss format
+iceberg2	timestamp	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+iceberg2	timestamp_s	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+iceberg2	timestamp_ms	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+iceberg2	timestamp_ns	timestamp	col_timestamp timestamp	TRUE	TRUE	A timestamp value in CCYY-MM-DD hh:mm:ss format
+iceberg2	timestamp with time zone	timestampz	col_timestampz timestamp	TRUE	TRUE	A timestamp value with time zone
+iceberg2	timestamptz	timestampz	col_timestampz timestamp	TRUE	TRUE	A timestamp value with time zone
+iceberg2	tinyblob	text	col_tinyblob tinyblob	TRUE	TRUE	A very small BLOB
+iceberg2	tinyint	smallint	col_tinyint tinyint	TRUE	TRUE	A very small integer
+iceberg2	varchar	text	col_varchar varchar(100)	TRUE	TRUE	A variable-length non-binary string
+iceberg2	boolean	bool	col_boolean boolean	TRUE	TRUE	Boolean type
+iceberg2	list	text	col_list list	TRUE	TRUE	List/Array type
+iceberg2	struct	json	col_struct struct	TRUE	TRUE	Struct type
+iceberg2	map	json	col_map map	TRUE	TRUE	Map type
+iceberg2	ubigint	bigint	col_ubigint ubigint	TRUE	TRUE	Unsigned big integer
+iceberg2	uint8	integer	col_uinteger uinteger	TRUE	TRUE	Unsigned integer
+iceberg2	uint16	integer	col_uinteger uinteger	TRUE	TRUE	Unsigned integer
+iceberg2	uint32	bigint	col_uinteger uinteger	TRUE	TRUE	Unsigned integer
+iceberg2	uint64	bigint	col_uinteger uinteger	TRUE	TRUE	Unsigned integer
+iceberg2	uinteger	bigint	col_uinteger uinteger	TRUE	TRUE	Unsigned integer
+iceberg2	usmallint	integer	col_usmallint usmallint	TRUE	TRUE	Unsigned small integer
+iceberg2	utinyint	integer	col_utinyint utinyint	TRUE	TRUE	Unsigned tiny integer
+iceberg2	uuid	uuid	col_uuid uuid	TRUE	TRUE	UUID type
+iceberg2	hugeint	bigint	col_hugeint hugeint	TRUE	TRUE	Huge integer
+iceberg2	interval	string	col_interval interval	TRUE	TRUE	Interval type
 mariadb	bigint	bigint	col_bigint bigint	TRUE	TRUE	A large integer
 mariadb	binary	binary	col_binary binary(100)	TRUE	TRUE	A fixed-length binary string
 mariadb	bit	binary	col_bit bit	FALSE	FALSE	A bit field

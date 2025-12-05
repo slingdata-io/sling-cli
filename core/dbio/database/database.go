@@ -312,6 +312,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &DuckDbConn{URL: URL}
 	} else if strings.HasPrefix(URL, "ducklake:") {
 		conn = &DuckLakeConn{DuckDbConn: DuckDbConn{URL: URL}}
+	} else if strings.HasPrefix(URL, "iceberg2:") {
+		conn = &Iceberg2Conn{DuckDbConn: DuckDbConn{URL: URL}}
 	} else if strings.HasPrefix(URL, "iceberg:") {
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {

@@ -1009,6 +1009,43 @@ func (c *Connection) setURL() (err error) {
 		}
 
 		template = "iceberg://{catalog_type}"
+	case dbio.TypeDbIceberg2:
+		setIfMissing("catalog_type", c.Data["catalog_type"]) // rest, glue, s3tables
+		setIfMissing("catalog_name", "iceberg")
+
+		// REST catalog properties
+		setIfMissing("rest_uri", c.Data["rest_uri"])
+		setIfMissing("rest_warehouse", c.Data["rest_warehouse"])
+		setIfMissing("rest_token", c.Data["rest_token"])
+		setIfMissing("rest_oauth_client_id", c.Data["rest_oauth_client_id"])
+		setIfMissing("rest_oauth_client_secret", c.Data["rest_oauth_client_secret"])
+		setIfMissing("rest_oauth_server_uri", c.Data["rest_oauth_server_uri"])
+		setIfMissing("rest_oauth_scope", c.Data["rest_oauth_scope"])
+
+		// Glue catalog properties
+		setIfMissing("glue_account_id", c.Data["glue_account_id"])
+		setIfMissing("glue_region", c.Data["glue_region"])
+
+		// S3 Tables properties
+		setIfMissing("s3_tables_arn", c.Data["s3_tables_arn"])
+
+		// S3 storage credentials
+		setIfMissing("s3_access_key_id", c.Data["s3_access_key_id"])
+		setIfMissing("s3_secret_access_key", c.Data["s3_secret_access_key"])
+		setIfMissing("s3_region", c.Data["s3_region"])
+		setIfMissing("s3_session_token", c.Data["s3_session_token"])
+		setIfMissing("s3_endpoint", c.Data["s3_endpoint"])
+
+		// Azure storage credentials
+		setIfMissing("azure_account_name", c.Data["azure_account_name"])
+		setIfMissing("azure_account_key", c.Data["azure_account_key"])
+		setIfMissing("azure_sas_token", c.Data["azure_sas_token"])
+
+		// GCS storage credentials
+		setIfMissing("gcs_access_key_id", c.Data["gcs_access_key_id"])
+		setIfMissing("gcs_secret_access_key", c.Data["gcs_secret_access_key"])
+
+		template = "iceberg2://{catalog_type}"
 	case dbio.TypeDbAthena:
 		// use dbt inputs
 		{
