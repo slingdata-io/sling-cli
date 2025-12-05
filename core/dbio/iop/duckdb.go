@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	DuckDbVersion      = "1.4.1"
+	DuckDbVersion      = "1.4.2"
 	DuckDbVersionMD    = "1.4.1"
 	DuckDbUseTempFile  = false
 	duckDbReadOnlyHint = "/* -readonly */"
