@@ -137,18 +137,39 @@ func NewTask(execID string, cfg *Config) (t *TaskExecution) {
 }
 
 // SetProgress sets the progress
-func (t *TaskExecution) SetProgress(progressText string, args ...interface{}) {
-	progressText = g.F(progressText, args...)
+func (t *TaskExecution) SetProgress(text string, args ...interface{}) {
+	progressText := g.F(text, args...)
 	t.ProgressHist = append(t.ProgressHist, progressText)
 	t.Progress = progressText
 	if !t.PBar.started || t.PBar.finished {
-		if strings.Contains(progressText, "execution failed") {
-			progressText = env.RedString(progressText)
+		if strings.Contains(text, "execution failed") {
+			text = env.RedString(text)
 		}
-		g.Info(progressText)
+		t.setLogDetails()
+		g.Info(text, args...)
 	} else {
 		t.PBar.SetStatus(progressText)
 	}
+}
+
+func (t *TaskExecution) setLogDetails() {
+	var duration int
+	if t.StartTime != nil {
+		duration = int(time.Since(*t.StartTime).Seconds())
+	}
+	rowCount := t.GetCount()
+	rowRate, byteRate := t.GetRate(1)
+	os.Setenv("SLING_LOG_DETAILS", g.Marshal(g.M(
+		"run_file", t.Config.Env["SLING_CONFIG_PATH"],
+		"run_type", "replication",
+		"stream_name", t.Config.StreamName,
+		"object_name", t.getTargetObjectValue(),
+		"row_count", rowCount,
+		"row_rate", rowRate,
+		"byte_rate", byteRate,
+		"status", t.Status,
+		"duration", duration,
+	)))
 }
 
 func (t *TaskExecution) GetSourceTable() (sTable database.Table, err error) {
@@ -626,6 +647,8 @@ func ErrorHelper(err error) (helpString string) {
 			helpString = `If you are using Ducklake with S3, make sure to specify the region with "s3_region"`
 		case contains("Error 1205 (HY000): Lock wait timeout exceeded"):
 			helpString = "This error occurs when the statement is waiting too long to acquire a lock on the table, likely because another transaction is holding a lock. Try setting `innodb_lock_wait_timeout` property in your connection. See https://docs.slingdata.io/connections/database-connections/mysql"
+		case contains("Cannot parse missing string: location"):
+			helpString = "This a known DuckDB bug. See https://github.com/duckdb/duckdb-iceberg/issues/549. Perhaps try a later DuckDB version by setting env var DUCKDB_VERSION"
 		}
 	}
 	return

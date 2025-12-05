@@ -226,6 +226,20 @@ func (pse *PipelineStepExecution) Context() *g.Context {
 	return pse.Pipeline.Context
 }
 
+func (pse *PipelineStepExecution) setLogDetails() {
+	var duration int
+	if pse.StartTime != nil {
+		duration = int(time.Since(*pse.StartTime).Seconds())
+	}
+	os.Setenv("SLING_LOG_DETAILS", g.Marshal(g.M(
+		"run_file", pse.Pipeline.FileName,
+		"run_type", "pipeline",
+		"step_id", pse.Step.ID(),
+		"status", pse.Status,
+		"duration", duration,
+	)))
+}
+
 // Execute executes a single pipeline step
 func (pse *PipelineStepExecution) Execute() (err error) {
 	if pse.Pipeline == nil {
@@ -260,17 +274,17 @@ func (pse *PipelineStepExecution) Execute() (err error) {
 		}
 	}()
 
-	// Update current step in pipeline
-	if !g.In(pse.Step.Type(), "log") {
-		g.Debug(`executing step "%s" (type: %s)`, pse.Step.ID(), pse.Step.Type())
-	}
-
 	pse.Context().Lock() // for map access
 	pse.Map = pse.Step.PayloadMap()
 	pse.Context().Unlock() // for map access
 
 	defer pse.StateSet()
 	pse.StateSet()
+
+	// Update current step in pipeline
+	if !g.In(pse.Step.Type(), "log") {
+		g.Debug(`executing step "%s" (type: %s)`, pse.Step.ID(), pse.Step.Type())
+	}
 
 	// Execute the step
 	stepErr := pse.Step.Execute()
@@ -334,6 +348,7 @@ func (pl *Pipeline) RuntimeState() (_ *PipelineState, err error) {
 
 	if pl.CurrentStep != nil {
 		pl.state.Run.Step = pl.CurrentStep
+		pl.CurrentStep.setLogDetails()
 	}
 
 	if pl.state.Run == nil {
