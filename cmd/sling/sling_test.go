@@ -670,7 +670,11 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
 		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
-		conn, err := taskCfg.TgtConn.AsDatabase()
+		opt := connection.AsConnOptions{UseCache: false}
+		if g.In(taskCfg.TgtConn.Type, dbio.TypeDbDuckDb) {
+			opt.UseCache = true // cannot have dup duckdb connections
+		}
+		conn, err := taskCfg.TgtConn.AsDatabase(opt)
 		if !g.AssertNoError(t, err) {
 			return
 		}
