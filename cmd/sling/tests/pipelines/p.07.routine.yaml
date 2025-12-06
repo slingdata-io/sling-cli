@@ -7,11 +7,10 @@ steps:
   - type: log
     message: "=== Test 1: Simple logging routine ==="
 
-  - type: routine
-    id: simple_test
+  - id: simple_test
     routine: test_logging
     params:
-      test_value: "hello_from_pipeline"
+      test_value: "hello_from_pipeline from {env.SLING_ROUTINES_DIR}"
     on_failure: abort
 
   - type: check
@@ -39,8 +38,7 @@ steps:
         (2, 'test2'),
         (3, 'test3');
 
-  - type: routine
-    id: validation_test
+  - id: validation_test
     routine: validate_data
     params:
       connection: "postgres"
