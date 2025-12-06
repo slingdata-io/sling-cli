@@ -151,6 +151,7 @@ func (pl *Pipeline) Execute() (err error) {
 	}
 
 	// Execute each step
+	var lastErr error
 	for i := 0; i < len(pl.steps); i++ {
 		step := pl.steps[i]
 		step.SetContext(pl.Context) // update with latest context
@@ -181,9 +182,14 @@ func (pl *Pipeline) Execute() (err error) {
 
 		// Execute the step
 		pl.CurrentStep = pse
-		err = pse.Execute()
+		err = pse.Execute(lastErr != nil) // skip if errored
 		if err != nil {
-			return err
+			lastErr = err // this allows to mark the rest of the steps as skipped
+		}
+
+		// continue to mark rest of steps if already errored
+		if lastErr != nil {
+			continue
 		}
 
 		// Check for break
@@ -201,7 +207,7 @@ func (pl *Pipeline) Execute() (err error) {
 		}
 	}
 
-	return nil
+	return lastErr
 }
 
 // PipelineStepExecution represents a single step execution context
@@ -241,7 +247,7 @@ func (pse *PipelineStepExecution) setLogDetails() {
 }
 
 // Execute executes a single pipeline step
-func (pse *PipelineStepExecution) Execute() (err error) {
+func (pse *PipelineStepExecution) Execute(skip bool) (err error) {
 	if pse.Pipeline == nil {
 		return g.Error("pipeline is nil")
 	}
@@ -279,6 +285,11 @@ func (pse *PipelineStepExecution) Execute() (err error) {
 	pse.Context().Unlock() // for map access
 
 	defer pse.StateSet()
+	if skip {
+		pse.Status = ExecStatusSkipped
+		return // mark as skipped
+	}
+
 	pse.StateSet()
 
 	// Update current step in pipeline
