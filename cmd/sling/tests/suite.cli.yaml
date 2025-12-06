@@ -1122,7 +1122,7 @@
   output_contains:
     - '=== Test 1: Simple logging routine ==='
     - 'Starting routine: test_logging'
-    - 'Parameter value: hello_from_pipeline'
+    - 'Parameter value: hello_from_pipeline from cmd/sling/tests/pipelines'
     - 'Environment variable: environment_test_value'
     - '=== Test 2: Data validation routine ==='
     - 'Validating data for table: public.test_routine_table'
