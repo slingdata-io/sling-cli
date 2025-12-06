@@ -40,7 +40,7 @@ test-connections-file:
 test-connections-database:
     #!/usr/bin/env bash
     echo "TESTING database connections"
-    cd cmd/sling && SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 35m -run TestSuiteDatabase && cd -
+    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run TestSuiteDatabase && cd -
 
 # Test core (sling core functionality)
 test-core:
