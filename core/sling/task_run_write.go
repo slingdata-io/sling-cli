@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -1070,7 +1069,7 @@ func executeSQL(t *TaskExecution, tgtConn database.Connection, sqlStatements *st
 	// apply values
 	sql := g.Rm(*sqlStatements, t.GetStateMap())
 
-	t.SetProgress(fmt.Sprintf("executing %s-sql", stage))
+	t.SetProgress("executing %s-sql", stage)
 	if _, err := tgtConn.ExecMulti(sql); err != nil {
 		err = g.Error(err, "Error executing %s-sql", stage)
 		return err
