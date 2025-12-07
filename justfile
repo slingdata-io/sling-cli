@@ -86,7 +86,7 @@ test-dbio-api:
     cd core/dbio/api && go test -v && cd -
 
 # Test all dbio
-test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-filesys test-dbio-api
+test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-api test-dbio-filesys
 
 # Test Python (default, without ARROW)
 test-python-main:
