@@ -3,8 +3,10 @@ package sling
 import (
 	"context"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -1830,4 +1832,73 @@ func cleanConnURL(payload, connURL string) string {
 	cleanSource := strings.Split(connURL, "://")[0] + "://"
 	payload = strings.ReplaceAll(payload, g.Marshal(connURL), g.Marshal(cleanSource))
 	return payload
+}
+
+type RunFileType string
+
+const (
+	RunFileReplication RunFileType = "replication"
+	RunFilePipeline    RunFileType = "pipeline"
+)
+
+type RunFile struct {
+	Type   RunFileType
+	File   g.FileItem
+	Body   string
+	loaded bool
+}
+
+func (rf *RunFile) Load() error {
+	content, err := os.ReadFile(rf.File.FullPath)
+	if err != nil {
+		return g.Error(err, "could not read file: %s", rf.File.RelPath)
+	}
+	rf.Body = string(content)
+
+	rf.Type = rf.inferFileType()
+
+	return nil
+}
+
+func (rf *RunFile) IsValid() (bool, error) {
+	if !rf.loaded {
+		err := rf.Load()
+		if err != nil {
+			return false, g.Error(err, "could not load file: %s", rf.File.RelPath)
+		}
+	}
+	return rf.Type != "", nil
+}
+
+func (rf *RunFile) hasLinePrefix(prefix string) bool {
+	pattern := fmt.Sprintf(`(?m)^\s*%s`, prefix)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(rf.Body)
+}
+
+func (rf *RunFile) inferFileType() (t RunFileType) {
+
+	if rf.hasLinePrefix("source:") &&
+		rf.hasLinePrefix("target:") &&
+		rf.hasLinePrefix("streams:") &&
+		!rf.hasLinePrefix("steps:") &&
+		!rf.hasLinePrefix("routines:") {
+		return RunFileReplication
+	}
+
+	if rf.hasLinePrefix("steps:") {
+		return RunFilePipeline
+	}
+
+	return ""
+}
+
+type RunFiles []RunFile
+
+func (rfs RunFiles) Order() (ordered RunFiles) {
+	ordered = rfs
+	return
 }

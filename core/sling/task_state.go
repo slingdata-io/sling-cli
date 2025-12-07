@@ -306,5 +306,8 @@ func (t *TaskExecution) StateSet() {
 
 		// set as active run
 		state.Run = run
+
+		// set log details
+		t.setLogDetails()
 	}
 }

@@ -177,6 +177,37 @@ func TestAPIConnectionRender(t *testing.T) {
 			expected:    "2025-01-01",
 			expectError: false,
 		},
+		{
+			name:     "json_payload_with_template_vars",
+			input:    `{"filters":{"from":"{state.from_date}"},"limit":{state.limit},"sort_order":"asc"}`,
+			expected: `{"filters":{"from":"2025-01-01"},"limit":100,"sort_order":"asc"}`,
+			setup: func(ac *APIConnection) {
+				ac.State.State["from_date"] = "2025-01-01"
+				ac.State.State["limit"] = 100
+			},
+		},
+		{
+			// YAML map payload (not a JSON string) - this is how YAML parses:
+			// payload:
+			//   "filters": {"from": "{state.from_date}"}
+			//   "limit": "{state.limit}"
+			//   "sort_order": "asc"
+			name: "yaml_map_payload_with_template_vars",
+			input: map[string]any{
+				"filters":    map[string]any{"from": "{state.from_date}"},
+				"limit":      "{state.limit}",
+				"sort_order": "asc",
+			},
+			expected: map[string]any{
+				"filters":    map[string]any{"from": "2025-01-01"},
+				"limit":      100.0,
+				"sort_order": "asc",
+			},
+			setup: func(ac *APIConnection) {
+				ac.State.State["from_date"] = "2025-01-01"
+				ac.State.State["limit"] = 100
+			},
+		},
 	}
 
 	for _, tt := range tests {

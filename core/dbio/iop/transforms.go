@@ -1285,6 +1285,40 @@ func (e *Evaluator) FindMatches(inputStr string) (expressions []string, err erro
 
 	for i < n {
 		if runes[i] == '{' {
+			// Check if this looks like a JSON object key pattern: {"key": or { "key":
+			// JSON objects have the pattern: { + optional whitespace + "key" + optional whitespace + :
+			// Template expressions with strings look like: { "text" + ... or { "{" + ...
+			// The key distinguisher is the colon (:) after the quoted string for JSON
+			j := i + 1
+			for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+				j++
+			}
+			if j < n && runes[j] == '"' {
+				// Found opening quote, scan to find the closing quote
+				k := j + 1
+				for k < n && runes[k] != '"' {
+					if runes[k] == '\\' && k+1 < n {
+						k += 2 // Skip escaped character
+						continue
+					}
+					k++
+				}
+				if k < n {
+					// Found closing quote, check what follows (skip whitespace)
+					k++
+					for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r') {
+						k++
+					}
+					if k < n && runes[k] == ':' {
+						// This is a JSON object (pattern: {"key": ...)
+						// Skip the opening brace and continue scanning
+						// This allows us to find template expressions inside JSON values
+						i++
+						continue
+					}
+				}
+			}
+
 			// Found potential expression start
 			start := i
 			depth := 1

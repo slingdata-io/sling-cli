@@ -96,6 +96,9 @@ func LoadSpec(specBody string) (spec Spec, err error) {
 		compiledEndpointMap[name] = endpoint
 	}
 
+	// update spec.EndpointMap with compiled endpoints
+	spec.EndpointMap = compiledEndpointMap
+
 	// validate that all queues used by endpoints are declared
 	if err = spec.validateQueues(compiledEndpointMap); err != nil {
 		return spec, g.Error(err, "queue validation failed")
@@ -257,41 +260,6 @@ func (a Authentication) Expires() int {
 	return cast.ToInt(a["expires"])
 }
 
-// Authentication defines how to authenticate with the API
-type Authentication0 struct {
-	Type AuthType `yaml:"type" json:"type"`
-
-	// when set, re-auth after number of seconds
-	Expires int `yaml:"expires" json:"expires,omitempty"`
-
-	// custom authentication workflow
-	Sequence Sequence `yaml:"sequence" json:"sequence,omitempty"`
-
-	// Basic Auth
-	Username string `yaml:"username,omitempty" json:"username,omitempty"`
-	Password string `yaml:"password,omitempty" json:"password,omitempty"`
-
-	// OAuth
-	Flow              OAuthFlow `yaml:"flow,omitempty" json:"flow,omitempty"`
-	AuthenticationURL string    `yaml:"authentication_url,omitempty" json:"authentication_url,omitempty"` // Token endpoint
-	AuthorizationURL  string    `yaml:"authorization_url,omitempty" json:"authorization_url,omitempty"`   // Authorization endpoint (for auth code flow)
-	ClientID          string    `yaml:"client_id,omitempty" json:"client_id,omitempty"`
-	ClientSecret      string    `yaml:"client_secret,omitempty" json:"client_secret,omitempty"`
-	Token             string    `yaml:"token,omitempty" json:"token,omitempty"`
-	Scopes            []string  `yaml:"scopes,omitempty" json:"scopes,omitempty"`
-	RedirectURI       string    `yaml:"redirect_uri,omitempty" json:"redirect_uri,omitempty"`
-	RefreshToken      string    `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
-	RefreshOnExpire   bool      `yaml:"refresh_on_expire,omitempty" json:"refresh_on_expire,omitempty"`
-
-	// AWS
-	AwsService         string `yaml:"aws_service,omitempty" json:"aws_service,omitempty"`
-	AwsAccessKeyID     string `yaml:"aws_access_key_id,omitempty" json:"aws_access_key_id,omitempty"`
-	AwsSecretAccessKey string `yaml:"aws_secret_access_key,omitempty" json:"aws_secret_access_key,omitempty"`
-	AwsSessionToken    string `yaml:"aws_session_token,omitempty" json:"aws_session_token,omitempty"`
-	AwsRegion          string `yaml:"aws_region,omitempty" json:"aws_region,omitempty"`
-	AwsProfile         string `yaml:"aws_profile,omitempty" json:"aws_profile,omitempty"`
-}
-
 type AuthType string
 
 const (
@@ -371,6 +339,14 @@ type Endpoint struct {
 	aggregate    AggregateState
 	originalMap  map[string]any
 	auth         APIStateAuth
+
+	// Modifier fields for prepending/appending to default setup/teardown (populated by custom unmarshal)
+	// Use +setup to prepend setup calls (executed before defaults)
+	// Use setup+ to append setup calls (executed after defaults)
+	prependSetup    Sequence `yaml:"-" json:"-"`
+	appendSetup     Sequence `yaml:"-" json:"-"`
+	prependTeardown Sequence `yaml:"-" json:"-"`
+	appendTeardown  Sequence `yaml:"-" json:"-"`
 }
 
 func (ep *Endpoint) SetStateVal(key string, val any) {
@@ -982,6 +958,115 @@ type Response struct {
 	Records    Records       `yaml:"records" json:"records"`
 	Processors []Processor   `yaml:"processors" json:"processors,omitempty"`
 	Rules      []Rule        `yaml:"rules" json:"rules,omitempty"`
+
+	// Modifier fields for prepending/appending to defaults (populated by custom unmarshal)
+	// Use +rules to prepend rules (evaluated before defaults)
+	// Use rules+ to append rules (evaluated after defaults, before hardcoded)
+	PrependRules      []Rule      `yaml:"-" json:"-"`
+	AppendRules       []Rule      `yaml:"-" json:"-"`
+	PrependProcessors []Processor `yaml:"-" json:"-"`
+	AppendProcessors  []Processor `yaml:"-" json:"-"`
+}
+
+// UnmarshalYAML handles +rules/rules+ and +processors/processors+ modifier syntax
+func (r *Response) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First unmarshal into a map to capture modifier keys
+	var rawMap map[string]interface{}
+	if err := unmarshal(&rawMap); err != nil {
+		return err
+	}
+
+	// Handle standard fields via type alias to avoid recursion
+	type ResponseAlias Response
+	alias := &ResponseAlias{}
+
+	// Re-marshal and unmarshal to get standard fields
+	if data, err := yaml.Marshal(rawMap); err == nil {
+		yaml.Unmarshal(data, alias)
+	}
+	*r = Response(*alias)
+
+	// Handle modifier keys for rules
+	if v, ok := rawMap["+rules"]; ok {
+		r.PrependRules = parseRulesFromInterface(v)
+	}
+	if v, ok := rawMap["rules+"]; ok {
+		r.AppendRules = parseRulesFromInterface(v)
+	}
+
+	// Handle modifier keys for processors
+	if v, ok := rawMap["+processors"]; ok {
+		r.PrependProcessors = parseProcessorsFromInterface(v)
+	}
+	if v, ok := rawMap["processors+"]; ok {
+		r.AppendProcessors = parseProcessorsFromInterface(v)
+	}
+
+	return nil
+}
+
+// parseRulesFromInterface converts an interface{} to []Rule
+func parseRulesFromInterface(v interface{}) []Rule {
+	var rules []Rule
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &rules)
+	}
+	return rules
+}
+
+// parseProcessorsFromInterface converts an interface{} to []Processor
+func parseProcessorsFromInterface(v interface{}) []Processor {
+	var processors []Processor
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &processors)
+	}
+	return processors
+}
+
+// UnmarshalYAML handles +setup/setup+ and +teardown/teardown+ modifier syntax for Endpoint
+func (ep *Endpoint) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First unmarshal into a map to capture modifier keys
+	var rawMap map[string]interface{}
+	if err := unmarshal(&rawMap); err != nil {
+		return err
+	}
+
+	// Handle standard fields via type alias to avoid recursion
+	type EndpointAlias Endpoint
+	alias := &EndpointAlias{}
+
+	// Re-marshal and unmarshal to get standard fields
+	if data, err := yaml.Marshal(rawMap); err == nil {
+		yaml.Unmarshal(data, alias)
+	}
+	*ep = Endpoint(*alias)
+
+	// Handle modifier keys for setup
+	if v, ok := rawMap["+setup"]; ok {
+		ep.prependSetup = parseSequenceFromInterface(v)
+	}
+	if v, ok := rawMap["setup+"]; ok {
+		ep.appendSetup = parseSequenceFromInterface(v)
+	}
+
+	// Handle modifier keys for teardown
+	if v, ok := rawMap["+teardown"]; ok {
+		ep.prependTeardown = parseSequenceFromInterface(v)
+	}
+	if v, ok := rawMap["teardown+"]; ok {
+		ep.appendTeardown = parseSequenceFromInterface(v)
+	}
+
+	return nil
+}
+
+// parseSequenceFromInterface converts an interface{} to Sequence ([]Call)
+func parseSequenceFromInterface(v interface{}) Sequence {
+	var seq Sequence
+	if data, err := yaml.Marshal(v); err == nil {
+		yaml.Unmarshal(data, &seq)
+	}
+	return seq
 }
 
 // Records configures how to extract and process data records from a response

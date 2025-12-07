@@ -1122,7 +1122,7 @@
   output_contains:
     - '=== Test 1: Simple logging routine ==='
     - 'Starting routine: test_logging'
-    - 'Parameter value: hello_from_pipeline'
+    - 'Parameter value: hello_from_pipeline from cmd/sling/tests/pipelines'
     - 'Environment variable: environment_test_value'
     - '=== Test 2: Data validation routine ==='
     - 'Validating data for table: public.test_routine_table'
@@ -1258,3 +1258,13 @@
     - '✓ Test 6 PASSED: Special characters properly handled in JSON payload'
     - '✓ Test 7 PASSED: Edge cases handled correctly'
     - 'All tests completed successfully!'
+
+- id: 144
+  name: Test Directory run
+  run: |
+    sling run cmd/sling/tests/replications/many/nested/p.command.yaml
+    sling run --directory cmd/sling/tests/replications/many/nested
+    sling run cmd/sling/tests/replications/many/
+  output_contains:
+    - 'p.log.yaml (pipeline)'
+    - 'r.swapi.yaml (replication)'
