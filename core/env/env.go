@@ -148,7 +148,7 @@ func SetLogger() {
 	}
 }
 
-// InitLogger initializes the g Logger
+// InitLogger initializes the Logger
 func InitLogger() {
 
 	// set log hook
