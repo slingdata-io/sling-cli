@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 func TestSpecEndpointsSort(t *testing.T) {
@@ -1810,4 +1811,658 @@ endpoints:
 			assert.Equal(t, tt.expected, s.IsDynamic())
 		})
 	}
+}
+
+func TestResponseUnmarshalYAML(t *testing.T) {
+	// Test the Response UnmarshalYAML directly
+	yamlStr := `
+format: json
+records:
+  jmespath: "data[]"
++rules:
+  - action: break
+    condition: "response.status == 403"
+rules:
+  - action: retry
+    condition: "response.status == 429"
+rules+:
+  - action: continue
+    condition: "response.status == 404"
++processors:
+  - expression: "log(record)"
+processors:
+  - expression: "record.id"
+    output: "state.last_id"
+processors+:
+  - expression: "record.name"
+    output: "state.last_name"
+`
+	var r Response
+	err := yaml.Unmarshal([]byte(yamlStr), &r)
+	require.NoError(t, err)
+
+	t.Logf("PrependRules: %+v", r.PrependRules)
+	t.Logf("Rules: %+v", r.Rules)
+	t.Logf("AppendRules: %+v", r.AppendRules)
+	t.Logf("PrependProcessors: %+v", r.PrependProcessors)
+	t.Logf("Processors: %+v", r.Processors)
+	t.Logf("AppendProcessors: %+v", r.AppendProcessors)
+
+	assert.Len(t, r.PrependRules, 1, "PrependRules should have 1 rule")
+	assert.Len(t, r.Rules, 1, "Rules should have 1 rule")
+	assert.Len(t, r.AppendRules, 1, "AppendRules should have 1 rule")
+	assert.Len(t, r.PrependProcessors, 1, "PrependProcessors should have 1 processor")
+	assert.Len(t, r.Processors, 1, "Processors should have 1 processor")
+	assert.Len(t, r.AppendProcessors, 1, "AppendProcessors should have 1 processor")
+
+	assert.Equal(t, RuleTypeBreak, r.PrependRules[0].Action)
+	assert.Equal(t, RuleTypeRetry, r.Rules[0].Action)
+	assert.Equal(t, RuleTypeContinue, r.AppendRules[0].Action)
+}
+
+func TestEndpointResponseUnmarshal(t *testing.T) {
+	// Test that Response modifier fields are preserved when unmarshalling an Endpoint
+	yamlStr := `
+name: test_endpoint
+request:
+  url: "https://api.example.com/test"
+response:
+  records:
+    jmespath: "data[]"
+  +rules:
+    - action: break
+      condition: "response.status == 403"
+  rules:
+    - action: retry
+      condition: "response.status == 429"
+`
+	var ep Endpoint
+	err := yaml.Unmarshal([]byte(yamlStr), &ep)
+	require.NoError(t, err)
+
+	t.Logf("Endpoint.Response.PrependRules: %+v", ep.Response.PrependRules)
+	t.Logf("Endpoint.Response.Rules: %+v", ep.Response.Rules)
+
+	assert.Len(t, ep.Response.PrependRules, 1, "PrependRules should have 1 rule")
+	assert.Equal(t, RuleTypeBreak, ep.Response.PrependRules[0].Action)
+}
+
+func TestSpecResponseModifierSyntax(t *testing.T) {
+	t.Run("prepend rules with +rules", func(t *testing.T) {
+		specYaml := `
+name: "Test API"
+
+defaults:
+  response:
+    rules:
+      - action: retry
+        condition: "response.status == 429"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      +rules:
+        - action: break
+          condition: "response.status == 403"
+`
+
+		s, err := LoadSpec(specYaml)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// The prepend rule should come first (before default rules)
+		// Order: +rules -> defaults -> hardcoded
+		assert.GreaterOrEqual(t, len(ep.Response.Rules), 3) // at least: prepend + default + hardcoded
+		assert.Equal(t, RuleTypeBreak, ep.Response.Rules[0].Action)
+		assert.Equal(t, "response.status == 403", ep.Response.Rules[0].Condition)
+	})
+
+	t.Run("append rules with rules+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    rules:
+      - action: retry
+        condition: "response.status == 429"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      rules+:
+        - action: continue
+          condition: "response.status == 404"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: defaults -> rules+ -> hardcoded
+		// The first rule should be the default retry rule
+		assert.Equal(t, RuleTypeRetry, ep.Response.Rules[0].Action)
+		assert.Equal(t, "response.status == 429", ep.Response.Rules[0].Condition)
+
+		// The second rule should be the appended continue rule
+		assert.Equal(t, RuleTypeContinue, ep.Response.Rules[1].Action)
+		assert.Equal(t, "response.status == 404", ep.Response.Rules[1].Condition)
+	})
+
+	t.Run("both +rules and rules+ together", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    rules:
+      - action: retry
+        condition: "response.status == 429"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      +rules:
+        - action: break
+          condition: "response.status == 403"
+      rules+:
+        - action: continue
+          condition: "response.status == 404"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +rules -> defaults -> rules+ -> hardcoded
+		assert.Equal(t, RuleTypeBreak, ep.Response.Rules[0].Action)          // prepend
+		assert.Equal(t, RuleTypeRetry, ep.Response.Rules[1].Action)          // default
+		assert.Equal(t, RuleTypeContinue, ep.Response.Rules[2].Action)       // append
+		assert.Equal(t, RuleTypeRetry, ep.Response.Rules[len(ep.Response.Rules)-2].Action) // hardcoded retry
+		assert.Equal(t, RuleTypeFail, ep.Response.Rules[len(ep.Response.Rules)-1].Action)  // hardcoded fail
+	})
+
+	t.Run("combine explicit rules with +rules and rules+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      +rules:
+        - action: break
+          condition: "response.status == 403"
+      rules:
+        - action: stop
+          condition: "response.status == 410"
+      rules+:
+        - action: continue
+          condition: "response.status == 404"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +rules -> rules -> rules+ -> hardcoded
+		assert.Equal(t, RuleTypeBreak, ep.Response.Rules[0].Action)    // prepend
+		assert.Equal(t, RuleTypeStop, ep.Response.Rules[1].Action)     // explicit
+		assert.Equal(t, RuleTypeContinue, ep.Response.Rules[2].Action) // append
+	})
+
+	t.Run("prepend processors with +processors", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    processors:
+      - expression: "record.id"
+        output: "state.last_id"
+        aggregation: "last"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      +processors:
+        - expression: "log(record)"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// The prepend processor should come first
+		assert.GreaterOrEqual(t, len(ep.Response.Processors), 2)
+		assert.Equal(t, "log(record)", ep.Response.Processors[0].Expression)
+		assert.Equal(t, "record.id", ep.Response.Processors[1].Expression)
+	})
+
+	t.Run("append processors with processors+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    processors:
+      - expression: "record.id"
+        output: "state.last_id"
+        aggregation: "last"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      processors+:
+        - expression: "log(record)"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// The first processor should be the default
+		assert.Equal(t, "record.id", ep.Response.Processors[0].Expression)
+		// The second processor should be the appended one
+		assert.Equal(t, "log(record)", ep.Response.Processors[1].Expression)
+	})
+
+	t.Run("no modifier syntax - defaults work normally", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    rules:
+      - action: retry
+        condition: "response.status == 429"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Default retry rule should be first (before hardcoded rules)
+		assert.Equal(t, RuleTypeRetry, ep.Response.Rules[0].Action)
+		assert.Equal(t, "response.status == 429", ep.Response.Rules[0].Condition)
+	})
+
+	t.Run("explicit rules override defaults", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  response:
+    rules:
+      - action: retry
+        condition: "response.status == 429"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+      rules:
+        - action: stop
+          condition: "response.status == 410"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Explicit rule should be first (default is overridden)
+		assert.Equal(t, RuleTypeStop, ep.Response.Rules[0].Action)
+		assert.Equal(t, "response.status == 410", ep.Response.Rules[0].Condition)
+	})
+}
+
+func TestSpecEndpointSetupTeardownModifierSyntax(t *testing.T) {
+	t.Run("prepend setup with +setup", func(t *testing.T) {
+		specYaml := `
+name: "Test API"
+
+defaults:
+  setup:
+    - request:
+        url: "https://api.example.com/auth/refresh"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    +setup:
+      - request:
+          url: "https://api.example.com/pre-check"
+`
+
+		s, err := LoadSpec(specYaml)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// The prepend setup should come first (before default setup)
+		// Order: +setup -> defaults
+		assert.Len(t, ep.Setup, 2)
+		assert.Equal(t, "https://api.example.com/pre-check", ep.Setup[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/auth/refresh", ep.Setup[1].Request.URL)
+	})
+
+	t.Run("append setup with setup+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  setup:
+    - request:
+        url: "https://api.example.com/auth/refresh"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    setup+:
+      - request:
+          url: "https://api.example.com/post-init"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: defaults -> setup+
+		assert.Len(t, ep.Setup, 2)
+		assert.Equal(t, "https://api.example.com/auth/refresh", ep.Setup[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/post-init", ep.Setup[1].Request.URL)
+	})
+
+	t.Run("both +setup and setup+ together", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  setup:
+    - request:
+        url: "https://api.example.com/auth/refresh"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    +setup:
+      - request:
+          url: "https://api.example.com/pre-check"
+    setup+:
+      - request:
+          url: "https://api.example.com/post-init"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +setup -> defaults -> setup+
+		assert.Len(t, ep.Setup, 3)
+		assert.Equal(t, "https://api.example.com/pre-check", ep.Setup[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/auth/refresh", ep.Setup[1].Request.URL)
+		assert.Equal(t, "https://api.example.com/post-init", ep.Setup[2].Request.URL)
+	})
+
+	t.Run("combine explicit setup with +setup and setup+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    +setup:
+      - request:
+          url: "https://api.example.com/pre-check"
+    setup:
+      - request:
+          url: "https://api.example.com/explicit-setup"
+    setup+:
+      - request:
+          url: "https://api.example.com/post-init"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +setup -> setup -> setup+
+		assert.Len(t, ep.Setup, 3)
+		assert.Equal(t, "https://api.example.com/pre-check", ep.Setup[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/explicit-setup", ep.Setup[1].Request.URL)
+		assert.Equal(t, "https://api.example.com/post-init", ep.Setup[2].Request.URL)
+	})
+
+	t.Run("prepend teardown with +teardown", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  teardown:
+    - request:
+        url: "https://api.example.com/cleanup"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    +teardown:
+      - request:
+          url: "https://api.example.com/pre-cleanup"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +teardown -> defaults
+		assert.Len(t, ep.Teardown, 2)
+		assert.Equal(t, "https://api.example.com/pre-cleanup", ep.Teardown[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/cleanup", ep.Teardown[1].Request.URL)
+	})
+
+	t.Run("append teardown with teardown+", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  teardown:
+    - request:
+        url: "https://api.example.com/cleanup"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    teardown+:
+      - request:
+          url: "https://api.example.com/post-cleanup"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: defaults -> teardown+
+		assert.Len(t, ep.Teardown, 2)
+		assert.Equal(t, "https://api.example.com/cleanup", ep.Teardown[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/post-cleanup", ep.Teardown[1].Request.URL)
+	})
+
+	t.Run("both +teardown and teardown+ together", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  teardown:
+    - request:
+        url: "https://api.example.com/cleanup"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    +teardown:
+      - request:
+          url: "https://api.example.com/pre-cleanup"
+    teardown+:
+      - request:
+          url: "https://api.example.com/post-cleanup"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Order: +teardown -> defaults -> teardown+
+		assert.Len(t, ep.Teardown, 3)
+		assert.Equal(t, "https://api.example.com/pre-cleanup", ep.Teardown[0].Request.URL)
+		assert.Equal(t, "https://api.example.com/cleanup", ep.Teardown[1].Request.URL)
+		assert.Equal(t, "https://api.example.com/post-cleanup", ep.Teardown[2].Request.URL)
+	})
+
+	t.Run("no modifier syntax - defaults work normally", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  setup:
+    - request:
+        url: "https://api.example.com/auth/refresh"
+  teardown:
+    - request:
+        url: "https://api.example.com/cleanup"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Defaults should be used
+		assert.Len(t, ep.Setup, 1)
+		assert.Equal(t, "https://api.example.com/auth/refresh", ep.Setup[0].Request.URL)
+		assert.Len(t, ep.Teardown, 1)
+		assert.Equal(t, "https://api.example.com/cleanup", ep.Teardown[0].Request.URL)
+	})
+
+	t.Run("explicit setup/teardown override defaults", func(t *testing.T) {
+		spec := `
+name: "Test API"
+
+defaults:
+  setup:
+    - request:
+        url: "https://api.example.com/auth/refresh"
+  teardown:
+    - request:
+        url: "https://api.example.com/cleanup"
+
+endpoints:
+  test_endpoint:
+    request:
+      url: "https://api.example.com/test"
+    response:
+      records:
+        jmespath: "data[]"
+    setup:
+      - request:
+          url: "https://api.example.com/custom-setup"
+    teardown:
+      - request:
+          url: "https://api.example.com/custom-teardown"
+`
+
+		s, err := LoadSpec(spec)
+		require.NoError(t, err)
+
+		ep := s.EndpointMap["test_endpoint"]
+
+		// Explicit setup/teardown should override defaults
+		assert.Len(t, ep.Setup, 1)
+		assert.Equal(t, "https://api.example.com/custom-setup", ep.Setup[0].Request.URL)
+		assert.Len(t, ep.Teardown, 1)
+		assert.Equal(t, "https://api.example.com/custom-teardown", ep.Teardown[0].Request.URL)
+	})
 }

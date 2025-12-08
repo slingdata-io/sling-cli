@@ -2448,6 +2448,33 @@ func TestEvaluatorFindMatches(t *testing.T) {
 			input:    `{format("{{nested}}")}`,
 			expected: []string{`format("{{nested}}")`},
 		},
+
+		// JSON object detection - should skip JSON braces and find template expressions inside
+		{
+			name:     "json_object_with_template_vars",
+			input:    `{"filters":{"from":"{state.from_date}"},"limit":{state.limit},"sort_order":"asc"}`,
+			expected: []string{"state.from_date", "state.limit"},
+		},
+		{
+			name:     "json_object_with_spaces",
+			input:    `{ "key": "{state.value}" }`,
+			expected: []string{"state.value"},
+		},
+		{
+			name:     "json_object_multiline",
+			input:    "{\n  \"filters\" : {\"from\":\"{state.from_date}\"},\n  \"limit\" : {state.limit}\n}",
+			expected: []string{"state.from_date", "state.limit"},
+		},
+		{
+			name:     "json_array_with_template_vars",
+			input:    `["{state.a}", "{state.b}"]`,
+			expected: []string{"state.a", "state.b"},
+		},
+		{
+			name:     "pure_template_expression_not_json",
+			input:    `{state.limit}`,
+			expected: []string{"state.limit"},
+		},
 	}
 
 	eval := NewEvaluator(nil)

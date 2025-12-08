@@ -55,6 +55,13 @@ func (conn *SnowflakeConn) Init() error {
 		)
 	}
 
+	if strings.EqualFold(conn.GetProp("authenticator"), "programmatic_access_token") &&
+		conn.GetProp("token") == "" {
+		return g.Error(
+			"did not provide property `token` with authenticator=programmatic_access_token. See https://docs.slingdata.io/connections/database-connections/snowflake",
+		)
+	}
+
 	if m := conn.GetProp("copy_method"); m != "" {
 		conn.CopyMethod = conn.GetProp("copy_method")
 	}

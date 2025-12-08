@@ -485,7 +485,7 @@ func (t *TaskExecution) runFileToDB() (err error) {
 		if t.Config.Source.UpdateKey == "." {
 			t.Config.Source.UpdateKey = slingLoadedAtColumn
 		}
-		t.SetProgress(g.F("getting checkpoint value (%s)", t.Config.Source.UpdateKey))
+		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey)
 
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
 			err = g.Error(err, "Could not get incremental value")
@@ -825,7 +825,7 @@ func (t *TaskExecution) runDbToDb() (err error) {
 		}
 		t.Context.Map.Set("incremental_value", t.Config.IncrementalValStr)
 	} else if t.isIncrementalWithUpdateKey() && !t.Config.IsIncrementalWithRange() {
-		t.SetProgress(g.F("getting checkpoint value (%s)", t.Config.Source.UpdateKey))
+		t.SetProgress("getting checkpoint value (%s)", t.Config.Source.UpdateKey)
 		if err = getIncrementalValueViaDB(t.Config, tgtConn, srcConn.GetType()); err != nil {
 			err = g.Error(err, "Could not get incremental value")
 			return err

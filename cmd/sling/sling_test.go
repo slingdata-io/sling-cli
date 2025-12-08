@@ -670,7 +670,11 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 			orderByStr = strings.Join(taskCfg.Source.PrimaryKey(), ", ")
 		}
 		sql := g.F("select * from %s order by %s", taskCfg.Target.Object, orderByStr)
-		conn, err := taskCfg.TgtConn.AsDatabase()
+		opt := connection.AsConnOptions{UseCache: false}
+		if g.In(taskCfg.TgtConn.Type, dbio.TypeDbDuckDb) {
+			opt.UseCache = true // cannot have dup duckdb connections
+		}
+		conn, err := taskCfg.TgtConn.AsDatabase(opt)
 		if !g.AssertNoError(t, err) {
 			return
 		}
@@ -871,14 +875,14 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					correctType = iop.DatetimeType // clickhouse uses datetime
 				}
 				if correctType == iop.BoolType {
-					correctType = iop.TextType // clickhouse doesn't have bool
+					correctType = iop.IntegerType // clickhouse bool is integer
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json
 				}
 			case srcType == dbio.TypeDbClickhouse && tgtType == dbio.TypeDbPostgres:
 				if correctType == iop.BoolType {
-					correctType = iop.TextType // clickhouse doesn't have bool
+					correctType = iop.IntegerType //  clickhouse bool is integer
 				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // clickhouse uses varchar(max) for json

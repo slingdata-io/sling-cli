@@ -60,10 +60,9 @@ var cliRunFlags = []g.Flag{
 		Description: "The pipeline config file to use (JSON or YAML).\n",
 	},
 	{
-		Name:        "config",
-		ShortName:   "c",
+		Name:        "directory",
 		Type:        "string",
-		Description: "The task config string or file to use (JSON or YAML). [deprecated]",
+		Description: "The directory path file to use to run nested replications/pipelines.\n",
 	},
 	{
 		Name:        "src-conn",
@@ -200,7 +199,15 @@ var cliRun = &g.CliSC{
 	Description:           "Execute a run",
 	AdditionalHelpPrepend: "\nSee more examples and configuration details at https://docs.slingdata.io/sling-cli/",
 	Flags:                 cliRunFlags,
-	ExecProcess:           processRun,
+	PosFlags: []g.Flag{
+		{
+			Name:        "path",
+			Type:        "string",
+			Description: "The path file or directory to use to run replications/pipelines.\n",
+			Required:    false,
+		},
+	},
+	ExecProcess: processRun,
 }
 
 var cliInteractive = &g.CliSC{

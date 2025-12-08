@@ -31,16 +31,18 @@ test-replication-defaults:
     cd cmd/sling && go test -v -run 'TestReplicationDefaults' && cd -
 
 # Test file connections
-test-connections-file:
+test-connections-file arg1="TestSuiteFile":
     #!/usr/bin/env bash
-    echo "TESTING file connections"
-    cd cmd/sling && go test -v -parallel 3 -run 'TestSuiteFile' && cd -
+    echo "TESTING file connections {{arg1}}"
+    export TESTS="{{arg1}}"
+    cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" && cd -
 
 # Test database connections
-test-connections-database:
+test-connections-database arg1="TestSuiteDatabase" arg2="":
     #!/usr/bin/env bash
-    echo "TESTING database connections"
-    cd cmd/sling && SKIP_CLICKHOUSE=TRUE go test -v -parallel 4 -timeout 35m -run TestSuiteDatabase && cd -
+    echo "TESTING database connections {{arg1}} {{arg2}}"
+    export TESTS="{{arg2}}"
+    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" && cd -
 
 # Test core (sling core functionality)
 test-core:
@@ -84,7 +86,7 @@ test-dbio-api:
     cd core/dbio/api && go test -v && cd -
 
 # Test all dbio
-test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-filesys test-dbio-api
+test-dbio: test-dbio-connection test-dbio-iop test-dbio-database test-dbio-api test-dbio-filesys
 
 # Test Python (default, without ARROW)
 test-python-main:

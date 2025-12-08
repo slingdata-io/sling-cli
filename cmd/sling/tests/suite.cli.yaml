@@ -1122,7 +1122,7 @@
   output_contains:
     - '=== Test 1: Simple logging routine ==='
     - 'Starting routine: test_logging'
-    - 'Parameter value: hello_from_pipeline'
+    - 'Parameter value: hello_from_pipeline from cmd/sling/tests/pipelines'
     - 'Environment variable: environment_test_value'
     - '=== Test 2: Data validation routine ==='
     - 'Validating data for table: public.test_routine_table'
@@ -1259,8 +1259,18 @@
     - '✓ Test 7 PASSED: Edge cases handled correctly'
     - 'All tests completed successfully!'
     
-# Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 - id: 144
+  name: Test Directory run
+  run: |
+    sling run cmd/sling/tests/replications/many/nested/p.command.yaml
+    sling run --directory cmd/sling/tests/replications/many/nested
+    sling run cmd/sling/tests/replications/many/
+  output_contains:
+    - 'p.log.yaml (pipeline)'
+    - 'r.swapi.yaml (replication)'
+    
+# Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
+- id: 145
   name: Test PostGIS (PostgreSQL) to GeoJSON as target
   run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geom_column_definition_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
   rows: 3
@@ -1271,7 +1281,7 @@
     - '"properties":{"id":1,"name":"Point 1"}'
 
 # Test PostGIS (PostgreSQL) to GeoJSON as target with default geometry column name "geometry"
-- id: 145
+- id: 146
   name: Test PostGIS (PostgreSQL) to GeoJSON as target
   run: 'sling run -d -r cmd/sling/tests/replications/r.69.postgres_geom_column_default_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
   rows: 3
