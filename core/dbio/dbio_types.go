@@ -632,6 +632,7 @@ const (
 	FileTypeXml       FileType = "xml"
 	FileTypeExcel     FileType = "xlsx"
 	FileTypeJson      FileType = "json"
+	FileTypeGeojson   FileType = "geojson"
 	FileTypeParquet   FileType = "parquet"
 	FileTypeArrow     FileType = "arrow"
 	FileTypeAvro      FileType = "avro"
@@ -651,6 +652,7 @@ var AllFileType = []struct {
 	{FileTypeXml, "FileTypeXml"},
 	{FileTypeExcel, "FileTypeExcel"},
 	{FileTypeJson, "FileTypeJson"},
+	{FileTypeGeojson, "FileTypeGeojson"},
 	{FileTypeParquet, "FileTypeParquet"},
 	{FileTypeAvro, "FileTypeAvro"},
 	{FileTypeArrow, "FileTypeArrow"},
@@ -676,7 +678,7 @@ func (ft FileType) Ext() string {
 
 func (ft FileType) IsJson() bool {
 	switch ft {
-	case FileTypeJson, FileTypeJsonLines:
+	case FileTypeJson, FileTypeJsonLines, FileTypeGeojson:
 		return true
 	}
 	return false

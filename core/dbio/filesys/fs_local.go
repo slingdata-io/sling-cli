@@ -167,7 +167,7 @@ func (fs *LocalFileSysClient) GetDatastream(uri string, cfg ...iop.FileStreamCon
 		}
 
 		switch Cfg.Format {
-		case dbio.FileTypeJson, dbio.FileTypeJsonLines:
+		case dbio.FileTypeJson, dbio.FileTypeJsonLines, dbio.FileTypeGeojson:
 			err = ds.ConsumeJsonReader(bufio.NewReader(file))
 		case dbio.FileTypeXml:
 			err = ds.ConsumeXmlReader(bufio.NewReader(file))
