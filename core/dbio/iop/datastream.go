@@ -337,12 +337,11 @@ func (ds *Datastream) writeBwCsvSafe(row []string) {
 		totalBytes++                  // Add 1 for delimiter/separator
 	}
 
-	if len(row) > 0 {
-		totalBytes-- // Remove last delimiter
-		totalBytes++ // Add newline character
+	// detect if a pointer-like value is being added (high byte 0xC0 on Linux x86_64)
+	// > 800 GB is suspicious, only add if below
+	if totalBytes < 800000000000 {
+		ds.AddBytes(totalBytes)
 	}
-
-	ds.AddBytes(totalBytes)
 }
 
 // Push return the fields of the Data
