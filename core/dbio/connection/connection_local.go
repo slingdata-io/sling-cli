@@ -394,3 +394,12 @@ func (ec *EnvFileConns) GetConnEntry(name string) (conn ConnEntry, ok bool) {
 	conn = entries.Get(name)
 	return conn, conn.Name != ""
 }
+
+func (ec *EnvFileConns) Keys() []string {
+	var keys []string
+	entries, _ := ec.ConnectionEntries()
+	for _, entry := range entries {
+		keys = append(keys, strings.ToLower(entry.Name))
+	}
+	return keys
+}
