@@ -674,7 +674,8 @@ func (a *AuthenticatorOAuth2) SaveToken(tok *oauth2.Token) error {
 
 // LoadToken loads the stored token.
 func (a *AuthenticatorOAuth2) LoadToken() (*oauth2.Token, error) {
-	tok := &oauth2.Token{}
+	// set default expiry, token renew needs it
+	tok := &oauth2.Token{Expiry: time.Now().Add(-1 * time.Hour)}
 
 	// attempt to load from secrets first, then from file
 	err := g.Unmarshal(g.Marshal(a.conn.State.Secrets), tok)
