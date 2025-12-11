@@ -80,15 +80,11 @@ var (
 	localConns        ConnEntries
 	localConnsTs      time.Time
 	localConnsExclude string
-	localConnsMux     sync.Mutex
 )
 
 type LocalConnsExclude string
 
 func GetLocalConns(options ...any) ConnEntries {
-	localConnsMux.Lock()
-	defer localConnsMux.Unlock()
-
 	defer func() { localConnsExclude = "" }() // clear if set
 	force := false
 
