@@ -1216,7 +1216,11 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (resul
 
 	eG := g.ErrorGroup{}
 	for _, q := range qs {
+		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
 		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
+				sql = sql + env.NoDebugKey
+			}
 			res, err := conn.Self().ExecContext(ctx, sql)
 			if err != nil {
 				eG.Capture(g.Error(err, "Error executing query"))
