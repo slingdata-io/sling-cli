@@ -247,6 +247,23 @@ func GetLocalConns(options ...any) ConnEntries {
 	}
 
 	connArr := lo.Values(connsMap)
+
+	// inject any additional API OAuth secrets
+	oauthMap := env.GetOAuthMap()
+	for i, entry := range connArr {
+		secrets := cast.ToStringMap(connArr[i].Connection.Data["secrets"])
+		specConnector := strings.ToLower(entry.Connection.DataS(true)["spec"])
+		if connData, ok := oauthMap[specConnector]; ok {
+			for k, v := range connData {
+				if _, ok := secrets[k]; !ok {
+					secrets[k] = v // write if not exist
+				}
+			}
+			connArr[i].Connection.Data["secrets"] = secrets // update secrets
+		}
+	}
+	oauthMap = nil
+
 	sort.Slice(connArr, func(i, j int) bool {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
 	})

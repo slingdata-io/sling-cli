@@ -34,6 +34,7 @@ var (
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
 	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
+	GetOAuthMap    = func() map[string]map[string]any { return map[string]map[string]any{} }
 	setupOtel      = func() {}
 )
 
