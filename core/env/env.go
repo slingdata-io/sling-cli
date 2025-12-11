@@ -33,7 +33,8 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
-	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
+	AgentID        = os.Getenv("SLING_AGENT_ID")
+	IsAgentMode    = AgentID != ""
 	GetOAuthMap    = func() map[string]map[string]any { return map[string]map[string]any{} }
 	setupOtel      = func() {}
 )
