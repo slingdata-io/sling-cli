@@ -246,23 +246,10 @@ func GetLocalConns(options ...any) ConnEntries {
 		connsMap[c.Name] = c
 	}
 
-	connArr := lo.Values(connsMap)
+	connArr := ConnEntries(lo.Values(connsMap))
 
 	// inject any additional API OAuth secrets
-	oauthMap := env.GetOAuthMap()
-	for i, entry := range connArr {
-		secrets := cast.ToStringMap(connArr[i].Connection.Data["secrets"])
-		specConnector := strings.ToLower(entry.Connection.DataS(true)["spec"])
-		if connData, ok := oauthMap[specConnector]; ok {
-			for k, v := range connData {
-				if _, ok := secrets[k]; !ok {
-					secrets[k] = v // write if not exist
-				}
-			}
-			connArr[i].Connection.Data["secrets"] = secrets // update secrets
-		}
-	}
-	oauthMap = nil
+	connArr = injectOAuthSecrets(connArr)
 
 	sort.Slice(connArr, func(i, j int) bool {
 		return cast.ToString(connArr[i].Name) < cast.ToString(connArr[j].Name)
@@ -277,6 +264,26 @@ func GetLocalConns(options ...any) ConnEntries {
 			iop.LocalConnections.Set(strings.ToLower(name), entry.Connection.Data)
 		}
 	}
+
+	return connArr
+}
+
+func injectOAuthSecrets(connArr ConnEntries) ConnEntries {
+
+	oauthMap := env.GetOAuthMap()
+	for i, entry := range connArr {
+		secrets := cast.ToStringMap(connArr[i].Connection.Data["secrets"])
+		specConnector := strings.ToLower(entry.Connection.DataS(true)["spec"])
+		if connData, ok := oauthMap[specConnector]; ok {
+			for k, v := range connData {
+				if _, ok := secrets[k]; !ok {
+					secrets[k] = v // write if not exist
+				}
+			}
+			connArr[i].Connection.Data["secrets"] = secrets // update secrets
+		}
+	}
+	oauthMap = nil
 
 	return connArr
 }
@@ -390,6 +397,7 @@ func (ec *EnvFileConns) ConnectionEntries() (entries ConnEntries, err error) {
 	}
 
 	entries = lo.Values(connsMap)
+	entries = injectOAuthSecrets(entries)
 	sort.Slice(entries, func(i, j int) bool {
 		return cast.ToString(entries[i].Name) < cast.ToString(entries[j].Name)
 	})
