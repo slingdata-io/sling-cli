@@ -331,7 +331,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	if keyCols := data.Columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
 		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
 		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
-		orderBy = strings.Join(colNames, ", ")
+		orderBy = g.F("(%s)", strings.Join(colNames, ", "))
 	}
 	ddl = g.R(ddl, "primary_key", primaryKey, "order_by", orderBy)
 
