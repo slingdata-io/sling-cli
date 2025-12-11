@@ -216,6 +216,7 @@ type APIStreamConfig struct {
 	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
 	Select      []string // select specific columns
+	PrimaryKey  []string
 	Limit       int
 	Metadata    iop.Metadata
 	Mode        string
