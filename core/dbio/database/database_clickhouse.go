@@ -384,6 +384,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 
 	// keep-alive interval to prevent idle connection timeout
 	keepAliveInterval := 60 * time.Second
+	lastPushTime := time.Time{}
 
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
@@ -462,13 +463,15 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 						// Execute keep-alive query within the transaction context
 						// This keeps the connection from being closed due to idle timeout
 						ds.Context.Lock()
-						_, keepAliveErr := conn.Tx().ExecContext(ds.Context.Ctx, "SELECT 1")
-						ds.Context.Unlock()
-						if keepAliveErr != nil {
-							g.Debug("keep-alive query failed: %v", keepAliveErr)
-						} else {
-							g.Trace("keep-alive query executed successfully")
+						if time.Since(lastPushTime).Seconds() > keepAliveInterval.Seconds() {
+							_, keepAliveErr := conn.Tx().ExecContext(ds.Context.Ctx, "SELECT 1")
+							if keepAliveErr != nil {
+								g.Debug("keep-alive query failed: %v", keepAliveErr)
+							} else {
+								g.Trace("keep-alive query executed successfully")
+							}
 						}
+						ds.Context.Unlock()
 					}
 				}
 			}()
@@ -550,6 +553,7 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 				// Do insert
 				ds.Context.Lock()
 				_, err := stmt.Exec(row...)
+				lastPushTime = time.Now()
 				ds.Context.Unlock()
 				if err != nil {
 					ds.Context.CaptureErr(g.Error(err, "could not COPY into table %s", tableFName))
