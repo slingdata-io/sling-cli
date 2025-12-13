@@ -83,29 +83,31 @@ func (rd *ReplicationConfig) JSON() string {
 // initRuntimeState initializes the runtime state
 // loads from state file if found
 func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
-	rd.state = &ReplicationState{
-		State:     map[string]map[string]any{},
-		Store:     map[string]any{},
-		Env:       rd.Env,
-		Runs:      map[string]*RunState{},
-		Execution: ExecutionState{},
-		Source:    ConnState{Name: rd.Source},
-		Target:    ConnState{Name: rd.Target},
-	}
+	if rd.state == nil {
+		rd.state = &ReplicationState{
+			State:     map[string]map[string]any{},
+			Store:     map[string]any{},
+			Env:       rd.Env,
+			Runs:      map[string]*RunState{},
+			Execution: ExecutionState{},
+			Source:    ConnState{Name: rd.Source},
+			Target:    ConnState{Name: rd.Target},
+		}
 
-	if env.IsThreadChild {
-		for _, streamName := range selectStreams {
-			stateFile := env.RuntimeFilePath(streamName)
-			bytes, err := os.ReadFile(stateFile)
-			if err != nil {
-				g.Warn("could not read runtime state file (%s): %s", streamName, err.Error())
-				continue
-			}
+		if env.IsThreadChild {
+			for _, streamName := range selectStreams {
+				stateFile := env.RuntimeFilePath(streamName)
+				bytes, err := os.ReadFile(stateFile)
+				if err != nil {
+					g.Warn("could not read runtime state file (%s): %s", streamName, err.Error())
+					continue
+				}
 
-			err = g.Unmarshal(string(bytes), &rd.state)
-			if err != nil {
-				g.Warn("could not unmarshal runtime state file (%s): %s", streamName, err.Error())
-				continue
+				err = g.Unmarshal(string(bytes), &rd.state)
+				if err != nil {
+					g.Warn("could not unmarshal runtime state file (%s): %s", streamName, err.Error())
+					continue
+				}
 			}
 		}
 	}
@@ -128,10 +130,12 @@ func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 	}
 }
 
+func (rd *ReplicationConfig) SetRuntimeState(state *ReplicationState) {
+	rd.state = state
+}
+
 func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
-	if rd.state == nil {
-		rd.initRuntimeState(nil)
-	}
+	rd.initRuntimeState(nil)
 
 	rd.state.Timestamp.Update()
 
