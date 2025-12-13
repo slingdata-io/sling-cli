@@ -417,23 +417,27 @@ func (ps *PipelineState) StepExecution() *PipelineStepExecution {
 	return nil
 }
 
+// SetPipelineStoreEnv syncs pipeline store to replication step run
 func SetPipelineStoreEnv(store map[string]any) {
 	payload, err := g.JSONMarshal(store)
-	if err == nil {
-		err = os.Setenv("SLING_PIPELINE_STORE", string(payload))
-		if err != nil {
-			g.Warn("could not set pipeline store payload into env: %s", err.Error())
-		}
-	} else {
-		g.Warn("could not marshal pipeline store payload before replication: %s", err.Error())
+	if err != nil {
+		g.Warn("could not marshal pipeline store payload: %s", err.Error())
+		return
+	}
+
+	filePath := env.RuntimeFilePath("_pipeline_store_")
+	err = os.WriteFile(filePath, payload, 0644)
+	if err != nil {
+		g.Warn("could not write pipeline store to file: %s", err.Error())
 	}
 }
 
+// GetPipelineStoreEnv syncs pipeline store from replication step run
 func GetPipelineStoreEnv() (store map[string]any) {
-
-	var err error
-	if storePayload := os.Getenv("SLING_PIPELINE_STORE"); storePayload != "" {
-		store, err = g.UnmarshalMap(storePayload)
+	filePath := env.RuntimeFilePath("_pipeline_store_")
+	payload, err := os.ReadFile(filePath)
+	if err == nil && len(payload) > 0 {
+		store, err = g.UnmarshalMap(string(payload))
 		if err != nil {
 			g.Warn("could not unmarshal pipeline store payload: %s", err.Error())
 		}
