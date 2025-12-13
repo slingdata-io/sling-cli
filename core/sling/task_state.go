@@ -180,7 +180,6 @@ type ObjectState struct {
 }
 
 func (t *TaskExecution) StateSet() {
-	StoreSet(t)
 
 	if t.Replication != nil && t.Config != nil && t.Context != nil {
 		t.Context.Lock()
@@ -310,4 +309,6 @@ func (t *TaskExecution) StateSet() {
 		// set log details
 		t.setLogDetails()
 	}
+
+	StoreSet(t)
 }
