@@ -272,31 +272,41 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 
 	// register queues being used by endpoint
 	{
+		// Regex pattern to match queue references like "queue.name"
+		queuePattern := regexp.MustCompile(`queue\.([a-zA-Z0-9_]+)`)
+		foundQueues := make(map[string]bool) // Track unique queues
+
+		// Extract queues from processor outputs
 		for _, processor := range endpoint.Response.Processors {
-			if strings.HasPrefix(processor.Output, "queue.") {
-				queueName := strings.TrimPrefix(processor.Output, "queue.")
-
-				if !g.In(queueName, ac.Spec.Queues...) {
-					return nil, g.Error("did not declare queue %s in queues list", queueName)
-				}
-
-				_, err = ac.RegisterQueue(queueName)
-				if err != nil {
-					return nil, g.Error(err, "could not register processor output queue: %s", queueName)
+			matches := queuePattern.FindAllStringSubmatch(processor.Output, -1)
+			for _, match := range matches {
+				if len(match) > 1 {
+					queueName := match[1]
+					foundQueues[queueName] = true
 				}
 			}
 		}
 
-		if overStr := cast.ToString(endpoint.Iterate.Over); strings.HasPrefix(overStr, "queue.") {
-			queueName := strings.TrimPrefix(overStr, "queue.")
+		// Extract queues from iterate over expression
+		if overStr := cast.ToString(endpoint.Iterate.Over); overStr != "" {
+			matches := queuePattern.FindAllStringSubmatch(overStr, -1)
+			for _, match := range matches {
+				if len(match) > 1 {
+					queueName := match[1]
+					foundQueues[queueName] = true
+				}
+			}
+		}
 
+		// Validate and register all found queues
+		for queueName := range foundQueues {
 			if !g.In(queueName, ac.Spec.Queues...) {
 				return nil, g.Error("did not declare queue %s in queues list", queueName)
 			}
 
 			_, err = ac.RegisterQueue(queueName)
 			if err != nil {
-				return nil, g.Error(err, "could not register iterate over queue: %s", queueName)
+				return nil, g.Error(err, "could not register queue: %s", queueName)
 			}
 		}
 	}
