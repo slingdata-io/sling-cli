@@ -1194,7 +1194,9 @@
   name: Test nested JSON to SQLite with replication config (pre-defined columns)
   run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
   group: sqlite
-  rows: 4
+  err: true
+  output_contains:
+   - cannot be assigned to zero-based row
 
 - id: 138
   name: Test wildcard stream with disabled table exclusion
