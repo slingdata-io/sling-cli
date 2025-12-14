@@ -298,8 +298,19 @@ func (pse *PipelineStepExecution) Execute(skip bool) (err error) {
 	}
 
 	// Execute the step
+retry:
 	stepErr := pse.Step.Execute()
-	_, err = pse.Step.ExecuteOnDone(stepErr)
+	onFail, err := pse.Step.ExecuteOnDone(stepErr)
+
+	if err != nil {
+		retried, _ := pse.Step.Context().Map.Get("retried")
+		if onFail == "retry" && !cast.ToBool(retried) {
+			pse.Step.Context().Map.Set("retried", true) // only retry once
+			g.Debug(`retrying step "%s" (type: %s)`, pse.Step.ID(), pse.Step.Type())
+			time.Sleep(5 * time.Second)
+			goto retry
+		}
+	}
 
 	pse.Context().Lock() // for map access
 	pse.Map = pse.Step.PayloadMap()
