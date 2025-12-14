@@ -43,13 +43,13 @@ func NewJSONStream(ds *Datastream, decoder decoderLike, flatten int, jmespath st
 	}
 	if flatten < 0 {
 		col := &Column{Position: 1, Name: "data", Type: JsonType, FileURI: cast.ToString(js.ds.Metadata.StreamURL.Value)}
-		js.ColumnMap[col.Name] = col
+		js.ColumnMap[strings.ToLower(col.Name)] = col
 		js.addColumn(*col)
 		js.ds.Inferred = true
 	} else {
-		// add existing columns
+		// add existing columns (use lowercase keys for case-insensitive matching)
 		for _, col := range ds.Columns {
-			js.ColumnMap[col.Name] = &col
+			js.ColumnMap[strings.ToLower(col.Name)] = &col
 		}
 	}
 
@@ -208,7 +208,7 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 				newRec[colName] = g.Marshal(arr)
 			}
 
-			col, ok := js.ColumnMap[colName]
+			col, ok := js.ColumnMap[strings.ToLower(colName)]
 			if !ok {
 				col = &Column{
 					Name:     colName,
@@ -218,7 +218,7 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 				}
 				colsToAdd = append(colsToAdd, *col)
 				row = append(row, nil)
-				js.ColumnMap[col.Name] = col
+				js.ColumnMap[strings.ToLower(col.Name)] = col
 			}
 			i := col.Position - 1
 			if i < len(row) {
@@ -233,11 +233,11 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 			js.addColumn(colsToAdd...)
 
 			// Rebuild ColumnMap to reflect current ds.Columns state after column casing
-			// This is necessary because AddColumns may transform column names via casing
-			// and recalculate positions via Merge (which uses case-insensitive matching)
+			// Use lowercase keys for case-insensitive matching, since AddColumns may
+			// transform column names via casing and Merge uses case-insensitive matching
 			js.ColumnMap = make(map[string]*Column, len(js.ds.Columns))
 			for i := range js.ds.Columns {
-				js.ColumnMap[js.ds.Columns[i].Name] = &js.ds.Columns[i]
+				js.ColumnMap[strings.ToLower(js.ds.Columns[i].Name)] = &js.ds.Columns[i]
 			}
 		}
 
