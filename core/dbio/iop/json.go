@@ -231,6 +231,14 @@ func (js *jsonStream) parseRecords(records []map[string]any) {
 
 		if len(colsToAdd) > 0 {
 			js.addColumn(colsToAdd...)
+
+			// Rebuild ColumnMap to reflect current ds.Columns state after column casing
+			// This is necessary because AddColumns may transform column names via casing
+			// and recalculate positions via Merge (which uses case-insensitive matching)
+			js.ColumnMap = make(map[string]*Column, len(js.ds.Columns))
+			for i := range js.ds.Columns {
+				js.ColumnMap[js.ds.Columns[i].Name] = &js.ds.Columns[i]
+			}
 		}
 
 		js.buffer <- row
