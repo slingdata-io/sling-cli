@@ -1268,3 +1268,12 @@
   output_contains:
     - 'p.log.yaml (pipeline)'
     - 'r.swapi.yaml (replication)'
+
+- id: 145
+  name: Test thread state sync (SLING_THREADS)
+  run: sling run -r cmd/sling/tests/replications/r.76.thread_state_sync.yaml -d
+  output_contains:
+    - 'Stream 1: total_rows=5, status=success'
+    - 'Stream 2: total_rows=5, status=success'
+    - 'Stream 3: total_rows=5, status=success'
+    - 'Stream 4: total_rows=5, status=success'
