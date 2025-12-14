@@ -133,7 +133,7 @@ func TestMain(m *testing.M) {
 			env.InitLogger()
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
-			os.Setenv("TESTS", arg)
+			testContext.Map.Set("TESTS", arg)
 		}
 	}
 
@@ -432,7 +432,8 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 	testNumbers := []int{}
 	testNames := []string{}
-	tns := os.Getenv("TESTS")
+	tnsV, _ := testContext.Map.Get("TESTS")
+	tns := cast.ToString(tnsV)
 	if tns == "" && len(testSelect) > 0 {
 		tns = testSelect[0]
 	}
