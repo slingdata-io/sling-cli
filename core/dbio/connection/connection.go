@@ -967,7 +967,7 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
 			template = template + "&schema={schema}"
 		}
-	case dbio.TypeDbArrowFlight:
+	case dbio.TypeDbArrowDBC:
 		setIfMissing("username", c.Data["user"])
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

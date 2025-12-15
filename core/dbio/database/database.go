@@ -384,7 +384,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
-	case dbio.TypeDbArrowFlight:
+	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
 	default:
 		driverName = dbType.String()

@@ -13,7 +13,7 @@ type ArrowFlightConn struct {
 // Init initiates the connection
 func (conn *ArrowFlightConn) Init() error {
 	conn.BaseConn.URL = conn.URL
-	conn.BaseConn.Type = dbio.TypeDbExasol
+	conn.BaseConn.Type = dbio.TypeDbArrowDBC
 	conn.BaseConn.defaultPort = 12345
 
 	// exasol driver is auto-registered on import
