@@ -1,5 +1,5 @@
 
-<p align="center"><img src="logo-with-text.png" alt="drawing" width="250"/></p>
+<p align="center"><img src="logo-brand.png" alt="drawing" width="250"/></p>
 
 <p align="center" style="margin-bottom: 0px">Slings from a data source to a data target.</p>
 <p align="center">See <a href="https://docs.slingdata.io/">docs.slingdata.io</a> for more details.</p>
