@@ -1277,3 +1277,27 @@
     - 'Stream 2: total_rows=5, status=success'
     - 'Stream 3: total_rows=5, status=success'
     - 'Stream 4: total_rows=5, status=success'
+
+# Requires ADBC_POSTGRES connection with PostgreSQL ADBC driver installed
+# Install driver: dbc install postgresql
+- id: 146
+  name: Test ADBC PostgreSQL connection
+  run: sling run -r cmd/sling/tests/replications/r.77.adbc_postgres.yaml -d
+  output_contains:
+    - 'Testing ADBC PostgreSQL connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC test completed successfully'
+    - 'wrote 1 rows'
+
+# Requires ADBC_SQLSERVER connection with SQL Server ADBC driver installed
+# Install driver: dbc install mssql
+- id: 147
+  name: Test ADBC SQL Server connection
+  run: sling run -r cmd/sling/tests/replications/r.78.adbc_sqlserver.yaml -d
+  output_contains:
+    - 'Testing ADBC SQL Server connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC SQL Server test completed successfully'
+    - 'wrote 1 rows'

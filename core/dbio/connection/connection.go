@@ -968,15 +968,9 @@ func (c *Connection) setURL() (err error) {
 			template = template + "&schema={schema}"
 		}
 	case dbio.TypeDbArrowDBC:
-		setIfMissing("username", c.Data["user"])
-		setIfMissing("password", "")
-		setIfMissing("port", c.Type.DefPort())
-		setIfMissing("schema", "")
-
-		template = "flightsql://{username}:{password}@{host}:{port}/?"
-		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
-			template = template + "&schema={schema}"
-		}
+		// ADBC connections use a driver path and driver-specific properties
+		// Set a simple URL scheme for connection identification
+		template = "adbc://"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

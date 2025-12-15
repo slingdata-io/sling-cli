@@ -316,8 +316,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
-	} else if strings.HasPrefix(URL, "flightsql:") {
-		conn = &AzureTableConn{URL: URL}
+	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
+		conn = &ArrowDBConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
