@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 ubuntu:focal
+FROM --platform=linux/arm64 ubuntu:jammy
 
 RUN groupadd -r sling && useradd -r -g sling sling
 
