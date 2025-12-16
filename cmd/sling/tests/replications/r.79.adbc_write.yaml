@@ -1,0 +1,65 @@
+# ADBC Write Test
+
+source: LOCAL
+target: '{TARGET}'
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: log
+      message: "Testing ADBC write"
+
+    # Create test CSV data
+    - type: write
+      content: |
+        id,name,value
+        1,alice,100.5
+        2,bob,200.75
+        3,charlie,300.25
+      to: file:///tmp/adbc_write_test.csv
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Query the data back to verify
+    - type: query
+      connection: '{target.name}'
+      query: select * from {SCHEMA}.adbc_write_test order by id
+      into: result
+
+    - type: log
+      message: "Query result: {store.result}"
+
+    # Verify first row data (also verifies data was inserted)
+    - type: check
+      check: int_parse(store.result[0].id) == 1
+      message: "Expected first row id to be 1"
+
+    - type: check
+      check: store.result[0].name == "alice"
+      message: "Expected first row name to be alice"
+
+    - type: check
+      check: int_parse(store.result[2].id) == 3
+      message: "Expected third row id to be 3 (verifies 3 rows exist)"
+
+    # Cleanup
+    - type: query
+      connection: '{target.name}'
+      query: drop table {SCHEMA}.adbc_write_test
+
+    - type: log
+      message: "ADBC write test completed successfully"
+
+streams:
+  file:///tmp/adbc_write_test.csv:
+    object: '{SCHEMA}.adbc_write_test'
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

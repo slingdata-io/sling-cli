@@ -1301,3 +1301,13 @@
     - '1,test'
     - 'ADBC SQL Server test completed successfully'
     - 'wrote 1 rows'
+
+# Tests write mode with BulkImportFlow using adbc.IngestStream
+- id: 148
+  name: Test ADBC write
+  run: |
+    TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'inserted 3 rows'

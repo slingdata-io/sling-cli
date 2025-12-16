@@ -1,45 +1,4 @@
-# ADBC (Arrow Database Connectivity) Template
-# This is a generic template for ADBC connections
-# The actual SQL syntax depends on the underlying database driver
-
-core:
-  drop_table: drop table if exists {table}
-  drop_view: drop view if exists {view}
-  create_table: create table if not exists {table} ({col_types})
-  create_index: create index if not exists {index} on {table} ({cols})
-  insert: insert into {table} ({cols}) values ({values})
-  sample: select {fields} from {table} limit {n}
-  rename_table: ALTER TABLE {table} RENAME TO {new_table}
-
-metadata:
-  current_database: select current_database()
-  databases: select datname as name from pg_database where datistemplate = false
-  schemas: |
-    select schema_name
-    from information_schema.schemata
-    order by schema_name
-  tables: |
-    select table_name
-    from information_schema.tables
-    where table_schema = '{schema}'
-    order by table_name
-  columns: |
-    select column_name, data_type
-    from information_schema.columns
-    where table_schema = '{schema}' and table_name = '{table}'
-    order by ordinal_position
-  schemata: |
-    select
-      table_schema as schema_name,
-      table_name,
-      column_name,
-      data_type,
-      coalesce(numeric_precision, 0) as precision,
-      coalesce(numeric_scale, 0) as scale,
-      ordinal_position as position
-    from information_schema.columns
-    where table_schema = '{schema}'
-    order by table_schema, table_name, ordinal_position
+core: {}
 
 variable:
   tmp_folder: /tmp
@@ -50,6 +9,7 @@ variable:
   bool_as: 'bool'
   quote_char: '"'
 
+# General type mappings - these are used when driver-specific mappings aren't available
 general_type_map:
   bool: bool
   int: integer
@@ -66,6 +26,7 @@ general_type_map:
   uuid: uuid
   decimal: numeric
 
+# Native type mappings - map database-specific types to general types
 native_type_map:
   bool: bool
   boolean: bool

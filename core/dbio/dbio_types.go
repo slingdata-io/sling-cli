@@ -389,10 +389,15 @@ func (template Template) Value(path string) (value string) {
 var typeTemplate = map[Type]Template{}
 var typeTemplateMutex sync.RWMutex
 
-func (t Type) Template() (template Template, err error) {
+func (t Type) Template(useBase ...bool) (template Template, err error) {
+	withBase := true
+	if len(useBase) > 0 {
+		withBase = useBase[0]
+	}
+
 	// Check if template exists in cache (with read lock)
 	typeTemplateMutex.RLock()
-	if val, ok := typeTemplate[t]; ok {
+	if val, ok := typeTemplate[t]; ok && withBase {
 		typeTemplateMutex.RUnlock()
 		return val, nil
 	}
@@ -411,13 +416,15 @@ func (t Type) Template() (template Template, err error) {
 
 	connTemplate := Template{}
 
-	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
-	if err != nil {
-		return template, g.Error(err, "could not read base.yaml")
-	}
+	if withBase {
+		baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
+		if err != nil {
+			return template, g.Error(err, "could not read base.yaml")
+		}
 
-	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
-		return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
+			return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		}
 	}
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
@@ -530,10 +537,12 @@ func (t Type) Template() (template Template, err error) {
 		template.GeneralTypeMap[gt] = rec[t.String()]
 	}
 
-	// cache with write lock
-	typeTemplateMutex.Lock()
-	typeTemplate[t] = template
-	typeTemplateMutex.Unlock()
+	// cache with write lock if has base
+	if withBase {
+		typeTemplateMutex.Lock()
+		typeTemplate[t] = template
+		typeTemplateMutex.Unlock()
+	}
 
 	return template, nil
 }

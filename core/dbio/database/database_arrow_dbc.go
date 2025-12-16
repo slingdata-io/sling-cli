@@ -12,6 +12,7 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc/drivermgr"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
@@ -21,9 +22,54 @@ import (
 // ArrowDBConn is an Arrow FlightSQL connection
 type ArrowDBConn struct {
 	BaseConn
-	URL  string
-	db   adbc.Database
-	Conn adbc.Connection
+	URL        string
+	db         adbc.Database
+	Conn       adbc.Connection
+	driverType dbio.Type // Underlying database type for templates
+}
+
+// getDriverType maps ADBC driver names to corresponding database types
+// This allows using driver-specific SQL templates
+func getDriverType(driverName string) dbio.Type {
+	mapping := map[string]dbio.Type{
+		"postgresql": dbio.TypeDbPostgres,
+		"postgres":   dbio.TypeDbPostgres,
+		"mssql":      dbio.TypeDbSQLServer,
+		"sqlserver":  dbio.TypeDbSQLServer,
+		"snowflake":  dbio.TypeDbSnowflake,
+		"sqlite":     dbio.TypeDbSQLite,
+		"duckdb":     dbio.TypeDbDuckDb,
+		"bigquery":   dbio.TypeDbBigQuery,
+	}
+	if t, ok := mapping[strings.ToLower(driverName)]; ok {
+		return t
+	}
+	return dbio.TypeDbArrowDBC // Fallback to ADBC template
+}
+
+// getArrowStringValue extracts a string value from an Arrow array at the given index.
+// It handles String, LargeString, Binary, and LargeBinary types, and creates a copy
+// of the string to avoid referencing Arrow buffer memory which may be freed.
+func getArrowStringValue(arr arrow.Array, idx int) string {
+	if arr.IsNull(idx) {
+		return ""
+	}
+	switch a := arr.(type) {
+	case *array.String:
+		return strings.Clone(a.Value(idx))
+	case *array.LargeString:
+		return strings.Clone(a.Value(idx))
+	case *array.Binary:
+		return string(a.Value(idx))
+	case *array.LargeBinary:
+		return string(a.Value(idx))
+	default:
+		val := iop.GetValueFromArrowArray(arr, idx)
+		if val != nil {
+			return cast.ToString(val)
+		}
+		return ""
+	}
 }
 
 // Init initiates the connection
@@ -94,7 +140,17 @@ func (conn *ArrowDBConn) Init() error {
 	instance := Connection(conn)
 	conn.BaseConn.instance = &instance
 
-	return conn.BaseConn.Init()
+	// Determine driver type for template delegation
+	driverName := conn.GetProp("driver_name")
+	conn.driverType = getDriverType(driverName)
+
+	if err := conn.BaseConn.Init(); err != nil {
+		return err
+	}
+
+	// Reload templates with driver-specific overrides
+	// (BaseConn.Init() loaded the default ADBC template)
+	return conn.LoadTemplates()
 }
 
 // resolveDriverPath attempts to find the ADBC driver from dbc CLI installation
@@ -169,6 +225,13 @@ func (conn *ArrowDBConn) resolveDriverPath() string {
 
 // Connect opens the ADBC connection
 func (conn *ArrowDBConn) Connect(timeOut ...int) (err error) {
+	// Re-initialize database if it was closed
+	if conn.db == nil {
+		if err := conn.Init(); err != nil {
+			return g.Error(err, "could not re-initialize ADBC database")
+		}
+	}
+
 	conn.Conn, err = conn.db.Open(conn.context.Ctx)
 	if err != nil {
 		return g.Error(err, "could not connect to ADBC database")
@@ -190,10 +253,12 @@ func (conn *ArrowDBConn) Close() error {
 
 	if conn.Conn != nil {
 		connErr = conn.Conn.Close()
+		conn.Conn = nil
 	}
 
 	if conn.db != nil {
 		dbErr = conn.db.Close()
+		conn.db = nil
 	}
 
 	if !cast.ToBool(conn.GetProp("silent")) && cast.ToBool(conn.GetProp("connected")) {
@@ -207,6 +272,115 @@ func (conn *ArrowDBConn) Close() error {
 	}
 	if dbErr != nil {
 		return g.Error(dbErr, "error closing ADBC database")
+	}
+
+	return nil
+}
+
+// GenerateDDL generates a DDL based on a dataset
+func (conn *ArrowDBConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
+
+	var c Connection
+	switch conn.driverType {
+	case dbio.TypeDbPostgres:
+		c, err = NewConn("postgres://")
+	case dbio.TypeDbSQLServer:
+		c, err = NewConn("sqlserver://")
+	case dbio.TypeDbSnowflake:
+		c, err = NewConn("snowflake://")
+	case dbio.TypeDbSQLite:
+		c, err = NewConn("sqlite://")
+	case dbio.TypeDbDuckDb:
+		c, err = NewConn("duckdb://")
+	case dbio.TypeDbBigQuery:
+		c, err = NewConn("bigquery://")
+	}
+
+	if err != nil {
+		return "", g.Error(err, "could not init conn for generating DDL")
+	}
+
+	return c.GenerateDDL(table, data, temporary)
+}
+
+// GetTemplateValue returns the template value for the given path
+// It first checks the driver-specific template, then falls back to ADBC template
+func (conn *ArrowDBConn) GetTemplateValue(path string) string {
+	// First try driver-specific template
+	if conn.driverType != "" && conn.driverType != dbio.TypeDbArrowDBC {
+		value := conn.driverType.GetTemplateValue(path)
+		if value != "" {
+			return value
+		}
+	}
+	// Fall back to ADBC template
+	return conn.Type.GetTemplateValue(path)
+}
+
+// GetNativeType returns the native column type from generic
+func (conn *ArrowDBConn) GetNativeType(col iop.Column) (nativeType string, err error) {
+	var ct iop.ColumnTyping
+	if val := conn.GetProp("column_typing"); val != "" {
+		g.Unmarshal(val, &ct)
+	}
+	return col.GetNativeType(conn.driverType, ct)
+}
+
+// LoadTemplates loads the appropriate yaml template
+// For ADBC, it merges the driver-specific template with the ADBC template
+// Driver template is base, ADBC template overrides for ADBC-specific behavior
+func (conn *ArrowDBConn) LoadTemplates() error {
+	// Load ADBC template without base
+	adbcTemplate, err := conn.Type.Template(false)
+	if err != nil {
+		return g.Error(err, "could not load ADBC template")
+	}
+
+	// If we have a driver type, start with driver template as base
+	if conn.driverType != "" && conn.driverType != dbio.TypeDbArrowDBC {
+		driverTemplate, err := conn.driverType.Template()
+		if err != nil {
+			g.Warn("could not load driver template for %s: %v", conn.driverType, err)
+			conn.template = adbcTemplate
+			return nil
+		}
+
+		// Start with driver template, then overlay ADBC-specific values
+		// This allows driver SQL syntax to be used, with ADBC overrides where needed
+		for k, v := range adbcTemplate.Core {
+			driverTemplate.Core[k] = v
+		}
+		for k, v := range adbcTemplate.Metadata {
+			driverTemplate.Metadata[k] = v
+		}
+		for k, v := range adbcTemplate.Analysis {
+			driverTemplate.Analysis[k] = v
+		}
+		for k, v := range adbcTemplate.Function {
+			driverTemplate.Function[k] = v
+		}
+		// for k, v := range adbcTemplate.GeneralTypeMap {
+		// 	driverTemplate.GeneralTypeMap[k] = v
+		// }
+		// for k, v := range adbcTemplate.NativeTypeMap {
+		// 	driverTemplate.NativeTypeMap[k] = v
+		// }
+		for k, v := range adbcTemplate.NativeStatsMap {
+			driverTemplate.NativeStatsMap[k] = v
+		}
+		for k, v := range adbcTemplate.Variable {
+			driverTemplate.Variable[k] = v
+		}
+
+		conn.template = driverTemplate
+
+		return nil
+	}
+
+	// load with base
+	conn.template, err = conn.Type.Template(true)
+	if err != nil {
+		return g.Error(err, "could not load ADBC template")
 	}
 
 	return nil
@@ -473,8 +647,8 @@ func (conn *ArrowDBConn) GetDatabases() (data iop.Dataset, err error) {
 		if record.NumCols() > 0 {
 			catalogCol := record.Column(0)
 			for i := 0; i < int(record.NumRows()); i++ {
-				catalogName := iop.GetValueFromArrowArray(catalogCol, i)
-				if catalogName != nil {
+				catalogName := getArrowStringValue(catalogCol, i)
+				if catalogName != "" {
 					data.Append([]interface{}{catalogName})
 				}
 			}
@@ -549,9 +723,9 @@ func (conn *ArrowDBConn) extractSchemasFromRecord(record arrow.Record) []string 
 		if structArray.NumField() > 0 {
 			schemaNameField := structArray.Field(0)
 			for j := int(start); j < int(end); j++ {
-				schemaName := iop.GetValueFromArrowArray(schemaNameField, j)
-				if schemaName != nil {
-					schemas = append(schemas, cast.ToString(schemaName))
+				schemaName := getArrowStringValue(schemaNameField, j)
+				if schemaName != "" {
+					schemas = append(schemas, schemaName)
 				}
 			}
 		}
@@ -646,8 +820,8 @@ func (conn *ArrowDBConn) parseGetObjectsRecord(record arrow.Record, database str
 
 	for catalogIdx := 0; catalogIdx < int(record.NumRows()); catalogIdx++ {
 		catalogName := ""
-		if val := iop.GetValueFromArrowArray(catalogNameCol, catalogIdx); val != nil {
-			catalogName = cast.ToString(val)
+		if catalogNameCol != nil {
+			catalogName = getArrowStringValue(catalogNameCol, catalogIdx)
 		}
 
 		if listCol.IsNull(catalogIdx) {
@@ -665,10 +839,7 @@ func (conn *ArrowDBConn) parseGetObjectsRecord(record arrow.Record, database str
 		for schemaIdx := int(start); schemaIdx < int(end); schemaIdx++ {
 			schemaName := ""
 			if structArray.NumField() > 0 {
-				schemaNameField := structArray.Field(0)
-				if val := iop.GetValueFromArrowArray(schemaNameField, schemaIdx); val != nil {
-					schemaName = cast.ToString(val)
-				}
+				schemaName = getArrowStringValue(structArray.Field(0), schemaIdx)
 			}
 
 			if schemaName == "" {
@@ -719,14 +890,10 @@ func (conn *ArrowDBConn) parseTablesFromField(tablesField arrow.Array, schemaIdx
 		tableType := ""
 
 		if tablesStruct.NumField() > 0 {
-			if val := iop.GetValueFromArrowArray(tablesStruct.Field(0), tableIdx); val != nil {
-				tableName = cast.ToString(val)
-			}
+			tableName = getArrowStringValue(tablesStruct.Field(0), tableIdx)
 		}
 		if tablesStruct.NumField() > 1 {
-			if val := iop.GetValueFromArrowArray(tablesStruct.Field(1), tableIdx); val != nil {
-				tableType = cast.ToString(val)
-			}
+			tableType = getArrowStringValue(tablesStruct.Field(1), tableIdx)
 		}
 
 		if tableName == "" {
@@ -781,9 +948,7 @@ func (conn *ArrowDBConn) parseColumnsFromField(columnsField arrow.Array, tableId
 
 		// column_name
 		if columnsStruct.NumField() > 0 {
-			if val := iop.GetValueFromArrowArray(columnsStruct.Field(0), colIdx); val != nil {
-				columnName = cast.ToString(val)
-			}
+			columnName = getArrowStringValue(columnsStruct.Field(0), colIdx)
 		}
 		// ordinal_position
 		if columnsStruct.NumField() > 1 {
@@ -793,9 +958,7 @@ func (conn *ArrowDBConn) parseColumnsFromField(columnsField arrow.Array, tableId
 		}
 		// xdbc_type_name (data type) - typically at index 5 or via another field
 		if columnsStruct.NumField() > 5 {
-			if val := iop.GetValueFromArrowArray(columnsStruct.Field(5), colIdx); val != nil {
-				dataType = cast.ToString(val)
-			}
+			dataType = getArrowStringValue(columnsStruct.Field(5), colIdx)
 		}
 
 		if columnName == "" {
@@ -812,4 +975,149 @@ func (conn *ArrowDBConn) parseColumnsFromField(columnsField arrow.Array, tableId
 
 		table.Columns = append(table.Columns, col)
 	}
+}
+
+// BulkImportFlow imports data from a dataflow using ADBC bulk ingestion
+func (conn *ArrowDBConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count uint64, err error) {
+	defer df.CleanUp()
+
+	if conn.Conn == nil {
+		return 0, g.Error("ADBC connection is not open")
+	}
+
+	for ds := range df.StreamCh {
+		if err = ds.WaitReady(); err != nil {
+			return count, g.Error(err, "error waiting for datastream")
+		}
+
+		cnt, err := conn.BulkImportStream(tableFName, ds)
+		if err != nil {
+			return count, g.Error(err, "error importing stream")
+		}
+		count += cnt
+	}
+
+	if err = df.Err(); err != nil {
+		return count, g.Error(err, "error in dataflow")
+	}
+
+	return count, nil
+}
+
+// BulkImportStream imports data from a datastream using ADBC bulk ingestion
+func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	if conn.Conn == nil {
+		return 0, g.Error("ADBC connection is not open")
+	}
+
+	// Parse table name to get schema
+	table, _ := ParseTableName(tableFName, conn.Type)
+
+	// Get ingest mode from property, default to append
+	ingestMode := conn.getIngestMode()
+
+	g.Trace("arrow schema => %s", iop.ColumnsToArrowSchema(ds.Columns))
+
+	for batch := range ds.BatchChan {
+		if batch.ColumnsChanged() || batch.IsFirst() {
+			// Columns changed, will create new schema
+			g.Debug("ADBC BulkImportStream: processing batch with %d rows, columns: %v", len(batch.Rows), batch.Columns.Names())
+		}
+
+		// Convert batch to Arrow record reader
+		reader, err := conn.batchToRecordReader(batch)
+		if err != nil {
+			return count, g.Error(err, "error converting batch to Arrow")
+		}
+
+		// Ingest using ADBC
+		opts := adbc.IngestStreamOptions{}
+		if table.Schema != "" {
+			opts.DBSchema = table.Schema
+		}
+
+		ingested, err := adbc.IngestStream(
+			conn.Context().Ctx,
+			conn.Conn,
+			reader,
+			table.Name,
+			ingestMode,
+			opts,
+		)
+		reader.Release()
+
+		if err != nil {
+			return count, g.Error(err, "error ingesting batch via ADBC")
+		}
+
+		count += uint64(ingested)
+	}
+
+	return count, nil
+}
+
+// getIngestMode returns the ADBC ingest mode based on the ingest_mode property
+// Valid values: create, append, replace, create_append
+// Default: append
+func (conn *ArrowDBConn) getIngestMode() string {
+	mode := strings.ToLower(conn.GetProp("ingest_mode"))
+	switch mode {
+	case "create":
+		return adbc.OptionValueIngestModeCreate
+	case "replace":
+		return adbc.OptionValueIngestModeReplace
+	case "create_append":
+		return adbc.OptionValueIngestModeCreateAppend
+	case "append", "":
+		return adbc.OptionValueIngestModeAppend
+	default:
+		g.Warn("Unknown ingest_mode '%s', using 'append'", mode)
+		return adbc.OptionValueIngestModeAppend
+	}
+}
+
+// batchToRecordReader converts an iop.Batch to an Arrow RecordReader
+// It consumes all rows from the batch channel
+func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch) (array.RecordReader, error) {
+	// Create Arrow schema from columns
+	schema := iop.ColumnsToArrowSchema(batch.Columns)
+
+	// Create memory allocator
+	mem := memory.NewGoAllocator()
+
+	// Create record builder
+	builder := array.NewRecordBuilder(mem, schema)
+
+	// Consume all rows from the batch channel and append to builder
+	rowCount := 0
+	for row := range batch.Rows {
+		for colIdx, col := range batch.Columns {
+			var val interface{}
+			if colIdx < len(row) {
+				val = row[colIdx]
+			}
+			iop.AppendToBuilder(builder.Field(colIdx), &col, val)
+		}
+		rowCount++
+	}
+
+	// Build the record
+	record := builder.NewRecord()
+	builder.Release()
+
+	if rowCount == 0 {
+		// Return empty reader with schema
+		record.Release()
+		return array.NewRecordReader(schema, []arrow.Record{})
+	}
+
+	// Create a RecordReader from the single record
+	reader, err := array.NewRecordReader(schema, []arrow.Record{record})
+	if err != nil {
+		record.Release()
+		return nil, g.Error(err, "error creating record reader")
+	}
+
+	// Note: record will be released when reader is released
+	return reader, nil
 }
