@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/xml"
 	"io"
 	"os"
@@ -29,6 +30,9 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
+	"github.com/twpayne/go-geom/encoding/ewkb"
+	"github.com/twpayne/go-geom/encoding/geojson"
+	"github.com/twpayne/go-geom/encoding/wkb"
 )
 
 var (
@@ -2386,6 +2390,188 @@ func (ds *Datastream) NewJsonReaderChnl(sc StreamConfig) (readerChn chan *io.Pip
 	}()
 
 	return readerChn
+}
+
+// NewGeojsonReaderChnl creates a GeoJSON FeatureCollection reader from datastream rows.
+// Requires a column with type "geometry" to be specified in the columns section. If not provided, it will fallback to "geometry".
+// The geometry column becomes the Feature geometry, all other columns become Feature properties.
+func (ds *Datastream) NewGeojsonReaderChnl(sc StreamConfig) (readerChn chan *io.PipeReader) {
+	readerChn = make(chan *io.PipeReader, 100)
+
+	// Find the geometry column name from config columns if provided
+	var geometryColName string
+	for _, configCol := range ds.Columns {
+		if configCol.Type == GeometryType {
+			geometryColName = configCol.Name
+			break
+		}
+	}
+
+	// Fallback to default column name"geometry" if not provided in config
+	if geometryColName == "" {
+		geometryColName = "geometry"
+	}
+
+	// Get the geometry column by name to get its position
+	geometryCol := ds.Columns.GetColumn(geometryColName)
+	if geometryCol == nil {
+		ds.Context.CaptureErr(g.Error("geometry column '%s' not found in query result", geometryColName))
+		return ds.NewJsonReaderChnl(sc)
+	}
+
+	geometryColIdx := geometryCol.Position - 1
+	if geometryColIdx < 0 || geometryColIdx >= len(ds.Columns) {
+		ds.Context.CaptureErr(g.Error("geometry column '%s' has invalid position", geometryColName))
+		return ds.NewJsonReaderChnl(sc)
+	}
+
+	g.Debug("NewGeojsonReaderChnl: geometry column: %s (index: %d)", geometryColName, geometryColIdx)
+	return ds.newGeojsonFromRowsReaderChnl(sc, geometryColIdx)
+}
+
+// convertGeometryToGeoJSON converts PostGIS geometry to GeoJSON.
+// PostGIS returns geometry as hex-encoded EWKB string or []byte. Unmarshals as EWKB (with SRID),
+// falls back to standard WKB if needed, then marshals to GeoJSON.
+// Returns json.RawMessage to avoid double marshaling.
+func convertGeometryToGeoJSON(val any) any {
+	if val == nil {
+		return nil
+	}
+
+	var bVal []byte
+	switch v := val.(type) {
+	case []byte:
+		bVal = v
+	case string:
+		// PostGIS returns hex-encoded WKB (may have "\x" or "0x" prefix)
+		hexStr := strings.TrimPrefix(strings.TrimPrefix(v, "\\x"), "0x")
+		var err error
+		bVal, err = hex.DecodeString(hexStr)
+		if err != nil {
+			g.Debug("convertGeometryToGeoJSON: failed to decode hex string: %v", err)
+			return nil
+		}
+	default:
+		g.Debug("convertGeometryToGeoJSON: geometry value is not []byte or string, type is %T", val)
+		return nil
+	}
+
+	if len(bVal) == 0 {
+		g.Debug("convertGeometryToGeoJSON: geometry value is empty")
+		return nil
+	}
+
+	// Try EWKB first (PostGIS uses EWKB with SRID), fall back to standard WKB
+	geom, err := ewkb.Unmarshal(bVal)
+	if err != nil {
+		g.Debug("convertGeometryToGeoJSON: EWKB unmarshal failed: %v, trying WKB", err)
+		geom, err = wkb.Unmarshal(bVal)
+		if err != nil {
+			g.Debug("convertGeometryToGeoJSON: WKB unmarshal also failed: %v", err)
+			return nil
+		}
+	}
+
+	geoJSONBytes, err := geojson.Marshal(geom)
+	if err != nil {
+		return nil
+	}
+
+	return json.RawMessage(geoJSONBytes)
+}
+
+// newGeojsonFromRowsReaderChnl builds a GeoJSON FeatureCollection from datastream rows.
+// Each row becomes a Feature: geometry column becomes geometry, other columns become properties.
+func (ds *Datastream) newGeojsonFromRowsReaderChnl(sc StreamConfig, geometryColIdx int) (readerChn chan *io.PipeReader) {
+	readerChn = make(chan *io.PipeReader, 100)
+	pipe := g.NewPipe()
+	readerChn <- pipe.Reader
+	firstFeature := true
+
+	go func() {
+		defer close(readerChn)
+		pipe.Writer.Write([]byte(`{"type":"FeatureCollection","features":[`))
+
+		rowCount := 0
+		for batch := range ds.BatchChan {
+			for row0 := range batch.Rows {
+				rowCount++
+				if !firstFeature {
+					pipe.Writer.Write([]byte{','})
+				}
+				firstFeature = false
+
+				feature := g.M()
+				feature["type"] = "Feature"
+
+				// Convert geometry column to GeoJSON
+				var geometry any
+				if geometryColIdx < len(row0) && row0[geometryColIdx] != nil {
+					geometry = convertGeometryToGeoJSON(row0[geometryColIdx])
+				}
+				feature["geometry"] = geometry
+
+				// All other columns become Feature properties
+				properties := g.M()
+				for i, val := range row0 {
+					if i != geometryColIdx && i < len(ds.Columns) {
+						properties[ds.Columns[i].Name] = val
+					}
+				}
+				feature["properties"] = properties
+
+				// Marshal feature to JSON
+				featureBytes, err := json.Marshal(feature)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error marshaling feature"))
+					pipe.Writer.Close()
+					return
+				}
+
+				_, err = pipe.Writer.Write(featureBytes)
+				if err != nil {
+					ds.Context.CaptureErr(g.Error(err, "error writing feature"))
+					pipe.Writer.Close()
+					return
+				}
+			}
+		}
+
+		// Write FeatureCollection closing
+		pipe.Writer.Write([]byte(`]}`))
+		pipe.Writer.Close()
+	}()
+
+	return readerChn
+}
+
+// writeJsonRecord writes a single JSON record (helper for fallback case)
+func (ds *Datastream) writeJsonRecord(writer io.Writer, cols Columns, row0 []any, addComma bool) {
+	if addComma {
+		writer.Write([]byte{','})
+	}
+
+	rec := g.M()
+	for i, val := range row0 {
+		if sVal, ok := val.(string); ok && cols[i].Type.IsJSON() {
+			if looksLikeJson(sVal) {
+				var v any
+				if err := g.Unmarshal(sVal, &v); err == nil {
+					val = v
+				}
+			} else if sVal == "null" {
+				val = nil
+			}
+		}
+		rec[cols.Names()[i]] = val
+	}
+
+	b, err := json.Marshal(rec)
+	if err != nil {
+		ds.Context.CaptureErr(g.Error(err, "error marshaling rec"))
+		return
+	}
+	writer.Write(b)
 }
 
 // NewJsonLinesReaderChnl provides a channel of readers as the limit is reached

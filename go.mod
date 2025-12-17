@@ -302,6 +302,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
+	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/uptrace/bun v1.2.12 // indirect
 	github.com/uptrace/bun/dialect/mssqldialect v1.2.12 // indirect
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.12 // indirect
