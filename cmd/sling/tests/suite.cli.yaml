@@ -1311,3 +1311,13 @@
   output_contains:
     - 'ADBC write test completed successfully'
     - 'inserted 3 rows'
+
+# Tests ADBC write with large data (100k rows)
+- id: 149
+  name: Test ADBC write large
+  run: |
+    # TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+  output_contains:
+    - 'ADBC write large test completed successfully'
+    # - 'inserted 100000 rows'
