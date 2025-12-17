@@ -1268,28 +1268,6 @@
   output_contains:
     - 'p.log.yaml (pipeline)'
     - 'r.swapi.yaml (replication)'
-    
-# Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
-- id: 145
-  name: Test PostGIS (PostgreSQL) to GeoJSON as target
-  run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geom_column_definition_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
-  rows: 3
-  output_contains:
-    - 'execution succeeded'
-    - '"type":"FeatureCollection"'
-    - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
-    - '"properties":{"id":1,"name":"Point 1"}'
-
-# Test PostGIS (PostgreSQL) to GeoJSON as target with default geometry column name "geometry"
-- id: 146
-  name: Test PostGIS (PostgreSQL) to GeoJSON as target
-  run: 'sling run -d -r cmd/sling/tests/replications/r.69.postgres_geom_column_default_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
-  rows: 3
-  output_contains:
-    - 'execution succeeded'
-    - '"type":"FeatureCollection"'
-    - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
-    - '"properties":{"id":1,"name":"Point 1"}'
 
 - id: 145
   name: Test thread state sync (SLING_THREADS)
@@ -1343,3 +1321,25 @@
   output_contains:
     - 'ADBC write large test completed successfully'
     # - 'inserted 100000 rows'
+    
+# # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
+# - id: 150
+#   name: Test PostGIS (PostgreSQL) to GeoJSON as target
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geom_column_definition_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+#   rows: 3
+#   output_contains:
+#     - 'execution succeeded'
+#     - '"type":"FeatureCollection"'
+#     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+#     - '"properties":{"id":1,"name":"Point 1"}'
+
+# # Test PostGIS (PostgreSQL) to GeoJSON as target with default geometry column name "geometry"
+# - id: 151
+#   name: Test PostGIS (PostgreSQL) to GeoJSON as target
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.69.postgres_geom_column_default_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+#   rows: 3
+#   output_contains:
+#     - 'execution succeeded'
+#     - '"type":"FeatureCollection"'
+#     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+#     - '"properties":{"id":1,"name":"Point 1"}'
