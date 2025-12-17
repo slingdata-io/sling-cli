@@ -1,11 +1,13 @@
 package sling
 
 import (
+	"os"
 	"time"
 
 	"github.com/flarco/g"
 	"github.com/slingdata-io/sling-cli/core/dbio"
 	"github.com/slingdata-io/sling-cli/core/dbio/iop"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"github.com/spf13/cast"
 )
 
@@ -180,7 +182,6 @@ type ObjectState struct {
 }
 
 func (t *TaskExecution) StateSet() {
-	StoreSet(t)
 
 	if t.Replication != nil && t.Config != nil && t.Context != nil {
 		t.Context.Lock()
@@ -309,5 +310,15 @@ func (t *TaskExecution) StateSet() {
 
 		// set log details
 		t.setLogDetails()
+
+		// write runtime state file if finished
+		if env.IsThreadChild && t.Status.IsFinished() {
+			stateFile := env.RuntimeFilePath(t.Config.StreamName)
+			if err := os.WriteFile(stateFile, []byte(g.Marshal(state)), 0755); err != nil {
+				g.Warn("could not write runtime state file (%s): %s", stateFile, err.Error())
+			}
+		}
 	}
+
+	StoreSet(t)
 }

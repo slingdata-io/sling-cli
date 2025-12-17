@@ -42,7 +42,9 @@ func init() {
 	store.InitDB()
 
 	if os.Getenv("SLING_EXEC_ID") == "" {
-		os.Setenv("SLING_EXEC_ID", sling.NewExecID()) // set exec id if none provided
+		// set exec id if none provided
+		env.ExecID = sling.NewExecID()
+		os.Setenv("SLING_EXEC_ID", env.ExecID)
 	}
 }
 

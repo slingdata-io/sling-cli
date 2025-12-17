@@ -316,8 +316,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
-	} else if strings.HasPrefix(URL, "flightsql:") {
-		conn = &AzureTableConn{URL: URL}
+	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
+		conn = &ArrowDBConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -384,7 +384,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
-	case dbio.TypeDbArrowFlight:
+	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
 	default:
 		driverName = dbType.String()
@@ -1216,7 +1216,11 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (resul
 
 	eG := g.ErrorGroup{}
 	for _, q := range qs {
+		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
 		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
+				sql = sql + env.NoDebugKey
+			}
 			res, err := conn.Self().ExecContext(ctx, sql)
 			if err != nil {
 				eG.Capture(g.Error(err, "Error executing query"))

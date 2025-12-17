@@ -1,0 +1,68 @@
+core: {}
+
+variable:
+  tmp_folder: /tmp
+  timestamp_layout_str: '{value}'
+  timestamp_layout: '2006-01-02 15:04:05.000000'
+  date_layout_str: '{value}'
+  date_layout: '2006-01-02 15:04:05'
+  bool_as: 'bool'
+  quote_char: '"'
+
+# General type mappings - these are used when driver-specific mappings aren't available
+general_type_map:
+  bool: bool
+  int: integer
+  bigint: bigint
+  float: double precision
+  string: text
+  text: text
+  json: json
+  timestamp: timestamp
+  datetime: timestamp
+  date: date
+  time: time
+  binary: bytea
+  uuid: uuid
+  decimal: numeric
+
+# Native type mappings - map database-specific types to general types
+native_type_map:
+  bool: bool
+  boolean: bool
+  int: integer
+  int2: integer
+  int4: integer
+  int8: bigint
+  smallint: integer
+  bigint: bigint
+  integer: integer
+  float: float
+  float4: float
+  float8: float
+  real: float
+  double precision: float
+  double: float
+  numeric: decimal
+  decimal: decimal
+  money: decimal
+  varchar: string
+  character varying: string
+  text: string
+  char: string
+  character: string
+  uuid: string
+  timestamp: timestamp
+  timestamp with time zone: timestamp
+  timestamp without time zone: timestamp
+  timestamptz: timestamp
+  datetime: datetime
+  date: date
+  time: time
+  time with time zone: time
+  time without time zone: time
+  timetz: time
+  bytea: binary
+  blob: binary
+  json: json
+  jsonb: json

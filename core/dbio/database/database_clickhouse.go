@@ -375,15 +375,12 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 			// use pre-defined function
 			err = oldOnColumnChanged(col)
 			if err != nil {
-				return g.Error(err, "could not process ColumnChange for Postgres")
+				return g.Error(err, "could not process ColumnChange for Clickhouse")
 			}
 
 			return nil
 		}
 	}
-
-	// keep-alive interval to prevent idle connection timeout
-	keepAliveInterval := 60 * time.Second
 
 	for batch := range ds.BatchChan {
 		if batch.ColumnsChanged() || batch.IsFirst() {
@@ -444,40 +441,6 @@ func (conn *ClickhouseConn) BulkImportStream(tableFName string, ds *iop.Datastre
 					}
 				}
 			}
-
-			// Start a keep-alive goroutine to prevent idle connection timeout
-			// This sends a SELECT 1 query periodically to keep the connection alive
-			// during long pauses in the data stream (e.g., slow source reads)
-			stopKeepAlive := make(chan struct{})
-			keepAliveDone := make(chan struct{})
-			go func() {
-				defer close(keepAliveDone)
-				ticker := time.NewTicker(keepAliveInterval)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-stopKeepAlive:
-						return
-					case <-ticker.C:
-						// Execute keep-alive query within the transaction context
-						// This keeps the connection from being closed due to idle timeout
-						ds.Context.Lock()
-						_, keepAliveErr := conn.Tx().ExecContext(ds.Context.Ctx, "SELECT 1")
-						ds.Context.Unlock()
-						if keepAliveErr != nil {
-							g.Debug("keep-alive query failed: %v", keepAliveErr)
-						} else {
-							g.Trace("keep-alive query executed successfully")
-						}
-					}
-				}
-			}()
-
-			// Ensure we stop the keep-alive goroutine when done
-			defer func() {
-				close(stopKeepAlive)
-				<-keepAliveDone
-			}()
 
 			for row := range batch.Rows {
 				var eG g.ErrorGroup

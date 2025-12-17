@@ -1193,8 +1193,8 @@
 - id: 137
   name: Test nested JSON to SQLite with replication config (pre-defined columns)
   run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
-  err: true
   group: sqlite
+  err: true
   output_contains:
    - cannot be assigned to zero-based row
 
@@ -1290,3 +1290,56 @@
     - '"type":"FeatureCollection"'
     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
     - '"properties":{"id":1,"name":"Point 1"}'
+
+- id: 145
+  name: Test thread state sync (SLING_THREADS)
+  run: sling run -r cmd/sling/tests/replications/r.76.thread_state_sync.yaml -d
+  output_contains:
+    - 'Stream 1: total_rows=5, status=success'
+    - 'Stream 2: total_rows=5, status=success'
+    - 'Stream 3: total_rows=5, status=success'
+    - 'Stream 4: total_rows=5, status=success'
+
+# Requires ADBC_POSTGRES connection with PostgreSQL ADBC driver installed
+# Install driver: dbc install postgresql
+- id: 146
+  name: Test ADBC PostgreSQL connection
+  run: sling run -r cmd/sling/tests/replications/r.77.adbc_postgres.yaml -d
+  output_contains:
+    - 'Testing ADBC PostgreSQL connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC test completed successfully'
+    - 'wrote 1 rows'
+
+# Requires ADBC_SQLSERVER connection with SQL Server ADBC driver installed
+# Install driver: dbc install mssql
+- id: 147
+  name: Test ADBC SQL Server connection
+  run: sling run -r cmd/sling/tests/replications/r.78.adbc_sqlserver.yaml -d
+  output_contains:
+    - 'Testing ADBC SQL Server connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC SQL Server test completed successfully'
+    - 'wrote 1 rows'
+
+# Tests write mode with BulkImportFlow using adbc.IngestStream
+- id: 148
+  name: Test ADBC write
+  run: |
+    TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'inserted 3 rows'
+
+# Tests ADBC write with large data (100k rows)
+- id: 149
+  name: Test ADBC write large
+  run: |
+    # TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+  output_contains:
+    - 'ADBC write large test completed successfully'
+    # - 'inserted 100000 rows'

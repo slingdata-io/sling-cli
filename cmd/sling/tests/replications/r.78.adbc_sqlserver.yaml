@@ -1,0 +1,44 @@
+# ADBC SQL Server Test
+# This test requires:
+# 1. Install dbc CLI: curl -sS https://dbc.columnar.tech/install.sh | bash
+# 2. Install SQL Server driver: dbc install mssql
+# 3. Set ADBC_SQLSERVER connection in env.yaml with:
+#    type: adbc
+#    driver_name: mssql
+#    adbc.sqlserver.connection_string: sqlserver://user:pass@host:1433/db
+
+source: ADBC_SQLSERVER
+target: LOCAL
+
+defaults:
+  mode: full-refresh
+  target_options:
+    format: csv
+
+hooks:
+  start:
+    - type: log
+      message: "Testing ADBC SQL Server connection"
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: read
+      into: result
+      from: file:///tmp/adbc_sqlserver_test_output.csv
+
+    - type: log
+      message: "Read CSV data: {store.result}"
+
+    - type: check
+      check: contains(store.result, "1,test")
+      message: "Expected CSV to contain '1,test'"
+
+    - type: log
+      message: "ADBC SQL Server test completed successfully"
+
+streams:
+  "select 1 as id, 'test' as name":
+    object: file:///tmp/adbc_sqlserver_test_output.csv

@@ -1,0 +1,160 @@
+source: postgres
+target: postgres
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.thread_sync_test_1;
+        DROP TABLE IF EXISTS public.thread_sync_test_2;
+        DROP TABLE IF EXISTS public.thread_sync_test_3;
+        DROP TABLE IF EXISTS public.thread_sync_test_4;
+        DROP TABLE IF EXISTS public.thread_sync_target_1;
+        DROP TABLE IF EXISTS public.thread_sync_target_2;
+        DROP TABLE IF EXISTS public.thread_sync_target_3;
+        DROP TABLE IF EXISTS public.thread_sync_target_4;
+
+        CREATE TABLE public.thread_sync_test_1 (id INTEGER PRIMARY KEY, name VARCHAR(100), value DECIMAL(10,2));
+        CREATE TABLE public.thread_sync_test_2 (id INTEGER PRIMARY KEY, name VARCHAR(100), value DECIMAL(10,2));
+        CREATE TABLE public.thread_sync_test_3 (id INTEGER PRIMARY KEY, name VARCHAR(100), value DECIMAL(10,2));
+        CREATE TABLE public.thread_sync_test_4 (id INTEGER PRIMARY KEY, name VARCHAR(100), value DECIMAL(10,2));
+
+        INSERT INTO public.thread_sync_test_1 (id, name, value) VALUES (1, 'Item 1-1', 100.50), (2, 'Item 1-2', 200.75), (3, 'Item 1-3', 300.00), (4, 'Item 1-4', 400.25), (5, 'Item 1-5', 500.50);
+        INSERT INTO public.thread_sync_test_2 (id, name, value) VALUES (1, 'Item 2-1', 110.50), (2, 'Item 2-2', 210.75), (3, 'Item 2-3', 310.00), (4, 'Item 2-4', 410.25), (5, 'Item 2-5', 510.50);
+        INSERT INTO public.thread_sync_test_3 (id, name, value) VALUES (1, 'Item 3-1', 120.50), (2, 'Item 3-2', 220.75), (3, 'Item 3-3', 320.00), (4, 'Item 3-4', 420.25), (5, 'Item 3-5', 520.50);
+        INSERT INTO public.thread_sync_test_4 (id, name, value) VALUES (1, 'Item 4-1', 130.50), (2, 'Item 4-2', 230.75), (3, 'Item 4-3', 330.00), (4, 'Item 4-4', 430.25), (5, 'Item 4-5', 530.50);
+
+  end:
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    - type: log
+      message: |
+        Thread State Sync Test Results:
+        ================================
+        runs keys: {keys(runs)}
+        execution: {execution}
+        full runs: {runs}
+
+        Stream 1: total_rows={runs["public_thread_sync_test_1"].total_rows}, status={runs["public_thread_sync_test_1"].status}
+        Stream 2: total_rows={runs["public_thread_sync_test_2"].total_rows}, status={runs["public_thread_sync_test_2"].status}
+        Stream 3: total_rows={runs["public_thread_sync_test_3"].total_rows}, status={runs["public_thread_sync_test_3"].status}
+        Stream 4: total_rows={runs["public_thread_sync_test_4"].total_rows}, status={runs["public_thread_sync_test_4"].status}
+
+    # Verify stream 1 exists and has correct state
+    - type: check
+      name: "Stream 1 exists in runs map"
+      check: runs["public_thread_sync_test_1"] != nil
+      failure_message: "runs['public_thread_sync_test_1'] should exist"
+
+    - type: check
+      name: "Stream 1 has 5 rows"
+      check: runs["public_thread_sync_test_1"].total_rows == 5
+      failure_message: 'Stream 1 should have 5 rows, got: {runs["public_thread_sync_test_1"].total_rows}'
+
+    - type: check
+      name: "Stream 1 status is success"
+      check: runs["public_thread_sync_test_1"].status == "success"
+      failure_message: 'Stream 1 status should be success, got: {runs["public_thread_sync_test_1"].status}'
+
+    - type: check
+      name: "Stream 1 has bytes"
+      check: runs["public_thread_sync_test_1"].total_bytes > 0
+      failure_message: 'Stream 1 should have total_bytes > 0, got: {runs["public_thread_sync_test_1"].total_bytes}'
+
+    # Verify stream 2 exists and has correct state
+    - type: check
+      name: "Stream 2 exists in runs map"
+      check: runs["public_thread_sync_test_2"] != nil
+      failure_message: "runs['public_thread_sync_test_2'] should exist"
+
+    - type: check
+      name: "Stream 2 has 5 rows"
+      check: runs["public_thread_sync_test_2"].total_rows == 5
+      failure_message: 'Stream 2 should have 5 rows, got: {runs["public_thread_sync_test_2"].total_rows}'
+
+    - type: check
+      name: "Stream 2 status is success"
+      check: runs["public_thread_sync_test_2"].status == "success"
+      failure_message: 'Stream 2 status should be success, got: {runs["public_thread_sync_test_2"].status}'
+
+    - type: check
+      name: "Stream 2 has bytes"
+      check: runs["public_thread_sync_test_2"].total_bytes > 0
+      failure_message: 'Stream 2 should have total_bytes > 0, got: {runs["public_thread_sync_test_2"].total_bytes}'
+
+    # Verify stream 3 exists and has correct state
+    - type: check
+      name: "Stream 3 exists in runs map"
+      check: runs["public_thread_sync_test_3"] != nil
+      failure_message: "runs['public_thread_sync_test_3'] should exist"
+
+    - type: check
+      name: "Stream 3 has 5 rows"
+      check: runs["public_thread_sync_test_3"].total_rows == 5
+      failure_message: 'Stream 3 should have 5 rows, got: {runs["public_thread_sync_test_3"].total_rows}'
+
+    - type: check
+      name: "Stream 3 status is success"
+      check: runs["public_thread_sync_test_3"].status == "success"
+      failure_message: 'Stream 3 status should be success, got: {runs["public_thread_sync_test_3"].status}'
+
+    - type: check
+      name: "Stream 3 has bytes"
+      check: runs["public_thread_sync_test_3"].total_bytes > 0
+      failure_message: 'Stream 3 should have total_bytes > 0, got: {runs["public_thread_sync_test_3"].total_bytes}'
+
+    # Verify stream 4 exists and has correct state
+    - type: check
+      name: "Stream 4 exists in runs map"
+      check: runs["public_thread_sync_test_4"] != nil
+      failure_message: "runs['public_thread_sync_test_4'] should exist"
+
+    - type: check
+      name: "Stream 4 has 5 rows"
+      check: runs["public_thread_sync_test_4"].total_rows == 5
+      failure_message: 'Stream 4 should have 5 rows, got: {runs["public_thread_sync_test_4"].total_rows}'
+
+    - type: check
+      name: "Stream 4 status is success"
+      check: runs["public_thread_sync_test_4"].status == "success"
+      failure_message: 'Stream 4 status should be success, got: {runs["public_thread_sync_test_4"].status}'
+
+    - type: check
+      name: "Stream 4 has bytes"
+      check: runs["public_thread_sync_test_4"].total_bytes > 0
+      failure_message: 'Stream 4 should have total_bytes > 0, got: {runs["public_thread_sync_test_4"].total_bytes}'
+
+    # Cleanup
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.thread_sync_test_1;
+        DROP TABLE IF EXISTS public.thread_sync_test_2;
+        DROP TABLE IF EXISTS public.thread_sync_test_3;
+        DROP TABLE IF EXISTS public.thread_sync_test_4;
+        DROP TABLE IF EXISTS public.thread_sync_target_1;
+        DROP TABLE IF EXISTS public.thread_sync_target_2;
+        DROP TABLE IF EXISTS public.thread_sync_target_3;
+        DROP TABLE IF EXISTS public.thread_sync_target_4;
+
+streams:
+  public.thread_sync_test_1:
+    object: public.thread_sync_target_1
+
+  public.thread_sync_test_2:
+    object: public.thread_sync_target_2
+
+  public.thread_sync_test_3:
+    object: public.thread_sync_target_3
+
+  public.thread_sync_test_4:
+    object: public.thread_sync_target_4
+
+env:
+  SLING_THREADS: 3

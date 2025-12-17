@@ -1,6 +1,8 @@
 package sling
 
 import (
+	"time"
+
 	"github.com/flarco/g"
 	"github.com/spf13/cast"
 )
@@ -81,10 +83,18 @@ func (hs Hooks) Execute() (err error) {
 			g.Debug(`executing hook "%s" (type: %s)`, hook.ID(), hook.Type())
 		}
 
+	retry:
 		hookErr := hook.Execute()
-		_, err = hook.ExecuteOnDone(hookErr)
+		onFail, err := hook.ExecuteOnDone(hookErr)
 
 		if err != nil {
+			retried, _ := hook.Context().Map.Get("retried")
+			if onFail == "retry" && !cast.ToBool(retried) {
+				hook.Context().Map.Set("retried", true) // only retry once
+				g.Debug(`retrying hook "%s" (type: %s)`, hook.ID(), hook.Type())
+				time.Sleep(5 * time.Second)
+				goto retry
+			}
 			return g.Error(err, "error executing hook")
 		} else if br, _ := hook.Context().Map.Get("break"); br == true {
 			break

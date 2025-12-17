@@ -12,6 +12,7 @@ import (
 	"github.com/flarco/g"
 	"github.com/flarco/g/json"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/slingdata-io/sling-cli/core/env"
 )
 
 type Queue struct {
@@ -33,7 +34,9 @@ func NewQueue(name string) (q *Queue, err error) {
 	// make temp folder
 	var tmpFile *os.File
 	var keep bool
-	if folder := os.Getenv("SLING_QUEUE_FOLDER"); folder != "" {
+
+	if env.IsThreadChild {
+		folder := env.QueueFolder()
 		keep = true // keep file, will be deleted by parent process
 		if err := os.MkdirAll(folder, 0755); err != nil {
 			return nil, g.Error(err, "could not create queue folder")

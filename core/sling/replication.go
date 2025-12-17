@@ -80,8 +80,9 @@ func (rd *ReplicationConfig) JSON() string {
 	return payload
 }
 
-// StateMap returns map for use
-func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
+// initRuntimeState initializes the runtime state
+// loads from state file if found
+func (rd *ReplicationConfig) initRuntimeState(selectStreams []string) {
 	if rd.state == nil {
 		rd.state = &ReplicationState{
 			State:     map[string]map[string]any{},
@@ -93,11 +94,48 @@ func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
 			Target:    ConnState{Name: rd.Target},
 		}
 
-		rd.state.Execution = ExecutionState{
-			ID:        os.Getenv("SLING_EXEC_ID"),
-			StartTime: g.Ptr(time.Now()),
+		if env.IsThreadChild {
+			for _, streamName := range selectStreams {
+				stateFile := env.RuntimeFilePath(streamName)
+				bytes, err := os.ReadFile(stateFile)
+				if err != nil {
+					g.Warn("could not read runtime state file (%s): %s", streamName, err.Error())
+					continue
+				}
+
+				err = g.Unmarshal(string(bytes), &rd.state)
+				if err != nil {
+					g.Warn("could not unmarshal runtime state file (%s): %s", streamName, err.Error())
+					continue
+				}
+			}
 		}
 	}
+
+	rd.state.Execution.ID = os.Getenv("SLING_EXEC_ID")
+	rd.state.Source = ConnState{Name: rd.Source}
+	rd.state.Target = ConnState{Name: rd.Target}
+	if rd.state.State == nil {
+		rd.state.State = map[string]map[string]any{}
+	}
+	if rd.state.Store == nil {
+		rd.state.Store = map[string]any{}
+	}
+	if rd.state.Runs == nil {
+		rd.state.Runs = map[string]*RunState{}
+	}
+	rd.state.Env = rd.Env
+	if rd.state.Execution.StartTime == nil {
+		rd.state.Execution.StartTime = g.Ptr(time.Now())
+	}
+}
+
+func (rd *ReplicationConfig) SetRuntimeState(state *ReplicationState) {
+	rd.state = state
+}
+
+func (rd *ReplicationConfig) RuntimeState() (_ *ReplicationState, err error) {
+	rd.initRuntimeState(nil)
 
 	rd.state.Timestamp.Update()
 
@@ -1029,6 +1067,9 @@ func (rd *ReplicationConfig) Compile(cfgOverwrite *Config, selectStreams ...stri
 				return g.Error(err, "could not prepare: %s", task.StreamName)
 			}
 		}
+
+		// init runtime state
+		rd.initRuntimeState(selectStreams)
 
 		if err = rd.ParseReplicationHook(HookStageStart); err != nil {
 			return g.Error(err, "could not parse start hooks")

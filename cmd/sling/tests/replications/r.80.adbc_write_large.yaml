@@ -1,0 +1,75 @@
+# ADBC Write Large Test - 100k rows
+
+source: LOCAL
+target: '{TARGET}'
+
+defaults:
+  mode: full-refresh
+
+hooks:
+  start:
+    - type: log
+      message: "Testing ADBC write with 100k rows"
+
+    # Generate 100k rows CSV using Python
+    - command: |
+        python3 -c "
+        import csv
+        with open('/tmp/adbc_write_large_test.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['id', 'name', 'value', 'category'])
+            for i in range(1, 1000001):
+                writer.writerow([i, f'user_{i}', round(i * 1.5, 1), f'cat_{i % 10}'])
+        print('Generated 100k rows')
+        "
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify row count in target
+    - type: query
+      connection: '{target.name}'
+      query: select count(*) as cnt from {SCHEMA}.adbc_write_large_test
+      into: count_result
+
+    - type: log
+      message: "Row count: {store.count_result[0].cnt}"
+
+    - check: int_parse(store.count_result[0].cnt) == 1000000
+      failure_message: "Expected 100000 rows, got {store.count_result[0].cnt}"
+
+    # Verify first and last rows
+    - type: query
+      connection: '{target.name}'
+      query: select * from {SCHEMA}.adbc_write_large_test where id = 1
+      into: first_row
+
+    - check: store.first_row[0].name == "user_1"
+      failure_message: "Expected first row name to be user_1"
+
+    - type: query
+      connection: '{target.name}'
+      query: select * from {SCHEMA}.adbc_write_large_test where id = 100000
+      into: last_row
+
+    - check: store.last_row[0].name == "user_100000"
+      failure_message: "Expected last row name to be user_100000"
+
+    # Cleanup
+    - type: query
+      connection: '{target.name}'
+      query: drop table {SCHEMA}.adbc_write_large_test
+
+    - type: log
+      message: "ADBC write large test completed successfully"
+
+streams:
+  file:///tmp/adbc_write_large_test.csv:
+    object: '{SCHEMA}.adbc_write_large_test'
+
+env:
+  TARGET: ${TARGET}
+  SCHEMA: ${SCHEMA}

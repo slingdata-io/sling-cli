@@ -59,7 +59,7 @@ func TestCLI(t *testing.T) {
 			os.Setenv("RUN_ALL", "true") // runs all test, don't fail earlys
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
-			os.Setenv("TESTS", arg)
+			testContext.Map.Set("TESTS", arg)
 		}
 	}
 
@@ -91,8 +91,8 @@ func TestCLI(t *testing.T) {
 
 	// get test numbers from env
 	testNumbers := []int{}
-	tns := os.Getenv("TESTS")
-	if tns != "" {
+	tnsV, ok := testContext.Map.Get("TESTS")
+	if tns := cast.ToString(tnsV); ok && tns != "" {
 		for _, tn := range strings.Split(tns, ",") {
 			if strings.HasSuffix(tn, "+") {
 				start := cast.ToInt(strings.TrimSuffix(tn, "+"))

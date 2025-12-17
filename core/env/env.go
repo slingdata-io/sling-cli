@@ -33,8 +33,20 @@ var (
 	NoDebugKey     = " /* nD */"
 	Executable     = ""
 	IsThreadChild  = cast.ToBool(os.Getenv("SLING_THREAD_CHILD"))
-	IsAgentMode    = os.Getenv("SLING_AGENT_ID") != ""
-	setupOtel      = func() {}
+	ExecID         = os.Getenv("SLING_EXEC_ID")
+	AgentID        = os.Getenv("SLING_AGENT_ID")
+	IsAgentMode    = AgentID != ""
+	GetOAuthMap    = func() map[string]map[string]any {
+		return map[string]map[string]any{}
+	}
+	ExecFolder      = func() string { return path.Join(HomeDir, "executions", ExecID) }
+	QueueFolder     = func() string { return path.Join(ExecFolder(), "queues") }
+	RuntimeFolder   = func() string { return path.Join(ExecFolder(), "runtime") }
+	RuntimeFilePath = func(name string) string {
+		os.MkdirAll(RuntimeFolder(), 0755) // make folder
+		return path.Join(RuntimeFolder(), g.F("%s.json", name))
+	}
+	setupOtel = func() {}
 )
 
 const (
@@ -148,7 +160,7 @@ func SetLogger() {
 	}
 }
 
-// InitLogger initializes the g Logger
+// InitLogger initializes the Logger
 func InitLogger() {
 
 	// set log hook

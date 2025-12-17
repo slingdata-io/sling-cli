@@ -86,7 +86,7 @@ const (
 	TypeDbIceberg       Type = "iceberg"
 	TypeDbAzureTable    Type = "azuretable"
 	TypeDbExasol        Type = "exasol"
-	TypeDbArrowFlight   Type = "flightsql"
+	TypeDbArrowDBC      Type = "adbc"
 )
 
 var AllType = []struct {
@@ -134,6 +134,7 @@ var AllType = []struct {
 	{TypeDbProton, "TypeDbProton"},
 	{TypeDbExasol, "TypeDbExasol"},
 	{TypeDbAzureTable, "TypeDbAzureTable"},
+	{TypeDbArrowDBC, "TypeDbArrowDBC"},
 }
 
 // ValidateType returns true is type is valid
@@ -155,7 +156,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC:
 		return t, true
 	}
 
@@ -204,7 +205,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -291,6 +292,7 @@ func (t Type) NameLong() string {
 		TypeDbMongoDB:       "DB - MongoDB",
 		TypeDbProton:        "DB - Proton",
 		TypeDbAzureTable:    "DB - Azure Table",
+		TypeDbArrowDBC:      "DB - Arrow DBC",
 	}
 
 	return mapping[t]
@@ -339,6 +341,7 @@ func (t Type) Name() string {
 		TypeDbAzure:         "Azure",
 		TypeDbProton:        "Proton",
 		TypeDbAzureTable:    "Azure Table",
+		TypeDbArrowDBC:      "Arrow DBC",
 	}
 
 	return mapping[t]
@@ -386,10 +389,15 @@ func (template Template) Value(path string) (value string) {
 var typeTemplate = map[Type]Template{}
 var typeTemplateMutex sync.RWMutex
 
-func (t Type) Template() (template Template, err error) {
+func (t Type) Template(useBase ...bool) (template Template, err error) {
+	withBase := true
+	if len(useBase) > 0 {
+		withBase = useBase[0]
+	}
+
 	// Check if template exists in cache (with read lock)
 	typeTemplateMutex.RLock()
-	if val, ok := typeTemplate[t]; ok {
+	if val, ok := typeTemplate[t]; ok && withBase {
 		typeTemplateMutex.RUnlock()
 		return val, nil
 	}
@@ -408,13 +416,15 @@ func (t Type) Template() (template Template, err error) {
 
 	connTemplate := Template{}
 
-	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
-	if err != nil {
-		return template, g.Error(err, "could not read base.yaml")
-	}
+	if withBase {
+		baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
+		if err != nil {
+			return template, g.Error(err, "could not read base.yaml")
+		}
 
-	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
-		return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
+			return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		}
 	}
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
@@ -527,10 +537,12 @@ func (t Type) Template() (template Template, err error) {
 		template.GeneralTypeMap[gt] = rec[t.String()]
 	}
 
-	// cache with write lock
-	typeTemplateMutex.Lock()
-	typeTemplate[t] = template
-	typeTemplateMutex.Unlock()
+	// cache with write lock if has base
+	if withBase {
+		typeTemplateMutex.Lock()
+		typeTemplate[t] = template
+		typeTemplateMutex.Unlock()
+	}
 
 	return template, nil
 }
