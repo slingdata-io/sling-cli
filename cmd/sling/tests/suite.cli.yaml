@@ -1320,7 +1320,6 @@
     TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
   output_contains:
     - 'ADBC write large test completed successfully'
-    # - 'inserted 100000 rows'
     
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
