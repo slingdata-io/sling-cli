@@ -21,8 +21,7 @@ test-cli arg1="": build
     echo "TESTING CLI {{arg1}}"
     export SLING_BINARY="$PWD/cmd/sling/sling"
     export RUN_ALL=true
-    export TESTS="{{arg1}}"
-    bash scripts/test.cli.sh
+    bash scripts/test.cli.sh "{{arg1}}"
 
 # Test replication defaults
 test-replication-defaults:
@@ -34,15 +33,13 @@ test-replication-defaults:
 test-connections-file arg1="TestSuiteFile":
     #!/usr/bin/env bash
     echo "TESTING file connections {{arg1}}"
-    export TESTS="{{arg1}}"
     cd cmd/sling && go test -v -parallel 3 -run "{{arg1}}" && cd -
 
 # Test database connections
 test-connections-database arg1="TestSuiteDatabase" arg2="":
     #!/usr/bin/env bash
     echo "TESTING database connections {{arg1}} {{arg2}}"
-    export TESTS="{{arg2}}"
-    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" && cd -
+    cd cmd/sling && SKIP_CLICKHOUSE=TRUE RUN_ALL=TRUE go test -v -parallel 4 -timeout 35m -run "{{arg1}}" -- "{{arg2}}" && cd -
 
 # Test core (sling core functionality)
 test-core:
