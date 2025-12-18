@@ -83,6 +83,7 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 	// set type for adbc
 	if conn.Type == dbio.TypeDbArrowDBC {
 		conn.Type = database.GetArrowDBCDriverType(conn.DataS(true)["driver_name"])
+		conn.Data["is_adbc"] = true
 	}
 
 	return conn, err
@@ -189,6 +190,14 @@ func (c *Connection) ToMap() map[string]interface{} {
 	data := g.M()
 	g.JSONConvert(c.Data, &data) // so that pointers are not modified downstream
 	return g.M("name", c.Name, "type", c.Type, "data", data)
+}
+
+// IsADBC returns whether connection originates from ADBC
+func (c *Connection) IsADBC() bool {
+	if c.Data == nil {
+		return false
+	}
+	return cast.ToBool(c.Data["is_adbc"])
 }
 
 // ToMap transforms DataConn to a Map

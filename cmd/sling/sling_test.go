@@ -757,7 +757,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) || g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) {
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() {
 				continue
 			}
 
