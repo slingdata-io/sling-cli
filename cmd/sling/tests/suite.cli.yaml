@@ -1318,6 +1318,7 @@
   run: |
     # TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
     TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    # TARGET=ADBC_MYSQL SCHEMA=mysql sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
   output_contains:
     - 'ADBC write large test completed successfully'
     
