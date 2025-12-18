@@ -2,11 +2,14 @@ package dbio
 
 import (
 	"embed"
+	"os"
+	"path"
 	"strings"
 	"sync"
 	"unicode"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"gopkg.in/yaml.v2"
 )
 
@@ -458,6 +461,46 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 
 	for key, val := range connTemplate.NativeTypeMap {
 		template.NativeTypeMap[key] = val
+	}
+
+	// Load user template overrides from ~/.sling/templates/{dbType}.yaml
+	userTemplates := path.Join(env.HomeDir, "templates")
+	userTemplatePath := path.Join(userTemplates, t.String()+".yaml")
+	if g.PathExists(userTemplatePath) {
+		userTemplateBytes, err := os.ReadFile(userTemplatePath)
+		if err != nil {
+			g.Warn("could not read user template at %s: %s", userTemplatePath, err.Error())
+		} else {
+			userTemplate := Template{}
+			err = yaml.Unmarshal(userTemplateBytes, &userTemplate)
+			if err != nil {
+				g.Warn("could not parse user template at %s: %s", userTemplatePath, err.Error())
+			} else {
+				// Merge user template over existing template (user values take precedence)
+				for key, val := range userTemplate.Core {
+					template.Core[key] = val
+				}
+				for key, val := range userTemplate.Analysis {
+					template.Analysis[key] = val
+				}
+				for key, val := range userTemplate.Function {
+					template.Function[key] = val
+				}
+				for key, val := range userTemplate.Metadata {
+					template.Metadata[key] = val
+				}
+				for key, val := range userTemplate.Variable {
+					template.Variable[key] = val
+				}
+				for key, val := range userTemplate.GeneralTypeMap {
+					template.GeneralTypeMap[key] = val
+				}
+				for key, val := range userTemplate.NativeTypeMap {
+					template.NativeTypeMap[key] = val
+				}
+				g.Debug("applied user template overrides from %s", userTemplatePath)
+			}
+		}
 	}
 
 	// cache with write lock if has base
