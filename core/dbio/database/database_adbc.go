@@ -924,11 +924,6 @@ func (conn *ArrowDBConn) BulkImportStream(tableFName string, ds *iop.Datastream)
 	g.Trace("arrow schema => %s", iop.ColumnsToArrowSchema(ds.Columns))
 
 	for batch := range ds.BatchChan {
-		if batch.ColumnsChanged() || batch.IsFirst() {
-			// Columns changed, will create new schema
-			g.Debug("ADBC BulkImportStream: processing batch with %d rows, columns: %v", len(batch.Rows), batch.Columns.Names())
-		}
-
 		// Convert batch to Arrow record reader
 		reader, err := conn.batchToRecordReader(batch)
 		if err != nil {
