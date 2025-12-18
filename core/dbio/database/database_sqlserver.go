@@ -538,7 +538,7 @@ func (conn *MsSQLServerConn) GetTableColumns(table *Table, fields ...string) (co
 	return
 }
 
-func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]interface{}) (data iop.Dataset, err error) {
+func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string]string, name string, values map[string]any) (data iop.Dataset, err error) {
 	if cast.ToBool(conn.GetProp("get_synonym")) && name == "columns" {
 		name = "columns_synonym"
 		values["base_object_database"] = conn.GetProp("synonym_database")
@@ -602,7 +602,7 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	// https://stackoverflow.com/questions/782353/sql-server-bulk-insert-of-csv-file-with-inconsistent-quotes
 	// reduces performance by ~25%, but is correct, and still 10x faster then insert into with batch VALUES
 	// If we use the parallel way, we gain back the speed by using more power. We also loose order.
-	transf := func(row []interface{}) (nRow []interface{}) {
+	transf := func(row []any) (nRow []any) {
 		nRow = row
 		for i, val := range row {
 
