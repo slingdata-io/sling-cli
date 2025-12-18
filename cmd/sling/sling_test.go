@@ -122,7 +122,7 @@ func TestMain(m *testing.M) {
 	args := os.Args
 	for _, arg := range args {
 		if arg == "-d" || arg == "--debug" {
-			os.Setenv("DEBUG", "true")
+			os.Setenv("DEBUG", "LOW")
 			env.InitLogger()
 		}
 		if arg == "-a" || arg == "--all" {

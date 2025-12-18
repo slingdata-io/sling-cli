@@ -44,7 +44,7 @@ func TestCLI(t *testing.T) {
 
 	for _, arg := range args {
 		if arg == "-d" || arg == "--debug" {
-			os.Setenv("DEBUG", "true")
+			os.Setenv("DEBUG", "LOW")
 			env.InitLogger()
 		}
 		if arg == "-t" || arg == "--trace" {
