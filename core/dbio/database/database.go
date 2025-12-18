@@ -2286,12 +2286,12 @@ func (conn *BaseConn) bindVar(i int, field string, n int, c int) string {
 
 // Unquote removes quotes to the field name
 func (conn *BaseConn) Unquote(field string) string {
-	return conn.Type.Unquote(field)
+	return conn.Template().Unquote(field)
 }
 
 // Quote adds quotes to the field name
 func (conn *BaseConn) Quote(field string) string {
-	return conn.Type.Quote(field)
+	return conn.Template().Quote(field)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2721,7 +2721,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 	}
 
 	var pkEqualFields, srcPkFields, tgtPkFields []string
-	pkFields = conn.Type.QuoteNames(pkCols.Names()...)
+	pkFields = conn.Template().QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
 	for _, pkField := range pkCols.Names() {
 		// don't normalize, use raw name
@@ -2744,7 +2744,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 		return
 	}
 
-	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
+	tgtFields := conn.Template().QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
 	setFieldsAll := []string{}
 	insertFields := []string{}
@@ -3015,9 +3015,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.Template().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
+			conn.Template().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -3056,9 +3056,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.Template().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
+		updatedFields = conn.Template().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),

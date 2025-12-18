@@ -72,14 +72,14 @@ func (conn *RedshiftConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	distKey := ""
 	if keyCols := data.Columns.GetKeys(iop.DistributionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		distKey = g.F("distkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{dist_key}", distKey)
 
 	sortKey := ""
 	if keyCols := data.Columns.GetKeys(iop.SortKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		sortKey = g.F("compound sortkey(%s)", strings.Join(colNames, ", "))
 	}
 	sql = strings.ReplaceAll(sql, "{sort_key}", sortKey)
@@ -474,7 +474,7 @@ func (conn *RedshiftConn) CopyFromS3(tableFName, s3Path string, columns iop.Colu
 	}
 	credentialExpr := conn.makeCopyCredentialString()
 
-	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
+	tgtColumns := conn.Template().QuoteNames(columns.Names()...)
 
 	g.Debug("copying into redshift from s3")
 	g.Debug("url: " + s3Path)

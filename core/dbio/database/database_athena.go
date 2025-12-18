@@ -149,7 +149,7 @@ func (conn *AthenaConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 			if col := data.Columns.GetColumn(key); col != nil {
 				// For partitioning, we need both column name and type
 				partitionCols = append(partitionCols, fmt.Sprintf("%s %s",
-					conn.GetType().Quote(col.Name), makeNativeType(col)))
+					conn.Quote(col.Name), makeNativeType(col)))
 			}
 		}
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
@@ -157,7 +157,7 @@ func (conn *AthenaConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 		for _, col := range keyCols {
 			// For partitioning, we need both column name and type
 			partitionCols = append(partitionCols, fmt.Sprintf("%s %s",
-				conn.GetType().Quote(col.Name), makeNativeType(&col)))
+				conn.Quote(col.Name), makeNativeType(&col)))
 		}
 	}
 	if len(partitionCols) > 0 {
@@ -167,7 +167,7 @@ func (conn *AthenaConn) GenerateDDL(table Table, data iop.Dataset, temporary boo
 	// Process bucketing/clustering if needed
 	bucketBy := ""
 	if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		// Default to 10 buckets, but make it configurable
 		numBuckets := 10
 		if bucketCount := cast.ToInt(conn.GetProp("bucket_count")); bucketCount > 0 {
@@ -932,7 +932,7 @@ func (conn *AthenaConn) LoadFromS3(tableFName, s3Path string, columns iop.Column
 	}()
 
 	// Insert from external table to target table
-	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
+	tgtColumns := conn.Template().QuoteNames(columns.Names()...)
 	insertSQL := fmt.Sprintf(`insert into %s (%s) select %s from %s`,
 		tableFName,
 		strings.Join(tgtColumns, ", "),

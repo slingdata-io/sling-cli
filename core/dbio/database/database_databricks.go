@@ -655,10 +655,10 @@ func (conn *DatabricksConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	// Add partitioning if specified
 	partitionBy := ""
 	if keys, ok := table.Keys[iop.PartitionKey]; ok {
-		colNames := conn.GetType().QuoteNames(keys...)
+		colNames := conn.Template().QuoteNames(keys...)
 		partitionBy = g.F(" PARTITIONED BY (%s)", strings.Join(colNames, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F(" PARTITIONED BY (%s)", strings.Join(colNames, ", "))
 	}
 
@@ -669,10 +669,10 @@ func (conn *DatabricksConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	// Add clustering if specified
 	clusterBy := ""
 	if keys, ok := table.Keys[iop.ClusterKey]; ok {
-		colNames := conn.GetType().QuoteNames(keys...)
+		colNames := conn.Template().QuoteNames(keys...)
 		clusterBy = g.F(" CLUSTER BY (%s)", strings.Join(colNames, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.ClusterKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		clusterBy = g.F(" CLUSTER BY (%s)", strings.Join(colNames, ", "))
 	}
 

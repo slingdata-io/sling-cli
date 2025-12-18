@@ -326,6 +326,18 @@ func (conn *ArrowDBConn) GetNativeType(col iop.Column) (nativeType string, err e
 	return col.GetNativeType(conn.driverType, ct)
 }
 
+func (conn *ArrowDBConn) Template() dbio.Template {
+	return conn.template
+}
+
+func (conn *ArrowDBConn) Quote(field string) string {
+	return conn.template.Quote(field)
+}
+
+func (conn *ArrowDBConn) Unquote(field string) string {
+	return conn.template.Unquote(field)
+}
+
 // LoadTemplates loads the appropriate yaml template
 // For ADBC, it merges the driver-specific template with the ADBC template
 // Driver template is base, ADBC template overrides for ADBC-specific behavior

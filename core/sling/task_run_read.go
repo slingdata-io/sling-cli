@@ -46,7 +46,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	if len(cfg.Source.Select) > 0 {
 		selectFields = lo.Map(cfg.Source.Select, func(f string, i int) string {
 			// lookup column name
-			col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(f))
+			col := sTable.Columns.GetColumn(srcConn.Unquote(f))
 			if col != nil {
 				return col.Name
 			}
@@ -64,7 +64,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 
 			includedCols := lo.Filter(sTable.Columns, func(c iop.Column, i int) bool {
 				for _, exField := range excluded {
-					exField = srcConn.GetType().Unquote(strings.TrimPrefix(exField, "-"))
+					exField = srcConn.Unquote(strings.TrimPrefix(exField, "-"))
 					if strings.EqualFold(c.Name, exField) {
 						return false
 					}
@@ -156,9 +156,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 			)
 
 			sFields := lo.Map(selectFields, func(sf string, i int) string {
-				col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(sf))
+				col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
 				if col != nil {
-					return srcConn.GetType().Quote(col.Name) // apply quotes if match
+					return srcConn.Quote(col.Name) // apply quotes if match
 				}
 				return sf
 			})
@@ -207,9 +207,9 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	// if {fields} placeholder is used, replace it with selected fields to avoid double wrapping
 	if strings.Contains(sTable.SQL, "{fields}") {
 		sFields := lo.Map(selectFields, func(sf string, i int) string {
-			col := sTable.Columns.GetColumn(srcConn.GetType().Unquote(sf))
+			col := sTable.Columns.GetColumn(srcConn.Unquote(sf))
 			if col != nil {
-				return srcConn.GetType().Quote(col.Name) // apply quotes if match
+				return srcConn.Quote(col.Name) // apply quotes if match
 			}
 			return sf
 		})

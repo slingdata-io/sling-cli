@@ -359,18 +359,19 @@ type Template struct {
 	GeneralTypeMap map[string]string `yaml:"general_type_map"`
 	NativeTypeMap  map[string]string `yaml:"native_type_map"`
 	Variable       map[string]string `yaml:"variable"`
+	Type           Type              `yaml:"-"`
 }
 
 // ToData convert is dataset
-func (template Template) Value(path string) (value string) {
+func (tp Template) Value(path string) (value string) {
 	prefixes := map[string]map[string]string{
-		"core.":             template.Core,
-		"analysis.":         template.Analysis,
-		"function.":         template.Function,
-		"metadata.":         template.Metadata,
-		"general_type_map.": template.GeneralTypeMap,
-		"native_type_map.":  template.NativeTypeMap,
-		"variable.":         template.Variable,
+		"core.":             tp.Core,
+		"analysis.":         tp.Analysis,
+		"function.":         tp.Function,
+		"metadata.":         tp.Metadata,
+		"general_type_map.": tp.GeneralTypeMap,
+		"native_type_map.":  tp.NativeTypeMap,
+		"variable.":         tp.Variable,
 	}
 
 	for prefix, dict := range prefixes {
@@ -410,6 +411,7 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		GeneralTypeMap: map[string]string{},
 		NativeTypeMap:  map[string]string{},
 		Variable:       map[string]string{},
+		Type:           t,
 	}
 
 	connTemplate := Template{}
@@ -514,39 +516,53 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 }
 
 // Unquote removes quotes to the field name
-func (t Type) Unquote(field string) string {
-	template, _ := t.Template()
-	q := template.Variable["quote_char"]
+func (tp Template) Unquote(field string) string {
+	q := tp.Variable["quote_char"]
 	return strings.ReplaceAll(field, q, "")
 }
 
 // Quote adds quotes to the field name
-func (t Type) Quote(field string) string {
+func (tp Template) Quote(field string) string {
 	// don't normalize, causes issues.
 	// see https://github.com/slingdata-io/sling-cli/issues/538
 	// we should determine the casing upstream, configuration phase
 	Normalize := false
 
-	template, _ := t.Template()
 	// always normalize if case is uniform. Why would you quote and not normalize?
 	if !HasVariedCase(field) && Normalize {
-		if t.DBNameUpperCase() {
+		if tp.Type.DBNameUpperCase() {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
 		}
 	}
-	q := template.Variable["quote_char"]
-	field = t.Unquote(field)
+	q := tp.Variable["quote_char"]
+	field = tp.Type.Unquote(field)
 	return q + field + q
+}
+func (tp Template) QuoteNames(names ...string) (newNames []string) {
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = tp.Quote(names[i])
+	}
+	return newNames
+}
+
+// Unquote removes quotes to the field name
+func (t Type) Unquote(field string) string {
+	template, _ := t.Template()
+	return template.Unquote(field)
+}
+
+// Quote adds quotes to the field name
+func (t Type) Quote(field string) string {
+	template, _ := t.Template()
+	return template.Quote(field)
 }
 
 func (t Type) QuoteNames(names ...string) (newNames []string) {
-	newNames = make([]string, len(names))
-	for i := range names {
-		newNames[i] = t.Quote(names[i])
-	}
-	return newNames
+	template, _ := t.Template()
+	return template.QuoteNames(names...)
 }
 
 func HasVariedCase(text string) bool {

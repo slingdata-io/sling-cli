@@ -329,7 +329,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 	orderBy := "tuple()"
 	primaryKey := ""
 	if keyCols := data.Columns.GetKeys(iop.PrimaryKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		primaryKey = g.F("primary key (%s)", strings.Join(colNames, ", "))
 		orderBy = strings.Join(colNames, ", ")
 	}
@@ -340,7 +340,7 @@ func (conn *ClickhouseConn) GenerateDDL(table Table, data iop.Dataset, temporary
 		// allow custom SQL expression for partitioning
 		partitionBy = g.F("partition by (%s)", strings.Join(keys, ", "))
 	} else if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by %s", strings.Join(colNames, ", "))
 	}
 	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
