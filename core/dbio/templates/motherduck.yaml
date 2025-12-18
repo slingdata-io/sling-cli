@@ -157,3 +157,55 @@ variable:
   timestampz_layout: '2006-01-02 15:04:05.000000-07:00'
   max_string_type: text
   max_string_length: 2147483647
+
+native_type_map:
+  bigint: bigint
+  binary: binary
+  blob: binary
+  boolean: bool
+  char: string
+  date: date
+  datetime: datetime
+  decimal: decimal
+  double: float
+  enum: string
+  float: float
+  hugeint: bigint
+  integer: integer
+  interval: string
+  json: json
+  list: text
+  map: json
+  smallint: smallint
+  struct: json
+  text: text
+  time: time
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  tinyblob: text
+  tinyint: smallint
+  ubigint: bigint
+  uinteger: bigint
+  usmallint: integer
+  utinyint: integer
+  uuid: uuid
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: binary
+  bool: bool
+  date: date
+  datetime: datetime
+  decimal: "decimal(,)"
+  float: double
+  integer: integer
+  json: json
+  smallint: smallint
+  string: "varchar()"
+  text: text
+  time: time
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: time
+  uuid: uuid

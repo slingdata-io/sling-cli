@@ -322,3 +322,47 @@ variable:
   max_string_type: VARCHAR
   max_string_length: 2147483647
   max_column_length: 127
+
+native_type_map:
+  array: json
+  bigint: bigint
+  binary: binary
+  boolean: bool
+  char: string
+  date: date
+  decimal: decimal
+  double: float
+  float: float
+  integer: integer
+  json: json
+  map: json
+  real: float
+  row: json
+  smallint: smallint
+  string: text
+  struct: json
+  text: text
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  tinyint: smallint
+  varbinary: binary
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: binary
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: double
+  integer: int
+  json: string
+  smallint: smallint
+  string: string
+  text: string
+  time: string
+  timestamp: timestamp
+  timestampz: timestamp
+  timez: string
+  uuid: string

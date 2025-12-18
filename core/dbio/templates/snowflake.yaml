@@ -514,3 +514,56 @@ variable:
 
 error_filter:
   table_not_exist: exist
+
+native_type_map:
+  array: json
+  bigint: bigint
+  binary: binary
+  boolean: bool
+  char: string
+  character: string
+  date: date
+  datetime: timestamp
+  decimal: decimal
+  double: float
+  "double precision": float
+  fixed: decimal
+  float: float
+  float4: float
+  float8: float
+  int: integer
+  integer: integer
+  number: decimal
+  numeric: decimal
+  object: json
+  real: float
+  smallint: smallint
+  string: text
+  text: text
+  time: time
+  timestamp: timestamp
+  timestamp_ltz: timestampz
+  timestamp_ntz: timestamp
+  timestamp_tz: timestampz
+  varbinary: binary
+  varchar: text
+  variant: json
+
+general_type_map:
+  bigint: bigint
+  binary: binary
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: float
+  integer: integer
+  json: variant
+  smallint: smallint
+  string: "varchar()"
+  text: text
+  time: varchar
+  timestamp: timestamp_ntz
+  timestampz: timestamp_tz
+  timez: varchar
+  uuid: "varchar(36)"

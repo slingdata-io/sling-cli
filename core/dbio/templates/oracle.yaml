@@ -324,3 +324,46 @@ variable:
   max_string_type: varchar(4000)
   max_string_length: 4000
   max_column_length: 128
+
+native_type_map:
+  bfile: binary
+  blob: text
+  char: string
+  clob: text
+  date: datetime
+  datetime: datetime
+  float: float
+  json: json
+  long: string
+  longvarchar: string
+  mlslabel: string
+  nchar: string
+  nclob: text
+  number: decimal
+  nvarchar2: string
+  raw: binary
+  rowid: bigint
+  timestamp: timestamp
+  timestampdty: timestamp
+  timestamptz: timestampz
+  timestamptz_dty: timestampz
+  varchar2: string
+
+general_type_map:
+  bigint: "number(19)"
+  binary: "varbinary()"
+  bool: "varchar(5)"
+  date: date
+  datetime: "timestamp(9)"
+  decimal: "number(,)"
+  float: number
+  integer: "number(10)"
+  json: clob
+  smallint: "number(5)"
+  string: "varchar()"
+  text: clob
+  time: "varchar()"
+  timestamp: "timestamp(9)"
+  timestampz: "timestamp(9) with time zone"
+  timez: "varchar()"
+  uuid: "varchar(36)"

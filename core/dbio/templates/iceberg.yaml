@@ -11,3 +11,28 @@ core:
 
 variable:
   quote_char: '"'
+
+native_type_map:
+  binary: binary
+  boolean: bool
+  date: date
+  decimal: decimal
+  double: float
+  fixed: binary
+  float: float
+  float32: float
+  float64: float
+  int: integer
+  int32: integer
+  int64: bigint
+  list: json
+  long: bigint
+  map: json
+  string: text
+  struct: json
+  time: time
+  timestamp: timestamp
+  timestamp_ns: timestamp
+  timestamptz: timestampz
+  timestamptz_ns: timestampz
+  uuid: uuid

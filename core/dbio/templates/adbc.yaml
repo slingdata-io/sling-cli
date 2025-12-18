@@ -11,20 +11,23 @@ variable:
 
 # General type mappings - these are used when driver-specific mappings aren't available
 general_type_map:
-  bool: bool
-  int: integer
   bigint: bigint
-  float: double precision
+  binary: bytea
+  bool: bool
+  date: date
+  datetime: timestamp
+  decimal: numeric
+  float: "double precision"
+  integer: integer
+  json: jsonb
+  smallint: smallint
   string: text
   text: text
-  json: json
-  timestamp: timestamp
-  datetime: timestamp
-  date: date
   time: time
-  binary: bytea
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: "time with time zone"
   uuid: uuid
-  decimal: numeric
 
 # Native type mappings - map database-specific types to general types
 native_type_map:

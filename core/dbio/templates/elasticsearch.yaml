@@ -14,3 +14,6 @@ variable:
   error_filter_table_exists: already
   error_ignore_drop_table: NotFound
   quote_char: ''
+
+native_type_map:
+  json: json

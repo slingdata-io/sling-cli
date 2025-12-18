@@ -1,10 +1,7 @@
 package dbio
 
 import (
-	"bufio"
 	"embed"
-	"encoding/csv"
-	"io"
 	"strings"
 	"sync"
 	"unicode"
@@ -358,7 +355,6 @@ type Template struct {
 	Function       map[string]string `yaml:"function"`
 	GeneralTypeMap map[string]string `yaml:"general_type_map"`
 	NativeTypeMap  map[string]string `yaml:"native_type_map"`
-	NativeStatsMap map[string]bool   `yaml:"native_stat_map"`
 	Variable       map[string]string `yaml:"variable"`
 }
 
@@ -410,7 +406,6 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		Function:       map[string]string{},
 		GeneralTypeMap: map[string]string{},
 		NativeTypeMap:  map[string]string{},
-		NativeStatsMap: map[string]bool{},
 		Variable:       map[string]string{},
 	}
 
@@ -457,84 +452,12 @@ func (t Type) Template(useBase ...bool) (template Template, err error) {
 		template.Variable[key] = val
 	}
 
-	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
-	if err != nil {
-		return template, g.Error(err, `cannot open types_native_to_general`)
+	for key, val := range connTemplate.GeneralTypeMap {
+		template.GeneralTypeMap[key] = val
 	}
 
-	csvReader := csv.NewReader(bufio.NewReader(TypesNativeFile))
-	csvReader.Comma = '\t'
-
-	var records []map[string]string
-
-	// Read header
-	header, err := csvReader.Read()
-	if err != nil {
-		return template, g.Error(err, "failed to read header from types_native_to_general.tsv")
-	}
-
-	// Read records
-	for {
-		row, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return template, g.Error(err, "failed to read row from types_native_to_general.tsv")
-		}
-
-		record := make(map[string]string)
-		for i, value := range row {
-			record[header[i]] = value
-		}
-		records = append(records, record)
-	}
-
-	for _, rec := range records {
-		if rec["database"] == t.String() {
-			nt := strings.TrimSpace(rec["native_type"])
-			gt := strings.TrimSpace(rec["general_type"])
-			s := strings.TrimSpace(rec["stats_allowed"])
-			template.NativeTypeMap[nt] = gt
-			template.NativeStatsMap[nt] = s == "true"
-		}
-	}
-
-	TypesGeneralFile, err := templatesFolder.Open("templates/types_general_to_native.tsv")
-	if err != nil {
-		return template, g.Error(err, `cannot open types_general_to_native`)
-	}
-
-	csvReader = csv.NewReader(bufio.NewReader(TypesGeneralFile))
-	csvReader.Comma = '\t'
-
-	// Read header
-	header, err = csvReader.Read()
-	if err != nil {
-		return template, g.Error(err, "failed to read header from types_general_to_native.tsv")
-	}
-
-	// Read records
-	records = []map[string]string{} // reset
-	for {
-		row, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return template, g.Error(err, "failed to read row from types_general_to_native.tsv")
-		}
-
-		record := make(map[string]string)
-		for i, value := range row {
-			record[header[i]] = value
-		}
-		records = append(records, record)
-	}
-
-	for _, rec := range records {
-		gt := strings.TrimSpace(rec["general_type"])
-		template.GeneralTypeMap[gt] = rec[t.String()]
+	for key, val := range connTemplate.NativeTypeMap {
+		template.NativeTypeMap[key] = val
 	}
 
 	// cache with write lock if has base

@@ -335,3 +335,38 @@ variable:
   error_filter_table_exists: already exists
   max_string_type: varchar
   max_string_length: 1000000
+
+native_type_map:
+  bigint: bigint
+  boolean: bool
+  date: date
+  decimal: decimal
+  double: float
+  integer: integer
+  json: json
+  smallint: smallint
+  text: text
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  unknown: text
+  varbinary: binary
+  varchar: string
+
+general_type_map:
+  bigint: bigint
+  binary: varbinary
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: double
+  integer: integer
+  json: json
+  smallint: smallint
+  string: varchar
+  text: varchar
+  time: varchar
+  timestamp: timestamp
+  timestampz: "timestamp with time zone"
+  timez: varchar
+  uuid: uuid

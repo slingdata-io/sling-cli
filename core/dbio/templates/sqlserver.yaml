@@ -378,3 +378,53 @@ variable:
   max_string_type: nvarchar(max)
   max_string_length: 4000
   max_column_length: 128
+
+native_type_map:
+  bigint: bigint
+  binary: binary
+  bit: smallint
+  char: string
+  date: date
+  datetime: datetime
+  datetime2: datetime
+  datetimeoffset: timestampz
+  decimal: decimal
+  float: float
+  image: binary
+  int: integer
+  money: decimal
+  nchar: text
+  ntext: text
+  numeric: decimal
+  nvarchar: text
+  real: float
+  smalldatetime: datetime
+  smallint: smallint
+  smallmoney: decimal
+  sql_variant: text
+  text: text
+  time: time
+  timestamp: binary
+  tinyint: smallint
+  uniqueidentifier: uuid
+  varbinary: binary
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: varbinary
+  bool: "varchar(5)"
+  date: date
+  datetime: datetime2
+  decimal: "decimal(,)"
+  float: float
+  integer: integer
+  json: "nvarchar(max)"
+  smallint: smallint
+  string: "nvarchar()"
+  text: "nvarchar(max)"
+  time: "varchar()"
+  timestamp: datetime2
+  timestampz: datetimeoffset
+  timez: "varchar()"
+  uuid: uniqueidentifier

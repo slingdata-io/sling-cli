@@ -557,3 +557,45 @@ variable:
 
 error_filter:
   table_not_exist: exist
+
+native_type_map:
+  array: json
+  bigint: bigint
+  binary: binary
+  boolean: bool
+  date: date
+  decimal: decimal
+  double: float
+  float: float
+  int: integer
+  interval: string
+  long: bigint
+  map: json
+  object: json
+  smallint: smallint
+  string: text
+  struct: json
+  timestamp: timestampz
+  timestamp_ntz: timestamp
+  tinyint: smallint
+  variant: json
+  void: text
+
+general_type_map:
+  bigint: bigint
+  binary: binary
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: double
+  integer: int
+  json: string
+  smallint: smallint
+  string: string
+  text: string
+  time: string
+  timestamp: timestamp_ntz
+  timestampz: timestamp
+  timez: string
+  uuid: string

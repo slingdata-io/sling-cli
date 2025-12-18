@@ -428,3 +428,114 @@ variable:
   max_string_type: varchar(65500)
   max_string_length: 65500
   max_column_length: 63
+
+native_type_map:
+  "char": string
+  '"char"[]': json
+  "_uuid": text
+  'aclitem[]': json
+  anyarray: json
+  bigint: bigint
+  bigserial: bigint
+  bit: bool
+  "bit varying": string
+  bool: bool
+  boolean: bool
+  'boolean[]': json
+  box: string
+  bpchar: string
+  bytea: binary
+  character: string
+  "character varying": text
+  cidr: string
+  circle: string
+  date: date
+  decimal: decimal
+  "double precision": float
+  "double precision[]": json
+  float4: float
+  float8: float
+  inet: string
+  information_schema.cardinal_number: integer
+  information_schema.character_data: string
+  information_schema.sql_identifier: string
+  information_schema.time_stamp: string
+  information_schema.yes_or_no: string
+  int: integer
+  int2: smallint
+  int2vector: string
+  int4: integer
+  int8: bigint
+  integer: integer
+  interval: string
+  json: json
+  jsonb: json
+  line: string
+  lseg: string
+  macaddr: string
+  money: decimal
+  name: string
+  'name[]': json
+  numeric: decimal
+  oid: string
+  'oid[]': json
+  oidvector: string
+  path: string
+  pg_dependencies: string
+  pg_lsn: bigint
+  pg_mcv_list: string
+  pg_ndistinct: string
+  pg_node_tree: string
+  'pg_statistic[]': json
+  point: string
+  polygon: string
+  real: float
+  'real[]': json
+  regproc: string
+  regtype: string
+  'regtype[]': json
+  serial: integer
+  serial2: smallint
+  serial4: integer
+  serial8: integer
+  smallint: smallint
+  'smallint[]': json
+  smallserial: smallint
+  text: text
+  'text[]': json
+  time: time
+  "time with time zone": timez
+  "time without time zone": time
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  "timestamp without time zone": timestamp
+  timestamptz: timestampz
+  timetz: timez
+  tsquery: string
+  tsvector: string
+  txid_snapshot: string
+  uuid: uuid
+  varbit: string
+  varchar: text
+  xid: string
+  xml: string
+
+
+general_type_map:
+  bigint: bigint
+  binary: bytea
+  bool: bool
+  date: date
+  datetime: timestamp
+  decimal: numeric
+  float: "double precision"
+  integer: integer
+  json: jsonb
+  smallint: smallint
+  string: "varchar()"
+  text: text
+  time: "time(6)"
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: "time with time zone"
+  uuid: uuid

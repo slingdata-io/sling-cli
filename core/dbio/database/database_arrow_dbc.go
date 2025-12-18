@@ -365,9 +365,6 @@ func (conn *ArrowDBConn) LoadTemplates() error {
 		// for k, v := range adbcTemplate.NativeTypeMap {
 		// 	driverTemplate.NativeTypeMap[k] = v
 		// }
-		for k, v := range adbcTemplate.NativeStatsMap {
-			driverTemplate.NativeStatsMap[k] = v
-		}
 		for k, v := range adbcTemplate.Variable {
 			driverTemplate.Variable[k] = v
 		}
