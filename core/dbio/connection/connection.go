@@ -80,6 +80,11 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 		return conn, g.Error(err, "could not set URL for %s: %s", conn.Type, Name)
 	}
 
+	// set type for adbc
+	if conn.Type == dbio.TypeDbArrowDBC {
+		conn.Type = database.GetArrowDBCDriverType(conn.DataS(true)["driver_name"])
+	}
+
 	return conn, err
 }
 

@@ -25,12 +25,13 @@ type ArrowDBConn struct {
 	URL        string
 	db         adbc.Database
 	Conn       adbc.Connection
-	driverType dbio.Type // Underlying database type for templates
+	driverType dbio.Type  // Underlying database type for templates
+	driverConn Connection // a nested pseudo conn for established logic
 }
 
-// getDriverType maps ADBC driver names to corresponding database types
+// GetArrowDBCDriverType maps ADBC driver names to corresponding database types
 // This allows using driver-specific SQL templates
-func getDriverType(driverName string) dbio.Type {
+func GetArrowDBCDriverType(driverName string) dbio.Type {
 	mapping := map[string]dbio.Type{
 		"postgresql": dbio.TypeDbPostgres,
 		"postgres":   dbio.TypeDbPostgres,
@@ -40,6 +41,8 @@ func getDriverType(driverName string) dbio.Type {
 		"sqlite":     dbio.TypeDbSQLite,
 		"duckdb":     dbio.TypeDbDuckDb,
 		"bigquery":   dbio.TypeDbBigQuery,
+		"mysql":      dbio.TypeDbMySQL,
+		"trino":      dbio.TypeDbTrino,
 	}
 	if t, ok := mapping[strings.ToLower(driverName)]; ok {
 		return t
@@ -66,7 +69,7 @@ func getArrowStringValue(arr arrow.Array, idx int) string {
 	default:
 		val := iop.GetValueFromArrowArray(arr, idx)
 		if val != nil {
-			return cast.ToString(val)
+			return g.CastToString(val)
 		}
 		return ""
 	}
@@ -103,6 +106,8 @@ func (conn *ArrowDBConn) Init() error {
 		"adbc.snowflake.connection_string":  "adbc.snowflake.sql.uri",
 		"adbc.sqlite.connection_string":     "uri",
 		"adbc.duckdb.connection_string":     "path",
+		"adbc.mysql.connection_string":      "uri",
+		"adbc.trino.connection_string":      "url",
 	}
 
 	for key, val := range conn.properties {
@@ -142,7 +147,31 @@ func (conn *ArrowDBConn) Init() error {
 
 	// Determine driver type for template delegation
 	driverName := conn.GetProp("driver_name")
-	conn.driverType = getDriverType(driverName)
+	conn.driverType = GetArrowDBCDriverType(driverName)
+
+	// set driver conn
+	switch conn.driverType {
+	case dbio.TypeDbPostgres:
+		conn.driverConn, err = NewConn("postgres://")
+	case dbio.TypeDbSQLServer:
+		conn.driverConn, err = NewConn("sqlserver://")
+	case dbio.TypeDbSnowflake:
+		conn.driverConn, err = NewConn("snowflake://")
+	case dbio.TypeDbSQLite:
+		conn.driverConn, err = NewConn("sqlite://")
+	case dbio.TypeDbDuckDb:
+		conn.driverConn, err = NewConn("duckdb://")
+	case dbio.TypeDbBigQuery:
+		conn.driverConn, err = NewConn("bigquery://")
+	case dbio.TypeDbMySQL:
+		conn.driverConn, err = NewConn("mysql://")
+	case dbio.TypeDbTrino:
+		conn.driverConn, err = NewConn("trino://")
+	}
+
+	if err != nil {
+		return g.Error(err, "could not init driver conn")
+	}
 
 	if err := conn.BaseConn.Init(); err != nil {
 		return err
@@ -279,28 +308,7 @@ func (conn *ArrowDBConn) Close() error {
 
 // GenerateDDL generates a DDL based on a dataset
 func (conn *ArrowDBConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
-
-	var c Connection
-	switch conn.driverType {
-	case dbio.TypeDbPostgres:
-		c, err = NewConn("postgres://")
-	case dbio.TypeDbSQLServer:
-		c, err = NewConn("sqlserver://")
-	case dbio.TypeDbSnowflake:
-		c, err = NewConn("snowflake://")
-	case dbio.TypeDbSQLite:
-		c, err = NewConn("sqlite://")
-	case dbio.TypeDbDuckDb:
-		c, err = NewConn("duckdb://")
-	case dbio.TypeDbBigQuery:
-		c, err = NewConn("bigquery://")
-	}
-
-	if err != nil {
-		return "", g.Error(err, "could not init conn for generating DDL")
-	}
-
-	return c.GenerateDDL(table, data, temporary)
+	return conn.driverConn.GenerateDDL(table, data, temporary)
 }
 
 // GetTemplateValue returns the template value for the given path
@@ -371,17 +379,12 @@ func (conn *ArrowDBConn) LoadTemplates() error {
 		for k, v := range adbcTemplate.Function {
 			driverTemplate.Function[k] = v
 		}
-		// for k, v := range adbcTemplate.GeneralTypeMap {
-		// 	driverTemplate.GeneralTypeMap[k] = v
-		// }
-		// for k, v := range adbcTemplate.NativeTypeMap {
-		// 	driverTemplate.NativeTypeMap[k] = v
-		// }
 		for k, v := range adbcTemplate.Variable {
 			driverTemplate.Variable[k] = v
 		}
 
 		conn.template = driverTemplate
+		conn.Type = conn.driverType
 
 		return nil
 	}
@@ -634,113 +637,6 @@ func (conn *ArrowDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 	}
 
 	return df, nil
-}
-
-// GetDatabases returns the list of databases/catalogs
-func (conn *ArrowDBConn) GetDatabases() (data iop.Dataset, err error) {
-	data = iop.NewDataset(iop.NewColumnsFromFields("name"))
-
-	if conn.Conn == nil {
-		return data, g.Error("ADBC connection is not open")
-	}
-
-	reader, err := conn.Conn.GetObjects(conn.Context().Ctx, adbc.ObjectDepthCatalogs, nil, nil, nil, nil, nil)
-	if err != nil {
-		return data, g.Error(err, "could not get databases")
-	}
-	defer reader.Release()
-
-	for reader.Next() {
-		record := reader.Record()
-		// The first column should be catalog_name
-		if record.NumCols() > 0 {
-			catalogCol := record.Column(0)
-			for i := 0; i < int(record.NumRows()); i++ {
-				catalogName := getArrowStringValue(catalogCol, i)
-				if catalogName != "" {
-					data.Append([]interface{}{catalogName})
-				}
-			}
-		}
-	}
-
-	if err := reader.Err(); err != nil {
-		return data, g.Error(err, "error reading databases")
-	}
-
-	return data, nil
-}
-
-// GetSchemas returns the list of schemas
-func (conn *ArrowDBConn) GetSchemas() (data iop.Dataset, err error) {
-	data = iop.NewDataset(iop.NewColumnsFromFields("schema_name"))
-
-	if conn.Conn == nil {
-		return data, g.Error("ADBC connection is not open")
-	}
-
-	reader, err := conn.Conn.GetObjects(conn.Context().Ctx, adbc.ObjectDepthDBSchemas, nil, nil, nil, nil, nil)
-	if err != nil {
-		return data, g.Error(err, "could not get schemas")
-	}
-	defer reader.Release()
-
-	// Parse the nested structure: catalog -> db_schemas
-	for reader.Next() {
-		record := reader.Record()
-		schemas := conn.extractSchemasFromRecord(record)
-		for _, schemaName := range schemas {
-			data.Append([]interface{}{schemaName})
-		}
-	}
-
-	if err := reader.Err(); err != nil {
-		return data, g.Error(err, "error reading schemas")
-	}
-
-	return data, nil
-}
-
-// extractSchemasFromRecord extracts schema names from GetObjects record
-func (conn *ArrowDBConn) extractSchemasFromRecord(record arrow.Record) []string {
-	var schemas []string
-
-	// GetObjects returns: catalog_name (string), catalog_db_schemas (list of structs)
-	if record.NumCols() < 2 {
-		return schemas
-	}
-
-	dbSchemasCol := record.Column(1)
-	listCol, ok := dbSchemasCol.(*array.List)
-	if !ok {
-		return schemas
-	}
-
-	for i := 0; i < int(record.NumRows()); i++ {
-		if listCol.IsNull(i) {
-			continue
-		}
-
-		start, end := listCol.ValueOffsets(i)
-		valuesArray := listCol.ListValues()
-		structArray, ok := valuesArray.(*array.Struct)
-		if !ok {
-			continue
-		}
-
-		// First field should be db_schema_name
-		if structArray.NumField() > 0 {
-			schemaNameField := structArray.Field(0)
-			for j := int(start); j < int(end); j++ {
-				schemaName := getArrowStringValue(schemaNameField, j)
-				if schemaName != "" {
-					schemas = append(schemas, schemaName)
-				}
-			}
-		}
-	}
-
-	return schemas
 }
 
 // GetSchemata returns the full database metadata
