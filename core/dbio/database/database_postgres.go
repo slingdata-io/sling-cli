@@ -376,6 +376,11 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 		return conn.bulkImportStreamPgx(tableFName, ds)
 	}
 
+	if conn.UseADBC() {
+		conn.Commit()
+		return conn.adbc.BulkImportStream(tableFName, ds)
+	}
+
 	// Standard lib/pq implementation for normal PostgreSQL
 	var columns iop.Columns
 

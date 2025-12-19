@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,54 +27,7 @@ type ArrowDBConn struct {
 	URL        string
 	db         adbc.Database
 	Conn       adbc.Connection
-	driverType dbio.Type  // Underlying database type for templates
-	driverConn Connection // a nested pseudo conn for established logic
-}
-
-// GetArrowDBCDriverType maps ADBC driver names to corresponding database types
-// This allows using driver-specific SQL templates
-func GetArrowDBCDriverType(driverName string) dbio.Type {
-	mapping := map[string]dbio.Type{
-		"postgresql": dbio.TypeDbPostgres,
-		"postgres":   dbio.TypeDbPostgres,
-		"mssql":      dbio.TypeDbSQLServer,
-		"sqlserver":  dbio.TypeDbSQLServer,
-		"snowflake":  dbio.TypeDbSnowflake,
-		"sqlite":     dbio.TypeDbSQLite,
-		"duckdb":     dbio.TypeDbDuckDb,
-		"bigquery":   dbio.TypeDbBigQuery,
-		"mysql":      dbio.TypeDbMySQL,
-		"trino":      dbio.TypeDbTrino,
-	}
-	if t, ok := mapping[strings.ToLower(driverName)]; ok {
-		return t
-	}
-	return dbio.TypeDbArrowDBC // Fallback to ADBC template
-}
-
-// getArrowStringValue extracts a string value from an Arrow array at the given index.
-// It handles String, LargeString, Binary, and LargeBinary types, and creates a copy
-// of the string to avoid referencing Arrow buffer memory which may be freed.
-func getArrowStringValue(arr arrow.Array, idx int) string {
-	if arr.IsNull(idx) {
-		return ""
-	}
-	switch a := arr.(type) {
-	case *array.String:
-		return strings.Clone(a.Value(idx))
-	case *array.LargeString:
-		return strings.Clone(a.Value(idx))
-	case *array.Binary:
-		return string(a.Value(idx))
-	case *array.LargeBinary:
-		return string(a.Value(idx))
-	default:
-		val := iop.GetValueFromArrowArray(arr, idx)
-		if val != nil {
-			return g.CastToString(val)
-		}
-		return ""
-	}
+	driverType dbio.Type // Underlying database type for templates
 }
 
 // Init initiates the connection
@@ -132,7 +87,7 @@ func (conn *ArrowDBConn) Init() error {
 	if adbcProps["driver"] == "" {
 		if driverPath := conn.resolveDriverPath(); driverPath != "" {
 			adbcProps["driver"] = driverPath
-			g.Debug("auto-detected ADBC driver: %s", driverPath)
+			g.Trace("auto-detected ADBC driver: %s", driverPath)
 		}
 	}
 
@@ -149,30 +104,6 @@ func (conn *ArrowDBConn) Init() error {
 	driverName := conn.GetProp("driver_name")
 	conn.driverType = GetArrowDBCDriverType(driverName)
 
-	// set driver conn
-	switch conn.driverType {
-	case dbio.TypeDbPostgres:
-		conn.driverConn, err = NewConn("postgres://")
-	case dbio.TypeDbSQLServer:
-		conn.driverConn, err = NewConn("sqlserver://")
-	case dbio.TypeDbSnowflake:
-		conn.driverConn, err = NewConn("snowflake://")
-	case dbio.TypeDbSQLite:
-		conn.driverConn, err = NewConn("sqlite://")
-	case dbio.TypeDbDuckDb:
-		conn.driverConn, err = NewConn("duckdb://")
-	case dbio.TypeDbBigQuery:
-		conn.driverConn, err = NewConn("bigquery://")
-	case dbio.TypeDbMySQL:
-		conn.driverConn, err = NewConn("mysql://")
-	case dbio.TypeDbTrino:
-		conn.driverConn, err = NewConn("trino://")
-	}
-
-	if err != nil {
-		return g.Error(err, "could not init driver conn")
-	}
-
 	if err := conn.BaseConn.Init(); err != nil {
 		return err
 	}
@@ -180,6 +111,52 @@ func (conn *ArrowDBConn) Init() error {
 	// Reload templates with driver-specific overrides
 	// (BaseConn.Init() loaded the default ADBC template)
 	return conn.LoadTemplates()
+}
+
+// GetArrowDBCDriverType maps ADBC driver names to corresponding database types
+// This allows using driver-specific SQL templates
+func GetArrowDBCDriverType(driverName string) dbio.Type {
+	mapping := map[string]dbio.Type{
+		"postgresql": dbio.TypeDbPostgres,
+		"postgres":   dbio.TypeDbPostgres,
+		"mssql":      dbio.TypeDbSQLServer,
+		"sqlserver":  dbio.TypeDbSQLServer,
+		"snowflake":  dbio.TypeDbSnowflake,
+		"sqlite":     dbio.TypeDbSQLite,
+		"duckdb":     dbio.TypeDbDuckDb,
+		"bigquery":   dbio.TypeDbBigQuery,
+		"mysql":      dbio.TypeDbMySQL,
+		"trino":      dbio.TypeDbTrino,
+	}
+	if t, ok := mapping[strings.ToLower(driverName)]; ok {
+		return t
+	}
+	return dbio.TypeDbArrowDBC // Fallback to ADBC template
+}
+
+// getArrowStringValue extracts a string value from an Arrow array at the given index.
+// It handles String, LargeString, Binary, and LargeBinary types, and creates a copy
+// of the string to avoid referencing Arrow buffer memory which may be freed.
+func getArrowStringValue(arr arrow.Array, idx int) string {
+	if arr.IsNull(idx) {
+		return ""
+	}
+	switch a := arr.(type) {
+	case *array.String:
+		return strings.Clone(a.Value(idx))
+	case *array.LargeString:
+		return strings.Clone(a.Value(idx))
+	case *array.Binary:
+		return string(a.Value(idx))
+	case *array.LargeBinary:
+		return string(a.Value(idx))
+	default:
+		val := iop.GetValueFromArrowArray(arr, idx)
+		if val != nil {
+			return g.CastToString(val)
+		}
+		return ""
+	}
 }
 
 // resolveDriverPath attempts to find the ADBC driver from dbc CLI installation
@@ -304,11 +281,6 @@ func (conn *ArrowDBConn) Close() error {
 	}
 
 	return nil
-}
-
-// GenerateDDL generates a DDL based on a dataset
-func (conn *ArrowDBConn) GenerateDDL(table Table, data iop.Dataset, temporary bool) (ddl string, err error) {
-	return conn.driverConn.GenerateDDL(table, data, temporary)
 }
 
 // GetTemplateValue returns the template value for the given path
@@ -618,6 +590,11 @@ func (conn *ArrowDBConn) GetSQLColumns(table Table) (columns iop.Columns, err er
 	return ds.Columns, nil
 }
 
+// BulkExportStream streams the rows in bulk
+func (conn *ArrowDBConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	return conn.StreamRowsContext(conn.Context().Ctx, table.Select())
+}
+
 // BulkExportFlow exports data as a dataflow
 func (conn *ArrowDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err error) {
 	// Build the query
@@ -637,249 +614,6 @@ func (conn *ArrowDBConn) BulkExportFlow(table Table) (df *iop.Dataflow, err erro
 	}
 
 	return df, nil
-}
-
-// GetSchemata returns the full database metadata
-func (conn *ArrowDBConn) GetSchemata(level SchemataLevel, schemaName string, tableNames ...string) (schemata Schemata, err error) {
-	schemata = Schemata{
-		Databases: map[string]Database{},
-		conn:      conn,
-	}
-
-	if conn.Conn == nil {
-		return schemata, g.Error("ADBC connection is not open")
-	}
-
-	// Determine object depth based on level
-	var depth adbc.ObjectDepth
-	switch level {
-	case SchemataLevelSchema:
-		depth = adbc.ObjectDepthDBSchemas
-	case SchemataLevelTable:
-		depth = adbc.ObjectDepthTables
-	case SchemataLevelColumn:
-		depth = adbc.ObjectDepthAll
-	default:
-		depth = adbc.ObjectDepthAll
-	}
-
-	// Prepare filters
-	var schemaFilter *string
-	if schemaName != "" {
-		schemaFilter = &schemaName
-	}
-
-	var tableFilter *string
-	if len(tableNames) > 0 && tableNames[0] != "" {
-		tableFilter = &tableNames[0]
-	}
-
-	reader, err := conn.Conn.GetObjects(conn.Context().Ctx, depth, nil, schemaFilter, tableFilter, nil, nil)
-	if err != nil {
-		return schemata, g.Error(err, "could not get schemata")
-	}
-	defer reader.Release()
-
-	currDatabase := conn.GetProp("database")
-	if currDatabase == "" {
-		currDatabase = "default"
-	}
-
-	schemas := map[string]Schema{}
-
-	// Parse the nested GetObjects structure
-	for reader.Next() {
-		record := reader.Record()
-		conn.parseGetObjectsRecord(record, currDatabase, level, schemas)
-	}
-
-	if err := reader.Err(); err != nil {
-		return schemata, g.Error(err, "error reading schemata")
-	}
-
-	schemata.Databases[currDatabase] = Database{
-		Name:    currDatabase,
-		Schemas: schemas,
-	}
-
-	return schemata, nil
-}
-
-// parseGetObjectsRecord parses the nested GetObjects Arrow record
-func (conn *ArrowDBConn) parseGetObjectsRecord(record arrow.Record, database string, level SchemataLevel, schemas map[string]Schema) {
-	// GetObjects structure:
-	// - catalog_name: string
-	// - catalog_db_schemas: list<struct<db_schema_name, db_schema_tables>>
-
-	if record.NumCols() < 2 {
-		return
-	}
-
-	catalogNameCol := record.Column(0)
-	dbSchemasCol := record.Column(1)
-
-	listCol, ok := dbSchemasCol.(*array.List)
-	if !ok {
-		return
-	}
-
-	for catalogIdx := 0; catalogIdx < int(record.NumRows()); catalogIdx++ {
-		catalogName := ""
-		if catalogNameCol != nil {
-			catalogName = getArrowStringValue(catalogNameCol, catalogIdx)
-		}
-
-		if listCol.IsNull(catalogIdx) {
-			continue
-		}
-
-		start, end := listCol.ValueOffsets(catalogIdx)
-		schemaArray := listCol.ListValues()
-		structArray, ok := schemaArray.(*array.Struct)
-		if !ok {
-			continue
-		}
-
-		// Parse each schema
-		for schemaIdx := int(start); schemaIdx < int(end); schemaIdx++ {
-			schemaName := ""
-			if structArray.NumField() > 0 {
-				schemaName = getArrowStringValue(structArray.Field(0), schemaIdx)
-			}
-
-			if schemaName == "" {
-				continue
-			}
-
-			schema := Schema{
-				Name:     schemaName,
-				Database: database,
-				Tables:   map[string]Table{},
-			}
-
-			if existing, ok := schemas[strings.ToLower(schemaName)]; ok {
-				schema = existing
-			}
-
-			// Parse tables if available (depth >= Tables)
-			if level != SchemataLevelSchema && structArray.NumField() > 1 {
-				tablesField := structArray.Field(1)
-				conn.parseTablesFromField(tablesField, schemaIdx, database, schemaName, catalogName, level, &schema)
-			}
-
-			schemas[strings.ToLower(schemaName)] = schema
-		}
-	}
-}
-
-// parseTablesFromField parses table information from the nested structure
-func (conn *ArrowDBConn) parseTablesFromField(tablesField arrow.Array, schemaIdx int, database, schemaName, _ string, level SchemataLevel, schema *Schema) {
-	tablesListCol, ok := tablesField.(*array.List)
-	if !ok {
-		return
-	}
-
-	if tablesListCol.IsNull(schemaIdx) {
-		return
-	}
-
-	tStart, tEnd := tablesListCol.ValueOffsets(schemaIdx)
-	tablesArray := tablesListCol.ListValues()
-	tablesStruct, ok := tablesArray.(*array.Struct)
-	if !ok {
-		return
-	}
-
-	for tableIdx := int(tStart); tableIdx < int(tEnd); tableIdx++ {
-		tableName := ""
-		tableType := ""
-
-		if tablesStruct.NumField() > 0 {
-			tableName = getArrowStringValue(tablesStruct.Field(0), tableIdx)
-		}
-		if tablesStruct.NumField() > 1 {
-			tableType = getArrowStringValue(tablesStruct.Field(1), tableIdx)
-		}
-
-		if tableName == "" {
-			continue
-		}
-
-		table := Table{
-			Name:     tableName,
-			Schema:   schemaName,
-			Database: database,
-			Dialect:  dbio.TypeDbArrowDBC,
-			IsView:   strings.ToUpper(tableType) == "VIEW",
-			Columns:  iop.Columns{},
-		}
-
-		if existing, ok := schema.Tables[strings.ToLower(tableName)]; ok {
-			table = existing
-		}
-
-		// Parse columns if level is Column
-		if level == SchemataLevelColumn && tablesStruct.NumField() > 3 {
-			columnsField := tablesStruct.Field(3) // table_columns is typically the 4th field
-			conn.parseColumnsFromField(columnsField, tableIdx, &table)
-		}
-
-		schema.Tables[strings.ToLower(tableName)] = table
-	}
-}
-
-// parseColumnsFromField parses column information from the nested structure
-func (conn *ArrowDBConn) parseColumnsFromField(columnsField arrow.Array, tableIdx int, table *Table) {
-	columnsListCol, ok := columnsField.(*array.List)
-	if !ok {
-		return
-	}
-
-	if columnsListCol.IsNull(tableIdx) {
-		return
-	}
-
-	cStart, cEnd := columnsListCol.ValueOffsets(tableIdx)
-	columnsArray := columnsListCol.ListValues()
-	columnsStruct, ok := columnsArray.(*array.Struct)
-	if !ok {
-		return
-	}
-
-	for colIdx := int(cStart); colIdx < int(cEnd); colIdx++ {
-		columnName := ""
-		ordinalPosition := 0
-		dataType := ""
-
-		// column_name
-		if columnsStruct.NumField() > 0 {
-			columnName = getArrowStringValue(columnsStruct.Field(0), colIdx)
-		}
-		// ordinal_position
-		if columnsStruct.NumField() > 1 {
-			if val := iop.GetValueFromArrowArray(columnsStruct.Field(1), colIdx); val != nil {
-				ordinalPosition = cast.ToInt(val)
-			}
-		}
-		// xdbc_type_name (data type) - typically at index 5 or via another field
-		if columnsStruct.NumField() > 5 {
-			dataType = getArrowStringValue(columnsStruct.Field(5), colIdx)
-		}
-
-		if columnName == "" {
-			continue
-		}
-
-		col := iop.Column{
-			Name:     columnName,
-			Position: ordinalPosition,
-			DbType:   dataType,
-			Type:     iop.StringType, // Default, should be inferred from data type
-			Sourced:  true,
-		}
-
-		table.Columns = append(table.Columns, col)
-	}
 }
 
 // BulkImportFlow imports data from a dataflow using ADBC bulk ingestion
@@ -1020,4 +754,361 @@ func (conn *ArrowDBConn) batchToRecordReader(batch *iop.Batch) (array.RecordRead
 
 	// Note: record will be released when reader is released
 	return reader, nil
+}
+
+// NewAdbcConn creates a new ADBC conn from a parent conn
+// constructs the connection string with complete URIs/paths for each database type
+func NewAdbcConn(parentConn Connection) (adbcConn Connection, err error) {
+	connMap := map[string]string{
+		"url":  "adbc://",
+		"name": parentConn.GetProp("name") + "-adbc",
+	}
+
+	// Get connection info and property accessor
+	info := parentConn.Info()
+	getProp := func(key string) string {
+		return parentConn.GetProp(key)
+	}
+
+	// Copy ADBC-specific properties from parent (adbc.*, driver_name, driver)
+	copyAdbcProperties(parentConn, connMap)
+
+	switch parentConn.GetType() {
+	case dbio.TypeDbPostgres:
+		connMap["driver_name"] = "postgresql"
+		connMap["uri"] = buildPostgresAdbcURI(info, getProp)
+
+	case dbio.TypeDbSQLServer:
+		connMap["driver_name"] = "mssql"
+		connMap["uri"] = buildSQLServerAdbcURI(info, getProp)
+
+	case dbio.TypeDbSnowflake:
+		connMap["driver_name"] = "snowflake"
+		connMap["adbc.snowflake.sql.uri"] = buildSnowflakeAdbcURI(info, getProp)
+
+	case dbio.TypeDbSQLite:
+		connMap["driver_name"] = "sqlite"
+		connMap["uri"] = buildSQLiteAdbcURI(info, getProp)
+
+	case dbio.TypeDbDuckDb:
+		connMap["driver_name"] = "duckdb"
+		connMap["path"] = buildDuckDbAdbcPath(info, getProp)
+
+	case dbio.TypeDbBigQuery:
+		connMap["driver_name"] = "bigquery"
+		buildBigQueryAdbcConfig(getProp, connMap)
+
+	case dbio.TypeDbMySQL:
+		connMap["driver_name"] = "mysql"
+		connMap["uri"] = buildMySQLAdbcURI(info, getProp)
+
+	case dbio.TypeDbTrino:
+		connMap["driver_name"] = "trino"
+		connMap["uri"] = parentConn.GetProp("http_url")
+		// Flight SQL auth via separate options
+		if info.User != "" {
+			connMap["username"] = info.User
+		}
+		if info.Password != "" {
+			connMap["password"] = info.Password
+		}
+	}
+
+	if uri := parentConn.GetProp("adbc_uri"); uri != "" {
+		connMap["uri"] = uri
+	}
+
+	props := g.MapToKVArr(connMap)
+	c, err := NewConnContext(parentConn.Context().Ctx, "adbc://", props...)
+	if err != nil {
+		return nil, g.Error(err, "could not init ADBC Connection")
+	}
+
+	return c, c.Init()
+}
+
+// copyAdbcProperties copies ADBC-specific and driver properties from parent to connMap
+func copyAdbcProperties(parentConn Connection, connMap map[string]string) {
+	for key, val := range parentConn.Props() {
+		// Pass through adbc.* properties (driver-specific options)
+		if strings.HasPrefix(key, "adbc.") {
+			connMap[key] = val
+		}
+	}
+	// Pass driver_name for driver resolution in Init()
+	if dn := parentConn.GetProp("driver_name"); dn != "" {
+		connMap["driver_name"] = dn
+	}
+	// Pass driver path if explicitly set
+	if driver := parentConn.GetProp("driver"); driver != "" {
+		connMap["driver"] = driver
+	}
+}
+
+// buildPostgresAdbcURI builds a PostgreSQL ADBC connection URI
+// Format: postgresql://[user[:password]@][host][:port][/dbname][?params]
+func buildPostgresAdbcURI(info ConnInfo, getProp func(string) string) string {
+	var uri strings.Builder
+	uri.WriteString("postgresql://")
+
+	// User and password
+	if info.User != "" {
+		uri.WriteString(url.QueryEscape(info.User))
+		if info.Password != "" {
+			uri.WriteString(":")
+			uri.WriteString(url.QueryEscape(info.Password))
+		}
+		uri.WriteString("@")
+	}
+
+	// Host and port
+	if info.Host != "" {
+		uri.WriteString(info.Host)
+		if info.Port > 0 {
+			uri.WriteString(fmt.Sprintf(":%d", info.Port))
+		}
+	}
+
+	// Database
+	if info.Database != "" {
+		uri.WriteString("/")
+		uri.WriteString(info.Database)
+	}
+
+	// Query parameters
+	params := url.Values{}
+	if val := getProp("sslmode"); val != "" {
+		params.Set("sslmode", val)
+	}
+	if val := getProp("connect_timeout"); val != "" {
+		params.Set("connect_timeout", val)
+	}
+	if val := getProp("application_name"); val != "" {
+		params.Set("application_name", val)
+	}
+
+	if len(params) > 0 {
+		uri.WriteString("?")
+		uri.WriteString(params.Encode())
+	}
+
+	result := uri.String()
+	return result
+}
+
+// buildSnowflakeAdbcURI builds a Snowflake ADBC connection URI
+// Format: user[:password]@account/database/schema[?params]
+func buildSnowflakeAdbcURI(info ConnInfo, getProp func(string) string) string {
+	var uri strings.Builder
+
+	// User and password
+	if info.User != "" {
+		uri.WriteString(url.QueryEscape(info.User))
+		if info.Password != "" {
+			uri.WriteString(":")
+			uri.WriteString(url.QueryEscape(info.Password))
+		}
+		uri.WriteString("@")
+	}
+
+	// Account - prefer explicit "account" property, then extract from host
+	account := getProp("account")
+	if account == "" {
+		// Handle full host: "account.region.snowflakecomputing.com" → "account.region"
+		account = strings.TrimSuffix(info.Host, ".snowflakecomputing.com")
+	}
+	uri.WriteString(account)
+
+	// Database and schema
+	if info.Database != "" {
+		uri.WriteString("/")
+		uri.WriteString(info.Database)
+		if info.Schema != "" {
+			uri.WriteString("/")
+			uri.WriteString(info.Schema)
+		}
+	}
+
+	// Query parameters
+	params := url.Values{}
+	if info.Warehouse != "" {
+		params.Set("warehouse", info.Warehouse)
+	}
+	if info.Role != "" {
+		params.Set("role", info.Role)
+	}
+	if val := getProp("authenticator"); val != "" {
+		params.Set("authenticator", val)
+	}
+
+	if len(params) > 0 {
+		uri.WriteString("?")
+		uri.WriteString(params.Encode())
+	}
+
+	result := uri.String()
+	return result
+}
+
+// buildSQLiteAdbcURI builds a SQLite ADBC connection URI
+// Format: file:path/to/file.db or :memory:
+func buildSQLiteAdbcURI(info ConnInfo, getProp func(string) string) string {
+	// Get database path
+	dbPath := info.Database
+	if dbPath == "" {
+		dbPath = getProp("database")
+	}
+	if dbPath == "" {
+		dbPath = ":memory:"
+	}
+
+	// If it's a file path and doesn't start with "file:" or ":memory:", add "file:" prefix
+	if dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
+		dbPath = "file:" + dbPath
+	}
+
+	return dbPath
+}
+
+// buildDuckDbAdbcPath builds a DuckDB ADBC path parameter
+// DuckDB uses 'path' parameter instead of 'uri'
+// Format: /path/to/file.db or :memory:
+func buildDuckDbAdbcPath(info ConnInfo, getProp func(string) string) string {
+	// Get database path
+	dbPath := info.Database
+	if dbPath == "" {
+		dbPath = getProp("database")
+	}
+	if dbPath == "" {
+		dbPath = ":memory:"
+	}
+
+	g.Debug("Built DuckDB ADBC path: %s", dbPath)
+	return dbPath
+}
+
+// buildBigQueryAdbcConfig populates ADBC BigQuery configuration parameters
+// BigQuery uses configuration parameters instead of URI format
+func buildBigQueryAdbcConfig(getProp func(string) string, connMap map[string]string) {
+	// Required: Project ID
+	if projectID := getProp("project"); projectID != "" {
+		connMap["adbc.bigquery.project_id"] = projectID
+	} else if projectID := getProp("project_id"); projectID != "" {
+		connMap["adbc.bigquery.project_id"] = projectID
+	}
+
+	// Auth type - determine from available credentials
+	authType := getProp("auth_type")
+	if authType == "" {
+		// Determine based on available credentials
+		if getProp("GC_KEY_BODY") != "" {
+			authType = "service"
+		} else if getProp("GC_KEY_FILE") != "" {
+			authType = "service"
+		} else {
+			authType = "user"
+		}
+	}
+	connMap["adbc.bigquery.auth_type"] = authType
+
+	// Credentials
+	if keyBody := getProp("GC_KEY_BODY"); keyBody != "" {
+		connMap["adbc.bigquery.auth_credentials"] = keyBody
+	} else if keyFile := getProp("GC_KEY_FILE"); keyFile != "" {
+		connMap["adbc.bigquery.auth_credentials_file"] = keyFile
+	}
+
+	// Optional: Dataset/Schema
+	if dataset := getProp("dataset"); dataset != "" {
+		connMap["adbc.bigquery.dataset_id"] = dataset
+	} else if schema := getProp("schema"); schema != "" {
+		connMap["adbc.bigquery.dataset_id"] = schema
+	}
+
+	// Optional: Location/Region
+	if location := getProp("location"); location != "" {
+		connMap["adbc.bigquery.location"] = location
+	}
+
+	g.Debug("Built BigQuery ADBC configuration with auth_type=%s", authType)
+}
+
+// buildSQLServerAdbcURI builds a SQL Server ADBC connection URI
+// Format: Server=host,port;Database=db;User Id=user;Password=pwd;
+func buildSQLServerAdbcURI(info ConnInfo, getProp func(string) string) string {
+	var parts []string
+
+	// Server
+	if info.Host != "" {
+		serverStr := info.Host
+		if info.Port > 0 {
+			serverStr = fmt.Sprintf("%s,%d", info.Host, info.Port)
+		}
+		parts = append(parts, fmt.Sprintf("Server=%s", serverStr))
+	}
+
+	// Database
+	if info.Database != "" {
+		parts = append(parts, fmt.Sprintf("Database=%s", info.Database))
+	}
+
+	// User and Password
+	if info.User != "" {
+		parts = append(parts, fmt.Sprintf("User Id=%s", info.User))
+	}
+	if info.Password != "" {
+		// ODBC escaping: wrap in braces if contains special chars, double any }
+		pwd := info.Password
+		if strings.ContainsAny(pwd, ";{}") {
+			pwd = "{" + strings.ReplaceAll(pwd, "}", "}}") + "}"
+		}
+		parts = append(parts, fmt.Sprintf("Password=%s", pwd))
+	}
+
+	// Additional parameters
+	if encrypt := getProp("encrypt"); encrypt != "" {
+		parts = append(parts, fmt.Sprintf("Encrypt=%s", encrypt))
+	}
+	if trustCert := getProp("TrustServerCertificate"); trustCert != "" {
+		parts = append(parts, fmt.Sprintf("TrustServerCertificate=%s", trustCert))
+	}
+
+	result := strings.Join(parts, ";")
+	return result
+}
+
+// buildMySQLAdbcURI builds a MySQL ADBC connection URI
+// Note: MySQL does not have an official ADBC driver
+// Format: user:password@tcp(host:port)/database
+func buildMySQLAdbcURI(info ConnInfo, getProp func(string) string) string {
+	var uri strings.Builder
+
+	// User and password
+	if info.User != "" {
+		uri.WriteString(url.QueryEscape(info.User))
+		if info.Password != "" {
+			uri.WriteString(":")
+			uri.WriteString(url.QueryEscape(info.Password))
+		}
+		uri.WriteString("@")
+	}
+
+	// Host and port with tcp protocol
+	if info.Host != "" {
+		uri.WriteString("tcp(")
+		uri.WriteString(info.Host)
+		if info.Port > 0 {
+			uri.WriteString(fmt.Sprintf(":%d", info.Port))
+		}
+		uri.WriteString(")")
+	}
+
+	// Database
+	if info.Database != "" {
+		uri.WriteString("/")
+		uri.WriteString(info.Database)
+	}
+
+	result := uri.String()
+	return result
 }

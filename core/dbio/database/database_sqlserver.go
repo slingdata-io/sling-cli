@@ -550,6 +550,10 @@ func (conn *MsSQLServerConn) SubmitTemplate(level string, templateMap map[string
 func (conn *MsSQLServerConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
 	conn.Commit() // cannot have transaction lock table
 
+	if conn.UseADBC() {
+		return conn.adbc.BulkImportStream(tableFName, ds)
+	}
+
 	// return conn.BaseConn.InsertBatchStream(tableFName, ds)
 	_, err = exec.LookPath(conn.bcpPath())
 	if err != nil {
