@@ -515,7 +515,16 @@ func ColumnsToArrowSchema(columns Columns) *arrow.Schema {
 		case FloatType:
 			arrowType = arrow.PrimitiveTypes.Float64
 		case DecimalType:
-			arrowType = &arrow.Decimal128Type{Precision: int32(col.DbPrecision), Scale: int32(col.DbScale)}
+			// Use minimum scale/precision when not set, matching AppendToBuilder logic
+			scale := col.DbScale
+			if scale == 0 {
+				scale = env.DdlMinDecScale
+			}
+			precision := col.DbPrecision
+			if precision == 0 {
+				precision = env.DdlMinDecLength
+			}
+			arrowType = &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}
 		case DateType:
 			arrowType = arrow.FixedWidthTypes.Date32
 		case DatetimeType, TimestampType, TimestampzType:
