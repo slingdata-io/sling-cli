@@ -1321,7 +1321,16 @@
     # TARGET=ADBC_MYSQL SCHEMA=mysql sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
   output_contains:
     - 'ADBC write large test completed successfully'
-    
+
+- id: 150
+  name: 'Test MSSQL boolean to string conversion'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.81.mssql_bool_string.yaml
+  output_contains:
+    - 'SUCCESS: Boolean values correctly converted to strings in MSSQL'
+    - 'mssql_test2.is_active has boolean type'
+    - 'SUCCESS: Boolean values correctly stored as boolean type in mssql_test2'
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target

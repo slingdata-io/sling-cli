@@ -602,6 +602,32 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 	emptyRep := `$~e$~`
 	postUpdateCol := map[int]uint64{}
 
+	ds.Context.Lock()
+	columns, err := conn.GetColumns(tableFName, ds.Columns.Names()...)
+	if err != nil {
+		return count, g.Error(err, "could not get matching list of columns from table")
+	}
+	ds.Context.Unlock()
+
+	insCols, err := conn.ValidateColumnNames(columns, ds.Columns.Names())
+	if err != nil {
+		return count, g.Error(err, "columns mismatch")
+	}
+
+	var boolCols []int
+	insColMap := insCols.Map()
+	for i, col := range ds.Columns {
+		insCol := g.PtrVal(insColMap[col.Name])
+		switch {
+		case col.Type == iop.BoolType:
+			// only set as bool if target column type is boolean/int
+			// need to maintain string booleans for existing replications
+			if insCol.IsBool() || insCol.IsInteger() {
+				boolCols = append(boolCols, i)
+			}
+		}
+	}
+
 	// transformation to correctly post process quotes, newlines, and delimiter afterwards
 	// https://stackoverflow.com/questions/782353/sql-server-bulk-insert-of-csv-file-with-inconsistent-quotes
 	// reduces performance by ~25%, but is correct, and still 10x faster then insert into with batch VALUES
@@ -633,6 +659,20 @@ func (conn *MsSQLServerConn) BcpImportFileParrallel(tableFName string, ds *iop.D
 				}
 			default:
 				_ = v
+			}
+
+			// set Bool correctly if target column is not string
+			for _, colI := range boolCols {
+				if row[colI] != nil {
+					valBool, err := cast.ToBoolE(row[colI])
+					if !ds.Context.CaptureErr(err) {
+						if valBool {
+							row[colI] = 1
+						} else {
+							row[colI] = 0
+						}
+					}
+				}
 			}
 		}
 		return
@@ -1233,6 +1273,10 @@ func (conn *MsSQLServerConn) CastColumnForSelect(srcCol iop.Column, tgtCol iop.C
 	case srcCol.IsString() && tgtCol.IsInteger():
 		// assume bool, convert from true/false to 1/0
 		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else cast({col} as bigint) end`
+		selectStr = g.R(sql, "col", qName)
+	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
+		// assume bool, convert from 1/0 to true/false
+		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else cast({col} as varchar) end`
 		selectStr = g.R(sql, "col", qName)
 	default:
 		selectStr = qName

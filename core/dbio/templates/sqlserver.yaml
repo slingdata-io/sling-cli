@@ -382,7 +382,7 @@ variable:
 native_type_map:
   bigint: bigint
   binary: binary
-  bit: smallint
+  bit: bool
   char: string
   date: date
   datetime: datetime
@@ -413,7 +413,7 @@ native_type_map:
 general_type_map:
   bigint: bigint
   binary: varbinary
-  bool: "varchar(5)"
+  bool: bit
   date: date
   datetime: datetime2
   decimal: "decimal(,)"
