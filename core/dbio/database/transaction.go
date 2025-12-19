@@ -323,12 +323,15 @@ func InsertBatchStream(conn Connection, tx Transaction, tableFName string, ds *i
 
 		vals := []interface{}{}
 		for _, row := range rows {
-			if conn.GetType() == dbio.TypeDbClickhouse {
+			switch {
+			case conn.GetType() == dbio.TypeDbClickhouse:
 				row = processClickhouseInsertRow(bColumns, row)
-			} else if conn.GetType() == dbio.TypeDbTrino {
+			case conn.GetType() == dbio.TypeDbTrino:
 				row = processTrinoInsertRow(bColumns, row)
-			} else if conn.GetType() == dbio.TypeDbProton {
+			case conn.GetType() == dbio.TypeDbProton:
 				row = processProtonInsertRow(bColumns, row)
+			case conn.GetType().IsSQLServer():
+				// row = processSQLServerInsertRow(bColumns, row)
 			}
 			vals = append(vals, row...)
 		}
