@@ -38,8 +38,8 @@ hooks:
         Thread State Sync Test Results:
         ================================
         runs keys: {keys(runs)}
-        execution: {execution}
-        full runs: {runs}
+        execution: {cast(execution, "string")}
+        full runs: {cast(runs, "string")}
 
         Stream 1: total_rows={runs["public_thread_sync_test_1"].total_rows}, status={runs["public_thread_sync_test_1"].status}
         Stream 2: total_rows={runs["public_thread_sync_test_2"].total_rows}, status={runs["public_thread_sync_test_2"].status}
