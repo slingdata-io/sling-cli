@@ -3,11 +3,11 @@ steps:
     location: aws_s3/tmp/planets.json
 
   - type: http
-    url: https://swapi.dev/api/planets
-    write_to: aws_s3/tmp/planets.json
+    url: "https://www.omdbapi.com/?apikey={env.OMDB_API_KEY}&t=movie"
+    write_to: aws_s3/tmp/movie.json
 
   - type: read
-    from: aws_s3/tmp/planets.json
+    from: aws_s3/tmp/movie.json
     into: planets
   
   - type: check
@@ -18,13 +18,15 @@ steps:
     recursive: true
 
   - type: http
-    url: https://swapi.dev/api/people
-    write_to: local//tmp/output/
+    url: "https://www.omdbapi.com/?apikey={env.OMDB_API_KEY}&t=movie"
+    write_to: local//tmp/output/movie.json
 
   - type: read
-    from: local//tmp/output/people
-    into: people
+    from: local//tmp/output/movie.json
+    into: movie
   
   - type: check
-    check: 'length(store.people) > 0'
+    check: 'length(store.movie) > 0'
   
+env:
+  OMDB_API_KEY: ${OMDB_API_KEY}

@@ -568,3 +568,52 @@ variable:
   max_string_type: varchar(65535)
   max_string_length: 65535
   max_column_length: 127
+
+native_type_map:
+  bigint: bigint
+  bool: bool
+  boolean: bool
+  bpchar: string
+  bytea: binary
+  char: string
+  character: string
+  "character varying": text
+  date: date
+  decimal: decimal
+  "double precision": float
+  float: float
+  float4: float
+  float8: float
+  int2: smallint
+  int4: integer
+  int8: bigint
+  integer: integer
+  name: string
+  numeric: decimal
+  real: float
+  smallint: smallint
+  text: text
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  "timestamp without time zone": timestamp
+  timestamptz: timestampz
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: "varchar(65535)"
+  bool: bool
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: "double precision"
+  integer: integer
+  json: "varchar(65535)"
+  smallint: smallint
+  string: "varchar()"
+  text: "varchar(65535)"
+  time: "varchar(65535)"
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: "varchar(65535)"
+  uuid: "varchar(36)"

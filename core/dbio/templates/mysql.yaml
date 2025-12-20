@@ -396,3 +396,67 @@ variable:
 
 error_filter:
   table_not_exist: exist
+
+native_type_map:
+  bigint: bigint
+  binary: binary
+  bit: binary
+  blob: text
+  char: string
+  date: date
+  datetime: datetime
+  decimal: decimal
+  double: float
+  enum: string
+  float: float
+  geomcollection: string
+  geometry: string
+  geometrycollection: string
+  int: integer
+  json: json
+  linestring: string
+  longblob: text
+  longtext: text
+  mediumblob: text
+  mediumint: integer
+  mediumtext: text
+  multilinestring: string
+  multipoint: string
+  multipolygon: string
+  point: string
+  polygon: string
+  set: string
+  smallint: smallint
+  text: text
+  time: time
+  timestamp: timestamp
+  tinyblob: text
+  tinyint: smallint
+  tinytext: text
+  "unsigned bigint": "decimal(28,0)"
+  "unsigned int": bigint
+  "unsigned mediumint": bigint
+  "unsigned smallint": integer
+  "unsigned tinyint": integer
+  varbinary: binary
+  varchar: text
+  year: string
+
+general_type_map:
+  bigint: bigint
+  binary: varbinary
+  bool: "char(5)"
+  date: date
+  datetime: "datetime(6)"
+  decimal: "decimal(,)"
+  float: double
+  integer: integer
+  json: json
+  smallint: smallint
+  string: "varchar()"
+  text: mediumtext
+  time: "varchar()"
+  timestamp: "datetime(6)"
+  timestampz: "datetime(6)"
+  timez: "varchar()"
+  uuid: "varchar(36)"

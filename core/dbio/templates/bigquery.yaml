@@ -418,3 +418,43 @@ variable:
 
 error_filter:
   table_not_exist: exist
+
+native_type_map:
+  array: json
+  bignumeric: decimal
+  bool: bool
+  boolean: bool
+  bytes: binary
+  date: date
+  datetime: datetime
+  float: float
+  float64: float
+  geography: string
+  int64: bigint
+  integer: bigint
+  json: json
+  numeric: decimal
+  record: json
+  string: text
+  struct: json
+  time: time
+  timestamp: timestamp
+
+general_type_map:
+  bigint: int64
+  binary: bytes
+  bool: bool
+  date: date
+  datetime: timestamp
+  decimal: numeric
+  float: float64
+  integer: int64
+  json: json
+  smallint: int64
+  string: string
+  text: string
+  time: string
+  timestamp: timestamp
+  timestampz: timestamp
+  timez: string
+  uuid: string

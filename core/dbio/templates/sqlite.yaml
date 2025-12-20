@@ -127,3 +127,41 @@ variable:
   batch_values: 1000
   max_string_type: text
   max_string_length: 1000000000
+
+native_type_map:
+  bigint: bigint
+  blob: text
+  boolean: bool
+  bytea: binary
+  date: date
+  datetime: datetime
+  decimal: decimal
+  float: float
+  int: integer
+  integer: bigint
+  json: json
+  null: text
+  num: integer
+  numeric: decimal
+  real: decimal
+  text: text
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: blob
+  bool: boolean
+  date: text
+  datetime: text
+  decimal: real
+  float: real
+  integer: integer
+  json: json
+  smallint: integer
+  string: text
+  text: text
+  time: text
+  timestamp: text
+  timestampz: text
+  timez: text
+  uuid: text

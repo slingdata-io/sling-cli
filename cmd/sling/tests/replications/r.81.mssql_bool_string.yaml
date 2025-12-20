@@ -1,0 +1,183 @@
+# Test for MSSQL boolean to string conversion (similar to issue #626 for ClickHouse)
+# When target column is already a VARCHAR type, we shouldn't force boolean conversion
+# When target column is new, it should be created as BIT (boolean type)
+source: postgres
+target: mssql
+
+hooks:
+  start:
+    # Create source table in postgres with boolean field
+    - type: query
+      connection: '{source.name}'
+      query: |
+        DROP TABLE IF EXISTS public.mssql_test1;
+        CREATE TABLE public.mssql_test1 (
+          id INTEGER,
+          name VARCHAR(100),
+          is_active BOOLEAN
+        );
+        INSERT INTO public.mssql_test1 (id, name, is_active) VALUES
+          (1, 'Test Record 1', true),
+          (2, 'Test Record 2', false),
+          (3, 'Test Record 3', true);
+
+    # Create target table in MSSQL with boolean column as VARCHAR (string)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS dbo.mssql_test1;
+        CREATE TABLE dbo.mssql_test1 (
+          id INT,
+          name VARCHAR(100),
+          is_active VARCHAR(10)
+        );
+
+  end:
+    # Check that execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # Verify data was loaded correctly
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM dbo.mssql_test1 ORDER BY id
+      into: result
+
+    - type: log
+      message: |
+        Loaded data: {pretty_table(store.result)}
+        Row count: {length(store.result)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result) == 3
+      failure_message: "Expected 3 rows but found {length(store.result)}"
+
+    # Verify first row - boolean true should be converted to string
+    - type: check
+      check: int_parse(store.result[0].id) == 1
+      failure_message: "Expected id=1 but found {store.result[0].id}"
+
+    - type: check
+      check: store.result[0].name == "Test Record 1"
+      failure_message: "Expected 'Test Record 1' but found {store.result[0].name}"
+
+    # The boolean true should be stored as string "true" or "1" in MSSQL VARCHAR
+    - type: log
+      message: |
+        is_active value for row 1: {store.result[0].is_active}
+
+    - type: check
+      check: store.result[0].is_active == "true" 
+      failure_message: "Expected 'true' or '1' but found {store.result[0].is_active}"
+
+    # Verify second row - boolean false should be converted to string
+    - type: check
+      check: int_parse(store.result[1].id) == 2
+      failure_message: "Expected id=2 but found {store.result[1].id}"
+
+    - type: check
+      check: store.result[1].is_active == "false"
+      failure_message: "Expected 'false' or '0' but found {store.result[1].is_active}"
+
+    # Verify third row
+    - type: check
+      check: int_parse(store.result[2].id) == 3
+      failure_message: "Expected id=3 but found {store.result[2].id}"
+
+    - type: check
+      check: store.result[2].is_active == "true"
+      failure_message: "Expected 'true' or '1' but found {store.result[2].is_active}"
+
+    - type: log
+      message: "SUCCESS: Boolean values correctly converted to strings in MSSQL"
+
+    # ===== Verify second stream: mssql_test2 should have BIT (boolean) type =====
+
+    # Check column type for is_active in mssql_test2
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'mssql_test2'
+          AND COLUMN_NAME = 'is_active'
+      into: col_type_result
+
+    - type: log
+      message: |
+        mssql_test2 is_active column type: {store.col_type_result[0].data_type}
+
+    # Verify is_active is BIT type (boolean in MSSQL)
+    - type: check
+      check: store.col_type_result[0].data_type == "bit"
+      failure_message: "Expected 'bit' but found {store.col_type_result[0].data_type}"
+      success_message: "mssql_test2.is_active has boolean type: {store.col_type_result[0].data_type}"
+
+    # Verify data was loaded correctly in mssql_test2
+    - type: query
+      connection: '{target.name}'
+      query: SELECT * FROM dbo.mssql_test2 ORDER BY id
+      into: result2
+
+    - type: log
+      message: |
+        mssql_test2 loaded data: {pretty_table(store.result2)}
+        Row count: {length(store.result2)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result2) == 3
+      failure_message: "Expected 3 rows in test2 but found {length(store.result2)}"
+
+    # Verify boolean values are actual booleans (0 or 1 as integers in MSSQL BIT)
+    - type: check
+      check: bool_parse(store.result2[0].is_active) == true
+      failure_message: "Expected is_active=1 (true) for row 1 but found {store.result2[0].is_active}"
+
+    - type: check
+      check: bool_parse(store.result2[1].is_active) == false
+      failure_message: "Expected is_active=0 (false) for row 2 but found {store.result2[1].is_active}"
+
+    - type: check
+      check: bool_parse(store.result2[2].is_active) == true
+      failure_message: "Expected is_active=1 (true) for row 3 but found {store.result2[2].is_active}"
+
+    - type: log
+      message: "SUCCESS: Boolean values correctly stored as boolean type in mssql_test2"
+
+    # Cleanup source table
+    - type: query
+      connection: '{source.name}'
+      query: DROP TABLE IF EXISTS public.mssql_test1;
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS dbo.mssql_test1;
+        DROP TABLE IF EXISTS dbo.mssql_test2;
+        DROP TABLE IF EXISTS dbo.mssql_test3;
+
+streams:
+  public.mssql_test1:
+    object: dbo.mssql_test1
+    mode: incremental
+    update_key: id
+    target_options:
+      use_bulk: false
+      direct_insert: true
+
+  mssql_test1_2:
+    sql: select * from public.mssql_test1
+    object: dbo.mssql_test2
+    mode: full-refresh # should create BIT column
+
+  mssql_test1_3:
+    sql: select * from public.mssql_test1
+    object: dbo.mssql_test3
+    mode: full-refresh # should create BIT column
+    target_options:
+      use_bulk: false  # without BCP

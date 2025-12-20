@@ -97,7 +97,7 @@ metadata:
       numeric_precision as precision, 
       numeric_scale as scale,
       collation_name,
-      collationProperty(collation_name, 'CodePage') as collation_code
+      cast(collationProperty(collation_name, 'CodePage') as varchar) as collation_code
     from INFORMATION_SCHEMA.COLUMNS
     where table_schema = '{schema}'
       and table_name = '{table}'
@@ -185,7 +185,7 @@ metadata:
       cols.data_type as data_type,
       cols.ordinal_position as position,
       cols.collation_name,
-      collationProperty(collation_name, 'CodePage') as collation_code
+      cast(collationProperty(collation_name, 'CodePage') as varchar) as collation_code
     from INFORMATION_SCHEMA.COLUMNS cols
     join tables
       on tables.table_catalog = cols.table_catalog
@@ -395,3 +395,52 @@ variable:
   max_string_type: varchar(max)
   max_string_length: 4000
   max_column_length: 128
+
+native_type_map:
+  bigint: bigint
+  binary: binary
+  bit: bool
+  char: string
+  date: date
+  datetime: datetime
+  datetime2: datetime
+  datetimeoffset: timestampz
+  decimal: decimal
+  float: float
+  image: binary
+  int: integer
+  money: decimal
+  nchar: text
+  ntext: text
+  numeric: decimal
+  nvarchar: text
+  real: float
+  smalldatetime: datetime
+  smallint: smallint
+  smallmoney: decimal
+  sql_variant: text
+  time: time
+  timestamp: binary
+  tinyint: smallint
+  uniqueidentifier: uuid
+  varbinary: binary
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: varbinary
+  bool: bit
+  date: date
+  datetime: "datetime2(6)"
+  decimal: "decimal(,)"
+  float: float
+  integer: integer
+  json: "varchar(max)"
+  smallint: smallint
+  string: "varchar()"
+  text: "varchar(max)"
+  time: "varchar()"
+  timestamp: "datetime2(6)"
+  timestampz: "datetime2(6)"
+  timez: "varchar()"
+  uuid: uniqueidentifier

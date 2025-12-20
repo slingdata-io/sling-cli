@@ -1,15 +1,15 @@
 package dbio
 
 import (
-	"bufio"
 	"embed"
-	"encoding/csv"
-	"io"
+	"os"
+	"path"
 	"strings"
 	"sync"
 	"unicode"
 
 	"github.com/flarco/g"
+	"github.com/slingdata-io/sling-cli/core/env"
 	"gopkg.in/yaml.v2"
 )
 
@@ -86,7 +86,7 @@ const (
 	TypeDbIceberg       Type = "iceberg"
 	TypeDbAzureTable    Type = "azuretable"
 	TypeDbExasol        Type = "exasol"
-	TypeDbArrowFlight   Type = "flightsql"
+	TypeDbArrowDBC      Type = "adbc"
 )
 
 var AllType = []struct {
@@ -134,6 +134,7 @@ var AllType = []struct {
 	{TypeDbProton, "TypeDbProton"},
 	{TypeDbExasol, "TypeDbExasol"},
 	{TypeDbAzureTable, "TypeDbAzureTable"},
+	{TypeDbArrowDBC, "TypeDbArrowDBC"},
 }
 
 // ValidateType returns true is type is valid
@@ -155,7 +156,7 @@ func ValidateType(tStr string) (Type, bool) {
 	case
 		TypeApi,
 		TypeFileLocal, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp,
-		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol:
+		TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbSnowflake, TypeDbDatabricks, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbAzureDWH, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbAzureTable, TypeDbFabric, TypeDbExasol, TypeDbArrowDBC:
 		return t, true
 	}
 
@@ -204,7 +205,7 @@ func (t Type) DBNameUpperCase() bool {
 func (t Type) Kind() Kind {
 	switch t {
 	case TypeDbPostgres, TypeDbRedshift, TypeDbStarRocks, TypeDbMySQL, TypeDbMariaDB, TypeDbOracle, TypeDbBigQuery, TypeDbBigTable,
-		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric:
+		TypeDbSnowflake, TypeDbDatabricks, TypeDbExasol, TypeDbSQLite, TypeDbD1, TypeDbSQLServer, TypeDbAzure, TypeDbClickhouse, TypeDbTrino, TypeDbAthena, TypeDbIceberg, TypeDbDuckDb, TypeDbDuckLake, TypeDbMotherDuck, TypeDbMongoDB, TypeDbElasticsearch, TypeDbPrometheus, TypeDbProton, TypeDbAzureTable, TypeDbFabric, TypeDbArrowDBC:
 		return KindDatabase
 	case TypeFileLocal, TypeFileHDFS, TypeFileS3, TypeFileAzure, TypeFileAzureABFS, TypeFileGoogle, TypeFileGoogleDrive, TypeFileSftp, TypeFileFtp, TypeFileHTTP, Type("https"):
 		return KindFile
@@ -291,6 +292,7 @@ func (t Type) NameLong() string {
 		TypeDbMongoDB:       "DB - MongoDB",
 		TypeDbProton:        "DB - Proton",
 		TypeDbAzureTable:    "DB - Azure Table",
+		TypeDbArrowDBC:      "DB - Arrow DBC",
 	}
 
 	return mapping[t]
@@ -339,6 +341,7 @@ func (t Type) Name() string {
 		TypeDbAzure:         "Azure",
 		TypeDbProton:        "Proton",
 		TypeDbAzureTable:    "Azure Table",
+		TypeDbArrowDBC:      "Arrow DBC",
 	}
 
 	return mapping[t]
@@ -355,20 +358,20 @@ type Template struct {
 	Function       map[string]string `yaml:"function"`
 	GeneralTypeMap map[string]string `yaml:"general_type_map"`
 	NativeTypeMap  map[string]string `yaml:"native_type_map"`
-	NativeStatsMap map[string]bool   `yaml:"native_stat_map"`
 	Variable       map[string]string `yaml:"variable"`
+	Type           Type              `yaml:"-"`
 }
 
 // ToData convert is dataset
-func (template Template) Value(path string) (value string) {
+func (tp Template) Value(path string) (value string) {
 	prefixes := map[string]map[string]string{
-		"core.":             template.Core,
-		"analysis.":         template.Analysis,
-		"function.":         template.Function,
-		"metadata.":         template.Metadata,
-		"general_type_map.": template.GeneralTypeMap,
-		"native_type_map.":  template.NativeTypeMap,
-		"variable.":         template.Variable,
+		"core.":             tp.Core,
+		"analysis.":         tp.Analysis,
+		"function.":         tp.Function,
+		"metadata.":         tp.Metadata,
+		"general_type_map.": tp.GeneralTypeMap,
+		"native_type_map.":  tp.NativeTypeMap,
+		"variable.":         tp.Variable,
 	}
 
 	for prefix, dict := range prefixes {
@@ -386,10 +389,15 @@ func (template Template) Value(path string) (value string) {
 var typeTemplate = map[Type]Template{}
 var typeTemplateMutex sync.RWMutex
 
-func (t Type) Template() (template Template, err error) {
+func (t Type) Template(useBase ...bool) (template Template, err error) {
+	withBase := true
+	if len(useBase) > 0 {
+		withBase = useBase[0]
+	}
+
 	// Check if template exists in cache (with read lock)
 	typeTemplateMutex.RLock()
-	if val, ok := typeTemplate[t]; ok {
+	if val, ok := typeTemplate[t]; ok && withBase {
 		typeTemplateMutex.RUnlock()
 		return val, nil
 	}
@@ -402,19 +410,21 @@ func (t Type) Template() (template Template, err error) {
 		Function:       map[string]string{},
 		GeneralTypeMap: map[string]string{},
 		NativeTypeMap:  map[string]string{},
-		NativeStatsMap: map[string]bool{},
 		Variable:       map[string]string{},
+		Type:           t,
 	}
 
 	connTemplate := Template{}
 
-	baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
-	if err != nil {
-		return template, g.Error(err, "could not read base.yaml")
-	}
+	if withBase {
+		baseTemplateBytes, err := templatesFolder.ReadFile("templates/base.yaml")
+		if err != nil {
+			return template, g.Error(err, "could not read base.yaml")
+		}
 
-	if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
-		return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		if err := yaml.Unmarshal([]byte(baseTemplateBytes), &template); err != nil {
+			return template, g.Error(err, "could not unmarshal baseTemplateBytes")
+		}
 	}
 
 	templateBytes, err := templatesFolder.ReadFile("templates/" + t.String() + ".yaml")
@@ -447,128 +457,112 @@ func (t Type) Template() (template Template, err error) {
 		template.Variable[key] = val
 	}
 
-	TypesNativeFile, err := templatesFolder.Open("templates/types_native_to_general.tsv")
-	if err != nil {
-		return template, g.Error(err, `cannot open types_native_to_general`)
+	for key, val := range connTemplate.GeneralTypeMap {
+		template.GeneralTypeMap[key] = val
 	}
 
-	csvReader := csv.NewReader(bufio.NewReader(TypesNativeFile))
-	csvReader.Comma = '\t'
-
-	var records []map[string]string
-
-	// Read header
-	header, err := csvReader.Read()
-	if err != nil {
-		return template, g.Error(err, "failed to read header from types_native_to_general.tsv")
+	for key, val := range connTemplate.NativeTypeMap {
+		template.NativeTypeMap[key] = val
 	}
 
-	// Read records
-	for {
-		row, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
+	// Load user template overrides from ~/.sling/templates/{dbType}.yaml
+	userTemplates := path.Join(env.HomeDir, "templates")
+	userTemplatePath := path.Join(userTemplates, t.String()+".yaml")
+	if g.PathExists(userTemplatePath) {
+		userTemplateBytes, err := os.ReadFile(userTemplatePath)
 		if err != nil {
-			return template, g.Error(err, "failed to read row from types_native_to_general.tsv")
+			g.Warn("could not read user template at %s: %s", userTemplatePath, err.Error())
+		} else {
+			userTemplate := Template{}
+			err = yaml.Unmarshal(userTemplateBytes, &userTemplate)
+			if err != nil {
+				g.Warn("could not parse user template at %s: %s", userTemplatePath, err.Error())
+			} else {
+				// Merge user template over existing template (user values take precedence)
+				for key, val := range userTemplate.Core {
+					template.Core[key] = val
+				}
+				for key, val := range userTemplate.Analysis {
+					template.Analysis[key] = val
+				}
+				for key, val := range userTemplate.Function {
+					template.Function[key] = val
+				}
+				for key, val := range userTemplate.Metadata {
+					template.Metadata[key] = val
+				}
+				for key, val := range userTemplate.Variable {
+					template.Variable[key] = val
+				}
+				for key, val := range userTemplate.GeneralTypeMap {
+					template.GeneralTypeMap[key] = val
+				}
+				for key, val := range userTemplate.NativeTypeMap {
+					template.NativeTypeMap[key] = val
+				}
+				g.Debug("applied user template overrides from %s", userTemplatePath)
+			}
 		}
-
-		record := make(map[string]string)
-		for i, value := range row {
-			record[header[i]] = value
-		}
-		records = append(records, record)
 	}
 
-	for _, rec := range records {
-		if rec["database"] == t.String() {
-			nt := strings.TrimSpace(rec["native_type"])
-			gt := strings.TrimSpace(rec["general_type"])
-			s := strings.TrimSpace(rec["stats_allowed"])
-			template.NativeTypeMap[nt] = gt
-			template.NativeStatsMap[nt] = s == "true"
-		}
+	// cache with write lock if has base
+	if withBase {
+		typeTemplateMutex.Lock()
+		typeTemplate[t] = template
+		typeTemplateMutex.Unlock()
 	}
-
-	TypesGeneralFile, err := templatesFolder.Open("templates/types_general_to_native.tsv")
-	if err != nil {
-		return template, g.Error(err, `cannot open types_general_to_native`)
-	}
-
-	csvReader = csv.NewReader(bufio.NewReader(TypesGeneralFile))
-	csvReader.Comma = '\t'
-
-	// Read header
-	header, err = csvReader.Read()
-	if err != nil {
-		return template, g.Error(err, "failed to read header from types_general_to_native.tsv")
-	}
-
-	// Read records
-	records = []map[string]string{} // reset
-	for {
-		row, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return template, g.Error(err, "failed to read row from types_general_to_native.tsv")
-		}
-
-		record := make(map[string]string)
-		for i, value := range row {
-			record[header[i]] = value
-		}
-		records = append(records, record)
-	}
-
-	for _, rec := range records {
-		gt := strings.TrimSpace(rec["general_type"])
-		template.GeneralTypeMap[gt] = rec[t.String()]
-	}
-
-	// cache with write lock
-	typeTemplateMutex.Lock()
-	typeTemplate[t] = template
-	typeTemplateMutex.Unlock()
 
 	return template, nil
 }
 
 // Unquote removes quotes to the field name
-func (t Type) Unquote(field string) string {
-	template, _ := t.Template()
-	q := template.Variable["quote_char"]
+func (tp Template) Unquote(field string) string {
+	q := tp.Variable["quote_char"]
 	return strings.ReplaceAll(field, q, "")
 }
 
 // Quote adds quotes to the field name
-func (t Type) Quote(field string) string {
+func (tp Template) Quote(field string) string {
 	// don't normalize, causes issues.
 	// see https://github.com/slingdata-io/sling-cli/issues/538
 	// we should determine the casing upstream, configuration phase
 	Normalize := false
 
-	template, _ := t.Template()
 	// always normalize if case is uniform. Why would you quote and not normalize?
 	if !HasVariedCase(field) && Normalize {
-		if t.DBNameUpperCase() {
+		if tp.Type.DBNameUpperCase() {
 			field = strings.ToUpper(field)
 		} else {
 			field = strings.ToLower(field)
 		}
 	}
-	q := template.Variable["quote_char"]
-	field = t.Unquote(field)
+	q := tp.Variable["quote_char"]
+	field = tp.Type.Unquote(field)
 	return q + field + q
+}
+func (tp Template) QuoteNames(names ...string) (newNames []string) {
+	newNames = make([]string, len(names))
+	for i := range names {
+		newNames[i] = tp.Quote(names[i])
+	}
+	return newNames
+}
+
+// Unquote removes quotes to the field name
+func (t Type) Unquote(field string) string {
+	template, _ := t.Template()
+	return template.Unquote(field)
+}
+
+// Quote adds quotes to the field name
+func (t Type) Quote(field string) string {
+	template, _ := t.Template()
+	return template.Quote(field)
 }
 
 func (t Type) QuoteNames(names ...string) (newNames []string) {
-	newNames = make([]string, len(names))
-	for i := range names {
-		newNames[i] = t.Quote(names[i])
-	}
-	return newNames
+	template, _ := t.Template()
+	return template.QuoteNames(names...)
 }
 
 func HasVariedCase(text string) bool {
@@ -632,6 +626,7 @@ const (
 	FileTypeXml       FileType = "xml"
 	FileTypeExcel     FileType = "xlsx"
 	FileTypeJson      FileType = "json"
+	FileTypeGeojson   FileType = "geojson"
 	FileTypeParquet   FileType = "parquet"
 	FileTypeArrow     FileType = "arrow"
 	FileTypeAvro      FileType = "avro"
@@ -651,6 +646,7 @@ var AllFileType = []struct {
 	{FileTypeXml, "FileTypeXml"},
 	{FileTypeExcel, "FileTypeExcel"},
 	{FileTypeJson, "FileTypeJson"},
+	{FileTypeGeojson, "FileTypeGeojson"},
 	{FileTypeParquet, "FileTypeParquet"},
 	{FileTypeAvro, "FileTypeAvro"},
 	{FileTypeArrow, "FileTypeArrow"},
@@ -676,7 +672,7 @@ func (ft FileType) Ext() string {
 
 func (ft FileType) IsJson() bool {
 	switch ft {
-	case FileTypeJson, FileTypeJsonLines:
+	case FileTypeJson, FileTypeJsonLines, FileTypeGeojson:
 		return true
 	}
 	return false

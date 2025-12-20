@@ -13,3 +13,6 @@ variable:
   error_ignore_drop_table: NotFound
   quote_char: ''
   max_column_length: 255
+
+native_type_map:
+  json: json

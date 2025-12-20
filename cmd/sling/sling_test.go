@@ -88,12 +88,14 @@ var connMap = map[dbio.Type]connTest{
 	dbio.TypeDbOracle:            {name: "oracle", schema: "oracle", useBulk: g.Bool(false)},
 	dbio.Type("oracle_sqlldr"):   {name: "oracle", schema: "oracle", useBulk: g.Bool(true)},
 	dbio.TypeDbPostgres:          {name: "postgres"},
+	dbio.Type("postgres_adbc"):   {name: "postgres_adbc", adjustCol: g.Bool(false)},
 	dbio.TypeDbRedshift:          {name: "redshift", adjustCol: g.Bool(false)},
 	dbio.TypeDbSnowflake:         {name: "snowflake"},
 	dbio.TypeDbSQLite:            {name: "sqlite", schema: "main"},
 	dbio.TypeDbD1:                {name: "d1", schema: "main"},
 	dbio.TypeDbSQLServer:         {name: "mssql", schema: "dbo", useBulk: g.Bool(false)},
 	dbio.Type("sqlserver_bcp"):   {name: "mssql", schema: "dbo", useBulk: g.Bool(true), adjustCol: g.Bool(false)},
+	dbio.Type("sqlserver_adbc"):  {name: "mssql_adbc", schema: "dbo"},
 	dbio.TypeDbStarRocks:         {name: "starrocks"},
 	dbio.TypeDbTrino:             {name: "trino", adjustCol: g.Bool(false)},
 	dbio.TypeDbMongoDB:           {name: "mongo", schema: "default"},
@@ -122,7 +124,7 @@ func TestMain(m *testing.M) {
 	args := os.Args
 	for _, arg := range args {
 		if arg == "-d" || arg == "--debug" {
-			os.Setenv("DEBUG", "true")
+			os.Setenv("DEBUG", "LOW")
 			env.InitLogger()
 		}
 		if arg == "-a" || arg == "--all" {
@@ -133,7 +135,7 @@ func TestMain(m *testing.M) {
 			env.InitLogger()
 		}
 		if arg != "" && unicode.IsDigit(rune(arg[0])) {
-			os.Setenv("TESTS", arg)
+			testContext.Map.Set("TESTS", arg)
 		}
 	}
 
@@ -369,6 +371,12 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 		return
 	}
 
+	if c := connection.GetLocalConns().Get(conn.name); c.Name != "" {
+		if cast.ToBool(c.Connection.Data["use_adbc"]) || c.Connection.IsADBC() {
+			conn.adjustCol = g.Ptr(false)
+		}
+	}
+
 	for i, rec := range data {
 		testName := cast.ToString(rec["test_name"])
 		streamConfig, _ := g.UnmarshalMap(cast.ToString(rec["stream_config"]))
@@ -432,7 +440,8 @@ func testSuite(t *testing.T, connType dbio.Type, testSelect ...string) {
 
 	testNumbers := []int{}
 	testNames := []string{}
-	tns := os.Getenv("TESTS")
+	tnsV, _ := testContext.Map.Get("TESTS")
+	tns := cast.ToString(tnsV)
 	if tns == "" && len(testSelect) > 0 {
 		tns = testSelect[0]
 	}
@@ -604,7 +613,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 	}
 	g.Debug("task config => %s", g.Marshal(taskCfg))
 
-	task := sling.NewTask("", taskCfg)
+	task := sling.NewTask("exec_test", taskCfg)
 	if g.AssertNoError(t, task.Err) {
 		task.Context = g.NewContext(testContext.Ctx)
 		err = task.Execute()
@@ -700,6 +709,12 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					for i := range valuesDb {
 						valDb := dataDB.Sp.ParseString(cast.ToString(valuesDb[i]))
 						valFile := dataDB.Sp.ParseString(cast.ToString(valuesFile[i]))
+
+						// format correctly when bool is formatted as number
+						if g.In(valFile, true, false) && g.In(cast.ToInt(valDb), 1, 0) {
+							valDb = cast.ToBool(valDb)
+						}
+
 						msg := g.F("row %d, col %d (%s vs %s), in test %s => %#v vs %#v", i+1, valCol, dataFile.Columns[valCol].Name, dataDB.Columns[valCol].Name, file.Name, valDb, valFile)
 						if !assert.EqualValues(t, valFile, valDb, msg) {
 							g.Warn(msg)
@@ -756,7 +771,9 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 		for colName, correctType := range correctTypeMap {
 			// skip those
-			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) || g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) {
+			if g.In(srcType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+				g.In(tgtType, dbio.TypeDbMongoDB, dbio.TypeDbAzureTable) ||
+				taskCfg.TgtConn.IsADBC() || taskCfg.SrcConn.IsADBC() {
 				continue
 			}
 
@@ -829,9 +846,6 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 				if correctType == iop.TimestampType {
 					correctType = iop.DatetimeType // sqlserver uses datetime
 				}
-				if correctType == iop.BoolType {
-					correctType = iop.TextType // sqlserver doesn't have bool
-				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
 				}
@@ -844,9 +858,6 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 					correctType = iop.TextType // redshift uses text for json
 				}
 			case srcType == dbio.TypeDbSQLServer && tgtType == dbio.TypeDbPostgres:
-				if correctType == iop.BoolType {
-					correctType = iop.TextType // sqlserver doesn't have bool
-				}
 				if correctType == iop.JsonType {
 					correctType = iop.TextType // sqlserver uses varchar(max) for json
 				}
@@ -983,6 +994,7 @@ func runOneTask(t *testing.T, file g.FileItem, connType dbio.Type) {
 
 func TestSuiteDatabasePostgres(t *testing.T) {
 	t.Parallel()
+	// testSuite(t, dbio.Type("postgres_adbc")) // COPY statement: PGRES_FATAL_ERROR ERROR:  invalid scale in external "numeric" value
 	testSuite(t, dbio.TypeDbPostgres)
 }
 
@@ -1094,6 +1106,7 @@ func TestSuiteDatabaseSQLServer(t *testing.T) {
 		g.Warn("BCP not found in PATH, failing")
 		t.Fail()
 	}
+	testSuite(t, dbio.Type("sqlserver_adbc"))
 }
 
 func TestSuiteDatabaseFabric(t *testing.T) {

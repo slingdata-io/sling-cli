@@ -159,13 +159,19 @@ func (t *TaskExecution) setLogDetails() {
 	}
 	rowCount := t.GetCount()
 	rowRate, byteRate := t.GetRate(1)
+	bytes, _ := t.GetBytes()
 	os.Setenv("SLING_LOG_DETAILS", g.Marshal(g.M(
 		"run_file", t.Config.Env["SLING_CONFIG_PATH"],
 		"run_type", "replication",
+		"source_name", t.Config.SrcConn.Name,
+		"source_type", t.Config.SrcConn.Type,
+		"target_name", t.Config.TgtConn.Name,
+		"target_type", t.Config.TgtConn.Type,
 		"stream_name", t.Config.StreamName,
 		"object_name", t.getTargetObjectValue(),
 		"row_count", rowCount,
 		"row_rate", rowRate,
+		"byte_count", bytes,
 		"byte_rate", byteRate,
 		"status", t.Status,
 		"duration", duration,

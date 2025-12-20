@@ -261,3 +261,49 @@ variable:
   max_string_type: String
   max_string_length: 1000000000
   max_column_length: 256
+
+native_type_map:
+  array: json
+  date: date
+  datetime: datetime
+  datetime64: datetime
+  decimal: decimal
+  enum: string
+  enum8: string
+  fixedstring: text
+  float32: float
+  float64: float
+  int16: smallint
+  int32: bigint
+  int64: bigint
+  int8: integer
+  ipv6: string
+  json: json
+  lowcardinality: string
+  map: json
+  string: text
+  tuple: string
+  uint16: integer
+  uint32: bigint
+  uint64: "decimal(28,0)"
+  uint8: integer
+  uuid: string
+
+general_type_map:
+  bigint: "nullable(int64)"
+  binary: "nullable(string)"
+  bool: "nullable(string)"
+  date: "nullable(date)"
+  datetime: "nullable(datetime64(6))"
+  decimal: "nullable(decimal(,))"
+  float: "nullable(float64)"
+  integer: "nullable(int64)"
+  json: "nullable(string)"
+  smallint: "nullable(int32)"
+  string: "nullable(string)"
+  text: "nullable(string)"
+  time: "nullable(string)"
+  timestamp: "nullable(datetime64(6))"
+  timestampz: "nullable(datetime64(6))"
+  timez: "nullable(string)"
+  uuid: "nullable(string)"

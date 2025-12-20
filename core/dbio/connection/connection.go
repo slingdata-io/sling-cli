@@ -80,6 +80,12 @@ func NewConnection(Name string, t dbio.Type, Data map[string]interface{}) (conn 
 		return conn, g.Error(err, "could not set URL for %s: %s", conn.Type, Name)
 	}
 
+	// set type for adbc
+	if conn.Type == dbio.TypeDbArrowDBC {
+		conn.Type = database.GetArrowDBCDriverType(conn.DataS(true)["driver_name"])
+		conn.Data["is_adbc"] = true
+	}
+
 	return conn, err
 }
 
@@ -184,6 +190,14 @@ func (c *Connection) ToMap() map[string]interface{} {
 	data := g.M()
 	g.JSONConvert(c.Data, &data) // so that pointers are not modified downstream
 	return g.M("name", c.Name, "type", c.Type, "data", data)
+}
+
+// IsADBC returns whether connection originates from ADBC
+func (c *Connection) IsADBC() bool {
+	if c.Data == nil {
+		return false
+	}
+	return cast.ToBool(c.Data["is_adbc"])
 }
 
 // ToMap transforms DataConn to a Map
@@ -967,16 +981,10 @@ func (c *Connection) setURL() (err error) {
 		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
 			template = template + "&schema={schema}"
 		}
-	case dbio.TypeDbArrowFlight:
-		setIfMissing("username", c.Data["user"])
-		setIfMissing("password", "")
-		setIfMissing("port", c.Type.DefPort())
-		setIfMissing("schema", "")
-
-		template = "flightsql://{username}:{password}@{host}:{port}/?"
-		if _, ok := c.Data["schema"]; ok && c.Data["schema"] != "" {
-			template = template + "&schema={schema}"
-		}
+	case dbio.TypeDbArrowDBC:
+		// ADBC connections use a driver path and driver-specific properties
+		// Set a simple URL scheme for connection identification
+		template = "adbc://"
 	case dbio.TypeFileSftp, dbio.TypeFileFtp:
 		setIfMissing("password", "")
 		setIfMissing("port", c.Type.DefPort())

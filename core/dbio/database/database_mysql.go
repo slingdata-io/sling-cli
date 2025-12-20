@@ -396,6 +396,12 @@ func (conn *MySQLConn) BulkExportStream(table Table) (ds *iop.Datastream, err er
 
 // BulkImportStream bulk import stream
 func (conn *MySQLConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+
+	if conn.UseADBC() {
+		conn.Commit()
+		return conn.adbc.BulkImportStream(tableFName, ds)
+	}
+
 	_, err = exec.LookPath("mysql")
 	if err != nil {
 		g.Trace("mysql not found in path. Using cursor...")

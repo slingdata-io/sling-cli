@@ -214,3 +214,39 @@ variable:
   null_if_empty: false
   timestamp_layout: '2006-01-02 15:04:05.000000'
   timestampz_layout: '2006-01-02 15:04:05.000000'
+
+native_type_map:
+  bigint: bigint
+  boolean: bool
+  char: string
+  date: date
+  decimal: decimal
+  double: float
+  geometry: text
+  hashtype: string
+  integer: integer
+  "interval day to second": string
+  "interval year to month": string
+  smallint: smallint
+  timestamp: timestamp
+  "timestamp with local time zone": timestampz
+  varchar: string
+
+general_type_map:
+  bigint: bigint
+  binary: "varchar(2000000)"
+  bool: boolean
+  date: date
+  datetime: timestamp
+  decimal: "decimal(,)"
+  float: "double precision"
+  integer: integer
+  json: "varchar(2000000)"
+  smallint: smallint
+  string: "varchar(2000000)"
+  text: "varchar(2000000)"
+  time: "varchar(100)"
+  timestamp: timestamp
+  timestampz: "timestamp with local time zone"
+  timez: "varchar(100)"
+  uuid: "varchar(36)"

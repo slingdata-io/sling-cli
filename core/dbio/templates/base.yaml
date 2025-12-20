@@ -399,3 +399,110 @@ variable:
 
 error_filter:
   table_not_exist: exist
+
+# Default native type mappings (native_type -> general_type)
+# Individual databases override these as needed
+native_type_map:
+  # Integer types
+  bigint: bigint
+  int: integer
+  int2: smallint
+  int4: integer
+  int8: bigint
+  integer: integer
+  mediumint: integer
+  smallint: smallint
+  tinyint: smallint
+
+  # Floating point types
+  double: float
+  "double precision": float
+  float: float
+  float4: float
+  float8: float
+  real: float
+
+  # Decimal/Numeric types
+  decimal: decimal
+  fixed: decimal
+  money: decimal
+  number: decimal
+  numeric: decimal
+
+  # String types
+  bpchar: string
+  char: string
+  character: string
+  "character varying": text
+  longtext: text
+  mediumtext: text
+  nchar: text
+  ntext: text
+  nvarchar: text
+  string: text
+  text: text
+  tinytext: text
+  varchar: text
+
+  # Binary types
+  binary: binary
+  bit: binary
+  blob: binary
+  bytea: binary
+  image: binary
+  longblob: binary
+  mediumblob: binary
+  tinyblob: binary
+  varbinary: binary
+
+  # Boolean types
+  bool: bool
+  boolean: bool
+
+  # Date/Time types
+  date: date
+  datetime: datetime
+  datetime2: datetime
+  smalldatetime: datetime
+  time: time
+  "time with time zone": timez
+  "time without time zone": time
+  timestamp: timestamp
+  "timestamp with time zone": timestampz
+  "timestamp without time zone": timestamp
+  timestamptz: timestampz
+  timetz: timez
+
+  # JSON types
+  json: json
+  jsonb: json
+
+  # UUID type
+  uuid: uuid
+
+  # Array/Complex types (default to json)
+  array: json
+  list: json
+  map: json
+  object: json
+  struct: json
+  variant: json
+
+general_type_map:
+  bigint: bigint
+  binary: bytea
+  bool: bool
+  date: date
+  datetime: timestamp
+  decimal: numeric
+  float: "double precision"
+  integer: integer
+  json: jsonb
+  smallint: smallint
+  string: "varchar()"
+  text: text
+  time: "time(6)"
+  timestamp: timestamp
+  timestampz: timestamptz
+  timez: "time with time zone"
+  uuid: uuid

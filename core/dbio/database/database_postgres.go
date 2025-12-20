@@ -333,7 +333,7 @@ func (conn *PostgresConn) GenerateDDL(table Table, data iop.Dataset, temporary b
 
 	partitionBy := ""
 	if keyCols := data.Columns.GetKeys(iop.PartitionKey); len(keyCols) > 0 {
-		colNames := conn.GetType().QuoteNames(keyCols.Names()...)
+		colNames := conn.Template().QuoteNames(keyCols.Names()...)
 		partitionBy = g.F("partition by range (%s)", strings.Join(colNames, ", "))
 	}
 	ddl = strings.ReplaceAll(ddl, "{partition_by}", partitionBy)
@@ -374,6 +374,11 @@ func (conn *PostgresConn) BulkImportStream(tableFName string, ds *iop.Datastream
 	// For Cloud SQL with pgx, use a specialized implementation
 	if conn.isCloudSQL && conn.cloudSQLConn != nil {
 		return conn.bulkImportStreamPgx(tableFName, ds)
+	}
+
+	if conn.UseADBC() {
+		conn.Commit()
+		return conn.adbc.BulkImportStream(tableFName, ds)
 	}
 
 	// Standard lib/pq implementation for normal PostgreSQL

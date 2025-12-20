@@ -136,7 +136,7 @@ func insertFromTemp(cfg *Config, tgtConn database.Connection) (err error) {
 		return
 	}
 
-	tgtFields := tgtConn.GetType().QuoteNames(tgtCols.Names()...)
+	tgtFields := tgtConn.Template().QuoteNames(tgtCols.Names()...)
 	srcFields := tgtConn.CastColumnsForSelect(tmpColumns, tgtColumns)
 
 	srcTable, err := database.ParseTableName(cfg.Target.Options.TableTmp, tgtConn.GetType())

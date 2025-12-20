@@ -95,6 +95,11 @@ func (c *Connection) Test() (ok bool, err error) {
 			g.Debug(env.MagentaString(g.F("testing endpoints with a max requests: %d. Set env var SLING_TEST_ENDPOINT_MAX_REQUESTS to modify.", maxRequests)))
 		}
 
+		// obtain the best endpoint for testing one (for connectivity/authentication)
+		if cast.ToBool(g.Getenv("SLING_TEST_SINGLE_ENDPOINT")) {
+			testEndpoints = []string{apiClient.GetTestEndpoint()}
+		}
+
 		for _, endpoint := range endpoints {
 			// check for match to test (if provided)
 			allowTest := len(testEndpoints) == 0

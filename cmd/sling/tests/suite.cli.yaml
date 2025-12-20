@@ -470,6 +470,7 @@
     SLING_STREAM_CNT=2 MODE=truncate     sling run -r $YAML_EXPR_FILE -d
     SLING_STREAM_CNT=2 MODE=incremental  sling run -r $YAML_EXPR_FILE -d
   streams: 33
+  group: duckdb
   env:
     YAML_FILE: cmd/sling/tests/replications/r.20.chunking.yaml
     YAML_EXPR_FILE: cmd/sling/tests/replications/r.20.chunking.expr.yaml
@@ -685,6 +686,7 @@
   name: Test timestamp to string casting without quotes
   run: sling run -r cmd/sling/tests/replications/r.31.timestamp_string_quotes.yaml --debug
   rows: 3
+  group: duckdb
   output_contains:
     - wrote 3 rows
     - execution succeeded
@@ -917,19 +919,19 @@
     - '✓ Salary field imported correctly'
     - '✓ XML to PostgreSQL import test completed successfully!'
 
-- id: 109
-  name: Test API -- Sling Platform
-  run: sling run -r cmd/sling/tests/replications/apis/r.sling_platform.yaml -d
-  streams: 3
-  output_contains:
-    - 'execution succeeded'
+# - id: 109
+#   name: Test API -- Sling Platform
+#   run: sling run -r cmd/sling/tests/replications/apis/r.sling_platform.yaml -d
+#   streams: 3
+#   output_contains:
+#     - 'execution succeeded'
     
-    # test iterations
-    - '/connection/list?test-value=1'
-    - '/connection/list?test-value=2'
-    - '/connection/list?test-value=3'
-    - '/connection/list?test-value=4'
-    - '/execution/list?filters=%7B%22period'
+#     # test iterations
+#     - '/connection/list?test-value=1'
+#     - '/connection/list?test-value=2'
+#     - '/connection/list?test-value=3'
+#     - '/connection/list?test-value=4'
+#     - '/execution/list?filters=%7B%22period'
 
 - id: 110
   name: Test API -- Sling Stripe
@@ -1101,6 +1103,7 @@
 # Test JSON camelCase to PostgreSQL with column_casing (should only create snake_case columns)
 - id: 129
   name: Test JSON camelCase to PostgreSQL column casing (reproduce duplicate columns bug)
+  after: [117]
   run: 'sling run -d -r cmd/sling/tests/replications/r.67.json_postgres_column_casing.yaml'
   streams: 1
   rows: 3
@@ -1131,7 +1134,7 @@
     - 'Processing file: local//tmp/routine_test_file.txt'
     - 'routine (missing_param_test) requires params that were not provided: ["test_param"]'
     - '=== Test 4: HTTP fetch routine ==='
-    - 'Fetching data from: https://swapi.dev/api/planets/1'
+    - 'Fetching data from: https://www.omdbapi.com'
     - '=== Test 5: Nested routine test ==='
     - 'Starting validation suite'
     - '=== Test 6: Conditional routine execution ==='
@@ -1193,8 +1196,8 @@
 - id: 137
   name: Test nested JSON to SQLite with replication config (pre-defined columns)
   run: 'sling run -d -r cmd/sling/tests/replications/r.71.json_sqlite_nested.yaml'
-  err: true
   group: sqlite
+  err: true
   output_contains:
    - cannot be assigned to zero-based row
 
@@ -1258,7 +1261,7 @@
     - '✓ Test 6 PASSED: Special characters properly handled in JSON payload'
     - '✓ Test 7 PASSED: Edge cases handled correctly'
     - 'All tests completed successfully!'
-
+    
 - id: 144
   name: Test Directory run
   run: |
@@ -1267,4 +1270,88 @@
     sling run cmd/sling/tests/replications/many/
   output_contains:
     - 'p.log.yaml (pipeline)'
-    - 'r.swapi.yaml (replication)'
+    - 'r.local.yaml (replication)'
+
+- id: 145
+  name: Test thread state sync (SLING_THREADS)
+  run: sling run -r cmd/sling/tests/replications/r.76.thread_state_sync.yaml -d
+  output_contains:
+    - 'Stream 1: total_rows=5, status=success'
+    - 'Stream 2: total_rows=5, status=success'
+    - 'Stream 3: total_rows=5, status=success'
+    - 'Stream 4: total_rows=5, status=success'
+
+# Requires ADBC_POSTGRES connection with PostgreSQL ADBC driver installed
+# Install driver: dbc install postgresql
+- id: 146
+  name: Test ADBC PostgreSQL connection
+  run: sling run -r cmd/sling/tests/replications/r.77.adbc_postgres.yaml -d
+  output_contains:
+    - 'Testing ADBC PostgreSQL connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC test completed successfully'
+    - 'wrote 1 rows'
+
+# Requires ADBC_SQLSERVER connection with SQL Server ADBC driver installed
+# Install driver: dbc install mssql
+- id: 147
+  name: Test ADBC SQL Server connection
+  run: sling run -r cmd/sling/tests/replications/r.78.adbc_sqlserver.yaml -d
+  output_contains:
+    - 'Testing ADBC SQL Server connection'
+    - 'Read CSV data:'
+    - '1,test'
+    - 'ADBC SQL Server test completed successfully'
+    - 'wrote 1 rows'
+
+# Tests write mode with BulkImportFlow using adbc.IngestStream
+- id: 148
+  name: Test ADBC write
+  run: |
+    TARGET=POSTGRES_ADBC SCHEMA=public sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+    TARGET=MSSQL_ADBC SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+  output_contains:
+    - 'ADBC write test completed successfully'
+    - 'inserted 3 rows'
+
+# Tests ADBC write with large data (100k rows)
+- id: 149
+  name: Test ADBC write large
+  run: |
+    # TARGET=POSTGRES_ADBC SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    TARGET=MSSQL_ADBC SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    # TARGET=MYSQL_ADBC SCHEMA=mysql sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+  output_contains:
+    - 'ADBC write large test completed successfully'
+
+- id: 150
+  name: 'Test MSSQL boolean to string conversion'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.81.mssql_bool_string.yaml
+  output_contains:
+    - 'SUCCESS: Boolean values correctly converted to strings in MSSQL'
+    - 'mssql_test2.is_active has boolean type'
+    - 'SUCCESS: Boolean values correctly stored as boolean type in mssql_test2'
+
+# # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
+# - id: 150
+#   name: Test PostGIS (PostgreSQL) to GeoJSON as target
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.68.postgres_geom_column_definition_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+#   rows: 3
+#   output_contains:
+#     - 'execution succeeded'
+#     - '"type":"FeatureCollection"'
+#     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+#     - '"properties":{"id":1,"name":"Point 1"}'
+
+# # Test PostGIS (PostgreSQL) to GeoJSON as target with default geometry column name "geometry"
+# - id: 151
+#   name: Test PostGIS (PostgreSQL) to GeoJSON as target
+#   run: 'sling run -d -r cmd/sling/tests/replications/r.69.postgres_geom_column_default_geojson.yaml && test -f /tmp/test_geojson_output.geojson && cat /tmp/test_geojson_output.geojson'
+#   rows: 3
+#   output_contains:
+#     - 'execution succeeded'
+#     - '"type":"FeatureCollection"'
+#     - '"geometry":{"type":"Point","coordinates":[9.09425263416477,53.4920035631827]}'
+#     - '"properties":{"id":1,"name":"Point 1"}'

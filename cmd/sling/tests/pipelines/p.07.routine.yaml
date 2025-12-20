@@ -1,6 +1,7 @@
 env:
   SLING_ROUTINES_DIR: cmd/sling/tests/pipelines
   TEST_ENV_VAR: "environment_test_value"
+  OMDB_API_KEY: ${OMDB_API_KEY}
 
 steps:
   # Test 1: Simple routine with params and env
@@ -84,7 +85,7 @@ steps:
     id: http_test
     routine: fetch_data
     params:
-      url: "https://swapi.dev/api/planets/1"
+      url: "https://www.omdbapi.com/?apikey={env.OMDB_API_KEY}&t=movie"
       output_path: "local//tmp/routine_http_test.json"
     on_failure: abort
 

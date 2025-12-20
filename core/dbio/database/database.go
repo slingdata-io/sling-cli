@@ -145,6 +145,7 @@ type Connection interface {
 	Merge(srcTable string, tgtTable string, pkFields []string) (rowAffCnt int64, err error)
 	ValidateColumnNames(tgtCols iop.Columns, colNames []string) (newCols iop.Columns, err error)
 	AddMissingColumns(table Table, newCols iop.Columns) (ok bool, err error)
+	UseADBC() bool
 }
 
 type ConnInfo struct {
@@ -175,6 +176,7 @@ type BaseConn struct {
 	properties  map[string]string
 	sshClient   *iop.SSHClient
 	Log         []string
+	adbc        Connection
 }
 
 // Pool is a pool of connections
@@ -316,8 +318,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &IcebergConn{URL: URL}
 	} else if strings.HasPrefix(URL, "azuretable:") {
 		conn = &AzureTableConn{URL: URL}
-	} else if strings.HasPrefix(URL, "flightsql:") {
-		conn = &AzureTableConn{URL: URL}
+	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
+		conn = &ArrowDBConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -384,7 +386,7 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "proton"
 	case dbio.TypeDbExasol:
 		driverName = "exasol"
-	case dbio.TypeDbArrowFlight:
+	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
 	default:
 		driverName = dbType.String()
@@ -478,6 +480,13 @@ func (conn *BaseConn) Init() (err error) {
 		Databases: map[string]Database{},
 	}
 
+	if conn.UseADBC() && !strings.HasPrefix(conn.URL, "adbc:") {
+		conn.adbc, err = NewAdbcConn(conn)
+		if err != nil {
+			return g.Error(err, "could not init ADBC connection")
+		}
+	}
+
 	return nil
 }
 
@@ -529,6 +538,11 @@ func (conn *BaseConn) Schemata() Schemata {
 // Template returns the Template object
 func (conn *BaseConn) Template() dbio.Template {
 	return conn.template
+}
+
+// UseADBC returns if connection should use ADBC
+func (conn *BaseConn) UseADBC() bool {
+	return cast.ToBool(conn.GetProp("use_adbc"))
 }
 
 // GetProp returns the value of a property
@@ -733,6 +747,13 @@ func (conn *BaseConn) Connect(timeOut ...int) (err error) {
 		}
 	}
 
+	// connect ADBC
+	if conn.UseADBC() && conn.adbc != nil {
+		if err = conn.adbc.Connect(); err != nil {
+			return g.Error(err, "could not connect via ADBC")
+		}
+	}
+
 	conn.postConnect()
 
 	return nil
@@ -773,6 +794,9 @@ func (conn *BaseConn) Close() error {
 	if conn.sshClient != nil {
 		conn.sshClient.Close()
 		conn.sshClient = nil
+	}
+	if conn.UseADBC() {
+		conn.adbc.Close()
 	}
 	conn.SetProp("connected", "false")
 	return err
@@ -819,12 +843,23 @@ func (conn *BaseConn) StreamRecords(sql string) (<-chan map[string]interface{}, 
 
 // BulkExportStream streams the rows in bulk
 func (conn *BaseConn) BulkExportStream(table Table) (ds *iop.Datastream, err error) {
+	// letting the native drive handle export, which is fast enough generally
+	// some ADBC drivers do not handle time zones like sling does.
+	// for example, SQL server datetimeoffset is exported as timestamp (looses time zone)
+	// Also, arrow would need to be serialized, just as via driver, so we loose advantage
+	// if conn.UseADBC() {
+	// 	return conn.adbc.BulkExportStream(table)
+	// }
+
 	g.Trace("BulkExportStream not implemented for %s", conn.Type)
 	return conn.Self().StreamRows(table.Select(), g.M("columns", table.Columns))
 }
 
 // BulkImportStream import the stream rows in bulk
 func (conn *BaseConn) BulkImportStream(tableFName string, ds *iop.Datastream) (count uint64, err error) {
+	if conn.UseADBC() {
+		return conn.adbc.BulkImportStream(tableFName, ds)
+	}
 	g.Trace("BulkImportStream not implemented for %s", conn.Type)
 	return conn.Self().InsertBatchStream(tableFName, ds)
 }
@@ -1216,7 +1251,11 @@ func (conn *BaseConn) ExecMultiContext(ctx context.Context, qs ...string) (resul
 
 	eG := g.ErrorGroup{}
 	for _, q := range qs {
+		hasNoDebugKey := strings.HasSuffix(strings.TrimSpace(q), env.NoDebugKey)
 		for _, sql := range ParseSQLMultiStatements(q, conn.Type) {
+			if hasNoDebugKey && !strings.HasSuffix(strings.TrimSpace(sql), env.NoDebugKey) {
+				sql = sql + env.NoDebugKey
+			}
 			res, err := conn.Self().ExecContext(ctx, sql)
 			if err != nil {
 				eG.Capture(g.Error(err, "Error executing query"))
@@ -2282,12 +2321,12 @@ func (conn *BaseConn) bindVar(i int, field string, n int, c int) string {
 
 // Unquote removes quotes to the field name
 func (conn *BaseConn) Unquote(field string) string {
-	return conn.Type.Unquote(field)
+	return conn.Template().Unquote(field)
 }
 
 // Quote adds quotes to the field name
 func (conn *BaseConn) Quote(field string) string {
-	return conn.Type.Quote(field)
+	return conn.Template().Quote(field)
 }
 
 // GenerateInsertStatement returns the proper INSERT statement
@@ -2437,6 +2476,8 @@ func (conn *BaseConn) BulkImportFlow(tableFName string, df *iop.Dataflow) (count
 		var cnt uint64
 		if conn.GetProp("use_bulk") == "false" {
 			cnt, err = conn.Self().InsertBatchStream(tableFName, ds)
+		} else if conn.UseADBC() {
+			cnt, err = conn.BulkImportStream(tableFName, ds)
 		} else {
 			cnt, err = conn.Self().BulkImportStream(tableFName, ds)
 		}
@@ -2717,7 +2758,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 	}
 
 	var pkEqualFields, srcPkFields, tgtPkFields []string
-	pkFields = conn.Type.QuoteNames(pkCols.Names()...)
+	pkFields = conn.Template().QuoteNames(pkCols.Names()...)
 	pkFieldMap := map[string]string{}
 	for _, pkField := range pkCols.Names() {
 		// don't normalize, use raw name
@@ -2740,7 +2781,7 @@ func (conn *BaseConn) GenerateMergeConfig(srcTable string, tgtTable string, pkFi
 		return
 	}
 
-	tgtFields := conn.Type.QuoteNames(tgtCols.Names()...)
+	tgtFields := conn.Template().QuoteNames(tgtCols.Names()...)
 	setFields := []string{}
 	setFieldsAll := []string{}
 	insertFields := []string{}
@@ -3011,9 +3052,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 
 		// for starrocks
 		fields := append(table.Columns.Names(), colNameTemp)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.Template().QuoteNames(fields...) // add quotes
 		updatedFields := append(
-			conn.GetType().QuoteNames(table.Columns.Names()...), // add quotes
+			conn.Template().QuoteNames(table.Columns.Names()...), // add quotes
 			oldColCasted)
 
 		ddlParts = append(ddlParts, g.R(
@@ -3052,9 +3093,9 @@ func GetOptimizeTableStatements(conn Connection, table *Table, newColumns iop.Co
 			return !strings.EqualFold(name, col.Name)
 		})
 		fields = append(otherNames, col.Name)
-		fields = conn.GetType().QuoteNames(fields...) // add quotes
+		fields = conn.Template().QuoteNames(fields...) // add quotes
 		updatedFields = append(otherNames, colNameTemp)
-		updatedFields = conn.GetType().QuoteNames(updatedFields...) // add quotes
+		updatedFields = conn.Template().QuoteNames(updatedFields...) // add quotes
 
 		ddlParts = append(ddlParts, g.R(
 			conn.GetTemplateValue("core.rename_column"),

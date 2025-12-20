@@ -134,7 +134,7 @@ func (conn *MsFabricConn) getOneLakePath(tableFName string) string {
 // CopyFromOneLake uses the COPY INTO command to load data from OneLake
 func (conn *MsFabricConn) CopyFromOneLake(tableFName, oneLakePath string, columns iop.Columns, fileFormat dbio.FileType) (err error) {
 	// Prepare target columns
-	tgtColumns := conn.GetType().QuoteNames(columns.Names()...)
+	tgtColumns := conn.Template().QuoteNames(columns.Names()...)
 
 	// Add wildcard pattern to load all files in the directory
 	// COPY INTO requires a file pattern, not a directory path

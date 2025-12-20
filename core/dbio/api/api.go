@@ -148,6 +148,49 @@ func (ac *APIConnection) ListEndpoints(patterns ...string) (endpoints Endpoints,
 	return endpoints, nil
 }
 
+// GetTestEndpoint returns the best endpoint for testing connectivity/authentication.
+// Ranking: (1) non-incremental with auth, (2) incremental with auth, (3) non-incremental, (4) first endpoint
+func (ac *APIConnection) GetTestEndpoint() string {
+	endpoints, err := ac.ListEndpoints()
+	if err != nil || len(endpoints) == 0 {
+		return ""
+	}
+
+	hasSpecAuth := ac.Spec.Authentication.Type() != AuthTypeNone
+
+	var nonIncrementalWithAuth, incrementalWithAuth, nonIncremental string
+
+	for _, ep := range endpoints {
+		// Determine if incremental (has sync values or update key)
+		isIncremental := len(ep.Sync) > 0 || ep.Response.Records.UpdateKey != ""
+
+		// Determine if has auth (spec-level or endpoint-level)
+		hasAuth := hasSpecAuth || ep.Authentication != nil
+
+		if !isIncremental && hasAuth && nonIncrementalWithAuth == "" {
+			nonIncrementalWithAuth = ep.Name
+		} else if isIncremental && hasAuth && incrementalWithAuth == "" {
+			incrementalWithAuth = ep.Name
+		} else if !isIncremental && nonIncremental == "" {
+			nonIncremental = ep.Name
+		}
+	}
+
+	// Return by priority
+	if nonIncrementalWithAuth != "" {
+		return nonIncrementalWithAuth
+	}
+	if incrementalWithAuth != "" {
+		return incrementalWithAuth
+	}
+	if nonIncremental != "" {
+		return nonIncremental
+	}
+
+	// Fallback: first endpoint (already sorted alphabetically)
+	return endpoints[0].Name
+}
+
 // compile all spec endpoints
 func (ac *APIConnection) CompileEndpoints() (compiledEndpoints Endpoints, err error) {
 	// render dynamic endpoint if needed
@@ -173,6 +216,7 @@ type APIStreamConfig struct {
 	Flatten     int // levels of flattening. 0 is infinite
 	JmesPath    string
 	Select      []string // select specific columns
+	PrimaryKey  []string
 	Limit       int
 	Metadata    iop.Metadata
 	Mode        string
@@ -228,31 +272,41 @@ func (ac *APIConnection) ReadDataflow(endpointName string, sCfg APIStreamConfig)
 
 	// register queues being used by endpoint
 	{
+		// Regex pattern to match queue references like "queue.name"
+		queuePattern := regexp.MustCompile(`queue\.([a-zA-Z0-9_]+)`)
+		foundQueues := make(map[string]bool) // Track unique queues
+
+		// Extract queues from processor outputs
 		for _, processor := range endpoint.Response.Processors {
-			if strings.HasPrefix(processor.Output, "queue.") {
-				queueName := strings.TrimPrefix(processor.Output, "queue.")
-
-				if !g.In(queueName, ac.Spec.Queues...) {
-					return nil, g.Error("did not declare queue %s in queues list", queueName)
-				}
-
-				_, err = ac.RegisterQueue(queueName)
-				if err != nil {
-					return nil, g.Error(err, "could not register processor output queue: %s", queueName)
+			matches := queuePattern.FindAllStringSubmatch(processor.Output, -1)
+			for _, match := range matches {
+				if len(match) > 1 {
+					queueName := match[1]
+					foundQueues[queueName] = true
 				}
 			}
 		}
 
-		if overStr := cast.ToString(endpoint.Iterate.Over); strings.HasPrefix(overStr, "queue.") {
-			queueName := strings.TrimPrefix(overStr, "queue.")
+		// Extract queues from iterate over expression
+		if overStr := cast.ToString(endpoint.Iterate.Over); overStr != "" {
+			matches := queuePattern.FindAllStringSubmatch(overStr, -1)
+			for _, match := range matches {
+				if len(match) > 1 {
+					queueName := match[1]
+					foundQueues[queueName] = true
+				}
+			}
+		}
 
+		// Validate and register all found queues
+		for queueName := range foundQueues {
 			if !g.In(queueName, ac.Spec.Queues...) {
 				return nil, g.Error("did not declare queue %s in queues list", queueName)
 			}
 
 			_, err = ac.RegisterQueue(queueName)
 			if err != nil {
-				return nil, g.Error(err, "could not register iterate over queue: %s", queueName)
+				return nil, g.Error(err, "could not register queue: %s", queueName)
 			}
 		}
 	}

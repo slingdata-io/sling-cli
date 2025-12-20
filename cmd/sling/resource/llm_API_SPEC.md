@@ -1257,6 +1257,7 @@ request:
 | `object_delete(map, key1, ...)`  | Deletes keys from map        | `map`: Object, followed by keys to delete | Modified map      | `object_delete({"a": 1, "b": 2}, "a")` → `{"b": 2}` |
 | `object_casing(map, casing)`  | Transforms keys to specified casing | `map`: Object, `casing`: "snake", "camel", "upper", "lower" | Modified map      | `object_casing({"firstName": "John"}, "snake")` → `{"first_name": "John"}` |
 | `object_merge(map1, map2, ...)` | Merges multiple maps together | Two or more maps (later maps override earlier) | Merged map      | `object_merge({"a": 1}, {"b": 2})` → `{"a": 1, "b": 2}` |
+| `object_zip(keys, values)`      | Creates object from key/value arrays | `keys`: Array of strings, `values`: Array of values (matched by position) | Map/object      | `object_zip(["a", "b"], [1, 2])` → `{"a": 1, "b": 2}` |
 | `filter(array, expression)`    | Filters array (goval expression)| `array`, `expression` (string uses `value`) | Filtered array    | `filter([1, 2, 3], "value > 1")` → `[2, 3]`                  |
 | `map(array, expression)`       | Maps array (goval expression)   | `array`, `expression` (string uses `value`) | Transformed array | `map([1, 2, 3], "value * 2")` → `[2, 4, 6]`                    |
 | `sort(array[, descending])`    | Sorts array elements            | `array`, `descending` (optional bool)     | Sorted array      | `sort([3, 1, 2])` → `[1, 2, 3]`                               |

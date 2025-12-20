@@ -65,7 +65,7 @@ Available Connectors:
 - **Data Lakes**:[`athena`](https://docs.slingdata.io/connections/datalake-connections/athena) [`Ducklake`](https://docs.slingdata.io/connections/datalake-connections/ducklake) [`iceberg`](https://docs.slingdata.io/connections/datalake-connections/iceberg) [`S3 Tables`](https://docs.slingdata.io/connections/datalake-connections/iceberg)
 
 - **File Systems**: [`azure`](https://docs.slingdata.io/connections/file-connections/azure) [`b2`](https://docs.slingdata.io/connections/file-connections/b2) [`dospaces`](https://docs.slingdata.io/connections/file-connections/dospaces) [`gs`](https://docs.slingdata.io/connections/file-connections/gs) [`local`](https://docs.slingdata.io/connections/file-connections/local) [`minio`](https://docs.slingdata.io/connections/file-connections/minio) [`r2`](https://docs.slingdata.io/connections/file-connections/r2) [`s3`](https://docs.slingdata.io/connections/file-connections/s3) [`sftp`](https://docs.slingdata.io/connections/file-connections/sftp) [`wasabi`](https://docs.slingdata.io/connections/file-connections/wasabi)
-- **File Formats**: `csv`, `parquet`, `xlsx`, `json`, `avro`, `xml`, `sas7bday`
+- **File Formats**: `csv`, `parquet`, `xlsx`, `json`, `geojson`, `avro`, `xml`, `sas7bday`
 
 Here are some additional links:
 - https://slingdata.io

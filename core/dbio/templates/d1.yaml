@@ -136,3 +136,41 @@ variable:
   bind_string: ${c}
   batch_rows: 50
   batch_values: 100  # requests fails when going above 100
+
+native_type_map:
+  bigint: bigint
+  blob: text
+  boolean: bool
+  bytea: binary
+  date: date
+  datetime: datetime
+  decimal: decimal
+  float: float
+  int: integer
+  integer: bigint
+  json: json
+  null: text
+  num: integer
+  numeric: decimal
+  real: decimal
+  text: text
+  varchar: text
+
+general_type_map:
+  bigint: bigint
+  binary: blob
+  bool: boolean
+  date: text
+  datetime: text
+  decimal: real
+  float: real
+  integer: integer
+  json: json
+  smallint: integer
+  string: text
+  text: text
+  time: text
+  timestamp: text
+  timestampz: text
+  timez: text
+  uuid: text
