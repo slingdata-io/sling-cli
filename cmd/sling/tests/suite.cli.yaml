@@ -1114,7 +1114,7 @@
   name: Test HTTP write_to
   run: 'sling run -d -p cmd/sling/tests/pipelines/p.07.http.yaml'
   output_contains:
-    - 'successfully executed step "step-08" (type: check)'
+    - 'successfully executed step "step-08-check" (type: check)'
 
 - id: 131
   name: Test Routine Hook
@@ -1131,7 +1131,7 @@
     - 'Processing file: local//tmp/routine_test_file.txt'
     - 'routine (missing_param_test) requires params that were not provided: ["test_param"]'
     - '=== Test 4: HTTP fetch routine ==='
-    - 'Fetching data from: https://swapi.dev/api/planets/1'
+    - 'Fetching data from: https://www.omdbapi.com'
     - '=== Test 5: Nested routine test ==='
     - 'Starting validation suite'
     - '=== Test 6: Conditional routine execution ==='
@@ -1267,7 +1267,7 @@
     sling run cmd/sling/tests/replications/many/
   output_contains:
     - 'p.log.yaml (pipeline)'
-    - 'r.swapi.yaml (replication)'
+    - 'r.local.yaml (replication)'
 
 - id: 145
   name: Test thread state sync (SLING_THREADS)
@@ -1306,8 +1306,8 @@
 - id: 148
   name: Test ADBC write
   run: |
-    TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
-    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+    TARGET=POSTGRES_ADBC SCHEMA=public sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
+    TARGET=SQLSERVER_ADBC SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.79.adbc_write.yaml -d
   output_contains:
     - 'ADBC write test completed successfully'
     - 'inserted 3 rows'
@@ -1316,9 +1316,9 @@
 - id: 149
   name: Test ADBC write large
   run: |
-    # TARGET=ADBC_POSTGRES SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
-    TARGET=ADBC_SQLSERVER SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
-    # TARGET=ADBC_MYSQL SCHEMA=mysql sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    # TARGET=POSTGRES_ADBC SCHEMA=public sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    TARGET=SQLSERVER_ADBC SCHEMA=dbo sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
+    # TARGET=MYSQL_ADBC SCHEMA=mysql sling run -r cmd/sling/tests/replications/r.80.adbc_write_large.yaml -d
   output_contains:
     - 'ADBC write large test completed successfully'
 
