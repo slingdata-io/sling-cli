@@ -548,6 +548,11 @@ func (ac *APIConnection) GetSyncUpdateKey(endpointName string) (syncKey, updateK
 			continue
 		}
 
+		// Check if expression matches "record.<update_key>"
+		if !strings.EqualFold(processor.Expression, "record."+updateKey) {
+			continue
+		}
+
 		// Check if output is "state.<key>" where <key> is in sync keys
 		if !strings.HasPrefix(processor.Output, "state.") {
 			continue

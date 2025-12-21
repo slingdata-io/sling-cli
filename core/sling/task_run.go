@@ -583,8 +583,9 @@ func (t *TaskExecution) runApiToDb() (err error) {
 
 				// set sync key/value
 				if t.Config.IncrementalVal != nil {
-					g.Debug("fetched incremental value from DB, setting sync value for key `%s` => %s", syncKey, t.Config.IncrementalValStr)
-					syncState[syncKey] = g.CastToString(t.Config.IncrementalVal)
+					value := g.CastToString(t.Config.IncrementalVal)
+					g.Debug("fetched incremental value from DB, setting sync value for key `%s` => %s", syncKey, value)
+					syncState[syncKey] = value
 				}
 			} else {
 				if len(srcConn.State.Store) == 0 && !t.hasRange() {
