@@ -935,9 +935,14 @@
 
 - id: 110
   name: Test API -- Sling Stripe
-  run: sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
+  run: |
+    SLING_STATE=postgres/sling_state.stripe sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
+
+    # test without SLING_STATE, to use DB incremental value
+    sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml --streams customer
   output_contains:
     - 'execution succeeded'
+    - 'fetched incremental value from DB'
 
 - id: 111
   name: Run AWS S3 file splitting test

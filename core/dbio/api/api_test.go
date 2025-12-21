@@ -2796,3 +2796,262 @@ endpoints:
 	assert.Equal(t, "/regions/us-west", requestPaths[1])
 	assert.Equal(t, "/summary", requestPaths[2])
 }
+
+func TestGetSyncUpdateKey(t *testing.T) {
+	tests := []struct {
+		name            string
+		specYAML        string
+		endpointName    string
+		expectedSync    string
+		expectedUpdate  string
+		expectError     bool
+		expectNotFound  bool
+	}{
+		{
+			name: "with_maximum_aggregation",
+			specYAML: `
+name: "Test API"
+endpoints:
+  issues:
+    description: "Issues endpoint"
+    sync: [last_updated]
+    request:
+      url: "https://api.example.com/issues"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+`,
+			endpointName:   "issues",
+			expectedSync:   "last_updated",
+			expectedUpdate: "updated_at",
+			expectError:    false,
+		},
+		{
+			name: "case_insensitive_endpoint_name",
+			specYAML: `
+name: "Test API"
+endpoints:
+  Issues:
+    description: "Issues endpoint"
+    sync: [last_updated]
+    request:
+      url: "https://api.example.com/issues"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+`,
+			endpointName:   "ISSUES",
+			expectedSync:   "last_updated",
+			expectedUpdate: "updated_at",
+			expectError:    false,
+		},
+		{
+			name: "no_sync_array",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint"
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
+		{
+			name: "no_update_key",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint"
+    sync: [last_updated]
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+      processors:
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
+		{
+			name: "no_maximum_processor",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint"
+    sync: [last_id]
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "id"
+      processors:
+        - expression: "record.id"
+          output: "state.last_id"
+          aggregation: "last"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
+		{
+			name: "processor_without_aggregation",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint without sync - tests processor has no aggregation"
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.repository"
+          output: "record.repo_name"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
+		{
+			name: "endpoint_not_found",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint"
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+`,
+			endpointName:   "nonexistent",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    true,
+			expectNotFound: true,
+		},
+		{
+			name: "multiple_sync_keys_first_match",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint"
+    sync: [last_updated, last_created]
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+        - expression: "record.created_at"
+          output: "state.last_created"
+          aggregation: "maximum"
+`,
+			endpointName:   "items",
+			expectedSync:   "last_updated",
+			expectedUpdate: "updated_at",
+			expectError:    false,
+		},
+		{
+			name: "processor_output_not_state",
+			specYAML: `
+name: "Test API"
+queues:
+  - item_ids
+endpoints:
+  items:
+    description: "Items endpoint - sync writes to state, queue output is separate"
+    sync: [last_updated]
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.id"
+          output: "queue.item_ids"
+        - expression: "record.updated_at"
+          output: "state.last_updated"
+          aggregation: "last"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Load spec from YAML
+			spec, err := LoadSpec(tt.specYAML)
+			assert.NoError(t, err, "Failed to load spec")
+
+			// Create API connection
+			ac, err := NewAPIConnection(context.Background(), spec, g.M())
+			assert.NoError(t, err, "Failed to create API connection")
+
+			// Call GetSyncUpdateKey
+			syncKey, updateKey, err := ac.GetSyncUpdateKey(tt.endpointName)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.expectNotFound {
+					assert.Contains(t, err.Error(), "endpoint not found")
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.expectedSync, syncKey, "Sync key mismatch")
+			assert.Equal(t, tt.expectedUpdate, updateKey, "Update key mismatch")
+		})
+	}
+}
