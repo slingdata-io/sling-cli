@@ -3026,6 +3026,31 @@ endpoints:
 			expectedUpdate: "",
 			expectError:    false,
 		},
+		{
+			name: "expression_does_not_match_update_key",
+			specYAML: `
+name: "Test API"
+endpoints:
+  items:
+    description: "Items endpoint - processor expression doesn't match update_key"
+    sync: [last_updated]
+    request:
+      url: "https://api.example.com/items"
+    response:
+      records:
+        jmespath: "[]"
+        primary_key: ["id"]
+        update_key: "updated_at"
+      processors:
+        - expression: "record.created_at"
+          output: "state.last_updated"
+          aggregation: "maximum"
+`,
+			endpointName:   "items",
+			expectedSync:   "",
+			expectedUpdate: "",
+			expectError:    false,
+		},
 	}
 
 	for _, tt := range tests {
