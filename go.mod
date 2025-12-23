@@ -1,8 +1,6 @@
 module github.com/slingdata-io/sling-cli
 
-go 1.24.0
-
-toolchain go1.24.3
+go 1.24.3
 
 require (
 	cloud.google.com/go v0.121.6
@@ -78,6 +76,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/shopspring/decimal v1.4.0
 	github.com/sijms/go-ora/v2 v2.8.24
+	github.com/slingdata-io/godbc v0.0.0-20251223182650-ca3b7f33fa0a
 	github.com/slingdata-io/sling v0.0.0-20240426022644-3c31b1eb088e
 	github.com/snowflakedb/gosnowflake v1.17.0
 	github.com/spf13/cast v1.7.1
@@ -174,7 +173,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/domodwyer/mailyak/v3 v3.6.2 // indirect
 	github.com/dvsekhvalnov/jose2go v1.7.0 // indirect
-	github.com/ebitengine/purego v0.8.2 // indirect
+	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/elastic/elastic-transport-go/v8 v8.6.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.32.4 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
@@ -371,5 +370,7 @@ replace github.com/slingdata-io/sling => ../sling
 replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-20251215185455-f48ab6cec24e
 
 // replace github.com/apache/iceberg-go => ../iceberg-go
+
+replace github.com/slingdata-io/godbc => ../godbc
 
 replace github.com/databricks/databricks-sql-go => github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad

@@ -21,7 +21,7 @@ func (t *TaskExecution) ReadFromDB(cfg *Config, srcConn database.Connection) (df
 	setStage("3 - prepare-dataflow")
 
 	selectFields := []string{"*"}
-	sTable, err := t.GetSourceTable()
+	sTable, err := t.GetSourceTable(srcConn)
 	if err != nil {
 		err = g.Error(err, "Could not parse source stream text")
 		return t.df, err

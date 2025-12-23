@@ -320,6 +320,8 @@ func NewConnContext(ctx context.Context, URL string, props ...string) (Connectio
 		conn = &AzureTableConn{URL: URL}
 	} else if strings.HasPrefix(URL, "adbc:") || strings.HasPrefix(URL, "flightsql:") {
 		conn = &ArrowDBConn{URL: URL}
+	} else if strings.HasPrefix(URL, "odbc:") {
+		conn = &ODBCConn{URL: URL}
 	} else {
 		conn = &BaseConn{URL: URL}
 	}
@@ -388,6 +390,8 @@ func getDriverName(conn Connection) (driverName string) {
 		driverName = "exasol"
 	case dbio.TypeDbArrowDBC:
 		driverName = "flightsql"
+	case dbio.TypeDbODBC:
+		driverName = "odbc"
 	default:
 		driverName = dbType.String()
 	}

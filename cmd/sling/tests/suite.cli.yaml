@@ -1356,6 +1356,11 @@
     - 'SUCCESS: BIT values correctly converted to integers in bool_testing_1'
     - 'SUCCESS: BIT values correctly converted to strings in bool_testing_2'
 
+- id: 153
+  name: 'Test ODBC data extraction from MSSQL_ODBC to PostgreSQL'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.84.mssql_odbc_extraction.yaml
+
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
 #   name: Test PostGIS (PostgreSQL) to GeoJSON as target
