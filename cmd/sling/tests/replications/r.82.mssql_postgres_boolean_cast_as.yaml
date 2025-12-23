@@ -1,0 +1,288 @@
+# Test for boolean column_typing cast_as option
+# Tests casting boolean columns to integer or string types
+source: MSSQL
+target: POSTGRES
+
+hooks:
+  start:
+    - type: query
+      connection: '{source.name}'
+      query: |
+        -- Drop tables if exists
+        IF OBJECT_ID('dbo.bool_test1', 'U') IS NOT NULL DROP TABLE dbo.bool_test1;
+        IF OBJECT_ID('dbo.bool_test2', 'U') IS NOT NULL DROP TABLE dbo.bool_test2;
+        IF OBJECT_ID('dbo.bool_test3', 'U') IS NOT NULL DROP TABLE dbo.bool_test3;
+
+        -- Create source table for integer cast test
+        CREATE TABLE dbo.bool_test1 (
+          id INT PRIMARY KEY,
+          is_active BIT,
+          is_verified BIT,
+          description NVARCHAR(100)
+        );
+
+        -- Create source table for string cast test
+        CREATE TABLE dbo.bool_test2 (
+          id INT PRIMARY KEY,
+          is_active BIT,
+          is_verified BIT,
+          description NVARCHAR(100)
+        );
+
+        -- Create source table for no cast (control)
+        CREATE TABLE dbo.bool_test3 (
+          id INT PRIMARY KEY,
+          is_active BIT,
+          is_verified BIT,
+          description NVARCHAR(100)
+        );
+
+        -- Insert test data into all tables
+        INSERT INTO dbo.bool_test1 VALUES
+        (1, 1, 0, N'Active, not verified'),
+        (2, 0, 1, N'Inactive, verified'),
+        (3, 1, 1, N'Active and verified'),
+        (4, 0, 0, N'Inactive and not verified');
+
+        INSERT INTO dbo.bool_test2 VALUES
+        (1, 1, 0, N'Active, not verified'),
+        (2, 0, 1, N'Inactive, verified'),
+        (3, 1, 1, N'Active and verified'),
+        (4, 0, 0, N'Inactive and not verified');
+
+        INSERT INTO dbo.bool_test3 VALUES
+        (1, 1, 0, N'Active, not verified'),
+        (2, 0, 1, N'Inactive, verified'),
+        (3, 1, 1, N'Active and verified'),
+        (4, 0, 0, N'Inactive and not verified');
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.bool_test1
+      into: source_count
+
+    - type: log
+      message: |
+        Created MSSQL source tables with {store.source_count[0].count} rows each
+
+  end:
+    # if errored, do not proceed
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # ===== Verify bool_test1 (cast_as: integer) =====
+
+    # Check column types for bool_test1 (should be integer)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          column_name,
+          data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'bool_test1'
+          AND column_name IN ('is_active', 'is_verified')
+        ORDER BY column_name
+      into: test1_column_types
+
+    - type: log
+      message: |
+        bool_test1 column types (should be integer):
+        {pretty_table(store.test1_column_types)}
+
+    # Verify boolean columns are stored as integer
+    - type: check
+      check: store.test1_column_types[0].data_type == "integer"
+      failure_message: "bool_test1.is_active should be 'integer', got '{store.test1_column_types[0].data_type}'"
+
+    - type: check
+      check: store.test1_column_types[1].data_type == "integer"
+      failure_message: "bool_test1.is_verified should be 'integer', got '{store.test1_column_types[1].data_type}'"
+
+    # Verify data values for bool_test1
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, is_active, is_verified FROM public.bool_test1 ORDER BY id
+      into: target_data1
+
+    - type: log
+      message: |
+        bool_test1 data (cast as integer):
+        {pretty_table(store.target_data1)}
+
+    # Check that true (1) and false (0) are stored as integers
+    - type: check
+      check: int_parse(store.target_data1[0].is_active) == 1
+      failure_message: "bool_test1 row 1 is_active should be 1, got {store.target_data1[0].is_active}"
+
+    - type: check
+      check: int_parse(store.target_data1[0].is_verified) == 0
+      failure_message: "bool_test1 row 1 is_verified should be 0, got {store.target_data1[0].is_verified}"
+
+    - type: check
+      check: int_parse(store.target_data1[1].is_active) == 0
+      failure_message: "bool_test1 row 2 is_active should be 0, got {store.target_data1[1].is_active}"
+
+    - type: check
+      check: int_parse(store.target_data1[1].is_verified) == 1
+      failure_message: "bool_test1 row 2 is_verified should be 1, got {store.target_data1[1].is_verified}"
+
+    - type: log
+      message: "SUCCESS: Boolean values correctly cast to integer in bool_test1"
+
+    # ===== Verify bool_test2 (cast_as: string) =====
+
+    # Check column types for bool_test2 (should be character varying)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          column_name,
+          data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'bool_test2'
+          AND column_name IN ('is_active', 'is_verified')
+        ORDER BY column_name
+      into: test2_column_types
+
+    - type: log
+      message: |
+        bool_test2 column types (should be character varying):
+        {pretty_table(store.test2_column_types)}
+
+    # Verify boolean columns are stored as character varying (string)
+    - type: check
+      check: store.test2_column_types[0].data_type == "character varying"
+      failure_message: "bool_test2.is_active should be 'character varying', got '{store.test2_column_types[0].data_type}'"
+
+    - type: check
+      check: store.test2_column_types[1].data_type == "character varying"
+      failure_message: "bool_test2.is_verified should be 'character varying', got '{store.test2_column_types[1].data_type}'"
+
+    # Verify data values for bool_test2
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, is_active, is_verified FROM public.bool_test2 ORDER BY id
+      into: target_data2
+
+    - type: log
+      message: |
+        bool_test2 data (cast as string):
+        {pretty_table(store.target_data2)}
+
+    # Check that true and false are stored as strings
+    - type: check
+      check: store.target_data2[0].is_active == "true"
+      failure_message: "bool_test2 row 1 is_active should be 'true', got '{store.target_data2[0].is_active}'"
+
+    - type: check
+      check: store.target_data2[0].is_verified == "false"
+      failure_message: "bool_test2 row 1 is_verified should be 'false', got '{store.target_data2[0].is_verified}'"
+
+    - type: check
+      check: store.target_data2[1].is_active == "false"
+      failure_message: "bool_test2 row 2 is_active should be 'false', got '{store.target_data2[1].is_active}'"
+
+    - type: check
+      check: store.target_data2[1].is_verified == "true"
+      failure_message: "bool_test2 row 2 is_verified should be 'true', got '{store.target_data2[1].is_verified}'"
+
+    - type: log
+      message: "SUCCESS: Boolean values correctly cast to string in bool_test2"
+
+    # ===== Verify bool_test3 (no cast, should be boolean) =====
+
+    # Check column types for bool_test3 (should be boolean)
+    - type: query
+      connection: '{target.name}'
+      query: |
+        SELECT
+          column_name,
+          data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'bool_test3'
+          AND column_name IN ('is_active', 'is_verified')
+        ORDER BY column_name
+      into: test3_column_types
+
+    - type: log
+      message: |
+        bool_test3 column types (should be boolean):
+        {pretty_table(store.test3_column_types)}
+
+    # Verify boolean columns are stored as boolean
+    - type: check
+      check: store.test3_column_types[0].data_type == "boolean"
+      failure_message: "bool_test3.is_active should be 'boolean', got '{store.test3_column_types[0].data_type}'"
+
+    - type: check
+      check: store.test3_column_types[1].data_type == "boolean"
+      failure_message: "bool_test3.is_verified should be 'boolean', got '{store.test3_column_types[1].data_type}'"
+
+    # Verify data values for bool_test3
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, is_active, is_verified FROM public.bool_test3 ORDER BY id
+      into: target_data3
+
+    - type: log
+      message: |
+        bool_test3 data (no cast, native boolean):
+        {pretty_table(store.target_data3)}
+
+    # Check that true and false are stored as booleans
+    - type: check
+      check: bool_parse(store.target_data3[0].is_active) == true
+      failure_message: "bool_test3 row 1 is_active should be true, got {store.target_data3[0].is_active}"
+
+    - type: check
+      check: bool_parse(store.target_data3[0].is_verified) == false
+      failure_message: "bool_test3 row 1 is_verified should be false, got {store.target_data3[0].is_verified}"
+
+    - type: log
+      message: "SUCCESS: Boolean values correctly stored as boolean in bool_test3"
+
+    # Clean up
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.bool_test1', 'U') IS NOT NULL DROP TABLE dbo.bool_test1;
+        IF OBJECT_ID('dbo.bool_test2', 'U') IS NOT NULL DROP TABLE dbo.bool_test2;
+        IF OBJECT_ID('dbo.bool_test3', 'U') IS NOT NULL DROP TABLE dbo.bool_test3;
+
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS public.bool_test1 CASCADE;
+        DROP TABLE IF EXISTS public.bool_test2 CASCADE;
+        DROP TABLE IF EXISTS public.bool_test3 CASCADE;
+
+streams:
+  dbo.bool_test1:
+    object: public.bool_test1
+    mode: full-refresh
+    target_options:
+      column_casing: lower
+      column_typing:
+        boolean:
+          cast_as: integer
+
+  dbo.bool_test2:
+    object: public.bool_test2
+    mode: full-refresh
+    target_options:
+      column_casing: lower
+      column_typing:
+        boolean:
+          cast_as: string
+
+  dbo.bool_test3:
+    object: public.bool_test3
+    mode: full-refresh
+    target_options:
+      column_casing: lower
+      # No column_typing for boolean - should remain as boolean

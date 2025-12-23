@@ -499,6 +499,51 @@ func TestColumnTypingJSON(t *testing.T) {
 	})
 }
 
+// Test for Boolean column typing
+func TestColumnTypingBoolean(t *testing.T) {
+	t.Run("boolean_no_cast", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{}
+		bct.Apply(&col)
+		assert.Equal(t, BoolType, col.Type) // unchanged when CastAs is empty
+	})
+
+	t.Run("boolean_cast_as_integer", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{CastAs: "integer"}
+		bct.Apply(&col)
+		assert.Equal(t, IntegerType, col.Type)
+	})
+
+	t.Run("boolean_cast_as_integer_uppercase", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{CastAs: "INTEGER"}
+		bct.Apply(&col)
+		assert.Equal(t, IntegerType, col.Type)
+	})
+
+	t.Run("boolean_cast_as_string", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{CastAs: "string"}
+		bct.Apply(&col)
+		assert.Equal(t, StringType, col.Type)
+	})
+
+	t.Run("boolean_cast_as_string_uppercase", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{CastAs: "STRING"}
+		bct.Apply(&col)
+		assert.Equal(t, StringType, col.Type)
+	})
+
+	t.Run("boolean_cast_as_invalid", func(t *testing.T) {
+		col := Column{Name: "test", Type: BoolType}
+		bct := BooleanColumnTyping{CastAs: "invalid"}
+		bct.Apply(&col)
+		assert.Equal(t, BoolType, col.Type) // unchanged for invalid value
+	})
+}
+
 // Test for MaxDecimals method
 func TestColumnTypingMaxDecimals(t *testing.T) {
 	t.Run("nil_column_typing", func(t *testing.T) {

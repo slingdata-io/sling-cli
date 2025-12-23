@@ -3755,6 +3755,26 @@ func applyColumnTypingToDf(conn Connection, df *iop.Dataflow) (err error) {
 				}
 			}
 		}
+
+		if bct := ct.Boolean; bct != nil {
+			for i, col := range df.Columns {
+				if col.IsBool() {
+					bct.Apply(&col)
+					df.Columns[i] = col //set back
+					df.PropagateColum(i)
+				}
+			}
+		}
+
+		if jct := ct.JSON; jct != nil {
+			for i, col := range df.Columns {
+				if col.Type.IsJSON() {
+					jct.Apply(&col)
+					df.Columns[i] = col //set back
+					df.PropagateColum(i)
+				}
+			}
+		}
 	}
 
 	return nil

@@ -527,6 +527,10 @@ func (t *TaskExecution) getSourceOptionsMap() (options map[string]any) {
 		options["column_casing"] = string(*cc)
 	}
 
+	if ct := t.Config.Target.Options.ColumnTyping; ct != nil {
+		options["column_typing"] = g.Marshal(*ct)
+	}
+
 	// set target type for column casing, name length validation
 	options["target_type"] = string(t.Config.TgtConn.Type)
 
@@ -550,6 +554,10 @@ func (t *TaskExecution) getTargetOptionsMap() (options map[string]any) {
 	if cc := t.Config.Target.Options.ColumnCasing; cc != nil {
 		// set as string so that StreamProcessor parses it
 		options["column_casing"] = string(*cc)
+	}
+
+	if ct := t.Config.Target.Options.ColumnTyping; ct != nil {
+		options["column_typing"] = g.Marshal(*ct)
 	}
 
 	// set target type for column casing, name length validation

@@ -69,6 +69,7 @@ type StreamConfig struct {
 	Jmespath       string         `json:"jmespath"`
 	Sheet          string         `json:"sheet"`
 	ColumnCasing   ColumnCasing   `json:"column_casing"`
+	ColumnTyping   ColumnTyping   `json:"column_typing"`
 	TargetType     dbio.Type      `json:"target_type"`
 	DeleteFile     bool           `json:"delete"` // whether to delete before writing
 	BoolAsInt      bool           `json:"-"`
@@ -398,6 +399,10 @@ func (sp *StreamProcessor) SetConfig(configMap map[string]string) {
 
 	if val, ok := configMap["column_casing"]; ok {
 		sp.Config.ColumnCasing = ColumnCasing(val)
+	}
+
+	if val, ok := configMap["column_typing"]; ok {
+		g.Unmarshal(val, &sp.Config.ColumnTyping)
 	}
 
 	if val, ok := configMap["target_type"]; ok {
@@ -951,6 +956,10 @@ func (sp *StreamProcessor) CastVal(i int, val any, col *Column) any {
 			sVal = cast.ToString(val)
 			sp.rowChecksum[i] = uint64(len(sVal))
 			return sVal
+		} else if bct := sp.Config.ColumnTyping.Boolean; bct != nil &&
+			bct.CastAs == string(IntegerType) {
+			nVal = cast.ToInt(bVal)
+			sp.rowChecksum[i] = uint64(nVal.(int))
 		} else {
 			nVal = strconv.FormatBool(bVal) // keep as string
 			sp.rowChecksum[i] = uint64(len(nVal.(string)))

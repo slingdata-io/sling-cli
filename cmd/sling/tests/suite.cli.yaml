@@ -939,7 +939,7 @@
     SLING_STATE=postgres/sling_state.stripe sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml
 
     # test without SLING_STATE, to use DB incremental value
-    sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml --streams customer
+    sling run -r cmd/sling/tests/replications/apis/r.stripe.yaml --streams customer -d
   output_contains:
     - 'execution succeeded'
     - 'fetched incremental value from DB'
@@ -1338,6 +1338,15 @@
     - 'SUCCESS: Boolean values correctly converted to strings in MSSQL'
     - 'mssql_test2.is_active has boolean type'
     - 'SUCCESS: Boolean values correctly stored as boolean type in mssql_test2'
+
+- id: 151
+  name: 'Test boolean column_typing cast_as (integer/string)'
+  run: |
+    sling run --debug -r cmd/sling/tests/replications/r.82.mssql_postgres_boolean_cast_as.yaml
+  output_contains:
+    - 'SUCCESS: Boolean values correctly cast to integer in bool_test1'
+    - 'SUCCESS: Boolean values correctly cast to string in bool_test2'
+    - 'SUCCESS: Boolean values correctly stored as boolean in bool_test3'
 
 # # Test PostGIS (PostgreSQL) to GeoJSON as target with geometry column name "geom"
 # - id: 150
