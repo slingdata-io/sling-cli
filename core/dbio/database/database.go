@@ -2243,7 +2243,13 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 				"inserting %s [%s] into %s [%s]",
 				srcCol.Name, srcCol.DbType, tgtCol.Name, tgtCol.DbType,
 			)
-			selectExpr = conn.Self().CastColumnForSelect(srcCol, tgtCol)
+			castedSelectExpr := conn.Self().CastColumnForSelect(srcCol, tgtCol)
+
+			// if expression is same, let's cast if types differ for boolean values
+			if strings.EqualFold(selectExpr, castedSelectExpr) {
+				castedSelectExpr = conn.castBoolForSelect(srcCol, tgtCol)
+			}
+			selectExpr = castedSelectExpr
 		} else if srcCol.DbPrecision > tgtCol.DbPrecision {
 			g.Debug(
 				"target precision / length is smaller when inserting %s [%s(%d)] into %s [%s(%d)]",
@@ -2259,6 +2265,26 @@ func (conn *BaseConn) CastColumnsForSelect(srcColumns iop.Columns, tgtColumns io
 	}
 
 	return selectExprs
+}
+
+func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (selectStr string) {
+
+	qName := conn.Self().Quote(srcCol.Name)
+
+	switch {
+	case srcCol.IsString() && tgtCol.IsInteger():
+		// assume bool, convert from true/false to 1/0
+		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else {col} end`
+		selectStr = g.R(sql, "col", qName)
+	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
+		// assume bool, convert from 1/0 to true/false
+		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col} end`
+		selectStr = g.R(sql, "col", qName)
+	default:
+		selectStr = qName
+	}
+
+	return selectStr
 }
 
 // ValidateColumnNames verifies that source fields are present in the target table
