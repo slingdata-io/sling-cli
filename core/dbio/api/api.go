@@ -499,6 +499,75 @@ func (ac *APIConnection) GetSyncedState(endpointName string) (data map[string]an
 	return data, nil
 }
 
+// GetSyncUpdateKey returns the sync key and update key for an endpoint
+// if the endpoint has:
+// 1. A sync key defined in Sync array
+// 2. A processor with aggregation="maximum" that outputs to "state.<sync_key>"
+// 3. An update_key defined in Response.Records.UpdateKey
+// Returns empty strings if conditions are not met.
+func (ac *APIConnection) GetSyncUpdateKey(endpointName string) (syncKey, updateKey string, err error) {
+	// Render dynamic endpoints first to ensure they exist in EndpointMap
+	if err = ac.RenderDynamicEndpoints(); err != nil {
+		return "", "", g.Error(err, "could not render dynamic endpoints")
+	}
+
+	// Find the endpoint by name (case-insensitive)
+	var endpoint *Endpoint
+	for _, ep := range ac.Spec.EndpointMap {
+		if strings.EqualFold(ep.Name, endpointName) {
+			epCopy := ep
+			endpoint = &epCopy
+			break
+		}
+	}
+
+	if endpoint == nil {
+		return "", "", g.Error("endpoint not found: %s", endpointName)
+	}
+
+	// Check if endpoint has sync keys
+	if len(endpoint.Sync) == 0 {
+		return "", "", nil
+	}
+
+	// Check if endpoint has update_key
+	updateKey = endpoint.Response.Records.UpdateKey
+	if updateKey == "" {
+		return "", "", nil
+	}
+
+	// Build a set of sync keys for quick lookup
+	syncKeySet := make(map[string]bool)
+	for _, sk := range endpoint.Sync {
+		syncKeySet[sk] = true
+	}
+
+	// Look for a processor with aggregation="maximum" that writes to a sync key
+	for _, processor := range endpoint.Response.Processors {
+		if processor.Aggregation != AggregationTypeMaximum {
+			continue
+		}
+
+		// Check if expression matches "record.<update_key>"
+		if !strings.EqualFold(processor.Expression, "record."+updateKey) {
+			continue
+		}
+
+		// Check if output is "state.<key>" where <key> is in sync keys
+		if !strings.HasPrefix(processor.Output, "state.") {
+			continue
+		}
+
+		stateKey := strings.TrimPrefix(processor.Output, "state.")
+		if syncKeySet[stateKey] {
+			return stateKey, updateKey, nil
+		}
+	}
+
+	// No matching processor found
+	return "", "", nil
+}
+
 // PutSyncedState restores the state from previous run in each endpoint
 // using the Endpoint.Sync values.
 // Inputs is map[Sync.value] = Endpoint.syncMap[Sync.value]

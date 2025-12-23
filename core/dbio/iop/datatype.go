@@ -1369,7 +1369,19 @@ remap:
 
 	} else if col.Type.IsJSON() {
 		if ct.JSON != nil {
+			origType := col.Type
 			ct.JSON.Apply(col)
+			if col.Type != origType {
+				goto remap
+			}
+		}
+	} else if col.IsBool() {
+		if ct.Boolean != nil {
+			origType := col.Type
+			ct.Boolean.Apply(col)
+			if col.Type != origType {
+				goto remap
+			}
 		}
 	}
 
@@ -1929,6 +1941,7 @@ type ColumnTyping struct {
 	String  *StringColumnTyping  `json:"string,omitempty" yaml:"string,omitempty"`
 	Decimal *DecimalColumnTyping `json:"decimal,omitempty" yaml:"decimal,omitempty"`
 	JSON    *JsonColumnTyping    `json:"json,omitempty" yaml:"json,omitempty"`
+	Boolean *BooleanColumnTyping `json:"boolean,omitempty" yaml:"boolean,omitempty"`
 }
 
 func (ct *ColumnTyping) MaxDecimals() int {
@@ -2055,5 +2068,21 @@ func (jct *JsonColumnTyping) Apply(col *Column) {
 	if jct.AsText {
 		// set to text type
 		col.Type = TextType
+	}
+}
+
+// BooleanColumnTyping contains boolean type mapping configurations
+type BooleanColumnTyping struct {
+	CastAs string `json:"cast_as,omitempty" yaml:"cast_as,omitempty"` // "integer" or "string"
+}
+
+func (bct *BooleanColumnTyping) Apply(col *Column) {
+	switch strings.ToLower(bct.CastAs) {
+	case "integer":
+		col.Type = IntegerType
+	case "string":
+		col.Type = StringType
+		col.Sourced = true
+		col.DbPrecision = 10
 	}
 }

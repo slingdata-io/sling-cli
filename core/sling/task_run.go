@@ -566,23 +566,46 @@ func (t *TaskExecution) runApiToDb() (err error) {
 	}
 
 	if t.Config.Mode == IncrementalMode {
+		syncState := map[string]any{}
 		if os.Getenv("SLING_STATE") == "" {
-			if len(srcConn.State.Store) == 0 && !t.hasRange() {
-				// warn if no store/range is provided
-				g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
-			}
-			goto skipGetState
-		}
-		if err = getIncrementalValueViaState(t); err != nil {
-			err = g.Error(err, "Could not get incremental value")
-			return err
-		}
-		var syncState map[string]any
-		if t.Config.IncrementalVal != nil {
-			err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+			// try to use the update key, fetch the max value database side
+			syncKey, updateKey, err := srcConn.GetSyncUpdateKey(t.Config.StreamName)
 			if err != nil {
-				err = g.Error(err, "Could not parse sync state value")
+				return g.Error(err, "cannot get sync/update key for incremental run")
+			} else if syncKey != "" && updateKey != "" {
+				if t.Config.Source.UpdateKey == "" {
+					t.Config.Source.UpdateKey = updateKey
+				}
+				if err = getIncrementalValueViaDB(t.Config, tgtConn, dbio.TypeDbDuckDb); err != nil {
+					err = g.Error(err, "Could not get incremental value")
+					return err
+				}
+
+				// set sync key/value
+				if t.Config.IncrementalVal != nil {
+					value := g.CastToString(t.Config.IncrementalVal)
+					g.Debug("fetched incremental value from DB, setting sync value for key `%s` => %s", syncKey, value)
+					syncState[syncKey] = value
+				}
+			} else {
+				if len(srcConn.State.Store) == 0 && !t.hasRange() {
+					// warn if no store/range is provided
+					g.Warn("Please use the SLING_STATE environment variable for incremental mode with APIs")
+				}
+				goto skipGetState
+			}
+		} else {
+			if err = getIncrementalValueViaState(t); err != nil {
+				err = g.Error(err, "Could not get incremental value")
 				return err
+			}
+
+			if t.Config.IncrementalVal != nil {
+				err = g.Unmarshal(cast.ToString(t.Config.IncrementalVal), &syncState)
+				if err != nil {
+					err = g.Error(err, "Could not parse sync state value")
+					return err
+				}
 			}
 		}
 

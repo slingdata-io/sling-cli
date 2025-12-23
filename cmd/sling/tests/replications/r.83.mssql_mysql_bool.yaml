@@ -1,0 +1,181 @@
+# Test for MSSQL BIT to MySQL integer/varchar conversion
+# Validates that BIT columns from MSSQL are correctly cast when target table
+# already exists with INTEGER or VARCHAR column types.
+# Mode: truncate (target tables pre-exist)
+source: mssql
+target: mysql
+
+defaults:
+  mode: truncate
+
+hooks:
+  start:
+    # Create source table in MSSQL with BIT column
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.bool_testing_1', 'U') IS NOT NULL DROP TABLE dbo.bool_testing_1;
+        CREATE TABLE dbo.bool_testing_1 (
+          id INT PRIMARY KEY,
+          is_active BIT
+        );
+        INSERT INTO dbo.bool_testing_1 (id, is_active) VALUES
+          (1, 1),
+          (2, 0),
+          (3, 1),
+          (4, 0),
+          (5, NULL);
+
+    # Create target table in MySQL with INTEGER is_active
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.bool_testing_1;
+        CREATE TABLE mysql.bool_testing_1 (
+          id INTEGER,
+          is_active INTEGER
+        );
+
+    # Create target table in MySQL with VARCHAR is_active
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.bool_testing_2;
+        CREATE TABLE mysql.bool_testing_2 (
+          id INTEGER,
+          is_active VARCHAR(10)
+        );
+
+    - type: query
+      connection: '{source.name}'
+      query: SELECT COUNT(*) as count FROM dbo.bool_testing_1
+      into: source_count
+
+    - type: log
+      message: |
+        Created MSSQL source table with {store.source_count[0].count} rows
+
+  end:
+    # Check execution succeeded
+    - type: check
+      check: execution.status.error == 0
+      on_failure: break
+
+    # ===== Verify bool_testing_1 (INTEGER target) =====
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, is_active FROM mysql.bool_testing_1 ORDER BY id
+      into: result_int
+
+    - type: log
+      message: |
+        bool_testing_1 (INTEGER target) data:
+        {pretty_table(store.result_int)}
+        Row count: {length(store.result_int)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result_int) == 5
+      failure_message: "Expected 5 rows in bool_testing_1 but found {length(store.result_int)}"
+
+    # Verify integer values: row 1 (id=1, is_active=1)
+    - type: check
+      check: int_parse(store.result_int[0].id) == 1
+      failure_message: "Expected id=1 but found {store.result_int[0].id}"
+
+    - type: check
+      check: int_parse(store.result_int[0].is_active) == 1
+      failure_message: "bool_testing_1 row 1 is_active should be 1, got {store.result_int[0].is_active}"
+
+    # Verify integer values: row 2 (id=2, is_active=0)
+    - type: check
+      check: int_parse(store.result_int[1].is_active) == 0
+      failure_message: "bool_testing_1 row 2 is_active should be 0, got {store.result_int[1].is_active}"
+
+    # Verify integer values: row 3 (id=3, is_active=1)
+    - type: check
+      check: int_parse(store.result_int[2].is_active) == 1
+      failure_message: "bool_testing_1 row 3 is_active should be 1, got {store.result_int[2].is_active}"
+
+    # Verify integer values: row 4 (id=4, is_active=0)
+    - type: check
+      check: int_parse(store.result_int[3].is_active) == 0
+      failure_message: "bool_testing_1 row 4 is_active should be 0, got {store.result_int[3].is_active}"
+
+    # Verify NULL: row 5 (id=5, is_active=NULL)
+    - type: check
+      check: store.result_int[4].is_active == nil
+      failure_message: "bool_testing_1 row 5 is_active should be NULL, got {store.result_int[4].is_active}"
+
+    - type: log
+      message: "SUCCESS: BIT values correctly converted to integers in bool_testing_1"
+
+    # ===== Verify bool_testing_2 (VARCHAR target) =====
+
+    - type: query
+      connection: '{target.name}'
+      query: SELECT id, is_active FROM mysql.bool_testing_2 ORDER BY id
+      into: result_str
+
+    - type: log
+      message: |
+        bool_testing_2 (VARCHAR target) data:
+        {pretty_table(store.result_str)}
+        Row count: {length(store.result_str)}
+
+    # Verify row count
+    - type: check
+      check: length(store.result_str) == 5
+      failure_message: "Expected 5 rows in bool_testing_2 but found {length(store.result_str)}"
+
+    # Verify string values: row 1 (id=1, is_active='true')
+    - type: check
+      check: store.result_str[0].is_active == "true"
+      failure_message: "bool_testing_2 row 1 is_active should be 'true', got '{store.result_str[0].is_active}'"
+
+    # Verify string values: row 2 (id=2, is_active='false')
+    - type: check
+      check: store.result_str[1].is_active == "false"
+      failure_message: "bool_testing_2 row 2 is_active should be 'false', got '{store.result_str[1].is_active}'"
+
+    # Verify string values: row 3 (id=3, is_active='true')
+    - type: check
+      check: store.result_str[2].is_active == "true"
+      failure_message: "bool_testing_2 row 3 is_active should be 'true', got '{store.result_str[2].is_active}'"
+
+    # Verify string values: row 4 (id=4, is_active='false')
+    - type: check
+      check: store.result_str[3].is_active == "false"
+      failure_message: "bool_testing_2 row 4 is_active should be 'false', got '{store.result_str[3].is_active}'"
+
+    # Verify NULL: row 5 (id=5, is_active=NULL)
+    - type: check
+      check: store.result_str[4].is_active == nil
+      failure_message: "bool_testing_2 row 5 is_active should be NULL, got '{store.result_str[4].is_active}'"
+
+    - type: log
+      message: "SUCCESS: BIT values correctly converted to strings in bool_testing_2"
+
+    # Cleanup source table
+    - type: query
+      connection: '{source.name}'
+      query: |
+        IF OBJECT_ID('dbo.bool_testing_1', 'U') IS NOT NULL DROP TABLE dbo.bool_testing_1;
+
+    # Cleanup target tables
+    - type: query
+      connection: '{target.name}'
+      query: |
+        DROP TABLE IF EXISTS mysql.bool_testing_1;
+        DROP TABLE IF EXISTS mysql.bool_testing_2;
+
+streams:
+  dbo.bool_testing_1:
+    object: mysql.bool_testing_1
+    mode: truncate
+
+  bool_testing_1_varchar:
+    sql: select * from dbo.bool_testing_1
+    object: mysql.bool_testing_2
+    mode: truncate
