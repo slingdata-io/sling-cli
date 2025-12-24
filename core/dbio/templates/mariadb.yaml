@@ -383,6 +383,7 @@ function:
   checksum_decimal: 'abs(truncate({field}, 0))'
   checksum_datetime: cast((UNIX_TIMESTAMP({field}) * 1000000) as UNSIGNED)
   checksum_boolean: '{field}'
+  cast_to_integer: 'cast({field} as signed)'
 
 variable:
   bind_string: "?"

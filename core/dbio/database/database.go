@@ -2275,15 +2275,26 @@ func (conn *BaseConn) castBoolForSelect(srcCol iop.Column, tgtCol iop.Column) (s
 
 	qName := conn.Self().Quote(srcCol.Name)
 
+	castFunc := conn.GetType().GetTemplateValue("function.cast_as")
+
 	switch {
 	case srcCol.IsString() && tgtCol.IsInteger():
 		// assume bool, convert from true/false to 1/0
-		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else {col} end`
-		selectStr = g.R(sql, "col", qName)
+		castFuncInt := conn.GetType().GetTemplateValue("function.cast_to_integer")
+		if castFuncInt == "" {
+			castFuncInt = castFunc
+		}
+		intType := conn.GetType().GetTemplateValue("general_type_map.integer")
+		castExpr := g.R(castFuncInt, "field", qName, "type", intType)
+		sql := `case when {col} = 'true' then 1 when {col} = 'false' then 0 else {col_as_int} end`
+		selectStr = g.R(sql, "col", qName, "col_as_int", castExpr)
 	case (srcCol.IsInteger() || srcCol.IsBool()) && tgtCol.IsString():
 		// assume bool, convert from 1/0 to true/false
-		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col} end`
-		selectStr = g.R(sql, "col", qName)
+		stringType := conn.GetType().GetTemplateValue("general_type_map.string")
+		stringType = strings.ReplaceAll(stringType, "()", "(100)")
+		castExpr := g.R(castFunc, "field", qName, "type", stringType)
+		sql := `case when {col} = 1 then 'true' when {col} = 0 then 'false' else {col_as_string} end`
+		selectStr = g.R(sql, "col", qName, "col_as_string", castExpr)
 	default:
 		selectStr = qName
 	}
