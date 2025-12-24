@@ -371,6 +371,6 @@ replace github.com/apache/iceberg-go => github.com/flarco/iceberg-go v0.0.0-2025
 
 // replace github.com/apache/iceberg-go => ../iceberg-go
 
-replace github.com/slingdata-io/godbc => ../godbc
+// replace github.com/slingdata-io/godbc => ../godbc
 
 replace github.com/databricks/databricks-sql-go => github.com/flarco/databricks-sql-go v0.0.0-20250613120556-51f7c1f3b4ad
