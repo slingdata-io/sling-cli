@@ -944,8 +944,8 @@ github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966 h1:JIAuq3EEf9cgbU6AtGPK4CTG3Zf6CKMNqf0MHTggAUA=
 github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966/go.mod h1:sUM3LWHvSMaG192sy56D9F7CNvL7jUJVXoqM1QKLnog=
-github.com/slingdata-io/godbc v0.0.0-20251223182650-ca3b7f33fa0a h1:3Y5DGdK86xEAbYGzoxfXW6zNGilr/zkGH6P/rXCGsmk=
-github.com/slingdata-io/godbc v0.0.0-20251223182650-ca3b7f33fa0a/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
+github.com/slingdata-io/godbc v0.0.0-20251224094044-ac2a443d9831 h1:MqxydPqQJeY3GrALGYzl4G6QUnSo+qkkb7Y4P24XhAE=
+github.com/slingdata-io/godbc v0.0.0-20251224094044-ac2a443d9831/go.mod h1:I7r2EZl10tyzeXMq4WLwGyLqD0ZlEtJXOsOSbAl+iLI=
 github.com/slingdata-io/pocketbase v0.22.136 h1:RtAvPvYdK0qm9EB1r8GzNeEfSiqDK+tV8jyxwbpKKBA=
 github.com/slingdata-io/pocketbase v0.22.136/go.mod h1:RYAdoMZtW+3OIgKqg+YhgWGIiwjtcBHGxRcVF2+1klA=
 github.com/snowflakedb/gosnowflake v1.17.0 h1:be50vC0buiOitvneyRHiqNkvPMcunGD3EcTnL2zYATg=
